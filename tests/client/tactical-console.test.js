@@ -20,8 +20,12 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { t } from '../../gui/strings.js';
 import { renderStation as battleshipRender } from '../../gui/battleship/tactical.console.js';
 import { renderStation as cruiserRender } from '../../gui/cruiser/tactical.console.js';
-import { renderStation as destroyerRender } from '../../gui/destroyer/tactical.console.js';
-import { renderStation as courierRender } from '../../gui/courier/tactical.console.js';
+import { renderStation as rawDestroyerRender } from '../../gui/destroyer/tactical.console.js';
+import { renderStation as rawCourierRender } from '../../gui/courier/tactical.console.js';
+import { withConsoleFamilyProjection } from './console-family-fixture.js';
+
+const destroyerRender = (payload, doc) => rawDestroyerRender(withConsoleFamilyProjection(payload), doc);
+const courierRender = (payload, doc) => rawCourierRender(withConsoleFamilyProjection(payload), doc);
 
 function mount(markup) {
   document.body.innerHTML = markup;
@@ -86,7 +90,7 @@ describe('inner-radar target contract — both uuids set on all four hulls (#123
     {
       hull: 'destroyer',
       render: destroyerRender,
-      // keyed payload (weaponsView is systemView)
+      // keyed payload (weaponsView is selected by Console Family)
       payload: { systems: { 'tactical-radar': { blips: [{ uuid: 'ds-1' }], target_uuid: 'ds-1' } } },
       uuid: 'ds-1',
     },
@@ -213,7 +217,7 @@ describe('destroyer tactical renderStation', () => {
     command_advice: { stance_label: 'console.common.auto', stance_id: 'aggressive' },
   };
 
-  it('reads the weapons view via systemView and keeps the blaster column visible', () => {
+  it('reads the weapons view via projected Console Family and keeps the blaster column visible', () => {
     destroyerRender(payload, document);
     expect(el('blasters-controls').state).toEqual({ banks: [{ id: 'bp' }] });
     expect(el('blasters-controls').hidden).toBe(false);

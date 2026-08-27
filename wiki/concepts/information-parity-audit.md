@@ -2,7 +2,7 @@
 title: Information-Parity Audit
 type: concept
 tags: [ai, backfill, parity, consoles, blackboards, coordination]
-sources: [pasm/spec/DATA_DRIVEN_FINE_SYSTEM_AI.md, src/entities/ai_flag_hosts.rs, src/ai/host.rs, src/ship/helm_ai/, src/ai/server.rs, src/console_ai/core.rs, src/console_ai/server.rs, src/console/captain/server.rs, src/console/comms/server.rs, src/console/repair/server.rs, src/console/navigation/server.rs, src/console/weapons/server.rs, src/console/weapons/blackboard.rs, src/ship/power.rs, src/ship/sensors.rs, src/ship/shields.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/core/messages.rs, gui/console-state.js, gui/mount-plan.js]
+sources: [pasm/spec/DATA_DRIVEN_FINE_SYSTEM_AI.md, src/entities/ai_flag_hosts.rs, src/ai/host.rs, src/ship/helm_ai/, src/ai/server.rs, src/console_ai/core.rs, src/console_ai/server.rs, src/console/captain/server.rs, src/console/comms/server.rs, src/console/repair/server.rs, src/console/navigation/server.rs, src/console/weapons/server.rs, src/console/weapons/blackboard.rs, src/ship/power.rs, src/ship/sensors.rs, src/ship/shields.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/core/messages.rs, gui/console-state.js, gui/console-payload.js, gui/mount-plan.js]
 updated: 2026-08-27
 ---
 
@@ -37,6 +37,9 @@ Cross-station requests use the typed coordination queue and serve the hull's aut
 - Fine-system control, damage, power, and station rating gate whether the host may act; there is no coarse-console fallback.
 - Policy memory is deterministic and snapshot-safe. It may fold visible facts over time but cannot introduce hidden world knowledge.
 - Human and AI actions converge at admitted `ControlSystem` commands. Downstream appliers never branch on actor type.
+- Human console routing and payload selection follow host-projected Console
+  Family metadata and typed blackboard discriminants rather than System id
+  spelling; flat versus keyed wire shape is not a second hull-specific rule.
 
 ## Related
 

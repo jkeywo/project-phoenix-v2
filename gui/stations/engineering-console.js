@@ -40,7 +40,7 @@
 
 import { t } from '../strings.js';
 import { setAutoState } from '../console-ui.js';
-import { systemView } from '../console-payload.js';
+import { familyView } from '../console-payload.js';
 
 /**
  * Build an Engineering `renderStation(s, doc)` for one hull from its `variant`.
@@ -58,7 +58,7 @@ export function makeEngineeringRender(variant) {
     // ── Shields (only on a hull whose Engineering seat owns Shields) ──────
     let sh = null;
     if (ids.shieldFacings) {
-      sh = systemView(s, 'shields-system');
+      sh = familyView(s, 'shields');
       const shieldEl = doc.getElementById(ids.shieldFacings);
       if (shieldEl) {
         shieldEl.state = { facings: sh.facings || [], focused_facing: sh.focused_facing || null, auto: !!sh.shields_auto };
@@ -79,7 +79,7 @@ export function makeEngineeringRender(variant) {
     }
 
     // ── Power ───────────────────────────────────────────────────────────
-    const p = systemView(s, 'power-reactor', 'power-battery');
+    const p = familyView(s, 'power');
     const powerEl = doc.getElementById(ids.power);
     if (powerEl) powerEl.state = { groups: p.consoles || [], auto: !!p.power_auto };
     const batteryEl = doc.getElementById(ids.battery);
@@ -92,7 +92,7 @@ export function makeEngineeringRender(variant) {
     }
 
     // ── Repair / Hull ───────────────────────────────────────────────────
-    const r = systemView(s, 'repair');
+    const r = familyView(s, 'repair');
     // Overall ship-wide hull (every damageable system), not just this
     // station's own systems.
     const oh = r.overall_hull || {};

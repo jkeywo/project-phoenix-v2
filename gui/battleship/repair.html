@@ -75,7 +75,7 @@
     // same `renderStation`. `s` is a flat RepairConsolePayload.
     import { renderStation } from './repair.console.js';
 
-    var consoleHandle = initConsole({ name: 'repair', family: 'repair', render: renderStation });
+    var consoleHandle = initConsole({ name: 'repair', render: renderStation });
 
     // The one dispatch button toggles dispatch/recall through the action map,
     // which sends the same admitted command a repair AI would (issue #1161).

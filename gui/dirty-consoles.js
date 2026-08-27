@@ -5,14 +5,14 @@
  * an inbound ServerMessage, `dirtyConsolesFor` returns the set of console
  * (station) names whose iframes should be re-pushed. The mapping is data:
  *
- *  - STATIC_MESSAGE_CONSOLES covers every non-blackboard message type with a
- *    fixed console list (the exact fan-out handleMessage used to hardcode).
+ *  - STATIC_MESSAGE_FAMILIES covers every non-blackboard message type with a
+ *    fixed Console Family list. The authoritative topology then resolves each
+ *    family to the actual Station ids that own its Systems.
  *  - BlackboardUpdate dirtiness is derived from the server-supplied
- *    station→systems ownership and authoritative System-id → Console Family
- *    projection. Unmigrated ids alone use the temporary #1251 matcher
- *    fallback; issue #1252 removes it once every descriptor is populated. A
- *    coarse blackboard id that directly names a console family ('helm',
- *    'tactical', …) dirties that family's owning station too.
+ *    station→systems ownership, authoritative System-id → Console Family
+ *    projection, and the separate reserved-blackboard-key projection. No id
+ *    spelling participates in routing, and reserved keys never masquerade as
+ *    Systems.
  *
  * On the battleship (identity stations) this reproduces the old hardcoded
  * routing exactly. On composite stations (courier 'pilot', destroyer
@@ -29,13 +29,12 @@
  * tests/client/dirty-consoles.test.js.
  */
 
-import { consoleForSystemId } from './console-state.js';
-
 /**
- * Non-blackboard message type → console names dirtied. Exact port of the old
- * per-case push*ConsoleState calls in handleMessage.
+ * Non-blackboard message type → Console Families dirtied. The list preserves
+ * the old per-message fan-out, while `dirtyConsolesFor` resolves those families
+ * through the current hull's actual ownership.
  */
-export const STATIC_MESSAGE_CONSOLES = Object.freeze({
+export const STATIC_MESSAGE_FAMILIES = Object.freeze({
   // Push the pre-seeded repair teams so the Repair console renders its rows
   // immediately on (re)connect, before the first RepairState broadcast.
   Welcome: Object.freeze(['repair']),
@@ -68,59 +67,32 @@ export const STATIC_MESSAGE_CONSOLES = Object.freeze({
 });
 
 /**
- * Console names whose pushes are NOT gated on being the active console.
+ * Console Families whose owning Stations are NOT gated on being active.
  * The captain push was always unconditional (BlackboardUpdate + RatingChanged
  * pushed it regardless of which console is on screen) — keep that as data
  * rather than an inline special case in the driver.
  */
-export const ALWAYS_PUSH = Object.freeze(new Set(['captain']));
-
-/**
- * TEMPORARY #1251 fallback for unmigrated coarse blackboard ids that directly
- * name a console family. Issue #1252 gives reserved channels authoritative
- * family metadata and removes this inverse-name census with the System matcher.
- */
-const CONSOLE_FAMILIES = Object.freeze(new Set([
-  'captain', 'helm', 'tactical', 'sensors', 'navigation',
-  'comms', 'shields', 'power', 'repair',
-]));
-
-/**
- * TEMPORARY #1251 fallback for reserved blackboard CHANNEL keys — ids no
- * `[[system]]` block declares and no station owns — mapped to the console
- * family that renders them. Issue #1252 migrates this table into authoritative
- * metadata and deletes it.
- *
- * `scan` (issue #1032) is the sensor suite's last reading. It is not a system
- * id (the commandable, damageable thing is `sensors`), so neither the fine
- * matcher nor the coarse family set below resolves it, and without this entry a
- * fresh reading would only reach a console that happened to be pushed for some
- * other reason.
- */
-const CHANNEL_FAMILIES = Object.freeze({
-  scan: 'sensors',
-});
+export const ALWAYS_PUSH_FAMILIES = Object.freeze(new Set(['captain']));
 
 /**
  * The console family a blackboard system id belongs to, or null.
- * System ids resolve through authoritative metadata first. Only absent,
- * unmigrated entries reach the temporary matcher/table/identity fallbacks above;
- * issue #1252 removes all three.
+ * Actual System ids and non-System blackboard keys deliberately use separate
+ * authoritative projections.
  */
-function familyForBlackboardId(id, systemConsoleFamilies) {
+function familyForBlackboardId(id, systemConsoleFamilies, blackboardConsoleFamilies) {
   if (typeof id !== 'string') return null;
-  const fine = consoleForSystemId(id, systemConsoleFamilies);
-  if (fine) return fine;
-  if (CHANNEL_FAMILIES[id]) return CHANNEL_FAMILIES[id];
-  return CONSOLE_FAMILIES.has(id) ? id : null;
+  const reserved = blackboardConsoleFamilies && blackboardConsoleFamilies[id];
+  if (typeof reserved === 'string' && reserved !== '') return reserved;
+  const system = systemConsoleFamilies && systemConsoleFamilies[id];
+  return typeof system === 'string' && system !== '' ? system : null;
 }
 
 /**
  * Console families a single blackboard update fans out to: its own family,
  * plus — for captain/viewscreen updates — the currentView cascade.
  */
-function familiesForBlackboardId(id, systemConsoleFamilies) {
-  const family = familyForBlackboardId(id, systemConsoleFamilies);
+function familiesForBlackboardId(id, systemConsoleFamilies, blackboardConsoleFamilies) {
+  const family = familyForBlackboardId(id, systemConsoleFamilies, blackboardConsoleFamilies);
   if (!family) return [];
   if (family === 'captain') {
     // Helm/Sensors/Comms/Navigation each derive their own "on screen" button
@@ -136,20 +108,35 @@ function familiesForBlackboardId(id, systemConsoleFamilies) {
 /**
  * Resolve a console family to the console (station) names that render it,
  * from the server-supplied stationSystems (station id → owned fine system
- * ids; station id == console name). Falls back to the family name itself
- * when ownership is unknown (boot race before Welcome) or no station owns
- * the family — pushes to unmounted consoles are harmless no-ops.
+ * ids); station id and Console Family are independent namespaces. Before
+ * Welcome there is no topology to route through, so the result is empty.
  */
 function owningConsoles(family, stationSystems, systemConsoleFamilies) {
   const owners = [];
   if (stationSystems) {
-    for (const [stationId, systemIds] of Object.entries(stationSystems)) {
-      if ((systemIds || []).some(id => consoleForSystemId(id, systemConsoleFamilies) === family)) {
+    for (const stationId of Object.keys(stationSystems).sort()) {
+      const systemIds = stationSystems[stationId];
+      if ((systemIds || []).some(id => systemConsoleFamilies?.[id] === family)) {
         owners.push(stationId);
       }
     }
   }
-  return owners.length > 0 ? owners : [family];
+  return owners;
+}
+
+/**
+ * Resolve the unconditional Console Families to actual owning Station ids.
+ * The driver uses this after Welcome so an arbitrarily named Station owning
+ * Captain Systems keeps the same immediate refresh behavior as `captain`.
+ */
+export function alwaysPushConsoles(stationSystems, systemConsoleFamilies) {
+  const consoles = new Set();
+  for (const family of ALWAYS_PUSH_FAMILIES) {
+    for (const name of owningConsoles(family, stationSystems, systemConsoleFamilies)) {
+      consoles.add(name);
+    }
+  }
+  return consoles;
 }
 
 /**
@@ -189,34 +176,51 @@ function isSeekingBlackboard(entry) {
  *   simState.stationSystems (station id → owned fine system ids); may be
  *   missing before Welcome.
  * @param {Object<string, string>|null|undefined} systemConsoleFamilies
- *   authoritative System id → Console Family projection. Missing entries are
- *   the only ids permitted to use #1251's temporary inference fallback.
+ *   authoritative System id → Console Family projection.
+ * @param {Object<string, string>|null|undefined} blackboardConsoleFamilies
+ *   authoritative reserved/aggregate blackboard key → Console Family
+ *   projection; these keys are not Systems.
  * @returns {Set<string>} console names to push via pushConsoleStateFor
  */
-export function dirtyConsolesFor(msg, stationSystems, systemConsoleFamilies) {
+export function dirtyConsolesFor(
+  msg,
+  stationSystems,
+  systemConsoleFamilies,
+  blackboardConsoleFamilies,
+) {
   if (!msg || !msg.type) return new Set();
   if (msg.type === 'BlackboardUpdate') {
     const dirty = new Set();
     const updates = (msg.data && msg.data.updates) || [];
     for (const entry of updates) {
       const id = Array.isArray(entry) ? entry[0] : entry;
-      for (const family of familiesForBlackboardId(id, systemConsoleFamilies)) {
+      for (const family of familiesForBlackboardId(
+        id,
+        systemConsoleFamilies,
+        blackboardConsoleFamilies,
+      )) {
         for (const name of owningConsoles(family, stationSystems, systemConsoleFamilies)) {
           dirty.add(name);
         }
       }
       if (isSeekingBlackboard(entry)) {
-        for (const name of Object.keys(stationSystems || {})) dirty.add(name);
+        for (const name of Object.keys(stationSystems || {}).sort()) dirty.add(name);
       }
     }
     return dirty;
   }
-  return new Set(STATIC_MESSAGE_CONSOLES[msg.type] || []);
+  const dirty = new Set();
+  for (const family of STATIC_MESSAGE_FAMILIES[msg.type] || []) {
+    for (const name of owningConsoles(family, stationSystems, systemConsoleFamilies)) {
+      dirty.add(name);
+    }
+  }
+  return dirty;
 }
 
 // Expose for the non-module inline script in client.html (same pattern as
 // gui/console-state.js / gui/mount-plan.js).
 if (typeof window !== 'undefined') {
   window.dirtyConsolesFor = dirtyConsolesFor;
-  window.DIRTY_ALWAYS_PUSH = ALWAYS_PUSH;
+  window.alwaysPushConsoles = alwaysPushConsoles;
 }

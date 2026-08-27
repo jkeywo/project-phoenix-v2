@@ -2,7 +2,7 @@
 title: Client Architecture
 type: concept
 tags: [client, javascript, iframe, console, console-family, state, accessibility, keyboard, vitest]
-sources: [client.html, gui/mount-plan.js, gui/hero-bar.js, gui/sim-state.js, gui/console-state.js, gui/dirty-consoles.js, gui/action-map.js, gui/destroyer/helm.console.js, gui/iframe-bridge.js, gui/accessibility-profile.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
+sources: [client.html, gui/mount-plan.js, gui/hero-bar.js, gui/sim-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/action-map.js, gui/iframe-bridge.js, gui/accessibility-profile.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
 updated: 2026-08-27
 ---
 
@@ -19,7 +19,9 @@ PeerJS message (JSON)
   → gui/sim-state.js apply(msg)           # folds ServerMessage into the single simState store
       gui/lobby-state.js                  # lobby-phase state
       gui/comms-state.js                  # comms inbox/contacts state
-  → gui/dirty-consoles.js dirtyConsolesFor(msg, stationSystems, systemConsoleFamilies)
+  → gui/dirty-consoles.js dirtyConsolesFor(msg, stationSystems,
+                                            systemConsoleFamilies,
+                                            blackboardConsoleFamilies)
                                                        # which consoles this message dirtied
   → gui/console-state.js buildConsoleState(name, simState)        # rebuild ONLY the dirty consoles → JSON string
   → gui/iframe-bridge.js push()           # __updateConsole(name, json) into the iframe
@@ -31,7 +33,9 @@ the consoles a given message affects, rather than rebuilding every console every
 tick.
 
 `systemConsoleFamilies` is the host-projected presentation classification for
-actual System instance ids; it does not duplicate Station ownership.
+actual System instance ids. `blackboardConsoleFamilies` separately classifies
+reserved and aggregate channels. Neither duplicates Station ownership, and a
+channel does not become a commandable System.
 
 Outbound: each console iframe posts `console_action` messages; `gui/action-map.js` is the table-driven dispatcher mapping `action.action` values to `ClientMessage`s (mostly `ControlSystem { target, payload }`) via `send(type, data?)`.
 
@@ -41,16 +45,17 @@ Outbound: each console iframe posts `console_action` messages; `gui/action-map.j
 |---|---|
 | `mount-plan.js` | **Single home** of the station-id → DOM-id naming scheme (`${id}-ui`/`${id}-iframe`, one tactical → weapons alias) and `planMounts(shipStations)` — the manifest is the server-supplied `ship_stations` |
 | `hero-bar.js` | Shared complete-Station tab model over `SimSnapshot.station_hosts`: direct Station pinned first, visiting Stations in hull order, selected identity/rating/ownership, and roving keyboard focus |
-| `sim-state.js` | JS port of the old Rust `ClientSimState`: `apply(msg)`, per-console radar configs, message builders, and the read-only System-id → Console Family replica from `Welcome` |
+| `sim-state.js` | JS port of the old Rust `ClientSimState`: `apply(msg)`, per-console radar configs, message builders, typed blackboard discriminants, and both read-only Console Family replicas from `Welcome` |
 | `lobby-state.js` | Lobby view-model (stations, players, ready states) |
 | `comms-state.js` | Comms inbox/contact view-model |
-| `console-state.js` | Pure view-model builders. System-composed consoles use the station's TOML-authored fine `SystemId`s and receive views keyed by those ids; family metadata selects the builder independently of instance and Station spelling. |
+| `console-state.js` | Pure view-model builders. One family registry contains all builders, including Command, Tractor and Umbilical; flat and composed consoles carry actual owned `SystemId`s and projected families, while typed blackboard discriminants select semantic data independently of id spelling. |
+| `console-payload.js` | Metadata-driven flat/keyed normalization plus `familyView`: mirrors flat views only under actual projected ids and selects composite views by Console Family, with no inverse id census. |
 | `action-map.js` | Table-driven `console_action` → `ClientMessage` dispatch |
 | `iframe-bridge.js` | `push()` / `wireLoad()` state-push into console iframes (ADR-0001 §2) |
 | `content-switcher.js` | Section visibility over the ship's mounted stations; one human directly holds one station |
 | `station-roster.js` | Pure fold: players + station defs → lobby roster rows + aggregates |
 | `client-router.js` | Pure per-message driver: uiState mutations + named side-effect plan for the client.html glue |
-| `dirty-consoles.js` | Declarative `ServerMessage` → dirty-console mapping (`dirtyConsolesFor(msg, stationSystems, systemConsoleFamilies)`, #823/#1251); Blackboard updates resolve their family from authoritative metadata, then topology resolves the owning console |
+| `dirty-consoles.js` | Declarative `ServerMessage` → Console Family mapping followed by actual topology → owning Station resolution. Blackboard updates use the System or reserved-channel projection; unknown or pre-`Welcome` metadata routes nowhere rather than guessing. |
 | `lobby-view.js` | Lobby view model (row classes, ready-button state, status-line string-id selection) |
 | `coordination-popup.js` | CoordinationPopup payload → `{ sender, title, body }` normaliser |
 | `phase-toggle.js` | Lobby vs in-game section visibility (`GameOver` counts as in-game) |
@@ -66,26 +71,27 @@ Each console UI is one HTML file per ship class (`gui/battleship/helm.html`, `gu
 
 ## Console Family routing
 
-`SystemKindDescriptor` is the host authority for presentation classification.
-On `Welcome`, `ShipClientConfig.system_console_families` projects that metadata
-from kind to each authored System instance id. Issue #1251 is the vertical
-tracer: Command metadata selects the Command payload builder without relying on
-either Station or System id spelling, while Dock metadata routes its blackboard
-refresh to the Station that owns its Helm-family System. The same resolved Dock
-instance id selects the blackboard view and returns through the Dock/Undock
-`ControlSystem.target`; neither leg substitutes the conventional `"dock"` id.
+Every shipped `SystemKindDescriptor` requires a Console Family, and `Welcome`
+projects that metadata onto every actual authored System id in
+`ShipClientConfig.system_console_families`. Reserved and aggregate channels
+(`helm`, `tactical`, `power`, `shields`, `dossiers`, and `scan`) use
+`blackboard_console_families`; this explicit second namespace lets dirty routing
+identify the affected family without pretending a channel is commandable or
+damageable.
 
-The station-name builder fallback is a boot boundary, not post-handshake
-authority. `ClientSimState.hasSystemConsoleFamilyProjection` distinguishes a
-genuine pre-`Welcome` state from a `Welcome` whose projection is empty. Once the
-projection boundary has arrived, a missing Command descriptor yields no builder
-instead of silently selecting Command because the Station is named `command`.
+The client uses those maps and the Station's actual `station_systems` topology
+for builder selection, dirty routing, payload keys, flat normalization and
+visiting-System composition. Semantic blackboard selection uses the wire's
+`SystemBlackboard.kind`, retained beside each unwrapped payload. Multiple
+same-kind blackboards use authored Station order when available and lexical
+order for cross-read-only fallback, keeping selection deterministic.
 
-Only Command and Dock carry metadata in this tracer. For a missing entry the
-client retains its existing exact/prefix matcher, plus the pre-`Welcome` boot
-fallback, solely so unmigrated families continue to render. The matcher must not
-learn new Command or Dock spellings; issue #1252 populates every descriptor and
-reserved channel and removes the inference fallback entirely.
+There is no exact/prefix family matcher, client-maintained family-to-System
+list, iframe `family` hint, or Station-name boot switch. Before `Welcome` there
+is no authoritative topology with which to choose a builder, so the payload is
+empty. Command, Tractor and Umbilical use the same builder registry as every
+other family. Dock keeps its resolved actual id for its control adapter; the
+broader action-map adapter remains a separate concern.
 
 `client.html` owns one shared Hero Bar above those iframes. It switches whole
 mounted Station surfaces, so visiting Navigation or Comms uses the same normal

@@ -12,27 +12,106 @@ import {
   repairCoreAndTargets,
   torpSlotStates,
   foldTorpedoBadges,
-  buildWeaponsConsoleState,
-  buildCaptainConsoleState,
-  buildHelmConsoleState,
-  buildHelmDockView,
-  buildHelmTowLoadView,
-  buildRepairConsoleState,
-  buildPowerConsoleState,
-  buildShieldsConsoleState,
-  buildSensorsConsoleState,
-  buildCommsConsoleState,
-  buildNavigationConsoleState,
-  buildCommandConsoleState,
-  buildSystemStationConsoleState,
+  buildWeaponsConsoleState as rawBuildWeaponsConsoleState,
+  buildCaptainConsoleState as rawBuildCaptainConsoleState,
+  buildHelmConsoleState as rawBuildHelmConsoleState,
+  buildHelmDockView as rawBuildHelmDockView,
+  buildHelmTowLoadView as rawBuildHelmTowLoadView,
+  buildRepairConsoleState as rawBuildRepairConsoleState,
+  buildPowerConsoleState as rawBuildPowerConsoleState,
+  buildShieldsConsoleState as rawBuildShieldsConsoleState,
+  buildSensorsConsoleState as rawBuildSensorsConsoleState,
+  buildCommsConsoleState as rawBuildCommsConsoleState,
+  buildNavigationConsoleState as rawBuildNavigationConsoleState,
+  buildCommandConsoleState as rawBuildCommandConsoleState,
+  buildSystemStationConsoleState as rawBuildSystemStationConsoleState,
   withTutorialOverlay,
-  withVisitingSystems,
+  withVisitingSystems as rawWithVisitingSystems,
   soughtSystemHosts,
-  commandAdviceFor,
-  withCommandAdvice,
+  commandAdviceFor as rawCommandAdviceFor,
+  withCommandAdvice as rawWithCommandAdvice,
 } from '../../gui/console-state.js';
 import { ClientSimState } from '../../gui/sim-state.js';
 import { t, getTable } from '../../gui/strings.js';
+
+// These long-standing unit fixtures predate the host projections and store
+// already-unwrapped blackboards under canonical test ids. Decorate them at the
+// test boundary; production code deliberately has no equivalent inference.
+function fixtureFamily(id) {
+  if (['captain', 'viewscreen', 'red-alert'].includes(id)) return 'captain';
+  if (id.startsWith('helm-') || id === 'dock') return 'helm';
+  if (id === 'tactical-radar' || id.startsWith('phaser-') || id.startsWith('blaster-') || id.startsWith('torpedo-')) return 'tactical';
+  if (id === 'sensors' || id === 'sensor-radar') return 'sensors';
+  if (id === 'navigation' || id === 'comms' || id === 'repair' || id === 'command' || id === 'tractor' || id === 'umbilical') return id;
+  if (id === 'shields-system' || id.startsWith('shield-arc-')) return 'shields';
+  if (id.startsWith('power-')) return 'power';
+  return null;
+}
+
+function fixtureBlackboardKind(id) {
+  const exact = {
+    helm: 'Helm', tactical: 'Weapons', power: 'Power', shields: 'Shields',
+    captain: 'Captain', command: 'Command', repair: 'Repair', comms: 'Comms',
+    sensors: 'Sensors', navigation: 'Navigation', viewscreen: 'Viewscreen',
+    'tactical-radar': 'TacticalRadar', 'sensor-radar': 'SensorRadar',
+    'torpedo-magazine': 'TorpedoMagazine', 'power-reactor': 'PowerReactor',
+    'power-battery': 'PowerBattery', dossiers: 'Dossiers', scan: 'Scan',
+    tractor: 'Tractor', umbilical: 'Umbilical', dock: 'Dock',
+    'helm-lateral-thrust': 'HelmLateralThrust',
+  };
+  if (exact[id]) return exact[id];
+  if (id.startsWith('helm-engine-')) return 'HelmEngine';
+  if (id.startsWith('phaser-')) return 'PhaserBank';
+  if (id.startsWith('torpedo-tube-')) return 'TorpedoTube';
+  if (id.startsWith('shield-arc-')) return 'ShieldArc';
+  return null;
+}
+
+function projectedFixtureState(state = {}) {
+  const ids = Object.values(state.stationSystems || {}).flat();
+  const systemConsoleFamilies = { ...(state.systemConsoleFamilies || {}) };
+  for (const id of ids) {
+    const family = fixtureFamily(id);
+    if (family && !systemConsoleFamilies[id]) systemConsoleFamilies[id] = family;
+  }
+  const blackboardKinds = { ...(state.blackboardKinds || {}) };
+  for (const id of Object.keys(state.blackboards || {})) {
+    const kind = fixtureBlackboardKind(id);
+    if (kind && !blackboardKinds[id]) blackboardKinds[id] = kind;
+  }
+  if (state instanceof ClientSimState) {
+    Object.assign(state.systemConsoleFamilies, systemConsoleFamilies);
+    Object.assign(state.blackboardKinds, blackboardKinds);
+    return state;
+  }
+  return { ...state, systemConsoleFamilies, blackboardKinds };
+}
+
+function fixtureSystemIds(state, family, ids) {
+  if (Array.isArray(ids)) return ids;
+  return [...new Set([
+    ...Object.values(state?.stationSystems || {}).flat(),
+    ...Object.keys(state?.controlSources || {}),
+    ...Object.keys(state?.blackboards || {}),
+  ].filter(id => fixtureFamily(id) === family))];
+}
+
+const buildWeaponsConsoleState = (state, ids) => rawBuildWeaponsConsoleState(projectedFixtureState(state), fixtureSystemIds(state, 'tactical', ids));
+const buildCaptainConsoleState = (state, ids) => rawBuildCaptainConsoleState(projectedFixtureState(state), fixtureSystemIds(state, 'captain', ids));
+const buildHelmConsoleState = (state, ids) => rawBuildHelmConsoleState(projectedFixtureState(state), fixtureSystemIds(state, 'helm', ids));
+const buildHelmDockView = (state, ids) => rawBuildHelmDockView(projectedFixtureState(state), ids);
+const buildHelmTowLoadView = state => rawBuildHelmTowLoadView(projectedFixtureState(state));
+const buildRepairConsoleState = (state, ids) => rawBuildRepairConsoleState(projectedFixtureState(state), fixtureSystemIds(state, 'repair', ids));
+const buildPowerConsoleState = (state, ids) => rawBuildPowerConsoleState(projectedFixtureState(state), fixtureSystemIds(state, 'power', ids));
+const buildShieldsConsoleState = (state, ids) => rawBuildShieldsConsoleState(projectedFixtureState(state), fixtureSystemIds(state, 'shields', ids));
+const buildSensorsConsoleState = (state, ids) => rawBuildSensorsConsoleState(projectedFixtureState(state), fixtureSystemIds(state, 'sensors', ids));
+const buildCommsConsoleState = (state, ids) => rawBuildCommsConsoleState(projectedFixtureState(state), fixtureSystemIds(state, 'comms', ids));
+const buildNavigationConsoleState = (state, ids) => rawBuildNavigationConsoleState(projectedFixtureState(state), fixtureSystemIds(state, 'navigation', ids));
+const buildCommandConsoleState = (state, ids) => rawBuildCommandConsoleState(projectedFixtureState(state), fixtureSystemIds(state, 'command', ids));
+const buildSystemStationConsoleState = (station, state) => rawBuildSystemStationConsoleState(station, projectedFixtureState(state));
+const withVisitingSystems = (station, state, json) => rawWithVisitingSystems(station, projectedFixtureState(state), json);
+const commandAdviceFor = (state, station) => rawCommandAdviceFor(projectedFixtureState(state), station);
+const withCommandAdvice = (station, state, json) => rawWithCommandAdvice(station, projectedFixtureState(state), json);
 
 // ── Entity helpers ────────────────────────────────────────────────────────────
 
@@ -711,7 +790,7 @@ describe('buildCommandConsoleState (issue #1107)', () => {
 
   it('returns valid JSON with safe defaults when no blackboard has arrived', () => {
     const s = parse(buildCommandConsoleState(EMPTY));
-    expect(s.command_system_id).toBe('command');
+    expect(s.command_system_id).toBeNull();
     expect(s.directed_station).toBe('');
     expect(s.directed_station_ai).toBe(false);
     expect(s.stances).toEqual([]);
@@ -1146,7 +1225,10 @@ describe('helm engine fields', () => {
 
   it('engine_stbd_thrust reads from helm-engine-starboard blackboard thrust_fraction', () => {
     const state = {
-      blackboards: { 'helm-engine-starboard': { thrust_fraction: 0.55 } },
+      blackboards: {
+        'helm-engine-port': { thrust_fraction: 0 },
+        'helm-engine-starboard': { thrust_fraction: 0.55 },
+      },
     };
     expect(parse(buildHelmConsoleState(state)).engine_stbd_thrust).toBeCloseTo(0.55);
   });
@@ -2658,25 +2740,40 @@ describe('auto fields', () => {
     expect(parse(buildHelmConsoleState(EMPTY)).helm_auto).toBe(false);
   });
 
-  // tactical_auto — per-system: every phaser system id (from stationSystems.tactical)
-  // must be controlled by 'Ai' in controlSources.
-  it('tactical_auto is true when every phaser system is Ai-controlled', () => {
+  // tactical_auto — typed PhaserBank scope. Simplified Tactical automates its
+  // phaser banks while other members of the Tactical family remain Human.
+  it('tactical_auto is true when typed PhaserBank systems are Ai-controlled', () => {
     const state = {
-      stationSystems: { tactical: ['phaser-fore', 'phaser-aft'] },
-      controlSources: { 'phaser-fore': 'Ai', 'phaser-aft': 'Ai' },
+      stationSystems: {
+        tactical: ['tactical-radar', 'phaser-port', 'phaser-starboard', 'torpedo-tube-fore', 'blaster-aft'],
+      },
+      controlSources: {
+        'tactical-radar': 'Human',
+        'phaser-port': 'Ai',
+        'phaser-starboard': 'Ai',
+        'torpedo-tube-fore': 'Human',
+        'blaster-aft': 'Human',
+      },
+      blackboards: { 'phaser-port': {}, 'phaser-starboard': {} },
     };
     expect(parse(buildWeaponsConsoleState(state)).tactical_auto).toBe(true);
   });
 
-  it('tactical_auto is false when only some phaser systems are Ai-controlled', () => {
+  it('tactical_auto is false when only some typed PhaserBank systems are Ai-controlled', () => {
     const state = {
       stationSystems: { tactical: ['phaser-fore', 'phaser-aft'] },
       controlSources: { 'phaser-fore': 'Ai', 'phaser-aft': 'Human' },
+      blackboards: { 'phaser-fore': {}, 'phaser-aft': {} },
     };
     expect(parse(buildWeaponsConsoleState(state)).tactical_auto).toBe(false);
   });
 
-  it('tactical_auto is false when stationSystems/controlSources are absent', () => {
+  it('tactical_auto is false when no typed PhaserBank projection is available', () => {
+    const state = {
+      stationSystems: { tactical: ['phaser-fore'] },
+      controlSources: { 'phaser-fore': 'Ai' },
+    };
+    expect(parse(buildWeaponsConsoleState(state)).tactical_auto).toBe(false);
     expect(parse(buildWeaponsConsoleState(EMPTY)).tactical_auto).toBe(false);
   });
 
@@ -3063,6 +3160,9 @@ describe('destroyer captain station via buildSystemStationConsoleState', () => {
     const s = parse(buildSystemStationConsoleState('captain', {
       stationSystems: CAPTAIN_SYSTEMS,
       controlSources: { 'red-alert': 'Ai', viewscreen: 'Human', sensors: 'Ai', 'sensor-radar': 'Ai' },
+      blackboards: {
+        captain: { red_alert_system_id: 'red-alert', viewscreen_system_id: 'viewscreen' },
+      },
     }));
     expect(s.systems['captain'].red_alert_auto).toBe(true);
     expect(s.systems['captain'].viewscreen_auto).toBe(false);
@@ -3277,15 +3377,32 @@ describe('destroyer tactical station via buildSystemStationConsoleState', () => 
     expect(s.systems['comms']).toHaveProperty('contacts');
   });
 
-  it('tactical_auto is true only when every owned weapon system is Ai-controlled', () => {
-    const allAi = parse(buildSystemStationConsoleState('tactical', {
-      stationSystems: { tactical: ['phaser-omni', 'blaster-port'] },
-      controlSources: { 'phaser-omni': 'Ai', 'blaster-port': 'Ai' },
+  it('preserves the PhaserBank AUTO cue across a mixed Tactical family', () => {
+    const stationSystems = {
+      tactical: ['tactical-radar', 'phaser-omni', 'torpedo-tube-fore', 'blaster-port'],
+    };
+    const simplified = parse(buildSystemStationConsoleState('tactical', {
+      stationSystems,
+      controlSources: {
+        'tactical-radar': 'Human',
+        'phaser-omni': 'Ai',
+        'torpedo-tube-fore': 'Human',
+        'blaster-port': 'Human',
+      },
+      blackboards: { 'phaser-omni': {} },
     }));
-    expect(allAi.systems['phaser-omni'].tactical_auto).toBe(true);
+    expect(simplified.systems['phaser-omni'].tactical_auto).toBe(true);
+    expect(simplified.systems['blaster-port'].tactical_auto).toBe(true);
+
     const mixed = parse(buildSystemStationConsoleState('tactical', {
-      stationSystems: { tactical: ['phaser-omni', 'blaster-port'] },
-      controlSources: { 'phaser-omni': 'Ai', 'blaster-port': 'Human' },
+      stationSystems,
+      controlSources: {
+        'tactical-radar': 'Human',
+        'phaser-omni': 'Human',
+        'torpedo-tube-fore': 'Human',
+        'blaster-port': 'Ai',
+      },
+      blackboards: { 'phaser-omni': {} },
     }));
     expect(mixed.systems['phaser-omni'].tactical_auto).toBe(false);
   });
@@ -4074,7 +4191,7 @@ describe('withVisitingSystems', () => {
     const flat = JSON.stringify({ helm_auto: false, speed: 12 });
     const s = parse(withVisitingSystems('helm', state, flat));
     expect(s.speed).toBe(12);
-    expect(Object.keys(s.systems)).toEqual(['comms']);
+    expect(Object.keys(s.systems)).toEqual(['helm-thrust', 'helm-steering', 'comms']);
     expect(s.hosted_systems).toContain('comms');
   });
 

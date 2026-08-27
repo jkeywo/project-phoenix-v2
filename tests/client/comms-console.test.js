@@ -19,7 +19,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { t } from '../../gui/strings.js';
 import { renderStation as battleshipRender } from '../../gui/battleship/comms.console.js';
-import { renderStation as cruiserRender } from '../../gui/cruiser/comms.console.js';
+import { renderStation as rawCruiserRender } from '../../gui/cruiser/comms.console.js';
+import { withConsoleFamilyProjection } from './console-family-fixture.js';
+
+const cruiserRender = (payload, doc) => rawCruiserRender(withConsoleFamilyProjection(payload), doc);
 
 function mount(markup) {
   document.body.innerHTML = markup;
@@ -119,7 +122,7 @@ describe('cruiser comms renderStation', () => {
   };
   const payload = { systems: { comms, navigation: nav }, own_hull: { pct: 0.5 } };
 
-  it('reads the comms view via systemView for the shared core', () => {
+  it('reads the comms view via projected Console Family for the shared core', () => {
     cruiserRender(payload, document);
     expect(el('comms-contact-list').state).toEqual({ contacts: [{ id: 'c1' }] });
     expect(el('comms-hail-list').state).toEqual(comms);

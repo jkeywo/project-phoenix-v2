@@ -255,9 +255,9 @@ pub struct SystemId(pub String);
 /// [`SystemId`] (command authority): a Dock System belongs to whichever Station
 /// the hull authors, but its state is presented by the Helm console family.
 ///
-/// Issue #1251 projects the Command and Dock tracer entries. The remaining
-/// variants name the existing client families so issue #1252 can migrate their
-/// descriptors without changing the wire vocabulary again.
+/// Every authored System-kind descriptor projects one of these values to the
+/// client. Reserved/aggregate blackboard keys use the same vocabulary through
+/// a separate map so presentation metadata never turns a channel into a System.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ConsoleFamily {
@@ -1360,13 +1360,19 @@ pub struct ShipClientConfig {
     #[serde(default)]
     pub station_systems: HashMap<String, Vec<String>>,
     /// Resolved System instance id -> Console Family metadata from the
-    /// authoritative System-kind descriptors (issue #1251). Unlike
-    /// `station_systems`, this classifies presentation rather than ownership.
-    /// The tracer projects Command and Dock; an absent entry means the family
-    /// has not yet migrated and the client may use the explicitly temporary
-    /// inference fallback until issue #1252 completes the registry.
+    /// authoritative System-kind descriptors. Unlike `station_systems`, this
+    /// classifies presentation rather than ownership. Every selected-ship
+    /// System instance has an entry; clients never infer it from id spelling.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub system_console_families: HashMap<String, ConsoleFamily>,
+    /// Reserved/aggregate blackboard key -> Console Family metadata.
+    ///
+    /// These keys share the blackboard map's `SystemId` wire wrapper but are
+    /// not authored Systems: they have no Station owner, Control Source, damage
+    /// state, or command authority. A distinct projection preserves that
+    /// boundary while still making BlackboardUpdate dirty routing authoritative.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub blackboard_console_families: HashMap<String, ConsoleFamily>,
     /// Anonymous accessibility eligibility projection (issue #1103).
     ///
     /// Per station id → per rating name → the T1 assist-function ids the station
@@ -1515,6 +1521,7 @@ impl Default for ShipClientConfig {
             ship_css: None,
             station_systems: HashMap::new(),
             system_console_families: HashMap::new(),
+            blackboard_console_families: HashMap::new(),
             station_assist_gaps: HashMap::new(),
             threat_bearing_epsilon_rad: default_threat_bearing_epsilon_rad(),
             helm_systems: Vec::new(),

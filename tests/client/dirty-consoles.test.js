@@ -2,277 +2,165 @@
 import { describe, it, expect } from 'vitest';
 import {
   dirtyConsolesFor,
-  STATIC_MESSAGE_CONSOLES,
-  ALWAYS_PUSH,
+  STATIC_MESSAGE_FAMILIES,
+  ALWAYS_PUSH_FAMILIES,
+  alwaysPushConsoles,
 } from '../../gui/dirty-consoles.js';
 
-// Battleship-style identity stations: every station id names its console and
-// owns fine system ids resolved by consoleForSystemId.
 const BATTLESHIP_STATIONS = {
   captain: ['captain', 'viewscreen', 'red-alert'],
-  helm: ['helm-thrust', 'helm-steering', 'helm-impulse', 'helm-boost', 'helm-lateral-thrust'],
-  tactical: ['tactical-radar', 'phaser-control', 'phaser-fore', 'phaser-aft', 'torpedo-magazine'],
-  repair: ['repair'],
-  sensors: ['sensors', 'sensor-radar'],
-  shields: ['shields-system', 'shield-arc-fore'],
-  navigation: ['navigation'],
-  power: ['power-reactor', 'power-battery'],
-  comms: ['comms'],
+  helm: ['helm-thrust', 'helm-steering'],
+  tactical: ['tactical-radar', 'phaser-fore'],
+  repair: ['repair'], sensors: ['sensors'], shields: ['shields-system'],
+  navigation: ['navigation'], power: ['power-reactor'], comms: ['comms'],
 };
-
-// Courier-style composite: the whole ship on one 'pilot' station.
-const COURIER_STATIONS = {
-  pilot: [
-    'captain', 'viewscreen', 'red-alert',
-    'helm-thrust', 'helm-steering',
-    'blaster-fore', 'tactical-radar',
-    'sensors', 'navigation', 'comms',
-  ],
-};
-
-// Destroyer-style composites: engineering = shields+power+repair,
-// tactical = weapons+navigation+comms, captain = captain+sensors.
 const DESTROYER_STATIONS = {
-  captain: ['captain', 'viewscreen', 'red-alert', 'sensors', 'sensor-radar'],
-  helm: ['helm-thrust', 'helm-steering', 'helm-lateral-thrust'],
-  tactical: ['phaser-omni', 'torpedo-tube-fore', 'navigation', 'comms', 'tactical-radar'],
-  engineering: ['shields-system', 'shield-arc-fore', 'power-reactor', 'power-battery', 'repair'],
+  captain: ['captain', 'sensors'],
+  helm: ['helm-thrust'],
+  tactical: ['phaser-omni', 'navigation', 'comms'],
+  engineering: ['shields-system', 'power-reactor', 'repair'],
+};
+const COURIER_STATIONS = {
+  pilot: ['captain', 'helm-thrust', 'blaster-fore', 'sensors', 'navigation', 'comms'],
+};
+
+const SYSTEM_FAMILIES = {
+  captain: 'captain', viewscreen: 'captain', 'red-alert': 'captain',
+  'helm-thrust': 'helm', 'helm-steering': 'helm',
+  'tactical-radar': 'tactical', 'phaser-fore': 'tactical',
+  'phaser-omni': 'tactical', 'blaster-fore': 'tactical',
+  repair: 'repair', sensors: 'sensors', 'shields-system': 'shields',
+  navigation: 'navigation', 'power-reactor': 'power', comms: 'comms',
+};
+const BLACKBOARD_FAMILIES = {
+  helm: 'helm', tactical: 'tactical', power: 'power', shields: 'shields',
+  dossiers: 'comms', scan: 'sensors',
 };
 
 const bbUpdate = ids => ({
   type: 'BlackboardUpdate',
   data: { updates: ids.map(id => [id, { kind: 'X', data: {} }]) },
 });
+const route = (msg, stations = BATTLESHIP_STATIONS, systems = SYSTEM_FAMILIES,
+  blackboards = BLACKBOARD_FAMILIES) => (
+  dirtyConsolesFor(msg, stations, systems, blackboards)
+);
 
-describe('STATIC_MESSAGE_CONSOLES', () => {
+describe('STATIC_MESSAGE_FAMILIES', () => {
   const expected = {
     Welcome: ['repair'],
     SimState: ['tactical', 'repair', 'sensors', 'navigation'],
     WorldSetup: ['tactical', 'helm', 'sensors', 'navigation'],
     EntitySpawned: ['tactical', 'helm', 'sensors', 'navigation'],
     AsteroidSpawned: ['tactical', 'helm', 'sensors', 'navigation'],
-    TargetLock: ['tactical'],
-    WeaponsUpdate: ['tactical'],
-    // BeamStarted/BeamEnded removed in #825: sim-state no longer mutates on
-    // them, so there is nothing to re-push.
-    SystemHullUpdate: ['repair'],
-    RepairState: ['repair'],
-    PowerState: ['power'],
+    TargetLock: ['tactical'], WeaponsUpdate: ['tactical'],
+    SystemHullUpdate: ['repair'], RepairState: ['repair'], PowerState: ['power'],
     ShieldStatus: ['shields'],
     AsteroidDestroyed: ['tactical', 'helm', 'sensors'],
     EntityDespawned: ['tactical', 'helm', 'sensors'],
-    CommsState: ['comms'],
-    CommsResponseRejected: ['comms'],
-    RatingChanged: ['captain'],
+    CommsState: ['comms'], CommsResponseRejected: ['comms'], RatingChanged: ['captain'],
   };
-
   for (const [type, consoles] of Object.entries(expected)) {
     it(`${type} dirties [${consoles.join(', ')}]`, () => {
-      expect(dirtyConsolesFor({ type }, BATTLESHIP_STATIONS))
-        .toEqual(new Set(consoles));
+      expect(route({ type })).toEqual(new Set(consoles));
     });
   }
-
-  it('BeamStarted / BeamEnded dirty nothing (removed in #825)', () => {
-    expect(dirtyConsolesFor({ type: 'BeamStarted' }, BATTLESHIP_STATIONS)).toEqual(new Set());
-    expect(dirtyConsolesFor({ type: 'BeamEnded' }, BATTLESHIP_STATIONS)).toEqual(new Set());
+  it('holds exactly the expected static entries', () => {
+    expect(Object.keys(STATIC_MESSAGE_FAMILIES).sort()).toEqual(Object.keys(expected).sort());
   });
 
-  it('the table itself holds exactly the expected static entries', () => {
-    expect(Object.keys(STATIC_MESSAGE_CONSOLES).sort())
-      .toEqual(Object.keys(expected).sort());
-  });
-});
-
-describe('dirtyConsolesFor — BlackboardUpdate on battleship (identity stations)', () => {
-  // Today's server blackboard ids are coarse (one per console family).
-  const coarse = ['helm', 'tactical', 'power', 'shields', 'repair', 'comms', 'sensors', 'navigation'];
-  for (const id of coarse) {
-    it(`coarse '${id}' lands on the identity console`, () => {
-      expect(dirtyConsolesFor(bbUpdate([id]), BATTLESHIP_STATIONS))
-        .toEqual(new Set([id]));
-    });
-  }
-
-  it('fine ids resolve through the shared matcher (helm-thrust → helm)', () => {
-    expect(dirtyConsolesFor(bbUpdate(['helm-thrust']), BATTLESHIP_STATIONS))
-      .toEqual(new Set(['helm']));
-    expect(dirtyConsolesFor(bbUpdate(['phaser-fore']), BATTLESHIP_STATIONS))
-      .toEqual(new Set(['tactical']));
-    expect(dirtyConsolesFor(bbUpdate(['power-battery']), BATTLESHIP_STATIONS))
-      .toEqual(new Set(['power']));
-  });
-
-  it('multiple updates in one message union their consoles', () => {
-    expect(dirtyConsolesFor(bbUpdate(['power', 'shields']), BATTLESHIP_STATIONS))
-      .toEqual(new Set(['power', 'shields']));
-  });
-
-  it('unknown system id dirties nothing', () => {
-    expect(dirtyConsolesFor(bbUpdate(['warp-core']), BATTLESHIP_STATIONS))
-      .toEqual(new Set());
-  });
-
-  // The `scan` channel (issue #1032) is not a system id — the commandable,
-  // damageable thing is `sensors` — so it needs the reserved-channel table to
-  // reach a console at all.
-  it('the scan channel dirties the console that renders sensors', () => {
-    expect(dirtyConsolesFor(bbUpdate(['scan']), BATTLESHIP_STATIONS))
-      .toEqual(new Set(['sensors']));
-    expect(dirtyConsolesFor(bbUpdate(['scan']), DESTROYER_STATIONS))
-      .toEqual(new Set(['captain']));
-  });
-});
-
-describe('dirtyConsolesFor — captain/viewscreen currentView cascade', () => {
-  // Helm/Sensors/Comms/Navigation derive their on-screen button state from
-  // simState.currentView, so a captain or viewscreen change refreshes them.
-  it('captain update cascades to helm/sensors/comms/navigation', () => {
-    expect(dirtyConsolesFor(bbUpdate(['captain']), BATTLESHIP_STATIONS))
-      .toEqual(new Set(['captain', 'helm', 'sensors', 'comms', 'navigation']));
-  });
-
-  it('viewscreen update cascades identically', () => {
-    expect(dirtyConsolesFor(bbUpdate(['viewscreen']), BATTLESHIP_STATIONS))
-      .toEqual(new Set(['captain', 'helm', 'sensors', 'comms', 'navigation']));
-  });
-
-  it('non-captain updates do not cascade', () => {
-    expect(dirtyConsolesFor(bbUpdate(['shields']), BATTLESHIP_STATIONS))
-      .toEqual(new Set(['shields']));
-  });
-});
-
-describe('dirtyConsolesFor — composite stations route to the owning console', () => {
-  it('courier: every update lands on pilot', () => {
-    expect(dirtyConsolesFor(bbUpdate(['helm']), COURIER_STATIONS))
-      .toEqual(new Set(['pilot']));
-    expect(dirtyConsolesFor(bbUpdate(['tactical']), COURIER_STATIONS))
-      .toEqual(new Set(['pilot']));
-    // Cascade collapses onto the single owning console too.
-    expect(dirtyConsolesFor(bbUpdate(['captain']), COURIER_STATIONS))
+  it('routes static families to composite Station ids through actual ownership', () => {
+    expect(route({ type: 'SimState' }, DESTROYER_STATIONS))
+      .toEqual(new Set(['tactical', 'engineering', 'captain']));
+    expect(route({ type: 'WorldSetup' }, COURIER_STATIONS))
       .toEqual(new Set(['pilot']));
   });
 
-  it('destroyer: shields/power/repair land on engineering', () => {
-    for (const id of ['shields', 'power', 'repair']) {
-      expect(dirtyConsolesFor(bbUpdate([id]), DESTROYER_STATIONS))
-        .toEqual(new Set(['engineering']));
-    }
-  });
-
-  it('destroyer: coarse tactical lands on the station owning phaser-*', () => {
-    expect(dirtyConsolesFor(bbUpdate(['tactical']), DESTROYER_STATIONS))
-      .toEqual(new Set(['tactical']));
-  });
-
-  it('destroyer: navigation/comms land on the tactical station, sensors on captain', () => {
-    expect(dirtyConsolesFor(bbUpdate(['navigation']), DESTROYER_STATIONS))
-      .toEqual(new Set(['tactical']));
-    expect(dirtyConsolesFor(bbUpdate(['comms']), DESTROYER_STATIONS))
-      .toEqual(new Set(['tactical']));
-    expect(dirtyConsolesFor(bbUpdate(['sensors']), DESTROYER_STATIONS))
-      .toEqual(new Set(['captain']));
-  });
-
-  it('destroyer: captain cascade fans out across the owning stations', () => {
-    // captain+sensors → captain station; helm → helm; comms/navigation →
-    // tactical station.
-    expect(dirtyConsolesFor(bbUpdate(['captain']), DESTROYER_STATIONS))
-      .toEqual(new Set(['captain', 'helm', 'tactical']));
+  it('does not invent static Station ids before Welcome', () => {
+    expect(route({ type: 'SimState' }, null)).toEqual(new Set());
   });
 });
 
-describe('dirtyConsolesFor — fallbacks and edge cases', () => {
-  it('routes a Dock blackboard to its Helm console through projected metadata', () => {
-    const stations = { 'flight-control': ['berthing-clamps'] };
-    const families = { 'berthing-clamps': 'helm' };
-    expect(dirtyConsolesFor(bbUpdate(['berthing-clamps']), stations, families))
+describe('BlackboardUpdate metadata routing', () => {
+  it('routes reserved aggregate keys through their separate projection', () => {
+    expect(route(bbUpdate(['helm']))).toEqual(new Set(['helm']));
+    expect(route(bbUpdate(['power', 'shields']))).toEqual(new Set(['power', 'shields']));
+    expect(route(bbUpdate(['scan']))).toEqual(new Set(['sensors']));
+  });
+
+  it('routes actual System ids through the complete System projection', () => {
+    expect(route(bbUpdate(['helm-thrust']))).toEqual(new Set(['helm']));
+    expect(route(bbUpdate(['phaser-fore']))).toEqual(new Set(['tactical']));
+  });
+
+  it('routes an arbitrary instance id without spelling inference', () => {
+    const stations = { 'flight-control': ['berthing-clamps-alpha'] };
+    const families = { 'berthing-clamps-alpha': 'helm' };
+    expect(route(bbUpdate(['berthing-clamps-alpha']), stations, families))
       .toEqual(new Set(['flight-control']));
   });
 
-  it('does not guess an unmapped Dock family from either id spelling', () => {
-    const stations = { 'flight-control': ['berthing-clamps'] };
-    expect(dirtyConsolesFor(bbUpdate(['berthing-clamps']), stations, {}))
+  it('never guesses a family from an exact id or prefix', () => {
+    expect(route(bbUpdate(['helm-thrust']), BATTLESHIP_STATIONS, {})).toEqual(new Set());
+    expect(route(bbUpdate(['phaser-surprise']), BATTLESHIP_STATIONS, {})).toEqual(new Set());
+  });
+
+  it('never treats a reserved channel as a System', () => {
+    expect(route(bbUpdate(['scan']), BATTLESHIP_STATIONS, SYSTEM_FAMILIES, {}))
       .toEqual(new Set());
   });
 
-  it('missing stationSystems falls back to coarse identity (boot race before Welcome)', () => {
-    expect(dirtyConsolesFor(bbUpdate(['power']), null))
-      .toEqual(new Set(['power']));
-    expect(dirtyConsolesFor(bbUpdate(['captain']), undefined))
+  it('routes composite Stations from actual ownership', () => {
+    expect(route(bbUpdate(['shields']), DESTROYER_STATIONS)).toEqual(new Set(['engineering']));
+    expect(route(bbUpdate(['navigation']), DESTROYER_STATIONS)).toEqual(new Set(['tactical']));
+    expect(route(bbUpdate(['sensors']), DESTROYER_STATIONS)).toEqual(new Set(['captain']));
+    expect(route(bbUpdate(['tactical']), COURIER_STATIONS)).toEqual(new Set(['pilot']));
+  });
+
+  it('cascades Captain-family changes through current-view consumers', () => {
+    expect(route(bbUpdate(['captain']), BATTLESHIP_STATIONS))
       .toEqual(new Set(['captain', 'helm', 'sensors', 'comms', 'navigation']));
+    expect(route(bbUpdate(['captain']), DESTROYER_STATIONS))
+      .toEqual(new Set(['captain', 'helm', 'tactical']));
   });
 
-  it('empty stationSystems behaves like missing', () => {
-    expect(dirtyConsolesFor(bbUpdate(['helm']), {}))
-      .toEqual(new Set(['helm']));
+  it('has no station-name boot fallback before Welcome', () => {
+    expect(route(bbUpdate(['power']), null)).toEqual(new Set());
+    expect(route(bbUpdate(['captain']), {})).toEqual(new Set());
   });
 
-  it('a family no station owns falls back to its own name', () => {
-    // Harmless: pushes to unmounted consoles are no-ops.
-    const noShields = { helm: ['helm-thrust'] };
-    expect(dirtyConsolesFor(bbUpdate(['shields']), noShields))
-      .toEqual(new Set(['shields']));
-  });
-
-  it('unknown message type dirties nothing', () => {
-    expect(dirtyConsolesFor({ type: 'PlayerJoined' }, BATTLESHIP_STATIONS)).toEqual(new Set());
-    expect(dirtyConsolesFor({ type: 'NoSuchMessage' }, BATTLESHIP_STATIONS)).toEqual(new Set());
-    expect(dirtyConsolesFor(null, BATTLESHIP_STATIONS)).toEqual(new Set());
-    expect(dirtyConsolesFor({}, BATTLESHIP_STATIONS)).toEqual(new Set());
-  });
-
-  it('BlackboardUpdate with no updates dirties nothing', () => {
-    expect(dirtyConsolesFor({ type: 'BlackboardUpdate', data: {} }, BATTLESHIP_STATIONS))
-      .toEqual(new Set());
+  it('ignores unknown messages, unknown ids, and empty updates', () => {
+    expect(route({ type: 'NoSuchMessage' })).toEqual(new Set());
+    expect(route(bbUpdate(['warp-core']))).toEqual(new Set());
+    expect(route({ type: 'BlackboardUpdate', data: {} })).toEqual(new Set());
   });
 });
 
-describe('ALWAYS_PUSH', () => {
-  it('captain is the only unconditionally-pushed console', () => {
-    expect(ALWAYS_PUSH).toEqual(new Set(['captain']));
+describe('human-seeking Systems', () => {
+  const seeking = (id, host) => ({
+    type: 'BlackboardUpdate',
+    data: { updates: [[id, { kind: 'Comms', data: { host_station: host } }]] },
+  });
+
+  it('dirties every known Station when a host appears or disappears', () => {
+    const expected = new Set(['captain', 'helm', 'tactical', 'engineering']);
+    expect(route(seeking('comms', 'engineering'), DESTROYER_STATIONS)).toEqual(expected);
+    expect(route(seeking('comms', null), DESTROYER_STATIONS)).toEqual(expected);
+  });
+
+  it('does not invent Stations when topology is unknown', () => {
+    expect(route(seeking('comms', 'engineering'), null)).toEqual(new Set());
   });
 });
 
-describe('window exposure for the client.html inline script', () => {
-  it('attaches dirtyConsolesFor and DIRTY_ALWAYS_PUSH to window', () => {
+describe('exports', () => {
+  it('projects the unconditional Captain family to actual owning Stations', () => {
+    expect(ALWAYS_PUSH_FAMILIES).toEqual(new Set(['captain']));
+    expect(alwaysPushConsoles(BATTLESHIP_STATIONS, SYSTEM_FAMILIES))
+      .toEqual(new Set(['captain']));
+    expect(alwaysPushConsoles(COURIER_STATIONS, SYSTEM_FAMILIES))
+      .toEqual(new Set(['pilot']));
     expect(typeof window.dirtyConsolesFor).toBe('function');
-    expect(window.DIRTY_ALWAYS_PUSH).toBe(ALWAYS_PUSH);
-  });
-});
-
-// ── human-seeking systems (issue #984) ───────────────────────────────────────
-
-/** A blackboard update for a SEEKING system: the `host_station` key present. */
-const seekingUpdate = (id, host) => ({
-  type: 'BlackboardUpdate',
-  data: { updates: [[id, { kind: 'X', data: { host_station: host } }]] },
-});
-
-describe('a seeking system dirties every station', () => {
-  // The one deliberate cross-read edge in this module. Which console shows
-  // Comms can change without anything the hosting station owns having changed,
-  // and the console that LOSES it has no event of its own to learn that from.
-  it('fans out to all stations when a host is named', () => {
-    expect(dirtyConsolesFor(seekingUpdate('comms', 'engineering'), DESTROYER_STATIONS))
-      .toEqual(new Set(['captain', 'helm', 'tactical', 'engineering']));
-  });
-
-  // The transition the fan-out exists for: the seek letting go. `host_station`
-  // is serialised even when null precisely so this case is still recognisable.
-  it('fans out when the host goes away', () => {
-    expect(dirtyConsolesFor(seekingUpdate('comms', null), DESTROYER_STATIONS))
-      .toEqual(new Set(['captain', 'helm', 'tactical', 'engineering']));
-  });
-
-  it('leaves an ordinary blackboard update routing exactly as it did', () => {
-    expect(dirtyConsolesFor(bbUpdate(['shields-system']), DESTROYER_STATIONS))
-      .toEqual(new Set(['engineering']));
-  });
-
-  it('does not invent stations when ownership is unknown', () => {
-    expect(dirtyConsolesFor(seekingUpdate('comms', 'engineering'), null))
-      .toEqual(new Set(['comms']));
+    expect(window.alwaysPushConsoles).toBe(alwaysPushConsoles);
   });
 });

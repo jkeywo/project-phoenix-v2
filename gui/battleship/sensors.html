@@ -82,7 +82,7 @@
     // vitest suite imports the same renderStation.
     import { renderStation } from './sensors.console.js';
 
-    var consoleApi = initConsole({ name: 'sensors', family: 'sensors', render: renderStation });
+    var consoleApi = initConsole({ name: 'sensors', render: renderStation });
 
     document.getElementById('btn-cancel-impulse').addEventListener('click', function() {
       consoleApi.sendAction('cancel_impulse', {});

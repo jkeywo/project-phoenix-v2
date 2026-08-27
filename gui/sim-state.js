@@ -132,16 +132,14 @@ export class ClientSimState {
     /** Station → system id list, populated from Welcome ship_config.station_systems.
      *  Used by aggregateStationHull to compute per-station damage from consoleHull. */
     this.stationSystems = {};
-    /** Authoritative System id → Console Family projection (issue #1251),
-     *  populated from Welcome ship_config.system_console_families. The tracer
-     *  carries Command and Dock; missing ids remain on the explicitly temporary
-     *  client inference path until #1252 completes the descriptor migration. */
+    /** Authoritative System id → Console Family projection, populated from
+     *  Welcome ship_config.system_console_families. Every owned System has an
+     *  entry; the client never infers presentation from its id spelling. */
     this.systemConsoleFamilies = {};
-    /** Whether a Welcome has supplied the topology projection boundary.
-     *  `systemConsoleFamilies === {}` alone is ambiguous before Welcome; once
-     *  this is true, an absent descriptor is authoritative and must not revive
-     *  a station-name builder fallback. */
-    this.hasSystemConsoleFamilyProjection = false;
+    /** Authoritative reserved/aggregate blackboard key → Console Family
+     *  projection. Kept separate because these keys are not Systems and convey
+     *  no ownership or command authority. */
+    this.blackboardConsoleFamilies = {};
     /** Anonymous eligibility projection (issue #1103): station → rating →
      *  assist-function ids that station forces manual. From Welcome
      *  ship_config.station_assist_gaps. Hull-derived config, never a profile. */
@@ -167,10 +165,13 @@ export class ClientSimState {
     this.stationImportance = stationImportance;
     /** Per-system control source ("Human" or "Ai"), populated from SimSnapshot. */
     this.controlSources = controlSources;
-    /** Per-system blackboard mirror, keyed by SystemId string.
-     *  Each value is the inner `data` object of the `SystemBlackboard` variant
-     *  (e.g. `this.blackboards['helm']` is a `HelmBlackboard`). */
+    /** Per-system/reserved-channel blackboard mirror, keyed by wire id.
+     *  Each value is the inner `data` object of the `SystemBlackboard` variant. */
     this.blackboards = {};
+    /** Tagged-enum variant for each blackboard key. Retained beside the
+     *  unwrapped payload so builders select semantic surfaces by kind even
+     *  when the authored instance id is arbitrary. */
+    this.blackboardKinds = {};
     this.currentTargetName = null;
     /** Shared waypoint set by the Navigation console, or null when clear. */
     this.navigationWaypoint = null;
@@ -386,10 +387,7 @@ export class ClientSimState {
         this.stationRatings = d.station_ratings || {};
         this.stationSystems = sc.station_systems || {};
         this.systemConsoleFamilies = sc.system_console_families || {};
-        // Welcome is the projection boundary even when the map is empty (or an
-        // older compatible payload omitted the additive field). After this
-        // point a missing Command descriptor must not be guessed by station id.
-        this.hasSystemConsoleFamilyProjection = true;
+        this.blackboardConsoleFamilies = sc.blackboard_console_families || {};
         // Anonymous eligibility projection (issue #1103): per station → per
         // rating → the assist-functions that station forces manual. Hull-derived
         // config, never anyone's profile; the lobby glue runs the SAME rule as
@@ -547,10 +545,11 @@ export class ClientSimState {
           // bb is { kind: "Helm", data: { yaw, forward_speed, ... } }
           if (bb && bb.kind && bb.data) {
             this.blackboards[systemId] = bb.data;
+            this.blackboardKinds[systemId] = bb.kind;
             // The navigation blackboard is the freshest source for the shared
             // waypoint (SimState only carries it at 10 Hz) — mirror it, as
             // client.html's deleted BlackboardUpdate handler used to (#819).
-            if (systemId === 'navigation') {
+            if (bb.kind === 'Navigation') {
               this.navigationWaypoint = bb.data.navigation_waypoint || null;
             }
           }
@@ -600,16 +599,26 @@ export class ClientSimState {
   /** The live entity array (the builders' historical `state.asteroids`). */
   get asteroids() { return this.world.entities; }
 
+  /** First blackboard matching an authoritative wire discriminant. Reserved
+   * aggregate channels and arbitrarily-named System instances share this
+   * lookup; lexical ordering keeps an accidental multi-match deterministic. */
+  blackboardOfKind(kind) {
+    const id = Object.keys(this.blackboardKinds)
+      .filter(key => this.blackboardKinds[key] === kind)
+      .sort()[0];
+    return id == null ? undefined : this.blackboards[id];
+  }
+
   /** Ship world X from the helm blackboard (0 until the first update). */
-  get shipX() { return this.blackboards['helm']?.x ?? 0; }
+  get shipX() { return this.blackboardOfKind('Helm')?.x ?? 0; }
   /** Ship world Z from the helm blackboard. */
-  get shipZ() { return this.blackboards['helm']?.z ?? 0; }
+  get shipZ() { return this.blackboardOfKind('Helm')?.z ?? 0; }
   /** Ship yaw (radians) from the helm blackboard. */
-  get shipYaw() { return this.blackboards['helm']?.yaw ?? 0; }
+  get shipYaw() { return this.blackboardOfKind('Helm')?.yaw ?? 0; }
   /** Forward speed from the helm blackboard. */
-  get forwardSpeed() { return this.blackboards['helm']?.forward_speed ?? 0; }
+  get forwardSpeed() { return this.blackboardOfKind('Helm')?.forward_speed ?? 0; }
   /** Impulse charge progress (0..1) from the helm blackboard. */
-  get impulseChargeProgress() { return this.blackboards['helm']?.impulse_charge ?? 0; }
+  get impulseChargeProgress() { return this.blackboardOfKind('Helm')?.impulse_charge ?? 0; }
 
   /**
    * Current viewscreen view derived from the captain blackboard's view_mode
@@ -618,14 +627,14 @@ export class ClientSimState {
    * the same default the deleted client.html mirror initialised with.
    */
   get currentView() {
-    const vm = this.blackboards['captain']?.view_mode;
+    const vm = this.blackboardOfKind('Captain')?.view_mode;
     const vd = vm && vm.kind === 'Camera' ? vm.data : null;
     const kind = vm && vm.kind === 'Cinematic' ? 'cinematic' : (vm && vm.kind);
     return vd || kind || 'Fore';
   }
 
   /** Red-alert flag from the captain blackboard. */
-  get redAlert() { return !!this.blackboards['captain']?.red_alert; }
+  get redAlert() { return !!this.blackboardOfKind('Captain')?.red_alert; }
 
   /** Tactical target uuid alias. The setter exists so the action-map's
    *  optimistic `mutate({ weaponsTarget })` patch lands on the one store. */

@@ -1,160 +1,97 @@
-/**
- * tests/client/console-payload.test.js — gui/console-payload.js (issue #1231,
- * T4.C0, and issue #1233, T4.C1.5, of the console-seam programme).
- *
- * Pure-Node tests over `systemView`, the shared replacement for the
- * `function system(s, ...ids) { ... }` helper copy-pasted into 9 console
- * documents (e.g. gui/cruiser/engineering.html). Nothing consumes this
- * module yet — phase 1 of the programme swaps each copy for an import — so
- * these assertions pin the exact semantics the 9 copies share today.
- *
- * Also covers `normalizeConsolePayload`, the console-core.js normalisation
- * seam that wraps a FLAT payload's fields under `systems[family]` so a
- * console reading through `systemView` never has to know whether the wire
- * payload arrived flat or already keyed (issue #925's defect class).
- */
 import { describe, it, expect } from 'vitest';
-import { systemView, normalizeConsolePayload } from '../../gui/console-payload.js';
+import { familyView, normalizeConsolePayload } from '../../gui/console-payload.js';
 
-describe('systemView', () => {
-  it('returns the first present system among the candidate ids', () => {
-    const s = { systems: { 'power-reactor': { level: 3 }, repair: { crews: 2 } } };
-    expect(systemView(s, 'power-reactor', 'power-battery')).toEqual({ level: 3 });
-    expect(systemView(s, 'shields-system', 'repair')).toEqual({ crews: 2 });
+describe('familyView — authoritative Console Family projection', () => {
+  it('selects an arbitrarily named System by projected family', () => {
+    const view = { level: 3 };
+    const payload = {
+      system_ids: ['main-bus-alpha'],
+      system_families: { 'main-bus-alpha': 'power' },
+      systems: { 'main-bus-alpha': view },
+    };
+    expect(familyView(payload, 'power')).toBe(view);
   });
 
-  it('skips ids not present and falls through to a later candidate', () => {
-    const s = { systems: { repair: { crews: 1 } } };
-    expect(systemView(s, 'power-reactor', 'power-battery', 'repair')).toEqual({ crews: 1 });
+  it('uses authored order when multiple Systems share one aggregate view', () => {
+    const payload = {
+      system_ids: ['starboard-drive', 'port-drive'],
+      system_families: { 'starboard-drive': 'helm', 'port-drive': 'helm' },
+      systems: { 'port-drive': { side: 'port' }, 'starboard-drive': { side: 'starboard' } },
+    };
+    expect(familyView(payload, 'helm')).toEqual({ side: 'starboard' });
   });
 
-  it('returns {} when none of the candidate ids are present', () => {
-    const s = { systems: { repair: {} } };
-    expect(systemView(s, 'power-reactor', 'shields-system')).toEqual({});
+  it('sorts visiting Systems after authored ids for deterministic selection', () => {
+    const payload = {
+      system_ids: ['bridge-core'],
+      system_families: { 'bridge-core': 'captain', zebra: 'comms', alpha: 'comms' },
+      systems: { zebra: { id: 'zebra' }, alpha: { id: 'alpha' }, 'bridge-core': {} },
+    };
+    expect(familyView(payload, 'comms')).toEqual({ id: 'alpha' });
   });
 
-  it('returns {} when s.systems is missing entirely', () => {
-    expect(systemView({})).toEqual({});
-    expect(systemView({}, 'power-reactor')).toEqual({});
+  it('does not infer a family from an exact legacy id or a prefix', () => {
+    const payload = {
+      system_ids: ['power-reactor', 'phaser-surprise'],
+      system_families: {},
+      systems: { 'power-reactor': { level: 3 }, 'phaser-surprise': { ready: true } },
+    };
+    expect(familyView(payload, 'power')).toEqual({});
+    expect(familyView(payload, 'tactical')).toEqual({});
   });
 
-  it('returns {} when called with no candidate ids at all', () => {
-    const s = { systems: { repair: { crews: 1 } } };
-    expect(systemView(s)).toEqual({});
-  });
-
-  it('treats a present-but-falsy value as absent and keeps looking (matches the copy-pasted helper)', () => {
-    const s = { systems: { 'power-reactor': null, repair: { crews: 4 } } };
-    expect(systemView(s, 'power-reactor', 'repair')).toEqual({ crews: 4 });
-  });
-
-  it('is a plain pure function importable in Node with no DOM globals', () => {
-    expect(typeof systemView).toBe('function');
+  it('returns an empty view for malformed or absent payload state', () => {
+    expect(familyView({}, 'repair')).toEqual({});
+    expect(familyView(null, 'repair')).toEqual({});
   });
 });
 
-// ── normalizeConsolePayload (issue #1233, T4.C1.5; correctness fix per review) ─
-//
-// The #925 defect class: `buildConsoleStateInner` emits a FLAT payload for a
-// single-family station and a system-id-KEYED payload for a multi-family
-// one; a console written against `systemView` finds nothing (falls through
-// every candidate to `{}`) when handed the flat shape directly. These tests
-// pin the wrap that closes that gap: a flat payload's fields get mirrored
-// under the FINE SYSTEM IDS its family owns (`FAMILY_SYSTEM_IDS`) — the exact
-// ids shipped readers pass to `systemView`, and the exact ids
-// `buildSystemStationConsoleState` keys a keyed payload by — so
-// `systemView(s, '<fine-id>', ...)` resolves a flat payload identically to a
-// keyed one.
-//
-// It must NOT be enough to mirror under the console-family NAME: no shipped
-// console ever queries `systemView(s, '<family-name>')` — a wrap keyed by name
-// is invisible to `systemView(s, 'power-reactor', ...)`, which is precisely the
-// blank-console bug this fix removes.
-describe('normalizeConsolePayload', () => {
-  it('wraps a flat payload under its family\'s fine system ids (not the family name), preserving top-level fields', () => {
-    const flat = { battery_charge: 42, battery_max: 100, groups: [] };
-    const out = normalizeConsolePayload(flat, 'power');
-    // Keyed by the FINE ids a power console's readers actually use — the ids
-    // `buildSystemStationConsoleState` would key a keyed payload by.
-    expect(out.systems['power-reactor']).toBe(flat);
-    expect(out.systems['power-battery']).toBe(flat);
-    // The console-family NAME is NOT a key — no shipped reader queries it.
-    expect(out.systems.power).toBeUndefined();
-    // Backward-compatible: existing consoles reading top-level fields
-    // directly keep working unchanged.
+describe('normalizeConsolePayload — actual owned System ids', () => {
+  it('mirrors a flat view under projected arbitrary instance ids', () => {
+    const flat = {
+      battery_charge: 42,
+      system_ids: ['reactor-port', 'reserve-cell'],
+      system_families: { 'reactor-port': 'power', 'reserve-cell': 'power' },
+    };
+    const out = normalizeConsolePayload(flat);
+    expect(out.systems['reactor-port']).toBe(flat);
+    expect(out.systems['reserve-cell']).toBe(flat);
+    expect(familyView(out, 'power')).toBe(flat);
     expect(out.battery_charge).toBe(42);
-    expect(out.battery_max).toBe(100);
-    expect(out.groups).toEqual([]);
   });
 
-  it('for a family whose fine id is its own name (captain, sensors, ...), that id is still keyed', () => {
-    const flat = { red_alert: true, view_direction: 'Fore' };
-    const out = normalizeConsolePayload(flat, 'captain');
-    // 'captain' here is a FINE id (consoleForSystemId('captain') === 'captain'),
-    // not a family alias — the destroyer/courier captain readers query it.
-    expect(out.systems.captain).toBe(flat);
-    expect(out.systems.viewscreen).toBe(flat);
-    expect(out.systems['red-alert']).toBe(flat);
-    expect(out.red_alert).toBe(true);
+  it('leaves an already keyed payload unchanged', () => {
+    const keyed = {
+      system_ids: ['reactor-port'],
+      system_families: { 'reactor-port': 'power' },
+      systems: { 'reactor-port': { level: 3 } },
+    };
+    expect(normalizeConsolePayload(keyed)).toBe(keyed);
   });
 
-  it('leaves an already-keyed payload (has .systems) unchanged', () => {
-    const keyed = { systems: { 'power-reactor': { level: 3 } }, station_id: 'engineering' };
-    expect(normalizeConsolePayload(keyed, 'power')).toBe(keyed);
+  it('does not invent keys when the authoritative projection is absent', () => {
+    const flat = { battery_charge: 42, system_ids: ['power-reactor'] };
+    expect(normalizeConsolePayload(flat)).toBe(flat);
+    expect(flat.systems).toBeUndefined();
   });
 
-  it('leaves a flat payload unchanged when no family is given', () => {
-    const flat = { locked: false };
-    const out = normalizeConsolePayload(flat, undefined);
-    expect(out).toBe(flat);
-    expect(out.systems).toBeUndefined();
+  it('passes through null and non-object payloads', () => {
+    expect(normalizeConsolePayload(null)).toBeNull();
+    expect(normalizeConsolePayload(undefined)).toBeUndefined();
   });
 
-  it('falls back to keying under the family name for an unknown family (never worse than pre-fix)', () => {
-    const flat = { x: 1 };
-    const out = normalizeConsolePayload(flat, 'not-a-real-family');
-    expect(out.systems['not-a-real-family']).toBe(flat);
-  });
-
-  it('passes through null/non-object payloads untouched', () => {
-    expect(normalizeConsolePayload(null, 'power')).toBeNull();
-    expect(normalizeConsolePayload(undefined, 'power')).toBeUndefined();
-  });
-
-  it('#925 regression: a systemView reader resolves the same data whether the wire payload was flat or keyed', () => {
-    // Same logical payload, two wire shapes. The assertions below use ONLY the
-    // FINE SYSTEM IDS a shipped power console's readers pass to systemView
-    // (e.g. gui/stations/engineering-console.js:
-    //   systemView(s, 'power-reactor', 'power-battery')) — NOT the family name,
-    // which no shipped console ever queries. That is the real reader contract:
-    // this test fails against a family-name-keyed normalisation (the pre-fix
-    // bug — systems['power'] is invisible to systemView('power-reactor', …)),
-    // and passes once the flat payload is keyed by fine id.
-    const view = { battery_charge: 42, battery_max: 100, groups: [] };
-    const flatWire = { battery_charge: 42, battery_max: 100, groups: [] };
-    const keyedWire = { systems: { 'power-reactor': view } };
-
-    const normalizedFlat = normalizeConsolePayload(flatWire, 'power');
-    const normalizedKeyed = normalizeConsolePayload(keyedWire, 'power');
-
-    // Fine ids only — the ids the console's render function actually uses.
-    expect(systemView(normalizedFlat, 'power-reactor', 'power-battery')).toEqual(flatWire);
-    expect(systemView(normalizedKeyed, 'power-reactor', 'power-battery')).toEqual(view);
-    // The two shapes resolve to equal data for the same reader call.
-    expect(systemView(normalizedFlat, 'power-reactor', 'power-battery'))
-      .toEqual(systemView(normalizedKeyed, 'power-reactor', 'power-battery'));
-
-    // And the same holds for the OTHER three families whose fine id differs
-    // from the family name — the ones the family-name wrap silently blanked.
-    const shieldsFlat = normalizeConsolePayload({ arc_charges: [1, 2] }, 'shields');
-    expect(systemView(shieldsFlat, 'shields-system')).toEqual({ arc_charges: [1, 2] });
-    const helmFlat = normalizeConsolePayload({ throttle: 0.5 }, 'helm');
-    expect(systemView(helmFlat, 'helm-thrust', 'helm-joystick', 'helm-steering')).toEqual({ throttle: 0.5 });
-    const tacticalFlat = normalizeConsolePayload({ banks: [] }, 'tactical');
-    expect(systemView(tacticalFlat, 'tactical-radar', 'phaser-control')).toEqual({ banks: [] });
-
-    // Without normalisation, the flat wire shape is exactly the historic
-    // blank-console symptom: no `.systems`, so every candidate id misses.
-    expect(systemView(flatWire, 'power-reactor', 'power-battery')).toEqual({});
+  it('resolves the same family view for flat and keyed wire shapes', () => {
+    const view = { battery_charge: 42 };
+    const metadata = {
+      system_ids: ['unconventional-reactor-id'],
+      system_families: { 'unconventional-reactor-id': 'power' },
+    };
+    const flat = normalizeConsolePayload({ ...view, ...metadata });
+    const keyed = normalizeConsolePayload({
+      ...metadata,
+      systems: { 'unconventional-reactor-id': view },
+    });
+    expect(familyView(flat, 'power')).toMatchObject(view);
+    expect(familyView(keyed, 'power')).toEqual(view);
   });
 });

@@ -160,7 +160,7 @@
     // vitest suite imports the same renderStation.
     import { renderStation } from './helm.console.js';
 
-    var consoleHandle = initConsole({ name: 'helm', family: 'helm', render: renderStation });
+    var consoleHandle = initConsole({ name: 'helm', render: renderStation });
 
     // The one dock button toggles dock/undock through the action map, which
     // sends the same admitted command a dock AI would (issues #1159, #1251).

@@ -598,24 +598,24 @@ export function torpSlotStates(tube) {
 
 /**
  * Tactical / Weapons console. Returns JSON of {@link WeaponsConsolePayload}.
- * Reads raw sim truth from `state.blackboards['tactical']` (WeaponsBlackboard),
+ * Reads raw sim truth from the typed Weapons blackboard,
  * falling back to legacy camelCase properties for compatibility.
  *
  * @param {{ blackboards?, weaponsTarget?, weaponsBanks?, weaponsTubes?,
  *           weaponsTorpedoCount?, weaponsPhaserMode?, blasterBanks? }} state
  */
-export function buildWeaponsConsoleState(state) {
-  const bb = (state.blackboards && state.blackboards['tactical']) || {};
+export function buildWeaponsConsoleState(state, systemIds = []) {
+  const bb = blackboardOfKind(state, 'Weapons', systemIds)?.data || {};
   // Combat Lock + radar blips/regions moved to the tactical-radar blackboard
   // (issue #829). `selected_target` is the authoritative lock; fall back to the
   // Weapons blackboard's `target_uuid` (still published for reconnect resync).
-  const tacRadarBb = (state.blackboards && state.blackboards['tactical-radar']) || {};
+  const tacRadarBb = blackboardOfKind(state, 'TacticalRadar', systemIds)?.data || {};
   const targetUuid   = tacRadarBb.selected_target ?? bb.target_uuid ?? state.weaponsTarget ?? null;
   const targetName   = bb.target_name   ?? state.weaponsTargetName   ?? null;
   const banks        = bb.banks         ?? state.weaponsBanks        ?? [];
   const tubes        = bb.tubes         ?? state.weaponsTubes        ?? [];
   const torpedoCount = bb.torpedo_count ?? state.weaponsTorpedoCount ?? 0;
-  const torpedoMagBb = (state.blackboards && state.blackboards['torpedo-magazine']) || {};
+  const torpedoMagBb = blackboardOfKind(state, 'TorpedoMagazine', systemIds)?.data || {};
   const torpedoMax   = torpedoMagBb.capacity ?? torpedoCount;
   const phaserMode   = bb.phaser_mode   ?? state.weaponsPhaserMode   ?? 'Auto';
   const regions      = tacRadarBb.regions ?? [];
@@ -623,14 +623,15 @@ export function buildWeaponsConsoleState(state) {
   const torpedoArcs  = bb.torpedo_arcs  ?? state.torpedoArcConfigs  ?? [];
   const blasters     = bb.blasters      ?? state.blasterBanks        ?? [];
 
-  // AUTO gate: per-system, not whole-station — a "Simplified" rating only
-  // automates the phaser bank(s), leaving torpedoes/blasters human. Derive
-  // from the generic per-system control-source map intersected with this
-  // ship's actual phaser system ids (data-driven; works for the destroyer's
-  // single bank and the battleship/cruiser's two banks alike).
-  const phaserSystemIds = (state.stationSystems?.['tactical'] || []).filter(id => id.startsWith('phaser-'));
+  // Tactical's AUTO cue reports the phaser-bank automation supplied by the
+  // Simplified rating. Select those systems through their authoritative
+  // blackboard discriminants: radar, tubes, and blasters may remain Human
+  // while the Tactical console is correctly shown as AUTO.
   const controlSources = state.controlSources || {};
-  const tacticalAuto = phaserSystemIds.length > 0 && phaserSystemIds.every(id => controlSources[id] === 'Ai');
+  const blackboardKinds = state.blackboardKinds || {};
+  const phaserSystemIds = systemIds.filter(id => blackboardKinds[id] === 'PhaserBank');
+  const tacticalAuto = phaserSystemIds.length > 0
+    && phaserSystemIds.every(id => controlSources[id] === 'Ai');
 
   const range = state.weaponsRadarRange ?? WEAPONS_RADAR_RANGE;
   const mappedPhaserArcs = phaserArcs.map(a => ({
@@ -676,7 +677,7 @@ export function buildWeaponsConsoleState(state) {
 
   // Add shared target markers (science target + navigation waypoint)
   const entities = state.asteroids || [];
-  const sensBb = state.blackboards?.['sensors'];
+  const sensBb = blackboardOfKind(state, 'Sensors')?.data;
   const sciTargetUuid = sensBb?.science_target_uuid || state.sensorsTarget || null;
   const sciMarker = buildTargetBlip(
     sciTargetUuid, entities, state.shipX || 0, state.shipZ || 0, state.shipYaw || 0, range,
@@ -731,18 +732,18 @@ export function buildWeaponsConsoleState(state) {
  * CaptainChair console. Returns JSON of {@link CaptainConsolePayload}.
  * @param {{ blackboards, redAlert, currentView, objectives, hullPct, blips }} state
  */
-export function buildCaptainConsoleState(state) {
-  const bb = state.blackboards && state.blackboards['captain'];
+export function buildCaptainConsoleState(state, systemIds = []) {
+  const bb = blackboardOfKind(state, 'Captain', systemIds)?.data;
   if (bb) {
     return JSON.stringify({
       red_alert:             bb.red_alert             ?? false,
-      red_alert_system_id:   bb.red_alert_system_id   ?? 'red-alert',
+      red_alert_system_id:   bb.red_alert_system_id   ?? null,
       red_alert_auto:        bb.red_alert_auto         ?? false,
       // The tactical restraint lever (issue #1041): guns cold while the ship
       // stays at stations. Same console and same control source as the alert,
       // so it rides the captain blackboard beside it.
       weapons_hold:          bb.weapons_hold           ?? false,
-      viewscreen_system_id:  bb.viewscreen_system_id  ?? 'viewscreen',
+      viewscreen_system_id:  bb.viewscreen_system_id  ?? null,
       viewscreen_auto:       bb.viewscreen_auto        ?? false,
       view_direction:        bb.view_direction         ?? '',
       camera_views:          bb.camera_views           ?? [],
@@ -760,19 +761,16 @@ export function buildCaptainConsoleState(state) {
     });
   }
   // Legacy fallback.
-  const controlSources = state.controlSources || {};
-  const redAlertAuto = controlSources['red-alert'] === 'Ai';
-  const viewscreenAuto = controlSources['viewscreen'] === 'Ai';
   const viewDirection = state.currentView || '';
   return JSON.stringify({
     red_alert:             state.redAlert    || false,
-    red_alert_system_id:   'red-alert',
-    red_alert_auto:        redAlertAuto,
+    red_alert_system_id:   null,
+    red_alert_auto:        false,
     // No blackboard, no hold: the legacy fallback has no wire source for it,
     // and "released" is the state a console with nothing to read should show.
     weapons_hold:          false,
-    viewscreen_system_id:  'viewscreen',
-    viewscreen_auto:       viewscreenAuto,
+    viewscreen_system_id:  null,
+    viewscreen_auto:       false,
     view_direction:        viewDirection,
     camera_views:          state.cameraViews || [],
     view_mode:             'Camera',
@@ -803,20 +801,56 @@ export function buildCaptainConsoleState(state) {
  */
 
 /**
+ * Resolve one typed blackboard by its authoritative wire discriminant.
+ * Preferred ids are walked in authored Station order; the global fallback is
+ * sorted so an auxiliary/cross-read surface remains deterministic. No SystemId
+ * spelling or Console Family is used to guess a blackboard's semantics.
+ *
+ * @param {object} state
+ * @param {string} kind SystemBlackboard serde variant name
+ * @param {string[]} [preferredIds]
+ * @returns {{systemId:string, data:object}|null}
+ */
+function blackboardsOfKind(state, kind, preferredIds = []) {
+  const blackboards = state.blackboards || {};
+  const kinds = state.blackboardKinds || {};
+  const seen = new Set();
+  const entries = [];
+  for (const id of preferredIds) {
+    if (kinds[id] === kind && Object.prototype.hasOwnProperty.call(blackboards, id)) {
+      seen.add(id);
+      entries.push({ systemId: id, data: blackboards[id] });
+    }
+  }
+  for (const systemId of Object.keys(kinds)
+    .filter(id => kinds[id] === kind && Object.prototype.hasOwnProperty.call(blackboards, id))
+    .sort()) {
+    if (!seen.has(systemId)) entries.push({ systemId, data: blackboards[systemId] });
+  }
+  return entries;
+}
+
+function blackboardOfKind(state, kind, preferredIds = []) {
+  return blackboardsOfKind(state, kind, preferredIds)[0] || null;
+}
+
+/**
  * Command console. Returns JSON of {@link CommandConsolePayload}.
  *
- * Reads the `command` blackboard mirror (`state.blackboards['command']`), which
+ * Reads the `Command` blackboard variant under the authored instance id. It
  * carries the directed proving Station, whether it is currently AI-controlled
  * (and therefore directable), the selectable stances and the stance in force.
  * The persistent non-colour automation cue the console renders is derived from
  * `directed_station_ai` / `command_auto` — never from a colour change.
  *
- * @param {{ blackboards? }} state
+ * @param {{ blackboards?, blackboardKinds? }} state
+ * @param {string[]} [systemIds] authored Command-family ids for this Station
  */
-export function buildCommandConsoleState(state) {
-  const bb = (state.blackboards && state.blackboards['command']) || null;
+export function buildCommandConsoleState(state, systemIds = []) {
+  const entry = blackboardOfKind(state, 'Command', systemIds);
+  const bb = entry?.data || null;
   return JSON.stringify({
-    command_system_id:      bb?.command_system_id     ?? 'command',
+    command_system_id:      bb?.command_system_id     ?? entry?.systemId ?? systemIds[0] ?? null,
     directed_station:       bb?.directed_station       ?? '',
     directed_station_name:  bb?.directed_station_name  ?? '',
     directed_station_ai:    bb?.directed_station_ai    ?? false,
@@ -845,7 +879,7 @@ export function buildCommandConsoleState(state) {
  * @returns {{stance_id:string, stance_label:string, high_alert:boolean}|null}
  */
 export function commandAdviceFor(state, consoleName) {
-  const bb = state && state.blackboards && state.blackboards['command'];
+  const bb = state ? blackboardOfKind(state, 'Command')?.data : null;
   if (!bb) return null;
   if (bb.directed_station !== consoleName) return null;
   if (bb.directed_station_ai) return null;
@@ -921,15 +955,16 @@ export function withCommandAdvice(consoleName, state, json) {
 /**
  * Helm console. Returns JSON of {@link HelmConsolePayload}.
  *
- * Reads raw sim truth from the blackboard mirror (`state.blackboards['helm']`)
+ * Reads raw sim truth from the typed aggregate Helm blackboard
  * when available, falling back to legacy camelCase properties for compatibility.
  *
  * @param {{ blackboards?, shipYaw?, forwardSpeed?, shipX?, shipZ?,
  *           impulseChargeProgress?, currentView?, asteroids?,
  *           boostEnabled?, boostBattery?, boostActive? }} state
+ * @param {string[]} [systemIds] authored Helm-family ids for this Station
  */
-export function buildHelmConsoleState(state) {
-  const bb = (state.blackboards && state.blackboards['helm']) || {};
+export function buildHelmConsoleState(state, systemIds = []) {
+  const bb = blackboardOfKind(state, 'Helm')?.data || {};
   const shipYaw    = bb.yaw            ?? state.shipYaw            ?? 0;
   const shipX      = bb.x              ?? state.shipX              ?? 0;
   const shipZ      = bb.z              ?? state.shipZ              ?? 0;
@@ -956,11 +991,11 @@ export function buildHelmConsoleState(state) {
 
   // Shared target markers (every radar shows tactical + science targets)
   const entities = state.asteroids || [];
-  const tacBb = state.blackboards?.['tactical'];
+  const tacBb = blackboardOfKind(state, 'Weapons')?.data;
   // Combat Lock now lives on the tactical-radar blackboard (issue #829); every
   // radar renders the other consoles' targets from these aggregated facts.
-  const tacRadarBb = state.blackboards?.['tactical-radar'];
-  const sensBb = state.blackboards?.['sensors'];
+  const tacRadarBb = blackboardOfKind(state, 'TacticalRadar')?.data;
+  const sensBb = blackboardOfKind(state, 'Sensors')?.data;
   const tacMarker = buildTargetBlip(
     tacRadarBb?.selected_target ?? tacBb?.target_uuid, entities, shipX, shipZ, shipYaw, range,
     { rotate: true, edgeClamp: true, kind: 'tactical-target', color: [1.0, 0.2, 0.2], label: t('console.radar.tactical_target') }
@@ -972,6 +1007,9 @@ export function buildHelmConsoleState(state) {
     { rotate: true, edgeClamp: true, kind: 'science-target', color: [0.2, 0.4, 1.0], label: t('console.radar.science_target') }
   );
   if (sciMarker) blips.push(sciMarker);
+
+  const engineBlackboards = blackboardsOfKind(state, 'HelmEngine', systemIds);
+  const lateralBb = blackboardOfKind(state, 'HelmLateralThrust', systemIds)?.data;
 
   return JSON.stringify({
     range,
@@ -990,15 +1028,15 @@ export function buildHelmConsoleState(state) {
     boost_active:            !!boostActive,
     helm_auto:               state.stationRatings?.['helm'] === 'Backfill',
     // Fine-system engine state (issue #511): read from per-system blackboards.
-    engine_port_thrust:  (state.blackboards?.['helm-engine-port']?.thrust_fraction) ?? 0,
-    engine_stbd_thrust:  (state.blackboards?.['helm-engine-starboard']?.thrust_fraction) ?? 0,
+    engine_port_thrust:  engineBlackboards[0]?.data?.thrust_fraction ?? 0,
+    engine_stbd_thrust:  engineBlackboards[1]?.data?.thrust_fraction ?? 0,
     engine_port_auto:    state.stationRatings?.['helm'] === 'Backfill',
     engine_stbd_auto:    state.stationRatings?.['helm'] === 'Backfill',
     // Lateral thrust state from per-system blackboard.
     lateral_speed:       bb.lateral_speed ?? 0,
-    lateral_input:       (state.blackboards?.['helm-lateral-thrust']?.lateral_input) ?? 0,
-    lateral_auto:        (state.blackboards?.['helm-lateral-thrust']?.auto) ?? false,
-    lateral_is_online:   (state.blackboards?.['helm-lateral-thrust']?.is_online) ?? true,
+    lateral_input:       lateralBb?.lateral_input ?? 0,
+    lateral_auto:        lateralBb?.auto ?? false,
+    lateral_is_online:   lateralBb?.is_online ?? true,
     // ── Hostile weapon-arc overlay (issue #874) ───────────────────────────
     // The server already gates the blackboard field on red alert AND on this
     // being the local ship, so the list is normally absent entirely. The
@@ -1025,7 +1063,7 @@ export function buildHelmConsoleState(state) {
     // contextual control appears exactly when `available` is true and becomes
     // the undock control when `docked`; every string it shows is a `t()` id, so
     // no English crosses here.
-    dock:                buildHelmDockView(state),
+    dock:                buildHelmDockView(state, systemIds),
     // ── Under-tow-load indicator (issue #1157) ────────────────────────────
     // The helm feels the tractor's load: while this ship's beam holds a target,
     // its top speed and turn rate are penalised, and the console says so and
@@ -1054,7 +1092,7 @@ export function buildHelmConsoleState(state) {
  * @returns {object|null}
  */
 export function buildHelmTowLoadView(state) {
-  const bb = state.blackboards && state.blackboards['tractor'];
+  const bb = blackboardOfKind(state, 'Tractor')?.data;
   if (!bb || !bb.coupled_target) return null;
   return {
     active: true,
@@ -1075,29 +1113,19 @@ export function buildHelmTowLoadView(state) {
  * is when the Dock control shows, `docked` when it becomes Undock, and `refusal`
  * is a `strings.csv` id the console resolves.
  *
- * @param {{ blackboards?, systemConsoleFamilies?,
- *           hasSystemConsoleFamilyProjection? }} state
+ * @param {{ blackboards?, blackboardKinds?, systemConsoleFamilies? }} state
+ * @param {string[]} [systemIds] authored Helm-family ids for this Station
  * @returns {object|null}
  */
-export function buildHelmDockView(state) {
-  const blackboards = state.blackboards || {};
-  const projectedIds = Object.entries(state.systemConsoleFamilies || {})
-    .filter(([id, family]) => family === 'helm'
-      && Object.prototype.hasOwnProperty.call(blackboards, id))
-    .map(([id]) => id);
-
-  // This slice projects Dock as the Helm tracer; all other Helm kinds remain on
-  // #1251's temporary inference path until #1252. Requiring exactly one live
-  // projected candidate avoids silently choosing between future descriptors.
-  // The literal is retained only for genuine pre-Welcome state, preserving the
-  // existing canonical boot behavior without overriding an empty projection.
-  const systemId = projectedIds.length === 1
-    ? projectedIds[0]
-    : (!state.hasSystemConsoleFamilyProjection
-        && Object.prototype.hasOwnProperty.call(blackboards, 'dock')
-      ? 'dock'
-      : null);
-  const bb = systemId ? blackboards[systemId] : null;
+export function buildHelmDockView(state, systemIds = []) {
+  const owned = systemIds.length > 0
+    ? systemIds
+    : Object.entries(state.systemConsoleFamilies || {})
+      .filter(([, family]) => family === 'helm')
+      .map(([id]) => id);
+  const entry = blackboardOfKind(state, 'Dock', owned);
+  const systemId = entry?.systemId || null;
+  const bb = entry?.data || null;
   if (!bb) return null;
   return {
     system_id: systemId,
@@ -1319,8 +1347,9 @@ export function repairDamagedSystems(systemHull, teams) {
  * Repair console. Returns JSON of {@link RepairConsolePayload}.
  * @param {{ blackboards, repairTeams, consoleHull }} state
  */
-export function buildRepairConsoleState(state) {
-  const bb = state.blackboards && state.blackboards['repair'];
+export function buildRepairConsoleState(state, systemIds = []) {
+  const entry = blackboardOfKind(state, 'Repair', systemIds);
+  const bb = entry?.data;
   if (bb) {
     const rawTeams = bb.teams || [];
     const travelDur = bb.travel_duration_secs ?? 5.0;
@@ -1353,11 +1382,8 @@ export function buildRepairConsoleState(state) {
       // Dispatchable, currently-damaged repair targets (stations + core).
       dispatch_targets:     targets,
       travel_duration_secs: bb.travel_duration_secs ?? 5.0,
-      // Per-system, not whole-station: the repair *system* id is always the
-      // literal "repair" regardless of which station owns it (battleship's
-      // dedicated Repair station vs. cruiser/destroyer's Engineering), so
-      // this works uniformly across all ship classes.
-      repair_auto:          state.controlSources?.['repair'] === 'Ai',
+      system_id:            entry.systemId,
+      repair_auto:          state.controlSources?.[entry.systemId] === 'Ai',
       // External repair-team dispatch (issue #1161). Non-null only on a hull
       // that authored `[repair.external_dispatch]` (its blackboard carries a
       // `range`), so the console shows the dispatch control on exactly those
@@ -1397,7 +1423,9 @@ export function buildRepairConsoleState(state) {
     core_systems:         legacy.coreSystems,
     dispatch_targets:     legacy.targets,
     travel_duration_secs: 5.0,
-    repair_auto:          state.controlSources?.['repair'] === 'Ai',
+    system_id:            systemIds[0] ?? null,
+    repair_auto:          systemIds.length > 0
+      && systemIds.every(id => state.controlSources?.[id] === 'Ai'),
   });
 }
 
@@ -1416,19 +1444,20 @@ export function buildRepairConsoleState(state) {
 /**
  * Power console. Returns JSON of {@link PowerConsolePayload}.
  *
- * Reads raw sim truth from `state.blackboards['power']` (aggregate
- * PowerBlackboard) plus the two fine blackboards (issue #513) at
- * `state.blackboards['power-reactor']` and `state.blackboards['power-battery']`
+ * Reads raw sim truth from the typed aggregate Power blackboard plus typed
+ * reactor and battery fine blackboards (issue #513)
  * for per-instance online flags. Before the first blackboard update the
  * payload renders empty defaults (there is no legacy PowerState wire path
  * any more — issue #825 removed the dead fallback).
  *
  * @param {{ blackboards? }} state
  */
-export function buildPowerConsoleState(state) {
-  const bb = (state.blackboards && state.blackboards['power']) || {};
-  const reactorBb = (state.blackboards && state.blackboards['power-reactor']) || null;
-  const batteryBb = (state.blackboards && state.blackboards['power-battery']) || null;
+export function buildPowerConsoleState(state, systemIds = []) {
+  const bb = blackboardOfKind(state, 'Power')?.data || {};
+  const reactorEntry = blackboardOfKind(state, 'PowerReactor', systemIds);
+  const batteryEntry = blackboardOfKind(state, 'PowerBattery', systemIds);
+  const reactorBb = reactorEntry?.data || null;
+  const batteryBb = batteryEntry?.data || null;
   // Default to online when the fine blackboard is missing (legacy safety).
   const reactorOnline = reactorBb ? !!reactorBb.is_online : true;
   const batteryOnline = batteryBb ? !!batteryBb.is_online : true;
@@ -1456,7 +1485,9 @@ export function buildPowerConsoleState(state) {
     reactor_online: reactorOnline,
     battery_online: batteryOnline,
     own_hull:       aggregateStationHull('power', state.consoleHull, state.stationSystems),
-    power_auto:     state.stationRatings?.['power'] === 'Backfill',
+    power_auto:     systemIds.length > 0
+      ? systemIds.every(id => state.controlSources?.[id] === 'Ai')
+      : state.stationRatings?.['power'] === 'Backfill',
     station_rating: state.stationRatings?.['power'] || 'Std',
   });
 }
@@ -1485,8 +1516,8 @@ export function buildPowerConsoleState(state) {
  * Shields console. Returns JSON of {@link ShieldsConsolePayload}.
  * @param {{ blackboards, shieldFacings, hullIntegrity, shieldFocusedFacing }} state
  */
-export function buildShieldsConsoleState(state) {
-  const bb = state.blackboards && state.blackboards['shields'];
+export function buildShieldsConsoleState(state, systemIds = []) {
+  const bb = blackboardOfKind(state, 'Shields')?.data;
   if (bb) {
     return JSON.stringify({
       facings:              bb.facings              ?? [],
@@ -1496,7 +1527,9 @@ export function buildShieldsConsoleState(state) {
       threat_bearing:       bb.threat_bearing       ?? null,
       grid_status:          bb.grid_status          ?? 'GRID NOMINAL',
       own_hull: aggregateStationHull('shields', state.consoleHull, state.stationSystems),
-      shields_auto: state.stationRatings?.['shields'] === 'Backfill',
+      shields_auto: systemIds.length > 0
+        ? systemIds.every(id => state.controlSources?.[id] === 'Ai')
+        : state.stationRatings?.['shields'] === 'Backfill',
     });
   }
   // Legacy fallback: read from ShieldStatus broadcast fields. Predates the
@@ -1520,7 +1553,9 @@ export function buildShieldsConsoleState(state) {
     grid_status:          (state.shieldFacings && state.shieldFacings.length > 0)
                             ? 'GRID NOMINAL' : 'GRID OFFLINE',
     own_hull: aggregateStationHull('shields', state.consoleHull, state.stationSystems),
-    shields_auto: state.stationRatings?.['shields'] === 'Backfill',
+    shields_auto: systemIds.length > 0
+      ? systemIds.every(id => state.controlSources?.[id] === 'Ai')
+      : state.stationRatings?.['shields'] === 'Backfill',
   });
 }
 
@@ -1560,7 +1595,7 @@ export function buildShieldsConsoleState(state) {
  * @param {{ blackboards }} state
  */
 function scanPayload(state) {
-  const bb = (state.blackboards && state.blackboards['scan']) || {};
+  const bb = blackboardOfKind(state, 'Scan')?.data || {};
   return {
     capable: bb.capable ?? false,
     reading: bb.reading ?? null,
@@ -1573,8 +1608,8 @@ function scanPayload(state) {
  * @param {{ blackboards, asteroids, shipX, shipZ, shipYaw, sensorsTarget,
  *           regions, complexity, impulseChargeProgress }} state
  */
-export function buildSensorsConsoleState(state) {
-  const bb = state.blackboards && state.blackboards['sensors'];
+export function buildSensorsConsoleState(state, systemIds = []) {
+  const bb = blackboardOfKind(state, 'Sensors', systemIds)?.data;
   const range = bb ? (bb.radar_range ?? SENSORS_RADAR_RANGE)
                    : (state.sensorsRadarRange ?? SENSORS_RADAR_RANGE);
   const radarShows   = bb ? (bb.radar_shows   ?? state.sensorsRadarShows)
@@ -1640,12 +1675,12 @@ export function buildSensorsConsoleState(state) {
   // so the intelligence stays confined to the Sensors scan surface. The host
   // publishes `Some(bool)` only for a Red-Alert-capable ship it has selected;
   // absent field (non-ship/incapable/no selection) reads as `null` → no row.
-  const sensorRadarBb = state.blackboards?.['sensor-radar'];
+  const sensorRadarBb = blackboardOfKind(state, 'SensorRadar', systemIds)?.data;
   const targetAlert = sensorRadarBb?.selected_target_alert ?? null;
 
   // Shared target markers (tactical target + navigation waypoint)
   const shipX = state.shipX || 0, shipZ = state.shipZ || 0, shipYaw = state.shipYaw || 0;
-  const tacBb = state.blackboards?.['tactical'];
+  const tacBb = blackboardOfKind(state, 'Weapons')?.data;
   const tacMarker = buildTargetBlip(
     tacBb?.target_uuid, entities, shipX, shipZ, shipYaw, range,
     { rotate: true, edgeClamp: true, kind: 'tactical-target', color: [1.0, 0.2, 0.2], label: t('console.radar.tactical_target') }
@@ -1695,7 +1730,9 @@ export function buildSensorsConsoleState(state) {
     // read from its own channel key rather than off the sensors one.
     scan:               scanPayload(state),
     own_hull: aggregateStationHull('sensors', state.consoleHull, state.stationSystems),
-    sensors_auto: state.stationRatings?.['sensors'] === 'Backfill',
+    sensors_auto: systemIds.length > 0
+      ? systemIds.every(id => state.controlSources?.[id] === 'Ai')
+      : state.stationRatings?.['sensors'] === 'Backfill',
   });
 }
 
@@ -1726,7 +1763,7 @@ export function buildSensorsConsoleState(state) {
  * @param {{ blackboards }} state
  */
 function dossiersPayload(state) {
-  const bb = (state.blackboards && state.blackboards['dossiers']) || {};
+  const bb = blackboardOfKind(state, 'Dossiers')?.data || {};
   return bb.subjects ?? [];
 }
 
@@ -1734,8 +1771,9 @@ function dossiersPayload(state) {
  * Comms console. Returns JSON of {@link CommsConsolePayload}.
  * @param {{ blackboards, commsMessages, commsContacts }} state
  */
-export function buildCommsConsoleState(state) {
-  const bb = state.blackboards && state.blackboards['comms'];
+export function buildCommsConsoleState(state, systemIds = []) {
+  const entry = blackboardOfKind(state, 'Comms', systemIds);
+  const bb = entry?.data;
   // Latest host rejection of an attempted response (#761 AC3); the comms
   // component flashes the matching button red.
   const rejection = state.commsRejection ?? null;
@@ -1754,8 +1792,9 @@ export function buildCommsConsoleState(state) {
       // Comms Station is visiting a differently named host (issue #1098,
       // mirroring navigation_auto below). Older snapshots may not carry
       // controlSources, so retain the lobby-rating fallback for compatibility.
-      comms_auto: state.controlSources?.['comms'] != null
-        ? state.controlSources['comms'] === 'Ai'
+      comms_auto: (entry?.systemId ?? systemIds[0]) != null
+          && state.controlSources?.[entry?.systemId ?? systemIds[0]] != null
+        ? state.controlSources[entry?.systemId ?? systemIds[0]] === 'Ai'
         : state.stationRatings?.['comms'] === 'Backfill',
       rejection,
     });
@@ -1767,8 +1806,8 @@ export function buildCommsConsoleState(state) {
     on_screen: state.currentView === 'Comms',
     own_hull:  aggregateStationHull('comms', state.consoleHull, state.stationSystems),
     dossiers:  dossiersPayload(state),
-    comms_auto: state.controlSources?.['comms'] != null
-      ? state.controlSources['comms'] === 'Ai'
+    comms_auto: systemIds.length > 0
+      ? systemIds.every(id => state.controlSources?.[id] === 'Ai')
       : state.stationRatings?.['comms'] === 'Backfill',
     rejection,
   });
@@ -1803,8 +1842,9 @@ export const NAVIGATION_RADAR_RANGE = 5000.0;
  * @param {{ blackboards, asteroids, shipX, shipZ, impulseChargeProgress,
  *           currentView }} state
  */
-export function buildNavigationConsoleState(state) {
-  const bb = state.blackboards && state.blackboards['navigation'];
+export function buildNavigationConsoleState(state, systemIds = []) {
+  const entry = blackboardOfKind(state, 'Navigation', systemIds);
+  const bb = entry?.data;
   const range = bb ? (bb.nav_chart_range ?? NAVIGATION_RADAR_RANGE)
                    : (state.navChartRange ?? NAVIGATION_RADAR_RANGE);
   const navShows = bb ? (bb.nav_chart_shows ?? state.navChartShows ?? [])
@@ -1880,8 +1920,9 @@ export function buildNavigationConsoleState(state) {
     // Navigation Station is visiting a differently named host. Older snapshots
     // may not carry controlSources, so retain the lobby-rating fallback for
     // compatibility rather than briefly presenting manual control as AUTO.
-    navigation_auto:         state.controlSources?.['navigation'] != null
-      ? state.controlSources['navigation'] === 'Ai'
+    navigation_auto:         (entry?.systemId ?? systemIds[0]) != null
+        && state.controlSources?.[entry?.systemId ?? systemIds[0]] != null
+      ? state.controlSources[entry?.systemId ?? systemIds[0]] === 'Ai'
       : state.stationRatings?.['navigation'] === 'Backfill',
   });
 }
@@ -1890,10 +1931,8 @@ export function buildNavigationConsoleState(state) {
  * Resolve a fine (TOML) System id to the Console Family that renders it, or
  * null for ids no console view covers.
  *
- * The host-projected `systemConsoleFamilies` map is authoritative. Issue #1251
- * supplies Command and Dock as the end-to-end tracer. The exact/prefix matcher
- * below is retained ONLY for ids whose kind has not migrated yet; issue #1252
- * projects every family and deletes that temporary inference fallback.
+ * The host-projected `systemConsoleFamilies` map is authoritative and complete.
+ * Instance-id spelling never selects presentation.
  *
  * @param {string} id  fine system id (e.g. 'helm-throttle', 'phaser-bank-1')
  * @param {Object<string, string>|null|undefined} systemConsoleFamilies
@@ -1904,24 +1943,7 @@ export function buildNavigationConsoleState(state) {
  */
 export function consoleForSystemId(id, systemConsoleFamilies) {
   const projected = systemConsoleFamilies && systemConsoleFamilies[id];
-  if (typeof projected === 'string' && projected !== '') return projected;
-
-  // TEMPORARY #1251 migration fallback. It applies only when this System id
-  // has no projected descriptor entry; #1252 removes this whole census once
-  // every shipped kind and reserved blackboard channel declares a family.
-  if (id === 'captain' || id === 'viewscreen' || id === 'red-alert') return 'captain';
-  if (id.startsWith('helm-')) return 'helm';
-  if (id === 'tactical-radar' || id === 'phaser-control' || id.startsWith('phaser-')
-      || id.startsWith('torpedo-') || id.startsWith('blaster-')) return 'tactical';
-  if (id === 'sensors' || id === 'sensor-radar') return 'sensors';
-  if (id === 'navigation') return 'navigation';
-  if (id === 'comms') return 'comms';
-  if (id === 'shields-system' || id.startsWith('shield-arc-')) return 'shields';
-  if (id === 'power-reactor' || id === 'power-battery') return 'power';
-  if (id === 'repair') return 'repair';
-  if (id === 'tractor') return 'tractor';
-  if (id === 'umbilical') return 'umbilical';
-  return null;
+  return typeof projected === 'string' && projected !== '' ? projected : null;
 }
 
 /**
@@ -1933,11 +1955,14 @@ export function consoleForSystemId(id, systemConsoleFamilies) {
  * console resolves through `t()` — no English crosses the wire). A hull with no
  * tractor publishes no such blackboard, so this returns the idle shape and the
  * control renders its own "no beam" state.
- * @param {{ blackboards }} state
+ * @param {{ blackboards, blackboardKinds? }} state
+ * @param {string[]} [systemIds] authored Tractor-family ids for this Station
  */
-export function buildTractorConsoleState(state) {
-  const bb = (state.blackboards && state.blackboards['tractor']) || {};
+export function buildTractorConsoleState(state, systemIds = []) {
+  const entry = blackboardOfKind(state, 'Tractor', systemIds);
+  const bb = entry?.data || {};
   return JSON.stringify({
+    system_id: entry?.systemId ?? systemIds[0] ?? null,
     range: bb.range ?? 0,
     engaged: !!bb.engaged,
     coupled_target: bb.coupled_target ?? null,
@@ -1955,11 +1980,14 @@ export function buildTractorConsoleState(state) {
  * refusal (which the console resolves through `t()` — no English crosses the
  * wire). A hull with no umbilical publishes no such blackboard, so this returns
  * the idle shape and the control renders its own "no umbilical" state.
- * @param {{ blackboards }} state
+ * @param {{ blackboards, blackboardKinds? }} state
+ * @param {string[]} [systemIds] authored Umbilical-family ids for this Station
  */
-export function buildUmbilicalConsoleState(state) {
-  const bb = (state.blackboards && state.blackboards['umbilical']) || {};
+export function buildUmbilicalConsoleState(state, systemIds = []) {
+  const entry = blackboardOfKind(state, 'Umbilical', systemIds);
+  const bb = entry?.data || {};
   return JSON.stringify({
+    system_id: entry?.systemId ?? systemIds[0] ?? null,
     capacity: bb.capacity ?? null,
     rate: bb.rate ?? 0,
     direction: bb.direction ?? null,
@@ -1971,36 +1999,78 @@ export function buildUmbilicalConsoleState(state) {
 }
 
 /**
- * Console family → the flat (plain, non-system-keyed) builder that produces its
- * payload. Used by buildConsoleStateInner to dispatch a single-family station by
- * the family it OWNS rather than by its station-id string (issue #925), so a
- * flat console renders correctly regardless of what the seat is named. A
- * family may use a ship-class-specific surface rather than a battleship page.
+ * Console Family presentation registry. Every family owns its flat builder and
+ * (where appropriate) a payload field that reports family-wide AI operation.
+ * Tactical computes its narrower PhaserBank cue inside its builder instead.
+ * Command, Tractor, and Umbilical use this same path; there is no second list
+ * maintained by the composite builder.
  */
-const FAMILY_BUILDERS = {
-  captain: buildCaptainConsoleState,
-  helm: buildHelmConsoleState,
-  tactical: buildWeaponsConsoleState,
-  sensors: buildSensorsConsoleState,
-  navigation: buildNavigationConsoleState,
-  comms: buildCommsConsoleState,
-  shields: buildShieldsConsoleState,
-  power: buildPowerConsoleState,
-  repair: buildRepairConsoleState,
-  command: buildCommandConsoleState,
-};
+const FAMILY_BUILDERS = Object.freeze({
+  captain: Object.freeze({
+    build: buildCaptainConsoleState,
+    adjust: (view, state) => {
+      const sources = state.controlSources || {};
+      if (view.red_alert_system_id && sources[view.red_alert_system_id] != null) {
+        view.red_alert_auto = sources[view.red_alert_system_id] === 'Ai';
+      }
+      if (view.viewscreen_system_id && sources[view.viewscreen_system_id] != null) {
+        view.viewscreen_auto = sources[view.viewscreen_system_id] === 'Ai';
+      }
+    },
+  }),
+  helm: Object.freeze({ build: buildHelmConsoleState, autoField: 'helm_auto' }),
+  tactical: Object.freeze({ build: buildWeaponsConsoleState }),
+  sensors: Object.freeze({ build: buildSensorsConsoleState, autoField: 'sensors_auto' }),
+  navigation: Object.freeze({ build: buildNavigationConsoleState, autoField: 'navigation_auto', autoScope: 'first' }),
+  comms: Object.freeze({ build: buildCommsConsoleState, autoField: 'comms_auto', autoScope: 'first' }),
+  shields: Object.freeze({ build: buildShieldsConsoleState, autoField: 'shields_auto', autoScope: 'first' }),
+  power: Object.freeze({ build: buildPowerConsoleState, autoField: 'power_auto', autoScope: 'first' }),
+  repair: Object.freeze({ build: buildRepairConsoleState, autoField: 'repair_auto', autoScope: 'first' }),
+  command: Object.freeze({ build: buildCommandConsoleState, autoField: 'command_auto' }),
+  tractor: Object.freeze({ build: buildTractorConsoleState, autoField: 'tractor_auto', autoScope: 'first' }),
+  umbilical: Object.freeze({ build: buildUmbilicalConsoleState, autoField: 'umbilical_auto', autoScope: 'first' }),
+});
+
+/** Build and normalize one registered family view from actual owned ids. */
+function buildFamilyConsoleView(family, state, systemIds) {
+  const descriptor = FAMILY_BUILDERS[family];
+  if (!descriptor) return null;
+  const view = JSON.parse(descriptor.build(state, systemIds));
+  if (descriptor.autoField) {
+    const sources = state.controlSources || {};
+    const checkedIds = descriptor.autoScope === 'first' ? systemIds.slice(0, 1) : systemIds;
+    const hasProjection = checkedIds.some(id => Object.prototype.hasOwnProperty.call(sources, id));
+    if (hasProjection) {
+      view[descriptor.autoField] = checkedIds.length > 0
+        && checkedIds.every(id => sources[id] === 'Ai');
+    }
+  }
+  if (descriptor.adjust) descriptor.adjust(view, state, systemIds);
+  return view;
+}
+
+/** Project authoritative family metadata for the supplied actual System ids. */
+function projectSystemFamilies(systemIds, state) {
+  const projected = {};
+  for (const id of systemIds) {
+    const family = consoleForSystemId(id, state.systemConsoleFamilies);
+    if (family) projected[id] = family;
+  }
+  return projected;
+}
 
 /**
  * Payload contract for system-composed station consoles (issues #825, #827):
  * any station whose TOML-owned fine systems span more than one console
  * family. `systems` holds one per-family view (a *ConsolePayload above)
- * under EACH owning fine-system id — a console reads
- * `s.systems['power-reactor']`, never a station-role key. Rendered by
+ * under EACH owning fine-system id — a console selects an actual id through
+ * `system_families`, never through a station-role key. Rendered by
  * gui/cruiser/{comms,engineering,science}.html,
  * gui/destroyer/{captain,engineering,tactical}.html and
  * gui/courier/{captain,pilot,tactical}.html.
  *
  * @typedef {{ station_id: string, system_ids: string[],
+ *             system_families: Object<string, string>,
  *             systems: Object<string, object>,
  *             dossiers: Array }} SystemStationConsolePayload
  */
@@ -2024,44 +2094,18 @@ const FAMILY_BUILDERS = {
 export function buildSystemStationConsoleState(stationId, state) {
   const ids = state.stationSystems?.[stationId] || [];
   const systems = {};
-  const controlSources = state.controlSources || {};
-  const add = (group, build, adjust) => {
-    const view = JSON.parse(build(state));
-    const owned = ids.filter(id => consoleForSystemId(id, state.systemConsoleFamilies) === group);
-    if (owned.length === 0) return;
-    if (adjust) adjust(view, owned);
-    owned.forEach(id => { systems[id] = view; });
-  };
-  const allAi = idsToCheck => idsToCheck.length > 0
-    && idsToCheck.every(id => controlSources[id] === 'Ai');
-
-  add('captain', buildCaptainConsoleState,
-    (view) => {
-      view.red_alert_auto = controlSources['red-alert'] === 'Ai';
-      view.viewscreen_auto = controlSources['viewscreen'] === 'Ai';
-    });
-  add('helm', buildHelmConsoleState,
-    (view, owned) => { view.helm_auto = allAi(owned); view.lateral_auto = controlSources['helm-lateral-thrust'] === 'Ai'; });
-  add('tactical', buildWeaponsConsoleState,
-    (view, owned) => { view.tactical_auto = allAi(owned); });
-  add('sensors', buildSensorsConsoleState,
-    (view, owned) => { view.sensors_auto = allAi(owned); });
-  add('navigation', buildNavigationConsoleState,
-    (view) => { view.navigation_auto = controlSources['navigation'] === 'Ai'; });
-  add('comms', buildCommsConsoleState,
-    (view) => { view.comms_auto = controlSources['comms'] === 'Ai'; });
-  add('shields', buildShieldsConsoleState,
-    (view) => { view.shields_auto = controlSources['shields-system'] === 'Ai'; });
-  add('power', buildPowerConsoleState,
-    (view) => { view.power_auto = controlSources['power-reactor'] === 'Ai'; });
-  add('repair', buildRepairConsoleState,
-    (view) => { view.repair_auto = controlSources['repair'] === 'Ai'; });
-  add('command', buildCommandConsoleState,
-    (view, owned) => { view.command_auto = allAi(owned); });
-  add('tractor', buildTractorConsoleState,
-    (view) => { view.tractor_auto = controlSources['tractor'] === 'Ai'; });
-  add('umbilical', buildUmbilicalConsoleState,
-    (view) => { view.umbilical_auto = controlSources['umbilical'] === 'Ai'; });
+  const idsByFamily = new Map();
+  for (const id of ids) {
+    const family = consoleForSystemId(id, state.systemConsoleFamilies);
+    if (!family || !FAMILY_BUILDERS[family]) continue;
+    const familyIds = idsByFamily.get(family) || [];
+    familyIds.push(id);
+    idsByFamily.set(family, familyIds);
+  }
+  for (const [family, familyIds] of idsByFamily) {
+    const view = buildFamilyConsoleView(family, state, familyIds);
+    for (const id of familyIds) systems[id] = view;
+  }
 
   // Dossiers (issue #1030) ride this top-level key rather than under
   // `systems['comms']`. That used to be enough because the destroyer's Intel
@@ -2074,6 +2118,7 @@ export function buildSystemStationConsoleState(stationId, state) {
   return JSON.stringify({
     station_id: stationId,
     system_ids: ids,
+    system_families: projectSystemFamilies(ids, state),
     systems,
     dossiers: dossiersPayload(state),
   });
@@ -2187,11 +2232,26 @@ export function withVisitingSystems(consoleName, state, json) {
     obj.hosted_systems = kept.concat(visiting);
     if (visiting.length > 0) {
       const systems = obj.systems || {};
+      const systemFamilies = obj.system_families || projectSystemFamilies(authored, state);
+      // A flat payload has no keyed owned views yet. Once a visitor adds the
+      // keyed shape, mirror that original flat view under the actual authored
+      // ids first so metadata-driven readers do not lose the owning family.
+      if (!obj.systems) {
+        const ownedView = { ...obj };
+        for (const id of authored) {
+          if (systemFamilies[id]) systems[id] = ownedView;
+        }
+      }
       for (const id of visiting) {
-        const build = FAMILY_BUILDERS[consoleForSystemId(id, state.systemConsoleFamilies)];
-        if (build) systems[id] = JSON.parse(build(state));
+        const family = consoleForSystemId(id, state.systemConsoleFamilies);
+        const view = buildFamilyConsoleView(family, state, [id]);
+        if (view) {
+          systems[id] = view;
+          systemFamilies[id] = family;
+        }
       }
       obj.systems = systems;
+      obj.system_families = systemFamilies;
     }
     return JSON.stringify(obj);
   } catch (_) {
@@ -2277,31 +2337,17 @@ if (typeof window !== 'undefined') {
       // it the correct flat builder instead of the `default: '{}'` blank that a
       // station-id mismatch used to produce.
       if (families.length === 1) {
-        const build = FAMILY_BUILDERS[families[0]];
-        if (build) return build(state);
+        const view = buildFamilyConsoleView(families[0], state, owned);
+        if (view) {
+          view.system_ids = [...owned];
+          view.system_families = projectSystemFamilies(owned, state);
+          return JSON.stringify(view);
+        }
       }
     }
-    // TEMPORARY #1251 pre-Welcome fallback: before topology arrives, use the
-    // plain builder matching the station id ('{}' for ids with no builder).
-    // Once Welcome establishes the projection boundary, a missing descriptor
-    // is authoritative: do not silently select canonical Command (or any other
-    // family) by station spelling. Issue #1252 removes this boot path with the
-    // remaining unmigrated-family matcher.
-    if (!state.hasSystemConsoleFamilyProjection) {
-      switch (consoleName) {
-        case 'tactical':    return buildWeaponsConsoleState(state);
-        case 'captain':     return buildCaptainConsoleState(state);
-        case 'helm':        return buildHelmConsoleState(state);
-        case 'repair':      return buildRepairConsoleState(state);
-        case 'power':       return buildPowerConsoleState(state);
-        case 'shields':     return buildShieldsConsoleState(state);
-        case 'sensors':     return buildSensorsConsoleState(state);
-        case 'comms':       return buildCommsConsoleState(state);
-        case 'navigation':  return buildNavigationConsoleState(state);
-        case 'command':     return buildCommandConsoleState(state);
-        default:            return '{}';
-      }
-    }
+    // Before Welcome there is neither mounted topology nor authoritative
+    // metadata to select a builder. Returning an empty payload makes that boot
+    // boundary explicit instead of reviving a station-name spelling switch.
     return '{}';
   };
 }

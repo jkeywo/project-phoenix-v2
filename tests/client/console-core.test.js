@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { initConsole } from '../../gui/console-core.js';
-import { systemView } from '../../gui/console-payload.js';
+import { familyView } from '../../gui/console-payload.js';
 
 // ── Global window shim ───────────────────────────────────────────────────────
 // Node has no `window`. Set global.window before each test so that
@@ -397,10 +397,9 @@ describe('initConsole — BroadcastChannel inbound context gating (#482)', () =>
 //
 // #925's defect class: `buildConsoleStateInner` emits a FLAT payload for a
 // single-family station and a system-id-KEYED payload for a multi-family
-// one, and a console written against `systemView` finds nothing when handed
-// the flat shape directly (every candidate id falls through to `{}`), which
-// renders blank. `initConsole({ family })` now normalises every inbound
-// payload before `render` sees it, so a console reading through `systemView`
+// one, and a console written against `familyView` needs the flat shape mirrored
+// under its actual System ids. `initConsole` normalises every inbound
+// payload before `render` sees it, so a console reading through `familyView`
 // gets the right data whichever shape the wire payload arrived in.
 describe('initConsole — payload shape normalisation (#925 regression)', () => {
   beforeEach(() => {
@@ -408,24 +407,23 @@ describe('initConsole — payload shape normalisation (#925 regression)', () => 
   });
 
   // A render function written the way a keyed-style console reads its
-  // payload — via `systemView`, never off top-level fields directly. Any
+  // payload — via `familyView`, never off top-level fields directly. Any
   // console migrated to read this way must render correctly no matter which
   // shape the wire payload used, once console-core normalises inbound state.
-  // Reads via the FINE system ids only — the exact ids a shipped power
-  // console's render passes to systemView (e.g. engineering-console.js:
-  // `systemView(s, 'power-reactor', 'power-battery')`). NOT the family name,
-  // which no shipped console queries: a normalisation that keyed a flat
-  // payload under `systems['power']` would leave this reader blank.
   function keyedStyleRender(calls) {
     return function render(s) {
-      calls.push(systemView(s, 'power-reactor', 'power-battery'));
+      calls.push(familyView(s, 'power'));
     };
   }
 
   it('renders a keyed-style console correctly when the wire payload is FLAT', () => {
     const calls = [];
-    initConsole({ name: 'power', family: 'power', render: keyedStyleRender(calls) });
-    const flatPayload = { battery_charge: 42, battery_max: 100, groups: [], own_hull: { pct: 1 } };
+    initConsole({ name: 'power', render: keyedStyleRender(calls) });
+    const flatPayload = {
+      battery_charge: 42, battery_max: 100, groups: [], own_hull: { pct: 1 },
+      system_ids: ['main-reactor-alpha'],
+      system_families: { 'main-reactor-alpha': 'power' },
+    };
     window.__updateConsole('power', JSON.stringify(flatPayload));
     expect(calls).toHaveLength(1);
     expect(calls[0]).toEqual(flatPayload);
@@ -433,18 +431,21 @@ describe('initConsole — payload shape normalisation (#925 regression)', () => 
 
   it('renders a keyed-style console correctly when the wire payload is already KEYED', () => {
     const calls = [];
-    initConsole({ name: 'power', family: 'power', render: keyedStyleRender(calls) });
+    initConsole({ name: 'power', render: keyedStyleRender(calls) });
     const view = { battery_charge: 77, battery_max: 100, groups: [] };
-    const keyedPayload = { systems: { 'power-reactor': view }, station_id: 'engineering', system_ids: ['power-reactor'] };
+    const keyedPayload = {
+      systems: { 'main-reactor-alpha': view },
+      station_id: 'engineering',
+      system_ids: ['main-reactor-alpha'],
+      system_families: { 'main-reactor-alpha': 'power' },
+    };
     window.__updateConsole('power', JSON.stringify(keyedPayload));
     expect(calls).toHaveLength(1);
     expect(calls[0]).toEqual(view);
   });
 
-  it('without a declared family, a flat payload stays flat and a keyed-style read finds nothing (documents the pre-#1233 symptom)', () => {
+  it('without projected metadata, a flat payload stays flat and a family read finds nothing', () => {
     const calls = [];
-    // No `family` passed — the console never opts into normalisation, so the
-    // historic defect is exactly reproducible: systemView finds no `.systems`.
     initConsole({ name: 'power', render: keyedStyleRender(calls) });
     const flatPayload = { battery_charge: 42, battery_max: 100 };
     window.__updateConsole('power', JSON.stringify(flatPayload));
@@ -456,14 +457,17 @@ describe('initConsole — payload shape normalisation (#925 regression)', () => 
     // Backward compatibility: every currently-shipped flat console still
     // reads `s.<field>` directly. Normalisation must not break that.
     const render = vi.fn();
-    initConsole({ name: 'power', family: 'power', render });
-    const flatPayload = { battery_charge: 42, battery_max: 100 };
+    initConsole({ name: 'power', render });
+    const flatPayload = {
+      battery_charge: 42,
+      battery_max: 100,
+      system_ids: ['main-reactor-alpha'],
+      system_families: { 'main-reactor-alpha': 'power' },
+    };
     window.__updateConsole('power', JSON.stringify(flatPayload));
     expect(render).toHaveBeenCalledTimes(1);
     const received = render.mock.calls[0][0];
     expect(received.battery_charge).toBe(42);
-    // Keyed by fine system id (matching buildSystemStationConsoleState), not
-    // by the family name — see normalizeConsolePayload / FAMILY_SYSTEM_IDS.
-    expect(received.systems['power-reactor']).toEqual(flatPayload);
+    expect(received.systems['main-reactor-alpha']).toEqual(flatPayload);
   });
 });

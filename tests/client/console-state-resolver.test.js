@@ -1,148 +1,158 @@
 // @vitest-environment jsdom
-//
-// Routing tests for window.buildConsoleStateInner (gui/console-state.js).
-// Post issue #825 the routing rule is purely data-driven: a station whose
-// TOML-owned fine systems span more than one console family (via
-// consoleForSystemId) gets the generic system-id-keyed payload from
-// buildSystemStationConsoleState; single-family stations keep their flat
-// plain-builder payloads; unknown names (and known multi-family pages before
-// Welcome delivers stationSystems) fall back to '{}'.
 import { describe, it, expect } from 'vitest';
 import '../../gui/console-state.js';
 import { aggregateStationHull } from '../../gui/console-state.js';
 import { ClientSimState } from '../../gui/sim-state.js';
 import { dirtyConsolesFor } from '../../gui/dirty-consoles.js';
 
-describe('buildConsoleStateInner family-span routing', () => {
-  it('routes the Destroyer engineering station (shields + power + repair) to the generic payload', () => {
-    const state = {
-      stationSystems: { engineering: ['shields-system', 'power-reactor', 'power-battery', 'repair'] },
-    };
-    const s = JSON.parse(window.buildConsoleStateInner('engineering', state));
-    expect(s.station_id).toBe('engineering');
-    expect(s.systems).toHaveProperty('shields-system');
-    expect(s.systems).toHaveProperty('power-reactor');
-    expect(s.systems).toHaveProperty('repair');
+const FAMILY_BY_ID = {
+  captain: 'captain', viewscreen: 'captain', 'red-alert': 'captain',
+  'helm-thrust': 'helm', 'helm-steering': 'helm',
+  'tactical-radar': 'tactical', 'phaser-control': 'tactical', 'phaser-fore': 'tactical',
+  'blaster-fore': 'tactical', sensors: 'sensors', 'sensor-radar': 'sensors',
+  'shields-system': 'shields', 'power-reactor': 'power', 'power-battery': 'power',
+  repair: 'repair', navigation: 'navigation', comms: 'comms',
+};
+
+function stateFor(stationSystems, extra = {}) {
+  const ids = Object.values(stationSystems).flat();
+  return {
+    stationSystems,
+    systemConsoleFamilies: Object.fromEntries(
+      ids.filter(id => FAMILY_BY_ID[id]).map(id => [id, FAMILY_BY_ID[id]]),
+    ),
+    ...extra,
+  };
+}
+
+describe('buildConsoleStateInner metadata routing', () => {
+  const representative = [
+    ['engineering', ['shields-system', 'power-reactor', 'repair'], ['shields', 'power', 'repair']],
+    ['science', ['sensors', 'shields-system'], ['sensors', 'shields']],
+    ['comms', ['navigation', 'comms'], ['navigation', 'comms']],
+    ['captain', ['captain', 'sensors'], ['captain', 'sensors']],
+    ['tactical', ['tactical-radar', 'navigation', 'comms'], ['tactical', 'navigation', 'comms']],
+  ];
+
+  for (const [station, ids, families] of representative) {
+    it(`builds representative multi-family ${station} from actual owned ids`, () => {
+      const state = stateFor({ [station]: ids });
+      const payload = JSON.parse(window.buildConsoleStateInner(station, state));
+      expect(payload.station_id).toBe(station);
+      expect(payload.system_ids).toEqual(ids);
+      expect(Object.keys(payload.systems)).toEqual(ids);
+      expect(new Set(Object.values(payload.system_families))).toEqual(new Set(families));
+    });
+  }
+
+  it('keeps a single-family Station flat while carrying its actual ids and projection', () => {
+    const state = stateFor({ gunnery: ['tactical-radar', 'phaser-fore'] });
+    const payload = JSON.parse(window.buildConsoleStateInner('gunnery', state));
+    expect(payload).not.toHaveProperty('systems');
+    expect(payload).toHaveProperty('banks');
+    expect(payload.system_ids).toEqual(['tactical-radar', 'phaser-fore']);
+    expect(payload.system_families).toEqual({
+      'tactical-radar': 'tactical', 'phaser-fore': 'tactical',
+    });
   });
 
-  it('routes the Cruiser engineering station (power + repair, no shields) to the generic payload', () => {
+  it('selects Command by metadata and typed blackboard with arbitrary names', () => {
     const state = {
-      stationSystems: { engineering: ['power-reactor', 'power-battery', 'repair'] },
-    };
-    const s = JSON.parse(window.buildConsoleStateInner('engineering', state));
-    expect(s.station_id).toBe('engineering');
-    expect(s.systems).not.toHaveProperty('shields-system');
-    expect(s.systems).toHaveProperty('power-reactor');
-    expect(s.systems).toHaveProperty('repair');
-  });
-
-  it('routes the Cruiser science station (sensors + shields) to the generic payload', () => {
-    const state = {
-      stationSystems: { science: ['sensors', 'sensor-radar', 'shields-system'] },
-    };
-    const s = JSON.parse(window.buildConsoleStateInner('science', state));
-    expect(s.station_id).toBe('science');
-    expect(s.systems).toHaveProperty('sensors');
-    expect(s.systems).toHaveProperty('shields-system');
-  });
-
-  it('routes the Cruiser comms station (navigation + comms) to the generic payload', () => {
-    const state = {
-      stationSystems: { comms: ['navigation', 'comms'] },
-    };
-    const s = JSON.parse(window.buildConsoleStateInner('comms', state));
-    expect(s.station_id).toBe('comms');
-    expect(s.systems).toHaveProperty('navigation');
-    expect(s.systems).toHaveProperty('comms');
-  });
-
-  it('routes the Destroyer captain station (command + sensors) to the generic payload', () => {
-    const state = {
-      stationSystems: { captain: ['captain', 'red-alert', 'viewscreen', 'sensors', 'sensor-radar'] },
-    };
-    const s = JSON.parse(window.buildConsoleStateInner('captain', state));
-    expect(s.station_id).toBe('captain');
-    expect(s.systems).toHaveProperty('captain');
-    expect(s.systems).toHaveProperty('sensors');
-  });
-
-  it('routes the Destroyer tactical station (weapons + navigation + comms) to the generic payload', () => {
-    const state = {
-      stationSystems: { tactical: ['tactical-radar', 'phaser-control', 'phaser-omni', 'navigation', 'comms'] },
-    };
-    const s = JSON.parse(window.buildConsoleStateInner('tactical', state));
-    expect(s.station_id).toBe('tactical');
-    expect(s.systems).toHaveProperty('tactical-radar');
-    expect(s.systems).toHaveProperty('navigation');
-    expect(s.systems).toHaveProperty('comms');
-  });
-
-  it('keeps the flat plain-builder payload for a single-family station (battleship tactical)', () => {
-    const state = {
-      stationSystems: { tactical: ['tactical-radar', 'phaser-control', 'phaser-fore', 'torpedo-magazine', 'blaster-heavy-fore'] },
-    };
-    const s = JSON.parse(window.buildConsoleStateInner('tactical', state));
-    // Flat weapons shape — not the generic system-id-keyed wrapper.
-    expect(s).not.toHaveProperty('systems');
-    expect(s).toHaveProperty('banks');
-    expect(s).toHaveProperty('tubes');
-  });
-
-  it('keeps the flat plain-builder payload for a single-family captain station', () => {
-    const state = {
-      stationSystems: { captain: ['captain', 'red-alert', 'viewscreen'] },
-    };
-    const s = JSON.parse(window.buildConsoleStateInner('captain', state));
-    expect(s).not.toHaveProperty('systems');
-    expect(s).toHaveProperty('red_alert');
-  });
-
-  it('selects the Command builder from projected metadata, not either id spelling', () => {
-    const state = {
-      stationSystems: { 'bridge-orders': ['orders-system'] },
-      systemConsoleFamilies: { 'orders-system': 'command' },
-      hasSystemConsoleFamilyProjection: true,
+      stationSystems: { 'bridge-orders': ['orders-array-alpha'] },
+      systemConsoleFamilies: { 'orders-array-alpha': 'command' },
       blackboards: {
-        command: {
-          command_system_id: 'orders-system',
+        'orders-array-alpha': {
+          command_system_id: 'orders-array-alpha',
           directed_station: 'tactical',
           directed_station_name: 'Tactical',
           directed_station_ai: true,
           stances: [],
         },
       },
+      blackboardKinds: { 'orders-array-alpha': 'Command' },
     };
-    const s = JSON.parse(window.buildConsoleStateInner('bridge-orders', state));
-    expect(s).not.toHaveProperty('systems');
-    expect(s.command_system_id).toBe('orders-system');
-    expect(s.directed_station).toBe('tactical');
+    const payload = JSON.parse(window.buildConsoleStateInner('bridge-orders', state));
+    expect(payload.command_system_id).toBe('orders-array-alpha');
+    expect(payload.directed_station).toBe('tactical');
+    expect(payload.system_ids).toEqual(['orders-array-alpha']);
   });
 
-  it('does not extend the temporary inference fallback to an unmapped Command id', () => {
+  it('uses the common family registry for arbitrary Tractor and Umbilical instances', () => {
     const state = {
-      stationSystems: { 'bridge-orders': ['orders-system'] },
-      systemConsoleFamilies: {},
-      hasSystemConsoleFamilyProjection: true,
+      stationSystems: { engineering: ['tow-array-alpha', 'cargo-link-port'] },
+      systemConsoleFamilies: {
+        'tow-array-alpha': 'tractor',
+        'cargo-link-port': 'umbilical',
+      },
+      blackboards: {
+        'tow-array-alpha': { engaged: true, coupled_target: 'freighter-1' },
+        'cargo-link-port': { running: true, rate: 12 },
+      },
+      blackboardKinds: {
+        'tow-array-alpha': 'Tractor',
+        'cargo-link-port': 'Umbilical',
+      },
     };
-    expect(JSON.parse(window.buildConsoleStateInner('bridge-orders', state))).toEqual({});
+    const payload = JSON.parse(window.buildConsoleStateInner('engineering', state));
+    expect(payload.systems['tow-array-alpha']).toMatchObject({
+      system_id: 'tow-array-alpha', engaged: true,
+    });
+    expect(payload.systems['cargo-link-port']).toMatchObject({
+      system_id: 'cargo-link-port', running: true, rate: 12,
+    });
   });
 
-  it('does not select canonical Command by station name after an empty projection', () => {
+  it('builds a wholly arbitrary multi-family Station without id inference', () => {
     const state = {
-      stationSystems: { command: ['command'] },
-      systemConsoleFamilies: {},
-      hasSystemConsoleFamilyProjection: true,
-      blackboards: { command: { command_system_id: 'command' } },
+      stationSystems: { operations: ['glass-eye-seven', 'quiet-line-port'] },
+      systemConsoleFamilies: {
+        'glass-eye-seven': 'sensors',
+        'quiet-line-port': 'comms',
+      },
+      blackboards: {
+        'glass-eye-seven': { radar_range: 777 },
+        'quiet-line-port': { messages: [{ id: 'm1' }], contacts: [] },
+      },
+      blackboardKinds: {
+        'glass-eye-seven': 'Sensors',
+        'quiet-line-port': 'Comms',
+      },
     };
-    expect(JSON.parse(window.buildConsoleStateInner('command', state))).toEqual({});
+    const payload = JSON.parse(window.buildConsoleStateInner('operations', state));
+    expect(payload.systems['glass-eye-seven'].scan_range).toBe(777);
+    expect(payload.systems['quiet-line-port'].messages).toEqual([{ id: 'm1' }]);
+    expect(payload.system_families).toEqual(state.systemConsoleFamilies);
   });
 
-  it('retains canonical Command only for the genuine pre-Welcome boot race', () => {
-    const s = JSON.parse(window.buildConsoleStateInner('command', {}));
-    expect(s.command_system_id).toBe('command');
+  it('does not infer an unmapped family from an exact id, prefix, or Station name', () => {
+    expect(JSON.parse(window.buildConsoleStateInner('command', {
+      stationSystems: { command: ['command'] }, systemConsoleFamilies: {},
+    }))).toEqual({});
+    expect(JSON.parse(window.buildConsoleStateInner('tactical', {
+      stationSystems: { tactical: ['phaser-surprise'] }, systemConsoleFamilies: {},
+    }))).toEqual({});
   });
 
-  it('folds an authored Dock host update into dirty routing and the Helm builder', () => {
+  it('has no Station-name builder switch before Welcome', () => {
+    expect(JSON.parse(window.buildConsoleStateInner('captain', {}))).toEqual({});
+    expect(JSON.parse(window.buildConsoleStateInner('sensors', {}))).toEqual({});
+    expect(JSON.parse(window.buildConsoleStateInner('command', {}))).toEqual({});
+  });
+
+  it('follows a System moved between Stations with no code change', () => {
+    const before = stateFor({ comms: ['navigation', 'comms'], tactical: ['tactical-radar'] });
+    const after = stateFor({ comms: ['comms'], tactical: ['tactical-radar', 'navigation'] });
+    expect(JSON.parse(window.buildConsoleStateInner('comms', before)).systems)
+      .toHaveProperty('navigation');
+    expect(JSON.parse(window.buildConsoleStateInner('tactical', before))).not.toHaveProperty('systems');
+    expect(JSON.parse(window.buildConsoleStateInner('comms', after))).not.toHaveProperty('systems');
+    expect(JSON.parse(window.buildConsoleStateInner('tactical', after)).systems)
+      .toHaveProperty('navigation');
+  });
+});
+
+describe('Dock tracer and visiting Systems', () => {
+  it('folds an arbitrary Dock id into dirty routing and Helm state', () => {
     const state = new ClientSimState();
     state.apply({
       type: 'Welcome',
@@ -152,158 +162,53 @@ describe('buildConsoleStateInner family-span routing', () => {
         ship_config: {
           station_systems: { 'flight-control': ['berthing-clamps'] },
           system_console_families: { 'berthing-clamps': 'helm' },
+          blackboard_console_families: { helm: 'helm' },
         },
       },
     });
     const update = {
       type: 'BlackboardUpdate',
-      data: {
-        updates: [[
-          'berthing-clamps',
-          {
-            kind: 'Dock',
-            data: {
-              range: 275,
-              available: true,
-              available_target: 'berth-1',
-              available_target_name: 'world.berth.one',
-              engaged: false,
-              docked: false,
-            },
-          },
-        ]],
-      },
+      data: { updates: [[
+        'berthing-clamps',
+        { kind: 'Dock', data: { range: 275, available: true, docked: false } },
+      ]] },
     };
-
     state.apply(update);
-
     expect(dirtyConsolesFor(
       update,
       state.stationSystems,
       state.systemConsoleFamilies,
+      state.blackboardConsoleFamilies,
     )).toEqual(new Set(['flight-control']));
-    const payload = JSON.parse(window.buildConsoleStateInner('flight-control', state));
-    expect(payload.dock).toMatchObject({
-      system_id: 'berthing-clamps',
-      range: 275,
-      available: true,
-      available_target: 'berth-1',
-      available_target_name: 'world.berth.one',
-    });
-    expect(state.blackboards).not.toHaveProperty('dock');
+    expect(JSON.parse(window.buildConsoleStateInner('flight-control', state)).dock)
+      .toMatchObject({ system_id: 'berthing-clamps', range: 275, available: true });
   });
 
-  it('falls back to the plain builder by name during the boot race (no stationSystems yet)', () => {
-    const s = JSON.parse(window.buildConsoleStateInner('sensors', {}));
-    expect(s).not.toHaveProperty('systems');
-    expect(s).toHaveProperty('blips');
-  });
-
-  it("returns '{}' for names with no plain builder before Welcome (science, pilot)", () => {
-    expect(JSON.parse(window.buildConsoleStateInner('science', {}))).toEqual({});
-    expect(JSON.parse(window.buildConsoleStateInner('pilot', {}))).toEqual({});
-  });
-
-  // Acceptance criterion (issue #825): TOML can move a system between stations
-  // without any console-state.js change — the routing and payload follow the
-  // station_systems data alone.
-  it('a system moved between stations in TOML re-routes with no code change', () => {
-    const before = {
-      stationSystems: {
-        comms: ['navigation', 'comms'],
-        tactical: ['tactical-radar', 'phaser-control'],
-      },
+  it('adds a visiting arbitrary System under its actual id and metadata', () => {
+    const state = {
+      stationSystems: { bridge: ['bridge-core'], remote: ['far-comms-array'] },
+      systemConsoleFamilies: { 'bridge-core': 'captain', 'far-comms-array': 'comms' },
+      blackboards: { 'far-comms-array': { host_station: 'bridge', messages: [] } },
+      blackboardKinds: { 'far-comms-array': 'Comms' },
     };
-    const after = {
-      stationSystems: {
-        comms: ['comms'],
-        tactical: ['tactical-radar', 'phaser-control', 'navigation'],
-      },
-    };
-    const commsBefore = JSON.parse(window.buildConsoleStateInner('comms', before));
-    expect(commsBefore.systems).toHaveProperty('navigation');
-    // tactical is single-family before the move → flat weapons payload.
-    const tacticalBefore = JSON.parse(window.buildConsoleStateInner('tactical', before));
-    expect(tacticalBefore).not.toHaveProperty('systems');
-
-    // After the TOML move: comms collapses to the flat comms payload, and
-    // tactical becomes multi-family and picks up the navigation view.
-    const commsAfter = JSON.parse(window.buildConsoleStateInner('comms', after));
-    expect(commsAfter).not.toHaveProperty('systems');
-    expect(commsAfter).toHaveProperty('messages');
-    const tacticalAfter = JSON.parse(window.buildConsoleStateInner('tactical', after));
-    expect(tacticalAfter.systems).toHaveProperty('navigation');
-    expect(tacticalAfter.systems['navigation']).toHaveProperty('waypoint');
+    const payload = JSON.parse(window.buildConsoleState('bridge', state));
+    expect(payload.systems).toHaveProperty('far-comms-array');
+    expect(payload.system_families['far-comms-array']).toBe('comms');
+    expect(payload.hosted_systems).toEqual(['bridge-core', 'far-comms-array']);
   });
 });
 
-describe('buildConsoleStateInner pilot routing', () => {
-  // The 'pilot' station is dormant (no shipped TOML declares it) but must
-  // route generically the moment a TOML re-declares it with multi-family
-  // ownership — no hardcoded 'pilot' case remains.
-  const PILOT_STATE = {
-    stationSystems: {
-      pilot: ['captain', 'helm-thrust', 'tactical-radar', 'blaster-fore', 'sensors', 'navigation', 'comms'],
-    },
-  };
-
-  it("routes a multi-family 'pilot' station to the generic payload", () => {
-    const s = JSON.parse(window.buildConsoleStateInner('pilot', PILOT_STATE));
-    expect(s.station_id).toBe('pilot');
-    for (const id of ['captain', 'helm-thrust', 'tactical-radar', 'sensors', 'navigation', 'comms']) {
-      expect(s.systems).toHaveProperty(id);
-    }
-  });
-
-  // Every nested view computes an own_hull for its own hardcoded station id
-  // ('tactical', 'sensors', ...), which is meaningless on a hull with one
-  // station. The top-level own_hull — the only one pilot.html reads — must be
-  // the pilot's, or the footer damage bar shows the wrong systems.
-  it('top-level own_hull aggregates the pilot station, not tactical', () => {
+describe('station hull normalization', () => {
+  it('uses the actual Station ownership for the top-level aggregate', () => {
     const state = {
-      stationSystems: { pilot: ['blaster-fore', 'helm-thrust'] },
-      consoleHull: [
-        { system_id: 'blaster-fore', display_name: 'Blaster', hp: 6, max_hp: 12, tier: 'Damaged' },
-      ],
+      stationSystems: { pilot: ['odd-blaster-id', 'odd-engine-id'] },
+      systemConsoleFamilies: { 'odd-blaster-id': 'tactical', 'odd-engine-id': 'helm' },
+      consoleHull: [{ system_id: 'odd-blaster-id', current: 6, max_hp: 12 }],
     };
-    const s = JSON.parse(window.buildConsoleState('pilot', state));
-    // Round-trip the expectation too: withStationDamage stringifies, which
-    // drops undefined-valued keys.
-    expect(s.own_hull).toEqual(
-      JSON.parse(JSON.stringify(
-        aggregateStationHull('pilot', state.consoleHull, state.stationSystems)
-      ))
-    );
-    expect(s.own_hull).not.toBeNull();
-    expect(s.own_hull.entries.map((e) => e.system_id)).toEqual(['blaster-fore']);
-  });
-});
-
-describe('fine-System station routing', () => {
-  it('builds the Courier Captain payload from its owned fine systems', () => {
-    const state = {
-      stationSystems: {
-        captain: ['captain', 'viewscreen', 'red-alert', 'navigation', 'comms', 'shields-system', 'power-reactor', 'power-battery', 'repair'],
-      },
-    };
-    const s = JSON.parse(window.buildConsoleStateInner('captain', state));
-    expect(s.system_ids).toEqual(state.stationSystems.captain);
-    expect(s.systems).toHaveProperty('red-alert');
-    expect(s.systems).toHaveProperty('navigation');
-    expect(s.systems).toHaveProperty('repair');
-    expect(s.systems).not.toHaveProperty('helm-thrust');
-  });
-
-  it('builds the Courier Tactical payload from its owned fine systems', () => {
-    const state = {
-      stationSystems: {
-        tactical: ['helm-thrust', 'helm-steering', 'tactical-radar', 'blaster-fore', 'sensors', 'sensor-radar'],
-      },
-    };
-    const s = JSON.parse(window.buildConsoleStateInner('tactical', state));
-    expect(s.systems).toHaveProperty('helm-thrust');
-    expect(s.systems).toHaveProperty('tactical-radar');
-    expect(s.systems).toHaveProperty('sensor-radar');
-    expect(s.systems).not.toHaveProperty('repair');
+    const payload = JSON.parse(window.buildConsoleState('pilot', state));
+    expect(payload.own_hull).toEqual(JSON.parse(JSON.stringify(
+      aggregateStationHull('pilot', state.consoleHull, state.stationSystems),
+    )));
+    expect(payload.own_hull.entries.map(entry => entry.system_id)).toEqual(['odd-blaster-id']);
   });
 });

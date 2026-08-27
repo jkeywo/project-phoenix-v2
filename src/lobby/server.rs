@@ -431,14 +431,14 @@ fn update_session_with_config(
                     (station.id.0.clone(), system_ids)
                 })
                 .collect();
-            // Authoritative System instance -> Console Family projection
-            // (issue #1251). Only Command and Dock descriptors carry metadata
-            // in this tracer; every absent family remains on the client's
-            // explicitly temporary inference path until #1252 completes the
-            // registry and removes that fallback.
+            // Authoritative System instance -> Console Family projection plus
+            // the separate reserved/aggregate blackboard-key presentation map.
+            // The second map is intentionally not folded into the first: those
+            // keys share a wire wrapper but have no System command authority.
             let registry = crate::ship::system_registry::SystemKindRegistry::with_core_systems()
                 .expect("the built-in System descriptor registry must be valid");
             next.system_console_families = registry.project_console_families(&sc.systems);
+            next.blackboard_console_families = registry.project_blackboard_console_families();
             // Anonymous accessibility eligibility projection (issue #1103):
             // per station → per rating → the T1 assist-functions the station
             // would force its holder to operate manually at that rating. Derived

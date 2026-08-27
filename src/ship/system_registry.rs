@@ -355,34 +355,60 @@ pub const SHIELD_ARC_KIND: &str = "shield_arc";
 
 /// Authoritative metadata owned by one `[[system]]` kind.
 ///
-/// Console Family is optional during the #1251 tracer: Command and Dock carry
-/// it now, while issue #1252 migrates every remaining kind and removes the
-/// client's temporary inference fallback. Command capability joins this same
-/// descriptor in issue #1253 rather than creating a second registry.
+/// Every registered kind declares exactly one Console Family. Presentation
+/// metadata is therefore complete before a ship topology is projected to the
+/// client: an absent instance entry means the topology is invalid, not that the
+/// client should infer a family from the instance id. Command capability joins
+/// this same descriptor in issue #1253 rather than creating a second registry.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SystemKindDescriptor {
     kind: String,
-    console_family: Option<ConsoleFamily>,
+    console_family: ConsoleFamily,
 }
 
 impl SystemKindDescriptor {
-    pub fn new(kind: impl Into<String>) -> Self {
+    pub fn new(kind: impl Into<String>, console_family: ConsoleFamily) -> Self {
         Self {
             kind: kind.into(),
-            console_family: None,
+            console_family,
         }
-    }
-
-    pub fn with_console_family(mut self, family: ConsoleFamily) -> Self {
-        self.console_family = Some(family);
-        self
     }
 
     pub fn kind(&self) -> &str {
         &self.kind
     }
 
-    pub fn console_family(&self) -> Option<ConsoleFamily> {
+    pub fn console_family(&self) -> ConsoleFamily {
+        self.console_family
+    }
+}
+
+/// Presentation metadata for a blackboard key that is not a System instance.
+///
+/// Aggregate console surfaces (`helm`, `tactical`, `power`, `shields`) and
+/// knowledge/result channels (`dossiers`, `scan`) share the blackboard map's
+/// `SystemId` wire type, but they do not gain command authority, damage state,
+/// or a Control Source. Keeping them in this distinct descriptor type prevents
+/// presentation routing from masquerading those keys as authored Systems.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BlackboardKeyDescriptor {
+    key: String,
+    console_family: ConsoleFamily,
+}
+
+impl BlackboardKeyDescriptor {
+    pub fn new(key: impl Into<String>, console_family: ConsoleFamily) -> Self {
+        Self {
+            key: key.into(),
+            console_family,
+        }
+    }
+
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    pub fn console_family(&self) -> ConsoleFamily {
         self.console_family
     }
 }
@@ -399,12 +425,15 @@ impl SystemKindDescriptor {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SystemKindRegistry {
     descriptors: HashMap<String, SystemKindDescriptor>,
+    blackboard_descriptors: HashMap<String, BlackboardKeyDescriptor>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SystemRegistryError {
     EmptyKind,
     DuplicateKind { kind: String },
+    EmptyBlackboardKey,
+    DuplicateBlackboardKey { key: String },
 }
 
 impl std::fmt::Display for SystemRegistryError {
@@ -422,66 +451,78 @@ impl SystemKindRegistry {
 
     pub fn with_red_alert() -> Result<Self, SystemRegistryError> {
         let mut registry = Self::new();
-        registry.register(RED_ALERT_KIND)?;
+        registry.register(RED_ALERT_KIND, ConsoleFamily::Captain)?;
         Ok(registry)
     }
 
     pub fn with_core_systems() -> Result<Self, SystemRegistryError> {
         let mut registry = Self::with_red_alert()?;
-        registry.register(POWER_KIND)?;
-        registry.register(SENSORS_KIND)?;
-        registry.register(NAVIGATION_KIND)?;
-        registry.register(SHIELDS_KIND)?;
-        registry.register(COMMS_KIND)?;
-        registry.register(CAPTAIN_KIND)?;
-        registry.register(VIEWSCREEN_KIND)?;
-        registry.register(REPAIR_KIND)?;
-        // Command is the #1251 Console-Family metadata tracer.
-        registry.register_descriptor(
-            SystemKindDescriptor::new(COMMAND_KIND).with_console_family(ConsoleFamily::Command),
-        )?;
+        registry.register(POWER_KIND, ConsoleFamily::Power)?;
+        registry.register(SENSORS_KIND, ConsoleFamily::Sensors)?;
+        registry.register(NAVIGATION_KIND, ConsoleFamily::Navigation)?;
+        registry.register(SHIELDS_KIND, ConsoleFamily::Shields)?;
+        registry.register(COMMS_KIND, ConsoleFamily::Comms)?;
+        registry.register(CAPTAIN_KIND, ConsoleFamily::Captain)?;
+        registry.register(VIEWSCREEN_KIND, ConsoleFamily::Captain)?;
+        registry.register(REPAIR_KIND, ConsoleFamily::Repair)?;
+        registry.register(COMMAND_KIND, ConsoleFamily::Command)?;
         // Tractor-beam system (issue #1156).
-        registry.register(TRACTOR_KIND)?;
-        // Dock is rendered by Helm regardless of either instance/station id:
-        // the second half of the #1251 Console-Family metadata tracer.
-        registry.register_descriptor(
-            SystemKindDescriptor::new(DOCK_KIND).with_console_family(ConsoleFamily::Helm),
-        )?;
+        registry.register(TRACTOR_KIND, ConsoleFamily::Tractor)?;
+        // Dock is rendered by Helm regardless of either instance/station id.
+        registry.register(DOCK_KIND, ConsoleFamily::Helm)?;
         // Transfer umbilical (issue #1160).
-        registry.register(UMBILICAL_KIND)?;
+        registry.register(UMBILICAL_KIND, ConsoleFamily::Umbilical)?;
         // Fine-grained Helm systems (issue #511)
-        registry.register(HELM_JOYSTICK_KIND)?;
-        registry.register(HELM_ENGINE_KIND)?;
-        registry.register(HELM_RADAR_KIND)?;
-        registry.register(HELM_IMPULSE_KIND)?;
-        registry.register(LATERAL_THRUST_KIND)?;
-        registry.register(VERTICAL_THRUST_KIND)?;
+        registry.register(HELM_JOYSTICK_KIND, ConsoleFamily::Helm)?;
+        registry.register(HELM_ENGINE_KIND, ConsoleFamily::Helm)?;
+        registry.register(HELM_RADAR_KIND, ConsoleFamily::Helm)?;
+        registry.register(HELM_IMPULSE_KIND, ConsoleFamily::Helm)?;
+        registry.register(LATERAL_THRUST_KIND, ConsoleFamily::Helm)?;
+        registry.register(VERTICAL_THRUST_KIND, ConsoleFamily::Helm)?;
         // Per-axis Helm systems (issue #701)
-        registry.register(HELM_THRUST_KIND)?;
-        registry.register(HELM_STEERING_KIND)?;
+        registry.register(HELM_THRUST_KIND, ConsoleFamily::Helm)?;
+        registry.register(HELM_STEERING_KIND, ConsoleFamily::Helm)?;
         // Helm boost fine system (issue #801)
-        registry.register(HELM_BOOST_KIND)?;
+        registry.register(HELM_BOOST_KIND, ConsoleFamily::Helm)?;
         // Fine-grained Tactical systems (issue #512)
-        registry.register(PHASER_BANK_KIND)?;
-        registry.register(TORPEDO_TUBE_KIND)?;
-        registry.register(TORPEDO_MAGAZINE_KIND)?;
+        registry.register(PHASER_BANK_KIND, ConsoleFamily::Tactical)?;
+        registry.register(TORPEDO_TUBE_KIND, ConsoleFamily::Tactical)?;
+        registry.register(TORPEDO_MAGAZINE_KIND, ConsoleFamily::Tactical)?;
         // Blaster bank fine system (issue #631)
-        registry.register(BLASTER_BANK_KIND)?;
+        registry.register(BLASTER_BANK_KIND, ConsoleFamily::Tactical)?;
         // Phaser control fine system (issue #801)
-        registry.register(PHASER_CONTROL_KIND)?;
+        registry.register(PHASER_CONTROL_KIND, ConsoleFamily::Tactical)?;
         // Tactical / sensor radar fine systems
-        registry.register(TACTICAL_RADAR_KIND)?;
-        registry.register(SENSOR_RADAR_KIND)?;
+        registry.register(TACTICAL_RADAR_KIND, ConsoleFamily::Tactical)?;
+        registry.register(SENSOR_RADAR_KIND, ConsoleFamily::Sensors)?;
         // Fine-grained Power systems (issue #513)
-        registry.register(POWER_REACTOR_KIND)?;
-        registry.register(POWER_BATTERY_KIND)?;
+        registry.register(POWER_REACTOR_KIND, ConsoleFamily::Power)?;
+        registry.register(POWER_BATTERY_KIND, ConsoleFamily::Power)?;
         // Fine-grained Shields systems (issue #514)
-        registry.register(SHIELD_ARC_KIND)?;
+        registry.register(SHIELD_ARC_KIND, ConsoleFamily::Shields)?;
+
+        // Blackboard keys which are presentation channels rather than System
+        // instances. Register them separately so they never enter `kinds()` or
+        // the topology projection used for ownership and command authority.
+        registry.register_blackboard_key(HELM_STATION_ID, ConsoleFamily::Helm)?;
+        registry.register_blackboard_key(TACTICAL_STATION_ID, ConsoleFamily::Tactical)?;
+        registry.register_blackboard_key(POWER_SYSTEM_ID, ConsoleFamily::Power)?;
+        registry.register_blackboard_key(SHIELDS_SYSTEM_ID, ConsoleFamily::Shields)?;
+        registry.register_blackboard_key(
+            crate::dossier::DOSSIER_BLACKBOARD_KEY,
+            ConsoleFamily::Comms,
+        )?;
+        registry
+            .register_blackboard_key(crate::science::SCAN_BLACKBOARD_KEY, ConsoleFamily::Sensors)?;
         Ok(registry)
     }
 
-    pub fn register(&mut self, kind: impl Into<String>) -> Result<(), SystemRegistryError> {
-        self.register_descriptor(SystemKindDescriptor::new(kind))
+    pub fn register(
+        &mut self,
+        kind: impl Into<String>,
+        console_family: ConsoleFamily,
+    ) -> Result<(), SystemRegistryError> {
+        self.register_descriptor(SystemKindDescriptor::new(kind, console_family))
     }
 
     pub fn register_descriptor(
@@ -500,6 +541,31 @@ impl SystemKindRegistry {
         Ok(())
     }
 
+    pub fn register_blackboard_descriptor(
+        &mut self,
+        descriptor: BlackboardKeyDescriptor,
+    ) -> Result<(), SystemRegistryError> {
+        if descriptor.key.trim().is_empty() {
+            return Err(SystemRegistryError::EmptyBlackboardKey);
+        }
+        if self.blackboard_descriptors.contains_key(&descriptor.key) {
+            return Err(SystemRegistryError::DuplicateBlackboardKey {
+                key: descriptor.key,
+            });
+        }
+        self.blackboard_descriptors
+            .insert(descriptor.key.clone(), descriptor);
+        Ok(())
+    }
+
+    pub fn register_blackboard_key(
+        &mut self,
+        key: impl Into<String>,
+        console_family: ConsoleFamily,
+    ) -> Result<(), SystemRegistryError> {
+        self.register_blackboard_descriptor(BlackboardKeyDescriptor::new(key, console_family))
+    }
+
     pub fn contains(&self, kind: &str) -> bool {
         self.descriptors.contains_key(kind)
     }
@@ -512,10 +578,12 @@ impl SystemKindRegistry {
         self.descriptors.get(kind)
     }
 
+    pub fn blackboard_descriptor(&self, key: &str) -> Option<&BlackboardKeyDescriptor> {
+        self.blackboard_descriptors.get(key)
+    }
+
     /// Resolve authored System instances to the Console Family declared by
-    /// their kinds. Unmigrated kinds are intentionally omitted: this tracer's
-    /// payload tells the client exactly which ids are authoritative and leaves
-    /// only those missing ids eligible for the temporary #1252 fallback.
+    /// their kinds. A validated topology has one entry for every instance.
     pub fn project_console_families(
         &self,
         systems: &[SystemInstanceConfig],
@@ -524,9 +592,17 @@ impl SystemKindRegistry {
             .iter()
             .filter_map(|system| {
                 self.descriptor(&system.kind)
-                    .and_then(SystemKindDescriptor::console_family)
-                    .map(|family| (system.id.0.clone(), family))
+                    .map(|descriptor| (system.id.0.clone(), descriptor.console_family()))
             })
+            .collect()
+    }
+
+    /// Project the complete reserved/aggregate blackboard-key presentation
+    /// metadata. This map is deliberately separate from System instances.
+    pub fn project_blackboard_console_families(&self) -> HashMap<String, ConsoleFamily> {
+        self.blackboard_descriptors
+            .iter()
+            .map(|(key, descriptor)| (key.clone(), descriptor.console_family()))
             .collect()
     }
 }
@@ -840,34 +916,61 @@ mod tests {
     fn register_adds_kind() {
         let mut registry = SystemKindRegistry::new();
 
-        registry.register("red_alert").unwrap();
+        registry
+            .register("red_alert", ConsoleFamily::Captain)
+            .unwrap();
 
         assert!(registry.contains("red_alert"));
     }
 
     #[test]
-    fn command_and_dock_descriptors_own_the_tracer_console_families() {
+    fn every_core_descriptor_owns_its_console_family() {
         let registry = SystemKindRegistry::with_core_systems().unwrap();
+        let expected = [
+            (RED_ALERT_KIND, ConsoleFamily::Captain),
+            (POWER_KIND, ConsoleFamily::Power),
+            (SENSORS_KIND, ConsoleFamily::Sensors),
+            (NAVIGATION_KIND, ConsoleFamily::Navigation),
+            (SHIELDS_KIND, ConsoleFamily::Shields),
+            (COMMS_KIND, ConsoleFamily::Comms),
+            (CAPTAIN_KIND, ConsoleFamily::Captain),
+            (VIEWSCREEN_KIND, ConsoleFamily::Captain),
+            (REPAIR_KIND, ConsoleFamily::Repair),
+            (COMMAND_KIND, ConsoleFamily::Command),
+            (TRACTOR_KIND, ConsoleFamily::Tractor),
+            (DOCK_KIND, ConsoleFamily::Helm),
+            (UMBILICAL_KIND, ConsoleFamily::Umbilical),
+            (HELM_JOYSTICK_KIND, ConsoleFamily::Helm),
+            (HELM_ENGINE_KIND, ConsoleFamily::Helm),
+            (HELM_RADAR_KIND, ConsoleFamily::Helm),
+            (HELM_IMPULSE_KIND, ConsoleFamily::Helm),
+            (LATERAL_THRUST_KIND, ConsoleFamily::Helm),
+            (VERTICAL_THRUST_KIND, ConsoleFamily::Helm),
+            (HELM_THRUST_KIND, ConsoleFamily::Helm),
+            (HELM_STEERING_KIND, ConsoleFamily::Helm),
+            (HELM_BOOST_KIND, ConsoleFamily::Helm),
+            (PHASER_BANK_KIND, ConsoleFamily::Tactical),
+            (TORPEDO_TUBE_KIND, ConsoleFamily::Tactical),
+            (TORPEDO_MAGAZINE_KIND, ConsoleFamily::Tactical),
+            (BLASTER_BANK_KIND, ConsoleFamily::Tactical),
+            (PHASER_CONTROL_KIND, ConsoleFamily::Tactical),
+            (TACTICAL_RADAR_KIND, ConsoleFamily::Tactical),
+            (SENSOR_RADAR_KIND, ConsoleFamily::Sensors),
+            (POWER_REACTOR_KIND, ConsoleFamily::Power),
+            (POWER_BATTERY_KIND, ConsoleFamily::Power),
+            (SHIELD_ARC_KIND, ConsoleFamily::Shields),
+        ];
 
-        assert_eq!(
-            registry
-                .descriptor(COMMAND_KIND)
-                .and_then(SystemKindDescriptor::console_family),
-            Some(ConsoleFamily::Command)
-        );
-        assert_eq!(
-            registry
-                .descriptor(DOCK_KIND)
-                .and_then(SystemKindDescriptor::console_family),
-            Some(ConsoleFamily::Helm)
-        );
-        assert_eq!(
-            registry
-                .descriptor(HELM_THRUST_KIND)
-                .and_then(SystemKindDescriptor::console_family),
-            None,
-            "unmigrated kinds stay absent until #1252 rather than gaining guessed metadata"
-        );
+        assert_eq!(registry.kinds().count(), expected.len());
+        for (kind, family) in expected {
+            assert_eq!(
+                registry
+                    .descriptor(kind)
+                    .map(SystemKindDescriptor::console_family),
+                Some(family),
+                "{kind:?} has the wrong presentation family"
+            );
+        }
     }
 
     #[test]
@@ -918,14 +1021,11 @@ mod tests {
             Some(&ConsoleFamily::Command)
         );
         assert_eq!(projected.get("berthing-clamps"), Some(&ConsoleFamily::Helm));
-        assert!(
-            !projected.contains_key("main-drive"),
-            "the tracer payload must not fabricate metadata for unmigrated families"
-        );
+        assert_eq!(projected.get("main-drive"), Some(&ConsoleFamily::Helm));
     }
 
     #[test]
-    fn every_shipped_command_and_dock_instance_projects_its_console_family() {
+    fn every_shipped_system_instance_projects_its_descriptor_family() {
         let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/entities");
         let mut entries: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
             .expect("assets/entities must be readable")
@@ -935,6 +1035,8 @@ mod tests {
         entries.sort();
 
         let registry = SystemKindRegistry::with_core_systems().unwrap();
+        let mut hulls = 0usize;
+        let mut systems = 0usize;
         let mut command_instances = 0usize;
         let mut dock_instances = 0usize;
 
@@ -945,19 +1047,16 @@ mod tests {
             let Some(ship) = entity.ship_config.as_ref() else {
                 continue;
             };
+            hulls += 1;
             let projected = registry.project_console_families(&ship.systems);
             for system in &ship.systems {
-                let expected = match system.kind.as_str() {
-                    COMMAND_KIND => {
-                        command_instances += 1;
-                        ConsoleFamily::Command
-                    }
-                    DOCK_KIND => {
-                        dock_instances += 1;
-                        ConsoleFamily::Helm
-                    }
-                    _ => continue,
-                };
+                systems += 1;
+                command_instances += usize::from(system.kind == COMMAND_KIND);
+                dock_instances += usize::from(system.kind == DOCK_KIND);
+                let expected = registry
+                    .descriptor(&system.kind)
+                    .unwrap_or_else(|| panic!("{source}: missing descriptor for {:?}", system.kind))
+                    .console_family();
                 assert_eq!(
                     projected.get(&system.id.0),
                     Some(&expected),
@@ -967,9 +1066,14 @@ mod tests {
             }
         }
 
+        assert!(hulls >= 10, "expected the complete shipped hull catalogue");
+        assert!(
+            systems >= 50,
+            "expected every shipped hull's System topology"
+        );
         assert_eq!(
             command_instances, 1,
-            "the shipped Command tracer disappeared"
+            "the shipped Command topology disappeared"
         );
         assert!(
             dock_instances >= 4,
@@ -981,18 +1085,80 @@ mod tests {
     fn rejects_empty_kind() {
         let mut registry = SystemKindRegistry::new();
 
-        assert_eq!(registry.register("  "), Err(SystemRegistryError::EmptyKind));
+        assert_eq!(
+            registry.register("  ", ConsoleFamily::Captain),
+            Err(SystemRegistryError::EmptyKind)
+        );
     }
 
     #[test]
     fn rejects_duplicate_kind() {
         let mut registry = SystemKindRegistry::new();
-        registry.register("red_alert").unwrap();
+        registry
+            .register("red_alert", ConsoleFamily::Captain)
+            .unwrap();
 
         assert_eq!(
-            registry.register("red_alert"),
+            registry.register("red_alert", ConsoleFamily::Captain),
             Err(SystemRegistryError::DuplicateKind {
                 kind: "red_alert".into()
+            })
+        );
+    }
+
+    #[test]
+    fn reserved_blackboard_keys_are_complete_and_not_system_kinds() {
+        let registry = SystemKindRegistry::with_core_systems().unwrap();
+        let expected = HashMap::from([
+            (HELM_STATION_ID.to_string(), ConsoleFamily::Helm),
+            (TACTICAL_STATION_ID.to_string(), ConsoleFamily::Tactical),
+            (POWER_SYSTEM_ID.to_string(), ConsoleFamily::Power),
+            (SHIELDS_SYSTEM_ID.to_string(), ConsoleFamily::Shields),
+            (
+                crate::dossier::DOSSIER_BLACKBOARD_KEY.to_string(),
+                ConsoleFamily::Comms,
+            ),
+            (
+                crate::science::SCAN_BLACKBOARD_KEY.to_string(),
+                ConsoleFamily::Sensors,
+            ),
+        ]);
+
+        assert_eq!(registry.project_blackboard_console_families(), expected);
+        for key in [
+            HELM_STATION_ID,
+            TACTICAL_STATION_ID,
+            crate::dossier::DOSSIER_BLACKBOARD_KEY,
+            crate::science::SCAN_BLACKBOARD_KEY,
+        ] {
+            assert!(
+                !registry.contains(key),
+                "reserved blackboard key {key:?} must not masquerade as a System kind"
+            );
+        }
+        // `power` and `shields` legitimately exist in both namespaces: their
+        // coarse System kinds remain valid while aggregate blackboards use the
+        // same wire strings. Separate descriptor tables preserve the meanings.
+        for key in [POWER_SYSTEM_ID, SHIELDS_SYSTEM_ID] {
+            assert!(registry.contains(key));
+            assert!(registry.blackboard_descriptor(key).is_some());
+        }
+    }
+
+    #[test]
+    fn rejects_empty_and_duplicate_blackboard_keys() {
+        let mut registry = SystemKindRegistry::new();
+        assert_eq!(
+            registry.register_blackboard_key("  ", ConsoleFamily::Captain),
+            Err(SystemRegistryError::EmptyBlackboardKey)
+        );
+        registry
+            .register_blackboard_key("aggregate", ConsoleFamily::Captain)
+            .unwrap();
+        assert_eq!(
+            registry.register_blackboard_key("aggregate", ConsoleFamily::Helm),
+            Err(SystemRegistryError::DuplicateBlackboardKey {
+                key: "aggregate".into()
             })
         );
     }

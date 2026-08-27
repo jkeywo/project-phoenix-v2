@@ -279,7 +279,8 @@ export function routeMessage(msg, ctx) {
       break;
     case 'RatingChanged': {
       // sim-state.js already updated stationRatings; pushDirtyConsoles pushed
-      // the captain console (unconditionally — see DIRTY_ALWAYS_PUSH).
+      // the Station owning the Captain family (unconditionally — see
+      // alwaysPushConsoles in dirty-consoles.js).
       break;
     }
     case 'ReadyChanged':

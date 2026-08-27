@@ -15,8 +15,12 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { t } from '../../gui/strings.js';
-import { renderStation as cruiserRender } from '../../gui/cruiser/engineering.console.js';
-import { renderStation as destroyerRender } from '../../gui/destroyer/engineering.console.js';
+import { renderStation as rawCruiserRender } from '../../gui/cruiser/engineering.console.js';
+import { renderStation as rawDestroyerRender } from '../../gui/destroyer/engineering.console.js';
+import { withConsoleFamilyProjection } from './console-family-fixture.js';
+
+const cruiserRender = (payload, doc) => rawCruiserRender(withConsoleFamilyProjection(payload), doc);
+const destroyerRender = (payload, doc) => rawDestroyerRender(withConsoleFamilyProjection(payload), doc);
 
 function mount(markup) {
   document.body.innerHTML = markup;
@@ -73,7 +77,7 @@ describe('cruiser engineering renderStation', () => {
     own_hull: { pct: 0.9 },
   };
 
-  it('drives power, battery, hull integrity and repair teams from systemView', () => {
+  it('drives power, battery, hull integrity and repair teams from projected families', () => {
     cruiserRender(payload, document);
     expect(el('power-controls').state).toEqual({ groups: [{ id: 'p1' }], auto: true });
     expect(el('battery-bar').state).toEqual({ level_pct: 40, charging: true, emergency_threshold_pct: 20 });

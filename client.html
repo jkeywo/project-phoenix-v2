@@ -2576,7 +2576,8 @@
     // here were deleted: handleMessage() now computes which consoles a message
     // dirties via the declarative table in gui/dirty-consoles.js and pushes
     // each through the generic pushConsoleStateFor above. Pushes are gated on
-    // the console being active, except the names in DIRTY_ALWAYS_PUSH
+    // the console being active, except Stations projected from the
+    // unconditional Console Families in dirty-consoles.js
     // (captain — its push was always unconditional).
     function pushDirtyConsoles(msg) {
       // Boot race: the module scripts may not have executed yet — drop the
@@ -2585,8 +2586,16 @@
       if (typeof window.dirtyConsolesFor !== 'function') return;
       const stationSystems = window.simState ? window.simState.stationSystems : null;
       const systemConsoleFamilies = window.simState ? window.simState.systemConsoleFamilies : null;
-      const alwaysPush = window.DIRTY_ALWAYS_PUSH || new Set();
-      for (const name of window.dirtyConsolesFor(msg, stationSystems, systemConsoleFamilies)) {
+      const blackboardConsoleFamilies = window.simState ? window.simState.blackboardConsoleFamilies : null;
+      const alwaysPush = window.alwaysPushConsoles
+        ? window.alwaysPushConsoles(stationSystems, systemConsoleFamilies)
+        : new Set();
+      for (const name of window.dirtyConsolesFor(
+        msg,
+        stationSystems,
+        systemConsoleFamilies,
+        blackboardConsoleFamilies,
+      )) {
         // The one acknowledging push (issue #1169): this fan-out runs only for
         // consoles an INBOUND host message dirtied, which is exactly the
         // causality `send_to_ack` claims.

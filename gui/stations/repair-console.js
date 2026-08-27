@@ -13,8 +13,8 @@
  *
  * `s` is a flat `RepairConsolePayload` — the battleship's Repair seat is a
  * single-family station, so `initConsole` normalises it under
- * `family: 'repair'` before `render` ever sees it, and this renderer reads it
- * straight off the top level (no `systemView` indirection needed).
+ * an authoritative flat Repair-family payload, and this renderer reads it
+ * straight off the top level.
  *
  * @typedef {object} RepairVariant
  * @property {object} ids                       element ids present in this hull's markup

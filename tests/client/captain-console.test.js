@@ -18,8 +18,12 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { t } from '../../gui/strings.js';
 import { renderStation as battleshipRender } from '../../gui/battleship/captain.console.js';
 import { renderStation as cruiserRender } from '../../gui/cruiser/captain.console.js';
-import { renderStation as destroyerRender } from '../../gui/destroyer/captain.console.js';
-import { renderStation as courierRender } from '../../gui/courier/captain.console.js';
+import { renderStation as rawDestroyerRender } from '../../gui/destroyer/captain.console.js';
+import { renderStation as rawCourierRender } from '../../gui/courier/captain.console.js';
+import { withConsoleFamilyProjection } from './console-family-fixture.js';
+
+const destroyerRender = (payload, doc) => rawDestroyerRender(withConsoleFamilyProjection(payload), doc);
+const courierRender = (payload, doc) => rawCourierRender(withConsoleFamilyProjection(payload), doc);
 
 function mount(markup) {
   document.body.innerHTML = markup;
@@ -162,7 +166,7 @@ describe('destroyer captain renderStation', () => {
     own_hull: { pct: 0.6 },
   };
 
-  it('reads the captain view via systemView', () => {
+  it('reads the captain view via projected Console Family', () => {
     destroyerRender(payload, document);
     expect(el('camera-select').state).toEqual({ views: ['camera_fore'], current_view: 'camera_fore', auto: true });
     expect(el('red-alert').state).toEqual({ active: false, hold: false, auto: true });

@@ -18,6 +18,7 @@
  * `render` — the class is set here on every render, so it is never stale.
  */
 import { makeEngineeringRender } from '../stations/engineering-console.js';
+import { familySystemId, familyView } from '../console-payload.js';
 
 export const renderStation = makeEngineeringRender({
   ids: {
@@ -35,9 +36,10 @@ export const renderStation = makeEngineeringRender({
   tail: (s, views, doc, t) => {
     // ── Tractor beam (issue #1156) ─────────────────────────────────────
     const panel = doc.getElementById('tractor-panel');
-    const tr = (s.systems && s.systems['tractor']) || null;
+    const tr = familyView(s, 'tractor');
+    const tractorSystemId = tr.system_id || familySystemId(s, 'tractor');
     if (panel) {
-      if (!tr) {
+      if (!tractorSystemId) {
         panel.hidden = true;
       } else {
         panel.hidden = false;
@@ -63,9 +65,10 @@ export const renderStation = makeEngineeringRender({
 
     // ── Transfer umbilical (issue #1160) ───────────────────────────────
     const uPanel = doc.getElementById('umbilical-panel');
-    const um = (s.systems && s.systems['umbilical']) || null;
+    const um = familyView(s, 'umbilical');
+    const umbilicalSystemId = um.system_id || familySystemId(s, 'umbilical');
     if (uPanel) {
-      if (!um) {
+      if (!umbilicalSystemId) {
         uPanel.hidden = true;
       } else {
         uPanel.hidden = false;

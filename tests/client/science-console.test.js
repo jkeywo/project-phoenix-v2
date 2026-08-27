@@ -7,11 +7,14 @@
  * `gui/cruiser/science.console.js`; this suite imports the SAME function and
  * drives it against a jsdom fixture. Science is a system-id-KEYED
  * `SystemStationConsolePayload` (no single `family`), read through
- * `systemView` — this is the only surviving variant.
+ * projected Console Family views — this is the only surviving variant.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { t } from '../../gui/strings.js';
-import { renderStation } from '../../gui/cruiser/science.console.js';
+import { renderStation as rawRenderStation } from '../../gui/cruiser/science.console.js';
+import { withConsoleFamilyProjection } from './console-family-fixture.js';
+
+const renderStation = (payload, doc) => rawRenderStation(withConsoleFamilyProjection(payload), doc);
 
 function mount(markup) {
   document.body.innerHTML = markup;
@@ -39,7 +42,7 @@ describe('cruiser science renderStation', () => {
     own_hull: { pct: 0.6 },
   };
 
-  it('reads sensors and shields through systemView and drives both radar+panel from the sensors view', () => {
+  it('reads sensors and shields through projected families and drives both radar+panel from the sensors view', () => {
     renderStation(payload, document);
     expect(el('sensor-radar').state).toEqual(payload.systems.sensors);
     expect(el('sensor-panel').state).toEqual(payload.systems.sensors);

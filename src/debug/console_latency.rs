@@ -415,6 +415,22 @@ fn label_of(action: &str) -> String {
 #[derive(Resource, Default, Debug)]
 pub struct DebugConsoleLatencyEnabled(pub bool);
 
+impl crate::debug::catalogue::DebugSurfaceState for DebugConsoleLatencyEnabled {
+    fn is_enabled(&self) -> bool {
+        self.0
+    }
+
+    fn set_enabled(&mut self, enabled: bool) {
+        self.0 = enabled;
+    }
+}
+
+/// Module-owned adapter for the console-latency Debug Surface.
+pub const DEBUG_CONSOLE_LATENCY_ADAPTER: crate::debug::catalogue::DebugSurfaceAdapter =
+    crate::debug::catalogue::DebugSurfaceAdapter::for_resource::<DebugConsoleLatencyEnabled>(
+        crate::core::debug_surface::DebugSurface::ConsoleLatency,
+    );
+
 /// The latest console-latency JSON, when capture is enabled (issue #1169).
 ///
 /// The target-agnostic sink, exactly like

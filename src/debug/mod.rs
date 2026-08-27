@@ -23,6 +23,7 @@
 //! overlays do; the counters, being invisible and inert to the sim, stay.
 
 pub mod ai_state;
+pub mod catalogue;
 pub mod console_latency;
 pub mod damage;
 pub mod entities;
@@ -35,6 +36,7 @@ pub mod station_activity;
 use bevy::prelude::*;
 
 pub use ai_state::{AiDoctrineCapture, DebugAiDoctrineEnabled};
+pub use catalogue::DebugSurfaceReadback;
 pub use console_latency::{
     ConsoleLatencyCapture, ConsoleLatencyTracker, DebugConsoleLatencyEnabled, TickAdmissionInstant,
 };
@@ -76,6 +78,14 @@ impl Plugin for DebugPlugin {
         use crate::authoritative::{DeclareState, StateClass};
 
         app.init_resource::<StationActivityTracker>()
+            // Every adapter has a resource on every simulation target. The
+            // browser applies `?debug_regions=1` through the same catalogue
+            // setter as its settings cog; these defaults are otherwise inert.
+            .init_resource::<crate::debug_overlay::DebugRegionsEnabled>()
+            .init_resource::<crate::debug_overlay::DebugOverlayEnabled>()
+            .init_resource::<crate::debug_overlay::DebugDamageEnabled>()
+            .init_resource::<crate::debug_overlay::DebugEntitiesEnabled>()
+            .init_resource::<crate::debug_overlay::DebugEntityInspectorEnabled>()
             .init_resource::<DebugStationActivityEnabled>()
             .init_resource::<StationActivityCapture>()
             .init_resource::<DebugAiDoctrineEnabled>()
@@ -93,6 +103,13 @@ impl Plugin for DebugPlugin {
             .init_resource::<ConsoleLatencyTracker>()
             .init_resource::<ConsoleLatencyCapture>()
             .init_resource::<TickAdmissionInstant>();
+
+        app.init_resource::<DebugSurfaceReadback>();
+        // Catalogue readback is an all-target presentation resource, not a
+        // browser-reporting cache. Refresh it even when there is no `Sessions`
+        // resource (headless/native); the server assembly separately decides
+        // whether there is a phone to receive `ServerMessage::DebugState`.
+        app.add_systems(PreUpdate, catalogue::refresh_readback);
 
         // The four legacy-overlay capture sinks (issue #1150). Each is the
         // target-agnostic JSON home for one migrated surface, the analogue of
@@ -135,6 +152,7 @@ impl Plugin for DebugPlugin {
             StateClass::Presentation,
             "debug-console-latency",
         )
+        .declare_state::<DebugSurfaceReadback>(StateClass::Presentation, "debug-overlay-state")
         .declare_state::<ConsoleLatencyTracker>(StateClass::Presentation, "debug-console-latency")
         .declare_state::<ConsoleLatencyCapture>(StateClass::Presentation, "debug-console-latency")
         .declare_state::<TickAdmissionInstant>(StateClass::Presentation, "debug-console-latency")
@@ -266,12 +284,10 @@ impl Plugin for DebugPlugin {
         //
         // The flag-gate lives INSIDE each system (each takes its
         // `debug_overlay` enabled flag as `Option<Res<..>>` and returns early
-        // when it is absent or off), not on a `run_if`: those flags are only
-        // inserted where `DebugOverlayPlugin` ran (the browser host), while a
-        // headless run merely declares them — so a `run_if` fetching the flag as
-        // `Res` could touch a resource that does not exist. The projections cost
-        // nothing when the flag is off, and the determinism guard inserts the
-        // flags to drive the publish deliberately.
+        // when it is absent or off), preserving the modules' standalone bare-App
+        // fixtures. `DebugPlugin` now inserts every flag on assembled targets so
+        // the catalogue adapters and all-build readback are complete; the
+        // projections still cost nothing while their flags are off.
         app.add_systems(PostUpdate, modifiers::publish_modifier_debug);
         app.add_systems(PostUpdate, damage::publish_damage_debug);
         app.add_systems(PostUpdate, entities::publish_entity_behavior_debug);

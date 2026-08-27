@@ -241,10 +241,26 @@ impl StationActivityTracker {
 ///
 /// The flag gates only the JSON *publish*; the counters in
 /// [`StationActivityTracker`] run whatever this says. Flipped from the host
-/// cog's Debug tab (`wasm_toggle_station_activity`) and from a connected phone
-/// (`DebugFlag::StationActivity`), read back in `ServerMessage::DebugState`.
+/// cog's generic Debug Surface setter and from a connected phone
+/// (`DebugSurface::StationActivity`), read back in `ServerMessage::DebugState`.
 #[derive(Resource, Default, Debug)]
 pub struct DebugStationActivityEnabled(pub bool);
+
+impl crate::debug::catalogue::DebugSurfaceState for DebugStationActivityEnabled {
+    fn is_enabled(&self) -> bool {
+        self.0
+    }
+
+    fn set_enabled(&mut self, enabled: bool) {
+        self.0 = enabled;
+    }
+}
+
+/// Module-owned adapter for the station-activity Debug Surface.
+pub const DEBUG_STATION_ACTIVITY_ADAPTER: crate::debug::catalogue::DebugSurfaceAdapter =
+    crate::debug::catalogue::DebugSurfaceAdapter::for_resource::<DebugStationActivityEnabled>(
+        crate::core::debug_surface::DebugSurface::StationActivity,
+    );
 
 /// The latest station-activity JSON, when capture is enabled (issue #1145).
 ///

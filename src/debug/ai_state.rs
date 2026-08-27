@@ -254,10 +254,26 @@ pub fn ship_scored_pool(blackboards: &ShipSystemBlackboards) -> Vec<ScoredObject
 ///
 /// Gates only the JSON publish; the pool it projects is authoritative state that
 /// exists whatever this says. Flipped from the host cog's Debug tab
-/// (`wasm_toggle_ai_doctrine`) and from a connected phone
-/// (`DebugFlag::AiDoctrine`), read back in `ServerMessage::DebugState`.
+/// (the generic Debug Surface setter) and from a connected phone
+/// (`DebugSurface::AiDoctrine`), read back in `ServerMessage::DebugState`.
 #[derive(Resource, Default, Debug)]
 pub struct DebugAiDoctrineEnabled(pub bool);
+
+impl crate::debug::catalogue::DebugSurfaceState for DebugAiDoctrineEnabled {
+    fn is_enabled(&self) -> bool {
+        self.0
+    }
+
+    fn set_enabled(&mut self, enabled: bool) {
+        self.0 = enabled;
+    }
+}
+
+/// Module-owned adapter for the AI-doctrine Debug Surface.
+pub const DEBUG_AI_DOCTRINE_ADAPTER: crate::debug::catalogue::DebugSurfaceAdapter =
+    crate::debug::catalogue::DebugSurfaceAdapter::for_resource::<DebugAiDoctrineEnabled>(
+        crate::core::debug_surface::DebugSurface::AiDoctrine,
+    );
 
 /// The latest AI doctrine-pool JSON, when capture is enabled (issue #1149).
 ///

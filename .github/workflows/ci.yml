@@ -356,6 +356,12 @@ jobs:
       - name: Install Node dependencies
         run: npm install
 
+      # Rust owns Debug Surface identity, order, and wire names. The phone and
+      # classic host script consume a committed JS artefact generated from that
+      # Rust macro, so fail here when a Rust edit was not regenerated.
+      - name: Check generated Debug Surface catalogue is current
+        run: npm run debug-surfaces:check
+
       - name: Run editor tests
         run: npx vitest run
 

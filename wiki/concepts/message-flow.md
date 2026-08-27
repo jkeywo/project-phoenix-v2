@@ -1,8 +1,8 @@
 ---
 title: Message Flow
 type: concept
-tags: [messages, bridge, wasm, bevy, routing, delivery-class, coordination]
-sources: [src/server/bridge.rs, src/core/codec.rs, src/core/messages.rs, src/core/broadcast/, src/lobby/server.rs, src/lobby/handler.rs, src/command_admission/, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/ship/shields.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/console/helm/server.rs, src/console/weapons/server.rs, src/console/repair/server.rs, src/console_bridge.rs, server.html, client.html, gui/client-router.js, gui/sim-state.js, gui/console-state.js, gui/coordination-popup.js]
+tags: [messages, bridge, wasm, bevy, events, routing, delivery-class, snapshot, coordination]
+sources: [src/core/debug_surface.rs, src/debug/catalogue.rs, src/server/bridge.rs, src/core/codec.rs, src/core/messages.rs, src/core/broadcast/, src/lobby/server.rs, src/lobby/handler.rs, src/command_admission/, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/server_app/registration.rs, src/ship/shields.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/console/helm/server.rs, src/console/weapons/server.rs, src/console/repair/server.rs, src/console_bridge.rs, server.html, client.html, gui/client-router.js, gui/debug-surfaces.generated.js, gui/debug-surface-adapters.js, gui/server-settings.js, gui/settings-panel.js, gui/sim-state.js, gui/console-state.js, gui/coordination-popup.js, scripts/generate-debug-surfaces.mjs, scripts/build-client.mjs, AGENTS.md]
 updated: 2026-08-28
 ---
 
@@ -121,6 +121,60 @@ generic Station or Ship popups while making that decision.
 ## Codec resilience
 
 All JSON encoding/decoding is centralised in `src/core/codec.rs`. `decode_bridge_client_messages` partitions valid messages from decode errors so one malformed frame does not discard the rest of the inbound batch. The bridge logs rejected payloads and continues processing.
+
+## Debug Surface catalogue (#1267)
+
+`src/core/debug_surface.rs` declares every diagnostic identity once. Its macro
+invocation generates `DebugSurface`, `DEBUG_SURFACE_CATALOGUE`, stable `ALL`
+iteration, serde names, and bridge name parsing from the same rows. There is no
+parallel `DebugToggleKind`. `src/debug/catalogue.rs` assembles exactly one
+`DebugSurfaceAdapter` constant from each owning diagnostic Module; each adapter
+reads and writes that Module's enabled Resource. The completeness test requires
+one adapter per canonical row in the same order.
+
+The same Rust macro is also the source for JavaScript identity, order, and wire
+names. `scripts/generate-debug-surfaces.mjs` parses its deliberately narrow row
+syntax and writes `gui/debug-surfaces.generated.js`, which exports frozen ESM
+symbols and publishes the same object globally for `server.html`'s classic
+script. Host and phone modules keep their own presentation ids, payload readers,
+and renderers, but `projectDebugSurfaceAdapters` validates their coverage and
+projects them through generated canonical order instead of letting either UI
+re-author identity or iteration. Missing, duplicate, or unknown adapters fail
+at module load. The editor-test job and `scripts/build-client.mjs` both reject
+a stale generated file; the classic host starts loading it eagerly and awaits
+that exact module before the `debug_regions` route can mutate a surface.
+
+The host and phone reach those same adapters by different transports:
+
+- The server-page cog sends an absolute `(wire name, enabled)` through the one
+  `wasm_set_debug_surface` export. Its value comes from authoritative readback,
+  so a phone changing the same surface cannot leave the host applying a stale
+  relative toggle. The export is cfg-absent from a public-demo WASM binary.
+- A phone sends `ClientMessage::ToggleDebugFlag { flag: DebugSurface }`.
+  `server::bridge::drain_client_debug_flags` accepts only connected sessions and
+  queues `debug::catalogue::apply_pending_toggles`. Duplicate surfaces received
+  in one drain still collapse to one flip, preserving the old pending-set
+  behavior. The message variant and drain are cfg-absent from demo builds.
+
+`debug::catalogue::refresh_readback` walks the adapters in canonical order each
+`PreUpdate`. `ServerMessage::DebugState` sends that vector to phones, while
+`wasm_get_debug_flags` exposes the identical state to the host cog. Readback is
+available in every build because it grants no mutation authority. The
+surface-specific payload getters remain beside their publishers because Damage,
+Scenario State, Console Latency, and the other panels intentionally have
+different structured schemas; only their identity/enabled state is generic.
+
+Pause and simulation-changing cheats are not catalogue members. Host Pause is
+queued separately by `wasm_toggle_pause` and remains on the trusted host's
+Gameplay tab in every build. Phone Pause remains its own demo-gated
+`ClientMessage::TogglePause`, drained frame-driven because pausing starves the
+`FixedUpdate` schedule. God Mode still crosses command admission so it is
+tick-stamped/logged/replayable, and Instagib remains host-only. A generic Debug
+Surface mutation can therefore never freeze the clock or change damage rules.
+
+The Debug/Cheat tab also carries Teleport to Waypoint, enabled only while the
+shared authoritative Navigation waypoint exists. It is a separate
+simulation-changing host action, not a Debug Surface.
 
 ## Related
 

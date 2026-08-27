@@ -166,7 +166,7 @@ pub fn encode_console_latency(p: &crate::debug::payload::ConsoleLatencyPayload) 
 /// Encode the debug-flag read-back for the host page's settings cog (issue
 /// #1169 review, finding C2).
 ///
-/// `[(DebugFlag, bool)]` — the exact list `ServerMessage::DebugState` carries —
+/// `[(DebugSurface, bool)]` — the exact list `ServerMessage::DebugState` carries —
 /// as a flat object keyed by each flag's own variant name:
 /// `{"ConsoleLatency":true,"Regions":false,…}`. Flat rather than the wire's pair
 /// list because the only consumer asks about one named flag at a time, and
@@ -178,10 +178,10 @@ pub fn encode_console_latency(p: &crate::debug::payload::ConsoleLatencyPayload) 
 /// string keys and booleans, which serde never fails to encode, so an error
 /// becomes the empty string the cog already treats as "the simulation has not
 /// reported yet".
-pub fn encode_debug_flags(flags: &[(crate::core::messages::DebugFlag, bool)]) -> String {
+pub fn encode_debug_surfaces(flags: &[(crate::core::debug_surface::DebugSurface, bool)]) -> String {
     let map: std::collections::BTreeMap<String, bool> = flags
         .iter()
-        .map(|(flag, on)| (format!("{flag:?}"), *on))
+        .map(|(surface, on)| (surface.wire_name().to_string(), *on))
         .collect();
     serde_json::to_string(&map).unwrap_or_default()
 }

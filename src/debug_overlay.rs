@@ -5,8 +5,24 @@ use crate::entities::spawner::RegionShapeSection;
 use crate::regions::shape::RegionShape;
 
 /// Resource indicating whether debug region wireframes are enabled.
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct DebugRegionsEnabled(pub bool);
+
+impl crate::debug::catalogue::DebugSurfaceState for DebugRegionsEnabled {
+    fn is_enabled(&self) -> bool {
+        self.0
+    }
+
+    fn set_enabled(&mut self, enabled: bool) {
+        self.0 = enabled;
+    }
+}
+
+/// Module-owned adapter for the region-wireframe Debug Surface.
+pub const DEBUG_REGIONS_ADAPTER: crate::debug::catalogue::DebugSurfaceAdapter =
+    crate::debug::catalogue::DebugSurfaceAdapter::for_resource::<DebugRegionsEnabled>(
+        crate::core::debug_surface::DebugSurface::Regions,
+    );
 
 /// Resource indicating whether the modifier debug overlay is enabled.
 #[derive(Resource, Default)]
@@ -18,8 +34,8 @@ pub struct DebugOverlayEnabled(pub bool);
 /// alongside the overlays (issue #939): the host settings menu exposes pause
 /// on its **Gameplay** tab, which is not build-gated, so this resource and
 /// everything that drives it must survive into a demo build where the
-/// Debug/Cheat tab is absent. The settings menu is its only driver, through
-/// the `DebugToggleKind::Pause` pending toggle.
+/// Debug/Cheat tab is absent. Pause has its own bridge pending flag and never
+/// enters the Debug Surface catalogue.
 #[derive(Resource, Default)]
 pub struct SimulationPaused(pub bool);
 
@@ -77,8 +93,8 @@ impl DamageLog {
 
 // ── The phone client's settings route (issue #940) ──────────────────────────
 //
-// The host page flips these resources through `bridge::drain_debug_toggles`,
-// which drains a thread-local the `wasm_toggle_*` exports fill. A phone has no
+// The host page sets these resources through `bridge::drain_host_controls`,
+// which drains the generic catalogue export. A phone has no
 // WASM to call, so it sends a top-level `ClientMessage` and the systems below
 // are its equivalent: two drains and one read-back broadcast.
 //
@@ -106,31 +122,30 @@ impl DamageLog {
 #[derive(Resource, Default)]
 #[allow(clippy::type_complexity)]
 pub struct LastReportedDebugState(
-    pub Option<(Vec<(crate::core::messages::DebugFlag, bool)>, bool, bool)>,
+    pub  Option<(
+        Vec<(crate::core::debug_surface::DebugSurface, bool)>,
+        bool,
+        bool,
+    )>,
 );
 
 /// Decide which flags a batch of inbound messages actually flips.
 ///
 /// Pure and Bevy-free so the authority question is testable without an App:
 /// a message counts only when its sender is a connected player. There is no
-/// per-flag question left to ask — every `DebugFlag` is diagnostic-only, and
-/// the build gate is the `#[cfg]` on this function and on the message itself.
-/// Returns the toggle kinds in arrival order; `apply_pending_toggles` dedupes
-/// them, exactly as it does for the host page's own pending set.
-///
-/// Stays on the sim side (issue #1193): it names only the protocol-layer
-/// [`crate::core::messages::DebugToggleKind`], nothing under `server::bridge`.
-/// Its consumer, the phone-route drain that feeds `apply_pending_toggles`, moved
-/// to `server::bridge::drain_client_debug_flags` (the marshalling side).
+/// per-surface question left to ask — every `DebugSurface` is diagnostic-only,
+/// and the build gate is the `#[cfg]` on this function and on the message itself.
+/// Returns the canonical identities in arrival order; the catalogue applier
+/// dedupes them, exactly as the former pending set did.
 #[cfg(not(phoenix_demo_build))]
 pub fn admitted_flag_toggles<'a>(
-    messages: impl IntoIterator<Item = (&'a str, crate::core::messages::DebugFlag)>,
+    messages: impl IntoIterator<Item = (&'a str, crate::core::debug_surface::DebugSurface)>,
     is_connected: impl Fn(&str) -> bool,
-) -> Vec<crate::core::messages::DebugToggleKind> {
+) -> Vec<crate::core::debug_surface::DebugSurface> {
     messages
         .into_iter()
         .filter(|(token, _)| is_connected(token))
-        .map(|(_, flag)| crate::core::messages::DebugToggleKind::from(flag))
+        .map(|(_, surface)| surface)
         .collect()
 }
 
@@ -189,7 +204,7 @@ pub fn drain_client_pause(
     paused.0 = !paused.0;
     // Identical side effect to the host page's drain: pausing `Time<Virtual>`
     // starves the fixed accumulator and freezes the whole sim. See
-    // `bridge::drain_debug_toggles` for what that costs.
+    // `bridge::drain_host_controls` for what that costs.
     if paused.0 {
         virtual_time.pause();
     } else {
@@ -221,25 +236,14 @@ pub fn drain_client_pause(
 /// Writes `OutboundMessage` directly rather than `SimOutbox` because that outbox
 /// is drained in `FixedUpdate`: a client that had just paused the game would
 /// never be told it worked.
-#[allow(clippy::too_many_arguments)]
 pub fn report_debug_state(
     mut reader: MessageReader<crate::lobby::InboundMessage>,
-    regions: Res<DebugRegionsEnabled>,
-    overlay: Res<DebugOverlayEnabled>,
+    surfaces: Res<crate::debug::catalogue::DebugSurfaceReadback>,
     paused: Res<SimulationPaused>,
-    damage: Res<DebugDamageEnabled>,
-    entities: Res<DebugEntitiesEnabled>,
-    inspector: Res<DebugEntityInspectorEnabled>,
-    station_activity: Res<crate::debug::DebugStationActivityEnabled>,
-    ai_doctrine: Res<crate::debug::DebugAiDoctrineEnabled>,
-    scenario_state: Res<crate::debug::DebugScenarioStateEnabled>,
-    console_latency: Res<crate::debug::DebugConsoleLatencyEnabled>,
     god_mode: Option<Res<crate::server_app::GodMode>>,
     mut last: ResMut<LastReportedDebugState>,
     mut writer: MessageWriter<crate::lobby::OutboundMessage>,
 ) {
-    use crate::core::messages::DebugFlag;
-
     // Forgetting what was last sent makes the compare below re-announce the
     // current state to everyone, which is cheap and is the only sync a joining
     // phone gets. That resend and the new peer's own `Welcome` flush in the
@@ -256,27 +260,7 @@ pub fn report_debug_state(
     }
 
     let god_mode = god_mode.map(|g| g.0).unwrap_or(false);
-    let flags: Vec<(DebugFlag, bool)> = DebugFlag::ALL
-        .iter()
-        .map(|flag| {
-            let on = match flag {
-                DebugFlag::Regions => regions.0,
-                DebugFlag::Modifiers => overlay.0,
-                DebugFlag::Damage => damage.0,
-                DebugFlag::Entities => entities.0,
-                DebugFlag::Inspector => inspector.0,
-                DebugFlag::StationActivity => station_activity.0,
-                DebugFlag::AiDoctrine => ai_doctrine.0,
-                DebugFlag::ScenarioState => scenario_state.0,
-                // The one flag a client acts on rather than only painting
-                // (issue #1169): seeing this on is what makes a phone start
-                // measuring its own console round trips and reporting them.
-                DebugFlag::ConsoleLatency => console_latency.0,
-            };
-            (*flag, on)
-        })
-        .collect();
-
+    let flags = surfaces.0.clone();
     let current = (flags, paused.0, god_mode);
     if last.0.as_ref() == Some(&current) {
         return;
@@ -291,7 +275,7 @@ pub fn report_debug_state(
     // for the wire, so the page and a connected phone can never be told
     // different things.
     #[cfg(all(target_arch = "wasm32", feature = "server"))]
-    crate::server::bridge::set_debug_flags_string(crate::core::codec::encode_debug_flags(
+    crate::server::bridge::set_debug_flags_string(crate::core::codec::encode_debug_surfaces(
         &current.0,
     ));
     writer.write(crate::lobby::OutboundMessage {
@@ -307,8 +291,8 @@ pub fn report_debug_state(
 
 /// Server-only plugin that draws region shape wireframes when enabled.
 ///
-/// The `enabled` field is typically set from the `?debug_regions=1` URL parameter
-/// on WASM (via `bridge.rs`), or directly in tests.
+/// The `enabled` field supports direct native/test setup. The WASM host starts
+/// false and applies `?debug_regions=1` through the catalogue after startup.
 pub struct DebugOverlayPlugin {
     pub enabled: bool,
 }
@@ -477,7 +461,7 @@ mod tests {
         let plugin = DebugOverlayPlugin { enabled: false };
         let mut app = App::new();
         plugin.build(&mut app);
-        // Simulate what drain_debug_toggles does: flip the resource.
+        // Simulate what the catalogue adapter does: flip the resource.
         app.world_mut().resource_mut::<DebugRegionsEnabled>().0 = true;
         let enabled = app.world().resource::<DebugRegionsEnabled>();
         assert!(enabled.0, "resource should be true after toggle");
@@ -583,33 +567,6 @@ mod tests {
         assert!(!enabled.0, "damage overlay should be disabled by default");
     }
 
-    /// Every wire flag maps onto a distinct host-page toggle kind — the two
-    /// vocabularies stay one-for-one, so no flag silently flips another's
-    /// resource. Compiled in every build, because the conversion is: it is the
-    /// shape of the two enums, not a route.
-    #[test]
-    fn every_flag_maps_to_its_own_toggle_kind() {
-        let kinds: std::collections::HashSet<_> = crate::core::messages::DebugFlag::ALL
-            .iter()
-            .map(|f| crate::core::messages::DebugToggleKind::from(*f))
-            .collect();
-        assert_eq!(kinds.len(), crate::core::messages::DebugFlag::ALL.len());
-    }
-
-    /// No `DebugFlag` reaches the clock. Pause left this enum precisely so the
-    /// overlay drain could not touch `SimulationPaused` even by accident, and
-    /// this is that claim, checked rather than asserted in prose.
-    #[test]
-    fn no_debug_flag_maps_to_the_pause_toggle() {
-        for flag in crate::core::messages::DebugFlag::ALL {
-            assert_ne!(
-                crate::core::messages::DebugToggleKind::from(flag),
-                crate::core::messages::DebugToggleKind::Pause,
-                "{flag:?} would let the overlay drain stop the simulation clock"
-            );
-        }
-    }
-
     // ── The phone client's settings routes (issue #940) ─────────────────────
     //
     // Gated as a whole: in a demo build neither drain exists, so there is
@@ -621,7 +578,7 @@ mod tests {
     #[cfg(not(phoenix_demo_build))]
     mod client_route {
         use super::*;
-        use crate::core::messages::DebugFlag;
+        use crate::core::debug_surface::DebugSurface;
 
         /// Only tokens in this list count as connected players.
         fn connected<'a>(known: &'a [&'a str]) -> impl Fn(&str) -> bool + 'a {
@@ -629,34 +586,32 @@ mod tests {
         }
 
         /// The happy path: a connected player's flags reach the pending set as
-        /// the matching `DebugToggleKind`s, in submission order.
+        /// the canonical surface identities, in submission order.
         #[test]
         fn a_connected_players_flag_is_admitted() {
             let kinds = admitted_flag_toggles(
-                [("phone", DebugFlag::Regions), ("phone", DebugFlag::Damage)],
+                [
+                    ("phone", DebugSurface::Regions),
+                    ("phone", DebugSurface::Damage),
+                ],
                 connected(&["phone"]),
             );
-            assert_eq!(
-                kinds,
-                vec![
-                    crate::core::messages::DebugToggleKind::Regions,
-                    crate::core::messages::DebugToggleKind::Damage,
-                ]
-            );
+            assert_eq!(kinds, vec![DebugSurface::Regions, DebugSurface::Damage]);
         }
 
         /// A token nobody registered is refused. The route widens *who* may
         /// flip a debug flag, not *whether* a sender has to exist.
         #[test]
         fn an_unregistered_token_is_refused() {
-            assert!(
-                admitted_flag_toggles([("ghost", DebugFlag::Regions)], connected(&["phone"]),)
-                    .is_empty()
-            );
+            assert!(admitted_flag_toggles(
+                [("ghost", DebugSurface::Regions)],
+                connected(&["phone"]),
+            )
+            .is_empty());
         }
 
         // `an_admitted_batch_flips_only_the_flags_it_names` — the round-trip that
-        // feeds `admitted_flag_toggles`' output into `apply_pending_toggles` —
+        // feeds `admitted_flag_toggles`' output into the catalogue applier —
         // moved to `server::bridge::tests` with the drain and the marshalling it
         // exercises (issue #1193). The two tests above keep the sim-side authority
         // filter (`admitted_flag_toggles`) covered here.

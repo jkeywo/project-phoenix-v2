@@ -207,32 +207,39 @@ entities:
     core:
       status: implemented
       confidence: confirmed
-      title: Debug Overlay Controller
-      summary: Maintains host-local diagnostic toggles for regions, modifier overlay, damage, entities, and entity inspection, plus the bounded damage log used by diagnostics.
+      title: Debug Surface Catalogue
+      summary: Defines the one stable diagnostic identity and wire-name catalogue for region wireframes, modifiers, damage, entities, inspection, station activity, AI doctrine, scenario state, and console latency. Each owning diagnostic Module supplies one Resource adapter; host and phone mutation plus all-build readback traverse those adapters rather than positional bridge booleans or a second toggle enum.
+      rationale:
+        - "DebugSurface and DEBUG_SURFACE_CATALOGUE are Bevy-free protocol identity. DEBUG_SURFACE_ADAPTERS is the sole runtime assembly seam and its completeness test requires exactly one correctly ordered module-owned adapter for every catalogue row."
+        - "The Rust macro invocation is the sole authored cross-language identity/order/wire-name table. A deterministic parser generates the committed ESM/global artefact used by both host and phone JavaScript; editor CI and the client build reject drift. Presentation ids, readers, and renderers remain module-owned adapters rather than entering the generated catalogue."
+        - "The host uses one absolute wasm_set_debug_surface export and the phone's ToggleDebugFlag carries the same DebugSurface. Pending relative phone toggles retain the established collapse-to-one behavior; readback is recomputed in catalogue order and drives both ServerMessage::DebugState and the host cog."
+        - "Diagnostic mutation exports and client message variants are cfg-absent from public-demo builds. DebugSurface contains neither Pause nor simulation-changing cheats: host Pause remains a Gameplay route in every build, phone Pause has its own demo-gated message, and God Mode/Instagib retain their authoritative paths."
     architecture:
       kind: diagnostic-service
       authority: host-local
       owns: [debug-overlay-state]
       produces: [debug-overlay-state]
-      runs_in: [host-browser-runtime]
+      runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [src/debug_overlay.rs]
-      tests: [cargo test]
+      paths: [src/core/debug_surface.rs, src/debug/catalogue.rs, src/debug/mod.rs, src/debug_overlay.rs, src/server/bridge.rs, gui/debug-surfaces.generated.js, gui/debug-surface-adapters.js, gui/server-settings.js, gui/settings-panel.js, scripts/generate-debug-surfaces.mjs]
+      symbols: [DebugSurface, DEBUG_SURFACE_CATALOGUE, DEBUG_SURFACE_ADAPTERS, DebugSurfaceReadback, DEBUG_SURFACE, DEBUG_SURFACE_ORDER, projectDebugSurfaceAdapters, apply_pending_states, apply_pending_toggles, refresh_readback, wasm_set_debug_surface]
+      tests: [cargo test --lib debug_surface, cargo test --lib debug::catalogue, cargo test --lib server::bridge::tests, npm run debug-surfaces:check, npx vitest run tests/client/debug-surfaces-generation.test.js tests/client/server-settings.test.js tests/client/settings-panel.test.js]
 
   - state: debug-overlay-state
     core:
       status: implemented
       confidence: confirmed
       title: Debug Overlay State
-      summary: Host-local diagnostic-toggle and damage-log state. It is not replicated to phone clients and does not itself alter gameplay.
+      summary: Presentation-only per-surface enabled state and stable catalogue readback. The state does not alter gameplay; ServerMessage::DebugState reports it to phones in every build, while each surface's structured payload remains owned by its diagnostic Module.
     architecture:
       classification: local
       owner: debug-overlay-controller
       writers: [debug-overlay-controller]
     implementation:
       status: declared
-      paths: [src/debug_overlay.rs]
+      paths: [src/core/debug_surface.rs, src/debug/catalogue.rs, src/debug/mod.rs, src/debug_overlay.rs]
+      symbols: [DebugSurfaceReadback]
 
   - component: host-debug-simulation-controls
     core:
@@ -272,16 +279,16 @@ entities:
     implementation:
       status: declared
       paths: [src/server/bridge.rs, src/debug_overlay.rs, src/server_app/components.rs]
-      # Instagib has no typed resource: INSTAGIB is a raw `thread_local!<bool>`
-      # in src/server/bridge.rs, read by is_instagib(). Pause and god mode are
-      # real Bevy resources; recorded together with an honest note on the
-      # third.
+      # Instagib's authoritative state is the typed `server_app::Instagib`
+      # Resource. The wasm edge retains only a queued-toggle inbox and the
+      # frame-lagged `INSTAGIB_MIRROR` read by `wasm_get_instagib`; its drain and
+      # publisher move state across the World-less bridge boundary.
       #
       # Pause is `SimulationPaused` (renamed from `DebugPaused` in issue #939):
       # the host settings menu exposes it on the NOT-build-gated Gameplay tab,
       # so it outlives the Debug/Cheat tab in the demo build and is no longer
       # a debug-only concept.
-      symbols: [SimulationPaused, GodMode, is_instagib]
+      symbols: [SimulationPaused, GodMode, Instagib, PENDING_INSTAGIB_TOGGLES, INSTAGIB_MIRROR, drain_instagib_toggle, publish_instagib]
 
   - component: client-debug-control-route
     core:
@@ -295,6 +302,7 @@ entities:
         - "[ai] Pause is a third route, not a fourth overlay flag. It is authoritative state rather than presentation, it cannot cross command admission at all because pausing starves the FixedUpdate schedule admission runs in, and it needs a build gate independent of the diagnostics because a demo player freezing everyone's mission is an authority problem rather than a diagnostics one."
         - "Build-gated with #[cfg], not an if: a hidden control is a UI fact and UI facts are forgeable, so the demo build contains no route to reach. The two session messages are gated at the variant, so a demo host cannot decode the frame; god mode is gated at the admission branch, because its message exists in every build. build.rs derives the phoenix_demo_build cfg from the same PHOENIX_DEMO_BUILD that build_flags reads back through option_env!, and the two answers are pinned to each other."
         - "[ai] The read-back is deliberately NOT gated. DebugState reports the flags, the pause and god mode in every build, because reporting grants no authority - a demo phone may learn that the host paused the mission and still have no way to pause it itself."
+        - "[ai] Issue #1267 gives diagnostics one catalogue and adapter path. The phone route carries DebugSurface directly and queues the catalogue applier; there is no DebugToggleKind conversion or bridge boolean census. The host's generic diagnostic mutation export is cfg-absent in the same demo build, while the host Pause export remains because it is a separate trusted Gameplay control."
     architecture:
       kind: admission-policy
       authority: authoritative
@@ -303,8 +311,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/command_admission/debug_route.rs, src/command_admission/policy.rs, src/debug_overlay.rs, src/build_flags.rs, src/demo_build_value.rs, build.rs, gui/settings-panel.js]
-      symbols: [admits_debug_command, is_demo_build, admitted_flag_toggles, admitted_pause_toggles, drain_client_pause]
+      paths: [src/command_admission/debug_route.rs, src/command_admission/policy.rs, src/core/debug_surface.rs, src/debug/catalogue.rs, src/debug_overlay.rs, src/server/bridge.rs, src/build_flags.rs, src/demo_build_value.rs, build.rs, gui/settings-panel.js]
+      symbols: [DebugSurface, admits_debug_command, is_demo_build, admitted_flag_toggles, admitted_pause_toggles, drain_client_debug_flags, drain_client_pause]
       tests: [cargo test, npx vitest run tests/client/settings-panel.test.js]
 
   - component: host-debug-waypoint-teleport

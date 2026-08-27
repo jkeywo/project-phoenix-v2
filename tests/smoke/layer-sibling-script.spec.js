@@ -222,7 +222,7 @@ fn failed_sibling_deadline(ctx) {
   }), witness);
   expect(forbidden).toEqual({ entity: false, objective: false });
 
-  await serverPage.evaluate(() => window.wasm_toggle_scenario_state());
+  await serverPage.evaluate(() => window.wasm_set_debug_surface('ScenarioState', true));
   await serverPage.waitForFunction(() => {
     try {
       const payload = JSON.parse(window.wasm_get_scenario_state());
@@ -318,7 +318,7 @@ fn spawn_reload_witness(ctx) {
   ), witness);
   expect(witnessSpawns).toBe(2);
 
-  await serverPage.evaluate(() => window.wasm_toggle_scenario_state());
+  await serverPage.evaluate(() => window.wasm_set_debug_surface('ScenarioState', true));
   await serverPage.waitForFunction(() => {
     try {
       const payload = JSON.parse(window.wasm_get_scenario_state());

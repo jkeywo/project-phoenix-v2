@@ -18,6 +18,7 @@ import { cp, mkdir, copyFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { emitShipCards } from './ship-cards.mjs';
+import { assertDebugSurfaceModuleCurrent } from './generate-debug-surfaces.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(root, 'dist', 'client');
@@ -38,6 +39,11 @@ const ASSET_DIRS = [
 ];
 
 async function main() {
+  // The phone has no Rust/WASM at runtime, so its Debug Surface identity comes
+  // from a committed JS module generated from the Rust catalogue. Refuse a
+  // stale module before deleting the previous build output.
+  await assertDebugSurfaceModuleCurrent(root);
+
   await rm(out, { recursive: true, force: true });
   await mkdir(path.join(out, 'assets'), { recursive: true });
 

@@ -20,6 +20,22 @@ use bevy::prelude::*;
 use crate::debug::payload::{DamageDebugPayload, DamageEntry, DEBUG_SCHEMA_VERSION};
 use crate::debug_overlay::DamageLog;
 
+impl crate::debug::catalogue::DebugSurfaceState for crate::debug_overlay::DebugDamageEnabled {
+    fn is_enabled(&self) -> bool {
+        self.0
+    }
+
+    fn set_enabled(&mut self, enabled: bool) {
+        self.0 = enabled;
+    }
+}
+
+/// Module-owned adapter for the damage Debug Surface.
+pub const DEBUG_DAMAGE_ADAPTER: crate::debug::catalogue::DebugSurfaceAdapter =
+    crate::debug::catalogue::DebugSurfaceAdapter::for_resource::<
+        crate::debug_overlay::DebugDamageEnabled,
+    >(crate::core::debug_surface::DebugSurface::Damage);
+
 /// The latest damage-log JSON, when capture is enabled (issue #1150).
 ///
 /// The target-agnostic sink, mirroring `debug::StationActivityCapture`: every

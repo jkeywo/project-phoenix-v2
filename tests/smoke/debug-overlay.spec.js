@@ -11,17 +11,17 @@ test('without URL param: debug regions disabled', async ({ context }) => {
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
   await waitForWasmReady(serverPage);
 
-  // wasm_is_debug_regions_enabled should be callable and return false
-  const enabled = await serverPage.evaluate(() => {
-    const fn = window.wasm_is_debug_regions_enabled;
-    return typeof fn === 'function' ? fn() : null;
+  await serverPage.waitForFunction(() => {
+    try {
+      return typeof JSON.parse(window.wasm_get_debug_flags()).Regions === 'boolean';
+    } catch (_) {
+      return false;
+    }
   });
-
-  // If the function is not available (WASM not fully initialised during test),
-  // the flag was never set — that's acceptable as "disabled"
-  if (enabled !== null) {
-    expect(enabled).toBe(false);
-  }
+  const enabled = await serverPage.evaluate(
+    () => JSON.parse(window.wasm_get_debug_flags()).Regions,
+  );
+  expect(enabled).toBe(false);
   expect(errors).toHaveLength(0);
 });
 
@@ -32,13 +32,16 @@ test('with ?debug_regions=1: debug regions enabled', async ({ context }) => {
   await serverPage.goto('/?debug_regions=1&scenario=assets/worlds/default.toml');
   await waitForWasmReady(serverPage);
 
-  const enabled = await serverPage.evaluate(() => {
-    const fn = window.wasm_is_debug_regions_enabled;
-    return typeof fn === 'function' ? fn() : null;
+  await serverPage.waitForFunction(() => {
+    try {
+      return JSON.parse(window.wasm_get_debug_flags()).Regions === true;
+    } catch (_) {
+      return false;
+    }
   });
-
-  if (enabled !== null) {
-    expect(enabled).toBe(true);
-  }
+  const enabled = await serverPage.evaluate(
+    () => JSON.parse(window.wasm_get_debug_flags()).Regions,
+  );
+  expect(enabled).toBe(true);
   expect(errors).toHaveLength(0);
 });

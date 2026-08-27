@@ -54,6 +54,7 @@ deadline the design model does not claim is an error by design.
 cargo fmt -- --check                           # CI: test job, step 1
 cargo clippy --workspace --all-targets --all-features -- -D warnings  # CI: test job, step 2
 cargo test --workspace --features headless     # CI: test job, step 3
+npm run debug-surfaces:check                   # CI: editor-test job (Rust -> JS drift)
 npx vitest run                                 # CI: editor-test job (tests/client/*.test.js)
 node scripts/check-strings.mjs --strict        # CI: editor-test job
 npm run lods:check                             # CI: editor-test job (LOD drift)
@@ -173,12 +174,13 @@ node scripts/build-client.mjs
 # cog's Debug/Cheat tab. Only .github/workflows/deploy-demo.yml sets it —
 # ci.yml's GitHub Pages deploy is the dev host and keeps its debug tooling.
 # Since #940 the same variable ALSO reaches the compiler as a cfg: build.rs
-# turns it into `phoenix_demo_build`, which DELETES four things from a demo
+# turns it into `phoenix_demo_build`, which DELETES five things from a demo
 # binary rather than merely refusing them —
 #   - the god-mode cheat route (src/command_admission/debug_route.rs),
 #   - ClientMessage::ToggleDebugFlag and its drain,
 #   - ClientMessage::TogglePause and its drain, and
-#   - the host mod-pack upload export, `wasm_add_mod_pack` (PRD #855).
+#   - the host mod-pack upload export, `wasm_add_mod_pack` (PRD #855), and
+#   - the host diagnostic mutation export, `wasm_set_debug_surface` (#1267).
 # The third is the blunt one: nothing server-side checks station, captaincy or
 # GamePhase before honouring a client pause, so any one of N demo players could
 # otherwise freeze the mission for everyone, repeatedly. The HOST's own pause,
@@ -195,6 +197,9 @@ node scripts/build-client.mjs
 # stay in every build: server.html calls them unconditionally and, with nothing
 # able to enter the stack, they answer emptily — gating them would turn a no-op
 # into a TypeError.
+# deploy-demo.yml checks the generated wasm-bindgen glue for BOTH privileged
+# mutation exports. Native cfg tests cannot prove a wasm32 export was actually
+# removed from the artifact being shipped.
 # The client page has no WASM to bake anything into, so it learns the
 # flag from the `phoenix-build-demo` meta tag the deploy workflow stamps.
 # The literal both halves compare against lives in ONE place —
@@ -252,8 +257,9 @@ git diff perf/baselines
 #                uploaded as the `pasm-reports` artifact. No pytest step.
 #   test         cargo fmt --check ; cargo clippy --all-targets --all-features
 #                -D warnings ; cargo test
-#   editor-test  npx vitest run ; node scripts/check-strings.mjs --strict ;
-#                npm run lods:check ; npm run lod-captures:check
+#   editor-test  npm run debug-surfaces:check ; npx vitest run ;
+#                node scripts/check-strings.mjs --strict ; npm run lods:check ;
+#                npm run lod-captures:check
 #   build        TRUNK_BUILD_RELEASE=true trunk build --release ;
 #                node scripts/build-client.mjs
 #   smoke        npx playwright test (against the built dist/)

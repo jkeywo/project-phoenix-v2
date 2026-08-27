@@ -2,8 +2,8 @@
 title: Build & Deployment
 type: concept
 tags: [trunk, wasm, github-pages, cloudflare, native-host, ci]
-sources: [Trunk.toml, scripts/build-client.mjs, scripts/check-deploy-headers.mjs, .github/workflows/, README.md, worker/wrangler.toml, worker/wrangler.demo.toml, deploy/cloudflare/_headers, src/delivery/, docs/delivery-checklist.md, pasm/spec/architecture/native-delivery.yaml]
-updated: 2026-08-27
+sources: [Trunk.toml, scripts/build-client.mjs, scripts/generate-debug-surfaces.mjs, scripts/check-deploy-headers.mjs, gui/debug-surfaces.generated.js, .github/workflows/, README.md, worker/wrangler.toml, worker/wrangler.demo.toml, deploy/cloudflare/_headers, src/delivery/, docs/delivery-checklist.md, pasm/spec/architecture/native-delivery.yaml]
+updated: 2026-08-28
 ---
 
 # Build & Deployment
@@ -13,7 +13,7 @@ updated: 2026-08-27
 | Build step | Output | Notes |
 |---|---|---|
 | `TRUNK_BUILD_RELEASE=true trunk build --release` | `dist/index.html` (server.html → view screen) | Builds the Rust/Bevy WASM host with the default `server` feature and enables the release-only post-build optimisation hook. |
-| `node scripts/build-client.mjs` | `dist/client/index.html` plus GUI assets | Copies the pure HTML/JS phone client; there is no client-side WASM feature. |
+| `node scripts/build-client.mjs` | `dist/client/index.html` plus GUI assets | First rejects a stale Rust-derived Debug Surface module, then copies the pure HTML/JS phone client; there is no client-side WASM feature. |
 
 The server is authoritative and runs the simulation. The client is a pure JS shell that connects to the host via PeerJS/WebRTC and renders HTML console panels.
 
@@ -32,6 +32,11 @@ node scripts/build-client.mjs
 ```
 
 Outputs land in `dist/` with the client at `dist/client/`. The QR code on the view screen encodes `https://<host>/client/index.html#<peerId>` so phones land on the right page.
+
+Debug Surface identity, stable order, and wire names are authored in the Rust
+macro at `src/core/debug_surface.rs`. Run `npm run debug-surfaces` after changing
+those rows; `npm run debug-surfaces:check`, the editor-test job, and the client
+build enforce that the committed `gui/debug-surfaces.generated.js` agrees.
 
 ## CI workflows
 
@@ -90,6 +95,13 @@ The Bevy `debug` feature is an opt-in Cargo feature enabled with
 damage log) are functional only when the feature is active. Their
 `wasm_bindgen` gate exports compile on all targets, while the Bevy backing
 resources are no-ops without `debug`.
+
+Project Phoenix's Debug Surface identity and enable-state catalogue is
+independent of that Bevy feature. Its authoritative readback and the
+surface-specific structured payload getters remain available in every build;
+without `debug`, a surface that needs Bevy's debug internals still has no
+backing data to present. The one generic diagnostic mutation export,
+`wasm_set_debug_surface`, is cfg-absent from a public-demo binary.
 
 ## Demo deployment (issue #931)
 

@@ -92,7 +92,7 @@ smoke tests (`tests/smoke/sim-tick.spec.js`).
 
 ## Simulation pause (settings cog)
 
-`wasm_toggle_pause()` (`drain_debug_toggles` in `src/server/bridge.rs`)
+`wasm_toggle_pause()` (`drain_host_controls` in `src/server/bridge.rs`)
 pauses `Time<Virtual>`, which starves the fixed accumulator — `FixedUpdate`
 stops running altogether while paused, not just the `SimSet` chain inside it.
 

@@ -29,7 +29,7 @@
 //!
 //! It follows the station-activity slice (#1145) exactly: one payload struct in
 //! [`crate::debug::payload`], one `encode_*` in [`crate::core::codec`], a
-//! [`DebugFlag`](crate::core::messages::DebugFlag) variant and its bridge
+//! [`DebugSurface`](crate::core::debug_surface::DebugSurface) identity and its bridge
 //! plumbing, and a JSON-driven dock renderer. The only shape difference from the
 //! station-activity tracker is that there are no always-on counters to feed:
 //! scenario state is authoritative already, so the whole surface is the
@@ -55,10 +55,26 @@ use crate::world::server::{ObjectiveManagerRes, WorldContentRuntime};
 /// Gates only the JSON *publish*: unlike the station-activity tracker there are
 /// no counters behind it, because scenario state is authoritative already. Read
 /// back in `ServerMessage::DebugState`; flipped from the host cog's Debug tab
-/// (`wasm_toggle_scenario_state`) and from a connected phone
-/// (`DebugFlag::ScenarioState`).
+/// (the generic Debug Surface setter) and from a connected phone
+/// (`DebugSurface::ScenarioState`).
 #[derive(Resource, Default, Debug)]
 pub struct DebugScenarioStateEnabled(pub bool);
+
+impl crate::debug::catalogue::DebugSurfaceState for DebugScenarioStateEnabled {
+    fn is_enabled(&self) -> bool {
+        self.0
+    }
+
+    fn set_enabled(&mut self, enabled: bool) {
+        self.0 = enabled;
+    }
+}
+
+/// Module-owned adapter for the scenario-state Debug Surface.
+pub const DEBUG_SCENARIO_STATE_ADAPTER: crate::debug::catalogue::DebugSurfaceAdapter =
+    crate::debug::catalogue::DebugSurfaceAdapter::for_resource::<DebugScenarioStateEnabled>(
+        crate::core::debug_surface::DebugSurface::ScenarioState,
+    );
 
 /// The latest scenario-state JSON, when capture is enabled (issue #1148).
 ///

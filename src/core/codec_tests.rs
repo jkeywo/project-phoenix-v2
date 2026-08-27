@@ -255,7 +255,7 @@ fn client_message_table() -> Vec<(ClientMessageDiscriminants, ClientMessage)> {
         (
             ClientMessageDiscriminants::ToggleDebugFlag,
             ClientMessage::ToggleDebugFlag {
-                flag: crate::core::messages::DebugFlag::Regions,
+                flag: crate::core::messages::DebugSurface::Regions,
             },
         ),
         #[cfg(not(phoenix_demo_build))]
@@ -836,9 +836,9 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
             ServerMessage::DebugState {
                 // Mixed on/off so a pair whose flag and bool were swapped
                 // in the encoding would not still round-trip.
-                flags: crate::core::messages::DebugFlag::ALL
+                flags: crate::core::messages::DebugSurface::ALL
                     .iter()
-                    .map(|f| (*f, *f == crate::core::messages::DebugFlag::Modifiers))
+                    .map(|f| (*f, *f == crate::core::messages::DebugSurface::Modifiers))
                     .collect(),
                 // Mixed again, for the same reason: two adjacent bools that
                 // agree cannot catch a transposition.
@@ -2612,12 +2612,12 @@ fn system_blackboard_dossiers_round_trips_and_carries_no_field_for_a_secret() {
 /// the read-back is not, because it is reported in every build.
 #[test]
 fn client_settings_menu_wire_shapes_are_pinned() {
-    use crate::core::messages::DebugFlag;
+    use crate::core::messages::DebugSurface;
 
     #[cfg(not(phoenix_demo_build))]
     {
         let msg = ClientMessage::ToggleDebugFlag {
-            flag: DebugFlag::Regions,
+            flag: DebugSurface::Regions,
         };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_eq!(
@@ -2652,7 +2652,10 @@ fn client_settings_menu_wire_shapes_are_pinned() {
     }
 
     let report = ServerMessage::DebugState {
-        flags: vec![(DebugFlag::Regions, true), (DebugFlag::Modifiers, false)],
+        flags: vec![
+            (DebugSurface::Regions, true),
+            (DebugSurface::Modifiers, false),
+        ],
         paused: true,
         god_mode: true,
     };
@@ -2668,7 +2671,7 @@ fn client_settings_menu_wire_shapes_are_pinned() {
     #[cfg(not(phoenix_demo_build))]
     {
         let msg = ClientMessage::ToggleDebugFlag {
-            flag: DebugFlag::StationActivity,
+            flag: DebugSurface::StationActivity,
         };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_eq!(
@@ -2679,7 +2682,7 @@ fn client_settings_menu_wire_shapes_are_pinned() {
 
         // The AI doctrine-pool flag rides the same route (issue #1149).
         let msg = ClientMessage::ToggleDebugFlag {
-            flag: DebugFlag::AiDoctrine,
+            flag: DebugSurface::AiDoctrine,
         };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_eq!(
@@ -3129,24 +3132,50 @@ fn a_console_latency_report_carries_no_surface_to_forge() {
 /// by the flag names JS asks for and stay deterministic.
 #[test]
 fn debug_flag_readback_encodes_a_flat_object_keyed_by_flag_name() {
-    use crate::core::messages::DebugFlag;
-    let json = crate::core::codec::encode_debug_flags(&[
-        (DebugFlag::ConsoleLatency, true),
-        (DebugFlag::Regions, false),
+    use crate::core::messages::DebugSurface;
+    let json = crate::core::codec::encode_debug_surfaces(&[
+        (DebugSurface::ConsoleLatency, true),
+        (DebugSurface::Regions, false),
     ]);
     assert_eq!(json, r#"{"ConsoleLatency":true,"Regions":false}"#);
 
     // Every flag the wire reports must be reachable by the name the client
     // settings table spells, so a new flag cannot be silently unpaintable.
-    let all: Vec<_> = DebugFlag::ALL.iter().map(|f| (*f, false)).collect();
-    let encoded = crate::core::codec::encode_debug_flags(&all);
+    let all: Vec<_> = DebugSurface::ALL.iter().map(|f| (*f, false)).collect();
+    let encoded = crate::core::codec::encode_debug_surfaces(&all);
     let parsed: serde_json::Value = serde_json::from_str(&encoded).expect("valid JSON");
-    for flag in DebugFlag::ALL {
+    for flag in DebugSurface::ALL {
         assert!(
-            parsed.get(format!("{flag:?}")).is_some(),
+            parsed.get(flag.wire_name()).is_some(),
             "{flag:?} is missing from the cog read-back: {encoded}"
         );
     }
+
+    // The enum's serde spelling and the catalogue's bridge spelling are the
+    // same declaration, not merely two strings that happen to agree today.
+    let report = ServerMessage::DebugState {
+        flags: DebugSurface::ALL
+            .into_iter()
+            .map(|surface| (surface, false))
+            .collect(),
+        paused: false,
+        god_mode: false,
+    };
+    let wire = JsonCodec.encode_server(&report).expect("encode DebugState");
+    let wire: serde_json::Value = serde_json::from_str(&wire).expect("valid JSON");
+    let wire_names: Vec<_> = wire["data"]["flags"]
+        .as_array()
+        .expect("flags array")
+        .iter()
+        .map(|pair| pair[0].as_str().expect("surface wire name"))
+        .collect();
+    assert_eq!(
+        wire_names,
+        DebugSurface::ALL
+            .into_iter()
+            .map(DebugSurface::wire_name)
+            .collect::<Vec<_>>()
+    );
 }
 
 /// `TorpedoTubeState` with non-default volley fields round-trips (issue #632).

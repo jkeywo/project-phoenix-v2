@@ -594,7 +594,7 @@ export class ClientSimState {
         break;
       case 'DebugState':
         // Authoritative read-back of the host's debug/session flags (#940).
-        // `flags` is a list of `[DebugFlag, bool]` pairs in a fixed order,
+        // `flags` is a list of `[DebugSurface, bool]` pairs in catalogue order,
         // folded into a plain object because every consumer asks about one
         // named flag. Replaced wholesale rather than merged: the host sends the
         // complete set every time, so merging could only preserve staleness.
@@ -609,7 +609,7 @@ export class ClientSimState {
           ),
           // Separate wire fields, not entries in `flags`: pause and god mode are
           // authoritative simulation state reached by their own routes, and
-          // neither is a `DebugFlag` any more. Reported in every build even
+          // neither is a `DebugSurface`. Reported in every build even
           // though a demo phone can drive neither — a read-back is not a route.
           paused: !!d.paused,
           godMode: !!d.god_mode,

@@ -21,6 +21,22 @@ use bevy::prelude::*;
 
 use crate::debug::payload::{EntityBehaviorEntry, EntityBehaviorPayload, DEBUG_SCHEMA_VERSION};
 
+impl crate::debug::catalogue::DebugSurfaceState for crate::debug_overlay::DebugEntitiesEnabled {
+    fn is_enabled(&self) -> bool {
+        self.0
+    }
+
+    fn set_enabled(&mut self, enabled: bool) {
+        self.0 = enabled;
+    }
+}
+
+/// Module-owned adapter for the entity-behaviour Debug Surface.
+pub const DEBUG_ENTITIES_ADAPTER: crate::debug::catalogue::DebugSurfaceAdapter =
+    crate::debug::catalogue::DebugSurfaceAdapter::for_resource::<
+        crate::debug_overlay::DebugEntitiesEnabled,
+    >(crate::core::debug_surface::DebugSurface::Entities);
+
 /// The latest entity-behavior JSON, when capture is enabled (issue #1150).
 ///
 /// The target-agnostic sink, mirroring `debug::StationActivityCapture`. `None`

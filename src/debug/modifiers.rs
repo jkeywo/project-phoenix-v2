@@ -20,6 +20,22 @@ use bevy::prelude::*;
 
 use crate::modifiers::ShipModifiers;
 
+impl crate::debug::catalogue::DebugSurfaceState for crate::debug_overlay::DebugOverlayEnabled {
+    fn is_enabled(&self) -> bool {
+        self.0
+    }
+
+    fn set_enabled(&mut self, enabled: bool) {
+        self.0 = enabled;
+    }
+}
+
+/// Module-owned adapter for the modifier Debug Surface.
+pub const DEBUG_MODIFIERS_ADAPTER: crate::debug::catalogue::DebugSurfaceAdapter =
+    crate::debug::catalogue::DebugSurfaceAdapter::for_resource::<
+        crate::debug_overlay::DebugOverlayEnabled,
+    >(crate::core::debug_surface::DebugSurface::Modifiers);
+
 /// The latest modifier-debug JSON, when capture is enabled (issue #1150).
 ///
 /// The target-agnostic sink, mirroring `debug::StationActivityCapture`. `None`

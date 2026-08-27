@@ -1,19 +1,19 @@
 // WASM/JS bridge — all public functions are #[wasm_bindgen] exports.
 //
-// On native targets this module carries only the debug-toggle MARSHALLING —
-// `apply_pending_toggles` (the pure flag-flipping logic, Bevy-free so it is
-// unit-tested natively; see the `tests` module at the bottom) and
-// `drain_client_debug_flags` (the phone-route system that feeds it, moved here
+// On native targets this module carries the debug-toggle MARSHALLING system —
+// `drain_client_debug_flags` (the phone route that feeds the canonical
+// `debug::catalogue` adapters, moved here
 // from `debug_overlay` in issue #1193 so the always-compiled sim half of the
-// overlay names nothing under `crate::server::bridge`). The toggle VOCABULARY
-// they use — `core::messages::DebugToggleKind` — lives in the protocol layer,
-// not here. The WASM-specific glue (thread-locals, wasm_bindgen exports, the
+// overlay names nothing under `crate::server::bridge`). The canonical identity
+// lives in `core::debug_surface`; there is no second pending-toggle enum. The
+// WASM-specific glue (thread-locals, wasm_bindgen exports, the
 // host-page Bevy drain system) is gated behind #[cfg(target_arch = "wasm32")].
 
-// Used by `apply_pending_toggles` below, which is compiled on every target, so
-// this import is not gated.
-use crate::core::messages::DebugToggleKind;
-use std::collections::HashSet;
+#[cfg(not(phoenix_demo_build))]
+use crate::core::debug_surface::DebugSurface;
+
+#[cfg(all(target_arch = "wasm32", not(phoenix_demo_build)))]
+use std::collections::HashMap;
 
 // `drain_client_debug_flags` (moved here from `debug_overlay` in issue #1193) is
 // a Bevy system, so it needs these prelude types on the native path — the rest
@@ -21,7 +21,7 @@ use std::collections::HashSet;
 // `bevy::prelude::*` glob in the gated `use` block below, and under a demo build
 // the drain is compiled out entirely, so the import is scoped to match.
 #[cfg(all(not(target_arch = "wasm32"), not(phoenix_demo_build)))]
-use bevy::prelude::{MessageReader, Res, ResMut};
+use bevy::prelude::{Commands, MessageReader, Res, World};
 
 #[cfg(target_arch = "wasm32")]
 use {
@@ -50,79 +50,14 @@ use {
     wasm_bindgen::prelude::*,
 };
 
-// ── Debug toggle marshalling ────────────────────────────────────────────────
-//
-// The toggle VOCABULARY (`DebugToggleKind`) and its wire form (`DebugFlag`) both
-// live in `crate::core::messages` (the protocol layer, issue #1193). What stays
-// here is the marshalling: `apply_pending_toggles` (below) and, further down,
-// `drain_client_debug_flags`. Both are on the bridge/marshalling side of the
-// sim↔presentation seam so the always-compiled `debug_overlay` never names them.
-//
-// Adding a new debug overlay means: add a `DebugToggleKind` variant (in
-// `core::messages`), add its resource field to `apply_pending_toggles`, and add
-// one `wasm_bindgen` export that inserts the variant — no new thread-local, no
-// new drain block (issue #609).
-//
-// `apply_pending_toggles` is deliberately kept free of `target_arch = "wasm32"`
-// and Bevy types so it can be unit-tested on native (`cargo test`) without a
-// running Bevy App.
-
-/// Applies a batch of pending debug-toggle requests to plain `bool` flags.
-///
-/// Pure function, no Bevy/wasm dependency, so it can be exercised directly by
-/// unit tests. Each distinct `DebugToggleKind` present in `pending` flips its
-/// corresponding flag exactly once, regardless of how many times that variant
-/// appears in the iterator (the pending set only ever holds each kind once,
-/// but the function doesn't rely on that to stay correct).
-///
-/// Returns `true` if `*paused` was flipped, so the caller (the Bevy drain
-/// system) knows to (un)pause `Time<Virtual>` as a side effect.
-#[allow(clippy::too_many_arguments)]
-pub fn apply_pending_toggles(
-    pending: impl IntoIterator<Item = DebugToggleKind>,
-    regions: &mut bool,
-    overlay: &mut bool,
-    paused: &mut bool,
-    damage: &mut bool,
-    entities: &mut bool,
-    entity_inspector: &mut bool,
-    station_activity: &mut bool,
-    ai_doctrine: &mut bool,
-    scenario_state: &mut bool,
-    console_latency: &mut bool,
-) -> bool {
-    let mut pause_changed = false;
-    // Dedupe in case the same kind was queued multiple times between drains.
-    let unique: HashSet<DebugToggleKind> = pending.into_iter().collect();
-    for kind in unique {
-        match kind {
-            DebugToggleKind::Regions => *regions = !*regions,
-            DebugToggleKind::Overlay => *overlay = !*overlay,
-            DebugToggleKind::Pause => {
-                *paused = !*paused;
-                pause_changed = true;
-            }
-            DebugToggleKind::Damage => *damage = !*damage,
-            DebugToggleKind::Entities => *entities = !*entities,
-            DebugToggleKind::EntityInspector => *entity_inspector = !*entity_inspector,
-            DebugToggleKind::StationActivity => *station_activity = !*station_activity,
-            DebugToggleKind::AiDoctrine => *ai_doctrine = !*ai_doctrine,
-            DebugToggleKind::ScenarioState => *scenario_state = !*scenario_state,
-            DebugToggleKind::ConsoleLatency => *console_latency = !*console_latency,
-        }
-    }
-    pause_changed
-}
-
 /// Drain `ClientMessage::ToggleDebugFlag` from connected phones and apply it.
 ///
 /// Moved here from `debug_overlay` in issue #1193: it is the phone-route
-/// MARSHALLING that feeds [`apply_pending_toggles`], so it belongs on the
+/// MARSHALLING that feeds the Debug Surface catalogue, so it belongs on the
 /// bridge/marshalling side of the sim↔presentation seam rather than in the
 /// always-compiled overlay. `debug_overlay` keeps the authority filter
 /// ([`crate::debug_overlay::admitted_flag_toggles`], still sim-side) and the
-/// overlay resources this flips; only the call into `apply_pending_toggles`
-/// lives here now.
+/// overlay resources this flips; only the bridge command queue lives here.
 ///
 /// **Not compiled into a demo build**, and neither is the message it reads.
 ///
@@ -130,27 +65,16 @@ pub fn apply_pending_toggles(
 /// see the variant's doc for why these never cross command admission. The
 /// authority check is not skipped, it is `admitted_flag_toggles`.
 ///
-/// The flag-flipping itself is [`apply_pending_toggles`], the same pure function
-/// the host page's drain calls, so a flag flipped from a phone and one flipped
-/// from the host page cannot diverge. `paused` is passed to it as a throwaway
-/// local: no `DebugFlag` maps to `DebugToggleKind::Pause` any more, so this drain
-/// can no longer touch the clock even by accident.
+/// The flag-flipping itself is `debug::catalogue::apply_pending_toggles`, the
+/// same module-owned adapter seam the host page uses. Pause is not a
+/// `DebugSurface`, so this drain cannot touch the clock by construction.
 #[cfg(not(phoenix_demo_build))]
-#[allow(clippy::too_many_arguments)]
 pub fn drain_client_debug_flags(
     mut reader: MessageReader<crate::lobby::InboundMessage>,
     sessions: Res<crate::lobby::Sessions>,
-    mut regions: ResMut<crate::debug_overlay::DebugRegionsEnabled>,
-    mut overlay: ResMut<crate::debug_overlay::DebugOverlayEnabled>,
-    mut damage: ResMut<crate::debug_overlay::DebugDamageEnabled>,
-    mut entities: ResMut<crate::debug_overlay::DebugEntitiesEnabled>,
-    mut inspector: ResMut<crate::debug_overlay::DebugEntityInspectorEnabled>,
-    mut station_activity: ResMut<crate::debug::DebugStationActivityEnabled>,
-    mut ai_doctrine: ResMut<crate::debug::DebugAiDoctrineEnabled>,
-    mut scenario_state: ResMut<crate::debug::DebugScenarioStateEnabled>,
-    mut console_latency: ResMut<crate::debug::DebugConsoleLatencyEnabled>,
+    mut commands: Commands,
 ) {
-    let mut requests: Vec<(String, crate::core::messages::DebugFlag)> = Vec::new();
+    let mut requests: Vec<(String, DebugSurface)> = Vec::new();
     for ev in reader.read() {
         if let crate::core::messages::ClientMessage::ToggleDebugFlag { flag } = &ev.msg {
             requests.push((ev.token.clone(), *flag));
@@ -168,24 +92,9 @@ pub fn drain_client_debug_flags(
         return;
     }
 
-    let mut unreachable_pause = false;
-    let pause_changed = apply_pending_toggles(
-        pending,
-        &mut regions.0,
-        &mut overlay.0,
-        &mut unreachable_pause,
-        &mut damage.0,
-        &mut entities.0,
-        &mut inspector.0,
-        &mut station_activity.0,
-        &mut ai_doctrine.0,
-        &mut scenario_state.0,
-        &mut console_latency.0,
-    );
-    debug_assert!(
-        !pause_changed,
-        "no DebugFlag maps to DebugToggleKind::Pause — pause is ClientMessage::TogglePause"
-    );
+    commands.queue(move |world: &mut World| {
+        crate::debug::catalogue::apply_pending_toggles(world, pending);
+    });
 }
 
 // ── De-globalised bridge state (issue #1181) ────────────────────────────────
@@ -324,7 +233,7 @@ pub fn apply_instagib_toggles(count: u32, current: &mut bool) {
 // each MUST stay a thread-local for the stated reason:
 //
 //  1. INBOX queues — JS pushes, a `PreUpdate` seam system drains into the sim.
-//     `INBOUND_QUEUE`, `DISCONNECT_QUEUE`, `PENDING_SAVE`, `PENDING_TOGGLES`,
+//     `INBOUND_QUEUE`, `DISCONNECT_QUEUE`, `PENDING_SAVE`, diagnostic pending state,
 //     `PENDING_FORCE_START`, `PENDING_TELEPORT_TO_WAYPOINT`,
 //     `PENDING_GOD_MODE_TOGGLES`, `PENDING_INSTAGIB_TOGGLES`. The JS caller has
 //     no `World`, so it cannot write a Resource; the drain does that a tick later.
@@ -342,7 +251,7 @@ pub fn apply_instagib_toggles(count: u32, current: &mut bool) {
 //  4. PRE-INIT stashes — set by JS BEFORE `wasm_init` builds the app, consumed
 //     while it is built (there is no `World` yet). `SHIP_STATIONS`, `SHIP_CONFIG`,
 //     `LOG_SPEC`, `LOG_ENTITY`, `SELECTED_SHIP_TEMPLATE_PATH`,
-//     `DEBUG_REGIONS_ENABLED`, `REDUCED_MOTION`, `SNAPSHOT_WORLD`,
+//     `REDUCED_MOTION`, `SNAPSHOT_WORLD`,
 //     `PENDING_RESTORE_STAGED`. Their durable half is a Resource `wasm_init`
 //     inserts from the stash; the stash is just the pre-`World` transport.
 //
@@ -372,21 +281,17 @@ thread_local! {
     /// tries to init_resource it (panicking in WASM via std::fs::read_to_string).
     static SHIP_CONFIG: RefCell<Option<ShipConfig>> = const { RefCell::new(None) };
 
-    /// Whether `?debug_regions=1` was specified in the URL. Set by JS via
-    /// `wasm_set_debug_regions()` before `wasm_init()`.
-    static DEBUG_REGIONS_ENABLED: RefCell<bool> = const { RefCell::new(false) };
-
     /// Whether the host page's reduced-motion preference
     /// (`prefers-reduced-motion: reduce`) is active, forwarded by
     /// [`wasm_set_reduced_motion`] (issue #1173). Drained each frame into the
     /// `ViewscreenMotion` resource by `viewscreen_border::sync_reduced_motion`.
-    /// Unlike `DEBUG_REGIONS_ENABLED` it is read continuously, so an OS-level
-    /// change of the preference takes effect without a page reload.
+    /// Read continuously, so an OS-level change of the preference takes effect
+    /// without a page reload.
     #[cfg(target_arch = "wasm32")]
     static REDUCED_MOTION: RefCell<bool> = const { RefCell::new(false) };
 
     /// Mirror of the `SimulationPaused` resource, written by
-    /// `drain_debug_toggles` so `wasm_is_paused()` can answer without a Bevy
+    /// `drain_host_controls` so `wasm_is_paused()` can answer without a Bevy
     /// world handle. The host settings menu's Gameplay tab reads it each frame
     /// to render its pause/resume affordance (issue #939).
     static SIM_PAUSED: RefCell<bool> = const { RefCell::new(false) };
@@ -401,11 +306,17 @@ thread_local! {
     /// logging to. Set by JS via `wasm_set_log_entity()` before `wasm_init()`.
     static LOG_ENTITY: RefCell<Option<String>> = const { RefCell::new(None) };
 
-    /// Pending debug-toggle requests queued by the six `wasm_toggle_*`
-    /// exports. Drained by `drain_debug_toggles` each `PreUpdate` frame via
-    /// `apply_pending_toggles`. Consolidated from six separate
-    /// `RefCell<bool>` thread-locals into one enum-keyed set (issue #609).
-    static PENDING_TOGGLES: RefCell<HashSet<DebugToggleKind>> = RefCell::new(HashSet::new());
+    /// Pending absolute states queued by the host's one generic diagnostic
+    /// mutation export. The key is the canonical Debug Surface identity; a
+    /// second request for the same surface replaces the first before the next
+    /// drain. Absent entirely from a public-demo binary.
+    #[cfg(not(phoenix_demo_build))]
+    static PENDING_DEBUG_SURFACE_STATES: RefCell<HashMap<DebugSurface, bool>> =
+        RefCell::new(HashMap::new());
+
+    /// Pending host pause toggle. Separate from diagnostic identity and present
+    /// in every build because host pause is a Gameplay control.
+    static PENDING_PAUSE: RefCell<bool> = const { RefCell::new(false) };
 
     /// The world this session loaded: `(path, TOML text)`, recorded by
     /// `wasm_load_world`. The snapshot boundary (issue #862) needs both — the
@@ -521,15 +432,6 @@ thread_local! {
     /// flags, and for console latency a stale button meant the operator saw a
     /// live surface that was measuring nothing.
     static DEBUG_FLAGS_STRING: RefCell<String> = const { RefCell::new(String::new()) };
-
-    /// Pending ABSOLUTE console-latency state from `wasm_set_console_latency()`
-    /// (issue #1169), drained by `drain_debug_toggles` each `PreUpdate` frame.
-    ///
-    /// Its own thread-local rather than a `PENDING_TOGGLES` member because it
-    /// carries a VALUE, not a request to invert one — see
-    /// `wasm_set_console_latency` for why this flag alone cannot use the
-    /// relative route.
-    static PENDING_CONSOLE_LATENCY: RefCell<Option<bool>> = const { RefCell::new(None) };
 
     /// Pending force-start request from `wasm_force_start()`. Drained by
     /// `drain_force_start_input` each `PreUpdate` frame into the
@@ -944,13 +846,10 @@ pub fn wasm_init() {
     // flushes need in either branch.
     app.add_plugins(crate::server::audio::ServerAudioPlugin);
 
-    // Always add the debug overlay plugin; ?debug_regions=1 sets initial state.
-    // Runtime toggling via the settings cog's Debug/Cheat tab is handled by
-    // drain_debug_toggles.
-    let debug_regions_initial = DEBUG_REGIONS_ENABLED.with(|v| *v.borrow());
-    app.add_plugins(crate::debug_overlay::DebugOverlayPlugin {
-        enabled: debug_regions_initial,
-    });
+    // Always add the debug overlay plugin. `?debug_regions=1` and settings-cog
+    // changes both queue the canonical setter and land through
+    // `drain_host_controls`; there is no second pre-init mutation export.
+    app.add_plugins(crate::debug_overlay::DebugOverlayPlugin { enabled: false });
 
     app.insert_resource(bevy::winit::WinitSettings {
         // Keep the host simulation ticking even after Playwright opens a client
@@ -975,7 +874,7 @@ pub fn wasm_init() {
         (
             drain_inbound,
             drain_disconnects,
-            drain_debug_toggles,
+            drain_host_controls.before(crate::debug::catalogue::refresh_readback),
             drain_force_start_input,
             drain_teleport_to_waypoint,
             drain_god_mode_toggle,
@@ -1004,7 +903,7 @@ pub fn wasm_init() {
             publish_sim_tick,
             publish_god_mode,
             publish_instagib,
-            publish_debug_mirrors,
+            publish_pause_mirror,
             // The snapshot seam (issue #862). `PostUpdate` for the same reason
             // the rest of this list is there — it runs *after* the frame's
             // fixed steps, which is the tick boundary a capture and a restore
@@ -1126,21 +1025,6 @@ pub fn set_forcefield_level(level: f32) {
     FORCEFIELD_LEVEL.with(|slot| {
         *slot.borrow_mut() = level;
     });
-}
-
-/// Called by JS to set the debug_regions flag from the URL parameter.
-/// Must be called before `wasm_init()` to take effect.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn wasm_set_debug_regions(enabled: bool) {
-    DEBUG_REGIONS_ENABLED.with(|v| *v.borrow_mut() = enabled);
-}
-
-/// Called by JS (or smoke tests) to query whether debug regions are enabled.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn wasm_is_debug_regions_enabled() -> bool {
-    DEBUG_REGIONS_ENABLED.with(|v| *v.borrow())
 }
 
 /// Called by the host page to forward its reduced-motion preference
@@ -1750,35 +1634,29 @@ fn drain_snapshot_restore(world: &mut World) {
     }
 }
 
-/// Called by JS (the settings cog's Debug/Cheat tab) to toggle region
-/// wireframes at runtime.
+/// Set one host diagnostic surface by its catalogue-owned wire name.
 ///
-/// Sets a pending flag that is consumed by `drain_debug_toggles` in the next
-/// `PreUpdate` frame, which flips the `DebugRegionsEnabled` Bevy resource.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn wasm_toggle_debug_regions() {
-    PENDING_TOGGLES.with(|set| {
-        set.borrow_mut().insert(DebugToggleKind::Regions);
-    });
-}
-
-/// Called by JS (the settings cog's Debug/Cheat tab) to toggle the modifier
-/// debug overlay at runtime.
+/// This is the only host diagnostic mutation export. It carries an absolute
+/// state derived from the authoritative readback, so a phone and the host
+/// cannot race a relative local toggle into the opposite value. Unknown names
+/// are rejected without queuing anything.
 ///
-/// Sets a pending flag that is consumed by `drain_debug_toggles` in the next
-/// `PreUpdate` frame, which flips the `DebugOverlayEnabled` Bevy resource.
-#[cfg(target_arch = "wasm32")]
+/// Absent from a public-demo binary. Readback exports remain available there.
+#[cfg(all(target_arch = "wasm32", not(phoenix_demo_build)))]
 #[wasm_bindgen]
-pub fn wasm_toggle_debug_overlay() {
-    PENDING_TOGGLES.with(|set| {
-        set.borrow_mut().insert(DebugToggleKind::Overlay);
+pub fn wasm_set_debug_surface(wire_name: String, enabled: bool) -> bool {
+    let Some(surface) = DebugSurface::from_wire_name(&wire_name) else {
+        return false;
+    };
+    PENDING_DEBUG_SURFACE_STATES.with(|pending| {
+        pending.borrow_mut().insert(surface, enabled);
     });
+    true
 }
 
 /// Called by JS to pause/unpause the simulation clock.
 ///
-/// Sets a pending flag that is consumed by `drain_debug_toggles` in the next
+/// Sets a pending flag that is consumed by `drain_host_controls` in the next
 /// `PreUpdate` frame, which pauses or unpauses `Time<Virtual>`.
 ///
 /// Named without `debug` (issue #939) because its only caller is the host
@@ -1788,9 +1666,7 @@ pub fn wasm_toggle_debug_overlay() {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_toggle_pause() {
-    PENDING_TOGGLES.with(|set| {
-        set.borrow_mut().insert(DebugToggleKind::Pause);
-    });
+    PENDING_PAUSE.with(|pending| *pending.borrow_mut() = true);
 }
 
 /// Called by JS each frame to read back whether the simulation clock is
@@ -1815,19 +1691,6 @@ pub fn wasm_is_paused() -> bool {
 #[wasm_bindgen]
 pub fn wasm_is_demo_build() -> bool {
     crate::build_flags::is_demo_build()
-}
-
-/// Called by JS (the settings cog's Debug/Cheat tab) to toggle the damage
-/// debug overlay at runtime.
-///
-/// Sets a pending flag that is consumed by `drain_debug_toggles` in the next
-/// `PreUpdate` frame, which flips the `DebugDamageEnabled` Bevy resource.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn wasm_toggle_debug_damage() {
-    PENDING_TOGGLES.with(|set| {
-        set.borrow_mut().insert(DebugToggleKind::Damage);
-    });
 }
 
 /// Called by JS each animation frame to read the latest modifier debug payload
@@ -1862,19 +1725,6 @@ pub fn set_damage_log_string(text: String) {
     DAMAGE_LOG_STRING.with(|v| *v.borrow_mut() = text);
 }
 
-/// Called by JS (the settings cog's Debug/Cheat tab) to toggle the entity
-/// behavior overlay at runtime.
-///
-/// Sets a pending flag that is consumed by `drain_debug_toggles` in the next
-/// `PreUpdate` frame, which flips the `DebugEntitiesEnabled` Bevy resource.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn wasm_toggle_debug_entities() {
-    PENDING_TOGGLES.with(|set| {
-        set.borrow_mut().insert(DebugToggleKind::Entities);
-    });
-}
-
 /// Called by JS each animation frame to read the latest entity-behavior payload
 /// as JSON while the surface is visible (issue #1150). The dock parses and
 /// renders it; empty until the first publish.
@@ -1891,19 +1741,6 @@ pub fn set_entity_debug_string(text: String) {
     ENTITY_DEBUG_STRING.with(|v| *v.borrow_mut() = text);
 }
 
-/// Called by JS (the settings cog's Debug/Cheat tab) to toggle the entity
-/// inspector overlay at runtime.
-///
-/// Sets a pending flag that is consumed by `drain_debug_toggles` in the next
-/// `PreUpdate` frame, which flips the `DebugEntityInspectorEnabled` Bevy resource.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn wasm_toggle_entity_inspector() {
-    PENDING_TOGGLES.with(|set| {
-        set.borrow_mut().insert(DebugToggleKind::EntityInspector);
-    });
-}
-
 /// Called by JS each animation frame to read the latest entity-inspector payload
 /// as JSON while the surface is visible (issue #1150). The dock parses and
 /// renders it; empty until the first publish.
@@ -1918,23 +1755,6 @@ pub fn wasm_get_entity_inspector() -> String {
 #[cfg(target_arch = "wasm32")]
 pub fn set_entity_inspector_string(text: String) {
     ENTITY_INSPECTOR_STRING.with(|v| *v.borrow_mut() = text);
-}
-
-/// Called by JS (the settings cog's Debug/Cheat tab) to toggle the
-/// station-activity chart at runtime (issue #1145).
-///
-/// Sets a pending flag consumed by `drain_debug_toggles` in the next `PreUpdate`
-/// frame, which flips `debug::DebugStationActivityEnabled`. The counters behind
-/// the chart are always-on regardless; only the JSON publish is gated. This is
-/// the transport pattern every later PRD #1144 surface copies: one pending-set
-/// variant, one `apply_pending_toggles` field, one `wasm_bindgen` toggle here,
-/// and one getter below.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn wasm_toggle_station_activity() {
-    PENDING_TOGGLES.with(|set| {
-        set.borrow_mut().insert(DebugToggleKind::StationActivity);
-    });
 }
 
 /// Called by JS each animation frame to read the latest station-activity payload
@@ -1956,21 +1776,6 @@ pub fn set_station_activity_string(text: String) {
     STATION_ACTIVITY_STRING.with(|v| *v.borrow_mut() = text);
 }
 
-/// Called by JS (the settings cog's Debug/Cheat tab) to toggle the AI
-/// doctrine-pool panel at runtime (issue #1149).
-///
-/// Same transport pattern as `wasm_toggle_station_activity`: sets a pending flag
-/// consumed by `drain_debug_toggles` next `PreUpdate`, which flips
-/// `debug::DebugAiDoctrineEnabled`. The pool it projects is authoritative state;
-/// only the JSON publish is gated.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn wasm_toggle_ai_doctrine() {
-    PENDING_TOGGLES.with(|set| {
-        set.borrow_mut().insert(DebugToggleKind::AiDoctrine);
-    });
-}
-
 /// Called by JS each animation frame to read the latest AI doctrine-pool payload
 /// as JSON while the panel is visible (issue #1149).
 ///
@@ -1987,21 +1792,6 @@ pub fn wasm_get_ai_doctrine() -> String {
 #[cfg(target_arch = "wasm32")]
 pub fn set_ai_doctrine_string(text: String) {
     AI_DOCTRINE_STRING.with(|v| *v.borrow_mut() = text);
-}
-
-/// Called by JS (the settings cog's Debug/Cheat tab) to toggle the scenario-state
-/// panel at runtime (issue #1148).
-///
-/// The same transport pattern as `wasm_toggle_station_activity`: one pending-set
-/// variant consumed by `drain_debug_toggles` in the next `PreUpdate` frame, which
-/// flips `debug::DebugScenarioStateEnabled`. There are no counters behind it —
-/// scenario state is authoritative — so only the JSON projection is gated.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn wasm_toggle_scenario_state() {
-    PENDING_TOGGLES.with(|set| {
-        set.borrow_mut().insert(DebugToggleKind::ScenarioState);
-    });
 }
 
 /// Called by JS each animation frame to read the latest scenario-state payload
@@ -2022,40 +1812,11 @@ pub fn set_scenario_state_string(text: String) {
     SCENARIO_STATE_STRING.with(|v| *v.borrow_mut() = text);
 }
 
-/// Called by JS (the settings cog's Debug/Cheat tab) to switch console
-/// input-to-feedback latency measurement on or off (issue #1169).
-///
-/// # An absolute set, not a toggle — deliberately unlike its neighbours
-///
-/// Every other debug surface on this bridge is flipped by a relative toggle,
-/// which is fine when the only thing that can desync is a button's highlight. It
-/// is not fine here (issue #1169 review, finding C2): a connected phone can flip
-/// the SAME flag through `ClientMessage::ToggleDebugFlag`, and a relative toggle
-/// sent from a cog painted before that arrived lands on the opposite value from
-/// the one the operator asked for. The failure is silent and total — the cog
-/// reads "on" while the simulation measures nothing and drops every batch a
-/// phone sends — so this route carries the value it wants rather than a request
-/// to invert whatever happens to be there.
-///
-/// The cog computes that value from [`wasm_get_debug_flags`], the simulation's
-/// own read-back, rather than from a local memory of what it last clicked.
-///
-/// One more difference worth knowing at the call site: this flag gates
-/// MEASUREMENT, not only the publish. With it off the simulation takes no
-/// wall-clock reading at all, so an empty payload right after enabling is
-/// expected rather than a fault — enabling deliberately clears the previous
-/// window (`debug::console_latency::clear_console_latency_on_enable`).
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn wasm_set_console_latency(on: bool) {
-    PENDING_CONSOLE_LATENCY.with(|v| *v.borrow_mut() = Some(on));
-}
-
 /// Called by JS while the settings cog is open, to read the debug flags the
 /// simulation actually holds (issue #1169).
 ///
 /// Returns the JSON object `debug_overlay::report_debug_state` mirrors here —
-/// `{"Regions":false,"ConsoleLatency":true,…}`, keyed by the `DebugFlag` variant
+/// `{"Regions":false,"ConsoleLatency":true,…}`, keyed by catalogue wire
 /// names — or an empty string before the first report.
 ///
 /// # Why the cog needed a read-back at all
@@ -2063,7 +1824,7 @@ pub fn wasm_set_console_latency(on: bool) {
 /// The debug OUTPUT resources had no read-back export, so the cog painted from
 /// its own module-local memory of what it had clicked. A phone flipping the same
 /// flag left the two disagreeing, and for console latency that disagreement is
-/// not cosmetic (see [`wasm_set_console_latency`]). The mirror is written by the
+/// not cosmetic. The mirror is written by the
 /// one system that already computes this set for the wire, so the host page and
 /// a connected phone read the same answer derived from the same place.
 #[cfg(target_arch = "wasm32")]
@@ -2821,77 +2582,31 @@ fn drain_inbound(mut writer: MessageWriter<InboundMessage>) {
     }
 }
 
-/// Drains the pending debug-toggle set each frame and updates the
-/// corresponding Bevy resources: `DebugRegionsEnabled`, `DebugOverlayEnabled`,
-/// `SimulationPaused`, `DebugDamageEnabled`, `DebugEntitiesEnabled`, and
-/// `DebugEntityInspectorEnabled` — all driven from the settings cog added in
-/// #939.
+/// Drains host-page diagnostic states and the separate Gameplay pause toggle.
 ///
-/// The actual flag-flipping logic lives in [`apply_pending_toggles`], a pure
-/// function with no Bevy/wasm dependency so it's unit-testable on native.
-/// This system just drains the thread-local set, calls that function against
-/// the live resources, and handles the one Bevy-specific side effect
-/// (pausing/unpausing `Time<Virtual>`) based on the returned flag.
+/// Diagnostic mutation delegates to module-owned catalogue adapters. The
+/// bridge neither names their Resources nor carries a positional boolean list.
+/// Pause stays on its own thread-local and resource path because it changes the
+/// authoritative clock and is available to the trusted host in demo builds.
 #[cfg(target_arch = "wasm32")]
-fn drain_debug_toggles(
-    mut regions_enabled: ResMut<crate::debug_overlay::DebugRegionsEnabled>,
-    mut overlay_enabled: ResMut<crate::debug_overlay::DebugOverlayEnabled>,
-    mut paused: ResMut<crate::debug_overlay::SimulationPaused>,
-    mut damage_enabled: ResMut<crate::debug_overlay::DebugDamageEnabled>,
-    mut entities_enabled: ResMut<crate::debug_overlay::DebugEntitiesEnabled>,
-    mut entity_inspector_enabled: ResMut<crate::debug_overlay::DebugEntityInspectorEnabled>,
-    mut station_activity_enabled: ResMut<crate::debug::DebugStationActivityEnabled>,
-    mut ai_doctrine_enabled: ResMut<crate::debug::DebugAiDoctrineEnabled>,
-    mut scenario_state_enabled: ResMut<crate::debug::DebugScenarioStateEnabled>,
-    mut console_latency_enabled: ResMut<crate::debug::DebugConsoleLatencyEnabled>,
-    mut virtual_time: ResMut<Time<bevy::time::Virtual>>,
-) {
-    // The one ABSOLUTE route on this drain (issue #1169): the cog sends the
-    // value it wants rather than a request to invert whatever is there, because
-    // a phone can flip the same flag and a relative toggle raced against that
-    // lands on the opposite state — silently, and for this flag that means the
-    // simulation stops measuring while the cog still reads "on". Applied
-    // unconditionally, ahead of the relative set below and outside its
-    // early-return, so it works whether or not anything else is pending.
-    if let Some(on) = PENDING_CONSOLE_LATENCY.with(|v| v.borrow_mut().take()) {
-        // Assigned through `set_if_neq` semantics by hand: writing the same value
-        // would still tick Bevy's change detection, and
-        // `clear_console_latency_on_enable` reads that edge to empty the tracker.
-        // A cog repaint that re-sends the current value must not wipe a live
-        // window.
-        if console_latency_enabled.0 != on {
-            console_latency_enabled.0 = on;
-        }
+fn drain_host_controls(world: &mut World) {
+    #[cfg(not(phoenix_demo_build))]
+    {
+        let pending: Vec<(DebugSurface, bool)> =
+            PENDING_DEBUG_SURFACE_STATES.with(|states| states.borrow_mut().drain().collect());
+        crate::debug::catalogue::apply_pending_states(world, pending);
     }
 
-    let pending: Vec<DebugToggleKind> =
-        PENDING_TOGGLES.with(|set| set.borrow_mut().drain().collect());
-    if pending.is_empty() {
-        return;
-    }
-
-    let pause_changed = apply_pending_toggles(
-        pending,
-        &mut regions_enabled.0,
-        &mut overlay_enabled.0,
-        &mut paused.0,
-        &mut damage_enabled.0,
-        &mut entities_enabled.0,
-        &mut entity_inspector_enabled.0,
-        &mut station_activity_enabled.0,
-        &mut ai_doctrine_enabled.0,
-        &mut scenario_state_enabled.0,
-        &mut console_latency_enabled.0,
-    );
-
-    // Region-wireframe state also lives in a thread-local (read back by
-    // `wasm_is_debug_regions_enabled()`), so mirror the resource into it.
-    DEBUG_REGIONS_ENABLED.with(|v| *v.borrow_mut() = regions_enabled.0);
-    // Same for the pause mirror `wasm_is_paused()` reads (issue #939).
-    SIM_PAUSED.with(|v| *v.borrow_mut() = paused.0);
-
+    let pause_changed = PENDING_PAUSE.with(|pending| std::mem::take(&mut *pending.borrow_mut()));
     if pause_changed {
-        if paused.0 {
+        let paused = {
+            let mut state = world.resource_mut::<crate::debug_overlay::SimulationPaused>();
+            state.0 = !state.0;
+            state.0
+        };
+        SIM_PAUSED.with(|mirror| *mirror.borrow_mut() = paused);
+        let mut virtual_time = world.resource_mut::<Time<bevy::time::Virtual>>();
+        if paused {
             // Pausing `Time<Virtual>` starves the fixed accumulator, so
             // `FixedUpdate` (and with it `SimTick`) stops advancing entirely —
             // deliberately, this is what `sim-tick.spec.js` DECOUPLING asserts
@@ -3095,21 +2810,11 @@ fn publish_instagib(instagib: Res<crate::server_app::Instagib>) {
     INSTAGIB_MIRROR.with(|v| *v.borrow_mut() = instagib.0);
 }
 
-/// Mirrors the two debug resources that have `wasm_*` read-backs into their
-/// thread-locals each frame (issue #940).
-///
-/// `drain_debug_toggles` already writes both, but only for flips *it* applied.
-/// Since a phone can now flip the same resources
-/// (`drain_client_debug_flags`, above), the host page's own settings cog
-/// would otherwise paint a stale Region Wireframes or Pause button whenever a
-/// client moved one. Mirroring unconditionally each frame removes the whole
-/// staleness class rather than adding a second writer at the new flip site.
+/// Mirror the pause resource for the host Gameplay control's synchronous
+/// getter. Diagnostic readback comes from the canonical all-build catalogue
+/// resource instead.
 #[cfg(target_arch = "wasm32")]
-fn publish_debug_mirrors(
-    regions: Res<crate::debug_overlay::DebugRegionsEnabled>,
-    paused: Res<crate::debug_overlay::SimulationPaused>,
-) {
-    DEBUG_REGIONS_ENABLED.with(|v| *v.borrow_mut() = regions.0);
+fn publish_pause_mirror(paused: Res<crate::debug_overlay::SimulationPaused>) {
     SIM_PAUSED.with(|v| *v.borrow_mut() = paused.0);
 }
 
@@ -3257,19 +2962,17 @@ fn flush_host_channels(
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 //
-// `apply_pending_toggles` is defined outside the `target_arch = "wasm32"` gate
-// (and its `DebugToggleKind` vocabulary lives in `core::messages`) specifically
-// so this module runs under plain `cargo test` on native, with no Bevy App and
-// no wasm_bindgen involved.
+// The Debug Surface adapter behavior stays native-testable even though the
+// host export is WASM-only; the bridge test below feeds the same canonical
+// identities the phone drain collects through the catalogue applier.
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_instagib_toggles, apply_pending_toggles, host_channels, next_restore_step,
-        PendingRestore, RestoreStep, RestoreWaited,
+        apply_instagib_toggles, host_channels, next_restore_step, PendingRestore, RestoreStep,
+        RestoreWaited,
     };
     use crate::console::navigation::server::apply_teleport_to_waypoint;
     use crate::console::navigation::{NavigationWaypoint, WaypointMode};
-    use crate::core::messages::DebugToggleKind;
     use crate::server_app::Instagib;
     use crate::ship::state::ShipPhysics;
 
@@ -3360,217 +3063,56 @@ mod tests {
         );
     }
 
-    /// Queuing a single toggle flips exactly the corresponding flag, exactly
-    /// once, and leaves every other flag untouched.
-    #[test]
-    fn queueing_regions_toggle_flips_only_regions_once() {
-        let (mut regions, mut overlay, mut paused, mut damage, mut entities, mut inspector) =
-            (false, false, false, false, false, false);
-        let mut station_activity = false;
-        let mut ai_doctrine = false;
-        let mut scenario_state = false;
-        let mut console_latency = false;
-
-        let pause_changed = apply_pending_toggles(
-            [DebugToggleKind::Regions],
-            &mut regions,
-            &mut overlay,
-            &mut paused,
-            &mut damage,
-            &mut entities,
-            &mut inspector,
-            &mut station_activity,
-            &mut ai_doctrine,
-            &mut scenario_state,
-            &mut console_latency,
-        );
-
-        assert!(regions, "Regions flag should have flipped to true");
-        assert!(!overlay);
-        assert!(!paused);
-        assert!(!damage);
-        assert!(!entities);
-        assert!(!inspector);
-        assert!(!station_activity);
-        assert!(!ai_doctrine);
-        assert!(!scenario_state);
-        assert!(!pause_changed, "pause was not in this batch");
-    }
-
-    /// Draining an empty pending set (e.g. the following frame, after the
-    /// queue was already drained) must not flip anything again.
-    #[test]
-    fn draining_empty_set_does_not_flip_again() {
-        let (mut regions, mut overlay, mut paused, mut damage, mut entities, mut inspector) =
-            (true, false, false, false, false, false);
-        let mut station_activity = false;
-        let mut ai_doctrine = false;
-        let mut scenario_state = false;
-        let mut console_latency = false;
-
-        let pause_changed = apply_pending_toggles(
-            std::iter::empty(),
-            &mut regions,
-            &mut overlay,
-            &mut paused,
-            &mut damage,
-            &mut entities,
-            &mut inspector,
-            &mut station_activity,
-            &mut ai_doctrine,
-            &mut scenario_state,
-            &mut console_latency,
-        );
-
-        assert!(regions, "previous state must be preserved, not re-toggled");
-        assert!(!pause_changed);
-    }
-
-    /// The pause toggle both flips the flag and reports that it changed, so
-    /// the caller knows to (un)pause `Time<Virtual>`.
-    #[test]
-    fn queueing_pause_toggle_flips_paused_and_reports_change() {
-        let (mut regions, mut overlay, mut paused, mut damage, mut entities, mut inspector) =
-            (false, false, false, false, false, false);
-        let mut station_activity = false;
-        let mut ai_doctrine = false;
-        let mut scenario_state = false;
-        let mut console_latency = false;
-
-        let pause_changed = apply_pending_toggles(
-            [DebugToggleKind::Pause],
-            &mut regions,
-            &mut overlay,
-            &mut paused,
-            &mut damage,
-            &mut entities,
-            &mut inspector,
-            &mut station_activity,
-            &mut ai_doctrine,
-            &mut scenario_state,
-            &mut console_latency,
-        );
-
-        assert!(paused);
-        assert!(pause_changed);
-    }
-
-    /// Multiple distinct toggles queued in the same batch each flip their own
-    /// flag independently.
-    #[test]
-    fn queueing_multiple_distinct_toggles_flips_each_independently() {
-        let (mut regions, mut overlay, mut paused, mut damage, mut entities, mut inspector) =
-            (false, false, false, false, false, false);
-        let mut station_activity = false;
-        let mut ai_doctrine = false;
-        let mut scenario_state = false;
-        let mut console_latency = false;
-
-        apply_pending_toggles(
-            [
-                DebugToggleKind::Overlay,
-                DebugToggleKind::Damage,
-                DebugToggleKind::EntityInspector,
-                DebugToggleKind::StationActivity,
-                DebugToggleKind::AiDoctrine,
-                DebugToggleKind::ScenarioState,
-            ],
-            &mut regions,
-            &mut overlay,
-            &mut paused,
-            &mut damage,
-            &mut entities,
-            &mut inspector,
-            &mut station_activity,
-            &mut ai_doctrine,
-            &mut scenario_state,
-            &mut console_latency,
-        );
-
-        assert!(!regions);
-        assert!(overlay);
-        assert!(!paused);
-        assert!(damage);
-        assert!(!entities);
-        assert!(inspector);
-        assert!(station_activity);
-        assert!(ai_doctrine);
-        assert!(scenario_state);
-    }
-
-    /// A duplicate variant appearing twice in the same batch (e.g. queued
-    /// from a `HashSet` that happened to be built with a duplicate insert)
-    /// still only flips the flag once — the function itself dedupes.
-    #[test]
-    fn duplicate_variant_in_same_batch_flips_only_once() {
-        let (mut regions, mut overlay, mut paused, mut damage, mut entities, mut inspector) =
-            (false, false, false, false, false, false);
-        let mut station_activity = false;
-        let mut ai_doctrine = false;
-        let mut scenario_state = false;
-        let mut console_latency = false;
-
-        apply_pending_toggles(
-            [DebugToggleKind::Entities, DebugToggleKind::Entities],
-            &mut regions,
-            &mut overlay,
-            &mut paused,
-            &mut damage,
-            &mut entities,
-            &mut inspector,
-            &mut station_activity,
-            &mut ai_doctrine,
-            &mut scenario_state,
-            &mut console_latency,
-        );
-
-        assert!(entities, "should have flipped once (false -> true)");
-    }
-
-    /// The phone-flag round trip (moved here from `debug_overlay` with the drain
-    /// in issue #1193): a connected player's admitted flags feed
-    /// `apply_pending_toggles` and flip exactly the resources they name — through
-    /// the same pure function the host page's own drain uses — and never the
-    /// clock, whatever they name. Exercises the marshalling
-    /// (`drain_client_debug_flags`) now lives beside the pure function it calls.
+    /// A connected phone's bridge batch reaches the same catalogue adapter as
+    /// the host route, while Pause stays untouched and duplicate diagnostic
+    /// toggles still collapse to one flip.
     #[cfg(not(phoenix_demo_build))]
     #[test]
-    fn an_admitted_batch_flips_only_the_flags_it_names() {
-        use crate::core::messages::DebugFlag;
-        let (mut regions, mut overlay, mut paused) = (false, false, false);
-        let (mut damage, mut entities, mut inspector) = (false, false, false);
-        let mut station_activity = false;
-        let mut ai_doctrine = false;
-        let mut scenario_state = false;
-        let mut console_latency = false;
-        let pending =
-            crate::debug_overlay::admitted_flag_toggles([("phone", DebugFlag::Damage)], |token| {
-                token == "phone"
-            });
-        let pause_changed = apply_pending_toggles(
-            pending,
-            &mut regions,
-            &mut overlay,
-            &mut paused,
-            &mut damage,
-            &mut entities,
-            &mut inspector,
-            &mut station_activity,
-            &mut ai_doctrine,
-            &mut scenario_state,
-            &mut console_latency,
-        );
-        assert!(damage, "the named flag must flip");
-        assert!(!pause_changed);
+    fn phone_bridge_batch_applies_the_named_surface_and_not_pause() {
+        use crate::core::debug_surface::DebugSurface;
+        use crate::core::messages::ClientMessage;
+        use crate::lobby::{InboundMessage, Sessions};
+        use bevy::prelude::{App, Messages, Update};
+
+        let mut app = App::new();
+        app.add_message::<InboundMessage>();
+        app.init_resource::<crate::debug_overlay::DebugRegionsEnabled>();
+        app.init_resource::<crate::debug_overlay::DebugOverlayEnabled>();
+        app.init_resource::<crate::debug_overlay::SimulationPaused>();
+        app.init_resource::<crate::debug_overlay::DebugDamageEnabled>();
+        app.init_resource::<crate::debug_overlay::DebugEntitiesEnabled>();
+        app.init_resource::<crate::debug_overlay::DebugEntityInspectorEnabled>();
+        app.init_resource::<crate::debug::DebugStationActivityEnabled>();
+        app.init_resource::<crate::debug::DebugAiDoctrineEnabled>();
+        app.init_resource::<crate::debug::DebugScenarioStateEnabled>();
+        app.init_resource::<crate::debug::DebugConsoleLatencyEnabled>();
+        let mut sessions = crate::lobby::session::SessionManager::new();
+        sessions
+            .register("phone".into(), "Tester".into())
+            .expect("register connected phone");
+        app.insert_resource(Sessions(sessions));
+        app.add_systems(Update, super::drain_client_debug_flags);
+        for _ in 0..2 {
+            app.world_mut()
+                .resource_mut::<Messages<InboundMessage>>()
+                .write(InboundMessage {
+                    token: "phone".into(),
+                    msg: ClientMessage::ToggleDebugFlag {
+                        flag: DebugSurface::Damage,
+                    },
+                });
+        }
+        app.update();
+
         assert!(
-            !regions
-                && !overlay
-                && !paused
-                && !entities
-                && !inspector
-                && !station_activity
-                && !ai_doctrine
-                && !scenario_state
+            app.world()
+                .resource::<crate::debug_overlay::DebugDamageEnabled>()
+                .0
+        );
+        assert!(
+            !app.world()
+                .resource::<crate::debug_overlay::SimulationPaused>()
+                .0
         );
     }
 

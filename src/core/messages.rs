@@ -1,3 +1,4 @@
+pub use crate::core::debug_surface::DebugSurface;
 pub use crate::entities::tags::EntityTag;
 use crate::lobby::stations_config::ShipStations;
 use crate::ship::damage::DamageTier;
@@ -2551,12 +2552,12 @@ pub enum ClientMessage {
     /// tab claims, and a hidden tab is a forgeable UI fact on its own.
     #[cfg(not(phoenix_demo_build))]
     ToggleDebugFlag {
-        flag: DebugFlag,
+        flag: DebugSurface,
     },
     /// Pause or resume the simulation clock from a connected phone's Gameplay
     /// tab (issue #940).
     ///
-    /// Its own top-level variant rather than a [`DebugFlag`], for two unrelated
+    /// Its own top-level variant rather than a [`DebugSurface`], for two unrelated
     /// reasons that happen to point the same way:
     ///
     ///  1. Pause is not a debug overlay. It stops the clock every system
@@ -2595,7 +2596,7 @@ pub enum ClientMessage {
     /// wall-clock reading may never enter authoritative state (AGENTS.md
     /// determinism contract), and this one does not.
     ///
-    /// Sent only while the reporting client sees [`DebugFlag::ConsoleLatency`]
+    /// Sent only while the reporting client sees [`DebugSurface::ConsoleLatency`]
     /// on in `ServerMessage::DebugState`. **Absent from a demo build**, like its
     /// `ToggleDebugFlag` neighbour and for the same reason: the whole
     /// diagnostic route is compiled out rather than refused at runtime.
@@ -2736,164 +2737,6 @@ pub struct ConsoleLatencyExpiry {
     pub action: String,
     /// How many of this action expired unanswered since the last report.
     pub count: u32,
-}
-
-/// One host-page debug overlay a settings menu can flip (issue #940).
-///
-/// Mirrors the diagnostic half of [`DebugToggleKind`] — that enum is the host
-/// page's local pending-toggle vocabulary and this is its wire form, with a
-/// `From<DebugFlag>` conversion between them (defined just below) so the two
-/// cannot drift into different flag sets.
-///
-/// Every member is diagnostic-only by construction, which is what lets
-/// `ClientMessage::ToggleDebugFlag` be removed wholesale from a demo build
-/// rather than narrowed flag-by-flag. Pause used to be a member and is not one
-/// any more: it is authoritative state, it needs a different build story, and a
-/// predicate saying "all of these except that one" was the seam through which a
-/// demo phone could still freeze the mission. It is
-/// `ClientMessage::TogglePause` now.
-///
-/// Not itself build-gated: `ServerMessage::DebugState` reports these in every
-/// build, and a read-back grants no authority.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub enum DebugFlag {
-    /// Region wireframes (`DebugRegionsEnabled`).
-    Regions,
-    /// Modifier debug overlay (`DebugOverlayEnabled`).
-    Modifiers,
-    /// Damage debug log (`DebugDamageEnabled`).
-    Damage,
-    /// Entity behaviour overlay (`DebugEntitiesEnabled`).
-    Entities,
-    /// Entity inspector overlay (`DebugEntityInspectorEnabled`).
-    Inspector,
-    /// Station-activity chart (`debug::DebugStationActivityEnabled`), the first
-    /// surface on the structured debug pipeline (issue #1145, PRD #1144). Unlike
-    /// its neighbours it gates a JSON payload rendered as a chart, not a
-    /// pre-formatted text stream; the counters behind it are always-on and only
-    /// the rendering is flag-gated.
-    StationActivity,
-    /// AI doctrine-pool panel (`debug::DebugAiDoctrineEnabled`, issue #1149). A
-    /// JSON surface like `StationActivity`: it gates the per-ship scored-objective
-    /// pool projection the dock panel renders. The pool is authoritative state
-    /// projected read-only, so only the rendering is flag-gated.
-    AiDoctrine,
-    /// Scenario-state panel (`debug::DebugScenarioStateEnabled`), the
-    /// second structured-JSON surface on the debug pipeline (issue #1148, PRD
-    /// #1144). Like `StationActivity` it gates a JSON payload rendered as a
-    /// panel, not a text stream; unlike it there are no always-on counters —
-    /// scenario state is authoritative already, so only the flag-gated projection
-    /// exists.
-    ScenarioState,
-    /// Console input-to-feedback latency (`debug::DebugConsoleLatencyEnabled`,
-    /// issue #1169). A JSON surface like its neighbours, but the only flag on
-    /// the pipeline that gates *measurement* rather than only rendering: the
-    /// stamps behind it are wall-clock reads, and a wall-clock read is not
-    /// something the simulation may take unasked (PRD #1144's "no observable
-    /// overhead when off"). It is also the one flag a CLIENT acts on rather
-    /// than merely echoing — a phone that sees it on starts measuring its own
-    /// round trips and reporting them via
-    /// [`ClientMessage::ReportConsoleLatency`].
-    ConsoleLatency,
-}
-
-impl DebugFlag {
-    /// Every flag, in the order `ServerMessage::DebugState` reports them.
-    ///
-    /// A fixed slice rather than map iteration, so identical state always
-    /// produces an identical message — the client's fold diffs it and the
-    /// codec test pins its shape.
-    pub const ALL: [DebugFlag; 9] = [
-        DebugFlag::Regions,
-        DebugFlag::Modifiers,
-        DebugFlag::Damage,
-        DebugFlag::Entities,
-        DebugFlag::Inspector,
-        DebugFlag::StationActivity,
-        DebugFlag::AiDoctrine,
-        DebugFlag::ScenarioState,
-        DebugFlag::ConsoleLatency,
-    ];
-}
-
-/// Identifies which debug overlay/toggle a pending request is for.
-///
-/// The host page's local pending-toggle vocabulary. Lives in the protocol layer
-/// (issue #1193, moved down from `server::bridge`) because it IS a toggle
-/// vocabulary — the always-compiled sim half of `debug_overlay` names it, so it
-/// cannot sit behind the `server` feature. Its marshalling counterpart
-/// (`server::bridge::apply_pending_toggles`) stays on the bridge/marshalling
-/// side; only the vocabulary comes down here.
-///
-/// One enum-keyed pending set replaces what used to be six near-identical
-/// `RefCell<bool>` thread-locals (one per debug overlay) plus six matching
-/// blocks in the drain system (issue #609). Adding a new debug overlay now
-/// means: add a variant here, add its resource field to
-/// `bridge::apply_pending_toggles`, and add one `wasm_bindgen` export that
-/// inserts the variant — no new thread-local, no new drain block.
-///
-/// Deliberately free of Bevy types and `target_arch = "wasm32"`, like the wire
-/// `DebugFlag` beside it, so the conversion below and
-/// `bridge::apply_pending_toggles` can be unit-tested on native without a
-/// running Bevy App.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum DebugToggleKind {
-    /// Region wireframes (`DebugRegionsEnabled`).
-    Regions,
-    /// Modifier debug overlay (`DebugOverlayEnabled`).
-    Overlay,
-    /// Simulation pause (`SimulationPaused`); also (un)pauses `Time<Virtual>`.
-    ///
-    /// Reached from the host settings menu's Gameplay tab, which is not
-    /// build-gated — so this variant, unlike its neighbours, has a caller that
-    /// survives into a demo build.
-    Pause,
-    /// Damage debug log (`DebugDamageEnabled`).
-    Damage,
-    /// Entity behavior overlay (`DebugEntitiesEnabled`).
-    Entities,
-    /// Entity inspector overlay (`DebugEntityInspectorEnabled`).
-    EntityInspector,
-    /// Station-activity chart (`debug::DebugStationActivityEnabled`), the first
-    /// surface on the structured debug pipeline (issue #1145).
-    StationActivity,
-    /// AI doctrine-pool panel (`debug::DebugAiDoctrineEnabled`, issue #1149).
-    AiDoctrine,
-    /// Scenario-state panel (`debug::DebugScenarioStateEnabled`), the second
-    /// structured surface on the pipeline (issue #1148).
-    ScenarioState,
-    /// Console input-to-feedback latency (`debug::DebugConsoleLatencyEnabled`,
-    /// issue #1169).
-    ConsoleLatency,
-}
-
-impl From<DebugFlag> for DebugToggleKind {
-    /// The wire form of the *diagnostic* half of [`DebugToggleKind`] (issue #940)
-    /// maps one-for-one onto it, so an overlay flipped from a phone and one
-    /// flipped from the host page converge on the same pending-toggle vocabulary
-    /// and the same [`crate::server::bridge::apply_pending_toggles`] call.
-    /// Exhaustive on purpose: adding a `DebugFlag` without a kind to carry it is a
-    /// compile error rather than a silently ignored toggle.
-    ///
-    /// [`DebugToggleKind::Pause`] is deliberately outside this conversion's
-    /// range. `DebugFlag` has no `Pause` member — a phone reaches the clock
-    /// through `ClientMessage::TogglePause`, gated separately — so there is no
-    /// wire flag a client could send that stops the simulation through the
-    /// overlay drain. `debug_overlay::tests::no_debug_flag_maps_to_the_pause_toggle`
-    /// pins that.
-    fn from(flag: DebugFlag) -> Self {
-        match flag {
-            DebugFlag::Regions => DebugToggleKind::Regions,
-            DebugFlag::Modifiers => DebugToggleKind::Overlay,
-            DebugFlag::Damage => DebugToggleKind::Damage,
-            DebugFlag::Entities => DebugToggleKind::Entities,
-            DebugFlag::Inspector => DebugToggleKind::EntityInspector,
-            DebugFlag::StationActivity => DebugToggleKind::StationActivity,
-            DebugFlag::AiDoctrine => DebugToggleKind::AiDoctrine,
-            DebugFlag::ScenarioState => DebugToggleKind::ScenarioState,
-            DebugFlag::ConsoleLatency => DebugToggleKind::ConsoleLatency,
-        }
-    }
 }
 
 /// Typed payload for a channel-3 coordination message (issue #494).
@@ -3514,17 +3357,17 @@ pub enum ServerMessage {
     /// exist in a demo build), and God Mode crosses command admission, so it
     /// lands a tick later than the click.
     ///
-    /// `flags` carries one entry per `DebugFlag::ALL`, in that order. `paused`
+    /// `flags` carries one entry per `DebugSurface::ALL`, in that order. `paused`
     /// and `god_mode` are separate fields because they are a different kind of
     /// thing: both are authoritative simulation state (a stopped clock, an
     /// invulnerable ship) rather than host-page overlays, and neither has a
-    /// `DebugFlag` any more.
+    /// `DebugSurface` entry.
     ///
     /// Reported in **every** build, unlike the two client messages that can
     /// change it. A read-back grants no authority: a demo phone learns that the
     /// host paused the mission and still has no way to pause it itself.
     DebugState {
-        flags: Vec<(DebugFlag, bool)>,
+        flags: Vec<(DebugSurface, bool)>,
         paused: bool,
         god_mode: bool,
     },

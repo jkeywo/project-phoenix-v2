@@ -279,10 +279,12 @@ jobs:
       # The catalogue restriction's other half (PRD #855). The curated manifest
       # above decides what the demo OFFERS; the mod-pack upload is the one
       # control that adds scenarios and hulls to it at runtime, so a demo binary
-      # must not contain `wasm_add_mod_pack` at all. The Rust gate is
-      # `#[cfg(not(phoenix_demo_build))]` on that export — this asserts the gate
-      # actually fired in the artifact being shipped, which is the only place it
-      # can be observed (the export is wasm32-only, so no native job compiles it).
+      # must not contain `wasm_add_mod_pack` at all. The same artifact boundary
+      # applies to the host's diagnostic mutation export,
+      # `wasm_set_debug_surface`. Their Rust gates are
+      # `#[cfg(not(phoenix_demo_build))]` — this asserts those gates actually
+      # fired in the artifact being shipped, which is the only place the
+      # wasm32-only exports can be observed.
       #
       # NOTE the deliberate asymmetry with the check above: `dist/index.html`
       # still CONTAINS the string, because server.html's page logic is unchanged
@@ -290,7 +292,7 @@ jobs:
       # wasm-bindgen GLUE that must not export it. The glue's name is derived the
       # same way the WASM-compression step below derives it, and the sanity grep
       # makes a trunk layout change loud rather than vacuously green.
-      - name: Verify the mod-pack upload route is compiled out
+      - name: Verify privileged host mutation exports are compiled out
         run: |
           set -euo pipefail
           GLUE="dist/$(basename "$(ls dist/*_bg.wasm)" _bg.wasm).js"
@@ -310,7 +312,11 @@ jobs:
             echo "$GLUE still exports wasm_add_mod_pack — the demo build would let a player widen the curated catalogue (PRD #855)" >&2
             exit 1
           fi
-          echo "ok: the mod-pack upload export is absent from the demo bundle"
+          if grep -qE '^export function wasm_set_debug_surface\b' "$GLUE"; then
+            echo "$GLUE still exports wasm_set_debug_surface — the demo build would expose host diagnostic mutation (#1267)" >&2
+            exit 1
+          fi
+          echo "ok: privileged host mutation exports are absent from the demo bundle"
 
       # Cloudflare Pages refuses any file over 25 MiB, and the release WASM
       # is ~38 MiB even after the -Oz pass (run 30847968215). Models are all

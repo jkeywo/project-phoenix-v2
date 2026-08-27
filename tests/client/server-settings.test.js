@@ -21,8 +21,10 @@ import {
   reconcileOutputs,
   visibleTabs,
   DEBUG_OUTPUTS,
+  DEBUG_TOGGLES,
 } from '../../gui/server-settings.js';
 import { isDemoBuild, setBuildFlags, demoFromMeta } from '../../gui/build-flags.js';
+import { CLIENT_DEBUG_FLAGS } from '../../gui/settings-panel.js';
 
 const SERVER_HTML = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -48,15 +50,18 @@ function makeBindings(overrides = {}) {
     paused: false,
     waypoint: true,
     master: 1,
+    debugFlags: {},
   };
   const record = (name) => (...args) => { calls.push([name, ...args]); };
   const bindings = {
     calls,
     state,
-    wasm_toggle_debug_overlay: record('wasm_toggle_debug_overlay'),
-    wasm_toggle_debug_damage: record('wasm_toggle_debug_damage'),
-    wasm_toggle_debug_entities: record('wasm_toggle_debug_entities'),
-    wasm_toggle_entity_inspector: record('wasm_toggle_entity_inspector'),
+    wasm_set_debug_surface: (surface, on) => {
+      calls.push(['wasm_set_debug_surface', surface, on]);
+      state.debugFlags[surface] = on;
+      if (surface === 'Regions') state.regions = on;
+    },
+    wasm_get_debug_flags: () => JSON.stringify(state.debugFlags),
     // The four legacy overlays now publish structured JSON the dock parses and
     // renders (issue #1150), not pre-formatted text — so the reads return
     // payloads matching each surface's `codec::encode_*` wire shape.
@@ -74,8 +79,6 @@ function makeBindings(overrides = {}) {
       }),
     wasm_get_entity_inspector: () =>
       JSON.stringify({ schema_version: 1, player: null, entities: [] }),
-    wasm_toggle_debug_regions: () => { calls.push(['wasm_toggle_debug_regions']); state.regions = !state.regions; },
-    wasm_is_debug_regions_enabled: () => state.regions,
     wasm_toggle_god_mode: () => { calls.push(['wasm_toggle_god_mode']); state.godmode = !state.godmode; },
     wasm_get_god_mode: () => state.godmode,
     wasm_toggle_instagib: () => { calls.push(['wasm_toggle_instagib']); state.instagib = !state.instagib; },
@@ -222,12 +225,12 @@ describe('the Debug/Cheat tab', () => {
     mounted.selectTab('debug');
 
     control('entities').click();
-    expect(bindings.calls.map((c) => c[0])).toEqual(['wasm_toggle_debug_entities']);
+    expect(bindings.calls).toEqual([['wasm_set_debug_surface', 'Entities', true]]);
 
     control('inspector').click();
-    expect(bindings.calls.map((c) => c[0])).toEqual([
-      'wasm_toggle_debug_entities',
-      'wasm_toggle_entity_inspector',
+    expect(bindings.calls).toEqual([
+      ['wasm_set_debug_surface', 'Entities', true],
+      ['wasm_set_debug_surface', 'Inspector', true],
     ]);
   });
 
@@ -239,9 +242,9 @@ describe('the Debug/Cheat tab', () => {
     control('modifiers').click();
     control('modifiers').click();
 
-    expect(bindings.calls.map((c) => c[0])).toEqual([
-      'wasm_toggle_debug_overlay',
-      'wasm_toggle_debug_overlay',
+    expect(bindings.calls).toEqual([
+      ['wasm_set_debug_surface', 'Modifiers', true],
+      ['wasm_set_debug_surface', 'Modifiers', false],
     ]);
     expect($('#debug-dock').classList.contains('open')).toBe(false);
   });
@@ -495,6 +498,22 @@ describe('server.html host-page guards', () => {
     expect(SRC).toMatch(/<meta name="phoenix-build-demo" content="false"/);
   });
 
+  it('routes the debug_regions URL option through the one catalogue mutator', () => {
+    expect(SRC).not.toContain('wasm_set_debug_regions');
+    expect(SRC).not.toContain('wasm_is_debug_regions_enabled');
+    const loadAt = SRC.indexOf("const _debugSurfacesReady = import('./gui/debug-surfaces.generated.js')");
+    const startAt = SRC.indexOf('async function startServer()');
+    const awaitAt = SRC.indexOf('await _debugSurfacesReady;', startAt);
+    const setAt = SRC.indexOf(
+      'wasm_set_debug_surface(window.phDebugSurfaces.DebugSurface.Regions, true)',
+      startAt,
+    );
+    expect(loadAt).toBeGreaterThanOrEqual(0);
+    expect(loadAt).toBeLessThan(startAt);
+    expect(awaitAt).toBeGreaterThan(startAt);
+    expect(setAt).toBeGreaterThan(awaitAt);
+  });
+
   it('refuses a peer that identifies under a reserved host-runtime token', () => {
     expect(SRC).toMatch(/function isPeerTokenAllowed\s*\(/);
     expect(SRC).toMatch(/token === LOCAL_CONSOLE_TOKEN\) return false/);
@@ -604,7 +623,7 @@ describe('server.html host-page guards', () => {
 describe('reconcileOutputs', () => {
   const OUTPUTS = [
     { id: 'console-latency', flag: 'ConsoleLatency' },
-    { id: 'station-activity' }, // no flag: no read-back to reconcile against
+    { id: 'station-activity', flag: 'StationActivity' },
   ];
 
   it('turns an output ON when the simulation says it is', () => {
@@ -635,7 +654,7 @@ describe('reconcileOutputs', () => {
     expect(next.viewing).toBe('station-activity');
   });
 
-  it('leaves outputs with no read-back exactly as they were', () => {
+  it('leaves an output unchanged when its catalogue row is absent from a partial report', () => {
     const state = { enabled: ['station-activity'], viewing: 'station-activity' };
     const next = reconcileOutputs(state, { ConsoleLatency: true }, OUTPUTS);
     expect(next.enabled).toContain('station-activity');
@@ -654,12 +673,21 @@ describe('reconcileOutputs', () => {
   });
 });
 
-describe('console-latency output — absolute set, not toggle', () => {
-  it('declares a `set` binding and a `flag`, unlike every render-only output', () => {
-    const entry = DEBUG_OUTPUTS.find((o) => o.id === 'console-latency');
-    expect(entry.set).toBe('wasm_set_console_latency');
-    expect(entry.flag).toBe('ConsoleLatency');
-    expect(entry.toggle).toBeUndefined();
+describe('catalogue-backed outputs — absolute set, not host-local toggles', () => {
+  it('host and phone expose the same one-to-one Debug Surface set', () => {
+    const hostFlags = [...DEBUG_OUTPUTS, ...DEBUG_TOGGLES]
+      .map((entry) => entry.flag)
+      .filter(Boolean);
+    const phoneFlags = CLIENT_DEBUG_FLAGS.map((entry) => entry.flag);
+    expect(new Set(hostFlags).size).toBe(hostFlags.length);
+    expect(new Set(phoneFlags).size).toBe(phoneFlags.length);
+    expect(hostFlags.slice().sort()).toEqual(phoneFlags.slice().sort());
+  });
+
+  it('declares a unique catalogue flag for every output', () => {
+    const flags = DEBUG_OUTPUTS.map((entry) => entry.flag);
+    expect(flags).not.toContain(undefined);
+    expect(new Set(flags).size).toBe(flags.length);
   });
 
   /** Open the cog on the Debug tab with a scripted flag read-back. */
@@ -667,7 +695,10 @@ describe('console-latency output — absolute set, not toggle', () => {
     const sets = [];
     const bindings = makeBindings({
       wasm_get_debug_flags: () => JSON.stringify(flags),
-      wasm_set_console_latency: (on) => sets.push(on),
+      wasm_set_debug_surface: (surface, on) => {
+        sets.push([surface, on]);
+        flags[surface] = on;
+      },
     });
     ({ menu: mounted } = mount({ bindings }));
     mounted.open();
@@ -678,7 +709,7 @@ describe('console-latency output — absolute set, not toggle', () => {
   it('sends the value it wants, computed from the simulation read-back', () => {
     const sets = cogWithFlags({ ConsoleLatency: false });
     control('console-latency').click();
-    expect(sets).toEqual([true]);
+    expect(sets).toEqual([['ConsoleLatency', true]]);
   });
 
   it('a phone that turned it on behind the cog makes the next click turn it OFF', () => {
@@ -687,7 +718,7 @@ describe('console-latency output — absolute set, not toggle', () => {
     control('console-latency').click();
     // A relative toggle would have turned it on AGAIN — silently leaving the
     // simulation measuring nothing while the button read "on".
-    expect(sets).toEqual([false]);
+    expect(sets).toEqual([['ConsoleLatency', false]]);
   });
 
   it('paints the button from the simulation, not from what it last clicked', () => {

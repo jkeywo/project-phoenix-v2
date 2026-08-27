@@ -86,8 +86,10 @@
  */
 export const MAX_BATCH = 64;
 
-/** `DebugFlag` variant name this measurement is gated on. */
-export const CONSOLE_LATENCY_FLAG = 'ConsoleLatency';
+import { DEBUG_SURFACE } from './debug-surfaces.generated.js';
+
+/** Canonical generated `DebugSurface` wire name this measurement is gated on. */
+export const CONSOLE_LATENCY_FLAG = DEBUG_SURFACE.ConsoleLatency;
 
 /**
  * Why a console's payload was pushed to its surface.

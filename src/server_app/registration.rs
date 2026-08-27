@@ -297,10 +297,9 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     // Authoritative-state EXCLUSION declarations (issue #1221, Track 3 step C9).
     // Every type below is non-authoritative state this function OWNS — it
     // `init_resource`s / `insert_resource`s each of them further down (or, for the
-    // debug-overlay flags, causes each to enter the component registry via the
-    // `resource_exists::<..>` run conditions on the settings-route systems below,
-    // even though the `DebugOverlayPlugin` that *inserts* them is absent from a
-    // headless run). Each is declared at this owning site via `App::declare_state`,
+    // Debug Surface flags, adds `DebugPlugin`, which inserts every catalogue
+    // adapter resource on every assembled target, including headless). Each is
+    // declared at this owning site via `App::declare_state`,
     // replacing the hand-maintained `EXCLUSIONS` const that used to live in
     // `tests/authoritative_state_enumeration.rs`; the enumeration guard now reads
     // the exclusion set back out of `StateCensus`. The declaration is inert to the
@@ -339,11 +338,10 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 StateClass::Presentation,
                 "station-importance-state",
             )
-            // Presentation debug-overlay flags (issue #940). Their inserting
-            // `DebugOverlayPlugin` is absent headless, but the settings-route
-            // systems below name them in `resource_exists` run conditions, so they
-            // enter the headless registry here — this is the site that owns their
-            // presence in the census the enumeration guard scans.
+            // Presentation Debug Surface flags (issues #940/#1267).
+            // `DebugPlugin` inserts them on every assembled target so each
+            // catalogue adapter and native readback is live; this remains the
+            // site that owns their presence in the authoritative-state census.
             .declare_state::<crate::debug_overlay::DebugRegionsEnabled>(
                 StateClass::Presentation,
                 "debug-overlay-state",
@@ -821,9 +819,14 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     // See `debug_overlay::drain_client_pause`.
     //
     // Gated on the two plugins that own what they touch. `DebugOverlayPlugin`
-    // is added by `wasm_init` and `LobbyPlugin` brings `Sessions` and the
-    // `OutboundMessage` stream — a headless run has neither, and no phone to
-    // serve either, so there is genuinely nothing to drain there.
+    // is added by `wasm_init` and owns `SimulationPaused`; `LobbyPlugin` brings
+    // `Sessions` and the `OutboundMessage` stream. A headless run deliberately
+    // omits `DebugOverlayPlugin` / `SimulationPaused` even though its lobby
+    // supplies `Sessions`, and it has no phone debug route to serve. Check the
+    // absent owner resource directly: since issue #1267
+    // `DebugRegionsEnabled` is inserted on every assembled target for the
+    // all-build Debug Surface catalogue, so it is no longer a browser-owner
+    // proxy.
     //
     // The reporter is registered unconditionally and the two drains are not:
     // in a demo build the phone has no route to either, but it is still told
@@ -859,18 +862,20 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             crate::debug_overlay::drain_client_pause,
         )
             .chain()
-            .before(crate::debug_overlay::report_debug_state)
+            .before(crate::debug::catalogue::refresh_readback)
             .run_if(
-                resource_exists::<crate::debug_overlay::DebugRegionsEnabled>
+                resource_exists::<crate::debug_overlay::SimulationPaused>
                     .and(resource_exists::<crate::lobby::Sessions>),
             ),
     );
     app.add_systems(
         PreUpdate,
-        crate::debug_overlay::report_debug_state.run_if(
-            resource_exists::<crate::debug_overlay::DebugRegionsEnabled>
-                .and(resource_exists::<crate::lobby::Sessions>),
-        ),
+        crate::debug_overlay::report_debug_state
+            .after(crate::debug::catalogue::refresh_readback)
+            .run_if(
+                resource_exists::<crate::debug_overlay::SimulationPaused>
+                    .and(resource_exists::<crate::lobby::Sessions>),
+            ),
     );
 
     // Console input-to-feedback latency, client half (issue #1169). Connected

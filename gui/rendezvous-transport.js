@@ -38,15 +38,23 @@ import {
   parseJoinCode,
   reasonStringId,
 } from './join-code.js';
+import { RENDEZVOUS_PROTOCOL } from './rendezvous-protocol.js';
 
-/** Frame-vocabulary revision; must match worker-rendezvous/src/registry.js. */
-export const RENDEZVOUS_PROTOCOL = 1;
+/** Re-exported so a consumer of this module needs only one import. */
+export { RENDEZVOUS_PROTOCOL };
 
 /**
- * The dev rendezvous service. One hardcoded literal, exactly like the TURN
- * worker's at gui/connection-manager.js — .github/workflows/deploy-demo.yml
- * sweeps dist/ for it and patches in the demo worker's URL, so do not build
- * this string from parts.
+ * The dev rendezvous service. One hardcoded literal, in the same shape as the
+ * TURN worker's at gui/connection-manager.js — keep it a whole string rather
+ * than building it from parts, because a deploy-time URL sweep can only find a
+ * literal.
+ *
+ * NOTE, and this is the honest state of it: no such sweep exists for THIS
+ * literal yet. .github/workflows/deploy-demo.yml sweeps `DEV_TURN_URL` only,
+ * and adding the rendezvous one is an open item in
+ * docs/delivery-checklist.md §3a — together with deploying the worker at all,
+ * which #1111 does not do. A demo build therefore still points at the dev
+ * service; the route is opt-in, so nothing breaks until both land.
  */
 export const DEV_RENDEZVOUS_URL = 'https://phoenix-rendezvous.project-phoenix.workers.dev';
 
@@ -81,27 +89,29 @@ export function rendezvousBaseFromLocation(search, defaultBase = DEV_RENDEZVOUS_
  *   `peerjs`      the fragment is a 32-hex peer id — today's route, untouched
  *   `rendezvous`  the fragment is a structured join code (a QR scan, or a
  *                 pasted full code): join straight away
- *   `entry`       nothing in the fragment: ask for five letters
- *   `none`        nothing in the fragment and no service to ask — the old
- *                 "no host id in the URL" dead end, kept for `?rendezvous=off`
+ *   `entry`       nothing in the fragment and the page asked for a service:
+ *                 ask for five letters
+ *   `none`        nothing to join and no service to ask — the "no host id in
+ *                 the URL" dead end this page has always had
  *
- * A structured code in the fragment IS an opt-in to the Phoenix route, so it
- * does not additionally need `?rendezvous`; that parameter only redirects the
- * page at another service, or turns the route off entirely.
+ * OFF BY DEFAULT, exactly like {@link rendezvousBaseFromLocation}, whose parse
+ * this reuses rather than repeating: a bare client page with an empty fragment
+ * is `none`, not an entry field pointed at a service that may not be deployed.
+ * A structured code in the fragment IS its own opt-in — it is what the QR
+ * carries — so that case does not additionally need `?rendezvous`; the
+ * parameter turns the entry field on, redirects the page at another service,
+ * or (`=off`) refuses even the fragment's implicit opt-in.
  */
 export function joinRouteFromLocation(search, hash, defaultBase = DEV_RENDEZVOUS_URL) {
-  const params = new URLSearchParams(search || '');
-  const raw = params.has('rendezvous') ? (params.get('rendezvous') || '').trim() : null;
-  const off = raw === '0' || raw === 'off';
-  const base = off
-    ? null
-    : raw && raw !== '1' && raw !== 'on' && raw !== 'default'
-      ? raw
-      : defaultBase;
+  const base = rendezvousBaseFromLocation(search, defaultBase);
+  // Absent and "explicitly off" are the same `null` to the base parse, and the
+  // difference matters for exactly one case: whether a structured code in the
+  // fragment may imply the service.
+  const off = new URLSearchParams(search || '').has('rendezvous') && !base;
 
   const fragment = String(hash || '').replace(/^#/, '');
   if (fragment.includes('_')) {
-    return base ? { route: 'rendezvous', base, code: fragment } : { route: 'none' };
+    return off ? { route: 'none' } : { route: 'rendezvous', base: base || defaultBase, code: fragment };
   }
   if (fragment) return { route: 'peerjs', hostPeerId: fragment };
   return base ? { route: 'entry', base } : { route: 'none' };
@@ -186,15 +196,14 @@ function decodeFrame(raw) {
  * @param {object} opts
  * @param {string} opts.base            rendezvous service base URL
  * @param {string} [opts.namespace]     which code namespace to be issued in
- * @param {string|null} [opts.stamp]    this host's delivery stamp, published as
- *                                      advisory discovery metadata
  * @param {object[]} [opts.iceServers]
  * @param {(stamp:string|null)=>{ok:boolean,code?:string,detail?:string}} [opts.checkStamp]
  *   the authoritative compatibility verdict. Defaults to "admit" so a page that
  *   cannot reach the WASM export degrades to today's behaviour rather than
  *   refusing everyone.
  * @param {(code:object)=>void} [opts.onCode]
- * @param {(conn:object)=>void} [opts.onConnection]
+ * @param {(conn:object)=>void} [opts.onConnection] called ONLY for a joiner the
+ *   compatibility handshake admitted — never on channel open.
  * @param {(reason:string, detail?:string)=>void} [opts.onError]
  * @param {(msg:string)=>void} [opts.onLog]
  */
@@ -202,7 +211,6 @@ export function createRendezvousHost(opts) {
   const {
     base,
     namespace = NAMESPACE_CLIENT,
-    stamp = null,
     iceServers = [],
     checkStamp = () => ({ ok: true }),
     onCode = () => {},
@@ -235,32 +243,48 @@ export function createRendezvousHost(opts) {
       if (channel.label !== RELIABLE_CHANNEL) return;
       const adapter = connectionAdapter(id, channel, pc);
       entry.adapter = adapter;
+      // The gate, per joiner. An open DataChannel is NOT admission: until the
+      // compatibility handshake has been answered `ok`, the page has never
+      // been handed this adapter, so nothing here can reach the Identify gate
+      // or wasm_receive_message. Frames arriving before that are DROPPED, not
+      // buffered — a build the host is about to refuse has no business queuing
+      // simulation traffic — and everything after a refusal is dropped too.
+      let admitted = false;
+      let refused = false;
       channel.onmessage = (ev) => {
+        if (refused) return;
         const msg = decodeFrame(ev.data);
-        // The compatibility handshake is transport-plane and never reaches the
-        // page's Identify gate, let alone WASM.
-        if (msg && msg.type === 'JoinHandshake') {
+        if (!admitted) {
+          // The compatibility handshake is transport-plane and never reaches
+          // the page's Identify gate, let alone WASM. Nothing else exists on
+          // this channel yet.
+          if (!msg || msg.type !== 'JoinHandshake') return;
           const verdict = checkStamp((msg.data && msg.data.stamp) || null);
-          if (verdict.ok) {
-            adapter.send(JSON.stringify({ type: 'JoinAccepted', data: {} }));
-          } else {
+          if (!verdict.ok) {
+            refused = true;
             onLog(`[rendezvous] refusing ${id}: ${verdict.code} ${verdict.detail || ''}`);
             adapter.send(JSON.stringify({
               type: 'JoinRefused',
               data: { code: verdict.code, detail: verdict.detail || '' },
             }));
-            // Let the refusal drain before tearing the channel down: a client
-            // that is dropped without being told why has learned nothing, and
-            // "cannot connect" is the least actionable message in the game.
+            // Purely a send-flush: let the refusal reach the wire before the
+            // channel goes. A client dropped without being told why has
+            // learned nothing, and "cannot connect" is the least actionable
+            // message in the game. Nothing is admitted during the wait.
             setTimeout(() => adapter.close(), 250);
+            return;
           }
+          admitted = true;
+          // Page first, then the acceptance the joiner answers with Identify,
+          // so the handler that reads it is already attached.
+          onConnection(adapter);
+          adapter.send(JSON.stringify({ type: 'JoinAccepted', data: {} }));
           return;
         }
+        // A second handshake from an admitted peer is noise, not a re-vote.
+        if (msg && msg.type === 'JoinHandshake') return;
         adapter.emit('data', ev.data);
       };
-      const announce = () => onConnection(adapter);
-      if (channel.readyState === 'open') announce();
-      else channel.onopen = announce;
     };
     return entry;
   }
@@ -282,7 +306,7 @@ export function createRendezvousHost(opts) {
   function handle(msg) {
     switch (msg.type) {
       case 'ready':
-        socket.send(frame('host-open', { namespace, stamp }));
+        socket.send(frame('host-open', { namespace }));
         break;
       case 'hosted':
         code = msg.code;
@@ -442,7 +466,10 @@ export function createRendezvousJoiner(opts) {
     switch (msg.type) {
       case 'ready':
         onStatus('connecting');
-        socket.send(frame('join', { code: parsed.full, stamp }));
+        // The joiner's own stamp travels in the in-band JoinHandshake, to the
+        // host that decides on it — never through the service, which has no
+        // say and would only be relaying dead metadata.
+        socket.send(frame('join', { code: parsed.full }));
         break;
       case 'joined':
         onLog(`[rendezvous] resolved ${parsed.suffix}; offering`);
@@ -451,13 +478,20 @@ export function createRendezvousJoiner(opts) {
       case 'signal':
         onSignal(msg.payload).catch((e) => onError('unreachable', String(e && e.message)));
         break;
+      // Both of these are terminal: there is no state this joiner can reach
+      // afterwards. Tear it down as well as reporting it, so a dead joiner can
+      // never fire a page callback later — the page's retry builds a new one,
+      // and an orphan still wired to the same closures would pop the join
+      // overlay back over a working session.
       case 'closed':
         onError(msg.reason || 'host-gone');
         onStatus('disconnected');
+        closeAll();
         break;
       case 'error':
         onError(msg.reason, msg.detail);
         onStatus('error');
+        closeAll();
         break;
       default:
         break;
@@ -471,13 +505,26 @@ export function createRendezvousJoiner(opts) {
     try { if (socket) socket.close(); } catch { /* already gone */ }
   }
 
+  /** True once the direct channel is up: the signalling socket is expendable. */
+  const linked = () => !!channel && channel.readyState === 'open';
+
   socket = factories.socket(socketUrl(base, '/v1/join'));
   socket.onopen = () => onLog('[rendezvous] join socket open');
   socket.onmessage = (e) => {
     const msg = decodeFrame(e.data);
     if (msg) handle(msg);
   };
-  socket.onerror = () => { onError('unreachable'); onStatus('error'); };
+  socket.onerror = () => { if (!closed) { onError('unreachable'); onStatus('error'); } };
+  // The host half has always had this; the joining half had not, so a
+  // server-initiated close — DO eviction, worker redeploy, idle timeout, an LB
+  // reset — fired `close` with no preceding `error` and left the phone on
+  // "connecting…" forever. Only before the direct channel exists: afterwards
+  // the signalling socket going away is expected, not a failure.
+  socket.onclose = () => {
+    if (closed || linked()) return;
+    onError('unreachable');
+    onStatus('error');
+  };
 
   return {
     get suffix() { return parsed.suffix; },

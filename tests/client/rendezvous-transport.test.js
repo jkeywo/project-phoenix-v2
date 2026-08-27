@@ -28,6 +28,7 @@ import {
   projectGuidFor,
   versionGuid,
   composeJoinCode,
+  reasonStringId,
 } from '../../gui/join-code.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -61,9 +62,13 @@ function makeWorld() {
       onopen: null, onmessage: null, onerror: null, onclose: null,
       send(text) { dispatch(registry.receive(id, JSON.parse(text))); },
       close() {
+        if (this.readyState === 3) return;
         this.readyState = 3;
         sockets.delete(id);
         dispatch(registry.disconnect(id));
+        // Real sockets fire this, and tests/smoke/rendezvous-shim.js does too;
+        // a fake that stays silent hides a whole class of failure.
+        if (this.onclose) this.onclose();
       },
     };
     sockets.set(id, ws);
@@ -151,17 +156,51 @@ async function hostOn(world, opts = {}) {
   const factories = { socket: world.socket, peer: makePeerFactory() };
   let code = null;
   const inbound = [];
+  const announced = [];
   const host = createRendezvousHost({
     base: 'https://rendezvous.test',
     factories,
     onCode: (c) => { code = c; },
     onConnection: (conn) => {
+      announced.push(conn);
       conn.on('data', (raw) => inbound.push(JSON.parse(raw)));
     },
     ...opts,
   });
   await settle();
-  return { host, code, inbound, factories };
+  return { host, code, inbound, announced, factories };
+}
+
+/**
+ * A joiner that is NOT gui/rendezvous-transport.js's — it speaks the same
+ * rendezvous frames and opens the same reliable channel, but sends whatever the
+ * test tells it to. That is the only way to ask what the host does about a peer
+ * that does not play by the handshake: the shipped joiner always does.
+ */
+async function rogueJoin(factories, code, { onOpen, onMessage } = {}) {
+  const socket = factories.socket('https://rendezvous.test/v1/join');
+  let pc = null;
+  let channel = null;
+  socket.onmessage = async (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'ready') {
+      socket.send(JSON.stringify({ v: 1, type: 'join', code }));
+    } else if (msg.type === 'joined') {
+      pc = factories.peer({ iceServers: [] });
+      channel = pc.createDataChannel('reliable', { ordered: true });
+      channel.onopen = () => { if (onOpen) onOpen(channel); };
+      channel.onmessage = (ev) => {
+        if (onMessage) onMessage(JSON.parse(ev.data), channel);
+      };
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socket.send(JSON.stringify({ v: 1, type: 'signal', payload: { sdp: pc.localDescription } }));
+    } else if (msg.type === 'signal' && msg.payload && msg.payload.sdp) {
+      await pc.setRemoteDescription(msg.payload.sdp);
+    }
+  };
+  await settle();
+  return { get channel() { return channel; } };
 }
 
 // ── Pure helpers ────────────────────────────────────────────────────────────
@@ -211,8 +250,20 @@ describe('which route a client page load is on', () => {
     });
   });
 
-  it('asks for five letters when the fragment is empty', () => {
-    expect(joinRouteFromLocation('', '')).toEqual({ route: 'entry', base: DEV_RENDEZVOUS_URL });
+  it('is off for a bare page load, exactly like the host half', () => {
+    // The Phoenix route is opt-in per page load until #1112 retires PeerJS. A
+    // client page opened with no fragment and no parameter keeps its old
+    // "no host id in the URL" dead end rather than presenting an entry field
+    // wired to a service that need not be deployed.
+    expect(joinRouteFromLocation('', '')).toEqual({ route: 'none' });
+    expect(joinRouteFromLocation('?scenario=x', '')).toEqual({ route: 'none' });
+  });
+
+  it('asks for five letters when the page asked for a service', () => {
+    expect(joinRouteFromLocation('?rendezvous', '')).toEqual({
+      route: 'entry',
+      base: DEV_RENDEZVOUS_URL,
+    });
   });
 
   it('honours a service override for both the code and the entry route', () => {
@@ -351,9 +402,12 @@ describe('distinct failures', () => {
 
   it('says wrong-type for a code minted in the server namespace', async () => {
     const world = makeWorld();
-    const { factories } = await hostOn(world, { namespace: NAMESPACE_SERVER });
-    const serverCode = world.registry.snapshot().find((r) => r.namespace === NAMESPACE_SERVER);
-    expect(await errorsFor(serverCode.suffix, world, factories)).toContain('wrong-type');
+    // The code comes from the `hosted` frame that issued it, not from the
+    // registry's diagnostics snapshot — that view deliberately carries no
+    // suffix, because the suffix is the private client code.
+    const { code, factories } = await hostOn(world, { namespace: NAMESPACE_SERVER });
+    expect(code.namespace).toBe(NAMESPACE_SERVER);
+    expect(await errorsFor(code.suffix, world, factories)).toContain('wrong-type');
   });
 
   it('says version-mismatch for the right namespace under another release', async () => {
@@ -362,7 +416,7 @@ describe('distinct failures', () => {
     // Re-address the same suffix to a release the registry does not hold.
     const other = composeJoinCode({
       project: projectGuidFor(NAMESPACE_CLIENT, DATA),
-      version: 'a-release-that-is-not-this-one',
+      version: '11112222-3333-4444-5555-666677778888',
       suffix: code.suffix,
     });
     expect(await errorsFor(other, world, factories)).toContain('version-mismatch');
@@ -438,5 +492,146 @@ describe('host compatibility handshake', () => {
     host.close();
     await settle();
     expect(errors).toContain('host-gone');
+  });
+
+  it('never hands the page a peer that skipped the handshake', async () => {
+    // An open DataChannel is not admission. A peer whose first frame is
+    // Identify has never been checked, so it must not reach onConnection —
+    // which in server.html IS attachHostConn, the Identify gate and
+    // dispatchToWasm behind it.
+    const world = makeWorld();
+    const { code, inbound, announced, factories } = await hostOn(world, {
+      checkStamp: () => ({ ok: true }),
+    });
+    const rogue = await rogueJoin(factories, code.suffix, {
+      onOpen: (channel) => channel.send(JSON.stringify({
+        type: 'Identify',
+        data: { token: 'sneaky', name: 'Mallory' },
+      })),
+    });
+    await settle();
+    expect(announced).toHaveLength(0);
+    expect(inbound).toHaveLength(0);
+
+    // …and the channel really was open and delivering all along: the same peer
+    // doing the handshake IS admitted, and its next frame arrives. Without
+    // this, the assertions above would pass just as well on a broken fixture.
+    rogue.channel.send(JSON.stringify({ type: 'JoinHandshake', data: { stamp: '1/x/1' } }));
+    await settle();
+    rogue.channel.send(JSON.stringify({ type: 'Identify', data: { token: 'proper' } }));
+    await settle();
+    expect(announced).toHaveLength(1);
+    expect(inbound).toEqual([{ type: 'Identify', data: { token: 'proper' } }]);
+  });
+
+  it('drops everything a refused peer sends after the refusal', async () => {
+    // The refusal is followed by a 250 ms drain so the client learns WHY it
+    // was dropped. That window is a send-flush, not an admission window.
+    const world = makeWorld();
+    const seen = [];
+    const { code, inbound, announced, factories } = await hostOn(world, {
+      checkStamp: () => ({ ok: false, code: 'protocol-mismatch', detail: 'host 1, client 2' }),
+    });
+    await rogueJoin(factories, code.suffix, {
+      onOpen: (channel) => channel.send(JSON.stringify({
+        type: 'JoinHandshake',
+        data: { stamp: '2/phoenix-base/1' },
+      })),
+      onMessage: (msg, channel) => {
+        seen.push(msg.type);
+        if (msg.type === 'JoinRefused') {
+          channel.send(JSON.stringify({ type: 'Identify', data: { token: 'after-refusal' } }));
+        }
+      },
+    });
+    await settle();
+    expect(seen).toEqual(['JoinRefused']);
+    expect(announced).toHaveLength(0);
+    expect(inbound).toHaveLength(0);
+  });
+
+  it('renders every host refusal code as its own sentence, never as unknown', async () => {
+    // Through to the string id client.html actually renders — an onError
+    // assertion alone would have passed while the phone said "no ship is using
+    // that code" for a build the host had authoritatively refused.
+    const unknownId = reasonStringId('unknown');
+    for (const refusal of [
+      'protocol-mismatch',
+      'content-id-mismatch',
+      'content-epoch-mismatch',
+      'bundle-content-missing',
+      'client-stamp-missing',
+    ]) {
+      const world = makeWorld();
+      const { code, factories } = await hostOn(world, {
+        checkStamp: () => ({ ok: false, code: refusal, detail: 'because' }),
+      });
+      const rendered = [];
+      createRendezvousJoiner({
+        base: 'https://rendezvous.test',
+        data: DATA,
+        code: code.suffix,
+        stamp: '9/other-content/3',
+        factories,
+        onError: (reason) => rendered.push(reasonStringId(reason)),
+      });
+      await settle();
+      expect(rendered, refusal).not.toContain(unknownId);
+      expect(rendered, refusal).toContain(reasonStringId(refusal));
+    }
+  });
+});
+
+describe('a joiner that fails cleans up after itself', () => {
+  it('reports a signalling socket that drops mid-join instead of hanging', async () => {
+    const world = makeWorld();
+    const { code } = await hostOn(world);
+    const joinSockets = [];
+    const factories = {
+      socket: (url) => {
+        const s = world.socket(url);
+        if (String(url).endsWith('/v1/join')) joinSockets.push(s);
+        return s;
+      },
+      peer: makePeerFactory(),
+    };
+
+    const errors = [];
+    const statuses = [];
+    createRendezvousJoiner({
+      base: 'https://rendezvous.test',
+      data: DATA,
+      code: code.suffix,
+      factories,
+      onError: (reason) => errors.push(reason),
+      onStatus: (s) => statuses.push(s),
+    });
+    // Far enough for the join to be sent, nowhere near a direct channel.
+    await Promise.resolve();
+    await Promise.resolve();
+    joinSockets[0].close();
+    await settle();
+
+    // A server-initiated close fires `close` with no preceding `error`, so
+    // without an onclose handler the guest sat on "connecting…" forever.
+    expect(errors).toContain('unreachable');
+    expect(statuses).toContain('error');
+  });
+
+  it('closes itself on a terminal frame, so a dead joiner cannot fire later', async () => {
+    const world = makeWorld();
+    const { factories } = await hostOn(world);
+    const joiner = createRendezvousJoiner({
+      base: 'https://rendezvous.test',
+      data: DATA,
+      code: 'ZZZZZ',
+      factories,
+    });
+    await settle();
+    // The service answered `unknown`. Retrying is the ordinary path through
+    // this screen, and each abandoned attempt used to leave a live socket, a
+    // registry connection and a peer connection still wired to the page.
+    expect(joiner.connected).toBe(false);
+    expect(world.registry.snapshot()[0].peers).toBe(0);
   });
 });

@@ -2232,27 +2232,17 @@
     // second code while the first one is still live. The rendezvous route has
     // no equivalent transient failure of its own to recover from here.
     let rendezvousHost = null;
+    // Whether a five-letter code is currently on screen. The PeerJS panel and
+    // the rendezvous panel write the same three elements, so "who painted last"
+    // has to be a decision rather than a race: PeerJS paints until a code is
+    // actually issued, and the code panel yields again if the service is lost.
+    let rendezvousCodeShown = false;
+    // Set when the rendezvous service reports a failure, so renderConnDiag()
+    // can tell the operator why no code appeared. Read inside initPeerJS().
+    let rendezvousFault = null;
 
-    /** This host's delivery stamp as `<protocol>/<content_id>/<content_epoch>`. */
-    function hostDeliveryStampField() {
-      try {
-        const bindings = window.wasmBindings;
-        if (!bindings || typeof bindings.wasm_delivery_stamp !== 'function') return null;
-        const s = JSON.parse(bindings.wasm_delivery_stamp());
-        return `${s.protocol}/${s.content_id}/${s.content_epoch}`;
-      } catch (_) {
-        // Published to the rendezvous as ADVISORY discovery metadata only, so
-        // not knowing it yet costs a joiner nothing — the binding handshake
-        // runs on the DataChannel later, when the host certainly does know.
-        return null;
-      }
-    }
-
-    /** Paint an issued join code: the letters, the QR and the copyable link. */
-    function showJoinCode(code) {
-      const url = window.rendezvousTransport.joinUrlForCode(
-        location.href, code.full, rendezvousBase,
-      );
+    /** Paint the join panel for a URL: the QR, the click-through and the text. */
+    function paintJoinPanel(url) {
       const canvas = document.getElementById('qr');
       if (canvas && typeof QRCode !== 'undefined') {
         canvas.style.display = 'block';
@@ -2261,20 +2251,53 @@
       const qrLink = document.getElementById('qr-link');
       if (qrLink) {
         qrLink.href = url;
+        // Clicking the QR opens the client in a separate WINDOW, not a tab, so
+        // testers can run several clients side-by-side on one desktop. A
+        // features string (size) is what makes the browser spawn a window
+        // rather than a tab; '_blank' name gives each click its own window.
+        // The href is kept for QR scanning and right-click "copy link".
         qrLink.onclick = (e) => {
           e.preventDefault();
           window.open(url, '_blank', 'popup,noopener,width=440,height=800');
         };
       }
-      // Written from the one `url` variable, like the PeerJS path, so the QR
-      // and the text under it can never disagree.
+      // Written from the one `url` variable so the QR and the text under it
+      // can never disagree.
       const qrUrl = document.getElementById('qr-url');
       if (qrUrl) qrUrl.textContent = url;
+    }
+
+    /** Paint an issued join code: the letters, plus the QR/link that carry it. */
+    function showJoinCode(code) {
+      paintJoinPanel(window.rendezvousTransport.joinUrlForCode(
+        location.href, code.full, rendezvousBase,
+      ));
       const codeEl = document.getElementById('join-code');
       if (codeEl) codeEl.textContent = code.suffix;
       const row = document.getElementById('join-code-row');
       if (row) row.style.display = '';
+      rendezvousCodeShown = true;
+      rendezvousFault = null;
       setConnectionStatus('ready');
+    }
+
+    /**
+     * The rendezvous service went away (unreachable at boot, or the host socket
+     * dropped later). The service has already deleted the record, so the five
+     * letters on screen now resolve to nothing — clear them rather than leave a
+     * dead code being read aloud across the room.
+     *
+     * This host does not re-register: a reconnect would be issued a NEW code,
+     * and code stability across a drop is #1115's (rotation/rebinding) scope,
+     * not something to half-do here. The PeerJS route is still live, so the
+     * panel falls back to its URL and QR, and renderConnDiag names the failure.
+     */
+    function clearJoinCode() {
+      const codeEl = document.getElementById('join-code');
+      if (codeEl) codeEl.textContent = '';
+      const row = document.getElementById('join-code-row');
+      if (row) row.style.display = 'none';
+      rendezvousCodeShown = false;
     }
 
     // ── ICE config latch (issue #1226) ─────────────────────────────────────
@@ -2336,6 +2359,10 @@
         const lines = [];
         if (!relayAvailable) lines.push(t('server.no_relay_warning'));
         else if (relaySource === 'openrelay') lines.push(t('server.relay_fallback_notice'));
+        // Why there is no five-letter code on screen. A console.warn is not a
+        // diagnostics surface: the operator is looking at the viewscreen, and
+        // an empty join-code row explains nothing by itself.
+        if (rendezvousFault) lines.push(t('server.join.rendezvous_lost'));
         for (const [id, state] of clientIceStages) {
           lines.push(t('server.client_ice_state', { id, state }));
         }
@@ -2345,33 +2372,27 @@
 
       const peer = new Peer(hostPeerId, { config: { iceServers } });
 
+      // The PeerJS URL and QR (PRD #1023 user story 4). Also the fallback the
+      // panel returns to if the rendezvous service is unreachable or lost:
+      // this peer stays up either way, so there is always a way in.
+      let peerJsOpen = false;
+      function showPeerJsJoin() {
+        if (!peerJsOpen) return;
+        paintJoinPanel(joinUrl);
+      }
+
       peer.on('open', () => {
         console.log('[PeerJS] signaling open — ready for clients');
         setConnectionStatus('ready');
-        // When this host is also registered with a rendezvous service, the
-        // join panel belongs to the five-letter code — writing the PeerJS URL
-        // over it would leave whichever finished last on screen. The PeerJS
-        // peer itself stays up, so both routes remain joinable.
-        if (rendezvousActive) return;
-        const canvas = document.getElementById('qr');
-        canvas.style.display = 'block';
-        QRCode.toCanvas(canvas, joinUrl, { width: 200 });
-        const qrLink = document.getElementById('qr-link');
-        qrLink.href = joinUrl;
-        // The same URL the code encodes, in text a guest can read across the
-        // room or copy (PRD #1023 user story 4). Written from joinUrl rather
-        // than composed twice, so the two can never disagree.
-        const qrUrl = document.getElementById('qr-url');
-        if (qrUrl) qrUrl.textContent = joinUrl;
-        // Clicking the QR opens the client in a separate WINDOW, not a tab, so
-        // testers can run several clients side-by-side on one desktop. A
-        // features string (size) is what makes the browser spawn a window
-        // rather than a tab; '_blank' name gives each click its own window.
-        // The href is kept for QR scanning and right-click "copy link".
-        qrLink.onclick = (e) => {
-          e.preventDefault();
-          window.open(joinUrl, '_blank', 'popup,noopener,width=440,height=800');
-        };
+        peerJsOpen = true;
+        // Suppressed only once a five-letter code is actually ON SCREEN — not
+        // merely because the page was opened with ?rendezvous. Suppressing on
+        // the parameter is how a host whose rendezvous service is unreachable
+        // ended up showing an empty panel: no code, no QR, no URL, nothing to
+        // join by at all. Both routes stay joinable; whichever has a code
+        // owns the panel.
+        if (rendezvousCodeShown) return;
+        showPeerJsJoin();
       });
 
       peer.on('disconnected', () => {
@@ -2511,7 +2532,6 @@
         const transport = window.rendezvousTransport;
         rendezvousHost = transport.createRendezvousHost({
           base: rendezvousBase,
-          stamp: hostDeliveryStampField(),
           iceServers,
           // The authoritative protocol/content verdict, answered by Rust's own
           // delivery::check_join_stamp — never re-decided in JavaScript, and
@@ -2540,6 +2560,16 @@
           },
           onError: (reason, detail) => {
             console.warn(`[rendezvous] ${reason}${detail ? `: ${detail}` : ''}`);
+            // Whatever the service said, this host no longer holds a code the
+            // service will honour: the record is dropped with the socket. Say
+            // so on the viewscreen, drop the dead letters, and fall back to
+            // the PeerJS panel, which is still a working way in.
+            rendezvousFault = reason;
+            const hadCode = rendezvousCodeShown;
+            clearJoinCode();
+            if (hadCode) setConnectionStatus('disconnected');
+            showPeerJsJoin();
+            renderConnDiag();
           },
           onLog: (msg) => console.log(msg),
         });

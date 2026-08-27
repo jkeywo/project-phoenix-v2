@@ -13,16 +13,22 @@ entities:
       rationale:
         - The alphabet excludes every letter the confusable map folds away, so a minted code always survives the normalisation that makes it typeable.
         - Deny-list entries are authored in ordinary spelling and canonicalised before comparison, so one entry refuses every confusable spelling of the word.
-        - Machine reasons map to strings.csv ids in the one module, so the phone and the host page cannot describe the same failure differently.
+        - Machine reasons map to strings.csv ids in the one module, so the phone and the host page cannot describe the same failure differently. That map covers the HOST's own StampMismatch codes too — an unmapped refusal renders as "no ship is using that code", which is a lie about a build the host authoritatively refused.
+        - "[ai] The designer-facing source is assets/join/join-codes.toml (AGENTS.md rule 11: the deny-list and its per-entry rationale are exactly the tunable data that rule is about, and TOML gives them real comments). assets/join/join-codes.json is a COMMITTED generated artifact, because the three consumers read the table with no parser and no build step — the phone fetches it, vitest reads it from disk, esbuild bundles it into the Worker. scripts/build-client.mjs regenerates it and a vitest drift gate fails when the two disagree."
+        - "[ai] The shape of a typed input is decided before canonicalisation, because `_` is both the part separator and an authored strip character: splitting first reported a player's spaced-out five letters as malformed."
     architecture:
       kind: identifier-scheme
       authority: non-authoritative
       runs_in: [host-browser-runtime, phone-browser-runtime, node-tooling-runtime]
     implementation:
       status: declared
-      paths: [gui/join-code.js, assets/join/join-codes.json]
+      paths:
+        - gui/join-code.js
+        - assets/join/join-codes.toml
+        - assets/join/join-codes.json
+        - scripts/join-codes.mjs
       symbols: [canonicaliseSuffix, validateSuffix, parseJoinCode, mintSuffix]
-      tests: [tests/client/join-code.test.js]
+      tests: [tests/client/join-code.test.js, tests/client/join-codes-data.test.js]
 
   - component: rendezvous-service
     core:
@@ -39,6 +45,10 @@ entities:
         - The Worker adapter decides nothing, so the contract tests drive the shipped protocol without wrangler, miniflare or a socket.
         - Issue #1111 issues codes in both namespaces but admits joins only to the client one; enabling server-code joining (#1114) adds an entry to joinableNamespaces rather than reshaping the lookup.
         - It replaces the public PeerJS broker for the crew star, per p2p-delta-transport-is-a-star-today; the crew protocol itself is untouched.
+        - "[ai] All registry state is in memory in one Durable Object instance and nothing is written to storage: a code cannot outlive its host socket or a redeploy. That is #1111's whole scope — persistence is what #1115 (rotation) and #1120 (rebinding) would add — and the module doc says so rather than leaving it inferred."
+        - "[ai] The service is unauthenticated and its codes are private over a 25^5 space, so the bounds are authored data in join-codes.toml's [limits]: a per-connection lookup cap that cuts the socket off, a record TTL swept lazily, a per-record peer cap, and length/shape validation on anything stored. Cross-socket rate limiting stays Cloudflare's edge to apply."
+        - "[ai] Both upgrade endpoints REQUIRE a present, allow-listed Origin; only /v1/health keeps the no-Origin exemption, because the deploy verification recipe is a bare curl. Every legitimate browser upgrade is cross-origin here, so exempting requests without an Origin would exempt only the scripted caller the refusal exists to stop."
+        - "[ai] The diagnostics snapshot carries no suffix. The suffix IS the private client code; a view that includes it is one route away from publishing every live session."
     architecture:
       kind: signalling-service
       authority: non-authoritative
@@ -55,7 +65,7 @@ entities:
         - worker-rendezvous/wrangler.toml
         - worker-rendezvous/wrangler.demo.toml
       symbols: [createRegistry, RendezvousRegistry]
-      tests: [tests/client/rendezvous-registry.test.js]
+      tests: [tests/client/rendezvous-registry.test.js, tests/client/rendezvous-worker.test.js]
 
   - state: join-code-registry-state
     core:
@@ -69,6 +79,7 @@ entities:
       rationale:
         - p2p-human-readable-join-namespaces forbids a join code being stored in authoritative simulation state or shared between hosts; keeping the registry outside every host process is what makes that structural rather than a rule to remember.
         - A host's code dies with its socket in #1111. Rotation, stale-record invalidation and rebinding a code to a replacement host are #1115 and #1120.
+        - "[ai] The record's suffix leaves the registry in exactly one frame — the `hosted` code issued to the host that minted it. Not in the diagnostics view, not in a joiner's `joined`, and never over the crew channel."
     architecture:
       classification: transport
       owner: rendezvous-service
@@ -93,6 +104,9 @@ entities:
       rationale:
         - Deliberately NOT a ClientMessage/ServerMessage variant — p2p-delta-transport-is-a-star-today forbids layering transport concerns onto the crew protocol, which is unchanged by this work.
         - Failures are a stable machine reason, never prose, so the service ships no player-visible text and the phone resolves the wording through strings.csv.
+        - "[ai] The revision literal is declared once, in gui/rendezvous-protocol.js, which both halves import. Every frame is hard-refused on a mismatch, so two copies held together by a comment would put a total join outage one careless edit away — and #1114/#1115 are both edits to this vocabulary."
+        - "[ai] No frame carries a delivery stamp in either direction. The host's compatibility check is in-band on the DataChannel, and relayed copies (resolved.host_stamp, joined.host_stamp, peer-joined.stamp) were read by nobody — dead surface the next extension would have had to keep."
+        - "[ai] The `resolve` verb stays as the lookup primitive even though the shipped phone goes straight to `join`: it is the side-effect-free question a launcher or a fleet flow asks, and it is role-gated exactly like `join`."
     architecture:
       authority: request
       producer: [rendezvous-transport-bridge]
@@ -118,6 +132,10 @@ entities:
         default route until #1112.
       rationale:
         - The host adapter presents the channel with PeerJS's DataConnection shape, so server.html's reserved-token refusal, duplicate-token dance and disconnect guard are reused rather than reimplemented.
+        - "[ai] An open DataChannel is not admission: the adapter reaches the page only after the compatibility verdict is ok. Frames before that are dropped rather than buffered, everything after a refusal is dropped, and the 250ms before the channel closes is a send-flush for the refusal — otherwise a build the host had just refused could still dispatch into the simulation."
+        - "[ai] The client route is OFF by default, like the host's: a bare page load with an empty fragment keeps the old no-host-id dead end rather than presenting an entry field wired to a service that is not deployed. A structured code in the fragment is its own opt-in, because that is what the QR carries."
+        - "[ai] A failed attempt tears its own joiner down — the page closes the previous one before each retry, and a terminal error/closed frame closes itself — so an abandoned attempt cannot keep a socket, a registry connection and a peer connection alive and still fire into the page's callbacks."
+        - "[ai] A host whose rendezvous service is unreachable keeps the PeerJS URL and QR on the join panel and names the failure on its own diagnostics row; the code panel takes over only once a code is actually issued, and yields again if the service is lost."
         - Inbound frames go through localiseTree exactly as the PeerJS path does; every console downstream assumes string ids are already resolved.
         - WebSocket and RTCPeerConnection come from an injectable factory pair, which is what lets the browser smoke suite drive the whole path with no real WebRTC and what a native in-process station pane will supply later.
       open_questions:
@@ -132,7 +150,11 @@ entities:
         forbidden: [host-only]
     implementation:
       status: declared
-      paths: [gui/rendezvous-transport.js, server.html, client.html]
+      paths:
+        - gui/rendezvous-transport.js
+        - gui/rendezvous-protocol.js
+        - server.html
+        - client.html
       symbols: [createRendezvousHost, createRendezvousJoiner, joinRouteFromLocation]
       tests:
         - tests/client/rendezvous-transport.test.js

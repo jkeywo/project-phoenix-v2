@@ -3004,8 +3004,11 @@
       // tests/client/rendezvous-transport.test.js), not three ifs here:
       //   'peerjs'      a 32-hex peer id in the fragment — unchanged
       //   'rendezvous'  a structured join code in the fragment (QR or paste)
-      //   'entry'       nothing in the fragment — ask for the five letters
-      //   'none'        nothing to join and no service to ask (?rendezvous=off)
+      //   'entry'       ?rendezvous and nothing in the fragment — ask for the
+      //                 five letters
+      //   'none'        nothing to join and no service asked for — a bare page
+      //                 load, or ?rendezvous=off. Off by default: the Phoenix
+      //                 route is opt-in until #1112 retires PeerJS.
       // Asked here rather than at script scope: every gui/ module is deferred,
       // so window.rendezvousTransport does not exist until this gate clears.
       const joinRoute = (window.rendezvousTransport
@@ -3230,6 +3233,13 @@
       const submit = document.getElementById('join-submit-btn');
       const errorEl = document.getElementById('join-entry-error');
       let lastTyped = '';
+      // The joiner from the attempt in flight, if any. Mistyping five letters
+      // and retrying is the ordinary path through this screen, so each attempt
+      // has to close the one before it: an orphaned joiner keeps its socket,
+      // its registry connection and its RTCPeerConnection, and stays wired to
+      // these same page callbacks — a late failure on a stale one would pop
+      // this overlay back over a session that had since connected.
+      let joiner = null;
 
       function showEntry(reason) {
         if (errorEl) errorEl.textContent = reason ? t(codes.reasonStringId(reason)) : '';
@@ -3239,13 +3249,14 @@
 
       function attempt(typed) {
         lastTyped = typed;
+        if (joiner) { joiner.close(); joiner = null; }
         const parsed = codes.parseJoinCode(typed, codes.NAMESPACE_CLIENT, data);
         if (!parsed.ok) { showEntry(parsed.reason); return; }
         if (errorEl) errorEl.textContent = '';
         if (panel) panel.classList.remove('open');
         setStatus(t('client.status_connecting_host'));
 
-        const joiner = transport.createRendezvousJoiner({
+        joiner = transport.createRendezvousJoiner({
           base: route.base,
           data,
           code: parsed.full,
@@ -3264,10 +3275,16 @@
             showEntry(reason);
           },
         });
+        // Bound to THIS attempt's joiner, not to whatever `joiner` holds
+        // later, so a link handed out here can never start driving a
+        // replacement connection. retryNow just re-attempts — attempt() closes
+        // the joiner in flight itself, which is the one discipline both paths
+        // now share.
+        const link = joiner;
         activeLink = {
-          get connected() { return joiner.connected; },
-          send: (type, payload) => joiner.send(type, payload),
-          retryNow: () => { joiner.close(); attempt(lastTyped); },
+          get connected() { return link.connected; },
+          send: (type, payload) => link.send(type, payload),
+          retryNow: () => attempt(lastTyped),
         };
       }
 

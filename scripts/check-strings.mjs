@@ -46,7 +46,7 @@ import { rowLineNumbers } from './strings-csv.mjs';
 import { untranslatedTextContent } from './strings-literals.mjs';
 import { lineOf, untranslatedMarkup } from './strings-markup.mjs';
 import { isLocalisable } from './strings-rules.mjs';
-import { proseLiterals } from './strings-rust.mjs';
+import { coordinationPresentationIds, proseLiterals } from './strings-rust.mjs';
 import { resolveThroughIncludes } from './toml-includes.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -157,6 +157,21 @@ for (const file of codeFiles) {
       if (id && !table.has(id)) {
         errors.push(`${rel(file)}: data-i18n-attr id "${id}" has no CSV row`);
       }
+    }
+  }
+}
+
+// Producer-owned Coordination presentation ids live in Rust now (issue
+// #1255), so the old t('...') client sweep can no longer discover them. Scan
+// the literal constructor surface directly. Test-only sibling files are
+// fixtures, not shipped producers; inline tests are stripped by the scanner.
+const rustPresentationFiles = (await walk(path.join(root, 'src'), (f) => f.endsWith('.rs')))
+  .filter((file) => !/(?:_tests|[\\/]tests)\.rs$/.test(file));
+for (const file of rustPresentationFiles) {
+  const src = await readFile(file, 'utf8');
+  for (const { line, id } of coordinationPresentationIds(src)) {
+    if (!table.has(id)) {
+      errors.push(`${rel(file)}:${line}: Coordination presentation id '${id}' has no CSV row`);
     }
   }
 }

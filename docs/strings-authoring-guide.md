@@ -228,14 +228,17 @@ The gate reports the tag itself; write `${t('id')}` in the template.
   spacing, because that is the only signal English markup actually gives:
   `title="Close"` is a tooltip, `title="close"` is a DOM hook. Capitalise
   display text and the gate sees it.
-- **Text composed in Rust — mostly closed now (issue #975).** The coordination
-  chatter/popup payloads and the HUD condition token no longer compose English
-  server-side: Rust emits string ids (and typed payloads + params), the client
-  resolves them, and `scripts/strings-rust.mjs` (wired in as check-strings
-  section 5) now scans an allowlist of wire-visible `src/` modules —
-  `src/ship/coordination_systems.rs` today — and fails on prose composed there.
-  It is narrow on purpose: a blanket `format!` scan of `src/` would drown in log
-  lines and machine tokens. **Still open**, and *not* on that allowlist: the
+- **Text composed in Rust — mostly closed now (issues #975, #1255).** Every
+  Coordination producer now supplies a localised-or-literal title/body plus
+  typed parameter maps beside its semantic payload; neither client presenter
+  derives a sentence from the payload. `scripts/strings-rust.mjs` therefore has
+  two complementary rules: the existing prose scan over the short
+  wire-visible-module allowlist, and a repository-wide production-Rust scan of
+  literal `CoordinationPresentation::{new,titled}` ids plus literal
+  `CoordinationParam::text` ids. The latter fails when an id moved out of
+  JavaScript has no CSV row while deliberately allowing literal authored text.
+  A blanket Rust prose scan would still drown in log lines and machine tokens.
+  **Still open**, and *not* on the prose allowlist: the
   game-over reason strings (`ServerMessage::GameOver { reason }`, and the
   `"Ship Destroyed"` override in `viewscreen_border::compute_hud_state`), which
   are composed at several weapon death sites and cross the wire as English. That
@@ -244,11 +247,12 @@ The gate reports the tag itself; write `${t('id')}` in the template.
   is a literal sitting lexically on the right-hand side — `el.textContent =
   'Standing by'`. A string built anywhere else and assigned through a variable
   is invisible: `el.textContent = norm.title`, where `norm.title` was
-  concatenated in a helper, matches no rule in either scanner. `gui/coordination-popup.js`
-  used to be the live example — about two dozen composed strings — but as of
-  #975 it resolves every sentence through `t('coordination.…', params)`, so the
-  words live only in `strings.csv`; check-strings validates each of those ids
-  has a row. The scanner hole itself remains, so a *future* helper that
+  concatenated in a helper, matches no rule in either scanner. Before #1255,
+  `gui/coordination-popup.js` was the live example — about two dozen branches
+  deriving text from semantic Coordination variants. It now resolves only the
+  required producer-owned presentation envelope, and the Rust constructor scan
+  verifies the ids it can discover. The generic JS scanner hole itself remains,
+  so a *future* unrelated helper that
   concatenates English into `norm.title` would still slip through — prefer
   `t(id)` at the composition site.
 - **Any DOM property or attribute other than `textContent` set from JS**
@@ -287,16 +291,17 @@ Test assertions resolve through the table too, so they survive copy edits:
 
 ## Known gaps
 
-Issue #975 closed most of the "composed in Rust" class: the coordination
-chatter/popup payloads (AI sender labels, the sentence templates) and the HUD
-condition token are now string ids + typed payloads, resolved on the client
-through `gui/coordination-popup.js` and `localiseTree`, and `scripts/strings-rust.mjs`
-keeps `src/ship/coordination_systems.rs` from regressing (check-strings section
-5). What remains is the **game-over reason** surface — `ServerMessage::GameOver
+Issues #975 and #1255 close the Coordination portion of the "composed in Rust"
+class: every producer owns a required string-id-or-literal presentation beside
+the typed payload; phone and Viewscreen resolve that generic envelope through
+`gui/coordination-popup.js` and `localiseTree`; and `scripts/strings-rust.mjs`
+checks both wire-visible prose and literal presentation ids (check-strings
+sections 2 and 5). What remains is the **game-over reason** surface — `ServerMessage::GameOver
 { reason }` and the `"Ship Destroyed"` override in `viewscreen_border` — which
 is composed at several weapon death sites and still crosses the wire as English.
 That is *not* on the `WIRE_VISIBLE_RUST` allowlist (it would demand fixing the
 death-site reasons too), so it will not turn CI red; it wants its own issue. The
-dynamic label *values* a payload carries (a shield facing, a power-group name, a
-`"waypoint (x, z)"`) are also still English composed in Rust — they ride as
-`{label}` params, a separate surface from the sentence templates #975 owns.
+Dynamic literal label values remain valid authored input: known String Table ids
+localise and unknown values pass through by design. Coordination's display-only
+waypoint/threat numbers are now producer parameters rather than client-side
+derivations.

@@ -264,6 +264,54 @@ pub fn tick_intent_narration(
                 .collect();
             let sender_origin = seat_control_source(&policies);
             let generation = narration.next_generation();
+            let body = change.subject.clone().unwrap_or_default();
+            let presentation = match change.kind {
+                crate::core::messages::IntentKind::TargetAcquired => {
+                    crate::core::messages::CoordinationPresentation::new(
+                        "coordination.intent.target_acquired",
+                        body,
+                    )
+                }
+                crate::core::messages::IntentKind::TargetSwitched => {
+                    crate::core::messages::CoordinationPresentation::new(
+                        "coordination.intent.target_switched",
+                        body,
+                    )
+                }
+                crate::core::messages::IntentKind::CombatPostureEntered => {
+                    crate::core::messages::CoordinationPresentation::titled(
+                        "coordination.intent.combat_posture_entered",
+                    )
+                }
+                crate::core::messages::IntentKind::CombatPostureLeft => {
+                    crate::core::messages::CoordinationPresentation::titled(
+                        "coordination.intent.combat_posture_left",
+                    )
+                }
+                crate::core::messages::IntentKind::BreakingOff => {
+                    crate::core::messages::CoordinationPresentation::titled(
+                        "coordination.intent.breaking_off",
+                    )
+                }
+                crate::core::messages::IntentKind::ShieldArcFocused => {
+                    crate::core::messages::CoordinationPresentation::new(
+                        "coordination.intent.shield_arc_focused",
+                        body,
+                    )
+                }
+                crate::core::messages::IntentKind::PowerBrownout => {
+                    crate::core::messages::CoordinationPresentation::new(
+                        "coordination.intent.power_brownout",
+                        body,
+                    )
+                }
+                crate::core::messages::IntentKind::ManoeuvreBegun => {
+                    crate::core::messages::CoordinationPresentation::new(
+                        "coordination.intent.manoeuvre_begun",
+                        body,
+                    )
+                }
+            };
 
             writer.write(CoordinationEnqueue {
                 source_entity: entity,
@@ -274,6 +322,7 @@ pub fn tick_intent_narration(
                     subject: change.subject,
                     generation,
                 },
+                presentation,
                 // Emit the station's derived display-name id (issue #975), not
                 // the English `name` — `localiseTree` resolves it on the client.
                 sender_label: format!("station.{}.name", station_id.0),
@@ -470,9 +519,22 @@ mod tests {
 
         set_target(&mut app, Some("harrow-raider-1"));
         decide(&mut app);
+        let acquired = drain(&mut app);
+        assert_eq!(advisory_kinds(&acquired), vec![IntentKind::TargetAcquired]);
         assert_eq!(
-            advisory_kinds(&drain(&mut app)),
-            vec![IntentKind::TargetAcquired]
+            acquired[0].presentation.title,
+            "coordination.intent.target_acquired"
+        );
+        let CoordinationPayload::IntentAdvisory {
+            subject: Some(subject),
+            ..
+        } = &acquired[0].payload
+        else {
+            panic!("target acquisition must retain its typed subject")
+        };
+        assert_eq!(
+            &acquired[0].presentation.body, subject,
+            "the producer carries the authored-or-literal subject without a client payload switch"
         );
 
         // Held: several decision ticks with the same lock say nothing.
@@ -486,9 +548,11 @@ mod tests {
 
         set_target(&mut app, Some("harrow-lance-2"));
         decide(&mut app);
+        let switched = drain(&mut app);
+        assert_eq!(advisory_kinds(&switched), vec![IntentKind::TargetSwitched]);
         assert_eq!(
-            advisory_kinds(&drain(&mut app)),
-            vec![IntentKind::TargetSwitched]
+            switched[0].presentation.title,
+            "coordination.intent.target_switched"
         );
     }
 
@@ -607,8 +671,9 @@ mod tests {
         decide(&mut app);
         let msgs = drain(&mut app);
         assert_eq!(advisory_kinds(&msgs), vec![IntentKind::PowerBrownout]);
-        // The subject is the group's `strings.csv` label id (issue #977), which
-        // `localiseTree` resolves in the popup — not the bare group token.
+        // The subject is the group's `strings.csv` label id (issue #977). The
+        // producer also carries it as the generic presentation body, where
+        // `localiseTree` resolves it without a client IntentKind switch.
         assert!(matches!(
             &msgs[0].payload,
             CoordinationPayload::IntentAdvisory { subject: Some(s), .. }

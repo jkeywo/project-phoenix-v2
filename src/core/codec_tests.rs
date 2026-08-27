@@ -43,6 +43,10 @@ fn station_address(id: &str) -> CoordinationAddress {
     CoordinationAddress::Station(StationId(id.to_string()))
 }
 
+fn test_coordination_presentation() -> CoordinationPresentation {
+    CoordinationPresentation::new("coordination.test.title", "Literal body")
+}
+
 fn player() -> Player {
     Player {
         token: "tok".into(),
@@ -217,6 +221,7 @@ fn client_message_table() -> Vec<(ClientMessageDiscriminants, ClientMessage)> {
             ClientMessage::SendCoordination {
                 address: station_address("tactical"),
                 payload: CoordinationPayload::FrequencyHint { frequency: 0.33 },
+                presentation: test_coordination_presentation(),
             },
         ),
         (
@@ -745,15 +750,9 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
                     title: "Shield down".into(),
                     body: "Fore shield offline".into(),
                 },
+                presentation: test_coordination_presentation(),
                 sender_label: "AI Tactical".into(),
-            },
-        ),
-        (
-            ServerMessageDiscriminants::AiChatter,
-            ServerMessage::AiChatter {
-                from_label: "Shields".into(),
-                to_label: "Helm".into(),
-                text: "Fore shield offline (12s)".into(),
+                to_label: "station.helm.name".into(),
             },
         ),
         (
@@ -936,23 +935,26 @@ fn tractor_load_modifier_source_round_trips() {
 // JS-side compatibility), which the table-driven harness above does not
 // inherently cover.
 
-/// `encode_chatter` wire shape pin (issues #818, #975): the `"chatter"`
-/// host channel's JSON must expose exactly `from_label` / `to_label` and the
-/// TYPED `payload` — `__updateChatter` in `server.html` reads these keys and
-/// renders the payload through the shared coordination-popup normaliser. The
-/// host no longer receives a pre-composed sentence.
+/// `encode_chatter` wire shape pin (issues #818, #1255): the `"chatter"`
+/// host channel keeps the typed payload and carries the same producer-owned
+/// presentation envelope the phone receives.
 #[test]
 fn encode_chatter_wire_shape_matches_js_handler() {
     let ev = crate::console_bridge::AiChatterEvent {
         from_label: "chatter.sender.sensors".into(),
         to_label: "tactical".into(),
         payload: crate::core::messages::CoordinationPayload::FrequencyHint { frequency: 0.5 },
+        presentation: crate::core::messages::CoordinationPresentation::new(
+            "coordination.frequency_hint.title",
+            "coordination.frequency_hint.body",
+        )
+        .with_body_param("frequency", 0.5_f32),
     };
     let encoded = encode_chatter(&ev).unwrap();
     assert_eq!(
         encoded,
-        r#"{"from_label":"chatter.sender.sensors","to_label":"tactical","payload":{"type":"FrequencyHint","data":{"frequency":0.5}}}"#,
-        "chatter wire shape must match what __updateChatter parses: from_label / to_label / typed payload"
+        r#"{"from_label":"chatter.sender.sensors","to_label":"tactical","payload":{"type":"FrequencyHint","data":{"frequency":0.5}},"presentation":{"title":"coordination.frequency_hint.title","body":"coordination.frequency_hint.body","body_params":{"frequency":0.5}}}"#,
+        "chatter wire shape must match the Viewscreen's semantic payload and presentation contract"
     );
 }
 
@@ -969,12 +971,18 @@ fn encode_chatter_escapes_special_characters() {
         payload: crate::core::messages::CoordinationPayload::Advisory {
             message: "line1\nline2".into(),
         },
+        presentation: crate::core::messages::CoordinationPresentation::new(
+            r#"Literal "title""#,
+            "line1\nline2",
+        ),
     };
     let encoded = encode_chatter(&ev).unwrap();
     let v: serde_json::Value = serde_json::from_str(&encoded).expect("valid JSON");
     assert_eq!(v["from_label"], r#"AI "Sensors""#);
     assert_eq!(v["to_label"], r"helm\aux");
     assert_eq!(v["payload"]["data"]["message"], "line1\nline2");
+    assert_eq!(v["presentation"]["title"], r#"Literal "title""#);
+    assert_eq!(v["presentation"]["body"], "line1\nline2");
 }
 
 #[test]
@@ -1257,6 +1265,7 @@ fn target_designation_coordination_payload_round_trips() {
             uuid: "asteroid-42".into(),
             label: "Asteroid".into(),
         },
+        presentation: test_coordination_presentation(),
     };
     assert_client_roundtrip(&JsonCodec, send_msg.clone());
     assert_client_roundtrip(&PrettyJsonCodec, send_msg);
@@ -1267,7 +1276,9 @@ fn target_designation_coordination_payload_round_trips() {
             uuid: "asteroid-42".into(),
             label: "Asteroid".into(),
         },
+        presentation: test_coordination_presentation(),
         sender_label: "Sensors".into(),
+        to_label: "station.tactical.name".into(),
     };
     assert_server_roundtrip(&JsonCodec, popup_msg.clone());
     assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
@@ -1278,10 +1289,15 @@ fn coordination_wire_shape_distinguishes_station_and_ship_addresses() {
     let station = ClientMessage::SendCoordination {
         address: station_address("tactical"),
         payload: CoordinationPayload::FrequencyHint { frequency: 0.83 },
+        presentation: CoordinationPresentation::new(
+            "coordination.frequency_hint.title",
+            "coordination.frequency_hint.body",
+        )
+        .with_body_param("frequency", 0.83_f32),
     };
     assert_eq!(
         JsonCodec.encode_client(&station).unwrap(),
-        r#"{"type":"SendCoordination","data":{"address":{"type":"Station","data":"tactical"},"payload":{"type":"FrequencyHint","data":{"frequency":0.83}}}}"#,
+        r#"{"type":"SendCoordination","data":{"address":{"type":"Station","data":"tactical"},"payload":{"type":"FrequencyHint","data":{"frequency":0.83}},"presentation":{"title":"coordination.frequency_hint.title","body":"coordination.frequency_hint.body","body_params":{"frequency":0.83}}}}"#,
         "a Station address is a typed StationId, never a SystemId-shaped target"
     );
 
@@ -1291,12 +1307,18 @@ fn coordination_wire_shape_distinguishes_station_and_ship_addresses() {
             title: "coordination.test.title".into(),
             body: "coordination.test.body".into(),
         },
+        presentation: CoordinationPresentation::new(
+            "coordination.test.title",
+            "Literal authored body",
+        )
+        .with_title_param("label", CoordinationParam::text("station.helm.name")),
         sender_label: "station.tactical.name".into(),
+        to_label: "chatter.addressee.ship".into(),
     };
     assert_eq!(
         JsonCodec.encode_server(&ship).unwrap(),
-        r#"{"type":"CoordinationPopup","data":{"address":{"type":"Ship"},"payload":{"type":"Alert","data":{"title":"coordination.test.title","body":"coordination.test.body"}},"sender_label":"station.tactical.name"}}"#,
-        "whole-Ship delivery is explicit in the wire shape, not inferred from Alert or Intent"
+        r#"{"type":"CoordinationPopup","data":{"address":{"type":"Ship"},"payload":{"type":"Alert","data":{"title":"coordination.test.title","body":"coordination.test.body"}},"presentation":{"title":"coordination.test.title","title_params":{"label":"station.helm.name"},"body":"Literal authored body"},"sender_label":"station.tactical.name","to_label":"chatter.addressee.ship"}}"#,
+        "whole-Ship delivery carries an explicit address, route label and the producer-owned presentation"
     );
 }
 
@@ -1324,6 +1346,7 @@ fn arc_bearing_request_coordination_payload_round_trips() {
                 },
             ],
         },
+        presentation: test_coordination_presentation(),
     };
     assert_client_roundtrip(&JsonCodec, send_msg.clone());
     assert_client_roundtrip(&PrettyJsonCodec, send_msg);
@@ -1340,7 +1363,9 @@ fn arc_bearing_request_coordination_payload_round_trips() {
                 range: 120.0,
             }],
         },
+        presentation: test_coordination_presentation(),
         sender_label: "Weapons".into(),
+        to_label: "station.helm.name".into(),
     };
     assert_server_roundtrip(&JsonCodec, popup_msg.clone());
     assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
@@ -1356,6 +1381,7 @@ fn arc_bearing_withdraw_coordination_payload_round_trips() {
         payload: CoordinationPayload::ArcBearingWithdraw {
             family: crate::core::messages::WeaponFamily::Torpedoes,
         },
+        presentation: test_coordination_presentation(),
     };
     assert_client_roundtrip(&JsonCodec, send_msg.clone());
     assert_client_roundtrip(&PrettyJsonCodec, send_msg);
@@ -1365,7 +1391,9 @@ fn arc_bearing_withdraw_coordination_payload_round_trips() {
         payload: CoordinationPayload::ArcBearingWithdraw {
             family: crate::core::messages::WeaponFamily::Blasters,
         },
+        presentation: test_coordination_presentation(),
         sender_label: "Weapons".into(),
+        to_label: "station.helm.name".into(),
     };
     assert_server_roundtrip(&JsonCodec, popup_msg.clone());
     assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
@@ -1382,6 +1410,7 @@ fn power_brownout_coordination_payload_round_trips() {
             label: "WEAPONS".into(),
             allocated_level: 2,
         },
+        presentation: test_coordination_presentation(),
     };
     assert_client_roundtrip(&JsonCodec, send_msg.clone());
     assert_client_roundtrip(&PrettyJsonCodec, send_msg);
@@ -1393,7 +1422,9 @@ fn power_brownout_coordination_payload_round_trips() {
             label: "WEAPONS".into(),
             allocated_level: 2,
         },
+        presentation: test_coordination_presentation(),
         sender_label: "Power".into(),
+        to_label: "station.tactical.name".into(),
     };
     assert_server_roundtrip(&JsonCodec, popup_msg.clone());
     assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
@@ -1422,6 +1453,7 @@ fn navigate_to_coordination_payload_round_trips() {
             x: 300.0,
             z: -100.0,
         },
+        presentation: test_coordination_presentation(),
     };
     assert_client_roundtrip(&JsonCodec, send_msg.clone());
     assert_client_roundtrip(&PrettyJsonCodec, send_msg);
@@ -1433,7 +1465,9 @@ fn navigate_to_coordination_payload_round_trips() {
             x: 300.0,
             z: -100.0,
         },
+        presentation: test_coordination_presentation(),
         sender_label: "Navigation".into(),
+        to_label: "station.helm.name".into(),
     };
     assert_server_roundtrip(&JsonCodec, popup_msg.clone());
     assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
@@ -1452,6 +1486,8 @@ fn repair_request_coordination_payload_round_trips() {
             tier: crate::ship::damage::DamageTier::Damaged,
             deficit: Some(12.5),
         },
+        presentation: CoordinationPresentation::titled("coordination.repair.title")
+            .with_title_param("label", CoordinationParam::text("station.helm.name")),
     };
     assert_client_roundtrip(&JsonCodec, send_msg.clone());
     assert_client_roundtrip(&PrettyJsonCodec, send_msg);
@@ -1467,7 +1503,10 @@ fn repair_request_coordination_payload_round_trips() {
             // deficit withheld (issue #737).
             deficit: None,
         },
+        presentation: CoordinationPresentation::titled("coordination.repair.title")
+            .with_title_param("label", CoordinationParam::text("station.helm.name")),
         sender_label: "Helm System".into(),
+        to_label: "station.repair.name".into(),
     };
     assert_server_roundtrip(&JsonCodec, popup_msg.clone());
     assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
@@ -1483,6 +1522,7 @@ fn threat_bearing_coordination_payload_round_trips() {
             bearing_rad: 0.698,
             label: "Hostile closing".into(),
         },
+        presentation: test_coordination_presentation(),
     };
     assert_client_roundtrip(&JsonCodec, send_msg.clone());
     assert_client_roundtrip(&PrettyJsonCodec, send_msg);
@@ -1493,7 +1533,9 @@ fn threat_bearing_coordination_payload_round_trips() {
             bearing_rad: 2.094,
             label: "Incoming torpedo".into(),
         },
+        presentation: test_coordination_presentation(),
         sender_label: "Sensors".into(),
+        to_label: "station.shields.name".into(),
     };
     assert_server_roundtrip(&JsonCodec, popup_msg.clone());
     assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
@@ -1511,7 +1553,12 @@ fn intent_advisory_coordination_payload_round_trips() {
             subject: Some("Harrow Raider".into()),
             generation: 4,
         },
+        presentation: CoordinationPresentation::new(
+            "coordination.intent.target_switched",
+            "Harrow Raider",
+        ),
         sender_label: "Tactical".into(),
+        to_label: "chatter.addressee.ship".into(),
     };
     assert_server_roundtrip(&JsonCodec, popup_msg.clone());
     assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
@@ -1524,7 +1571,9 @@ fn intent_advisory_coordination_payload_round_trips() {
             subject: None,
             generation: 5,
         },
+        presentation: CoordinationPresentation::titled("coordination.intent.breaking_off"),
         sender_label: "Helm".into(),
+        to_label: "chatter.addressee.ship".into(),
     };
     assert_server_roundtrip(&JsonCodec, bare.clone());
     assert_server_roundtrip(&PrettyJsonCodec, bare);

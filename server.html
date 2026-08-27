@@ -1489,9 +1489,9 @@
     // is classic-script, so publish the strings API on window and substitute
     // the static data-i18n markup once the table loads.
     import './gui/strings-boot.js';
-    // The viewscreen chatter renders coordination payloads through the same
-    // normaliser the phone popup uses (issue #975); importing it publishes
-    // window.normalizeCoordinationPayload for the classic script below.
+    // The viewscreen and phone render the same producer-owned Coordination
+    // presentation envelope (issue #1255); importing publishes the shared DOM
+    // builders for the classic scripts below.
     import './gui/coordination-popup.js';
     import { t, has, applyToDom, localiseTree } from './gui/strings.js';
     window.phStrings = { t, has, applyToDom, localiseTree };
@@ -2108,32 +2108,15 @@
   window.__updateChatter = function(json) {
     let ev;
     try { ev = JSON.parse(json); } catch (e) { return; }
-    const { from_label, to_label, payload } = ev;
-    if (!payload) return;
-    // The words come from the shared coordination-popup normaliser (issue
-    // #975), so the viewscreen and the phone read identically for one event.
-    // `from_label` and any id-bearing payload field are already resolved by
-    // localiseHostPayload; the normaliser only fills the sentence template.
-    if (typeof window.normalizeCoordinationPayload !== 'function') return;
-    const norm = window.normalizeCoordinationPayload(payload, from_label, to_label);
+    const { from_label, to_label, presentation } = ev;
+    if (!presentation) return;
+    if (typeof window.buildCoordinationChatterBubble !== 'function') return;
 
     const container = document.getElementById('chatter-container');
     if (!container) return;
-
-    // The bubble already shows sender → target as its own spans, so the text
-    // span carries the sentence. Advisory sets its title to the sender label,
-    // which the from-span already shows — drop a title that merely repeats it.
-    const parts = [];
-    if (norm.title && norm.title !== from_label) parts.push(norm.title);
-    if (norm.body) parts.push(norm.body);
-    const text = parts.join(' — ') || norm.title;
-
-    // Create bubble element
-    const bubble = document.createElement('div');
-    bubble.className = 'chatter-bubble';
-    bubble.innerHTML = '<span class="chatter-from">[' + escapeHtml(norm.from)
-      + ']</span><span class="chatter-arrow"> → </span><span class="chatter-to">[' + escapeHtml(norm.to)
-      + ']</span><span class="chatter-text">: ' + escapeHtml(text) + '</span>';
+    const bubble = window.buildCoordinationChatterBubble(
+      document, presentation, from_label, to_label,
+    );
 
     container.appendChild(bubble);
 

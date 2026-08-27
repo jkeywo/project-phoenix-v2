@@ -3,8 +3,8 @@ use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
 use crate::core::messages::{
-    CoordinationPayload, ModifierSlot, SensorsBlackboard, SystemBlackboard, SystemControlPayload,
-    SystemId,
+    CoordinationPayload, CoordinationPresentation, ModifierSlot, SensorsBlackboard,
+    SystemBlackboard, SystemControlPayload, SystemId,
 };
 use crate::ship_plugin::CoordinationEnqueue;
 
@@ -200,6 +200,10 @@ pub fn handle_sensors_messages(
                 .0
                 .source_for(&crate::ship::system_registry::sensors_system_id());
 
+            let presentation =
+                CoordinationPresentation::titled("coordination.target_designation.title")
+                    .with_title_param("label", label.clone());
+
             let Some(address) = crate::ship::coordination::address_for_system(
                 &ship_config.0,
                 &crate::ship::system_registry::tactical_radar_system_id(),
@@ -214,6 +218,7 @@ pub fn handle_sensors_messages(
                     uuid: uuid.clone(),
                     label,
                 },
+                presentation,
                 sender_label: crate::ship::coordination::CHATTER_SENDER_SENSORS.to_string(),
                 sender_system: crate::ship::system_registry::sensors_system_id(),
             });
@@ -327,6 +332,11 @@ pub fn tick_sensors_frequency_hint(
             sender_origin,
             address,
             payload: CoordinationPayload::FrequencyHint { frequency },
+            presentation: CoordinationPresentation::new(
+                "coordination.frequency_hint.title",
+                "coordination.frequency_hint.body",
+            )
+            .with_body_param("frequency", frequency),
             sender_label: crate::ship::coordination::CHATTER_SENDER_SENSORS.to_string(),
             sender_system: crate::ship::system_registry::sensors_system_id(),
         });
@@ -566,11 +576,13 @@ pub fn tick_sensors_threat_warning(
         }
 
         let bearing_deg = (relative_bearing.to_degrees() + 360.0) % 360.0;
-        let label = format!("Hostile closing, range {distance:.0}m, bearing {bearing_deg:.0}°");
+        let presentation = CoordinationPresentation::titled("coordination.threat_bearing.title")
+            .with_title_param("deg", bearing_deg.round() as i64)
+            .with_title_param("distance", distance.round() as i64);
 
         state.last_threat_uuid = Some(threat_uuid.clone());
         state.last_bearing_rad = Some(relative_bearing);
-        state.last_label = Some(label.clone());
+        state.last_label = Some(threat_uuid.clone());
         state.last_distance = Some(distance);
 
         let sender_origin = control_sources
@@ -589,8 +601,9 @@ pub fn tick_sensors_threat_warning(
             address,
             payload: CoordinationPayload::ThreatBearing {
                 bearing_rad: relative_bearing,
-                label,
+                label: threat_uuid,
             },
+            presentation,
             sender_label: crate::ship::coordination::CHATTER_SENDER_SENSORS.to_string(),
             sender_system: crate::ship::system_registry::sensors_system_id(),
         });

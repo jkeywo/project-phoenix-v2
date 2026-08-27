@@ -2,7 +2,7 @@
 title: Message Flow
 type: concept
 tags: [messages, bridge, wasm, bevy, routing, delivery-class, coordination]
-sources: [src/server/bridge.rs, src/core/codec.rs, src/core/messages.rs, src/core/broadcast/sim.rs, src/lobby/server.rs, src/lobby/handler.rs, src/command_admission/, src/server_app/broadcast_publish.rs, src/ship/shields.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, server.html, client.html, gui/sim-state.js, gui/console-state.js]
+sources: [src/server/bridge.rs, src/core/codec.rs, src/core/messages.rs, src/core/broadcast/sim.rs, src/lobby/server.rs, src/lobby/handler.rs, src/command_admission/, src/server_app/broadcast_publish.rs, src/ship/shields.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/console/weapons/server.rs, src/console_bridge.rs, server.html, client.html, gui/client-router.js, gui/sim-state.js, gui/console-state.js, gui/coordination-popup.js]
 updated: 2026-08-27
 ---
 
@@ -69,6 +69,18 @@ delivery emits a popup for a human recipient or `DeliveredCoordination` for an
 AI recipient. Ship delivery fans out deterministically in authored Station
 order under the same policy. Human/AI actor identity affects presentation, not
 the authoritative payload or domain applier.
+
+Every emission also carries a required producer-owned
+`CoordinationPresentation`. The router preserves that envelope unchanged beside
+the typed payload through the lag queue and into `CoordinationPopup`,
+`DeliveredCoordination`, and `AiChatterEvent`; phone and Viewscreen presenters
+therefore render the same localised-or-literal title, body, and deterministic
+scalar parameters without enumerating `CoordinationPayload`. The authoritative
+route heading is derived from the typed address. Its core Ship label is the
+undecorated `Ship` display value, matching Station labels; the phone and
+Viewscreen layouts each add their own single pair of square brackets. The phone
+keeps separate title and body lines, while the Viewscreen joins them onto its
+existing single chatter line.
 
 Damage-tier destruction alerts address the Station that owns Captain. Tactical
 arc-bearing requests and Navigation clearances resolve their fine System to its

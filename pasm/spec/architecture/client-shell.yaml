@@ -121,7 +121,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Client Access Shell
-      summary: Uses authoritative station ownership and the selected ship configuration to show the player's single console (one human = one station; the active console is derived from station ownership — the tab bar, swipe switching, and their helper modules were deleted in issue 827), plus the lobby station roster, responsive phone layout, connection status, and reconnection state. Message routing, roster folding, lobby view selection, and coordination-popup normalisation are extracted pure modules; client.html keeps only bootstrap and DOM glue.
+      summary: Uses authoritative station ownership and the selected ship configuration to show the player's single console (one human = one station; the active console is derived from station ownership — the tab bar, swipe switching, and their helper modules were deleted in issue 827), plus the lobby station roster, responsive phone layout, connection status, and reconnection state. Message routing, roster folding, lobby view selection, and generic Coordination presentation rendering are extracted pure modules; client.html keeps only bootstrap and DOM glue.
     architecture:
       kind: client-shell
       authority: non-authoritative

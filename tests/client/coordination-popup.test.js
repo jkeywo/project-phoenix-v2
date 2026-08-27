@@ -1,151 +1,134 @@
-import { describe, it, expect } from 'vitest';
-import { normalizeCoordinationPayload } from '../../gui/coordination-popup.js';
+// @vitest-environment jsdom
+
+import { describe, it, expect, beforeEach } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  normalizeCoordinationPresentation,
+  renderCoordinationPopup,
+  buildCoordinationChatterBubble,
+} from '../../gui/coordination-popup.js';
 import { t } from '../../gui/strings.js';
 
-// The normaliser resolves every sentence through the string table (issue #975),
-// so these assert against `t(id, params)` rather than English literals — the
-// text survives a copy edit, and the same ids are what the host viewscreen
-// chatter resolves, which is what makes the two surfaces render identically.
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const SOURCE = fs.readFileSync(path.resolve(HERE, '../../gui/coordination-popup.js'), 'utf8');
 
-describe('normalizeCoordinationPayload — sender', () => {
-  it('keeps the localised sender and destination as a route header', () => {
-    expect(normalizeCoordinationPayload({ type: 'Alert' }, 'Helm AI').sender).toBe('Helm AI');
-    expect(normalizeCoordinationPayload({ type: 'Alert' }, 'Helm AI', 'Tactical'))
-      .toMatchObject({ sender: 'Helm AI → Tactical', from: 'Helm AI', to: 'Tactical' });
+describe('normalizeCoordinationPresentation', () => {
+  it('resolves a known title/body id and keeps numeric parameters typed', () => {
+    const norm = normalizeCoordinationPresentation({
+      title: 'coordination.frequency_hint.title',
+      body: 'coordination.frequency_hint.body',
+      body_params: { frequency: 121.5 },
+    }, 'chatter.sender.sensors', 'station.tactical.name');
+
+    expect(norm).toEqual({
+      sender: `${t('chatter.sender.sensors')} → ${t('station.tactical.name')}`,
+      from: t('chatter.sender.sensors'),
+      to: t('station.tactical.name'),
+      title: t('coordination.frequency_hint.title'),
+      body: t('coordination.frequency_hint.body', { frequency: 121.5 }),
+    });
   });
 
-  it('falls back to the AI id when no label is given', () => {
-    expect(normalizeCoordinationPayload({ type: 'Alert' }, null).sender).toBe(t('chatter.sender.ai'));
+  it('passes literal authored text and interpolates literal parameters', () => {
+    expect(normalizeCoordinationPresentation({
+      title: 'Lark has the helm',
+      title_params: {},
+      body: 'Course {course}',
+      body_params: { course: 'steady' },
+    }, 'Lark', 'chatter.addressee.ship')).toMatchObject({
+      title: 'Lark has the helm',
+      body: 'Course steady',
+      to: t('chatter.addressee.ship'),
+    });
+  });
+
+  it('localises a String Table id used as a parameter value', () => {
+    const norm = normalizeCoordinationPresentation({
+      title: 'coordination.repair.title',
+      title_params: { label: 'station.helm.name' },
+      body: '',
+    }, null, 'station.repair.name');
+    expect(norm.title).toBe(t('coordination.repair.title', { label: t('station.helm.name') }));
+    expect(norm.from).toBe(t('chatter.sender.ai'));
+  });
+
+  it('contains no payload-family renderer', () => {
+    expect(SOURCE).not.toMatch(/payload\s*\.\s*type|CoordinationPayload|IntentKind|WeaponFamily/);
+    expect(SOURCE).not.toMatch(/case\s+['"](?:FrequencyHint|RepairRequest|IntentAdvisory)['"]/);
   });
 });
 
-describe('normalizeCoordinationPayload — variants', () => {
-  it('Advisory: label as title, message as body (data-wrapped or flat)', () => {
-    expect(normalizeCoordinationPayload(
-      { type: 'Advisory', data: { message: 'Adjust course' } }, 'Nav AI'))
-      .toMatchObject({ title: 'Nav AI', body: 'Adjust course' });
-    expect(normalizeCoordinationPayload(
-      { type: 'Advisory', message: 'Flat form' }, 'Nav AI').body).toBe('Flat form');
+describe('Coordination DOM layouts', () => {
+  beforeEach(() => {
+    document.body.innerHTML = `
+      <div id="coordination-popup">
+        <div class="popup-sender"><span id="popup-from"></span><span id="popup-arrow"></span><span id="popup-to"></span><span id="popup-colon"></span></div>
+        <div class="popup-title" id="popup-title"></div>
+        <div class="popup-body" id="popup-body"></div>
+      </div>`;
   });
 
-  it('Alert: title/body from data or flat fields with defaults', () => {
-    expect(normalizeCoordinationPayload(
-      { type: 'Alert', data: { title: 'Hull breach', body: 'Deck 3' } }, 'x'))
-      .toMatchObject({ title: 'Hull breach', body: 'Deck 3' });
-    expect(normalizeCoordinationPayload({ type: 'Alert' }, 'x'))
-      .toMatchObject({ title: t('coordination.alert.fallback_title'), body: '' });
+  it('keeps the phone route plus separate title/body lines', () => {
+    const presentation = {
+      title: 'coordination.power_brownout.title',
+      title_params: { label: 'power.group.weapons' },
+      body: 'coordination.power_brownout.body',
+      body_params: { level: 2 },
+    };
+    const norm = renderCoordinationPopup(
+      document, presentation, 'chatter.sender.power', 'station.tactical.name',
+    );
+
+    expect(norm).not.toBeNull();
+    expect(document.querySelector('.popup-sender').textContent)
+      .toBe(`[${t('chatter.sender.power')}] → [${t('station.tactical.name')}]:`);
+    expect(document.querySelector('.popup-title').textContent)
+      .toBe(t('coordination.power_brownout.title', { label: t('power.group.weapons') }));
+    expect(document.querySelector('.popup-body').textContent)
+      .toBe(t('coordination.power_brownout.body', { level: 2 }));
   });
 
-  it('FrequencyHint carries the frequency', () => {
-    expect(normalizeCoordinationPayload(
-      { type: 'FrequencyHint', data: { frequency: 121.5 } }, 'x'))
-      .toMatchObject({
-        title: t('coordination.frequency_hint.title'),
-        body: t('coordination.frequency_hint.body', { frequency: 121.5 }),
-      });
+  it('decorates the bare Ship destination exactly once on the phone', () => {
+    renderCoordinationPopup(document, {
+      title: 'Ship-wide advisory',
+      body: 'All stations acknowledge',
+    }, 'chatter.sender.ai', 'chatter.addressee.ship');
+
+    expect(t('chatter.addressee.ship')).toBe('Ship');
+    expect(document.querySelector('#popup-to').textContent).toBe('[Ship]');
+    expect(document.querySelector('.popup-sender').textContent)
+      .toBe(`[${t('chatter.sender.ai')}] → [Ship]:`);
   });
 
-  it('ShieldFacingDown / Restored use the facing label', () => {
-    expect(normalizeCoordinationPayload(
-      { type: 'ShieldFacingDown', data: { label: 'Fore' } }, 'x').title)
-      .toBe(t('coordination.shield_offline.title', { label: 'Fore' }));
-    expect(normalizeCoordinationPayload(
-      { type: 'ShieldFacingRestored', label: 'Aft' }, 'x').title)
-      .toBe(t('coordination.shield_restored.title', { label: 'Aft' }));
-    expect(normalizeCoordinationPayload(
-      { type: 'ShieldFacingDown' }, 'x').title)
-      .toBe(t('coordination.shield_offline.title', { label: t('coordination.shield.fallback_label') }));
+  it('keeps the Viewscreen route/title/body on one chatter line', () => {
+    const bubble = buildCoordinationChatterBubble(document, {
+      title: 'coordination.frequency_hint.title',
+      body: 'coordination.frequency_hint.body',
+      body_params: { frequency: 0.83 },
+    }, 'chatter.sender.sensors', 'station.tactical.name');
+
+    expect(bubble.children).toHaveLength(4);
+    expect(bubble.querySelector('.chatter-from').textContent)
+      .toBe(`[${t('chatter.sender.sensors')}]`);
+    expect(bubble.querySelector('.chatter-to').textContent)
+      .toBe(`[${t('station.tactical.name')}]`);
+    expect(bubble.querySelector('.chatter-text').textContent).toBe(
+      `: ${t('coordination.frequency_hint.title')} — ${t('coordination.frequency_hint.body', { frequency: 0.83 })}`,
+    );
   });
 
-  it('TargetDesignation / ArcBearingRequest', () => {
-    expect(normalizeCoordinationPayload(
-      { type: 'TargetDesignation', data: { label: 'Raider-2' } }, 'x').title)
-      .toBe(t('coordination.target_designation.title', { label: 'Raider-2' }));
-    expect(normalizeCoordinationPayload(
-      { type: 'ArcBearingRequest', data: { label: 'Raider-2' } }, 'x'))
-      .toMatchObject({
-        title: t('coordination.arc_bearing.title', { weapon: t('coordination.weapon_family.phasers') }),
-        body: 'Raider-2',
-      });
-  });
+  it('decorates the bare Ship destination exactly once on the Viewscreen', () => {
+    const bubble = buildCoordinationChatterBubble(document, {
+      title: 'Ship-wide advisory',
+      body: 'All stations acknowledge',
+    }, 'chatter.sender.ai', 'chatter.addressee.ship');
 
-  it('ArcBearingRequest is weapon-family-aware (issue #767)', () => {
-    expect(normalizeCoordinationPayload(
-      { type: 'ArcBearingRequest', data: { label: 'Raider-2', family: 'Blasters' } }, 'x').title)
-      .toBe(t('coordination.arc_bearing.title', { weapon: t('coordination.weapon_family.blasters') }));
-    expect(normalizeCoordinationPayload(
-      { type: 'ArcBearingRequest', data: { label: 'Raider-2', family: 'Torpedoes' } }, 'x').title)
-      .toBe(t('coordination.arc_bearing.title', { weapon: t('coordination.weapon_family.torpedoes') }));
-    // Phasers by default when the family field is absent (pre-#767 payloads).
-    expect(normalizeCoordinationPayload(
-      { type: 'ArcBearingRequest', data: { label: 'Raider-2' } }, 'x').title)
-      .toBe(t('coordination.arc_bearing.title', { weapon: t('coordination.weapon_family.phasers') }));
-  });
-
-  it('ArcBearingWithdraw is weapon-family-aware (issue #932)', () => {
-    expect(normalizeCoordinationPayload(
-      { type: 'ArcBearingWithdraw', data: { family: 'Torpedoes' } }, 'x'))
-      .toMatchObject({
-        title: t('coordination.arc_withdraw.title', { weapon: t('coordination.weapon_family.torpedoes') }),
-        body: '',
-      });
-  });
-
-  it('PowerBrownout carries the allocation level', () => {
-    expect(normalizeCoordinationPayload(
-      { type: 'PowerBrownout', data: { label: 'Phasers', allocated_level: 1 } }, 'x'))
-      .toMatchObject({
-        title: t('coordination.power_brownout.title', { label: 'Phasers' }),
-        body: t('coordination.power_brownout.body', { level: 1 }),
-      });
-  });
-
-  it('NavigateTo / RepairRequest / ThreatBearing (now first-class, issue #975)', () => {
-    // Coords carried on the payload now (issue #977); the popup rounds them and
-    // the template composes "waypoint (x, z)". Rust no longer sends a label.
-    expect(normalizeCoordinationPayload(
-      { type: 'NavigateTo', data: { x: 300.4, z: -100.6 } }, 'x').title)
-      .toBe(t('coordination.navigate.title', { x: 300, z: -101 }));
-    expect(normalizeCoordinationPayload(
-      { type: 'RepairRequest', data: { station_label: 'Tactical' } }, 'x').title)
-      .toBe(t('coordination.repair.title', { label: 'Tactical' }));
-    // bearing_rad = π/2 → 90°.
-    expect(normalizeCoordinationPayload(
-      { type: 'ThreatBearing', data: { bearing_rad: Math.PI / 2, label: 'Raider-2' } }, 'x').title)
-      .toBe(t('coordination.threat_bearing.title', { deg: 90, label: 'Raider-2' }));
-  });
-
-  it('IntentAdvisory names the decision and its subject (issue #879)', () => {
-    expect(normalizeCoordinationPayload(
-      { type: 'IntentAdvisory', data: { kind: 'TargetSwitched', subject: 'Raider-2', generation: 3 } }, 'Tactical'))
-      .toMatchObject({ title: t('coordination.intent.target_switched'), body: 'Raider-2' });
-    expect(normalizeCoordinationPayload(
-      { type: 'IntentAdvisory', kind: 'ShieldArcFocused', subject: 'FORE' }, 'Shields'))
-      .toMatchObject({ title: t('coordination.intent.shield_arc_focused'), body: 'FORE' });
-  });
-
-  it('IntentAdvisory kinds that name nothing carry an empty body', () => {
-    expect(normalizeCoordinationPayload(
-      { type: 'IntentAdvisory', data: { kind: 'BreakingOff', generation: 9 } }, 'Helm'))
-      .toMatchObject({ title: t('coordination.intent.breaking_off'), body: '' });
-    expect(normalizeCoordinationPayload(
-      { type: 'IntentAdvisory', data: { kind: 'CombatPostureEntered', generation: 1 } }, 'Helm'))
-      .toMatchObject({ title: t('coordination.intent.combat_posture_entered'), body: '' });
-    expect(normalizeCoordinationPayload(
-      { type: 'IntentAdvisory', data: { kind: 'CombatPostureLeft', generation: 2 } }, 'Helm'))
-      .toMatchObject({ title: t('coordination.intent.combat_posture_left'), body: '' });
-  });
-
-  it('an IntentAdvisory kind the client does not know still renders its token', () => {
-    expect(normalizeCoordinationPayload(
-      { type: 'IntentAdvisory', data: { kind: 'SomethingNew', generation: 1 } }, 'Helm'))
-      .toMatchObject({ title: 'SomethingNew', body: '' });
-  });
-
-  it('unknown variants fall back to the type name with an empty body', () => {
-    expect(normalizeCoordinationPayload({ type: 'FutureThing' }, 'x'))
-      .toMatchObject({ title: 'FutureThing', body: '' });
-    expect(normalizeCoordinationPayload({}, 'x'))
-      .toMatchObject({ title: t('coordination.advisory.fallback_title'), body: '' });
+    expect(t('chatter.addressee.ship')).toBe('Ship');
+    expect(bubble.querySelector('.chatter-to').textContent).toBe('[Ship]');
+    expect(bubble.textContent).toBe(
+      `[${t('chatter.sender.ai')}] → [Ship]: Ship-wide advisory — All stations acknowledge`,
+    );
   });
 });

@@ -51,6 +51,7 @@ pub fn handle_coordination_enqueue(
             sender_origin: ev.sender_origin,
             address: ev.address.clone(),
             payload: ev.payload.clone(),
+            presentation: ev.presentation.clone(),
             sender_label,
             due_time: now + lag,
         });
@@ -67,7 +68,12 @@ pub fn handle_coordination_enqueue(
     };
     let lag = ship_config.0.coordination_lag_secs;
     for msg in &inbound_msgs {
-        let ClientMessage::SendCoordination { address, payload } = &msg.msg else {
+        let ClientMessage::SendCoordination {
+            address,
+            payload,
+            presentation,
+        } = &msg.msg
+        else {
             continue;
         };
         let player = match sessions.0.players().iter().find(|p| p.token == msg.token) {
@@ -91,6 +97,7 @@ pub fn handle_coordination_enqueue(
             sender_origin,
             address: address.clone(),
             payload: payload.clone(),
+            presentation: presentation.clone(),
             sender_label: player.name.clone(),
             due_time: now + lag,
         });
@@ -501,6 +508,7 @@ pub fn process_coordination_lag(
         });
 
         for msg in queue.0.due_messages(now) {
+            let to_label = coordination::coordination_addressee_label(&msg.address);
             // Whole-ship delivery is selected by its address, never by looking
             // for a particular payload variant. The authored Station order is
             // retained for deterministic fan-out.
@@ -527,7 +535,9 @@ pub fn process_coordination_lag(
                                 repair_vis.as_ref(),
                                 Some(&seat.station),
                             ),
+                            presentation: msg.presentation.clone(),
                             sender_label: label.clone(),
+                            to_label: to_label.clone(),
                         },
                     ));
                 }
@@ -557,6 +567,7 @@ pub fn process_coordination_lag(
                             source_entity: ship_entity,
                             address: msg.address.clone(),
                             payload: msg.payload.clone(),
+                            presentation: msg.presentation.clone(),
                         });
                     }
 
@@ -623,8 +634,9 @@ pub fn process_coordination_lag(
                         };
                         chatter_writer.write(AiChatterEvent {
                             from_label,
-                            to_label: coordination::coordination_addressee_label(&msg.address),
+                            to_label: to_label.clone(),
                             payload: msg.payload.clone(),
+                            presentation: msg.presentation.clone(),
                         });
                     }
                 }
@@ -670,7 +682,9 @@ pub fn process_coordination_lag(
                                     repair_vis.as_ref(),
                                     Some(station_id),
                                 ),
+                                presentation: msg.presentation,
                                 sender_label: label,
+                                to_label,
                             },
                         ));
                     }

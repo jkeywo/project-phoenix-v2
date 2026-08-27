@@ -107,13 +107,16 @@ entities:
       status: implemented
       confidence: confirmed
       title: Coordination Lag Router
-      summary: Per-ship delayed advisory channel addressed explicitly to one Station or the whole source Ship, with control and availability resolved at delivery time and typed AI deliveries handed to the receiving module.
+      summary: Per-ship delayed advisory channel addressed explicitly to one Station or the whole source Ship, carrying a typed semantic payload plus a required producer-owned presentation envelope while control and availability are resolved at delivery time.
       rationale:
         - Coordination latency should affect the message path consistently without freezing stale ownership decisions at send time.
         - "Issue #1254 replaces Station-shaped SystemId values with CoordinationAddress::Station and makes whole-ship intent explicit as CoordinationAddress::Ship. A producer resolving a fine System to its owning Station drops an ownerless or unknown result; it never widens a failed lookup into a Ship broadcast. ControlSystem commands remain System-addressed."
         - "The lag router branches on the address, never the payload. Station delivery resolves the live Station policy after the delay; Helm and Tactical retain their established composite policies, while other Stations reduce their authored fine-System policies. Unknown Stations are invalid for that hull and are dropped, not sent to every client."
         - "Ship delivery applies route_coordination per authored Station in stable hull order: a backfilled sender reaches every connected human seat, an AI or offline seat gets nothing, and a human sender is suppressed exactly as human-to-human traffic already was. The #737 Repair coarsening is re-applied per recipient so the Ship address cannot widen protected information."
         - "After the delay, an AI Station delivery is emitted as DeliveredCoordination. Issue #1254's Tactical tracer consumes a typed FrequencyHint in the Tactical module and latches PendingTacticalFrequencyHint for apply_tactical_frequency_hint on the following Input tick. Both receiver and applier re-check live Tactical AI ownership, so a human claim inside the delivery/application window drops the hint rather than overwriting the new operator. sender_origin remains only a routing tag."
+        - "Issue #1255 makes CoordinationPresentation required at every producer and carries it byte-for-byte beside the typed payload through CoordinationLagQueue, DeliveredCoordination, CoordinationPopup, and AiChatterEvent. The phone and Viewscreen resolve the same localised-or-literal title/body plus scalar parameter maps and never enumerate CoordinationPayload; the phone retains separate title/body lines and the Viewscreen joins them onto its existing single line. The router derives the destination heading from CoordinationAddress (`station.<id>.name` or `chatter.addressee.ship`), removing the incomplete client Station switch. Route labels resolve to undecorated display text (including bare `Ship`); each layout owns its single pair of square brackets, matching the existing Station-label contract. The unused text-only ServerMessage::AiChatter vocabulary is deleted so there is no second Coordination presentation contract beside the live AiChatterEvent host channel."
+        - "[decision] Adding required presentation and destination fields was treated as one atomic wire-vocabulary change, so PROTOCOL_VERSION advances from 2 to 3 instead of accepting partially-present legacy messages. Parameter values use the existing `<field>_params` localization convention with an untagged scalar enum and BTreeMap ordering: frequency remains numeric, known ids localise, and literal authored text passes through. Display-only waypoint and threat figures are rounded producer-side to preserve the prior JavaScript output; the ThreatBearing semantic label is now the threat UUID because its former composed English existed only to feed the deleted client presenter."
+        - "Repair presentation names only the coarse authored Station/Core label and never carries its protected exact deficit, regardless of recipient entitlement. Destroyed-System presentation uses the hull entry's authored display name with String Table title/body ids; no Rust-composed English remains. The strict String Table gate scans literal Rust CoordinationPresentation constructors and text-valued presentation parameters so moving ids out of JavaScript cannot make missing rows invisible."
     architecture:
       kind: coordination-service
       authority: authoritative
@@ -123,9 +126,9 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [src/ship/coordination.rs, src/ship/coordination_systems.rs, src/ship/components.rs, src/ship_plugin.rs, src/core/messages.rs, src/console/weapons/server.rs, gui/client-router.js, gui/sim-state.js]
-      symbols: [CoordinationAddress, address_for_system, address_for_system_kind, CoordinationLagQueue, CoordinationPayload, DeliveredCoordination, PendingTacticalFrequencyHint, receive_tactical_coordination, apply_tactical_frequency_hint, broadcast_to_ship, seat_control_source, ShipSeat]
-      messages: [SendCoordination, CoordinationPopup, DeliveredCoordination]
+      paths: [src/ship/coordination.rs, src/ship/coordination_systems.rs, src/ship/components.rs, src/ship_plugin.rs, src/core/messages.rs, src/core/codec.rs, src/console_bridge.rs, src/console/weapons/server.rs, gui/client-router.js, gui/sim-state.js, gui/coordination-popup.js, client.html, server.html, scripts/check-strings.mjs, scripts/strings-rust.mjs]
+      symbols: [CoordinationAddress, CoordinationPresentation, CoordinationParam, address_for_system, address_for_system_kind, CoordinationLagQueue, CoordinationPayload, DeliveredCoordination, PendingTacticalFrequencyHint, receive_tactical_coordination, apply_tactical_frequency_hint, broadcast_to_ship, seat_control_source, ShipSeat, normalizeCoordinationPresentation, renderCoordinationPopup, buildCoordinationChatterBubble, coordinationPresentationIds]
+      messages: [SendCoordination, CoordinationPopup, DeliveredCoordination, AiChatterEvent]
       tests: [cargo test, tests/client/client-router.test.js, tests/client/sim-state.test.js, tests/client/coordination-popup.test.js]
 
   - state: coordination-lag-queue-state
@@ -133,7 +136,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Coordination Lag Queue State
-      summary: Authoritative per-ship queue of pending advisory messages carrying an explicit Station or Ship address and configured delivery delay.
+      summary: Authoritative per-ship queue of pending advisory messages carrying an explicit Station or Ship address, typed semantic payload, required producer-owned presentation envelope, and configured delivery delay.
     architecture:
       classification: authoritative
       owner: coordination-lag-router
@@ -148,16 +151,16 @@ entities:
       status: implemented
       confidence: confirmed
       title: Coordination Delivery State
-      summary: "Ephemeral post-delay outputs: Station-addressed typed deliveries for receiving System modules and human Coordination popups, plus deterministic Ship-addressed popup fan-out."
+      summary: "Ephemeral post-delay outputs: Station-addressed typed deliveries for receiving System modules, human Coordination popups, and Viewscreen chatter carrying the same presentation envelope, plus deterministic Ship-addressed popup fan-out."
     architecture:
       classification: ephemeral
       owner: coordination-lag-router
       derived_from: [coordination-lag-queue-state]
     implementation:
       status: declared
-      paths: [src/core/messages.rs, src/ship/components.rs, src/ship/coordination_systems.rs, src/console/weapons/server.rs, src/ship_plugin.rs]
-      symbols: [DeliveredCoordination, receive_tactical_coordination]
-      messages: [CoordinationPopup, DeliveredCoordination]
+      paths: [src/core/messages.rs, src/ship/components.rs, src/ship/coordination_systems.rs, src/console/weapons/server.rs, src/console_bridge.rs, gui/coordination-popup.js, client.html, server.html, src/ship_plugin.rs]
+      symbols: [CoordinationPresentation, DeliveredCoordination, AiChatterEvent, receive_tactical_coordination, normalizeCoordinationPresentation]
+      messages: [CoordinationPopup, DeliveredCoordination, AiChatterEvent]
 
   - component: intent-narration-coalescer
     core:
@@ -168,7 +171,7 @@ entities:
       rationale:
         - "Issue #879. The crew of a partly-backfilled bridge needs to know what the automation is doing without an advisory per shot or per thrust tick, so state-change detection is taken out of the emitters entirely: the adapter reads authoritative state (tactical selection, red alert, hull, shield focus, power brownout, the helm policy's own state-machine leg) into an IntentSnapshot and the pure coalesce_intent decides whether anything changed. Steady state produces nothing."
         - "[ai] The contract is zero-or-one per seat per decision tick. When several axes move on the same tick a FIXED priority ladder (break-off, brownout, posture, target, shield focus, manoeuvre) picks exactly one, so two lockstep peers resolving the same tick pick the same advisory. Unreported axes are still recorded in the stored snapshot, so they cannot resurface later as changes that never happened."
-        - "Advisories carry a typed kind plus at most one label and NO figures — the same information boundary #737 drew for RepairRequest, where the tier crossing reaches Engineering and the exact HP deficit does not. The client renders the sentence from the typed kind."
+        - "Advisories carry a typed kind plus at most one label and NO figures — the same information boundary #737 drew for RepairRequest, where the tier crossing reaches Engineering and the exact HP deficit does not. The producer maps that kind to the required presentation envelope; clients render the envelope without knowing IntentKind."
         - "The break-off hull fraction is authored as [global] intent_break_off_hull_fraction; the serde default is the only hardcoded copy of it."
         - "Nothing on the emit side branches on who holds the seat. The fact is derived from authoritative system state whoever is operating the console, and the seat's control source is stamped onto sender_origin afterwards as a routing tag — the shape issue #873 had to restore after an emit-side operate_ai conjunct made a coordination fact depend on the operator."
         - "The emitter is gated by run_if(ai_tick_ready) on the one shared AI cadence. SimSet is configured in Bevy's Update, so an ungated narrator would sample decision state once per rendered frame and could narrate a flicker inside a single AI tick twice."

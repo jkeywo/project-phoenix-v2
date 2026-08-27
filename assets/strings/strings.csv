@@ -1003,7 +1003,7 @@ chatter.sender.power,Coordination chatter/popup — sender label for the Power s
 chatter.sender.shields,Coordination chatter/popup — sender label for the Shields system,Shields
 chatter.sender.ai,Coordination chatter/popup — generic sender label when the origin system is unnamed,AI
 chatter.addressee.core,Coordination chatter — sender label for a system the ship's Core owns (belongs to no station),Core
-chatter.addressee.ship,Coordination chatter/popup — destination label for a ship-wide advisory,[Ship]
+chatter.addressee.ship,Coordination chatter/popup — undecorated destination label for a ship-wide advisory; the route layout supplies brackets,Ship
 coordination.advisory.fallback_title,Coordination popup — title for a bare advisory that carries no sender label,Advisory
 coordination.alert.fallback_title,Coordination popup — title for an alert that carries no title of its own,Alert
 coordination.frequency_hint.title,"Coordination popup/chatter — Sensors-to-Tactical shield-frequency hint, title",Frequency Hint
@@ -1022,7 +1022,9 @@ coordination.power_brownout.title,Coordination popup/chatter — a power group i
 coordination.power_brownout.body,Coordination popup/chatter — power-brownout body. {level} is the allocated power level,Allocation: {level}
 coordination.navigate.title,Coordination popup/chatter — Navigation clears Helm toward a waypoint. {x} and {z} are the waypoint coordinates,"Navigation: steer toward waypoint ({x}, {z})"
 coordination.repair.title,Coordination popup/chatter — a system needs repair. {label} is the station or system name,Repair requested: {label}
-coordination.threat_bearing.title,"Coordination popup/chatter — Sensors warns Shields of a threat. {deg} is the bearing in degrees, {label} the threat name",Sensors: threat bearing {deg}° — {label}
+coordination.system_destroyed.title,Coordination popup/chatter — a System reached Destroyed. {label} is its authored display name,System Destroyed: {label}
+coordination.system_destroyed.body,Coordination popup/chatter — destroyed-System alert body. {label} is its authored display name,{label} destroyed.
+coordination.threat_bearing.title,"Coordination popup/chatter — Sensors warns Shields of a threat. {deg} is the bearing in degrees and {distance} is range in metres","Sensors: threat bearing {deg}° — Hostile closing, range {distance}m, bearing {deg}°"
 coordination.intent.target_acquired,Coordination popup — an AI seat took a target. Intent-advisory title,Target acquired
 coordination.intent.target_switched,Coordination popup — an AI seat switched targets. Intent-advisory title,Switching target
 coordination.intent.combat_posture_entered,Coordination popup — an AI seat entered combat posture. Intent-advisory title,Combat posture

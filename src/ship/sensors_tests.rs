@@ -235,6 +235,16 @@ fn sensors_set_science_target_enqueues_target_designation_for_tactical() {
         }
         other => panic!("expected TargetDesignation, got {other:?}"),
     }
+    assert_eq!(
+        enqueued.presentation.title,
+        "coordination.target_designation.title"
+    );
+    assert_eq!(
+        enqueued.presentation.title_params.get("label"),
+        Some(&crate::core::messages::CoordinationParam::Text(
+            "asteroid-42".into()
+        ))
+    );
 }
 
 #[test]
@@ -433,6 +443,17 @@ fn low_fidelity_ships_emit_here_regardless_of_who_holds_sensors() {
             )),
             "the hint is addressed to Tactical either way"
         );
+        assert_eq!(hint.presentation.title, "coordination.frequency_hint.title");
+        assert_eq!(hint.presentation.body, "coordination.frequency_hint.body");
+        let CoordinationPayload::FrequencyHint { frequency } = &hint.payload else {
+            unreachable!("the event was selected by its FrequencyHint payload")
+        };
+        assert_eq!(
+            hint.presentation.body_params.get("frequency"),
+            Some(&crate::core::messages::CoordinationParam::Decimal(
+                *frequency
+            ))
+        );
     }
 }
 
@@ -480,6 +501,16 @@ fn operate_sensors_ai_runs_per_entity_for_ai_controlled_ships() {
 fn test_app_with_factions() -> (App, uuid::Uuid, uuid::Uuid) {
     let mut app = test_app();
 
+    // Use the fully composed hull surface that a real spawn receives. The
+    // `ShipConfigComponent::default()` fallback does not synthesize the
+    // shield-arc System instances that typed Station addressing resolves.
+    let ship_config = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_battleship.toml",
+    )
+    .expect("the shipped battleship composes")
+    .ship_config
+    .expect("the shipped battleship declares a ship config");
+
     // Seed the faction registry so is_enemy works.
     let fed_uuid = uuid::Uuid::new_v4();
     let harrow_uuid = uuid::Uuid::new_v4();
@@ -507,23 +538,13 @@ fn test_app_with_factions() -> (App, uuid::Uuid, uuid::Uuid) {
         .world_mut()
         .query_filtered::<Entity, With<crate::server_app::LocalShip>>();
     let ship = ship_q.single_mut(app.world_mut()).unwrap();
-    // Threat coordination is addressed through the ship's authored topology.
-    // The lightweight `ShipConfigComponent::default()` fallback does not run
-    // EntityConfig's shield-arc synthesis, so this fixture must attach the same
-    // composed config a real battleship spawn receives.
-    let authored_ship_config = crate::entities::include_resolve::load_entity_config(
-        "assets/entities/alliance_battleship.toml",
-    )
-    .expect("the shipped battleship composes")
-    .ship_config
-    .expect("the shipped battleship declares its station topology");
     app.world_mut().entity_mut(ship).insert((
+        crate::ship_plugin::ShipConfigComponent(ship_config),
         crate::entities::spawner::EntityUuid(ship_uuid.clone()),
         SensorsThreatState::default(),
         crate::modifiers::ShipModifiers::new(),
         crate::entities::spawner::FactionComponent(fed_uuid),
         crate::ship::state::ShipPhysics::default(),
-        crate::ship_plugin::ShipConfigComponent(authored_ship_config),
     ));
 
     (app, fed_uuid, harrow_uuid)
@@ -577,13 +598,25 @@ fn threat_warning_emitted_for_hostile_in_range() {
                 bearing_rad.abs() < 0.1,
                 "bearing should be near 0 for target ahead, got {bearing_rad}"
             );
-            assert!(
-                label.contains("Hostile closing"),
-                "label should contain threat description, got {label}"
+            assert_eq!(
+                label, "h-1",
+                "semantic payload retains the threat identity, not presentation prose"
             );
         }
         other => panic!("expected ThreatBearing, got {other:?}"),
     }
+    assert_eq!(
+        threat.presentation.title,
+        "coordination.threat_bearing.title"
+    );
+    assert_eq!(
+        threat.presentation.title_params.get("deg"),
+        Some(&crate::core::messages::CoordinationParam::Integer(0))
+    );
+    assert_eq!(
+        threat.presentation.title_params.get("distance"),
+        Some(&crate::core::messages::CoordinationParam::Integer(200))
+    );
 }
 
 #[test]

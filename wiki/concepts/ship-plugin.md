@@ -2,7 +2,7 @@
 title: ShipPlugin
 type: concept
 tags: [ship, helm, physics, coordination, control-source, ai]
-sources: [src/ship_plugin.rs, src/ship/helm_ai/, src/ship/helm_admission.rs, src/ship/physics_systems.rs, src/ship/coordination_systems.rs, src/ship/rating_systems.rs, src/server_app/collision.rs]
+sources: [src/ship_plugin.rs, src/ship/components.rs, src/ship/helm_ai/, src/ship/helm_admission.rs, src/ship/physics_systems.rs, src/ship/coordination_systems.rs, src/ship/rating_systems.rs, src/ship/damage_sync.rs, src/console/weapons/server.rs, src/core/messages.rs, src/server_app/collision.rs]
 updated: 2026-08-27
 ---
 
@@ -21,7 +21,8 @@ The current AI axes are thrust, steering, lateral thrust, vertical thrust, impul
 The plugin registers `CoordinationEnqueue`, owns the per-ship coordination queue
 adapters, resolves human-seeking station hosts, and updates control sources when
 station ratings or tenure change. `process_coordination_lag` delays explicitly
-Station- or Ship-addressed messages, resolves live recipient policy, emits
+Station- or Ship-addressed messages, preserves each producer-owned presentation
+envelope beside its typed payload, resolves live recipient policy, emits
 `CoordinationPopup` or `DeliveredCoordination` for a human- or AI-operated
 Station respectively, and fans Ship delivery to eligible human seats in
 authored Station order. Owning domain receivers consume the same typed fact

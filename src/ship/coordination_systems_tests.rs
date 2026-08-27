@@ -5,6 +5,13 @@ use crate::ship::components::LastSystemTiers;
 use crate::ship::control_source::ControlSource;
 use crate::ship::test_support::*;
 
+fn test_coordination_presentation() -> crate::core::messages::CoordinationPresentation {
+    crate::core::messages::CoordinationPresentation::new(
+        "test.coordination.title",
+        "test.coordination.body",
+    )
+}
+
 // ── Issue #684: Destroyed-tier alerts to Captain ─────────────────────────
 
 #[derive(Resource, Default)]
@@ -69,9 +76,31 @@ fn destroyed_crossing_emits_alert_to_captain() {
         "Alert must address the Captain Station"
     );
     assert_eq!(alerts[0].sender_label, "tactical");
-    assert!(
-        matches!(&alerts[0].payload, CoordinationPayload::Alert { .. }),
-        "payload must be Alert"
+    assert_eq!(
+        &alerts[0].payload,
+        &CoordinationPayload::Alert {
+            title: "coordination.system_destroyed.title".into(),
+            body: "coordination.system_destroyed.body".into(),
+        },
+        "the semantic Alert no longer carries Rust-composed destroyed-System English"
+    );
+    assert_eq!(
+        alerts[0].presentation.title,
+        "coordination.system_destroyed.title"
+    );
+    assert_eq!(
+        alerts[0].presentation.body,
+        "coordination.system_destroyed.body"
+    );
+    let title_label = alerts[0]
+        .presentation
+        .title_params
+        .get("label")
+        .expect("destroyed title must name the authored System");
+    assert_eq!(
+        alerts[0].presentation.body_params.get("label"),
+        Some(title_label),
+        "title and body use the same authored hull display label"
     );
 }
 
@@ -289,6 +318,7 @@ fn station_control_is_resolved_live_after_enqueue_not_frozen_in_the_queue() {
                 title: "test.alert.title".into(),
                 body: "test.alert.body".into(),
             },
+            presentation: test_coordination_presentation(),
             sender_label: "station.sensors.name".into(),
             due_time: 0.0,
         });
@@ -302,6 +332,22 @@ fn station_control_is_resolved_live_after_enqueue_not_frozen_in_the_queue() {
         1,
         "the live human holder receives the delayed advisory; queued AI state is not frozen"
     );
+    let (presentation, to_label) = app
+        .world()
+        .resource::<crate::lobby::LobbyOutbox>()
+        .0
+        .iter()
+        .find_map(|(_, message)| match message {
+            crate::core::messages::ServerMessage::CoordinationPopup {
+                presentation,
+                to_label,
+                ..
+            } => Some((presentation, to_label)),
+            _ => None,
+        })
+        .expect("delayed popup");
+    assert_eq!(presentation, &test_coordination_presentation());
+    assert_eq!(to_label, "station.captain.name");
 }
 
 // ── Issue #737: the repair-request popup is subject to the same boundary ──
@@ -397,6 +443,44 @@ fn repair_popup_deficits(app: &App) -> Vec<Option<f32>> {
             _ => None,
         })
         .collect()
+}
+
+fn repair_popup_presentations(app: &App) -> Vec<&crate::core::messages::CoordinationPresentation> {
+    app.world()
+        .resource::<crate::lobby::LobbyOutbox>()
+        .0
+        .iter()
+        .filter_map(|(_, msg)| match msg {
+            crate::core::messages::ServerMessage::CoordinationPopup {
+                payload: CoordinationPayload::RepairRequest { .. },
+                presentation,
+                ..
+            } => Some(presentation),
+            _ => None,
+        })
+        .collect()
+}
+
+fn assert_repair_presentations_are_coarse(app: &App) {
+    let presentations = repair_popup_presentations(app);
+    assert!(
+        !presentations.is_empty(),
+        "fixture must deliver Repair presentation"
+    );
+    for presentation in presentations {
+        assert_eq!(presentation.title, "coordination.repair.title");
+        assert_eq!(presentation.body, "");
+        assert_eq!(
+            presentation
+                .title_params
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["label"],
+            "Repair presentation may name only the coarse Station; protected deficit stays out"
+        );
+        assert!(presentation.body_params.is_empty());
+    }
 }
 
 /// Put a repair team physically on site at `system_id` before the crossing.
@@ -711,6 +795,7 @@ fn enqueue_coordination(
             sender_origin,
             address,
             payload,
+            presentation: test_coordination_presentation(),
             sender_label: "Sensors".into(),
             sender_system: crate::core::messages::SystemId(String::new()),
         });
@@ -771,6 +856,11 @@ fn delayed_ai_station_delivery_emits_typed_handoff_for_the_owning_module() {
         CoordinationPayload::FrequencyHint { frequency: 0.83 },
         "the owning Tactical module receives the typed value unchanged"
     );
+    assert_eq!(
+        delivered[0].presentation,
+        test_coordination_presentation(),
+        "the owning module receives the producer presentation unchanged beside the typed value"
+    );
 }
 
 #[test]
@@ -790,6 +880,7 @@ fn tactical_receiver_consumes_a_delivered_frequency_hint_without_router_state_mu
                 crate::ship::system_registry::TACTICAL_STATION_ID.into(),
             )),
             payload: CoordinationPayload::FrequencyHint { frequency: 0.61 },
+            presentation: test_coordination_presentation(),
         });
     tick(&mut app);
 
@@ -915,6 +1006,7 @@ fn spectator_send_coordination_is_dropped_but_crew_is_queued() {
         ClientMessage::SendCoordination {
             address: address.clone(),
             payload: payload.clone(),
+            presentation: test_coordination_presentation(),
         },
     );
     tick(&mut app);
@@ -944,7 +1036,11 @@ fn spectator_send_coordination_is_dropped_but_crew_is_queued() {
     push(
         &mut app,
         "spec",
-        ClientMessage::SendCoordination { address, payload },
+        ClientMessage::SendCoordination {
+            address,
+            payload,
+            presentation: test_coordination_presentation(),
+        },
     );
     tick(&mut app);
     assert_eq!(
@@ -1002,6 +1098,11 @@ fn only_ai_to_ai_coordination_reaches_viewscreen_chatter() {
         chatter[0].to_label, "station.tactical.name",
         "the viewscreen names the target STATION, not the bare system key"
     );
+    assert_eq!(
+        chatter[0].presentation,
+        test_coordination_presentation(),
+        "the Viewscreen receives the same producer-owned presentation that crossed the lag queue"
+    );
     assert!(
         !chatter[0].to_label.contains(' '),
         "a station addressee carries no 'Station System' composite, got {:?}",
@@ -1029,6 +1130,11 @@ fn a_senders_system_is_addressed_as_its_owning_station() {
                 crate::ship::system_registry::TACTICAL_STATION_ID.into(),
             )),
             payload: CoordinationPayload::FrequencyHint { frequency: 0.83 },
+            presentation: crate::core::messages::CoordinationPresentation::new(
+                "coordination.frequency_hint.title",
+                "coordination.frequency_hint.body",
+            )
+            .with_body_param("frequency", 0.83_f32),
             // A raw `chatter.sender.*` fallback that MUST be overridden by
             // the station the sensors system resolves to.
             sender_label: coordination::CHATTER_SENDER_SENSORS.to_string(),
@@ -1638,6 +1744,7 @@ fn repair_popup_withholds_exact_non_core_deficit_before_a_team_arrives() {
         "the exact HP deficit of a non-Core system must not reach Engineering \
          before a team is on site; got {deficits:?}"
     );
+    assert_repair_presentations_are_coarse(&app);
 }
 
 #[test]
@@ -1659,6 +1766,7 @@ fn repair_popup_carries_the_exact_deficit_once_a_team_is_on_site() {
         deficits.iter().any(|d| d.is_some()),
         "a team on site is the information gate opening; got {deficits:?}"
     );
+    assert_repair_presentations_are_coarse(&app);
 }
 
 // ── Issue #879: the ship-wide intent-advisory broadcast ──────────────────

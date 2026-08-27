@@ -314,22 +314,34 @@ describe('routeMessage — no-render cases', () => {
 
   it('CoordinationPopup emits the popup effect and never renders', () => {
     const address = { type: 'Station', data: 'tactical' };
-    const msg = { type: 'CoordinationPopup', data: { address, payload: { type: 'Alert' }, sender_label: 'Helm AI' } };
+    const presentation = { title: 'Alert', body: 'Brace' };
+    const msg = {
+      type: 'CoordinationPopup',
+      data: {
+        address, payload: { type: 'Alert' }, presentation,
+        sender_label: 'Helm AI', to_label: 'Tactical',
+      },
+    };
     const r = routeMessage(msg, ctx(baseUiState()));
     expect(r.sideEffects).toEqual([{
-      effect: 'coordination-popup', address, payload: { type: 'Alert' }, senderLabel: 'Helm AI', targetLabel: 'tactical',
+      effect: 'coordination-popup', address, presentation,
+      senderLabel: 'Helm AI', targetLabel: 'Tactical',
     }]);
     expect(r.shouldRender).toBe(false);
   });
 
-  it('ship-wide CoordinationPopup keeps its typed address and has no Station label', () => {
+  it('ship-wide CoordinationPopup keeps its typed address and authoritative Ship label', () => {
     const address = { type: 'Ship' };
+    const presentation = { title: 'Standing down', body: '' };
     const r = routeMessage({
       type: 'CoordinationPopup',
-      data: { address, payload: { type: 'IntentAdvisory' }, sender_label: 'Tactical' },
+      data: {
+        address, payload: { type: 'IntentAdvisory' }, presentation,
+        sender_label: 'Tactical', to_label: 'Ship',
+      },
     }, ctx(baseUiState()));
     expect(r.sideEffects[0]).toMatchObject({
-      effect: 'coordination-popup', address, targetLabel: null,
+      effect: 'coordination-popup', address, presentation, targetLabel: 'Ship',
     });
   });
 

@@ -7131,6 +7131,9 @@ fn withdraw_fore_arc_request(app: &mut App, family: crate::core::messages::Weapo
                 ),
             ),
             payload: crate::core::messages::CoordinationPayload::ArcBearingWithdraw { family },
+            presentation: crate::core::messages::CoordinationPresentation::titled(
+                "coordination.arc_withdraw.title",
+            ),
             sender_label: "Weapons".to_string(),
             sender_system: crate::core::messages::SystemId(String::new()),
         });

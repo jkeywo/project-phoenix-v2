@@ -1083,6 +1083,28 @@ fn operate_navigation_ai_reach_sets_free_waypoint_and_emits_navigate_to() {
         // are the waypoint's own coordinates.
         assert_eq!((*x, *z), (300.0, -100.0));
     }
+    let presentation = &nav_to.expect("asserted above").presentation;
+    assert_eq!(presentation.title, "coordination.navigate.title");
+    assert_eq!(
+        presentation.title_params.get("x"),
+        Some(&crate::core::messages::CoordinationParam::Integer(300))
+    );
+    assert_eq!(
+        presentation.title_params.get("z"),
+        Some(&crate::core::messages::CoordinationParam::Integer(-100))
+    );
+}
+
+#[test]
+fn coordination_waypoint_rounding_matches_javascript_math_round() {
+    assert_eq!(coordination_display_integer(1.49), 1);
+    assert_eq!(coordination_display_integer(1.5), 2);
+    assert_eq!(coordination_display_integer(-1.49), -1);
+    assert_eq!(
+        coordination_display_integer(-1.5),
+        -1,
+        "JavaScript Math.round resolves a negative tie toward positive infinity"
+    );
 }
 
 /// The shared issuer sends exactly ONE `NavigateTo` per waypoint

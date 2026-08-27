@@ -40,8 +40,8 @@
   <script type="module" src="gui/console-resolver.js"></script>
   <!-- Extracted shell modules (issue #827): mount plan (station id → DOM ids
        + iframe URLs), section switching, the lobby roster fold, the pure
-       per-message router, the lobby view model, and the coordination-popup
-       payload normaliser. -->
+       per-message router, the lobby view model, and the generic Coordination
+       presentation renderer. -->
   <script type="module" src="gui/mount-plan.js"></script>
   <script type="module" src="gui/content-switcher.js"></script>
   <script type="module" src="gui/console-mount.js"></script>
@@ -2682,27 +2682,15 @@
 
     // -- Coordination popup (issue #494) ---------------------------------------
     let coordinationPopupTimer = null;
-      function showCoordinationPopup(payload, sender_label, target_label) {
+    function showCoordinationPopup(presentation, sender_label, target_label) {
       const el = document.getElementById('coordination-popup');
       if (!el) return;
-      const fromEl = document.getElementById('popup-from');
-      const arrowEl = document.getElementById('popup-arrow');
-      const toEl = document.getElementById('popup-to');
-      const colonEl = document.getElementById('popup-colon');
-      const titleEl = document.getElementById('popup-title');
-      const bodyEl = document.getElementById('popup-body');
-      if (!fromEl || !arrowEl || !toEl || !colonEl || !titleEl || !bodyEl) return;
-      // Payload → { sender, title, body } normalisation is pure and lives in
-      // gui/coordination-popup.js (issue #827); only the DOM writes and the
-      // auto-dismiss timer stay here.
-      if (typeof window.normalizeCoordinationPayload !== 'function') return;
-        const norm = window.normalizeCoordinationPayload(payload, sender_label, target_label);
-      fromEl.textContent = `[${norm.from}]`;
-      arrowEl.textContent = norm.to ? ' → ' : '';
-      toEl.textContent = norm.to ? `[${norm.to}]` : '';
-      colonEl.textContent = ':';
-      titleEl.textContent = norm.title;
-      bodyEl.textContent = norm.body;
+      // Producers own the words; this shared renderer knows only the generic
+      // route and the phone's route/title/body layout (issue #1255).
+      if (typeof window.renderCoordinationPopup !== 'function') return;
+      if (!window.renderCoordinationPopup(
+        document, presentation, sender_label, target_label,
+      )) return;
       el.style.display = 'block';
       if (coordinationPopupTimer) clearTimeout(coordinationPopupTimer);
       coordinationPopupTimer = setTimeout(dismissCoordinationPopup, 8000);
@@ -2940,7 +2928,7 @@
           if (navigator.vibrate) navigator.vibrate(fx.duration);
           break;
         case 'coordination-popup':
-            showCoordinationPopup(fx.payload, fx.senderLabel, fx.targetLabel);
+          showCoordinationPopup(fx.presentation, fx.senderLabel, fx.targetLabel);
           break;
       }
     }

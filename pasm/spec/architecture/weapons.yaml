@@ -467,7 +467,7 @@ entities:
         - "Per-family arcs on the wire (AC1). The request carries the emitting `WeaponFamily` and the union of that family's usable ONLINE emitter arcs as `Vec<WeaponEmitterArc { facing_deg, arc_deg, range }>` — phaser facing + auto-fire arc × per-bank beam range × radar modifier; blaster facing + fire arc × projectile range; torpedo-tube facing + fire arc × homing reach (speed × lifespan), only loaded tubes usable. Serialize/Deserialize + codec round-trip cover the extended shape."
         - "[ai] Helm consumes as facing intent, no drift (AC2). `apply_arc_bearing_request` biases ONLY `steering` (never thrust — the facing-only invariant per helm-controls.yaml). It resolves the target against the carried family arcs via the shared `weapons::phaser::target_geometry`, so Helm and the emitter judge the same geometry rather than a hard-coded phaser arc."
         - "Both sides clear on target/range/arc change (AC4). The emitter debounce (`WeaponsArcRequestState`) keys on family + target + the usable arc set, so a change of family, target, or arc condition re-fires. The Helm self-clear (`PendingArcBearingRequest`) drops the request when the target leaves the merged view, leaves the range of every carried arc, or enters some carried arc (the family can fire)."
-        - "Player-facing label is family-aware and rendered entirely client-side. The shared normaliser `gui/coordination-popup.js` (`normalizeCoordinationPayload`) names the emitting family (phasers/blasters/torpedoes) from the `ArcBearingRequest` payload's `family` field, resolving the words from `assets/strings/strings.csv` through `t()`. Since issue #975 this is the ONE place a coordination payload becomes a sentence: the phone popup (`client.html`) and the host viewscreen AI-to-AI chatter bubble (`server.html __updateChatter`) both resolve through it, so a single `AiChatterEvent` renders identical text on both surfaces. The server no longer composes a parallel English sentence — the old `format_coordination_chatter` is DELETED; Rust emits the typed `CoordinationPayload` plus the string ids, and `codec::encode_chatter` puts `from_label` / `to_label` / `payload` on the `chatter` host channel for the client normaliser to render."
+        - "Player-facing label is family-aware and producer-owned. `tick_weapons_arc_request` maps WeaponFamily to a localised presentation parameter when it emits the typed ArcBearingRequest; the parameter and title/body ids travel unchanged through the lag queue beside the semantic payload. `gui/coordination-popup.js` resolves that generic CoordinationPresentation for both the phone popup and Viewscreen chatter without knowing WeaponFamily or CoordinationPayload, so adding a weapon family cannot require a client sentence branch."
     architecture:
       kind: coordination-policy
       authority: authoritative
@@ -478,6 +478,7 @@ entities:
       status: declared
       paths:
         - src/console/weapons/mod.rs
+        - src/console/weapons/server.rs
         - src/core/messages.rs
         - src/core/codec.rs
         - src/ship/components.rs
@@ -495,4 +496,6 @@ entities:
         - WeaponEmitterArc
         - PendingArcBearingRequest
         - apply_arc_bearing_request
+        - CoordinationPresentation
+        - coordination_weapon_family_param
       tests: [cargo test, npx vitest run]

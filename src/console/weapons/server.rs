@@ -1066,6 +1066,10 @@ fn tick_weapons_arc_request(
                         blaster_opt,
                         torpedo_opt,
                     ));
+                    let presentation = crate::core::messages::CoordinationPresentation::titled(
+                        "coordination.arc_withdraw.title",
+                    )
+                    .with_title_param("weapon", coordination_weapon_family_param(withdrawn_family));
                     writer.write(CoordinationEnqueue {
                         source_entity: ship_entity,
                         sender_origin,
@@ -1073,6 +1077,7 @@ fn tick_weapons_arc_request(
                         payload: CoordinationPayload::ArcBearingWithdraw {
                             family: withdrawn_family,
                         },
+                        presentation,
                         sender_label: crate::ship::coordination::CHATTER_SENDER_WEAPONS.to_string(),
                         sender_system: arc_request_sender_system(
                             withdrawn_family,
@@ -1104,6 +1109,12 @@ fn tick_weapons_arc_request(
             torpedo_opt,
         ));
 
+        let presentation = crate::core::messages::CoordinationPresentation::new(
+            "coordination.arc_bearing.title",
+            label.clone(),
+        )
+        .with_title_param("weapon", coordination_weapon_family_param(family));
+
         writer.write(CoordinationEnqueue {
             source_entity: ship_entity,
             sender_origin,
@@ -1114,9 +1125,26 @@ fn tick_weapons_arc_request(
                 family,
                 arcs,
             },
+            presentation,
             sender_label: crate::ship::coordination::CHATTER_SENDER_WEAPONS.to_string(),
             sender_system: arc_request_sender_system(family, blaster_opt, torpedo_opt),
         });
+    }
+}
+
+fn coordination_weapon_family_param(
+    family: WeaponFamily,
+) -> crate::core::messages::CoordinationParam {
+    match family {
+        WeaponFamily::Phasers => {
+            crate::core::messages::CoordinationParam::text("coordination.weapon_family.phasers")
+        }
+        WeaponFamily::Blasters => {
+            crate::core::messages::CoordinationParam::text("coordination.weapon_family.blasters")
+        }
+        WeaponFamily::Torpedoes => {
+            crate::core::messages::CoordinationParam::text("coordination.weapon_family.torpedoes")
+        }
     }
 }
 

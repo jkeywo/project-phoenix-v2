@@ -503,6 +503,8 @@ pub struct QueuedCoordination {
     pub address: CoordinationAddress,
     /// Typed coordination payload.
     pub payload: CoordinationPayload,
+    /// Producer-owned display envelope, carried unchanged through the delay.
+    pub presentation: crate::core::messages::CoordinationPresentation,
     /// Human-readable label for the sender (e.g. "AI Tactical", "Captain").
     pub sender_label: String,
     /// Simulation time (seconds) at which this message is due for delivery.

@@ -28,7 +28,7 @@
  *   'show-loading'       { pct }                 — show overlay at pct
  *   'bezel-alert'        { on }                  — phone-bezel red alert
  *   'vibrate'            { duration }            — navigator.vibrate ms
- *   'coordination-popup' { address, payload, senderLabel, targetLabel } — show the popup
+ *   'coordination-popup' { address, presentation, senderLabel, targetLabel } — show the popup
  *
  * The state modules (lobbyState / simState / commsState apply) and the
  * dirty-console iframe fan-out run BEFORE this router — see handleMessage().
@@ -261,9 +261,11 @@ export function routeMessage(msg, ctx) {
       return done(false);
     }
     case 'CoordinationPopup': {
-      const { payload, sender_label, address } = msg.data;
-      const targetLabel = address?.type === 'Station' ? address.data : null;
-      sideEffects.push({ effect: 'coordination-popup', address, payload, senderLabel: sender_label, targetLabel });
+      const { presentation, sender_label, to_label, address } = msg.data;
+      sideEffects.push({
+        effect: 'coordination-popup', address, presentation,
+        senderLabel: sender_label, targetLabel: to_label,
+      });
       return done(false);
     }
     case 'CommsState': {

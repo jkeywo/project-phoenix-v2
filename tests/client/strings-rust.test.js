@@ -12,6 +12,7 @@ import {
   stringLiterals,
   productionRegion,
   proseLiterals,
+  coordinationPresentationIds,
 } from '../../scripts/strings-rust.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -122,5 +123,35 @@ describe('proseLiterals — the guarded module is actually clean', () => {
       'utf8',
     );
     expect(proseLiterals(src)).toEqual([]);
+  });
+});
+
+describe('coordinationPresentationIds', () => {
+  it('discovers literal title/body ids and text-valued parameter ids', () => {
+    const src = `
+      let p = CoordinationPresentation::new(
+        "coordination.frequency_hint.title",
+        "coordination.frequency_hint.body",
+      ).with_body_param("frequency", value);
+      let q = CoordinationPresentation::titled("coordination.repair.title")
+        .with_title_param("label", CoordinationParam::text("station.helm.name"));
+    `;
+    expect(coordinationPresentationIds(src).map(({ id }) => id)).toEqual([
+      'coordination.frequency_hint.title',
+      'coordination.frequency_hint.body',
+      'coordination.repair.title',
+      'station.helm.name',
+    ]);
+  });
+
+  it('leaves literal authored prose and inline test fixtures alone', () => {
+    const src = `
+      let p = CoordinationPresentation::new("Literal title", "Literal body");
+      #[cfg(test)]
+      mod tests {
+        let missing = CoordinationPresentation::titled("coordination.missing.test_id");
+      }
+    `;
+    expect(coordinationPresentationIds(src)).toEqual([]);
   });
 });

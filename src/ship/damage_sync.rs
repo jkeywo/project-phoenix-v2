@@ -164,6 +164,7 @@ pub fn detect_damage_tier_crossings(
                 !worsened_tier && !red_alert && prev_hp.is_some_and(|p| cur < p);
 
             if worsened_tier || any_damage_off_alert {
+                let entry = hull.get(system_id).expect("just iterated entry");
                 if worsened_tier && current_tier == DamageTier::Destroyed {
                     // Issue #893: a tactical radar reaching Destroyed clears
                     // the ship's standing target lock. Keyed on the SYSTEM
@@ -187,14 +188,21 @@ pub fn detect_damage_tier_crossings(
                     if let Some(address) =
                         crate::ship::coordination::address_for_system(&config.0, &captain_system)
                     {
+                        let presentation = crate::core::messages::CoordinationPresentation::new(
+                            "coordination.system_destroyed.title",
+                            "coordination.system_destroyed.body",
+                        )
+                        .with_title_param("label", entry.display_name.clone())
+                        .with_body_param("label", entry.display_name.clone());
                         coord_writer.write(CoordinationEnqueue {
                             source_entity: entity,
                             sender_origin,
                             address,
                             payload: CoordinationPayload::Alert {
-                                title: format!("System Destroyed: {}", system_id.0),
-                                body: format!("{} destroyed.", system_id.0),
+                                title: "coordination.system_destroyed.title".to_string(),
+                                body: "coordination.system_destroyed.body".to_string(),
                             },
+                            presentation,
                             sender_label: system_id.0.clone(),
                             sender_system: system_id.clone(),
                         });
@@ -218,14 +226,24 @@ pub fn detect_damage_tier_crossings(
                 }
 
                 let system_config = config.0.system(system_id);
-                let station_id = system_config
+                let (station_id, station_label) = system_config
                     .and_then(|s| s.station.as_ref())
-                    .map(|s| s.0.clone())
+                    .map(|station| {
+                        (
+                            station.0.clone(),
+                            crate::ship::coordination::coordination_addressee_label(
+                                &crate::core::messages::CoordinationAddress::Station(
+                                    station.clone(),
+                                ),
+                            ),
+                        )
+                    })
                     .unwrap_or_else(|| {
-                        crate::console::repair::visibility::CORE_BUCKET_ID.to_string()
+                        (
+                            crate::console::repair::visibility::CORE_BUCKET_ID.to_string(),
+                            crate::ship::coordination::CHATTER_ADDRESSEE_CORE.to_string(),
+                        )
                     });
-                let station_label = station_id.clone();
-                let entry = hull.get(system_id).expect("just iterated entry");
                 let deficit = entry.max - entry.current;
                 let sender_origin = sources.0.source_for(system_id);
 
@@ -240,7 +258,7 @@ pub fn detect_damage_tier_crossings(
                         payload: CoordinationPayload::RepairRequest {
                             system_id: system_id.clone(),
                             station_id,
-                            station_label,
+                            station_label: station_label.clone(),
                             tier: current_tier,
                             // Exact on the host-internal enqueue — the AI repair
                             // queue sorts by it. Coarsened to `None` on the way out
@@ -248,6 +266,13 @@ pub fn detect_damage_tier_crossings(
                             // to exact detail for this system (issue #737).
                             deficit: Some(deficit),
                         },
+                        // Deliberately names only the coarse Station bucket.
+                        // Exact `deficit` remains semantic payload data behind
+                        // the #737 per-recipient coarsening boundary.
+                        presentation: crate::core::messages::CoordinationPresentation::titled(
+                            "coordination.repair.title",
+                        )
+                        .with_title_param("label", station_label),
                         sender_label: system_id.0.clone(),
                         sender_system: system_id.clone(),
                     });

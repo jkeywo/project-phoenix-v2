@@ -45,8 +45,10 @@ pub fn encode_hud_state(
 }
 
 /// Encode an AI→AI chatter event for the `"chatter"` host channel (issue
-/// #818). The wire shape is `{"from_label":…,"to_label":…,"text":…}` — the
-/// `__updateChatter` handler in `server.html` reads exactly these keys.
+/// #818). Issue #1255's wire shape carries `from_label`, `to_label`, the typed
+/// semantic `payload`, and the same required producer-owned `presentation`
+/// envelope a phone popup receives. `server.html::__updateChatter` renders only
+/// that envelope; it does not derive words from the payload.
 pub fn encode_chatter(
     ev: &crate::console_bridge::AiChatterEvent,
 ) -> Result<String, serde_json::Error> {

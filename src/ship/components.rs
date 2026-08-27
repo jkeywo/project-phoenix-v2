@@ -266,6 +266,9 @@ pub struct CoordinationEnqueue {
     pub sender_origin: ControlSource,
     pub address: crate::core::messages::CoordinationAddress,
     pub payload: CoordinationPayload,
+    /// Required producer-owned display envelope. It travels beside the typed
+    /// payload unchanged through the lag queue and every delivery surface.
+    pub presentation: crate::core::messages::CoordinationPresentation,
     /// Fallback origin label, used only when `sender_system` does not resolve to
     /// a station (a human sender's name, or an already-resolved `station.*.name`
     /// id). For an AI system the resolved station overrides it at enqueue.
@@ -289,6 +292,7 @@ pub struct DeliveredCoordination {
     pub source_entity: Entity,
     pub address: crate::core::messages::CoordinationAddress,
     pub payload: CoordinationPayload,
+    pub presentation: crate::core::messages::CoordinationPresentation,
 }
 
 /// Load `ShipConfigComponent` from `assets/entities/alliance_battleship.toml`.

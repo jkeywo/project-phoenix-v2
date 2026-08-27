@@ -570,6 +570,12 @@ pub fn tick_power_brownout_advisory(
                         label: power_group_label(&group_id.0).to_string(),
                         allocated_level: level,
                     },
+                    presentation: crate::core::messages::CoordinationPresentation::new(
+                        "coordination.power_brownout.title",
+                        "coordination.power_brownout.body",
+                    )
+                    .with_title_param("label", power_group_label(&group_id.0))
+                    .with_body_param("level", level),
                     sender_label: crate::ship::coordination::CHATTER_SENDER_POWER.to_string(),
                     sender_system: crate::ship::system_registry::power_reactor_system_id(),
                 });

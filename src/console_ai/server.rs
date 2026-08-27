@@ -1536,6 +1536,11 @@ pub(crate) fn tick_frequency_hint_high_fidelity(
                 sender_origin,
                 address,
                 payload: crate::core::messages::CoordinationPayload::FrequencyHint { frequency },
+                presentation: crate::core::messages::CoordinationPresentation::new(
+                    "coordination.frequency_hint.title",
+                    "coordination.frequency_hint.body",
+                )
+                .with_body_param("frequency", frequency),
                 sender_label: crate::ship::coordination::CHATTER_SENDER_SENSORS.to_string(),
                 sender_system: sensors_sid.clone(),
             });

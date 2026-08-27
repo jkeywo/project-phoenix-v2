@@ -782,6 +782,10 @@ fn seeking_seats_are_returned_in_authored_station_order() {
 
 // ── Lag queue ─────────────────────────────────────────────────────────
 
+fn test_presentation() -> crate::core::messages::CoordinationPresentation {
+    crate::core::messages::CoordinationPresentation::titled("test.coordination.title")
+}
+
 #[test]
 fn queue_starts_empty() {
     let queue = CoordinationLagQueue::new();
@@ -798,6 +802,7 @@ fn enqueue_adds_message() {
         payload: CoordinationPayload::Advisory {
             message: "test".into(),
         },
+        presentation: test_presentation(),
         sender_label: String::new(),
         due_time: 10.0,
     });
@@ -814,6 +819,7 @@ fn due_messages_returns_nothing_before_deadline() {
         payload: CoordinationPayload::Advisory {
             message: "test".into(),
         },
+        presentation: test_presentation(),
         sender_label: String::new(),
         due_time: 10.0,
     });
@@ -831,6 +837,7 @@ fn due_messages_returns_ready_at_deadline() {
         payload: CoordinationPayload::Advisory {
             message: "test".into(),
         },
+        presentation: test_presentation(),
         sender_label: String::new(),
         due_time: 10.0,
     });
@@ -848,6 +855,7 @@ fn due_messages_returns_ready_after_deadline() {
         payload: CoordinationPayload::Advisory {
             message: "test".into(),
         },
+        presentation: test_presentation(),
         sender_label: String::new(),
         due_time: 10.0,
     });
@@ -865,6 +873,7 @@ fn due_messages_respects_per_message_deadlines() {
         payload: CoordinationPayload::Advisory {
             message: "first".into(),
         },
+        presentation: test_presentation(),
         sender_label: String::new(),
         due_time: 1.0,
     });
@@ -874,6 +883,7 @@ fn due_messages_respects_per_message_deadlines() {
         payload: CoordinationPayload::Advisory {
             message: "early".into(),
         },
+        presentation: test_presentation(),
         sender_label: String::new(),
         due_time: 5.0,
     });
@@ -883,6 +893,7 @@ fn due_messages_respects_per_message_deadlines() {
         payload: CoordinationPayload::Advisory {
             message: "late".into(),
         },
+        presentation: test_presentation(),
         sender_label: String::new(),
         due_time: 15.0,
     });
@@ -920,6 +931,7 @@ fn sender_origin_is_captured_at_enqueue_time() {
             title: "AI Alert".into(),
             body: "Incoming threat detected.".into(),
         },
+        presentation: test_presentation(),
         sender_label: "AI Tactical".into(),
         due_time: 5.0,
     });
@@ -940,6 +952,7 @@ fn explicit_address_survives_the_delay_unchanged() {
             title: "test".into(),
             body: "body".into(),
         },
+        presentation: test_presentation(),
         sender_label: String::new(),
         due_time: 1.0,
     });

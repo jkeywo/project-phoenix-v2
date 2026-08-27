@@ -448,6 +448,11 @@ fn issue_navigate_to_clearance(
             ) else {
                 continue;
             };
+            let presentation = crate::core::messages::CoordinationPresentation::titled(
+                "coordination.navigate.title",
+            )
+            .with_title_param("x", coordination_display_integer(snapshot.x))
+            .with_title_param("z", coordination_display_integer(snapshot.z));
             coordination_writer.write(crate::ship_plugin::CoordinationEnqueue {
                 source_entity: entity,
                 // The origin is the navigation system's resolved control
@@ -465,12 +470,20 @@ fn issue_navigate_to_clearance(
                     x: snapshot.x,
                     z: snapshot.z,
                 },
+                presentation,
                 sender_label: crate::ship::coordination::CHATTER_SENDER_NAVIGATION.to_string(),
                 sender_system: crate::ship::system_registry::navigation_system_id(),
             });
             state.issued_generation = Some(generation);
         }
     }
+}
+
+/// Match JavaScript `Math.round`, which owned waypoint display rounding before
+/// Coordination presentation moved to the producer. In particular, negative
+/// half values round toward positive infinity rather than away from zero.
+fn coordination_display_integer(value: f32) -> i64 {
+    (f64::from(value) + 0.5).floor() as i64
 }
 
 /// Build the appropriate `WaypointMode` from raw coordinates and an optional

@@ -23,7 +23,7 @@ use uuid::Uuid;
 ///
 /// A versioning boundary, not a gameplay value, so it is a code constant
 /// (AGENTS.md rule 11), exactly like `manifest::SUPPORTED_PACK_FORMAT`.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).
@@ -252,6 +252,114 @@ pub enum CoordinationAddress {
     Ship,
 }
 
+/// One deterministic interpolation value in a Coordination presentation.
+///
+/// The variants are intentionally scalar and untagged on the wire: the client
+/// string-table resolver already accepts string and number parameters. Keeping
+/// the distinction here means a shield frequency remains a JSON number rather
+/// than becoming pre-formatted prose, while a label may remain either a String
+/// Table id or literal authored text. `BTreeMap` owns parameter ordering in
+/// [`CoordinationPresentation`], so equal emissions encode identically.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum CoordinationParam {
+    Text(String),
+    Integer(i64),
+    Decimal(f32),
+}
+
+impl CoordinationParam {
+    /// A localised-or-literal text parameter.
+    ///
+    /// Literal calls are deliberately easy for `scripts/check-strings.mjs` to
+    /// discover: dotted ids supplied here must name a String Table row.
+    pub fn text(value: impl Into<String>) -> Self {
+        Self::Text(value.into())
+    }
+}
+
+impl From<String> for CoordinationParam {
+    fn from(value: String) -> Self {
+        Self::Text(value)
+    }
+}
+
+impl From<&str> for CoordinationParam {
+    fn from(value: &str) -> Self {
+        Self::Text(value.to_string())
+    }
+}
+
+impl From<i64> for CoordinationParam {
+    fn from(value: i64) -> Self {
+        Self::Integer(value)
+    }
+}
+
+impl From<u8> for CoordinationParam {
+    fn from(value: u8) -> Self {
+        Self::Integer(i64::from(value))
+    }
+}
+
+impl From<f32> for CoordinationParam {
+    fn from(value: f32) -> Self {
+        Self::Decimal(value)
+    }
+}
+
+/// Producer-owned words for one Coordination emission.
+///
+/// `title` and `body` each carry either a known String Table id or literal
+/// authored text. Their sibling parameter maps use the repository-wide
+/// `<field>_params` convention, so `localiseTree` resolves ids and interpolates
+/// values at the phone and Viewscreen ingress boundaries without either
+/// presenter inspecting [`CoordinationPayload`]. Empty maps are omitted from
+/// the wire but the title/body fields are required: every producer must make
+/// the presentation decision at the same boundary as the semantic payload.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CoordinationPresentation {
+    pub title: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub title_params: BTreeMap<String, CoordinationParam>,
+    pub body: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub body_params: BTreeMap<String, CoordinationParam>,
+}
+
+impl CoordinationPresentation {
+    pub fn new(title: impl Into<String>, body: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            title_params: BTreeMap::new(),
+            body: body.into(),
+            body_params: BTreeMap::new(),
+        }
+    }
+
+    pub fn titled(title: impl Into<String>) -> Self {
+        Self::new(title, "")
+    }
+
+    pub fn with_title_param(
+        mut self,
+        key: impl Into<String>,
+        value: impl Into<CoordinationParam>,
+    ) -> Self {
+        self.title_params.insert(key.into(), value.into());
+        self
+    }
+
+    pub fn with_body_param(
+        mut self,
+        key: impl Into<String>,
+        value: impl Into<CoordinationParam>,
+    ) -> Self {
+        self.body_params.insert(key.into(), value.into());
+        self
+    }
+}
+
 /// Stable, designer-authored identifier for one capability instance on a ship.
 ///
 /// System ids are ship-wide unique authoring keys such as `phaser-fore` or
@@ -431,8 +539,8 @@ impl WeaponReadiness {
 
 /// The weapon family an [`CoordinationPayload::ArcBearingRequest`] is emitted
 /// for (issue #767). A structural identity — not player-facing text — used to
-/// key the emitter debounce, pick the localised chatter/popup label, and
-/// document which family's arcs the request carries.
+/// key the emitter debounce, select the producer-owned presentation parameter,
+/// and document which family's arcs the request carries.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum WeaponFamily {
     /// Beam phaser banks.
@@ -2380,6 +2488,7 @@ pub enum ClientMessage {
     SendCoordination {
         address: CoordinationAddress,
         payload: CoordinationPayload,
+        presentation: CoordinationPresentation,
     },
     /// Sent from the GameOver screen to return everyone to the Lobby for
     /// another round. Only honoured while `GamePhase::GameOver` is active;
@@ -2790,7 +2899,9 @@ impl From<DebugFlag> for DebugToggleKind {
 /// Typed payload for a channel-3 coordination message (issue #494).
 ///
 /// These are always lagged and routed through the coordination bus — they
-/// never produce immediate authoritative effects.
+/// never produce immediate authoritative effects. Player-facing words travel
+/// beside the payload in the required [`CoordinationPresentation`]; phone and
+/// Viewscreen presenters do not enumerate this semantic enum.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data")]
 pub enum CoordinationPayload {
@@ -2924,9 +3035,10 @@ pub enum CoordinationPayload {
 
 /// Which coarse decision a seat has just changed (issue #879).
 ///
-/// Deliberately a closed typed set rather than prose: the host emits the fact,
-/// the client renders the sentence. A `String` here would put player-visible
-/// English in Rust for a payload that has a client-side renderer already.
+/// Deliberately a closed typed set rather than prose: the host emits the fact
+/// and the producer independently maps it to a [`CoordinationPresentation`].
+/// A receiving AI can therefore retain typed behaviour while both display
+/// surfaces stay ignorant of this enum.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum IntentKind {
     /// Took a target where it had none.
@@ -3357,28 +3469,22 @@ pub enum ServerMessage {
         hull: f32,
         shield: f32,
     },
-    /// Channel-3 coordination popup delivered to a specific player (issue #494).
-    /// Sent to the holder(s) resolved from the explicit destination. Carries the typed
-    /// coordination payload and the originating sender info.
+    /// Channel-3 coordination popup delivered to a specific player (issues
+    /// #494, #1255). Sent to the holder(s) resolved from the explicit
+    /// destination. The typed payload is for semantic consumers; both display
+    /// surfaces render the required producer-owned presentation and
+    /// authoritative route labels without inspecting it.
     CoordinationPopup {
         address: CoordinationAddress,
         payload: CoordinationPayload,
+        presentation: CoordinationPresentation,
         /// Origin display label: normally a String Table id for a System, or a
         /// connected human sender's player name.
-        #[serde(default)]
         sender_label: String,
-    },
-    /// AI-to-AI coordination chatter displayed on the viewscreen.
-    /// Emitted when an AI-controlled system sends a level-3 coordination
-    /// message to another AI-controlled system. Broadcast to the viewscreen
-    /// only (not forwarded to phone clients).
-    AiChatter {
-        /// Human-readable label of the sending system (e.g. "Shields", "Sensors").
-        from_label: String,
-        /// Human-readable label of the target system (e.g. "Helm", "Weapons").
+        /// Destination display label derived from the typed address by the
+        /// authoritative ship router (`station.<id>.name` or the Ship label).
+        /// Presenters render this value and never maintain a Station switch.
         to_label: String,
-        /// Concise message body derived from the original CoordinationPayload.
-        text: String,
     },
     /// Dirty-tracked per-system blackboard sync (issue #557, Channel 1).
     ///

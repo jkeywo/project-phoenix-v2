@@ -2,7 +2,7 @@
 title: Client Architecture
 type: concept
 tags: [client, javascript, iframe, console, console-family, state, accessibility, keyboard, vitest]
-sources: [client.html, gui/mount-plan.js, gui/hero-bar.js, gui/reducer-result.js, gui/lobby-state.js, gui/sim-state.js, gui/comms-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/action-map.js, gui/iframe-bridge.js, gui/client-router.js, gui/accessibility-profile.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
+sources: [client.html, server.html, gui/mount-plan.js, gui/hero-bar.js, gui/reducer-result.js, gui/lobby-state.js, gui/sim-state.js, gui/comms-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/action-map.js, gui/iframe-bridge.js, gui/client-router.js, gui/coordination-popup.js, gui/accessibility-profile.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
 updated: 2026-08-27
 ---
 
@@ -57,7 +57,7 @@ Outbound: each console iframe posts `console_action` messages; `gui/action-map.j
 |---|---|
 | `mount-plan.js` | **Single home** of the station-id → DOM-id naming scheme (`${id}-ui`/`${id}-iframe`, one tactical → weapons alias) and `planMounts(shipStations)` — the manifest is the server-supplied `ship_stations` |
 | `hero-bar.js` | Shared complete-Station tab model over `SimSnapshot.station_hosts`: direct Station pinned first, visiting Stations in hull order, selected identity/rating/ownership, and roving keyboard focus |
-| `sim-state.js` | JS port of the old Rust `ClientSimState`: `apply(msg)`, per-console radar configs, message builders, typed blackboard discriminants, both read-only Console Family replicas from `Welcome`, and the latest explicitly Station- or Ship-addressed Coordination popup |
+| `sim-state.js` | JS port of the old Rust `ClientSimState`: `apply(msg)`, per-console radar configs, message builders, typed blackboard discriminants, both read-only Console Family replicas from `Welcome`, and the latest explicitly Station- or Ship-addressed Coordination popup with producer-authored presentation retained beside its typed payload |
 | `reducer-result.js` | Fresh, mergeable semantic change results (`changedDomains`, `changedSystems`, `changedBlackboards`) shared by the distinct client reducers and downstream presentation routing |
 | `lobby-state.js` | Lobby view-model (stations, players, ready states) and lobby-domain reducer results |
 | `comms-state.js` | Comms inbox/contact view-model and Comms-domain reducer results |
@@ -70,7 +70,7 @@ Outbound: each console iframe posts `console_action` messages; `gui/action-map.j
 | `client-router.js` | Pure per-message driver: uiState mutations + named side-effect plan for the client.html glue; Coordination effects carry the authoritative address through to presentation |
 | `dirty-consoles.js` | Merged semantic domains, changed Systems and changed blackboards → Console Families → actual owning Stations. It has no `ServerMessage` input or message-variant census; unknown domains/ids and pre-`Welcome` metadata route nowhere rather than guessing. |
 | `lobby-view.js` | Lobby view model (row classes, ready-button state, status-line string-id selection) |
-| `coordination-popup.js` | CoordinationPopup payload → `{ sender, title, body }` normaliser |
+| `coordination-popup.js` | Generic producer-owned Coordination presentation resolver plus the phone's two-content-line and Viewscreen's one-line DOM builders; it knows no semantic payload variants and owns each surface's single bracket pair |
 | `phase-toggle.js` | Lobby vs in-game section visibility (`GameOver` counts as in-game) |
 | `phone-bezel.js` | Diegetic phone bezel chrome |
 | `console-ui.js` | Shared iframe UI primitives (`reconcileRows`, `setBtn`, `setBar`, `setAutoState`, `setText`, keyed rebuild) |

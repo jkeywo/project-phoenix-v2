@@ -37,11 +37,9 @@ pub struct LobbyStateChanged {
 }
 
 /// Emitted by the coordination lag processor when an AI→AI coordination
-/// message is delivered. Carries the origin/target labels (as string ids, or a
-/// player name that passes through) and the TYPED payload — never a composed
-/// sentence (issue #975). The client turns the payload into words through the
-/// same `gui/coordination-popup.js` normaliser the phone popup uses, so the
-/// viewscreen chatter and the popup read identically for one event. Drained by
+/// message is delivered. Carries the origin/target labels, typed payload and
+/// the producer-owned presentation envelope. The Viewscreen and phone resolve
+/// the same envelope; neither presenter enumerates the payload. Drained by
 /// `bridge::flush_host_channels` (wasm), which encodes it via
 /// `codec::encode_chatter` onto the `"chatter"` host channel — hence the
 /// `Serialize` derive; the wire shape is pinned by `codec`'s `encode_chatter`
@@ -52,11 +50,14 @@ pub struct AiChatterEvent {
     /// on the client, or a human player's name (which no table row matches, so
     /// it passes through untouched).
     pub from_label: String,
-    /// Target label: the target station-level key (a machine token, shown as-is
-    /// — mirrors the popup's raw target so host and phone agree).
+    /// Authoritative destination label: a `station.*.name` or
+    /// `chatter.addressee.ship` String Table id. The phone and Viewscreen use
+    /// this directly, so neither keeps its own Station-name switch.
     pub to_label: String,
-    /// The typed coordination payload the client renders into a sentence.
+    /// The typed coordination payload retained for semantic consumers.
     pub payload: crate::core::messages::CoordinationPayload,
+    /// Localised-or-literal title/body and deterministic typed parameters.
+    pub presentation: crate::core::messages::CoordinationPresentation,
 }
 
 /// Emitted once by `server::audio::push_audio_config` when the local ship

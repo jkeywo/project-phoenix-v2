@@ -160,3 +160,47 @@ export function stringLiterals(src) {
 export function proseLiterals(src) {
   return stringLiterals(productionRegion(src)).filter(({ text }) => readsAsProse(text));
 }
+
+/**
+ * Literal String Table ids introduced by producer-owned Coordination
+ * presentation constructors (issue #1255).
+ *
+ * The runtime accepts localised-or-literal strings, so a blanket Rust string
+ * scan cannot require every argument to exist in the table. This narrow scan
+ * selects only dotted id-shaped literals in the three constructors that put
+ * text onto the presentation wire: title/body in `new`, title in `titled`, and
+ * text-valued interpolation parameters in `CoordinationParam::text`.
+ *
+ * @param {string} src
+ * @returns {{line: number, id: string}[]}
+ */
+export function coordinationPresentationIds(src) {
+  const production = productionRegion(src);
+  const found = [];
+  const seen = new Set();
+  const looksLikeId = /^[a-z][a-z0-9_]*(?:\.[a-z0-9_-]+)+$/;
+  const add = (id, index) => {
+    if (!looksLikeId.test(id)) return;
+    const key = `${index}:${id}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    found.push({
+      line: production.slice(0, index).split('\n').length,
+      id,
+    });
+  };
+
+  const firstArg = /\bCoordinationPresentation::(?:new|titled)\s*\(\s*"([^"]*)"/g;
+  for (const match of production.matchAll(firstArg)) add(match[1], match.index);
+
+  const newPair = /\bCoordinationPresentation::new\s*\(\s*"([^"]*)"\s*,\s*"([^"]*)"/gs;
+  for (const match of production.matchAll(newPair)) {
+    const secondOffset = match[0].lastIndexOf(`"${match[2]}"`);
+    add(match[2], match.index + secondOffset);
+  }
+
+  const textParam = /\bCoordinationParam::text\s*\(\s*"([^"]*)"/g;
+  for (const match of production.matchAll(textParam)) add(match[1], match.index);
+
+  return found.sort((a, b) => a.line - b.line || a.id.localeCompare(b.id));
+}

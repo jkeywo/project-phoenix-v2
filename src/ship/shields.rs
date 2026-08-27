@@ -444,11 +444,16 @@ pub fn emit_shields_coordination(
                         label: snap.label.clone(),
                         offline_remaining: snap.offline_remaining,
                     };
+                    let presentation = crate::core::messages::CoordinationPresentation::titled(
+                        "coordination.shield_offline.title",
+                    )
+                    .with_title_param("label", snap.label.clone());
                     writer.write(CoordinationEnqueue {
                         source_entity: entity,
                         sender_origin,
                         address: helm_address.clone(),
                         payload,
+                        presentation,
                         sender_label: crate::ship::coordination::CHATTER_SENDER_SHIELDS.to_string(),
                         sender_system: first_arc_sid
                             .clone()
@@ -468,11 +473,16 @@ pub fn emit_shields_coordination(
                     let payload = CoordinationPayload::ShieldFacingRestored {
                         label: snap.label.clone(),
                     };
+                    let presentation = crate::core::messages::CoordinationPresentation::titled(
+                        "coordination.shield_restored.title",
+                    )
+                    .with_title_param("label", snap.label.clone());
                     writer.write(CoordinationEnqueue {
                         source_entity: entity,
                         sender_origin,
                         address: helm_address.clone(),
                         payload,
+                        presentation,
                         sender_label: crate::ship::coordination::CHATTER_SENDER_SHIELDS.to_string(),
                         sender_system: first_arc_sid
                             .clone()

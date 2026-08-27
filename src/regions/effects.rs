@@ -68,16 +68,14 @@ pub struct DamageZoneEffect {
 /// three fifths. It is the same defect the radar-dampening sign fix corrected
 /// on the neighbouring field, found in #1037 and fixed there first.
 ///
-/// # A field-free slow zone is not a mistake
+/// # A field-free slow zone is valid but inert
 ///
-/// `[effects.slow_zone]` with NEITHER field authored is legitimate and shipped
-/// deliberately: it is the presence marker an operation's
-/// `[[operations.capability.interrupt]]` names with
-/// `region_effect = "slow_zone"`, and the rate that stretches the work lives on
-/// the CAPABILITY. A band that only wants to make external work take longer
-/// authors no numbers here and has no sign to get wrong. That path is a
-/// separate, correctly-signed mechanism (`rate_percent`, where 50 means half
-/// rate) and nothing here touches it.
+/// `[effects.slow_zone]` with NEITHER field authored still parses, but current
+/// runtime semantics register no speed or yaw modifier for it. The old
+/// operations runner once consumed the table's mere presence as an interruption
+/// marker; that consumer retired in issue #1164 with `[operations]`. No shipped
+/// region now relies on a field-free slow zone, and the sign guard below skips
+/// one because there is no numeric effect to judge.
 ///
 /// See `shipped_assets::every_shipped_slow_zone_actually_slows` below for the
 /// CI-side guard, and
@@ -93,10 +91,10 @@ impl SlowZoneEffect {
     /// True when every axis this effect actually authors slows the ship — i.e.
     /// when each present bonus resolves to a multiplier below 1.0.
     ///
-    /// Vacuously true for the field-free presence marker described on the type,
-    /// and that is the intended reading: a slow zone that authors no numbers has
-    /// no sign to get wrong, and rejecting it here would fail the one shape the
-    /// operations path depends on.
+    /// Vacuously true for an inert field-free table: it has no numeric sign to
+    /// reject. No current crew-system path consumes that empty table; this method
+    /// only answers whether any numbers that are present point in the right
+    /// direction.
     ///
     /// `0.0` on a PRESENT axis is not neutral either: it is a modifier that
     /// modifies nothing, on the one axis whose entire job is to change

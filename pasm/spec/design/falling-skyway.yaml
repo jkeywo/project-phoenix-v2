@@ -66,9 +66,9 @@ entities:
       confidence: provisional
       origin: ai
       title: Operations (Falling Skyway)
-      summary: "[ai] Runs the external operations the storm and the collapse demand: tow, stabilise, transfer."
+      summary: "[ai] Runs the crew-owned external systems the storm and back half demand: tractor tow/stabilise, docked umbilical transfer, and external repair dispatch."
     game_design:
-      player_verbs: [fs-order-the-tow, fs-order-the-stabilise]
+      player_verbs: [fs-order-the-tow, fs-order-the-stabilise, fs-prime-window-transfer]
   - role: fs-science
     core:
       status: proposed
@@ -149,6 +149,22 @@ entities:
       architecture_links: [scenario-script-host-seam]
       owner_role: fs-science
       produces_facts: [evidence-filed]
+  - verb: fs-prime-window-transfer
+    core:
+      status: proposed
+      confidence: provisional
+      origin: ai
+      title: Prime the Transfer Manifold
+      summary: >
+        [ai] Helm docks the destroyer to the window's receiving manifold and
+        Engineering runs the umbilical until the target's own reserve-fuel
+        threshold rises. The manifold exists from mission start, so early work
+        latches as memory and later posts green; posting the objective never
+        grants completion.
+    game_design:
+      architecture_links: [dock-controller, umbilical-flow-controller, infrastructure-condition-tracker]
+      owner_role: fs-operations
+      produces_facts: [window-transfer-primed]
   - verb: fs-book-the-window
     core: {status: proposed, confidence: provisional, origin: ai, title: Book the Window, summary: "[ai] Allocate the computed lift among the three claims. There is no state of the world in which all three fit."}
     game_design:
@@ -348,6 +364,21 @@ entities:
       deadline_id: skyhook_failure_due
       requires: [fs-storm-passes]
       on_failure: [fs-skyhook-collapse]
+  - gate: fs-window-transfer-run-up
+    core:
+      status: proposed
+      confidence: provisional
+      origin: ai
+      title: The Transfer Manifold Must Be Primed
+      summary: >
+        [ai] Optional good-ending work, live before the back half posts it.
+        Completion is the receiving manifold's capacity-backed threshold edge,
+        not elapsed time or source-side depletion. If still unworked at the
+        existing 1600-second opening boundary, the optional objective fails;
+        the allocation scene still opens.
+    game_design:
+      requires_player_action: [fs-prime-window-transfer]
+      on_success: [fs-window-transfer-ready]
   - gate: fs-window-opens
     core:
       status: proposed
@@ -364,7 +395,7 @@ entities:
       self_resolving: true
       deadline_id: skyway_transfer_window
       requires: [fs-storm-passes]
-      on_failure: [fs-window-opens-short]
+      on_failure: [fs-window-opens-short, fs-window-transfer-unworked]
   - gate: fs-window-closes
     core:
       status: proposed
@@ -374,11 +405,12 @@ entities:
       summary: >
         [ai] The window shuts for good; the ledger decides which two of
         three claims lifted, and the seven campaign flag families carry the
-        rest forward. The envelope anchor below holds the whole mission to
-        20-30 minutes, and the authored 1800s close lands exactly on that
-        boundary.
+        rest forward. An untouched allocation objective fails rather than a
+        timer choosing for the captain. The temporary receiving manifold ends
+        here and the unpublished player transfer ledger remains mission-local.
+        The envelope anchor below holds the whole mission to 20-30 minutes,
+        and the authored 1800s close lands exactly on that boundary.
     game_design:
-      self_resolving: true
       deadline_id: skyway_window_closes
       requires: [fs-window-opens]
       requires_player_action: [fs-book-the-window]
@@ -495,6 +527,14 @@ entities:
       handler: on_transfer_window_opens
       magnitude_source: computed lift at window open, from head certification, rung lines, and staffing
       depends_on_state: [fs-ladder-supply-picture]
+  - consequence: fs-window-transfer-ready
+    core: {status: proposed, confidence: provisional, origin: ai, title: The Manifold Is Primed, summary: "[ai] The target-side reserve ledger crossed its authored threshold; early completion is remembered and resolves the optional objective whenever it posts."}
+    game_design:
+      handler: on_window_transfer_primed
+  - consequence: fs-window-transfer-unworked
+    core: {status: proposed, confidence: provisional, origin: ai, title: The Manifold Was Not Primed, summary: "[ai] The existing 1600-second opening boundary fails the still-active optional run-up; it does not block the window or complete the work for free."}
+    game_design:
+      handler: on_transfer_window_opens
   - consequence: fs-clean-ledger
     core:
       status: proposed

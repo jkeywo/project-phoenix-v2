@@ -13,13 +13,13 @@ Phoenix scenarios range from direct tests with clear win conditions to operation
 
 Related documents: [Thin Margin Setting](../foundation/thin-margin-setting.md), [Campaign Continuity and Persistence](../foundation/campaign-continuity.md), [World and Environmental Systems](./world-environmental-systems.md), [Difficulty and Balance](../foundation/difficulty-balance-playtesting.md), [Combat Test](../content/scenarios/combat-test.md), and [Falling Skyway](../content/scenarios/falling-skyway.md).
 
-Detailed mechanics: [Sensors and Epistemics](../mechanics/sensors-epistemics.md), [Comms and Commitments](../mechanics/comms-commitments.md), and [External Operations](../mechanics/external-operations.md).
+Detailed mechanics: [Sensors and Epistemics](../mechanics/sensors-epistemics.md), [Comms and Commitments](../mechanics/comms-commitments.md), and [Crew-Owned External Systems](../mechanics/external-operations.md).
 
 ## Scenario contract
 
 A scenario provides a bounded situation for one or more selectable player ships. It defines the initial world, available hulls, objectives and pressures, actors and relationships, relevant physical and informational systems, terminal outcomes, and enough presentation for the crew to understand what is happening.
 
-The world TOML defines stable data: global timing, anchors, placed entities, selectable ships, player spawn, routes, workforces, deadlines, rendering, audio, and script sources. Rhai defines event choreography: trigger registration, dialogue, objectives, spawning, deadlines, state changes, consequences, and game-over calls. Persistent simulation systems continue to own movement, combat, damage, operations, condition, capacity, sensing, and faction behaviour.
+The world TOML defines stable data: global timing, anchors, placed entities, selectable ships, player spawn, routes, workforces, deadlines, rendering, audio, and script sources. Rhai defines event choreography: trigger registration, dialogue, objectives, spawning, deadlines, state changes, consequences, and game-over calls. Persistent simulation systems continue to own movement, combat, damage, tractor coupling, docking, umbilical flow, repair dispatch, condition, capacity, sensing, and faction behaviour.
 
 ## Scenario scales
 
@@ -118,7 +118,7 @@ All current event logic is Rhai. The former declarative `[[trigger]]` and `[[com
 
 At load time the script registers event-to-handler relationships such as world loaded, timer, deadline, flag set/cleared, entity destroyed or attacked, hull threshold, waypoint reached, and group destroyed. At runtime the host calls named handlers with a bounded context. Handlers inspect supported flags, counters, evidence, deadlines, commitments, and dialogue state, then buffer supported effects. Scripts cannot mutate arbitrary Bevy state.
 
-Common effect families include objectives; comms and dialogue; flags and counters; spawn/despawn and group membership; faction relations; infrastructure and civilian orders; external operations; deadlines and delayed calls; evidence, dossiers, and commitments; world-layer load/unload; and explicit victory or defeat. The exact callable signatures live in `src/world/script/authoring.rs` and must be checked rather than inferred from an old example.
+Common effect families include objectives; comms and dialogue; flags and counters; spawn/despawn and group membership; faction relations; infrastructure and civilian orders; deadlines and delayed calls; evidence, dossiers, and commitments; world-layer load/unload; and explicit victory or defeat. Crew-owned tractor, dock, umbilical and repair systems are driven through admitted controls and objective directives rather than script-started external-operation effects. The exact callable signatures live in `src/world/script/authoring.rs` and must be checked rather than inferred from an old example.
 
 ## Scenario structure
 
@@ -130,9 +130,24 @@ The first minute should establish the ship’s role, immediate situation, and fi
 
 Pressure should come from changing shared state: actors moving, deadlines advancing, infrastructure failing, weapons causing damage, incomplete scans, promises constraining options, or resource capacity proving insufficient. Scripts should pace and acknowledge those changes, not simulate them twice.
 
+When work may happen before its objective posts, record completion from the
+authoritative edge and let the later post consume that memory. Do not create an
+early objective merely to hold state, and do not grant completion when the
+deadline arrives. Transfer work should normally be gated on the receiving
+entity's capacity-backed threshold so source depletion, target arrival and the
+crew-facing event all share one fact.
+
 ### Resolution
 
 Terminal outcomes must be authoritative and whole-session. Victory and defeat should identify why the scenario ended. More open scenarios may also write campaign facts, record casualties and promises, and distinguish a successful operation from a morally or politically clean one.
+
+An optional timed failure and a protected decision are different things. A
+boundary may fail uncompleted optional preparation, but it must not choose an
+irreversible beneficiary or mark that allocation complete. Likewise, writing
+campaign tallies does not set a terminal outcome: every ordinary completion
+path must explicitly record its verdict. Keep private mission ledgers
+`publish = false`, and destroy temporary named machinery before the terminal
+snapshot if it must not become a campaign asset.
 
 ### Recovery and failure
 
@@ -159,7 +174,7 @@ Each scenario records a possible range of `0–Max Players per selected ship` an
 - Every anchor, route, named entity, group, function, deadline, faction, objective target, and string reference resolves.
 - Every registered handler exists; every dialogue `on_pick` function exists; no retired declarative trigger/comms block remains.
 - The scenario has an explicit opening, at least one achievable terminal outcome, and no common path that strands the game without progression.
-- Scenario text agrees with authoritative position, condition, capacity, faction, damage, and operation state.
+- Scenario text agrees with authoritative position, condition, capacity, faction, damage, and crew-system state.
 - Recommended player count and expected duration are based on observed play rather than document guesswork, or clearly marked TBD.
 - A headless or smoke-level test covers loading and the most important outcome/progression contract in proportion to risk.
 

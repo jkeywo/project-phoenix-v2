@@ -200,32 +200,37 @@
 # `pasm/spec/architecture/world-files.yaml`'s `campaign-flag-handoff-state`
 # describes the handoff and names the types that carry it.
 #
-# BASELINE. CURRENT VALUE: 0x1fa0f17dd3285616 (2279086934165313046), last moved
-# by the berth offsets — the paragraphs below are the history of how it got
-# there, oldest first, and the first number in them is NOT the one to A/B
-# against.
+# BASELINE. CURRENT #1135 CANDIDATE VALUE: 0x5168aa8676cfd6a6
+# (5866126009145743014). Re-measured on 2026-08-27 as an exact A/B from the
+# issue branch's clean base, not inferred from an older entry in this history:
+#
+#   A — clean 3399dad17205d1838d043359ad4f2abbf96472f3
+#       final 0x79ad6c2d2e54efa5 (8767782990866870181)
+#       tick 0 0xc5ece656827f64ae (14262027379206481070)
+#   B — that same commit plus the complete uncommitted #1135 review diff
+#       final 0x5168aa8676cfd6a6 (5866126009145743014)
+#       tick 0 0x536a2c573968643d (6010665405816267837)
+#
+# Each side was rebuilt from its own sources and measured with:
 #
 #   target/debug/phoenix-headless --world assets/worlds/falling_skyway.toml \
 #     --seed 42 --ticks 900 --record target/t1_falling_skyway.ron --digest-every 0
 #
-# STILL 0x1fa0f17dd3285616 AFTER THE CREW-SYSTEMS RE-AUTHOR (issues #1164/#1165),
-# tick-0 number and all (0x2b82554aab902790 / 3135162069797578640). The
-# paragraphs below that name the destroyer's `[operations]` table or its
-# `tow`/`stabilise`/`transfer`/`field_repair` capabilities are the history AS EACH
-# SLICE MEASURED IT; the operations model they name was retired in #1164, where
-# the crew's destroyer gained a tractor, a transfer umbilical and a dock (each
-# with a `[[hull.system_hull]]` entry) plus a repair-dispatch, and #1165 gave the
-# Lyra, the head and the two survivor craft an `[held_response]` table so Falling
-# Skyway works its tow/stabilise beats through the tractor. The number does not
-# move on any of it — RE-MEASURED against the current templates at seed 42 / 900
-# ticks, both anchors reproduce EXACTLY. That is what the operations-era A/Bs
-# below already predicted: the digest window is fifteen mission seconds and Act 2
-# opens at ninety, so no beat is ever RUN inside it; a coupling system that is
-# only ever idle here moves nothing a completed tow or transfer would, exactly as
-# the retired operations capability moved nothing until a tow was run. And a
-# `[held_response]` is a config component the digest does not walk at all, so
-# #1165's four tables could not have moved it either. The historical entries below
-# are left as they were measured, because a rewritten measurement is a fiction.
+# A one-frame run with `--digest-every 1` supplied each tick-0 checkpoint. The
+# move is expected at load: #1135 gives the player instance a private transfer
+# ledger and adds the receiving manifold entity, whose condition, capacity and
+# capacity-backed held flag are all authoritative digest state. `publish = false`
+# excludes the player's ledger from CAMPAIGN structure projection; it does not
+# exclude simulation state from determinism. The manifold also takes its place
+# in the entity namespace. The fifteen-second window never reaches the transfer,
+# the 1600-second optional failure or the manifold's close-of-window destruction,
+# so none of those later script effects explains this A/B.
+#
+# The paragraphs below are the historical record, oldest first. In particular,
+# 0x1fa0f17dd3285616 was the value after the berth offsets and before later base
+# changes plus #1135; it is no longer the number to A/B against. Entries that name
+# the retired `[operations]` model remain written as each slice measured them,
+# because rewriting historical provenance would be a fiction.
 #
 # #1034 recorded the first value: final digest 0x14d6dc5dcf05a3c1
 # (1501629821237961665), and 8541878955160725293 at tick 0. Measured on a clean
@@ -961,6 +966,24 @@ id = "player-ship"
 transform = { position = [300.0, 0.0, 420.0] }
 spawn_on = "game_start"
 
+# Falling Skyway's transfer run-up gives the destroyer a scenario-local load to
+# pump into the receiving manifold below. The fleet hull deliberately carries no
+# infrastructure ledger in other worlds (#1164); the game-start instance overlay
+# is merged onto the lobby-selected hull, so this cargo exists here and nowhere
+# else. It is a separate `reserve_fuel` ledger used only by the umbilical. None of
+# the window-supply arithmetic reads it, so priming the manifold cannot increase
+# the 52-unit lift ceiling or make the three-claimant choice easier.
+[entity.overrides.infrastructure]
+publish = false
+condition_max = 100.0
+decay_per_sec = 0.0
+hull_damage_share = 0.0
+
+[[entity.overrides.infrastructure.capacity]]
+id = "reserve_fuel"
+amount = 100
+ceiling = 100
+
 # ── The world below ──────────────────────────────────────────────────────────
 #
 # Anonymous scenery: the city the tether is anchored to, and the star it turns
@@ -974,6 +997,36 @@ transform = { position = [-4200.0, 0.0, -3400.0] }
 [[entity]]
 template_path = "assets/entities/planet_ecumenopolis.toml"
 transform = { position = [0.0, -900.0, 0.0] }
+
+# The deterministic receiving end of Act 3's real transfer work. The passive
+# berth template supplies dock markers and an empty `reserve_fuel` ledger; this
+# instance adds the operational threshold the scenario listens to. Filling it
+# to half through the destroyer's landed dock/umbilical path raises
+# `skyway_window_transfer_primed` from THIS entity's authoritative state. The
+# threshold is an authored fraction of the 100-unit ceiling: at the destroyer's
+# authored 20 units/s it takes 2.5 seconds of genuine flow after Helm makes the
+# dock. [ai] Unratified, and the threshold is the pace surface.
+[[entity]]
+template_path = "assets/entities/umbilical_berth.toml"
+id = "window_transfer_manifold"
+name = "world.falling_skyway.entity.window_transfer_manifold.name"
+transform = { anchor = "station_keeping" }
+
+[entity.overrides.infrastructure]
+condition_max = 100.0
+decay_per_sec = 0.0
+hull_damage_share = 0.0
+
+[[entity.overrides.infrastructure.capacity]]
+id = "reserve_fuel"
+amount = 0
+ceiling = 100
+
+[[entity.overrides.infrastructure.threshold]]
+flag = "skyway_window_transfer_primed"
+capacity = "reserve_fuel"
+fails_below = 0.5
+restores_above = 0.5
 
 # ── The structures ───────────────────────────────────────────────────────────
 
@@ -2926,10 +2979,12 @@ fn on_storm_front(ctx) {
     // tow — it would complete the moment the ship got there, whether or not
     // anybody ever put a line on her.
     //
-    // The approach, then, carries the directive: what an AI-backfilled helm
-    // flies and what a human helm is being asked for, at the highest priority
-    // in the act.
-    ctx.effects.add_objective(#{
+    // The approach, then, carries the Helm directive, while the rescue carries
+    // the Engineering-owned Tow directive below. Both consume the SAME
+    // threshold-backed memory: Lyra is actionable from the opening tick, so a
+    // crew who got a line on her before Control's forecast must not be handed
+    // two newly-active objectives for work the world already records as done.
+    post_remembered_objective(ctx, #{
         id: "obj-a2-approach",
         text: "world.falling_skyway.objective.approach.text",
         source: "mission",
@@ -2937,15 +2992,20 @@ fn on_storm_front(ctx) {
         directive_kind: "Reach",
         directive_anchor: "lyra_drift",
         targets: ["world.falling_skyway.entity.lyra_ascending.name"],
-    });
-    // …and the rescue itself carries no directive at all. It is resolved by
-    // what the crew DID: the tow's own completion signal, or the deadline.
-    ctx.effects.add_objective(#{
+    }, "skyway_lyra_recovered");
+    // The rescue still resolves only from what the crew DID — the tow's own
+    // threshold crossing, or the deadline — but the directive makes that work
+    // addressable by the same Engineering Backfill host a human shares.
+    post_remembered_objective(ctx, #{
         id: "obj-a2-rescue",
         text: "world.falling_skyway.objective.rescue.text",
         mandatory: true,
+        source: "mission",
+        base_priority: 70,
+        directive_kind: "Tow",
+        target: "world.falling_skyway.entity.lyra_ascending.name",
         targets: ["world.falling_skyway.entity.lyra_ascending.name"],
-    });
+    }, "skyway_lyra_recovered");
     ctx.effects.add_objective(#{
         id: "obj-a2-storm",
         text: "world.falling_skyway.objective.storm.text",
@@ -3656,8 +3716,18 @@ on_flag_set("skyway_pod_secured", "on_pod_recovered");
 // exactly the problem: the head is carrying traffic on a ribbon that has been
 // slipping since before anybody sent a destroyer.
 fn on_head_watch_opens(ctx) {
-    ctx.flags.skyway_tether_watch = 1;
     ctx.flags.increment("a3_watch_open", 1);
+
+    // The head can be destroyed before Act 3 opens. Its last published
+    // `skyhook_lift_capable` value is then necessarily stale because the
+    // structure that owned the threshold no longer ticks. Loss is the earlier,
+    // authoritative fate: do not post remembered work or let that fossil turn
+    // one destroyed head into both LOST and HELD.
+    if ctx.flags.skyway_skyhook_lost > 0 {
+        ctx.flags.skyway_tether_watch = 0;
+        return;
+    }
+    ctx.flags.skyway_tether_watch = 1;
 
     // TWO OBJECTIVES FOR ONE STRUCTURE, split for the reason Act 2's rescue is
     // split: `detect_reached_objective_completion` completes any objective whose
@@ -3666,7 +3736,7 @@ fn on_head_watch_opens(ctx) {
     // `station_keeping` — 247 units off the head, inside the destroyer's authored
     // 500-unit stabilise range — so a backfilled helm parks the ship where the
     // save is possible from.
-    ctx.effects.add_objective(#{
+    post_remembered_objective(ctx, #{
         id: "obj-a3-standoff",
         text: "world.falling_skyway.objective.head_standoff.text",
         source: "mission",
@@ -3674,13 +3744,28 @@ fn on_head_watch_opens(ctx) {
         directive_kind: "Reach",
         directive_anchor: "station_keeping",
         targets: ["world.falling_skyway.entity.skyhook.name"],
-    });
-    ctx.effects.add_objective(#{
+    }, "skyhook_lift_capable");
+    post_remembered_objective(ctx, #{
         id: "obj-a3-head",
         text: "world.falling_skyway.objective.head_watch.text",
         mandatory: true,
+        source: "mission",
+        base_priority: 55,
+        directive_kind: "Stabilise",
+        target: "world.falling_skyway.entity.skyhook.name",
         targets: ["world.falling_skyway.entity.skyhook.name"],
-    });
+    }, "skyhook_lift_capable");
+
+    // The head is actionable from Act 1. If the crew already restored its live
+    // lift certification after the tether slip, the threshold is the
+    // authoritative memory of that work: post the objectives for the record,
+    // resolve the watch immediately, and do not start a decline that asks them
+    // to repeat a stabilise they have already landed.
+    if ctx.flags.skyhook_lift_capable > 0 {
+        ctx.flags.increment("a3_stabilised_early", 1);
+        head_holds(ctx);
+        return;
+    }
 
     // The people on the head, checking in. Not a warning — this is the beat that
     // establishes there ARE people up there, so the three that follow are
@@ -3977,8 +4062,10 @@ fn head_survivors(ctx) {
         },
     });
 
-    // The epilogue's own two objectives, split on the approach/work line for the
-    // third time in this file and for the same reason every time.
+    // The epilogue's approach and aggregate debt, plus one operate directive per
+    // craft. A single Tow directive cannot name both targets, and leaving the
+    // first directive active after its threshold rose would make Backfill hold
+    // the recovered lighter forever instead of taking the pod next.
     ctx.effects.add_objective(#{
         id: "obj-a3-muster",
         text: "world.falling_skyway.objective.muster.text",
@@ -3995,6 +4082,24 @@ fn head_survivors(ctx) {
             "world.falling_skyway.entity.head_lighter.name",
             "world.falling_skyway.entity.head_pod.name",
         ],
+    });
+    ctx.effects.add_objective(#{
+        id: "obj-a3-lighter",
+        text: "world.falling_skyway.objective.lighter.text",
+        source: "mission",
+        base_priority: 86,
+        directive_kind: "Tow",
+        target: "world.falling_skyway.entity.head_lighter.name",
+        targets: ["world.falling_skyway.entity.head_lighter.name"],
+    });
+    ctx.effects.add_objective(#{
+        id: "obj-a3-pod",
+        text: "world.falling_skyway.objective.pod.text",
+        source: "mission",
+        base_priority: 85,
+        directive_kind: "Tow",
+        target: "world.falling_skyway.entity.head_pod.name",
+        targets: ["world.falling_skyway.entity.head_pod.name"],
     });
     ctx.flags.increment("a3_epilogue_open", 1);
 
@@ -4025,12 +4130,14 @@ fn on_lighter_recovered(ctx) {
     if ctx.flags.a3_epilogue_open == 0 { return; }
     ctx.flags.skyway_lighter_safe = 1;
     ctx.flags.increment("a3_survivors_recovered", 1);
+    ctx.effects.complete_objective("obj-a3-lighter");
 }
 
 fn on_pod_recovered(ctx) {
     if ctx.flags.a3_epilogue_open == 0 { return; }
     ctx.flags.skyway_pod_safe = 1;
     ctx.flags.increment("a3_survivors_recovered", 1);
+    ctx.effects.complete_objective("obj-a3-pod");
 }
 
 // The epilogue's resolution. Three outcomes rather than two, because "we got one
@@ -4051,9 +4158,11 @@ fn head_epilogue_resolves(ctx) {
     // same `destroy_entity` the head went to, and the same reading: a failure is
     // a thing that happens, not a thing that quietly stops being mentioned.
     if ctx.flags.skyway_lighter_safe == 0 {
+        ctx.effects.fail_objective("obj-a3-lighter");
         ctx.effects.destroy_entity("world.falling_skyway.entity.head_lighter.name");
     }
     if ctx.flags.skyway_pod_safe == 0 {
+        ctx.effects.fail_objective("obj-a3-pod");
         ctx.effects.destroy_entity("world.falling_skyway.entity.head_pod.name");
     }
 
@@ -4229,6 +4338,7 @@ fn head_stands_down(ctx) {
 // honest state of the act until the choice lands on top of it.
 
 on_flag_set("skyway_storm_passed", "on_act_three_opens");
+on_flag_set("skyway_window_transfer_primed", "on_window_transfer_primed");
 on_deadline("skyway_transfer_window", "on_transfer_window_opens");
 on_deadline("skyway_window_closes", "on_transfer_window_closes");
 
@@ -4256,28 +4366,35 @@ on_flag_set("skyway_book_convoy", "on_book_convoy");
 // registers a second handler on the SAME flag for the same reason: two slices
 // opening one act is two registrations, not an edit of somebody else's function.
 fn on_act_three_opens(ctx) {
-    // The readiness beat, and it deliberately points helm at the anchor #1040's
-    // own `obj-a3-standoff` already points it at. Two objectives naming one
-    // place is not a conflict — it is two reasons to be there, and the ship
-    // cannot be sent to both by being asked twice. `station_keeping` is 247
-    // units off the head, inside the destroyer's stabilise range, and 578 from
-    // Control, inside its authored 800-unit comms range: the same berth saves
-    // the tether and hears the window open.
+    // The readiness beat is real two-seat work: Helm docks with the named
+    // manifold and Engineering runs the umbilical. The target sits at
+    // `station_keeping`, where #1040's standoff Reach already sends the ship.
+    // Priority 54, one below that Reach, is load-bearing: Transfer itself is an
+    // operate directive rather than a travel directive, so the standoff stays
+    // the top Helm destination until the dock is in range; the dock and
+    // umbilical hosts still find this directive through their kind filter.
     //
-    // Priority 56, one above that standoff, because they share an anchor and
-    // being one rung apart costs nothing; every rung of the tether ladder above
-    // it (60/70/80) still outranks this, which is right — a head about to come
-    // down is more urgent than being ready for a window that has not opened.
-    ctx.effects.add_objective(#{
+    // The receiving ledger's threshold is the completion memory. A crew may
+    // prime it before the storm clears; `post_remembered_objective` then records
+    // the objective already green instead of asking them to repeat the work.
+    post_remembered_objective(ctx, #{
         id: "obj-a3-window-ready",
         text: "world.falling_skyway.objective.window_ready.text",
-        mandatory: true,
         source: "mission",
-        base_priority: 56,
-        directive_kind: "Reach",
-        directive_anchor: "station_keeping",
-        targets: ["world.falling_skyway.entity.skyway_control.name"],
-    });
+        base_priority: 54,
+        directive_kind: "Transfer",
+        target: "world.falling_skyway.entity.window_transfer_manifold.name",
+        targets: ["world.falling_skyway.entity.window_transfer_manifold.name"],
+    }, "skyway_window_transfer_worked");
+}
+
+// The umbilical work lands. This is a target-side reading, not an operation
+// event: capacity physically moved onto the receiving manifold and crossed its
+// authored threshold. Latch it separately so completion survives an objective
+// that has not posted yet (and any later change to the live capacity).
+fn on_window_transfer_primed(ctx) {
+    ctx.flags.skyway_window_transfer_worked = 1;
+    ctx.effects.complete_objective("obj-a3-window-ready");
 }
 
 // ── The arithmetic ──────────────────────────────────────────────────────────
@@ -4365,7 +4482,12 @@ fn on_transfer_window_opens(ctx) {
     publish_manifest(ctx, "skyway_window_demand", demand);
     publish_manifest(ctx, "skyway_window_shortfall", short);
 
-    ctx.effects.complete_objective("obj-a3-window-ready");
+    // Opening the window is the work's authored boundary, never its completion
+    // shortcut. A crew who did not prime the target-side ledger leave the
+    // optional run-up red; a timer cannot perform an umbilical transfer.
+    if ctx.flags.skyway_window_transfer_worked == 0 {
+        ctx.effects.fail_objective("obj-a3-window-ready");
+    }
     // NO DIRECTIVE, and priority 65 rather than the top of the act. This beat is
     // a DECISION and not a place: there is nowhere to fly to in order to choose
     // who goes up, and an objective carrying a Reach anchor would have a
@@ -4376,7 +4498,6 @@ fn on_transfer_window_opens(ctx) {
     ctx.effects.add_objective(#{
         id: "obj-a3-window",
         text: "world.falling_skyway.objective.window.text",
-        mandatory: true,
         source: "mission",
         base_priority: 65,
         targets: ["world.falling_skyway.entity.skyway_control.name"],
@@ -4485,6 +4606,10 @@ fn book_lift(ctx, claim_id) {
     }
     ctx.flags.increment("skyway_window_reserved", need);
     ctx.flags.increment("skyway_window_lifts_started", 1);
+    // The protected human decision resolves its own objective. The close
+    // deadline may mark an untouched decision red, but it never turns work
+    // green on the crew's behalf.
+    ctx.effects.complete_objective("obj-a3-window");
     // Exact deltas, so two bookings landing in one tick both count.
     ctx.effects.adjust_capacity(
         "world.falling_skyway.entity.skyway_control.name", "skyway_window_available", -need);
@@ -4529,7 +4654,18 @@ fn on_transfer_window_closes(ctx) {
             "world.falling_skyway.entity.skyway_control.name", "skyway_window_available", -left);
     }
 
-    ctx.effects.complete_objective("obj-a3-window");
+    // Closing the window cannot make the protected allocation decision for the
+    // crew. A human booking already resolved this optional good-ending
+    // objective at the booking seam; an untouched window stays red, visibly
+    // distinct from the mandatory spine.
+    if ctx.flags.skyway_window_lifts_started == 0 {
+        ctx.effects.fail_objective("obj-a3-window");
+    }
+
+    // The receiving manifold is mission machinery, not an asset the campaign
+    // can inherit. Its job ends with this one window, so close the entity's
+    // lifecycle before the terminal snapshot is projected.
+    ctx.effects.destroy_entity("world.falling_skyway.entity.window_transfer_manifold.name");
     ctx.effects.open_comms(#{
         from: "world.falling_skyway.entity.skyway_control.name",
         node_fn: "window_closes",
@@ -5372,6 +5508,10 @@ fn the_mission_closes(ctx) {
     ctx.flags.skyway_mission_resolved = 1;
     ctx.flags.act3_resolved = 1;
     ctx.flags.increment("a3_endings_written", 1);
+    // A completed campaign episode must leave an authoritative terminal
+    // outcome, not only a family of handoff counters. Partial and costly roads
+    // are still mission completion; collision/ship-loss remain defeat paths.
+    ctx.effects.game_over("world.falling_skyway.game_over.mission_complete", "victory");
 }
 
 // Whether a claimant actually got off the rock — by lift or by berth. The

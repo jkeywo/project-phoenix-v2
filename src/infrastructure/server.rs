@@ -80,9 +80,10 @@ impl Plugin for InfrastructurePlugin {
 
 /// Advance every infrastructure track by one logical tick.
 ///
-/// Per structure, in UUID order: publish its capacities and starting flags on
-/// the first tick it exists, fold in any hull it lost, apply authored decay,
-/// then apply this tick's queued script adjustments and capacity moves. Every
+/// Per structure, in UUID order: publish its starting flags before any mutation
+/// on the first tick it exists, apply this tick's queued capacity moves, publish
+/// its capacities, fold in any hull it lost, apply authored decay, then apply
+/// queued condition adjustments. Every
 /// operational flag that changed along the way is mirrored into the base-world
 /// flag store, and every capacity that moved is re-published onto its counter.
 ///
@@ -168,15 +169,24 @@ pub fn tick_infrastructure_condition(
         let capacities: Vec<(String, i64)>;
         {
             let state = &mut condition.0;
+            // Initial truth must be mirrored before a first-tick mutation. A
+            // full capacity drained on its spawn tick is a real trueâ†’false
+            // edge, not a structure that merely appeared false.
+            if first_tick {
+                changes.extend(state.initial_flags());
+            }
             for (id, delta) in capacity_moves {
-                if state.adjust_capacity(id, delta).is_none() {
-                    crate::pwarn!(
-                        log,
-                        crate::logging::LogCat::World,
-                        entity = entity,
-                        "capacity move for '{id}' on {uuid}: this structure declares no such \
-                         capacity — ignoring"
-                    );
+                match state.adjust_capacity(id, delta) {
+                    Some((_, capacity_changes)) => changes.extend(capacity_changes),
+                    None => {
+                        crate::pwarn!(
+                            log,
+                            crate::logging::LogCat::World,
+                            entity = entity,
+                            "capacity move for '{id}' on {uuid}: this structure declares no such \
+                             capacity — ignoring"
+                        );
+                    }
                 }
             }
             // Re-published whenever anything about this structure moved, not
@@ -189,9 +199,6 @@ pub fn tick_infrastructure_condition(
                 .iter()
                 .map(|c| (c.id.clone(), c.level))
                 .collect();
-            if first_tick {
-                changes.extend(state.initial_flags());
-            }
             if let Some(total) = hull_total {
                 changes.extend(state.observe_hull(total));
             }
@@ -203,10 +210,11 @@ pub fn tick_infrastructure_condition(
             }
         }
 
-        // A capacity is a published quantity, not an operational flag: its
-        // counter is readable from a script predicate, but it deliberately
-        // fires no `on_flag_set`. "This depot has berths" is not an event, and
-        // neither is "it now has twelve fewer".
+        // A capacity is a published quantity, not an operational flag by
+        // default: its counter is readable from a script predicate, but a plain
+        // move deliberately fires no `on_flag_set`. A threshold explicitly
+        // naming that capacity is the opt-in operational edge, mirrored with
+        // the condition-backed changes collected above.
         for (id, amount) in capacities {
             runtime.flags.set_flag_value(&id, amount);
         }
@@ -278,6 +286,7 @@ mod tests {
             thresholds: vec![ThresholdConfig {
                 label: None,
                 flag: FLAG.to_string(),
+                capacity: None,
                 fails_below: 0.4,
                 restores_above: None,
             }],
@@ -406,6 +415,99 @@ mod tests {
             .get::<InfrastructureCondition>(entity)
             .expect("the component is still attached");
         assert_eq!(condition.0.condition(), 55.0);
+    }
+
+    #[test]
+    fn a_capacity_threshold_crossing_queues_the_same_authoritative_flag_event() {
+        let config = InfrastructureConfig {
+            capacities: vec![CapacityConfig {
+                id: "reserve_fuel".to_string(),
+                amount: 0,
+                ceiling: Some(100),
+                label: None,
+            }],
+            thresholds: vec![ThresholdConfig {
+                flag: "transfer_primed".to_string(),
+                capacity: Some("reserve_fuel".to_string()),
+                fails_below: 0.5,
+                restores_above: Some(0.5),
+                label: None,
+            }],
+            ..Default::default()
+        };
+        let (mut app, _) = app_with(&config);
+        app.update();
+        assert!(!flag(&app, "transfer_primed"));
+        assert!(drain_events(&mut app).is_empty());
+
+        app.world_mut()
+            .resource_mut::<EffectQueue<CapacityAdjustment>>()
+            .0
+            .push(CapacityAdjustment {
+                uuid: "depot-1".to_string(),
+                capacity: "reserve_fuel".to_string(),
+                delta: 50,
+            });
+        app.update();
+
+        assert_eq!(counter(&app, "reserve_fuel"), 50);
+        assert!(flag(&app, "transfer_primed"));
+        assert_eq!(
+            drain_events(&mut app),
+            vec![WorldEvent::FlagSet {
+                name: "transfer_primed".to_string(),
+                origin_layer: None,
+            }],
+            "the receiving entity's own threshold supplies the on_flag_set seam"
+        );
+    }
+
+    #[test]
+    fn a_first_tick_capacity_drain_publishes_both_sides_of_the_edge() {
+        let config = InfrastructureConfig {
+            capacities: vec![CapacityConfig {
+                id: "reserve_fuel".to_string(),
+                amount: 100,
+                ceiling: Some(100),
+                label: None,
+            }],
+            thresholds: vec![ThresholdConfig {
+                flag: "transfer_primed".to_string(),
+                capacity: Some("reserve_fuel".to_string()),
+                fails_below: 0.5,
+                restores_above: Some(0.5),
+                label: None,
+            }],
+            ..Default::default()
+        };
+        let (mut app, _) = app_with(&config);
+        app.world_mut()
+            .resource_mut::<EffectQueue<CapacityAdjustment>>()
+            .0
+            .push(CapacityAdjustment {
+                uuid: "depot-1".to_string(),
+                capacity: "reserve_fuel".to_string(),
+                delta: -100,
+            });
+
+        app.update();
+
+        assert_eq!(counter(&app, "reserve_fuel"), 0);
+        assert!(!flag(&app, "transfer_primed"));
+        assert_eq!(
+            drain_events(&mut app),
+            vec![
+                WorldEvent::FlagSet {
+                    name: "transfer_primed".to_string(),
+                    origin_layer: None,
+                },
+                WorldEvent::FlagCleared {
+                    name: "transfer_primed".to_string(),
+                    origin_layer: None,
+                },
+            ],
+            "initial truth is published before the same tick's drain, preserving the exact edge"
+        );
     }
 
     #[test]

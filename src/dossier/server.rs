@@ -397,6 +397,7 @@ mod tests {
                 ],
                 thresholds: vec![ThresholdConfig {
                     flag: "transfer_capable".into(),
+                    capacity: None,
                     fails_below: 0.4,
                     restores_above: None,
                     label: Some("world.skyhook.transfer.label".into()),

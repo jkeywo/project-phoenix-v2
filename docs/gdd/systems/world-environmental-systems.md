@@ -60,7 +60,7 @@ Planned field consumers are radiation damage through the normal damage path; int
 
 Civilian-capable entities follow authored routes composed of anchor legs, speeds, and optional holds. Route completion may loop or follow another authored policy. Live traffic holds its current leg and order independently; the route remains map data.
 
-Supported orders such as hold, divert, and dock should alter real movement and compliance state. Civilian actors may be destroyed, delayed, stranded, sheltered, escorted, or towed. A script can acknowledge waypoint arrival or loss, but it should not teleport traffic through a problem the route/operation model claims the crew solved.
+Supported orders such as hold, divert, and dock should alter real movement and compliance state. Civilian actors may be destroyed, delayed, stranded, sheltered, escorted, or towed. A script can acknowledge waypoint arrival or loss, but it should not teleport traffic through a problem the route or crew-system model claims the crew solved.
 
 Traffic makes an area socially inhabited and creates shared work for Navigation, Helm, Sensors, Comms, and Captain. It should have enough persistence to create consequences without requiring a full economy simulation.
 
@@ -70,13 +70,13 @@ Infrastructure entities carry a structural condition track, named capacities, op
 
 Thresholds create named facts such as transfer-capable or lift-capable, with hysteresis where authored. Capacities say how much of a named resource or service remains. Published condition/capacity becomes client-visible and enters dossiers; unpublished internal state remains authoritative but needs another legitimate observation path if players must act on it.
 
-Workforce is separate from faction. A strike can stop or slow work without making a structure hostile. Disposition and strike state are world runtime facts; operation capability authoring decides what a stoppage does to each kind of work.
+Workforce is separate from faction. A strike can stop work without making a structure hostile. Disposition and strike state are world runtime facts; current crew-owned external systems do not infer a hidden rate penalty from them, so a scenario that needs a stoppage consequence must author it explicitly from the published workforce flags.
 
-## External operations
+## Crew-owned external systems
 
-The common operation spine supports stabilise, tow, escort, transfer, and field repair where the operating hull authors the capability. Starting work checks target eligibility, range, power, available teams, capacities, and other verb requirements. Operations advance as timed holds, may be slowed or interrupted by authored hazards/fire/work stoppage, and pay results into authoritative condition, capacity, or spatial state.
+The retired timed-operation spine no longer owns stabilise, tow, transfer or field repair. Current hulls author first-class tractor, dock, umbilical and external-repair systems. Their ordinary admitted controls check target eligibility, range, geometry, power, dock state, available teams, capacities and other job requirements, then pay authoritative condition, capacity or spatial state while the relevant system keeps working.
 
-Operations should create bridge coordination:
+External work should create bridge coordination:
 
 - Sensors establishes the target’s state and whether work is needed.
 - Navigation and Helm put the ship in the correct place and hold it there.
@@ -85,7 +85,7 @@ Operations should create bridge coordination:
 - Tactical and Shields protect a vulnerable hold.
 - Comms and Captain negotiate permission, priority, or consequences.
 
-An operation refusal or interruption must state its reason in player language. A completed animation without authoritative payment is not success; authoritative payment without visible acknowledgement is not adequate feedback.
+A refusal or interruption must state its reason in player language. A completed animation without authoritative payment is not success; authoritative payment without visible acknowledgement is not adequate feedback. Scenario completion should read the target-side threshold or held response the work produced, not a retired generic operation timer.
 
 ## Scanning, observation, and evidence
 
@@ -113,7 +113,7 @@ A dossier is a projection of what the crew knows about one subject, not an indep
 - Environmental effects resolve through shared modifier/damage/availability systems for humans and AI.
 - Traffic continues to follow authoritative routes/orders when not observed and exposes compliance or failure.
 - Infrastructure condition, thresholds, capacity, workforce, hull, and script text do not contradict one another.
-- External operations validate capability and eligibility, expose progress/refusal/interruption, and pay authoritative results.
+- Tractor, dock, umbilical and external-repair systems validate capability and eligibility, expose progress/refusal/interruption, and pay authoritative results.
 - Required knowledge has a legitimate sensor/comms/dossier path; scripts do not reveal a parallel unearned truth.
 - Deterministic populations, fields, and scheduled state reproduce from the same authored inputs and seed.
 - Scenario and station playtests show at least three station families responding to each major environmental pressure where that complexity is intended.
@@ -122,5 +122,5 @@ A dossier is a projection of what the crew knows about one subject, not an indep
 
 - `pasm/spec/design/simulation-differentiation.yaml` and `fields-epistemics.yaml`.
 - `pasm/spec/architecture/world-files.yaml`, `power-modifiers-regions.yaml`, and `scenario-scripting.yaml`.
-- `src/regions/`, `src/asteroids/`, `src/infrastructure/`, `src/operations/`, `src/civilian/`, and `src/science/`.
+- `src/regions/`, `src/asteroids/`, `src/infrastructure/`, `src/tractor/`, `src/dock/`, `src/umbilical/`, `src/console/repair/`, `src/civilian/`, and `src/science/`.
 - `assets/worlds/falling_skyway.toml` and its infrastructure/civilian/region entity templates.

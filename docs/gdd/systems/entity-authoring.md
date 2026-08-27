@@ -40,10 +40,10 @@ Composition is resolved before parsing and spawning. Included fragments merge in
 | Detection | `[radar_appearance]`, `[target]`, `[comms]` | Whether and how the entity appears, can be selected, and can communicate. |
 | Behaviour | `[behaviour]`, `[[behaviour.doctrine]]`, `[ai_profile]`, fine-system policies | Goals, movement/combat intent, and authored AI decisions. The retired behaviour-state FSM is not valid current authoring. |
 | Environment | `[shape]`, `[effects]`, `[asteroid_field]` | Areas, fields, hazards, and generated populations. |
-| Operations | `[infrastructure]`, `[operations]`, `[scan]`, `[civilian]` | Condition/capacity, external work a hull can perform, facts sensors can derive, and route-following traffic. |
+| Crew systems | `[infrastructure]`, `[tractor]`, `[dock]`, `[umbilical]`, `[repair.external_dispatch]`, `[scan]`, `[civilian]` | Condition/capacity, real external-system work a hull can perform, facts sensors can derive, and route-following traffic. |
 | Presentation | `[[light]]`, `[audio]`, `[cinematic_camera]`, `[reference_grid]` | Renderer and host presentation that does not become a separate gameplay truth. |
 
-Absence is meaningful. No radar appearance means no radar contact; no target section means the entity is not targetable; no operations section means the hull cannot start those external operations; no infrastructure section means it has no authored condition/capacity model; no scan capability means it cannot produce structural readings.
+Absence is meaningful. No radar appearance means no radar contact; no target section means the entity is not targetable; no tractor/dock/umbilical/external-dispatch configuration means the hull cannot perform that crew-system job; no infrastructure section means it has no authored condition/capacity model; no scan capability means it cannot produce structural readings.
 
 ## Template TOML specification
 

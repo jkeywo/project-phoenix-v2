@@ -699,13 +699,29 @@ different thing from a missing one, and the panel says so in as many words.
 [[infrastructure.capacity]]
 id     = "depot_berths"
 amount = 4
+ceiling = 8
 label  = "world.fs.capacity.berths.label"   # shown; without this, script-only
 
 [[infrastructure.threshold]]
 flag        = "depot_transfer_capable"
+capacity    = "depot_berths"                 # optional; omit to read condition
 fails_below = 0.4
 label       = "world.fs.threshold.transfer.label"
 ```
+
+A threshold reads `condition / condition_max` when `capacity` is omitted. When
+`capacity` is present it must name a capacity on this same entity and reads that
+capacity's live `level / ceiling` instead. Empty or missing local ids are load
+errors. A plain capacity move only updates its published counter; a
+capacity-backed threshold is the explicit opt-in that also emits authoritative
+`FlagSet` / `FlagCleared` edges. On an entity's first tick, its initial flag is
+published before any queued capacity mutation, so a full ledger drained
+immediately still produces the true-to-false edge.
+
+This target-side form is the normal completion gate for an umbilical transfer:
+the receiver says when enough arrived. If a scenario allows work before the
+objective posts, latch that flag edge as memory and resolve the later objective
+from the memory; never award completion merely because a deadline arrived.
 
 A faction's crew-facing name works the same way: `assets/factions/*.toml` takes
 an optional `display_name` beside its `name`. `name` stays the reference key
@@ -798,29 +814,14 @@ Naming a workforce this world has no dispute about is legal and means what it
 says — work there carries on. That is what lets one depot template ship in five
 scenarios when only one of them has a strike.
 
-**What a stoppage does is authored per verb, on the operating hull**, not here.
-The same cause means different things to different work:
-
-```toml
-# assets/entities/alliance_destroyer.toml
-[[operations.capability]]
-verb = "transfer"
-# … nobody is signing this off, so it is refused outright
-[[operations.capability.interrupt]]
-cause    = "work_stoppage"
-response = "fail"
-
-[[operations.capability]]
-verb = "field_repair"
-# … the local crews are gone, so your own team does the whole job, slowly
-[[operations.capability.interrupt]]
-cause        = "work_stoppage"
-response     = "slow"
-rate_percent = 35
-```
-
-A refused operation comes back on the operations panel carrying
-`operation.refused.work_stopped` — words, not a bar that never moves.
+**What a stoppage does is explicit scenario design, not an automatic system
+modifier.** The retired `[operations]` model once carried per-verb interruption
+rules; current tractor, dock, umbilical and repair-dispatch systems do not infer
+a refusal or slowdown from `workforce` on the target. Read
+`workforce.<id>.on_strike` / `.disposition` in Rhai and author the objective,
+dialogue, capacity, condition or permission consequence the fiction requires.
+That keeps “nobody will sign off a transfer” distinct from “our own repair team
+can still work here slowly” without a hidden generic rule.
 
 **Script moves a side**, and both effects reverse the moment it does, because
 nothing about a stoppage latches:
@@ -838,9 +839,8 @@ condition reads the state with the vocabulary it already has
 `on_flag_cleared("workforce.skyway_workers.on_strike", "…")` trigger chains off
 a settlement.
 
-See `assets/worlds/probe_strike_min.toml` for the register and its settlement;
-the strike's operation-side bites (a refused transfer, a slowed repair) moved onto
-the per-system slices with the rest of the operations content (#1164).
+See `assets/worlds/probe_strike_min.toml` for the register and its settlement,
+and Falling Skyway for scenario-authored consequences over that state.
 
 ### 1.13 Knowing whether the crew went and looked
 
@@ -1074,121 +1074,69 @@ of the entity transform; multiple lights are spawned as children.
 | `intensity` | f32 | **required** | Candela (point) or lux (directional). |
 | `range` | f32 | `50.0` | Effective falloff range. Point lights only; ignored for `directional`. |
 
-### 2.1.6 `[operations]` — external operations (issues #1026, #1027)
+### 2.1.6 External work — tractor, dock, umbilical and repair dispatch
 
-Which **external operations** this hull can perform: the verbs it applies to
-things outside its own hull. The mirror image of `[infrastructure]` — that table
-says what can be done *to* an entity, this one says what an entity can do.
+The old `[operations]` capability table and its script-started timed holds were
+retired in issue #1164. Do not author `[[operations.capability]]` or call
+`ctx.effects.transfer`, `tow`, `stabilise`, `escort`, or `field_repair`: current
+world loading rejects that retired model. External work is now distributed
+across ordinary crew-owned systems, using the same admitted commands for humans
+and Backfill.
 
-Omitting the table changes nothing. A hull that authors none can start no
-operation and is refused by name if asked to.
-
-There are five verbs, and they share one implementation. What separates them is
-**what you author**, not what the engine does: a tow and a field-repair run
-through the same eligibility test and the same timed hold, and differ only in
-the fields below that each one fills in.
-
-| Verb | What it does | The fields that make it that verb |
-|---|---|---|
-| `stabilise` | Hold station on a failing structure and arrest its decline. | `condition_on_complete` |
-| `tow` | The target's position becomes the operator's rig for the duration. | `tow_offset` |
-| `escort` | Keep station on something that is *moving*. | `separation_limit` |
-| `transfer` | Move a named capacity between the operator and the target. | `[…capability.transfer]` |
-| `field_repair` | Work a structure's condition continuously, at a cost in repair teams. | `condition_per_second`, `repair_teams` |
+| Work | Operator-side authoring | Target-side authoring | Crew chain |
+|---|---|---|---|
+| tow / stabilise / escort | `[tractor]` plus its real `[[system]]` and hull-damage row | optional `[held_response]` | Tactical locks; Engineering engages the tractor |
+| transfer | `[dock]` and `[umbilical]` plus their real systems and hull-damage rows | dock marker plus the named capacity on both ends | Helm docks; Engineering starts flow |
+| field repair | `[repair.external_dispatch]` | `[infrastructure]` condition | Repair dispatches one of the hull's real teams |
 
 ```toml
-[[operations.capability]]
-verb                  = "field_repair"
-range                 = 400.0         # world units, centre to centre
-duration_secs         = 20            # whole seconds of ELIGIBLE hold
-power_group           = "helm"        # which group the operation draws on
-min_power_level       = 2             # …and the level it needs held
-condition_per_second  = 2.0           # points paid for every second held
-repair_teams          = 2             # teams unavailable to the ship meanwhile
-stall_limit_secs      = 45            # optional cumulative stall budget
+[tractor]
+range = 500.0
+coupling_offset = [0.0, 0.0, -90.0]
+min_power_level = 2
 
-# What interrupts it, and what that does. Authored per capability, because how
-# bad a storm is for a particular job is a judgement about the job.
-[[operations.capability.interrupt]]
-cause         = "attack"
-response      = "fail"
+[dock]
+range = 200.0
+engage_distance = 400.0
+approach_speed = 60.0
+mate_tolerance = 4.0
+undock_clear_distance = 120.0
+min_power_level = 2
 
-[[operations.capability.interrupt]]
-cause         = "region"
-region_effect = "slow_zone"
-response      = "slow"
-rate_percent  = 50
+[umbilical]
+capacity = "reserve_fuel"     # both docked ends declare this capacity
+rate = 20.0                   # units per second
+direction = "deliver"         # operator -> partner; "collect" reverses it
+min_power_level = 2
+
+[repair.external_dispatch]
+range = 400.0
+repair_rate = 0.5             # target condition points per second
 ```
 
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `verb` | `"stabilise"` \| `"tow"` \| `"escort"` \| `"transfer"` \| `"field_repair"` | **required** | The operation this block authorises. |
-| `range` | f32 | `400.0` | How far from the target the ship may be and still count the tick. |
-| `duration_secs` | i64 | `20` | Whole seconds of *eligible* hold. Stalled ticks do not count towards it — that is the point of the hold. |
-| `power_group` | string | `"helm"` | The power group the operation draws on. |
-| `min_power_level` | u8 | `2` | The level that group must hold. `2` is where every group is seeded, so a ship that has stripped helm loses the operation. |
-| `condition_on_complete` | f32 | `0.0` | Infrastructure condition points the target gains **on completion**, paid once. |
-| `condition_per_second` | f32 | `0.0` | Condition points paid for every **second held**, scaled by the tick's rate. `field_repair`'s shape. |
-| `repair_teams` | u8 | `0` | How many of the operator's own repair teams are unavailable for internal work while the hold runs. They never leave the hull. |
-| `tow_offset` | `[f32; 3]` | `[0,0,0]` | Where a towed target rides, in the operator's **own frame**: `[starboard, up, forward]`, so `[0, 0, -150]` is 150 units astern. |
-| `separation_limit` | f32 | *(none)* | Distance past which the hold **fails** rather than stalling. Must be at or beyond `range`. `escort`'s shape. |
-| `target_requirement` | `"present"` \| `"condition_track"` \| `"capacity"` | *(the verb's own)* | What the target has to be. Override it to tow only damaged hulks, or to stabilise something unusual. |
-| `stall_limit_secs` | i64 | *(none)* | Whole seconds of **cumulative** stalled time tolerated before the operation fails. Omit to let it stall indefinitely. |
+The tractor's fiction is supplied by the target:
 
-`[operations.capability.transfer]` — required for a `transfer`, and what makes
-the two ends two ends:
+```toml
+[held_response]
+kind = "arrest-decline"       # follow | arrest-decline | station-keep | formation-keep
+recover_per_sec = 0.5         # arrest-decline only
+```
 
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `capacity` | string | **required** | The `[[infrastructure.capacity]]` id being moved. Both the operator and the target must carry one under this id. |
-| `amount` | i64 | **required** | How much moves, in the capacity's own units. Paid once, on completion. |
-| `direction` | `"deliver"` \| `"collect"` | **required** | Named from the **operator's** point of view: a tender *delivers* to a depot and *collects* from it. |
+`follow` rides the operator's coupling rig, `arrest-decline` cancels the
+target's ordinary decay and adds the authored recovery, `station-keep` holds it
+in place, and `formation-keep` additionally authors `offset` and `distance`.
+The resulting condition/capacity movement always goes through the target's
+infrastructure queue, so its own thresholds and events remain authoritative.
 
-`[[operations.capability.interrupt]]` — zero or more. A capability that authors
-none behaves exactly as it did before interrupts existed: only eligibility can
-stop the hold.
+Scenario objectives expose the matching AI verbs with `directive_kind =
+"Tow"`, `"Stabilise"`, `"Transfer"`, or `"FieldRepair"`. A `Transfer`
+directive names the receiving target: Helm's Backfill docks there and
+Engineering's Backfill flows the umbilical. Do not complete the objective from
+elapsed time or source-side depletion; author a threshold on the receiving
+capacity and react to its flag edge.
 
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `cause` | `"attack"` \| `"region"` | **required** | Recent *landed hits* on the operator (firing your own guns is not being attacked), or membership of a region carrying `region_effect`. |
-| `region_effect` | `"slow_zone"`, `"damage_zone"`, `"comms_jam"`, … | *(none)* | Required for `cause = "region"`, refused for anything else. The names mirror the `[effects]` sub-tables in **§2.5**. |
-| `response` | `"slow"` \| `"pause"` \| `"fail"` | **required** | Keep going more slowly; freeze and spend the stall budget; or end it now. |
-| `rate_percent` | u16 | `50` | For `response = "slow"`: what fraction of normal speed, `1..=100`. Author `pause` for a full stop. |
-
-Two rules that both fire take the **stricter** response, and two `slow` rules
-take the **lower** rate — so a capability carrying both cannot get a different
-answer depending on which line you typed first.
-
-**Power loss is not an interrupt cause**, deliberately. It is already an
-eligibility condition, tested against the live grid every tick, and a second
-spelling would let one capability say two different things about it.
-
-A hold **stalls** rather than ending when eligibility lapses for something the
-crew can fix — out of range, under-powered, a depot with no room, no free repair
-team — and progress freezes where it stood rather than decaying, so recovering
-resumes it. It **fails** when eligibility is lost for something they cannot fix
-(the target is gone; the escortee is past the separation limit; the hull never
-had the capability), when an authored interrupt says `fail`, or when the stall
-budget runs out. A `slow` interrupt does *not* spend the stall budget, however
-long it lasts: the operation is being held, just badly.
-
-Refused at load, by field name: a zero range, a non-positive `duration_secs`, an
-empty `power_group`, a negative payoff of either kind, a `separation_limit`
-inside `range`, a `transfer` with no capacity id or a non-positive amount, a
-`transfer` requirement with no transfer block, an interrupt with `cause =
-"region"` and no `region_effect` (or the reverse), a `slow` rate outside
-`1..=100`, a negative stall budget, or two blocks claiming the same verb.
-
-Starting one: `ctx.effects.stabilise(ship, target)` — or `tow`, `escort`,
-`transfer`, `field_repair` — from a script (**§1.5**), or a `StartOperation` /
-`AbortOperation` console command at the `captain` system. Progress reaches the
-crew on the operations blackboard, rendered by `<ph-operation-panel>`, which
-offers a verb picker when the hull can do more than one.
-`assets/worlds/probe_stabilise_resume.toml` is a worked example of one verb end
-to end; `assets/worlds/probe_operations_resume.toml` runs a transfer and a
-field-repair, the latter inside a storm band that slows it (both kept as the
-operations feature's snapshot fixtures after #1164 retired the fat operations
-probes).
+See `assets/entities/alliance_destroyer.toml` for the complete operator-side
+tables and `assets/worlds/falling_skyway.toml` for a target-side transfer gate.
 
 ### 2.2 Ships
 
@@ -1862,11 +1810,11 @@ through the real `RegionPlugin` and asserts the ship is worse off inside the
 region than outside it. Neither the number nor the formula can drift out from
 under the other.
 
-`[effects.slow_zone]` with **neither** field authored is legitimate and is not a
-sign error: it is the presence marker an operation's
-`[[operations.capability.interrupt]]` names with `region_effect = "slow_zone"`,
-and the rate that stretches the work lives on the capability as `rate_percent`
-(a true percentage — `50` means half). Both guards skip it.
+`[effects.slow_zone]` with **neither** field authored is valid TOML but currently
+inert: it registers no speed or yaw modifier. The retired `[operations]` runner
+once consumed the table's presence as an interruption marker; no current
+tractor, dock, umbilical or repair system does. Both sign guards skip it because
+there is no numeric effect to judge.
 
 #### Example — `assets/entities/region_nebula.toml`
 

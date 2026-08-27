@@ -9000,6 +9000,11 @@ fn skyway_at_act_two() -> (bevy::prelude::App, bevy::prelude::Entity) {
     // are in range before handing the fixture to a test.
     skyway_move(&mut app, ship, CHOICE_LADDER);
     run(&mut app, 4);
+    // Return to the strike scene. The server re-checks comms range when a
+    // response is admitted; an old inbox row is not permission to answer the
+    // cutter from the distant survey start.
+    skyway_move(&mut app, ship, CHOICE_LADDER);
+    run(&mut app, 2);
     (app, ship)
 }
 
@@ -11002,10 +11007,10 @@ fn falling_skyway_pre_front_traffic_loss_stays_failed_after_storm_passage() {
 /// nobody ran still fails loudly on its independent clock and writes campaign
 /// state.
 ///
-/// Once Act 2 opens, this failure branch is what an unattended bridge produces:
-/// opening an operation is a crew verb, so a backfilled bridge
-/// never tows anybody. The companion test below drives the same act with a crew
-/// that does.
+/// Once Act 2 opens, this failure branch is what an engaged but idle crew
+/// produces: Tactical is human-held with no designation, so the authored Tow
+/// directive is visible but Engineering has no target to work. The companion
+/// test below gives the same shared systems a real lock and tractor command.
 #[test]
 fn falling_skyway_backfill_orders_traffic_clear_of_all_three_bands() {
     use project_phoenix::civilian::ComplianceState;
@@ -11022,6 +11027,7 @@ fn falling_skyway_backfill_orders_traffic_clear_of_all_three_bands() {
 
     let args = skyway_args(dt, closes_at + 6.0);
     let mut app = build_engaged_skyway_app(&args);
+    skyway_seat_idle_tactical(&mut app);
 
     let mut first: std::collections::BTreeMap<String, f64> = std::collections::BTreeMap::new();
     let mut seen: std::collections::BTreeSet<String> = Default::default();
@@ -11355,6 +11361,66 @@ fn falling_skyway_act_2_rescue_lands_when_the_crew_start_before_the_band() {
         (1, 0),
         "exactly one of the two campaign flags is written, and it is the other one this \
          time"
+    );
+}
+
+/// **Issue #1135 — pre-emption memory, rescue side.** Lyra exists and is
+/// actionable before Control's storm forecast posts the rescue objectives. A
+/// real tractor hold that restores her threshold in that interval is remembered
+/// by the world flag, so both the approach and rescue objectives arrive already
+/// complete instead of asking the crew to repeat finished work.
+#[test]
+fn falling_skyway_an_early_lyra_tow_resolves_when_the_rescue_objectives_post() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let dt = SKYWAY_DT;
+    let probe = build_headless_app(&skyway_args(dt, 1.0)).expect("the world must load");
+    let front_at = skyway_deadline_secs(&probe, "storm_front_due") as f64;
+    drop(probe);
+
+    let args = skyway_args(dt, front_at + 5.0);
+    let mut app = build_engaged_skyway_app(&args);
+    run(&mut app, 4);
+    let (ship, _) = skyway_crew_hull(&mut app);
+    let lyra = position_of(&mut app, SKYWAY_LYRA);
+    let alongside = bevy::prelude::Vec3::new(lyra.x + 40.0, lyra.y, lyra.z + 40.0);
+    let lyra_uuid = skyway_uuid(&app, SKYWAY_LYRA);
+
+    skyway_move(&mut app, ship, alongside);
+    skyway_engage_tractor(&mut app, ship, SKYWAY_LYRA);
+    let mut recovered_at = None;
+    while window_now(&app) < front_at - 1.0 {
+        skyway_move(&mut app, ship, alongside);
+        skyway_set_lock(&mut app, ship, Some(lyra_uuid.clone()));
+        run(&mut app, 1);
+        if skyway_flag(&app, "skyway_lyra_recovered") > 0 {
+            recovered_at = Some(window_now(&app));
+            break;
+        }
+    }
+    skyway_release_tractor(&mut app);
+
+    let recovered_at = recovered_at.expect(
+        "Lyra's authored arrest-decline must cross her under-control threshold before the forecast",
+    );
+    assert!(
+        recovered_at < front_at,
+        "precondition: the work lands before its objective posts ({recovered_at:.1} < {front_at:.1})"
+    );
+    while window_now(&app) < front_at + 2.0 {
+        run(&mut app, 1);
+    }
+
+    assert_eq!(skyway_flag(&app, "a2_front_warned"), 1);
+    assert_eq!(
+        objective_status(&app, "obj-a2-approach"),
+        ObjectiveStatus::Completed,
+        "the approach is only a means to the rescue and must not remain active after Lyra is safe"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a2-rescue"),
+        ObjectiveStatus::Completed,
+        "the threshold-backed completion memory resolves the newly-posted Tow objective"
     );
 }
 
@@ -13578,6 +13644,29 @@ fn skyway_crew_hull(app: &mut bevy::prelude::App) -> (bevy::prelude::Entity, Str
     (ship, uuid)
 }
 
+/// Seat a human at the tactical designation control without giving them a
+/// target. The issue-#1162 tractor host can only act after Tactical locks the
+/// objective's named target, so this is the headless equivalent of an engaged
+/// but idle crew: the Tow/Stabilise directive remains visible and the ordinary
+/// Engineering policy remains installed, but nobody designates anything for
+/// it. Tests that subsequently work the beat call `skyway_set_lock`, which
+/// keeps this human tenure and supplies the same target a console would.
+fn skyway_seat_idle_tactical(app: &mut bevy::prelude::App) {
+    let (ship, _) = skyway_crew_hull(app);
+    if let Some(mut sources) = app
+        .world_mut()
+        .get_mut::<project_phoenix::ship_plugin::ShipSystemControlSources>(ship)
+    {
+        sources.0.set(
+            project_phoenix::ship::system_registry::tactical_radar_system_id(),
+            project_phoenix::ship::control_source::ControlSource::Human,
+        );
+    }
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(project_phoenix::console::weapons::beam::TacticalRadarSelection(None));
+}
+
 /// The `ai:` token every migrated Falling Skyway crew action is sent under
 /// (issue #1165 S11b). Unregistered, so admission routes it to the LocalShip —
 /// the crew's destroyer — and authorises it because that hull is fully
@@ -13611,8 +13700,9 @@ fn skyway_uuid(app: &bevy::prelude::App, name: &str) -> String {
 /// closest this harness has to seating them, exactly as `skyway_at_act_two`
 /// seats a person at Comms. The tractor and repair stay AI-backfilled, so the
 /// `ai:` crew commands below are still admitted through the shared seam
-/// (AGENTS.md rule 6). The neglect tests seat nobody, so their backfilled bridge
-/// clears the lock and works no beat — the honest unattended default.
+/// (AGENTS.md rule 6). The neglect tests use `skyway_seat_idle_tactical`: a
+/// human-held designation with no target, distinct from a fully Backfilled
+/// bridge which now has an authored operate directive to follow.
 fn skyway_set_lock(
     app: &mut bevy::prelude::App,
     ship: bevy::prelude::Entity,
@@ -13721,16 +13811,16 @@ fn skyway_projected_floor(app: &bevy::prelude::App) -> f64 {
     skyway_deadline_secs(app, "skyhook_failure_due") as f64 - 16.0
 }
 
-/// **Issue #1040, AC1/AC2/AC4/AC5/AC6/AC7.** After the opening scan-backed
-/// safety stop, Act 3 runs end to end with nobody at the consoles: the head
-/// warns three times on three surfaces, crosses its
+/// **Issue #1040/#1135, AC1/AC2/AC4/AC5/AC6/AC7.** After the opening
+/// scan-backed safety stop, Act 3 runs end to end with Tactical held by an idle
+/// crew: the head warns three times on three surfaces, crosses its
 /// authored structural floor, is REMOVED FROM THE WORLD, and the mission carries
 /// on into a survivor-rescue epilogue that reaches its own resolution.
 ///
-/// Once Act 3 opens, this neglect branch is what an unattended bridge produces:
-/// opening an operation is a crew verb, so a backfilled bridge
-/// never stabilises anything. The companion tests below drive the same act with
-/// a crew that reacts, and the epilogue with a crew that tows.
+/// Once Act 3 opens, this neglect branch is what an engaged but idle crew
+/// produces: Tactical is human-held with no designation, so the Stabilise/Tow
+/// directives remain visible without being acted on. The companion tests below
+/// drive the same shared systems with a crew that reacts.
 #[test]
 fn falling_skyway_act_3_warns_three_times_then_the_head_falls_into_a_playable_epilogue() {
     use project_phoenix::core::messages::ObjectiveStatus;
@@ -13746,6 +13836,7 @@ fn falling_skyway_act_3_warns_three_times_then_the_head_falls_into_a_playable_ep
     // must not silently turn this into a test of an act that never finished.
     let args = skyway_args(dt, projected + 100.0);
     let mut app = build_engaged_skyway_app(&args);
+    skyway_seat_idle_tactical(&mut app);
 
     let mut first: std::collections::BTreeMap<String, f64> = Default::default();
     // What each surface said on the tick each warning fired. Sampled AT THE
@@ -13963,6 +14054,13 @@ fn falling_skyway_act_3_warns_three_times_then_the_head_falls_into_a_playable_ep
         "a rescue nobody ran fails, exactly as the Lyra's did — the epilogue is playable, \
          which means it is also losable"
     );
+    for objective in ["obj-a3-lighter", "obj-a3-pod"] {
+        assert_eq!(
+            objective_status(&app, objective),
+            ObjectiveStatus::Failed,
+            "each unworked Tow directive closes with the aggregate survivor debt"
+        );
+    }
     let flags = &app.world().resource::<WorldContentRuntime>().flags;
     assert_eq!(
         (
@@ -14119,6 +14217,163 @@ fn falling_skyway_act_3_a_crew_who_react_to_the_last_warning_save_the_head() {
     );
 }
 
+/// **Issue #1135 — pre-emption memory, stabilise side.** The skyhook is live
+/// from the opening and its Act-1 slip leaves it below lift certification long
+/// before the storm clears. Restoring that real threshold before the back-half
+/// watch posts must resolve the later Stabilise objective immediately and must
+/// not start a fresh decline that asks the crew to repeat the same work.
+#[test]
+fn falling_skyway_an_early_skyhook_stabilise_resolves_when_the_watch_posts() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let dt = SKYWAY_DT;
+    let probe = build_headless_app(&skyway_args(dt, 1.0)).expect("the world must load");
+    let watch_at = skyway_deadline_secs(&probe, "storm_passed_due") as f64;
+    let slip_at = skyway_deadline_secs(&probe, "tether_slip") as f64;
+    drop(probe);
+
+    let args = skyway_args(dt, watch_at + 8.0);
+    let mut app = build_headless_app(&args).expect("the scenario world must load and build");
+    run(&mut app, 10);
+    let (ship, _) = skyway_crew_hull(&mut app);
+    let authored_start = {
+        let physics = app
+            .world()
+            .get::<ShipPhysics>(ship)
+            .expect("the crew's hull has physics");
+        bevy::prelude::Vec3::new(physics.x, physics.y, physics.z)
+    };
+    skyway_scan_for_survey(&mut app, ship, SKYWAY_SURVEY_HEAD);
+    skyway_move(&mut app, ship, authored_start);
+    skyway_seat_idle_tactical(&mut app);
+    while window_now(&app) < slip_at + 3.0 {
+        run(&mut app, 1);
+    }
+    assert_eq!(
+        skyway_flag(&app, "skyhook_lift_capable"),
+        0,
+        "precondition: Act 1's tether slip has taken the head below certification"
+    );
+
+    let station = bevy::prelude::Vec3::new(180.0, 0.0, 170.0);
+    let head_uuid = skyway_uuid(&app, SKYWAY_HEAD);
+    skyway_move(&mut app, ship, station);
+    skyway_engage_tractor(&mut app, ship, SKYWAY_HEAD);
+    let repair_limit = window_now(&app) + 20.0;
+    let mut restored_at = None;
+    while window_now(&app) < repair_limit {
+        skyway_move(&mut app, ship, station);
+        skyway_set_lock(&mut app, ship, Some(head_uuid.clone()));
+        run(&mut app, 1);
+        if skyway_flag(&app, "skyhook_lift_capable") > 0 {
+            restored_at = Some(window_now(&app));
+            break;
+        }
+    }
+    skyway_release_tractor(&mut app);
+    let restored_at = restored_at
+        .expect("the real tractor hold must restore the head's authored lift-capable threshold");
+    assert!(
+        restored_at < watch_at,
+        "precondition: certification returns before the back-half post ({restored_at:.1} < {watch_at:.1})"
+    );
+
+    while window_now(&app) < watch_at + 3.0 {
+        run(&mut app, 1);
+    }
+
+    assert_eq!(skyway_flag(&app, "a3_watch_open"), 1);
+    assert_eq!(skyway_flag(&app, "a3_stabilised_early"), 1);
+    assert_eq!(skyway_flag(&app, "a3_head_held"), 1);
+    assert_eq!(
+        skyway_flag(&app, "skyway_tether_watch"),
+        0,
+        "the remembered work resolves the watch instead of starting another strain chain"
+    );
+    for warning in ["a3_warning_one", "a3_warning_two", "a3_warning_three"] {
+        assert_eq!(
+            skyway_flag(&app, warning),
+            0,
+            "no warning should fire for work completed before the watch opened"
+        );
+    }
+    assert!(named_entity_present(&mut app, SKYWAY_HEAD));
+    assert_eq!(
+        objective_status(&app, "obj-a3-standoff"),
+        ObjectiveStatus::Completed
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a3-head"),
+        ObjectiveStatus::Completed
+    );
+    assert_eq!(
+        skyway_captain_deadline(&mut app, "skyhook_failure_due").state,
+        "cancelled"
+    );
+}
+
+/// **Issue #1135 â€” early loss outranks stale completion memory.** A destroyed
+/// structure cannot publish a final threshold clear, so its last
+/// `skyhook_lift_capable` value may remain true in the shared store. When Act 3
+/// later opens, that fossil must not turn one head into both possible fates.
+#[test]
+fn falling_skyway_a_head_destroyed_before_the_back_half_has_exactly_one_fate() {
+    use project_phoenix::entities::spawner::{EntityName, EntityUuid};
+    use project_phoenix::world::content::WorldEvent;
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let mut app = build_headless_app(&skyway_args(SKYWAY_DT, 2.0))
+        .expect("the scenario world must load and build");
+    run(&mut app, 10);
+    assert_eq!(
+        skyway_flag(&app, "skyhook_lift_capable"),
+        1,
+        "precondition: the intact head's last published threshold is true"
+    );
+
+    let (head, uuid) = {
+        let mut q = app
+            .world_mut()
+            .query::<(bevy::prelude::Entity, &EntityName, &EntityUuid)>();
+        q.iter(app.world())
+            .find(|(_, name, _)| name.0 == SKYWAY_HEAD)
+            .map(|(entity, _, uuid)| (entity, uuid.0.clone()))
+            .expect("the skyhook exists before its early destruction")
+    };
+    app.world_mut().entity_mut(head).despawn();
+    app.world_mut()
+        .resource_mut::<WorldContentRuntime>()
+        .pending_world_events
+        .push(WorldEvent::Destroyed { uuid });
+    run(&mut app, 4);
+    assert_eq!(skyway_flag(&app, "skyway_skyhook_lost"), 1);
+    assert_eq!(
+        skyway_flag(&app, "skyhook_lift_capable"),
+        1,
+        "the regression requires the stale true threshold the destroyed entity can no longer clear"
+    );
+
+    window_fire_deadline_callback(&mut app, "on_storm_passed");
+
+    assert_eq!(
+        (
+            skyway_flag(&app, "skyway_skyhook_lost"),
+            skyway_flag(&app, "skyway_skyhook_held"),
+        ),
+        (1, 0),
+        "the earlier destruction is authoritative: exactly one fate is recorded"
+    );
+    assert_eq!(skyway_flag(&app, "a3_head_held"), 0);
+    assert_eq!(skyway_flag(&app, "a3_stabilised_early"), 0);
+    assert_eq!(skyway_flag(&app, "skyway_tether_watch"), 0);
+    assert_eq!(
+        objective_status_opt(&app, "obj-a3-head"),
+        None,
+        "Act 3 must not post or complete Stabilise work for a head already gone"
+    );
+    assert!(!named_entity_present(&mut app, SKYWAY_HEAD));
+}
+
 /// **Issue #1040, AC5.** The epilogue is PLAYABLE, and playable means winnable:
 /// a crew who lose the head and then go and do the work pull both craft out of
 /// the debris inside the epilogue's own window.
@@ -14139,6 +14394,7 @@ fn falling_skyway_act_3_epilogue_is_completable_by_a_crew_that_tows_both_craft()
 
     let args = skyway_args(dt, projected + 100.0);
     let mut app = build_engaged_skyway_app(&args);
+    skyway_seat_idle_tactical(&mut app);
     run(&mut app, 10);
     let (ship, _ship_uuid) = skyway_crew_hull(&mut app);
 
@@ -14236,6 +14492,13 @@ fn falling_skyway_act_3_epilogue_is_completable_by_a_crew_that_tows_both_craft()
         ObjectiveStatus::Completed,
         "and the epilogue's own mandatory objective completes"
     );
+    for objective in ["obj-a3-lighter", "obj-a3-pod"] {
+        assert_eq!(
+            objective_status(&app, objective),
+            ObjectiveStatus::Completed,
+            "each craft's Tow directive resolves on that craft's own threshold"
+        );
+    }
     for craft in [SKYWAY_LIGHTER, SKYWAY_POD] {
         assert!(
             named_entity_present(&mut app, craft),
@@ -14555,6 +14818,8 @@ fn a_condition_floor_collapses_a_structure_and_a_reaction_inside_the_last_window
 /// The authority that runs the window, and the one console surface its whole
 /// arithmetic lands on.
 const WINDOW_CONTROL: &str = "world.falling_skyway.entity.skyway_control.name";
+/// The passive, deterministic receiving end of the run-up transfer.
+const WINDOW_TRANSFER_MANIFOLD: &str = "world.falling_skyway.entity.window_transfer_manifold.name";
 /// The head. Its lift certification is the whole of its contribution.
 const WINDOW_HEAD: &str = "world.falling_skyway.entity.skyhook.name";
 /// The rung that still works.
@@ -14578,6 +14843,26 @@ fn window_run_to(app: &mut bevy::prelude::App, secs: f64) {
     while window_now(app) < secs {
         run(app, 10);
     }
+}
+
+/// Advance the authoritative logical tick directly to one already-armed named
+/// deadline callback, then let the ordinary callback system run it. This keeps
+/// focused causal tests from simulating twenty quiet mission minutes while
+/// preserving the exact fire tick authored by the real deadline table.
+fn window_fire_deadline_callback(app: &mut bevy::prelude::App, handler: &str) {
+    let fire_tick = app
+        .world()
+        .resource::<project_phoenix::world::server::WorldScriptRuntime>()
+        .pending_callbacks
+        .0
+        .iter()
+        .find(|call| call.fn_name == handler)
+        .unwrap_or_else(|| panic!("the mission must have armed deadline handler '{handler}'"))
+        .fire_tick;
+    app.world_mut()
+        .resource_mut::<project_phoenix::sim_tick::SimTick>()
+        .0 = fire_tick;
+    run(app, 2);
 }
 
 /// Skyway Control's manifest as the live condition track carries it — every
@@ -14736,6 +15021,56 @@ fn window_ship(app: &mut bevy::prelude::App) -> (bevy::prelude::Entity, String) 
     found.expect("the crew hull")
 }
 
+/// Prime the transfer window's receiving manifold through the real Dock and
+/// Umbilical command paths. Shared by the focused pre-emption proof and both
+/// fixtures that claim the crew completed every available job.
+fn window_prime_manifold(app: &mut bevy::prelude::App, ship: bevy::prelude::Entity) {
+    use project_phoenix::core::messages::SystemControlPayload;
+
+    assert!(
+        window_capacity_of(app, WINDOW_TRANSFER_MANIFOLD, "reserve_fuel") < 50,
+        "the run-up helper expects an unprimed receiving ledger"
+    );
+    skyway_move(
+        app,
+        ship,
+        bevy::prelude::Vec3::new(WINDOW_STATION.x - 100.0, 0.0, WINDOW_STATION.z),
+    );
+    run(app, 3);
+    let target_uuid = skyway_uuid(app, WINDOW_TRANSFER_MANIFOLD);
+    assert_eq!(
+        umbilical_dock_of(app).available_target.as_deref(),
+        Some(target_uuid.as_str()),
+        "the named manifold must be the dock's real in-range target"
+    );
+    send_umbilical_dock(app, SystemControlPayload::Dock);
+    for _ in 0..240 {
+        if umbilical_dock_of(app).docked {
+            break;
+        }
+        run(app, 1);
+    }
+    assert!(
+        umbilical_dock_of(app).docked,
+        "Helm must land the dock before Engineering can flow the umbilical"
+    );
+
+    send_umbilical_flow(app, SystemControlPayload::StartTransfer);
+    for _ in 0..240 {
+        if skyway_flag(app, "skyway_window_transfer_worked") > 0 {
+            break;
+        }
+        run(app, 1);
+    }
+    send_umbilical_flow(app, SystemControlPayload::StopTransfer);
+    assert_eq!(skyway_flag(app, "skyway_window_transfer_primed"), 1);
+    assert_eq!(skyway_flag(app, "skyway_window_transfer_worked"), 1);
+    assert!(
+        window_capacity_of(app, WINDOW_TRANSFER_MANIFOLD, "reserve_fuel") >= 50,
+        "completion is the receiving entity's own ledger crossing its authored half-full line"
+    );
+}
+
 /// One row off the captain's countdown, by deadline id.
 fn window_countdown(
     app: &mut bevy::prelude::App,
@@ -14837,20 +15172,18 @@ fn no_state_of_falling_skyway_covers_all_three_claimants() {
          rather than a choice"
     );
 
-    // …and that ceiling is a CEILING rather than today's reading, because
-    // nothing the crew fly can put anything into a rung. A real transfer moves an
-    // authored capacity between two ends carrying the same id (the umbilical,
-    // #1160), and the mission's hull authors NO `[infrastructure]` ledger of its
-    // own — deliberately (#1164): a condition or capacity track on the crew's own
-    // hull would fold into every world it flies. With no cargo ledger to draw
-    // from, its umbilical delivers nothing into a rung; standing a transfer up at
-    // a structure moves no capacity, exactly as the retired `transfer` verb did.
+    // …and that ceiling is still a CEILING rather than today's reading. #1135
+    // gives this scenario's player instance a `reserve_fuel` load for the
+    // separate run-up manifold, but none of the chain arithmetic above reads
+    // that id. The cargo can complete real umbilical work without increasing a
+    // rung, the head, or the 52-unit ceiling the moral choice is tuned against.
     let (ship, _) = window_ship(&mut app);
-    assert!(
-        app.world().get::<InfrastructureCondition>(ship).is_none(),
-        "the crew's hull must carry no infrastructure ledger: a hull that could deliver \
-         cargo into a rung could raise the ladder's ceiling, and the assertion above would \
-         stop being about every run"
+    assert_eq!(
+        app.world()
+            .get::<InfrastructureCondition>(ship)
+            .and_then(|condition| condition.0.capacity("reserve_fuel")),
+        Some(100),
+        "the scenario-local load exists for the manifold and nowhere in window_supply"
     );
 
     // A structural double-check on the pairing the claims are tuned for: ANY
@@ -14868,6 +15201,106 @@ fn no_state_of_falling_skyway_covers_all_three_claimants() {
          'capacity for two' is not what the numbers say: {} + {} against {best_possible}",
         claims[1],
         claims[2]
+    );
+}
+
+/// **Issue #1135 — early transfer pre-emption.** The manifold is live before
+/// Act 3 posts its run-up objective. A crew who physically dock and move reserve
+/// fuel over the umbilical crosses the receiver's own authored capacity
+/// threshold; the scenario latches that work and the later post arrives green.
+#[test]
+fn falling_skyway_an_early_umbilical_transfer_resolves_when_the_window_work_posts() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let (mut app, ship) = skyway_at_act_two();
+    assert_eq!(
+        objective_status_opt(&app, "obj-a3-window-ready"),
+        None,
+        "precondition: the back-half objective has not posted yet"
+    );
+    assert_eq!(
+        window_capacity_of(&mut app, WINDOW_TRANSFER_MANIFOLD, "reserve_fuel"),
+        0,
+        "the deterministic receiving manifold starts empty"
+    );
+
+    window_prime_manifold(&mut app, ship);
+    assert_eq!(
+        objective_status_opt(&app, "obj-a3-window-ready"),
+        None,
+        "the work was remembered without inventing an objective early"
+    );
+
+    window_fire_deadline_callback(&mut app, "on_storm_passed");
+    assert_eq!(
+        objective_status(&app, "obj-a3-window-ready"),
+        ObjectiveStatus::Completed,
+        "post_remembered_objective consumes the target-backed completion memory"
+    );
+    let posted = app
+        .world()
+        .resource::<project_phoenix::world::server::ObjectiveManagerRes>()
+        .0
+        .sorted_snapshots()
+        .into_iter()
+        .find(|objective| objective.id == "obj-a3-window-ready")
+        .expect("the objective was posted for the mission record");
+    assert!(
+        !posted.mandatory,
+        "window work is a good-ending differentiator"
+    );
+}
+
+/// **Issue #1135 — unworked transfer and protected decision.** If nobody runs
+/// the dock/umbilical chain, opening the window fails the optional work instead
+/// of completing it. Closing an untouched window also leaves the protected
+/// allocation red: neither authored boundary makes the decision for the crew.
+#[test]
+fn falling_skyway_unworked_transfer_and_unbooked_window_stay_red() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let (mut app, _) = skyway_at_act_two();
+    window_fire_deadline_callback(&mut app, "on_storm_passed");
+    assert_eq!(
+        objective_status(&app, "obj-a3-window-ready"),
+        ObjectiveStatus::Active
+    );
+    assert_eq!(skyway_flag(&app, "skyway_window_transfer_worked"), 0);
+    assert_eq!(
+        window_capacity_of(&mut app, WINDOW_TRANSFER_MANIFOLD, "reserve_fuel"),
+        0
+    );
+
+    window_fire_deadline_callback(&mut app, "on_transfer_window_opens");
+    assert_eq!(
+        objective_status(&app, "obj-a3-window-ready"),
+        ObjectiveStatus::Failed,
+        "the authored opening is a failure boundary, never free completion"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a3-window"),
+        ObjectiveStatus::Active,
+        "the human-protected allocation still waits for a booking"
+    );
+    let window = app
+        .world()
+        .resource::<project_phoenix::world::server::ObjectiveManagerRes>()
+        .0
+        .sorted_snapshots()
+        .into_iter()
+        .find(|objective| objective.id == "obj-a3-window")
+        .expect("the window objective was posted");
+    assert!(
+        !window.mandatory,
+        "the locked mandatory spine excludes the window"
+    );
+
+    window_fire_deadline_callback(&mut app, "on_transfer_window_closes");
+    assert_eq!(skyway_flag(&app, "skyway_window_lifts_started"), 0);
+    assert_eq!(
+        objective_status(&app, "obj-a3-window"),
+        ObjectiveStatus::Failed,
+        "a timer cannot auto-complete the protected fs-book-the-window decision"
     );
 }
 
@@ -14911,6 +15344,15 @@ fn a_crew_who_did_everything_still_reach_the_window_short() {
         1,
         "precondition: the workers are back before anything gets repaired at full rate"
     );
+
+    // From here on this is a manually driven work branch. Leave Comms under
+    // its ordinary fixture authority for the negotiation above, then hold the
+    // shared Tactical target source idle until each explicit lock below.
+    skyway_seat_idle_tactical(&mut app);
+
+    // This fixture's "everything" includes the optional target-side run-up.
+    // Prime it after the time-sensitive negotiation scene, before Act 3.
+    window_prime_manifold(&mut app, ship);
 
     // ── Act 2's other work: mend the rung the dispute was about ─────────────
     window_field_repair(
@@ -15061,7 +15503,7 @@ fn a_crew_who_did_everything_still_reach_the_window_short() {
     assert_eq!(
         objective_status(&app, "obj-a3-window-ready"),
         ObjectiveStatus::Completed,
-        "the run-up beat resolves when the thing it was a run-up to arrives"
+        "the real target-side priming completed before the opening boundary"
     );
 
     // The duration is on the panel for as long as the window lasts — the second
@@ -15084,6 +15526,11 @@ fn a_crew_who_did_everything_still_reach_the_window_short() {
     let committee_claim = manifest["skyway_claim_committee"];
     window_book(&mut app, "skyway_book_committee");
     assert_eq!(skyway_flag(&app, "skyway_window_lifts_started"), 1);
+    assert_eq!(
+        objective_status(&app, "obj-a3-window"),
+        ObjectiveStatus::Completed,
+        "the protected human booking resolves its own decision objective; the close timer does not"
+    );
     assert_eq!(
         window_manifest(&mut app)["skyway_window_available"],
         supply - committee_claim,
@@ -15192,6 +15639,7 @@ fn a_crew_who_did_everything_still_reach_the_window_short() {
 #[test]
 fn a_crew_who_saved_the_head_and_nothing_else_reach_the_window_shorter() {
     let (mut app, ship) = skyway_at_act_two();
+    skyway_seat_idle_tactical(&mut app);
     let (_, ship_uuid) = window_ship(&mut app);
 
     let projection = skyway_deadline_secs(&app, "skyhook_failure_due") as f64;
@@ -15244,6 +15692,14 @@ fn a_crew_who_saved_the_head_and_nothing_else_reach_the_window_shorter() {
         "there is lift in this window and it is not enough — the same news as the run \
          above, told against a different number"
     );
+
+    window_book(&mut app, "skyway_book_committee");
+    assert_eq!(skyway_flag(&app, "skyway_window_lifts_started"), 1);
+    assert_eq!(
+        objective_status(&app, "obj-a3-window"),
+        project_phoenix::core::messages::ObjectiveStatus::Completed,
+        "the protected human booking, not the later close timer, resolves the optional decision"
+    );
 }
 
 /// **Issue #1042, AC2/AC4 — the third outcome, and the one a bridge unattended
@@ -15270,6 +15726,7 @@ fn a_crew_who_mended_nothing_reach_a_window_with_no_lift_in_it_at_all() {
     drop(probe);
 
     let mut app = build_engaged_skyway_app(&skyway_args(SKYWAY_DT, opens_at + 12.0));
+    skyway_seat_idle_tactical(&mut app);
     run(&mut app, 10);
     let (ship, _) = window_ship(&mut app);
     window_run_to(&mut app, opens_at - 20.0);
@@ -15793,6 +16250,10 @@ fn falling_skyway_carries_the_workers_and_the_convoy_and_keeps_the_captains_word
     let settled_by = window_now(&app) + 24.0;
     window_run_to(&mut app, settled_by);
     assert_eq!(skyway_flag(&app, "skyway_strike_settled"), 1);
+
+    // "Everything" includes the optional manifold run-up. Do it after the
+    // time-sensitive parley setup and before the back half opens.
+    window_prime_manifold(&mut app, ship);
 
     // ── Act 2's other work, and Act 3's: mend the rung, hold the head ────────
     window_field_repair(
@@ -16476,6 +16937,7 @@ fn the_early_collapse_leaves_one_berth_and_control_asks_for_a_name() {
     use project_phoenix::core::messages::ObjectiveStatus;
 
     let (mut app, ship) = skyway_at_act_two();
+    skyway_seat_idle_tactical(&mut app);
 
     // Nothing is done about anything. The ship is parked where it can hear
     // Control, which is the only thing this crew get right.
@@ -16646,6 +17108,7 @@ fn the_next_mission_opens_on_what_this_one_left_behind() {
     use project_phoenix::snapshot::{capture, run_for, versions};
 
     let (mut app, ship) = skyway_at_act_two();
+    skyway_seat_idle_tactical(&mut app);
 
     // Nothing is done about anything: the head comes down before the window
     // opens, and the one berth left on the rung goes to the convoy.
@@ -16682,6 +17145,11 @@ fn the_next_mission_opens_on_what_this_one_left_behind() {
 
     assert_eq!(facts.version, CAMPAIGN_FACTS_VERSION);
     assert_eq!(facts.mission, SKYWAY_WORLD);
+    assert_eq!(
+        facts.outcome.as_deref(),
+        Some("victory"),
+        "an ordinarily completed episode carries an explicit authoritative campaign outcome"
+    );
 
     // THE CLAIM, stated against the live world rather than against a road this
     // test thinks it took: every `campaign.` counter the mission actually wrote
@@ -16794,6 +17262,27 @@ fn the_next_mission_opens_on_what_this_one_left_behind() {
         );
         assert!((0.0..=1.0).contains(&structure.condition));
     }
+    assert!(
+        !facts
+            .assets
+            .iter()
+            .any(|asset| asset.name == WINDOW_TRANSFER_MANIFOLD),
+        "the temporary manifold ends with the transfer window and cannot leak as a campaign asset"
+    );
+    assert!(
+        !facts
+            .structures
+            .iter()
+            .any(|structure| structure.name == WINDOW_TRANSFER_MANIFOLD),
+        "the same mission machinery cannot leak through the narrower structure projection"
+    );
+    assert!(
+        !facts
+            .structures
+            .iter()
+            .any(|structure| structure.name == "entity.alliance_destroyer.name"),
+        "the player's publish=false transfer-fuel ledger is scenario-local rather than a campaign structure"
+    );
 
     // ── What did not travel ──────────────────────────────────────────────────
 

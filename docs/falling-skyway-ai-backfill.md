@@ -50,6 +50,18 @@ authored state as it stands, and flags every unratified number it leans on.
 > sticky across travel and range changes, while ordinary `ClearComms` remains a
 > deliberate dismissal of the inbox and does not auto-reopen this optional route.
 
+> **Current external-work note (#1162/#1164/#1135).** The audit below predates
+> the retirement of `StartOperation`. Current Backfill consumes objective
+> directives for `Tow`, `Stabilise`, `Transfer`, `FieldRepair`, and `Order`,
+> driving the same tractor, dock, umbilical, repair-dispatch and traffic controls
+> as humans. Falling Skyway's optional `Transfer` directive makes Helm
+> dock to the receiving manifold and Engineering flow reserve fuel; completion
+> is the target's capacity-backed threshold. The edge is remembered if work
+> happens early and an unworked objective fails at the existing t=1600 opening.
+> The later beneficiary allocation is a distinct protected decision and is not
+> chosen by Backfill. Findings 1–4 and the old command-surface/gap tables remain
+> historical evidence, not a description of the current runtime.
+
 ## Method
 
 - Read the three AI fragments the Alliance Destroyer composes:
@@ -63,7 +75,7 @@ authored state as it stands, and flags every unratified number it leans on.
 - Grepped the repo for every producer of `StartOperation` and for any
   `operations_console` AI surface.
 
-## The AI command surface (what a console on auto can actually emit)
+## Historical AI command surface (before the crew-owned system emitters)
 
 Every verb an AI backfill can order, and where it is declared:
 
@@ -86,13 +98,13 @@ Plus the five target selectors (`fleet_baseline.toml:407-631`): sensors, weapons
 navigation (objective waypoints only), repair (own damage stations), comms
 hail (hail-independent, band-scored).
 
-**The decisive negative:** there is **no `operations_console`, no operations AI
+**Historical decisive negative:** there was **no `operations_console`, no operations AI
 policy, and no way for AI to emit `StartOperation`**. `StartOperation` has exactly
 two producers in the repo — a *human* captain console (`gui/action-map.js:204`)
 and *world script* (`src/world/script/effects.rs:410`). The destroyer owns all four
 capability verbs (`alliance_destroyer.toml:1520-1640`) but nothing in any fragment
 can order them. `tow`, `stabilise`, `field_repair` and `transfer` are therefore
-strictly crew-only today.
+strictly crew-only in that historical build.
 
 ## Finding 1 — Act 1 completed without the crew doing anything (historical)
 
@@ -153,7 +165,7 @@ the policy can still encounter the file path, and whole-scenario success remains
 the later AI-backfill evaluation's job. Both negotiation and force remain
 available, and the lowered workforce disposition makes late force costlier.
 
-## Finding 3 — operations are unreachable, so the storm and the collapse are unwinnable-by-AI
+## Finding 3 — historical: operations were unreachable
 
 Because no policy can emit `StartOperation`:
 
@@ -224,7 +236,7 @@ approach (or that loiters at the Lyra waiting for a tow nobody can order) crosse
 into the DESTROYED row. This is the one survivability result in the scenario
 that is timing-sensitive for backfill, and the agents' numbers are unratified.
 
-## Gap summary and what would close each gap
+## Historical gap summary
 
 | Gap | Evidence | Would require |
 |---|---|---|
@@ -341,14 +353,17 @@ gates actually sit ([ai] exploration; every ref verified against the file).
   records promise already cannot be kept without the scan. What is missing is
   the up-front requirement, not the consequence.
 
-## The locked design — Falling Skyway as a mission the verbed AI completes 80-95 %
+## The locked design — Falling Skyway as a mission the verbed AI can complete
 
 This is the ratified follow-on to the survey above, reached by grilling the design
 tree branch by branch. All numbered decisions are the human's; the prose that
 rounded them out is AI-origin. The goal restated: make Falling Skyway require
-real interaction, then give the AI the verbs (scan, operations, traffic ordering)
-so a fully-backfilled crew completes the mandatory objectives semi-reliably —
-**80-95 % across seeds** — where today's AI manages almost none of it, and an
+real interaction, then give the AI the verbs (scan, tow/stabilise/transfer/repair,
+traffic ordering)
+so a fully-backfilled crew can complete the mandatory objectives without hidden
+shortcuts. The later rough first-pass balance band is **25-95 % across seeds**;
+this document does not claim a new sweep, and the historical audit measured
+almost none of the mandatory set. An
 idle crew fails loudly in every intensity era.
 
 ### The spine (mandatory set)
@@ -373,8 +388,9 @@ Idle crew fails these loudly across all eras.
   leaving the report interaction available for later records and consequences.
   Idempotency comes from "did the crew already engage" flags, like the
   `skyway_strike_settled` guard.
-- **Pre-emption is remembered**: early work (scan early, tow the Lyra at t=300,
-  settle the strike before the deadline) is recorded and the objective
+- **Pre-emption is remembered**: early work (scan early, tow the Lyra, settle
+  the strike, stabilise the head, or prime the transfer manifold) is recorded
+  from authoritative target state and the objective
   **auto-resolves when it posts** — the full 25-minute schedule stays on stage;
 early work relieves pressure rather than shortening the mission.
 
@@ -418,7 +434,7 @@ Content split (through-line = 1/2/4/5/7, side-pressure = 3/8, back-half = 6):
 | 4 | rescue | through-line | opens on storm front / early tow |
 | 5 | storm survival | through-line | storm front |
 | 6 | stabilise / collapse | back-half | head comes down after rescue-clear or deadline |
-| 7 | transfer window | through-line | booked after rescue; the good-ending differentiator, compute over the #1042 ledger `:3477-3523` |
+| 7 | transfer window | through-line | optional manifold run-up may complete early; t=1600 fails it if unworked, then the protected allocation remains the good-ending differentiator |
 | 8 | evidence / confrontation | side-pressure | worker corroboration + scan diff |
 
 Survey + bad news → strike stews mid-survey → storm mid-negotiation → rescue and
@@ -447,26 +463,23 @@ urgent Control message and exact missing-work flags.
 
 ### The AI surface (the verb batch, scoped separately)
 
-- **(Q17) New `AiDirective` kinds carry the verbs**: `Scan { target }`, the
-  delivered operate-family directives, and `Order { target, route }` — mirroring the
-  `Hail`/`Dock` precedent. New `SystemAffinity` entries route them into the per-
-  system scored-objective pools (`score_doctrine_pool`); the new emitters —
-  sensors AI scan (`src/ship/sensors.rs:633-650` has the applier, no policy),
-  the operation-owning fine-system emitters, and Navigation's order-civilian
-  emitter — consume them exactly like Comms consumes `Hail`
-  (`SystemAffinity::Comms`, `core/messages.rs:4295-4298`). This makes the AI
-  "AI-addressable by construction": the objective *is* the directive the emitter
-  serves.
+- **Current `AiDirective` kinds carry the delivered verbs**: `Tow`, `Stabilise`,
+  `Transfer`, `FieldRepair`, and `Order`, mirroring the existing `Hail`/`Dock`
+  precedent. Station-specific emitters consume the shared scored-objective pool:
+  Tractor, Dock, Umbilical, Repair and Navigation each issue their ordinary
+  admitted control. A `Transfer` is a two-seat chain rather than a generic
+  `Operate` command. `Scan` remains the dedicated Sensors slice (#1139).
 - **(Q14) Objectives-driven emitters**: each actionable objective carries enough
-  authored info (verb and target, plus route where required) for the AI to emit its verb. Not
+  authored info (verb and target, plus route where required) for the AI to emit
+  its verb. Not
   verb-gating or locks — give the AI the verbs, then let concurrency overwhelm
   it. Keep humans and AI symmetric; nothing branches on actor identity, only on
   timing of engagement.
-- Today's AI at ≈0 % on the mandatory set is the regression baseline.
+- The ≈0 % result is the historical regression baseline, not current behavior.
 
 ### Measurement
 
-Objectives-completion rate on the **mandatory set, 80-95 % across seeds**, driven
+Objectives-completion rate on the mandatory set can be driven
 through `scripts/balance-runs.mjs` seed sweeps. Needs a per-objective status
 rollup in `src/headless/report.rs` (`RunReport` at `:180-203` has
 outcome/phase/ship/damage but no per-objective set).
@@ -477,8 +490,6 @@ outcome/phase/ship/damage but no per-objective set).
 - `assets/entities/fragments/ai/fleet_baseline.toml`
 - `assets/entities/fragments/ai/captain_alliance.toml`
 - `assets/entities/fragments/ai/movement_attack_pass.toml`
-- `assets/entities/alliance_destroyer.toml` (`[operations]` at 1489-1640)
+- `assets/entities/alliance_destroyer.toml` (current tractor, dock, umbilical and repair-dispatch tables; historical audit used the retired `[operations]` block)
 - `assets/entities/region_radiation_band.toml`
-- `gui/action-map.js` (`StartOperation` producer, line 204)
-- `src/world/script/effects.rs` (`StartOperation` script producer, line 410)
-- `src/operations/server.rs` (admission, line 242; start, line 309)
+- `src/tractor/`, `src/dock/`, `src/umbilical/`, and `src/console/repair/external_server.rs` (current crew-owned systems)

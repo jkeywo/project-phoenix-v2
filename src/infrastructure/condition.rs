@@ -116,11 +116,11 @@ pub struct InfrastructureConfig {
     /// deliberately not cross-checked at load. See
     /// [`WorkforceRegister::on_strike`](crate::world::workforce::WorkforceRegister::on_strike).
     ///
-    /// What a stoppage *does* to work here is not on this table either. It is
-    /// authored per verb on the operating hull's
-    /// `[[operations.capability.interrupt]]` with `cause = "work_stoppage"`,
-    /// because "transfers are refused but repairs merely go slowly" is a
-    /// judgement about the fiction rather than a property of the structure.
+    /// What a stoppage *does* to crew-owned tractor, dock, umbilical or repair
+    /// systems is not implicit in this association. The workforce register
+    /// publishes its state for the scenario to gate objectives, dialogue and
+    /// consequences; physical systems continue to obey their own authored
+    /// eligibility unless the scenario changes the state they read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workforce: Option<String>,
     /// Named capacities, in authored order.
@@ -251,10 +251,18 @@ pub struct ThresholdConfig {
     /// The operational flag this threshold owns. The author's namespace: two
     /// entities declaring the same name are declaring the same flag.
     pub flag: String,
-    /// Condition fraction below which the flag falls.
+    /// Optional capacity whose live fraction this threshold reads instead of
+    /// the condition track (issue #1135). The capacity must be declared on this
+    /// same infrastructure block. Omitting it retains the original condition-
+    /// backed threshold semantics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capacity: Option<String>,
+    /// Source fraction below which the flag falls. The source is the condition
+    /// track by default, or `capacity / capacity.ceiling` when `capacity` is
+    /// authored above.
     pub fails_below: f32,
-    /// Condition fraction at or above which the flag returns. `None` resolves
-    /// to `fails_below + hysteresis`.
+    /// Source fraction at or above which the flag returns. `None` resolves to
+    /// `fails_below + hysteresis`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restores_above: Option<f32>,
     /// `strings.csv` id for a crew-facing label, when the scenario wants this
@@ -343,9 +351,24 @@ impl InfrastructureConfig {
             if threshold.flag.trim().is_empty() {
                 return Err("[[infrastructure.threshold]] needs a non-empty flag".to_string());
             }
+            if let Some(capacity) = &threshold.capacity {
+                if capacity.trim().is_empty() {
+                    return Err(format!(
+                        "[[infrastructure.threshold]] {} capacity must be a non-empty id",
+                        threshold.flag
+                    ));
+                }
+                if !self.capacities.iter().any(|c| c.id == *capacity) {
+                    return Err(format!(
+                        "[[infrastructure.threshold]] {} reads capacity '{capacity}', but this \
+                         entity declares no [[infrastructure.capacity]] with that id",
+                        threshold.flag
+                    ));
+                }
+            }
             if !(0.0..=1.0).contains(&threshold.fails_below) {
                 return Err(format!(
-                    "[[infrastructure.threshold]] {} fails_below must be a condition FRACTION in \
+                    "[[infrastructure.threshold]] {} fails_below must be a source FRACTION in \
                      0.0..=1.0, got {}",
                     threshold.flag, threshold.fails_below
                 ));
@@ -353,7 +376,7 @@ impl InfrastructureConfig {
             if let Some(restore) = threshold.restores_above {
                 if !(0.0..=1.0).contains(&restore) {
                     return Err(format!(
-                        "[[infrastructure.threshold]] {} restores_above must be a condition \
+                        "[[infrastructure.threshold]] {} restores_above must be a source \
                          FRACTION in 0.0..=1.0, got {restore}",
                         threshold.flag
                     ));
@@ -387,9 +410,13 @@ impl InfrastructureConfig {
 pub struct ResolvedThreshold {
     /// The operational flag this threshold owns.
     pub flag: String,
-    /// Condition fraction below which the flag falls.
+    /// Optional capacity whose live fraction this threshold reads. `None`
+    /// means the entity's condition track.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capacity: Option<String>,
+    /// Source fraction below which the flag falls.
     pub fails_below: f32,
-    /// Condition fraction at or above which the flag returns.
+    /// Source fraction at or above which the flag returns.
     pub restores_above: f32,
     /// The authored crew-facing label, carried through unchanged — see
     /// [`ThresholdConfig::label`].
@@ -436,9 +463,10 @@ pub struct InfrastructureState {
     hull_damage_share: f32,
     publish: bool,
     /// The `[[workforce]]` id staffing this structure (issue #1035), carried
-    /// through from the authored table so the one system that asks — the
-    /// operations tick — can read it off the component it already queries
-    /// rather than needing a second lookup back to the entity's TOML.
+    /// through from the authored table and snapshot as the structure's party
+    /// association. Current crew-owned external systems do not infer a hidden
+    /// slowdown or refusal from it; scenarios read the workforce register's
+    /// published flags and author the consequence explicitly.
     ///
     /// Authored and immutable, like `publish`: nothing moves it, and a
     /// structure does not change hands mid-mission.
@@ -470,6 +498,7 @@ impl InfrastructureState {
             .iter()
             .map(|t| ResolvedThreshold {
                 flag: t.flag.clone(),
+                capacity: t.capacity.clone(),
                 fails_below: t.fails_below,
                 restores_above: t
                     .restores_above
@@ -477,10 +506,23 @@ impl InfrastructureState {
                 label: t.label.clone(),
             })
             .collect();
-        let fraction = fraction_of(current, max);
+        let capacities: Vec<ResolvedCapacity> = config
+            .capacities
+            .iter()
+            .map(|c| ResolvedCapacity {
+                id: c.id.clone(),
+                level: c.amount,
+                // An unauthored ceiling is the starting amount: every
+                // capacity written before transfers existed means "this is
+                // what the depot holds", and that reading has to keep
+                // working unchanged.
+                ceiling: c.ceiling.unwrap_or(c.amount).max(c.amount),
+                label: c.label.clone(),
+            })
+            .collect();
         let held = thresholds
             .iter()
-            .map(|t| fraction >= t.fails_below)
+            .map(|t| threshold_fraction(t, current, max, &capacities) >= t.fails_below)
             .collect();
         Self {
             max,
@@ -491,20 +533,7 @@ impl InfrastructureState {
             workforce: config.workforce.clone(),
             thresholds,
             held,
-            capacities: config
-                .capacities
-                .iter()
-                .map(|c| ResolvedCapacity {
-                    id: c.id.clone(),
-                    level: c.amount,
-                    // An unauthored ceiling is the starting amount: every
-                    // capacity written before transfers existed means "this is
-                    // what the depot holds", and that reading has to keep
-                    // working unchanged.
-                    ceiling: c.ceiling.unwrap_or(c.amount).max(c.amount),
-                    label: c.label.clone(),
-                })
-                .collect(),
+            capacities,
             last_hull: None,
         }
     }
@@ -547,8 +576,8 @@ impl InfrastructureState {
     /// Deliberately NOT on the wire. Which side of a dispute staffs a depot is
     /// something the crew learn by talking to people, and putting it on the
     /// published condition block would have every console read the answer off a
-    /// panel before the negotiation started. What the crew *do* see is the
-    /// refusal the stoppage produces, in words, on the operations panel.
+    /// panel before the negotiation started. What the crew *do* see is whichever
+    /// stoppage consequence the scenario authors onto Comms or the dossier.
     pub fn workforce(&self) -> Option<&str> {
         self.workforce.as_deref()
     }
@@ -567,8 +596,8 @@ impl InfrastructureState {
     }
 
     /// A named capacity whole — its level and its ceiling (issue #1027), which
-    /// is what a `transfer` needs in order to ask whether this end can take
-    /// part.
+    /// is what an Umbilical flow needs in order to ask whether this end has
+    /// room.
     pub fn capacity_reading(&self, id: &str) -> Option<&ResolvedCapacity> {
         self.capacities.iter().find(|c| c.id == id)
     }
@@ -587,16 +616,19 @@ impl InfrastructureState {
     /// that keeps a depot's published number honest if two moves ever land in
     /// one tick.
     ///
-    /// Unlike a condition move this returns no [`FlagChange`]s: a capacity is a
-    /// published quantity rather than an operational state, and "the depot has
-    /// twelve fewer berths" is not an event a threshold can be crossed by.
-    pub fn adjust_capacity(&mut self, id: &str, delta: i64) -> Option<i64> {
+    /// A plain capacity remains a published quantity rather than an event. When
+    /// an authored infrastructure threshold explicitly names this capacity,
+    /// crossing that threshold returns the corresponding [`FlagChange`] just
+    /// like a condition-backed threshold does.
+    pub fn adjust_capacity(&mut self, id: &str, delta: i64) -> Option<(i64, Vec<FlagChange>)> {
         let capacity = self.capacities.iter_mut().find(|c| c.id == id)?;
         capacity.level = capacity
             .level
             .saturating_add(delta)
             .clamp(0, capacity.ceiling);
-        Some(capacity.level)
+        let level = capacity.level;
+        let changes = self.recompute_flags();
+        Some((level, changes))
     }
 
     /// The resolved thresholds, in authored order.
@@ -716,12 +748,19 @@ impl InfrastructureState {
     /// Edge-detect every threshold against the stored flag state. See the
     /// module docs for why this is edge-triggered rather than level-computed.
     fn recompute_flags(&mut self) -> Vec<FlagChange> {
-        let fraction = fraction_of(self.current, self.max);
+        let fractions: Vec<f32> = self
+            .thresholds
+            .iter()
+            .map(|threshold| {
+                threshold_fraction(threshold, self.current, self.max, &self.capacities)
+            })
+            .collect();
         let mut changes = Vec::new();
         for (index, threshold) in self.thresholds.iter().enumerate() {
             let Some(held) = self.held.get_mut(index) else {
                 continue;
             };
+            let fraction = fractions[index];
             if *held && fraction < threshold.fails_below {
                 *held = false;
                 changes.push(FlagChange {
@@ -748,6 +787,31 @@ fn fraction_of(current: f32, max: f32) -> f32 {
     (current / max).clamp(0.0, 1.0)
 }
 
+/// Read one threshold's configured source as a normalized fraction. A capacity
+/// with a zero ceiling reads empty, not intact: unlike a condition track, zero
+/// capacity is a real authored "nothing can be transferred" state.
+fn threshold_fraction(
+    threshold: &ResolvedThreshold,
+    condition: f32,
+    condition_max: f32,
+    capacities: &[ResolvedCapacity],
+) -> f32 {
+    let Some(id) = threshold.capacity.as_deref() else {
+        return fraction_of(condition, condition_max);
+    };
+    capacities
+        .iter()
+        .find(|capacity| capacity.id == id)
+        .map(|capacity| {
+            if capacity.ceiling <= 0 {
+                0.0
+            } else {
+                (capacity.level as f32 / capacity.ceiling as f32).clamp(0.0, 1.0)
+            }
+        })
+        .unwrap_or(0.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -766,6 +830,7 @@ mod tests {
             thresholds: vec![ThresholdConfig {
                 label: None,
                 flag: "depot_transfer_capable".to_string(),
+                capacity: None,
                 fails_below: 0.4,
                 restores_above: None,
             }],
@@ -810,6 +875,7 @@ amount = 12
 
 [[threshold]]
 flag = "docking_capable"
+capacity = "berths"
 fails_below = 0.3
 restores_above = 0.6
 "#;
@@ -830,7 +896,21 @@ restores_above = 0.6
             1,
             "[[threshold]] is a repeated block"
         );
+        assert_eq!(parsed.thresholds[0].capacity.as_deref(), Some("berths"));
         parsed.validate().expect("the authored table is valid");
+    }
+
+    #[test]
+    fn an_omitted_threshold_capacity_keeps_condition_backing() {
+        let parsed: ThresholdConfig = toml::from_str(
+            r#"
+flag = "load_bearing"
+fails_below = 0.4
+"#,
+        )
+        .expect("the original threshold vocabulary still parses");
+        assert_eq!(parsed.capacity, None);
+        assert_eq!(ThresholdConfig::default().capacity, None);
     }
 
     #[test]
@@ -943,6 +1023,106 @@ restores_above = 0.6
                 raised: true
             }],
             "…and 90 % is the authored restore point exactly, so the flag returns there"
+        );
+    }
+
+    #[test]
+    fn a_capacity_backed_threshold_flips_from_the_capacity_track() {
+        let config = InfrastructureConfig {
+            capacities: vec![CapacityConfig {
+                id: "reserve_fuel".to_string(),
+                amount: 0,
+                ceiling: Some(100),
+                label: None,
+            }],
+            thresholds: vec![ThresholdConfig {
+                flag: "transfer_primed".to_string(),
+                capacity: Some("reserve_fuel".to_string()),
+                fails_below: 0.4,
+                restores_above: Some(0.5),
+                label: None,
+            }],
+            ..Default::default()
+        };
+        config
+            .validate()
+            .expect("a threshold may read a capacity on the same infrastructure track");
+        let mut state = InfrastructureState::from_config(&config);
+        assert_eq!(state.flag("transfer_primed"), Some(false));
+
+        let (level, short) = state
+            .adjust_capacity("reserve_fuel", 49)
+            .expect("the capacity exists");
+        assert_eq!(level, 49);
+        assert!(
+            short.is_empty(),
+            "49 % remains below the authored 50 % restore point"
+        );
+
+        let (_, raised) = state
+            .adjust_capacity("reserve_fuel", 1)
+            .expect("the capacity exists");
+        assert_eq!(
+            raised,
+            vec![FlagChange {
+                flag: "transfer_primed".to_string(),
+                raised: true,
+            }],
+            "filling the receiving ledger to its authored line raises the operational edge"
+        );
+
+        let (_, fell) = state
+            .adjust_capacity("reserve_fuel", -11)
+            .expect("the capacity exists");
+        assert_eq!(
+            fell,
+            vec![FlagChange {
+                flag: "transfer_primed".to_string(),
+                raised: false,
+            }],
+            "draining below the failure line clears the same target-side flag"
+        );
+    }
+
+    #[test]
+    fn a_capacity_backed_threshold_must_name_a_capacity_on_the_same_entity() {
+        let config = InfrastructureConfig {
+            thresholds: vec![ThresholdConfig {
+                flag: "transfer_primed".to_string(),
+                capacity: Some("missing".to_string()),
+                fails_below: 0.5,
+                restores_above: Some(0.5),
+                label: None,
+            }],
+            ..Default::default()
+        };
+        let err = config
+            .validate()
+            .expect_err("a target-local reading cannot silently bind a global counter");
+        assert!(
+            err.contains("declares no [[infrastructure.capacity]]"),
+            "the authoring error must explain the missing local capacity, got {err}"
+        );
+    }
+
+    #[test]
+    fn a_capacity_backed_threshold_rejects_an_empty_source_id() {
+        let config = InfrastructureConfig {
+            thresholds: vec![ThresholdConfig {
+                flag: "transfer_primed".to_string(),
+                capacity: Some("   ".to_string()),
+                fails_below: 0.5,
+                restores_above: Some(0.5),
+                label: None,
+            }],
+            ..Default::default()
+        };
+        let err = config
+            .validate()
+            .expect_err("an empty source cannot identify a target-local capacity");
+        assert!(
+            err.contains("capacity must be a non-empty id"),
+            "the validation error must name the capacity source, got {err}"
         );
     }
 
@@ -1194,6 +1374,7 @@ restores_above = 0.6
                     thresholds: vec![ThresholdConfig {
                         label: None,
                         flag: "a".to_string(),
+                        capacity: None,
                         fails_below: 40.0,
                         restores_above: None,
                     }],
@@ -1206,6 +1387,7 @@ restores_above = 0.6
                     thresholds: vec![ThresholdConfig {
                         label: None,
                         flag: "a".to_string(),
+                        capacity: None,
                         fails_below: 0.5,
                         restores_above: Some(0.2),
                     }],
@@ -1219,12 +1401,14 @@ restores_above = 0.6
                         ThresholdConfig {
                             label: None,
                             flag: "a".to_string(),
+                            capacity: None,
                             fails_below: 0.5,
                             restores_above: None,
                         },
                         ThresholdConfig {
                             label: None,
                             flag: "a".to_string(),
+                            capacity: None,
                             fails_below: 0.2,
                             restores_above: None,
                         },
@@ -1289,5 +1473,50 @@ restores_above = 0.6
              down — restoring the number alone would re-fire the crossing on the next tick"
         );
         assert_eq!(restored.flag("depot_transfer_capable"), Some(false));
+    }
+
+    #[test]
+    fn capacity_threshold_source_and_held_state_survive_a_snapshot_round_trip() {
+        let config = InfrastructureConfig {
+            capacities: vec![CapacityConfig {
+                id: "reserve_fuel".to_string(),
+                amount: 0,
+                ceiling: Some(100),
+                label: None,
+            }],
+            thresholds: vec![ThresholdConfig {
+                flag: "transfer_primed".to_string(),
+                capacity: Some("reserve_fuel".to_string()),
+                fails_below: 0.4,
+                restores_above: Some(0.5),
+                label: None,
+            }],
+            ..Default::default()
+        };
+        let mut state = InfrastructureState::from_config(&config);
+        state
+            .adjust_capacity("reserve_fuel", 50)
+            .expect("the capacity exists");
+
+        let bytes = toml::to_string(&state).expect("the live track serialises");
+        let mut restored: InfrastructureState =
+            toml::from_str(&bytes).expect("the capacity-backed threshold comes back");
+        assert_eq!(restored, state);
+        assert_eq!(
+            restored.thresholds()[0].capacity.as_deref(),
+            Some("reserve_fuel")
+        );
+        assert_eq!(restored.flag("transfer_primed"), Some(true));
+        assert_eq!(
+            restored
+                .adjust_capacity("reserve_fuel", -11)
+                .expect("the restored capacity remains addressable")
+                .1,
+            vec![FlagChange {
+                flag: "transfer_primed".to_string(),
+                raised: false,
+            }],
+            "after resume, the threshold must still read the capacity rather than the unchanged condition track"
+        );
     }
 }

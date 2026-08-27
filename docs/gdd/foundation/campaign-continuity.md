@@ -57,6 +57,12 @@ The proposed loop is:
 
 The record names the episode and its authoritative terminal outcome. An unfinished saved run is not silently converted into a completed episode. A campaign may retain a short episode history for debrief and branching, but later scenarios consume declared facts rather than parsing prose summaries or assuming that `victory` means the same thing in every mission.
 
+Every ordinary completion path must therefore set an outcome explicitly; a
+complete family of campaign counters is not a substitute for the terminal
+verdict. Falling Skyway records `victory` after its window-close handoff even on
+costly partial roads, while its corridor collision and player-ship loss are
+explicit defeat routes.
+
 ### Campaign tallies and exclusive facts
 
 Scenario-authored counters under the `campaign.<mission>.<family>.<fact>` prefix carry facts that do not fit a generic record. Mutually exclusive families must write exactly one member on every ordinary completion path. A later script reads the named counter directly, so absence is never used to guess which outcome occurred.
@@ -82,6 +88,16 @@ Standing records the disposition of authored parties and whether their workforce
 Named entities that still exist may be carried as campaign assets by authored name and, where applicable, template. Structures carry condition as a fraction and their operational flags. The next scenario decides whether and how to instantiate those facts; identity never depends on a per-run UUID.
 
 A surviving convoy, damaged skyhook, lost patrol craft, or intact depot may therefore reappear. Incidental unnamed ships, spawned debris, asteroid populations, and transient visual objects do not.
+
+Only published infrastructure becomes a campaign structure. `[infrastructure]
+publish = false` is the existing narrow declaration for an authoritative
+mission-local ledger: it remains part of the scenario and its snapshot, but the
+projection does not turn it into durable structure state. This does not erase
+the named entity from campaign assets. Temporary named machinery must therefore
+end its entity lifecycle before the terminal snapshot if it should be neither
+asset nor structure. Falling Skyway uses both sides of the rule: the player
+ship's transfer-fuel ledger is unpublished, and its temporary receiving
+manifold is destroyed when the window closes.
 
 ## What does not persist by default
 

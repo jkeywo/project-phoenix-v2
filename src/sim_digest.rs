@@ -917,12 +917,11 @@ fn fold_umbilical_namespace(world: &World, mut acc: u64) -> u64 {
 /// Every other walk here folds its row count first, so "no rows" is still a
 /// number in the accumulator. That is the right shape when the population is a
 /// permanent part of the simulation — "no asteroids" is a fact about the world
-/// worth recording. Infrastructure is not yet: no world in the repository
-/// authors `[infrastructure]`, and folding a zero for all of them would have
-/// moved every committed world digest the moment this slice landed, over state
-/// none of those worlds have. A world with no infrastructure entities and a
-/// world built before the feature existed *are the same authoritative state*,
-/// so they fold to the same number.
+/// worth recording. This namespace entered while no shipped world authored
+/// `[infrastructure]`; folding a zero then would have moved every committed
+/// digest over absent state. That compatibility rule remains part of the fold:
+/// a world with no infrastructure entities and a pre-feature world are the
+/// same authoritative state and fold to the same number.
 ///
 /// The moment one structure exists it is folded in full, and from then on the
 /// count is in the accumulator like everyone else's — so this is a one-time
@@ -962,6 +961,10 @@ fn fold_infrastructure_namespace(world: &World, mut acc: u64) -> u64 {
             acc = fold_str(acc, flag);
             acc = fold_u64(acc, u64::from(held));
         }
+        // A capacity-backed threshold is represented at runtime by the same
+        // held flag above plus the live source level below. Its selector and
+        // restore/failure lines are immutable authored content, owned by the
+        // content digest rather than duplicated in this state fold.
         // Capacity LEVELS, since #1027 made them movable. Two hosts that
         // disagree about how many berths a depot has left disagree about
         // whether the transfer window can be met, which is the mission. The
@@ -1399,6 +1402,7 @@ mod tests {
             thresholds: vec![crate::infrastructure::ThresholdConfig {
                 label: None,
                 flag: "transfer_capable".to_string(),
+                capacity: None,
                 fails_below: 0.4,
                 restores_above: None,
             }],

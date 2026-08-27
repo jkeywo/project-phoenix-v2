@@ -40,7 +40,7 @@
 //!
 //! The prefix is the contract there, so the prefix is the filter here. What this
 //! module contributes is the *rest* of the handoff — the promises, findings,
-//! standing, assets and structures that are already authoritative records rather
+//! standing, assets and published structures that are already authoritative records rather
 //! than counters, and which a later mission would otherwise have to re-derive
 //! from a flag someone remembered to write.
 //!
@@ -382,6 +382,13 @@ fn structures(snapshot: &PhoenixSnapshot, scenario: &ScenarioState) -> Vec<Campa
         .iter()
         .filter_map(|entity| {
             let condition = entity.infrastructure.as_ref()?;
+            // `publish = false` is the infrastructure vocabulary's existing
+            // declaration that this is a private, scenario-local ledger. It
+            // remains authoritative mission state, but it is not a durable
+            // structure a campaign may project.
+            if !condition.publishes() {
+                return None;
+            }
             let mut flags: Vec<(String, bool)> = condition
                 .flags()
                 .into_iter()
@@ -612,12 +619,14 @@ mod tests {
                 thresholds: vec![
                     ThresholdConfig {
                         flag: "lift_capable".into(),
+                        capacity: None,
                         fails_below: 0.6,
                         restores_above: None,
                         label: None,
                     },
                     ThresholdConfig {
                         flag: "tether_stable".into(),
+                        capacity: None,
                         fails_below: 0.2,
                         restores_above: None,
                         label: None,
@@ -627,6 +636,15 @@ mod tests {
             });
         state.set_condition(45.0);
         state
+    }
+
+    fn mission_local_condition() -> crate::infrastructure::InfrastructureState {
+        crate::infrastructure::InfrastructureState::from_config(
+            &crate::infrastructure::condition::InfrastructureConfig {
+                publish: false,
+                ..crate::infrastructure::condition::InfrastructureConfig::default()
+            },
+        )
     }
 
     fn stored(payload: PhoenixSnapshot) -> StoredRun {
@@ -721,6 +739,23 @@ mod tests {
             ],
             "the operational flags as the mission left them — which is what a \
              later mission opens on, rather than what its own world file authors"
+        );
+    }
+
+    #[test]
+    fn unpublished_mission_local_infrastructure_is_not_a_campaign_structure() {
+        let mut payload = finished_payload();
+        payload.entities[0].infrastructure = Some(mission_local_condition());
+
+        let facts = project(&stored(payload));
+
+        assert!(
+            facts.assets.iter().any(|asset| asset.name == SKYHOOK),
+            "publish=false narrows only the infrastructure projection; it does not broadly erase a real named asset"
+        );
+        assert!(
+            facts.structures.is_empty(),
+            "the infrastructure vocabulary already marks this ledger private to the mission, so it must not become campaign structure state"
         );
     }
 

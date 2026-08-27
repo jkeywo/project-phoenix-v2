@@ -543,6 +543,7 @@ mod tests {
             }],
             thresholds: vec![ThresholdConfig {
                 flag: "depot_transfer_capable".into(),
+                capacity: None,
                 fails_below: 0.4,
                 restores_above: None,
                 label: Some("world.probe.threshold.transfer.label".into()),

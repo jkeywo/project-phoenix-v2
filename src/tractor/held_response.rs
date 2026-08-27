@@ -309,6 +309,7 @@ mod tests {
             thresholds: vec![ThresholdConfig {
                 label: None,
                 flag: "holding".to_string(),
+                capacity: None,
                 fails_below: 0.4,
                 restores_above: Some(0.6),
             }],

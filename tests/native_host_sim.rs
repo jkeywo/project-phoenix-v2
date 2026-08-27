@@ -29,6 +29,16 @@
 //!
 //! The native *render* proof is `tests/native_viewscreen_render.rs`, which
 //! needs a GPU and is `#[ignore]`d for that reason.
+//!
+//! The native↔headless **digest equivalence** check is not here either, and for
+//! a load-bearing reason: pinning the scheduler means a one-thread task pool,
+//! and Bevy's task pools are process-global and fixed by whichever app in the
+//! process builds first — so a digest claim made in this binary, where five
+//! other tests build apps of their own, would be a claim about whoever won that
+//! race. It lives in `tests/native_headless_digest.rs`, alone, on the pattern
+//! `tests/rng_determinism.rs` and `tests/archetype_order_determinism.rs`
+//! established. `tests/native_host_snapshot.rs` owns criterion 5's snapshot
+//! half for the same reason.
 
 use bevy::prelude::*;
 
@@ -64,6 +74,19 @@ fn solo_config() -> NativeHostConfig {
     cfg.solo = true;
     cfg.surface = NativeRenderSurface::Contract;
     cfg
+}
+
+/// The hulls the built host's world offers, in the world's authored order —
+/// read off the `WorldConfig` boot parsed rather than scanned out of the TOML,
+/// because `template_path` is also `[[entity]]`'s field name and a text scan
+/// picks up the scenery.
+fn available_hulls(app: &App) -> Vec<String> {
+    app.world()
+        .resource::<project_phoenix::world::config::WorldConfig>()
+        .available_ships
+        .iter()
+        .map(|s| s.template_path.clone())
+        .collect()
 }
 
 /// Pump `app` for `frames` frames of fixed virtual time, exactly as the
@@ -284,81 +307,158 @@ fn a_content_tree_with_no_templates_is_refused_rather_than_silently_defaulted() 
     let _ = std::fs::remove_dir_all(&empty);
 }
 
-/// The native↔headless authoritative equivalence check (acceptance criterion 5).
-///
-/// Gated on `headless` because that is where the other half lives; CI runs
-/// `cargo test --workspace --features headless`, so it runs there.
-///
-/// What it proves is precise and worth stating: the native host composes the
-/// simulation with `render: true`, which registers a pile of presentation state
-/// headless never sees — `RenderInterp`, `ProceduralMeshCache`, `RenderTuning`,
-/// `AssetPreloadResource`, the star and planet renderers, the viewscreen radar
-/// and the reference grid. Every one of those is declared `Presentation` or
-/// `DeferredFold` in the authoritative census. If any of them were to touch
-/// authoritative state, this digest would move. Same world, same seed, same
-/// frame clock, byte-identical answer.
-///
-/// It is deliberately a comparison against **headless** rather than against the
-/// browser: `src/cross_target_probe.rs` already pins native↔wasm equivalence
-/// for the simulation crate, tick by tick, against a committed ledger, and it
-/// does so from Rust literals with no filesystem precisely so the two targets
-/// are comparable. Adding a boot profile does not change what that probe tests,
-/// and re-blessing its ledger to accommodate a native host would be exactly the
-/// move its own header forbids.
-#[cfg(feature = "headless")]
 #[test]
-fn a_native_host_and_a_headless_run_agree_on_the_authoritative_digest() {
-    use project_phoenix::core::telemetry::RunTelemetry;
-    use project_phoenix::headless::report::{collect_balance_events, collect_outbound};
-    use project_phoenix::headless::{build_headless_app, HeadlessArgs};
-    use project_phoenix::sim_digest::world_digest;
-
-    const FRAMES: u64 = 240;
+fn a_ship_the_template_cache_does_not_hold_is_refused_rather_than_silently_defaulted() {
+    // The `--ship` half of boot's template gate. `check_native_templates` sees
+    // the world's DECLARED set, and issue #935 made the player's own hull
+    // authored content that need not be in it — so an explicit `--ship` walks
+    // straight past that gate. On a cache miss
+    // `lobby::server::update_session_with_config` keeps a DEFAULT
+    // `ShipClientConfig` with nothing in the log, which is the exact silent
+    // failure the boot refusal exists to prevent.
+    //
+    // The fixture hull is REAL and parses (so the refusal cannot be confused
+    // with "this file does not exist"), it declares stations (so it cannot be
+    // confused with the no-`[[station]]` refusal), and it lives outside the
+    // content tree the preload walked, so it is genuinely uncached.
     let preload = preload();
+    let dir = std::env::temp_dir().join("phoenix-native-host-uncached-hull");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("fixture dir");
+    let hull = dir.join("uncached_hull.toml");
+    std::fs::copy("assets/entities/alliance_destroyer.toml", &hull).expect("fixture hull");
+    let hull_path = hull.to_string_lossy().replace('\\', "/");
 
-    // The native host picks the world's first `available_ships` entry; name the
-    // same hull to headless so the two are flying the same ship.
-    let cfg = solo_config();
-    let mut native = build_native_host_app(&cfg, &preload).expect("the native host assembles");
-    let ship = native
+    let mut cfg = solo_config();
+    cfg.ship_path = Some(hull_path.clone());
+    let err = build_native_host_app(&cfg, &preload)
+        .expect_err("an uncached hull must not silently default");
+    assert!(
+        matches!(err, NativeHostError::Ship(_)),
+        "expected a ship error, got {err:?}"
+    );
+    let message = err.to_string();
+    assert!(
+        message.contains(&hull_path),
+        "the refusal must name the hull it could not find cached: {message}"
+    );
+    assert!(
+        message.contains("Default"),
+        "and must say what would have happened instead: {message}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_curating_manifest_restricts_the_hull_the_host_flies_as_well_as_the_one_it_publishes() {
+    // Issue #917's catalogue restriction is the same lever on both surfaces.
+    // Before the fix round `--manifest assets/scenarios.demo.toml` narrowed what
+    // the process PUBLISHED over HTTP but not what it FLEW, so one host could
+    // serve a curated catalogue and simultaneously run a hull outside it.
+    //
+    // Asserted relationally against the world's own list rather than against a
+    // pinned path, so a designer reordering `[[available_ships]]` does not have
+    // to edit this test.
+    let preload = preload();
+    let base = build_native_host_app(&solo_config(), &preload).expect("the native host assembles");
+    let unrestricted = base
         .world()
         .resource::<project_phoenix::lobby::SelectedShipResource>()
         .0
         .clone();
-
-    // The one piece of scaffolding this comparison needs, and it is the
-    // OBSERVER rather than the simulation. `sim_digest::fold_collisions` reads
-    // `RunTelemetry` — the batch runner's collision tracer — and deliberately
-    // folds "absent" and "present but empty" as different numbers. A live host
-    // produces no run report and so carries no `RunTelemetry`; headless always
-    // does. Installing the same collector on both sides is what makes the two
-    // digests comparable at all, and it adds nothing to `FixedUpdate`: both
-    // systems run in `Last` and only read.
-    native.insert_resource(RunTelemetry::default()).add_systems(
-        Last,
-        (collect_outbound, collect_balance_events).chain(),
+    let offered = available_hulls(&base);
+    assert_eq!(
+        offered.first(),
+        Some(&unrestricted),
+        "with no curation the default is available_ships[0]"
     );
 
-    pump(&mut native, FRAMES);
+    // Curate to some hull that is NOT the unrestricted default.
+    let other = offered
+        .iter()
+        .find(|p| *p != &unrestricted)
+        .cloned()
+        .expect("combat_test offers more than one hull");
 
-    let mut headless = build_headless_app(&HeadlessArgs {
-        world_path: WORLD.to_string(),
-        ship_path: ship,
-        seed: Some(SEED),
-        max_ticks: FRAMES,
-        ..Default::default()
-    })
-    .expect("the headless app assembles");
-    // `build_headless_app` already installs `ManualDuration` at the same `dt`
-    // this uses; re-inserting it is a no-op that keeps the two loops identical.
-    pump(&mut headless, FRAMES);
-
+    let mut cfg = solo_config();
+    cfg.curated_ships = vec![other.clone()];
+    let restricted = build_native_host_app(&cfg, &preload)
+        .expect("the native host assembles under a curated catalogue")
+        .world()
+        .resource::<project_phoenix::lobby::SelectedShipResource>()
+        .0
+        .clone();
     assert_eq!(
-        world_digest(native.world()),
-        world_digest(headless.world()),
-        "a rendered native host and a headless run of the same world and seed \
-         must reach the same authoritative state — the presentation plugins \
-         `render: true` adds are declared Presentation/DeferredFold and must \
-         not fold into the digest"
+        restricted, other,
+        "the default hull must come from the curated allowlist, not from \
+         available_ships[0] ({unrestricted})"
+    );
+
+    // An explicit --ship still wins, exactly as `?ship=` does in the browser:
+    // curation narrows the DEFAULT, it is not a second admission gate.
+    cfg.ship_path = Some(unrestricted.clone());
+    let explicit = build_native_host_app(&cfg, &preload)
+        .expect("an explicit hull assembles")
+        .world()
+        .resource::<project_phoenix::lobby::SelectedShipResource>()
+        .0
+        .clone();
+    assert_eq!(explicit, unrestricted);
+
+    // And a world whose hulls the allowlist admits none of is refused by name,
+    // rather than quietly falling back to available_ships[0].
+    let mut impossible = solo_config();
+    impossible.curated_ships = vec!["assets/entities/not_in_this_world.toml".to_string()];
+    let err = build_native_host_app(&impossible, &preload)
+        .expect_err("no admissible hull must be an error");
+    assert!(
+        matches!(err, NativeHostError::NoShip(_)),
+        "expected NoShip, got {err:?}"
+    );
+    assert!(
+        err.to_string().contains("not_in_this_world.toml"),
+        "the refusal must name the allowlist it could not satisfy: {err}"
+    );
+}
+
+#[test]
+fn the_curated_allowlist_is_read_from_the_manifest_the_host_serves() {
+    // The other half of the same claim: the allowlist above is not a test
+    // fixture, it is what `--manifest` resolves to. `curated_hulls_for_world`
+    // is the one function the binary uses, so pin it against the SHIPPED
+    // curated manifest rather than a hand-built one.
+    let demo = std::fs::read_to_string("assets/scenarios.demo.toml").expect("the demo manifest reads");
+    let curated = project_phoenix::native_host::curated_hulls_for_world(&demo, WORLD);
+    assert!(
+        !curated.is_empty(),
+        "assets/scenarios.demo.toml curates {WORLD}'s hulls (issue #931), so this \
+         test is only meaningful while it does"
+    );
+
+    let preload = preload();
+    let app = build_native_host_app(&solo_config(), &preload).expect("the native host assembles");
+    let authored = available_hulls(&app);
+    for hull in &curated {
+        assert!(
+            authored.contains(hull),
+            "the curated list must be a RESTRICTION of what the world authors: \
+             {hull} is not in {authored:?}"
+        );
+    }
+
+    // The base manifest curates nothing, which is "unrestricted" rather than
+    // "no hulls" — the distinction the default-hull resolution turns on.
+    let base = std::fs::read_to_string("assets/scenarios.toml").expect("the base manifest reads");
+    assert!(
+        project_phoenix::native_host::curated_hulls_for_world(&base, WORLD).is_empty(),
+        "the dev catalogue restricts nothing"
+    );
+    // A world the manifest does not publish at all is unrestricted too, not
+    // refused: `--world` names a file directly and the manifest is beside the
+    // point for an ordinary dev invocation.
+    assert!(
+        project_phoenix::native_host::curated_hulls_for_world(&demo, "assets/worlds/nope.toml")
+            .is_empty()
     );
 }

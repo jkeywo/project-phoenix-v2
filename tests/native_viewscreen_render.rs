@@ -22,13 +22,25 @@
 //! # What it asserts, and why that is the right assertion
 //!
 //! The same claim `tests/smoke/viewscreen.render.spec.js` makes about the
-//! browser: the viewscreen is **not one flat colour**. That spec exists because
-//! a render-graph break need not log anything — the PRD #1023 HDR regression
-//! turned the canvas black with a completely clean console, because Bevy's
-//! view-target cache is keyed by `(target, usages, hdr, msaa)` and a mismatched
-//! `Hdr` between the composite camera pair silently replaces the finished 3-D
-//! image with an empty one. A native host is worse off, not better: it has no
-//! console for a human to notice is clean.
+//! browser, sampled the same way: over the **middle 40% of the frame**, the
+//! scene area is **not one flat colour** and **something in it is lit**. That
+//! spec exists because a render-graph break need not log anything — the PRD
+//! #1023 HDR regression turned the canvas black with a completely clean console,
+//! because Bevy's view-target cache is keyed by `(target, usages, hdr, msaa)`
+//! and a mismatched `Hdr` between the composite camera pair silently replaces
+//! the finished 3-D image with an empty one. A native host is worse off, not
+//! better: it has no console for a human to notice is clean.
+//!
+//! **The crop is what makes this a claim about the 3-D scene.** Both cameras are
+//! retargeted at the offscreen image (see [`attach_offscreen_target`] for why
+//! they must be), and the 2-D UI camera is deliberately kept active throughout
+//! `InProgress` so the FPS counter and radar widgets keep drawing
+//! (`server::renderer`). Counted over the whole buffer, antialiased HUD text and
+//! the viewscreen border alone produce far more distinct colours than any
+//! threshold worth setting — so a live HUD over a completely dead 3-D scene
+//! would sail through. Sampling only the middle 40% puts the measurement inside
+//! the viewscreen border and away from the chrome, exactly as the browser spec's
+//! screenshot `clip` does.
 //!
 //! It renders **offscreen** rather than into a window
 //! ([`NativeRenderSurface::Offscreen`]) for the reason `capture-billboard` and
@@ -62,17 +74,49 @@ const MAX_FRAMES: usize = 900;
 #[derive(Resource)]
 struct OffscreenAttached;
 
-/// How many distinct RGBA values a frame carries, capped at `cap` so a busy
-/// frame stops counting early.
-fn distinct_colours(pixels: &[u8], cap: usize) -> usize {
+/// The fraction of the frame sampled, from the centre out — the middle 40%,
+/// matching `tests/smoke/viewscreen.render.spec.js`'s screenshot `clip`.
+const CROP: f32 = 0.4;
+
+/// What the browser spec measures, over the same region: how many distinct RGBA
+/// values the SCENE AREA carries (capped, so a busy frame stops counting early)
+/// and the brightest channel anywhere in it.
+///
+/// The pair is the assertion, not either half. `distinct > 1` catches the wiped
+/// buffer; `max_channel > 16` catches the case that would otherwise pass it —
+/// two shades of black, which is a broken composite rather than a drawn scene.
+#[derive(Debug, Default, Clone, Copy)]
+struct SceneStats {
+    distinct_colours: usize,
+    max_channel: u8,
+}
+
+/// Sample the middle [`CROP`] of a `width`×`height` RGBA buffer.
+fn scene_stats(pixels: &[u8], width: u32, height: u32, cap: usize) -> SceneStats {
+    let margin = (1.0 - CROP) / 2.0;
+    let x0 = (width as f32 * margin) as u32;
+    let x1 = (width as f32 * (margin + CROP)) as u32;
+    let y0 = (height as f32 * margin) as u32;
+    let y1 = (height as f32 * (margin + CROP)) as u32;
+
     let mut seen: std::collections::HashSet<[u8; 4]> = std::collections::HashSet::new();
-    for chunk in pixels.chunks_exact(4) {
-        seen.insert([chunk[0], chunk[1], chunk[2], chunk[3]]);
-        if seen.len() >= cap {
-            break;
+    let mut max_channel = 0u8;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let i = ((y * width + x) * 4) as usize;
+            let Some(px) = pixels.get(i..i + 4) else {
+                continue;
+            };
+            max_channel = max_channel.max(px[0]).max(px[1]).max(px[2]);
+            if seen.len() < cap {
+                seen.insert([px[0], px[1], px[2], px[3]]);
+            }
         }
     }
-    seen.len()
+    SceneStats {
+        distinct_colours: seen.len(),
+        max_channel,
+    }
 }
 
 #[test]
@@ -92,7 +136,7 @@ fn the_native_viewscreen_draws_a_frame_that_is_not_one_flat_colour() {
     app.finish();
     app.cleanup();
 
-    let mut best = 0usize;
+    let mut best = SceneStats::default();
     let mut frames_with_pixels = 0usize;
     for frame in 0..MAX_FRAMES {
         app.update();
@@ -117,26 +161,36 @@ fn the_native_viewscreen_draws_a_frame_that_is_not_one_flat_colour() {
         };
         frames_with_pixels += 1;
         let pixels = unpad_rows(&padded, WIDTH, HEIGHT);
-        let colours = distinct_colours(&pixels, 64);
-        best = best.max(colours);
-        // Two distinct colours is already a drawn image rather than a cleared
-        // buffer; wait for a few more so the assertion is about a scene rather
-        // than about one stray pixel.
-        if colours >= 8 {
+        let stats = scene_stats(&pixels, WIDTH, HEIGHT, 512);
+        best.distinct_colours = best.distinct_colours.max(stats.distinct_colours);
+        best.max_channel = best.max_channel.max(stats.max_channel);
+        // The browser spec's pair, verbatim: more than one colour in the scene
+        // area, and something in it actually lit. A native host streams its
+        // skybox, hulls and LOD levels off disk through the ordinary
+        // `AssetServer`, so early mission frames legitimately fail both.
+        if stats.distinct_colours > 1 && stats.max_channel > 16 {
             println!(
-                "native viewscreen: {colours} distinct colours at frame {frame} \
-                 ({frames_with_pixels} frames read back)"
+                "native viewscreen: {} distinct colours, max channel {} in the \
+                 middle {}% at frame {frame} ({frames_with_pixels} frames read back)",
+                stats.distinct_colours,
+                stats.max_channel,
+                (CROP * 100.0) as u32,
             );
             return;
         }
     }
 
     panic!(
-        "the native viewscreen never drew anything but a flat colour: best was \
-         {best} distinct colour(s) over {MAX_FRAMES} frames ({frames_with_pixels} \
-         of which read pixels back). A completely flat frame with a clean log is \
-         exactly the shape of the PRD #1023 HDR regression — check that the \
-         Camera3d/Camera2d pair share one `Hdr` answer (render_setup::apply_target_hdr)."
+        "the native viewscreen never drew a scene: the best the middle {}% of any \
+         frame managed was {} distinct colour(s) with a brightest channel of {} \
+         over {MAX_FRAMES} frames ({frames_with_pixels} of which read pixels back). \
+         A flat — or uniformly black — scene area under a live HUD, with a clean \
+         log, is exactly the shape of the PRD #1023 HDR regression: check that the \
+         Camera3d/Camera2d pair share one `Hdr` answer \
+         (render_setup::apply_target_hdr).",
+        (CROP * 100.0) as u32,
+        best.distinct_colours,
+        best.max_channel,
     );
 }
 

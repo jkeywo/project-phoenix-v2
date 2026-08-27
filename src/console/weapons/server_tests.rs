@@ -2317,7 +2317,7 @@ fn npc_ship_can_fire_torpedo_when_toml_has_torpedoes_block() {
 fn local_console_token_can_fire_torpedo() {
     // issue #422: actions from the local HTML console (browser server
     // viewscreen / native wry server) arrive under LOCAL_CONSOLE_TOKEN with
-    // no remote PeerJS session, so holder_for_station(tactical) is None.
+    // no remote network session, so holder_for_station(tactical) is None.
     // `tactical_authorized` must treat that token as an authorized local
     // operator so a button press actually launches end-to-end — the
     // decode→map→InboundMessage→fire hop the wasm bridge cannot unit-test.

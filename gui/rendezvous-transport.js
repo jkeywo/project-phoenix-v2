@@ -1,29 +1,53 @@
 /**
- * gui/rendezvous-transport.js — the Phoenix join path (issue #1111).
+ * gui/rendezvous-transport.js — the Phoenix crew transport (issues #1111, #1112).
  *
- * A parallel, additive route to the PeerJS one: a secure WebSocket to the
- * rendezvous service carries typed join-code lookup and WebRTC signalling, and
- * the game traffic then runs over a direct reliable DataChannel. PeerJS is
- * untouched — replacing it is #1112.
+ * THE route, since #1112: a secure WebSocket to the rendezvous service carries
+ * typed join-code lookup and WebRTC signalling, and the game traffic then runs
+ * over direct DataChannels. PeerJS, the peer-id-in-the-URL-hash mechanic and
+ * the cloud broker behind them are gone — there is no second transport and no
+ * flag selecting between them.
  *
  * Two halves, both here because they are two ends of one frame vocabulary:
  *
  *   createRendezvousHost   server.html — registers, is issued a five-letter
- *                          code, answers offers, and hands each opened channel
- *                          to the page as a PeerJS-shaped connection so the
- *                          existing Identify gate and token maps are reused
- *                          verbatim.
+ *                          code, answers offers, and hands each admitted joiner
+ *                          to the page as a connection object carrying both of
+ *                          its channels, so the page's Identify gate and token
+ *                          maps are one code path.
  *   createRendezvousJoiner client.html — resolves a typed code, offers, opens
- *                          the channel, completes the compatibility handshake
- *                          and then speaks ordinary ClientMessage JSON.
+ *                          the channels, completes the compatibility handshake,
+ *                          speaks ordinary ClientMessage JSON, and reconnects
+ *                          itself on its own backoff without the guest ever
+ *                          re-entering the code.
  *
- * The compatibility handshake (`JoinHandshake` / `JoinAccepted` /
- * `JoinRefused`) is deliberately NOT a ClientMessage/ServerMessage variant —
- * pasm/spec/design/p2p-design-deltas.yaml forbids layering transport concerns
- * onto the crew protocol. It never reaches WASM as a message; the host answers
- * it from `checkStamp`, which server.html wires to Rust's own
- * `delivery::check_join_stamp`. The rendezvous service's version advice is
- * discovery help only; this handshake is the authority.
+ * ## Two channels, one connection (#1112 AC2)
+ *
+ * The joiner is the offerer and creates BOTH channels before the offer, so the
+ * answering host picks them up by label:
+ *
+ *   'reliable'  ordered, retransmitting — commands and every reliable
+ *               ServerMessage, plus the join handshake itself.
+ *   'snapshot'  `{ordered:false, maxRetransmits:0}` — the snapshot delivery
+ *               class (SimState and friends). Genuinely lossy: a late snapshot
+ *               is worthless, and head-of-line blocking on a phone's radio is
+ *               worse than a dropped frame.
+ *
+ * Nothing anywhere assumes the lossy channel exists. The host's outbound router
+ * (gui/host-peer-routing.js) falls back to the reliable channel PER TOKEN for
+ * any client whose snapshot channel has not finished negotiating or has gone,
+ * and the joiner's own `send` does the same on the way up.
+ *
+ * ## The compatibility handshake
+ *
+ * `JoinHandshake` / `JoinAccepted` / `JoinRefused` are deliberately NOT
+ * ClientMessage/ServerMessage variants — pasm/spec/design/p2p-design-deltas.yaml
+ * forbids layering transport concerns onto the crew protocol. They never reach
+ * WASM as messages; the host answers from `checkStamp`, which server.html wires
+ * to Rust's own `delivery::check_join_stamp`. The rendezvous service's version
+ * advice is discovery help; this handshake is the authority, and since #1112 a
+ * joiner that presents no stamp at all is refused rather than admitted.
+ *
+ * ## Injected factories
  *
  * WebSocket and RTCPeerConnection are taken from an injectable factory pair so
  * the smoke suite can drive the whole path with no real WebRTC (CI has none),
@@ -39,6 +63,11 @@ import {
   reasonStringId,
 } from './join-code.js';
 import { RENDEZVOUS_PROTOCOL } from './rendezvous-protocol.js';
+import {
+  nextBackoffDelay,
+  connectTimeoutMs,
+  candidateType,
+} from './connection-manager.js';
 
 /** Re-exported so a consumer of this module needs only one import. */
 export { RENDEZVOUS_PROTOCOL };
@@ -50,71 +79,96 @@ export { RENDEZVOUS_PROTOCOL };
  * literal.
  *
  * NOTE, and this is the honest state of it: no such sweep exists for THIS
- * literal yet. .github/workflows/deploy-demo.yml sweeps `DEV_TURN_URL` only,
- * and adding the rendezvous one is an open item in
- * docs/delivery-checklist.md §3a — together with deploying the worker at all,
- * which #1111 does not do. A demo build therefore still points at the dev
- * service; the route is opt-in, so nothing breaks until both land.
+ * literal yet, and worker-rendezvous/ has never been deployed.
+ * .github/workflows/deploy-demo.yml sweeps `DEV_TURN_URL` only. Both are open
+ * items in docs/delivery-checklist.md §3a, and since #1112 they are BLOCKING
+ * rather than cosmetic: PeerJS is gone, so a build pointed at a service that is
+ * not there has no join path at all.
  */
 export const DEV_RENDEZVOUS_URL = 'https://phoenix-rendezvous.project-phoenix.workers.dev';
 
-/** Label of the reliable ordered channel. #1112 adds the lossy 'snapshot' one. */
+/** Label of the reliable ordered channel: commands and reliable messages. */
 export const RELIABLE_CHANNEL = 'reliable';
+/** Label of the lossy unordered channel: the snapshot delivery class. */
+export const SNAPSHOT_CHANNEL = 'snapshot';
+
+/**
+ * Refusals a retry cannot fix. Everything NOT in here — an unreachable
+ * service, a signalling drop, an ICE timeout — is a link failure the joiner
+ * retries on its own backoff; everything in here is an answer about the CODE
+ * or the BUILD, and re-asking gets the same answer while the guest stares at a
+ * spinner. Those go back to the entry field with their own sentence.
+ *
+ * `host-gone` belongs here on purpose: the record died with its host, and the
+ * replacement host was issued a different code, so the honest thing is to say
+ * so rather than to retry a name that no longer exists (code rebinding across
+ * a host drop is #1115's).
+ */
+const TERMINAL_REASONS = new Set([
+  'empty', 'length', 'charset', 'denied', 'malformed',
+  'unknown-project', 'unknown-namespace',
+  'unknown', 'wrong-type', 'version-mismatch', 'not-joinable',
+  'admission-closed', 'host-gone', 'exhausted',
+  'too-many-attempts', 'unsupported-protocol', 'forbidden-role', 'not-joined',
+  // The host's own StampMismatch::code() values, relayed through JoinRefused.
+  'protocol-mismatch', 'content-id-mismatch', 'content-epoch-mismatch',
+  'bundle-content-missing', 'client-stamp-missing',
+]);
+
+/** True when a machine reason is worth another attempt. */
+export function isRetryableReason(reason) {
+  return !TERMINAL_REASONS.has(String(reason || ''));
+}
 
 // ── Pure helpers ────────────────────────────────────────────────────────────
 
 /**
- * Which rendezvous service (if any) this page should use.
+ * Which rendezvous service this page should use.
  *
- * #1111 is additive: the PeerJS route stays the default and the Phoenix route
- * is opted into per page load, so a build whose service is not deployed cannot
- * be broken by it. `?rendezvous` (or `=1`/`=default`/`=on`) uses the built-in
- * URL; `?rendezvous=<url>` points at another one; absent means "off".
+ * There is exactly one route now, so this no longer decides WHETHER to use the
+ * service — only WHICH one. `?rendezvous=<url>` points a page at another
+ * service (a `wrangler dev` on localhost, a staging deployment); anything else,
+ * including no parameter at all, means the built-in one. The #1111 opt-in
+ * spellings (`?rendezvous`, `=on`, `=1`, `=off`) are gone with PeerJS: a flag
+ * whose only remaining value selects the default is a flag that lies about
+ * having a choice.
  *
- * @returns {string|null} base URL, or null when the Phoenix route is off
+ * A value that is not an http(s) URL is deliberately ignored rather than
+ * honoured — an old `?rendezvous=on` bookmark must open the game, not try to
+ * dial a service called "on" and throw building the socket URL.
+ *
+ * @returns {string} base URL — never null, because there is no "off"
  */
 export function rendezvousBaseFromLocation(search, defaultBase = DEV_RENDEZVOUS_URL) {
-  const params = new URLSearchParams(search || '');
-  if (!params.has('rendezvous')) return null;
-  const value = (params.get('rendezvous') || '').trim();
-  if (!value || value === '1' || value === 'on' || value === 'default') return defaultBase;
-  if (value === '0' || value === 'off') return null;
-  return value;
+  const value = (new URLSearchParams(search || '').get('rendezvous') || '').trim();
+  if (!value) return defaultBase;
+  try {
+    const { protocol } = new URL(value);
+    return protocol === 'http:' || protocol === 'https:' ? value : defaultBase;
+  } catch {
+    return defaultBase;
+  }
 }
 
 /**
  * Which join route this client page load is on. Pure, so the branch is decided
  * in one tested place rather than in three `if`s in client.html.
  *
- *   `peerjs`      the fragment is a 32-hex peer id — today's route, untouched
- *   `rendezvous`  the fragment is a structured join code (a QR scan, or a
- *                 pasted full code): join straight away
- *   `entry`       nothing in the fragment and the page asked for a service:
- *                 ask for five letters
- *   `none`        nothing to join and no service to ask — the "no host id in
- *                 the URL" dead end this page has always had
+ *   `rendezvous`  something is in the fragment — a QR scan, a pasted full code,
+ *                 or a stale bookmark: join with it straight away
+ *   `entry`       nothing in the fragment: ask for five letters
  *
- * OFF BY DEFAULT, exactly like {@link rendezvousBaseFromLocation}, whose parse
- * this reuses rather than repeating: a bare client page with an empty fragment
- * is `none`, not an entry field pointed at a service that may not be deployed.
- * A structured code in the fragment IS its own opt-in — it is what the QR
- * carries — so that case does not additionally need `?rendezvous`; the
- * parameter turns the entry field on, redirects the page at another service,
- * or (`=off`) refuses even the fragment's implicit opt-in.
+ * A fragment that is NOT a valid code is deliberately still `rendezvous`
+ * rather than a third route. gui/join-code.js is the one place that decides
+ * what a string is, so a stale `#<32 hex peer id>` bookmark from the PeerJS era
+ * lands in front of the entry field with a stated reason instead of hanging on
+ * a status line, and this function never needs to know what yesterday's links
+ * looked like.
  */
 export function joinRouteFromLocation(search, hash, defaultBase = DEV_RENDEZVOUS_URL) {
   const base = rendezvousBaseFromLocation(search, defaultBase);
-  // Absent and "explicitly off" are the same `null` to the base parse, and the
-  // difference matters for exactly one case: whether a structured code in the
-  // fragment may imply the service.
-  const off = new URLSearchParams(search || '').has('rendezvous') && !base;
-
-  const fragment = String(hash || '').replace(/^#/, '');
-  if (fragment.includes('_')) {
-    return off ? { route: 'none' } : { route: 'rendezvous', base: base || defaultBase, code: fragment };
-  }
-  if (fragment) return { route: 'peerjs', hostPeerId: fragment };
-  return base ? { route: 'entry', base } : { route: 'none' };
+  const fragment = String(hash || '').replace(/^#/, '').trim();
+  return fragment ? { route: 'rendezvous', base, code: fragment } : { route: 'entry', base };
 }
 
 /** Socket URL for an endpoint on a service base, upgrading the scheme. */
@@ -155,29 +209,6 @@ function frame(type, rest) {
   return JSON.stringify({ v: RENDEZVOUS_PROTOCOL, type, ...rest });
 }
 
-/**
- * Wrap a raw RTCDataChannel in the shape server.html's existing per-connection
- * handler expects from a PeerJS DataConnection: `.peer`, `.send`, `.close`,
- * `.on('data'|'close')` and an `open` flag. gui/host-peer-routing.js already
- * accepts either `conn.open` or `conn.readyState === 'open'`, so the outbound
- * router needs no change at all.
- */
-function connectionAdapter(peerId, channel, pc) {
-  const listeners = { data: [], close: [] };
-  const adapter = {
-    peer: peerId,
-    peerConnection: pc,
-    get open() { return channel.readyState === 'open'; },
-    get readyState() { return channel.readyState; },
-    send(payload) { if (channel.readyState === 'open') channel.send(payload); },
-    close() { try { channel.close(); } catch { /* already gone */ } },
-    on(event, cb) { (listeners[event] || (listeners[event] = [])).push(cb); },
-    emit(event, arg) { for (const cb of listeners[event] || []) cb(arg); },
-  };
-  channel.onclose = () => adapter.emit('close');
-  return adapter;
-}
-
 /** Decode one DataChannel payload to an object, or null. */
 function decodeFrame(raw) {
   const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw);
@@ -186,6 +217,48 @@ function decodeFrame(raw) {
   } catch {
     return null;
   }
+}
+
+const isChannelOpen = (c) => !!c && c.readyState === 'open';
+
+/**
+ * Wrap a joiner's channels in the shape server.html's per-connection handler
+ * expects: `.peer`, `.send`, `.close`, `.on('data'|'close'|'snapshot')` and an
+ * `open` flag. gui/host-peer-routing.js already accepts either `conn.open` or
+ * `conn.readyState === 'open'`, so the outbound router needs no change at all.
+ *
+ * `snapshotChannel` is the raw lossy `RTCDataChannel` once it has negotiated,
+ * and null before that or after it goes; the `'snapshot'` event fires on every
+ * transition so the page can keep its per-token map in step without polling.
+ */
+function connectionAdapter(peerId, channel, pc) {
+  const listeners = { data: [], close: [], snapshot: [] };
+  const adapter = {
+    peer: peerId,
+    peerConnection: pc,
+    snapshotChannel: null,
+    get open() { return channel.readyState === 'open'; },
+    get readyState() { return channel.readyState; },
+    send(payload) { if (channel.readyState === 'open') channel.send(payload); },
+    close() { try { channel.close(); } catch { /* already gone */ } },
+    on(event, cb) { (listeners[event] || (listeners[event] = [])).push(cb); },
+    emit(event, arg) { for (const cb of listeners[event] || []) cb(arg); },
+    /** Adopt the lossy channel negotiated alongside this one. */
+    bindSnapshot(chan) {
+      if (adapter.snapshotChannel === chan) return;
+      adapter.snapshotChannel = isChannelOpen(chan) ? chan : null;
+      chan.onopen = () => { adapter.snapshotChannel = chan; adapter.emit('snapshot'); };
+      const drop = () => {
+        if (adapter.snapshotChannel === chan) adapter.snapshotChannel = null;
+        adapter.emit('snapshot');
+      };
+      chan.onclose = drop;
+      chan.onerror = drop;
+      adapter.emit('snapshot');
+    },
+  };
+  channel.onclose = () => adapter.emit('close');
+  return adapter;
 }
 
 // ── Host half ───────────────────────────────────────────────────────────────
@@ -199,13 +272,18 @@ function decodeFrame(raw) {
  * @param {object[]} [opts.iceServers]
  * @param {(stamp:string|null)=>{ok:boolean,code?:string,detail?:string}} [opts.checkStamp]
  *   the authoritative compatibility verdict. Defaults to "admit" so a page that
- *   cannot reach the WASM export degrades to today's behaviour rather than
- *   refusing everyone.
- * @param {(code:object)=>void} [opts.onCode]
+ *   cannot reach the WASM export degrades to admitting rather than refusing
+ *   everyone — a host that cannot ask cannot refuse.
+ * @param {(code:object)=>void} [opts.onCode] fires again with a NEW code if the
+ *   service was lost and this host re-registered.
  * @param {(conn:object)=>void} [opts.onConnection] called ONLY for a joiner the
  *   compatibility handshake admitted — never on channel open.
  * @param {(reason:string, detail?:string)=>void} [opts.onError]
+ * @param {(peer:string, state:string)=>void} [opts.onPeerIce] one joiner's ICE
+ *   connection state. When ICE never completes no channel ever opens, so this
+ *   is the only way the host operator learns a phone is trying and failing.
  * @param {(msg:string)=>void} [opts.onLog]
+ * @param {boolean} [opts.reregister] retry registration after service loss
  */
 export function createRendezvousHost(opts) {
   const {
@@ -216,14 +294,18 @@ export function createRendezvousHost(opts) {
     onCode = () => {},
     onConnection = () => {},
     onError = () => {},
+    onPeerIce = () => {},
     onLog = () => {},
+    reregister = true,
     factories = defaultFactories(),
   } = opts;
 
-  const peers = new Map(); // rendezvous peer id → { pc, adapter, pending[] }
+  const peers = new Map(); // rendezvous peer id → per-joiner state
   let socket = null;
   let code = null;
   let closed = false;
+  let retryTimer = null;
+  let retryAttempt = 0;
 
   function signal(to, payload) {
     if (socket && socket.readyState === 1) socket.send(frame('signal', { to, payload }));
@@ -233,35 +315,64 @@ export function createRendezvousHost(opts) {
     let entry = peers.get(id);
     if (entry) return entry;
     const pc = factories.peer({ iceServers });
-    entry = { pc, adapter: null, pendingCandidates: [] };
+    // The gate, per joiner. An open DataChannel is NOT admission: until the
+    // compatibility handshake has been answered `ok`, the page has never been
+    // handed this connection, so nothing here can reach the Identify gate or
+    // wasm_receive_message. Frames arriving before that are DROPPED, not
+    // buffered — a build the host is about to refuse has no business queuing
+    // simulation traffic — and everything after a refusal is dropped too.
+    entry = {
+      pc,
+      adapter: null,
+      snapshot: null,
+      admitted: false,
+      refused: false,
+      pendingCandidates: [],
+    };
     peers.set(id, entry);
+
     pc.onicecandidate = (e) => {
       if (e && e.candidate) signal(id, { candidate: e.candidate });
     };
+    pc.oniceconnectionstatechange = () => onPeerIce(id, pc.iceConnectionState);
+
+    /** Hand the lossy channel to the adapter once both exist. */
+    function pairSnapshot() {
+      if (entry.adapter && entry.snapshot) entry.adapter.bindSnapshot(entry.snapshot);
+    }
+
+    /** Ordinary crew traffic, on whichever channel it arrived. */
+    function deliver(data) {
+      if (entry.refused || !entry.admitted) return;
+      const msg = decodeFrame(data);
+      // A second handshake from an admitted peer is noise, not a re-vote.
+      if (msg && msg.type === 'JoinHandshake') return;
+      entry.adapter.emit('data', data);
+    }
+
     pc.ondatachannel = (e) => {
       const channel = e.channel;
+      if (channel.label === SNAPSHOT_CHANNEL) {
+        entry.snapshot = channel;
+        channel.onmessage = (ev) => deliver(ev.data);
+        pairSnapshot();
+        return;
+      }
       if (channel.label !== RELIABLE_CHANNEL) return;
       const adapter = connectionAdapter(id, channel, pc);
       entry.adapter = adapter;
-      // The gate, per joiner. An open DataChannel is NOT admission: until the
-      // compatibility handshake has been answered `ok`, the page has never
-      // been handed this adapter, so nothing here can reach the Identify gate
-      // or wasm_receive_message. Frames arriving before that are DROPPED, not
-      // buffered — a build the host is about to refuse has no business queuing
-      // simulation traffic — and everything after a refusal is dropped too.
-      let admitted = false;
-      let refused = false;
+      pairSnapshot();
       channel.onmessage = (ev) => {
-        if (refused) return;
-        const msg = decodeFrame(ev.data);
-        if (!admitted) {
+        if (entry.refused) return;
+        if (!entry.admitted) {
           // The compatibility handshake is transport-plane and never reaches
           // the page's Identify gate, let alone WASM. Nothing else exists on
           // this channel yet.
+          const msg = decodeFrame(ev.data);
           if (!msg || msg.type !== 'JoinHandshake') return;
           const verdict = checkStamp((msg.data && msg.data.stamp) || null);
           if (!verdict.ok) {
-            refused = true;
+            entry.refused = true;
             onLog(`[rendezvous] refusing ${id}: ${verdict.code} ${verdict.detail || ''}`);
             adapter.send(JSON.stringify({
               type: 'JoinRefused',
@@ -274,16 +385,14 @@ export function createRendezvousHost(opts) {
             setTimeout(() => adapter.close(), 250);
             return;
           }
-          admitted = true;
+          entry.admitted = true;
           // Page first, then the acceptance the joiner answers with Identify,
           // so the handler that reads it is already attached.
           onConnection(adapter);
           adapter.send(JSON.stringify({ type: 'JoinAccepted', data: {} }));
           return;
         }
-        // A second handshake from an admitted peer is noise, not a re-vote.
-        if (msg && msg.type === 'JoinHandshake') return;
-        adapter.emit('data', ev.data);
+        deliver(ev.data);
       };
     };
     return entry;
@@ -303,6 +412,14 @@ export function createRendezvousHost(opts) {
     }
   }
 
+  function dropPeers() {
+    for (const entry of peers.values()) {
+      if (entry.adapter) entry.adapter.emit('close');
+      try { entry.pc.close(); } catch { /* already closed */ }
+    }
+    peers.clear();
+  }
+
   function handle(msg) {
     switch (msg.type) {
       case 'ready':
@@ -310,6 +427,7 @@ export function createRendezvousHost(opts) {
         break;
       case 'hosted':
         code = msg.code;
+        retryAttempt = 0;
         onLog(`[rendezvous] issued ${code.namespace} code ${code.suffix}`);
         onCode(code);
         break;
@@ -323,28 +441,69 @@ export function createRendezvousHost(opts) {
           try { entry.pc.close(); } catch { /* already closed */ }
           peers.delete(msg.peer);
         }
+        // Told even for a peer that never opened a channel: it is exactly the
+        // struggling-ICE case the diagnostics row is watching, and nothing
+        // else would ever clear its line.
+        onPeerIce(msg.peer, 'closed');
         break;
       }
       case 'signal':
         onSignal(msg.from, msg.payload).catch((e) => onError('signal', String(e && e.message)));
         break;
       case 'error':
-        onError(msg.reason, msg.detail);
+        if (msg.reason === 'unreachable') lostService('unreachable');
+        else onError(msg.reason, msg.detail);
         break;
       default:
         break;
     }
   }
 
+  /**
+   * The record is gone: the socket died, or the service swept it. There is no
+   * second transport to fall back to any more, so a host that simply stopped
+   * here would be unjoinable until someone reloaded the viewscreen — which is
+   * why this re-registers instead of only reporting.
+   *
+   * The replacement registration mints a DIFFERENT code, because the old record
+   * really is gone and the letters on screen resolve to nothing. Keeping the
+   * SAME code across a host drop needs persistence in the service and is
+   * #1115's (rotation/rebinding); minting a fresh one and repainting the panel
+   * is not that, and it is the difference between a recoverable blip and a
+   * dead mission.
+   */
+  function lostService(reason) {
+    if (closed) return;
+    // Detached and silenced BEFORE anything else: closing a socket fires its
+    // own `close`, and a handler that could still see itself as the current
+    // one would re-enter here and report the same loss twice.
+    const dying = socket;
+    socket = null;
+    code = null;
+    dropPeers();
+    if (dying) {
+      dying.onopen = null; dying.onmessage = null; dying.onerror = null; dying.onclose = null;
+      try { dying.close(); } catch { /* already gone */ }
+    }
+    onError(reason || 'unreachable');
+    if (!reregister || retryTimer) return;
+    const delay = nextBackoffDelay(retryAttempt, 1_000);
+    retryAttempt += 1;
+    onLog(`[rendezvous] service lost — re-registering in ${delay}ms (attempt ${retryAttempt})`);
+    retryTimer = setTimeout(() => { retryTimer = null; if (!closed) connect(); }, delay);
+  }
+
   function connect() {
     socket = factories.socket(socketUrl(base, '/v1/host'));
+    const mine = socket;
     socket.onopen = () => onLog('[rendezvous] host socket open');
     socket.onmessage = (e) => {
+      if (socket !== mine) return;
       const msg = decodeFrame(e.data);
       if (msg) handle(msg);
     };
-    socket.onerror = () => onError('unreachable');
-    socket.onclose = () => { if (!closed) onError('unreachable'); };
+    socket.onerror = () => { if (socket === mine) lostService('unreachable'); };
+    socket.onclose = () => { if (!closed && socket === mine) lostService('unreachable'); };
   }
 
   connect();
@@ -357,6 +516,7 @@ export function createRendezvousHost(opts) {
     },
     close() {
       closed = true;
+      if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
       if (socket && socket.readyState === 1) socket.send(frame('host-close', {}));
       for (const entry of peers.values()) {
         try { entry.pc.close(); } catch { /* already closed */ }
@@ -370,12 +530,25 @@ export function createRendezvousHost(opts) {
 // ── Client half ─────────────────────────────────────────────────────────────
 
 /**
- * Resolve a typed code and join the host behind it.
+ * Resolve a typed code and join the host behind it, then KEEP that link alive.
  *
- * `onStatus` mirrors gui/connection-manager.js's vocabulary
- * ('connecting' | 'ready' | 'disconnected' | 'error') so client.html's existing
- * status handling is reused unchanged, and `onError` reports a machine reason
- * that gui/join-code.js's `reasonStringId` turns into display text.
+ * `onStatus` speaks the page's four states ('connecting' | 'ready' |
+ * 'disconnected' | 'error') and `onDiag` the structured connection-diagnostics
+ * events client.html's `#conn-diag` readout renders, so the page's existing
+ * status handling is reused unchanged. `onError` reports a machine reason that
+ * gui/join-code.js's `reasonStringId` turns into display text.
+ *
+ * ## Reconnect (#1112 AC3)
+ *
+ * Once the host has accepted this build, a link failure is never terminal: the
+ * joiner re-resolves THE SAME code on an exponential backoff, re-offers,
+ * re-sends the compatibility handshake and re-sends `Identify` with the same
+ * session token — so the host restores the held station and pushes the current
+ * projection, and the guest is never asked for five letters a second time.
+ * `retryNow()` short-circuits the wait for the page's "retry now" control.
+ *
+ * Only a refusal a retry cannot fix (see {@link isRetryableReason}) ends the
+ * loop and goes back to the entry field with its own sentence.
  */
 export function createRendezvousJoiner(opts) {
   const {
@@ -390,32 +563,131 @@ export function createRendezvousJoiner(opts) {
     onStatus = () => {},
     onError = () => {},
     onLog = () => {},
+    onDiag = () => {},
     factories = defaultFactories(),
   } = opts;
 
   const parsed = parseJoinCode(code, namespace, data);
   if (!parsed.ok) {
     onError(parsed.reason, reasonStringId(parsed.reason));
-    return { failed: true, reason: parsed.reason, close() {} };
+    return {
+      failed: true,
+      reason: parsed.reason,
+      get connected() { return false; },
+      send() {},
+      retryNow() {},
+      close() {},
+    };
   }
 
   let socket = null;
   let pc = null;
   let channel = null;
+  let snapshot = null;
   let closed = false;
-  const pendingCandidates = [];
+  /** True once the host has ACCEPTED this build at least once. */
+  let established = false;
+  let generation = 0;
+  /** The attempt already reported as failed, so a late rejection cannot
+   *  report it a second time (an in-flight offer whose peer connection was
+   *  torn out from under it rejects AFTER the failure that tore it out). */
+  let failedGeneration = -1;
+  let attemptIndex = 0;
+  let retryTimer = null;
+  let connectTimer = null;
+  let pendingCandidates = [];
+
+  const linked = () => isChannelOpen(channel);
+
+  function clearTimers() {
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+    if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
+  }
+
+  /** Drop this attempt's socket/peer/channels without ending the joiner. */
+  function teardown() {
+    if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
+    for (const c of [channel, snapshot]) {
+      if (!c) continue;
+      c.onopen = null; c.onmessage = null; c.onclose = null; c.onerror = null;
+      try { c.close(); } catch { /* already gone */ }
+    }
+    channel = null;
+    snapshot = null;
+    if (pc) { try { pc.close(); } catch { /* already gone */ } pc = null; }
+    if (socket) {
+      socket.onopen = null; socket.onmessage = null; socket.onerror = null; socket.onclose = null;
+      try { socket.close(); } catch { /* already gone */ }
+      socket = null;
+    }
+    pendingCandidates = [];
+  }
+
+  /**
+   * This attempt failed. A terminal reason, or a failure before the host ever
+   * accepted us, goes back to the page; anything else is the reconnect loop.
+   */
+  function fail(gen, reason, detail) {
+    if (closed || gen !== generation || gen === failedGeneration) return;
+    failedGeneration = gen;
+    teardown();
+    if (established && isRetryableReason(reason)) {
+      onLog(`[rendezvous] link lost (${reason}) — retrying`);
+      onStatus('disconnected');
+      scheduleRetry();
+      return;
+    }
+    onError(reason, detail);
+    onStatus(established ? 'disconnected' : 'error');
+  }
+
+  function scheduleRetry() {
+    if (closed || retryTimer) return;
+    const delay = nextBackoffDelay(attemptIndex);
+    attemptIndex += 1;
+    onLog(`[rendezvous] retrying in ${delay}ms (attempt ${attemptIndex + 1})`);
+    retryTimer = setTimeout(() => { retryTimer = null; attempt(); }, delay);
+  }
 
   function signal(payload) {
     if (socket && socket.readyState === 1) socket.send(frame('signal', { payload }));
   }
 
-  async function offer() {
+  async function offer(gen) {
     pc = factories.peer({ iceServers });
+    const mine = pc;
+    const gathered = new Set();
     pc.onicecandidate = (e) => {
-      if (e && e.candidate) signal({ candidate: e.candidate });
+      if (gen !== generation || pc !== mine) return;
+      if (!e || !e.candidate) return;
+      signal({ candidate: e.candidate });
+      const type = candidateType(e.candidate);
+      if (type && !gathered.has(type)) {
+        gathered.add(type);
+        onLog(`[ICE] gathered ${type} candidate`);
+        onDiag({ event: 'candidates', types: [...gathered] });
+      }
     };
+    pc.oniceconnectionstatechange = () => {
+      if (gen !== generation || pc !== mine) return;
+      onLog(`[ICE] state — ${pc.iceConnectionState}`);
+      onDiag({ event: 'ice-state', state: pc.iceConnectionState });
+    };
+
+    // Both channels are created here, on the offerer, so the answering host
+    // picks them up by label off one negotiation. The lossy one is opened
+    // whether or not anything ends up riding it: negotiating it lazily would
+    // mean the first minute of every session runs snapshots down the reliable
+    // channel for no reason.
     channel = pc.createDataChannel(RELIABLE_CHANNEL, { ordered: true });
+    snapshot = pc.createDataChannel(SNAPSHOT_CHANNEL, { ordered: false, maxRetransmits: 0 });
+    snapshot.onmessage = (e) => deliver(gen, e.data);
+    snapshot.onopen = () => onLog('[rendezvous] snapshot channel open');
+
     channel.onopen = () => {
+      if (gen !== generation) return;
+      if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
+      onDiag({ event: 'open' });
       // The host's compatibility handshake goes first; Identify follows only
       // once the host has accepted this build.
       channel.send(JSON.stringify({
@@ -424,48 +696,59 @@ export function createRendezvousJoiner(opts) {
       }));
     };
     channel.onclose = () => {
-      if (!closed) onStatus('disconnected');
+      if (closed || gen !== generation) return;
+      fail(gen, 'unreachable');
     };
     channel.onmessage = (e) => {
+      if (gen !== generation) return;
       const msg = decodeFrame(e.data);
       if (!msg) return;
       if (msg.type === 'JoinAccepted') {
+        established = true;
+        attemptIndex = 0;
         onStatus('ready');
+        // Re-sent on EVERY reconnect, not just the first: the host restores
+        // seat, rating and projection from the token on every Identify, which
+        // is what makes an automatic reconnect resume the same station.
         channel.send(JSON.stringify({ type: 'Identify', data: getIdent() }));
         return;
       }
       if (msg.type === 'JoinRefused') {
         const reason = (msg.data && msg.data.code) || 'version-mismatch';
         onLog(`[rendezvous] host refused this build: ${reason}`);
-        onError(reason, (msg.data && msg.data.detail) || '');
-        onStatus('error');
-        closeAll();
+        // A refusal is the host's answer about this BUILD; established or not,
+        // reconnecting would only be told the same thing again.
+        established = false;
+        fail(gen, reason, (msg.data && msg.data.detail) || '');
         return;
       }
-      // Ordinary ServerMessage traffic. localiseTree resolves string ids to
-      // display text once, here, exactly as the PeerJS path does — every
-      // console downstream assumes it has already happened.
-      onData(localiseTree(msg));
+      deliver(gen, e.data);
     };
-    const description = await pc.createOffer();
-    await pc.setLocalDescription(description);
-    signal({ sdp: pc.localDescription || description });
+
+    // `mine`, not `pc`, from here down: this function is async, and a failure
+    // during the awaits tears `pc` out from under it. Reading the field would
+    // then throw on null and report the same failure a second time.
+    const description = await mine.createOffer();
+    await mine.setLocalDescription(description);
+    if (gen !== generation) return;
+    signal({ sdp: mine.localDescription || description });
   }
 
-  async function onSignal(payload) {
-    if (payload && payload.sdp) {
-      await pc.setRemoteDescription(payload.sdp);
-      for (const c of pendingCandidates.splice(0)) await pc.addIceCandidate(c);
-    } else if (payload && payload.candidate) {
-      if (pc && pc.remoteDescription) await pc.addIceCandidate(payload.candidate);
-      else pendingCandidates.push(payload.candidate);
-    }
+  /** Ordinary ServerMessage traffic, on whichever channel it arrived. */
+  function deliver(gen, raw) {
+    if (gen !== generation) return;
+    const msg = decodeFrame(raw);
+    if (!msg) return;
+    // localiseTree resolves string ids to display text once, here, so no
+    // console downstream has to know which of its fields are localisable.
+    onData(localiseTree(msg));
   }
 
-  function handle(msg) {
+  function handle(gen, msg) {
     switch (msg.type) {
       case 'ready':
-        onStatus('connecting');
+        if (!established) onStatus('connecting');
+        onDiag({ event: 'signaling', state: 'open' });
         // The joiner's own stamp travels in the in-band JoinHandshake, to the
         // host that decides on it — never through the service, which has no
         // say and would only be relaying dead metadata.
@@ -473,74 +756,112 @@ export function createRendezvousJoiner(opts) {
         break;
       case 'joined':
         onLog(`[rendezvous] resolved ${parsed.suffix}; offering`);
-        offer().catch((e) => onError('unreachable', String(e && e.message)));
+        offer(gen).catch((e) => fail(gen, 'unreachable', String(e && e.message)));
         break;
       case 'signal':
-        onSignal(msg.payload).catch((e) => onError('unreachable', String(e && e.message)));
+        onSignal(gen, msg.payload).catch((e) => fail(gen, 'unreachable', String(e && e.message)));
         break;
-      // Both of these are terminal: there is no state this joiner can reach
-      // afterwards. Tear it down as well as reporting it, so a dead joiner can
-      // never fire a page callback later — the page's retry builds a new one,
-      // and an orphan still wired to the same closures would pop the join
-      // overlay back over a working session.
+      // Both of these are answers, not blips: the record is gone, or the
+      // service refused the request. Tear the attempt down as well as
+      // reporting it, so a dead attempt can never fire a page callback later.
       case 'closed':
-        onError(msg.reason || 'host-gone');
-        onStatus('disconnected');
-        closeAll();
+        fail(gen, msg.reason || 'host-gone');
         break;
       case 'error':
-        onError(msg.reason, msg.detail);
-        onStatus('error');
-        closeAll();
+        fail(gen, msg.reason, msg.detail);
         break;
       default:
         break;
     }
   }
 
-  function closeAll() {
-    closed = true;
-    try { if (channel) channel.close(); } catch { /* already gone */ }
-    try { if (pc) pc.close(); } catch { /* already gone */ }
-    try { if (socket) socket.close(); } catch { /* already gone */ }
+  async function onSignal(gen, payload) {
+    if (gen !== generation || !pc) return;
+    if (payload && payload.sdp) {
+      await pc.setRemoteDescription(payload.sdp);
+      for (const c of pendingCandidates.splice(0)) await pc.addIceCandidate(c);
+    } else if (payload && payload.candidate) {
+      if (pc.remoteDescription) await pc.addIceCandidate(payload.candidate);
+      else pendingCandidates.push(payload.candidate);
+    }
   }
 
-  /** True once the direct channel is up: the signalling socket is expendable. */
-  const linked = () => !!channel && channel.readyState === 'open';
+  /** One resolve-offer-handshake-Identify pass. Every retry runs this again. */
+  function attempt() {
+    if (closed) return;
+    teardown();
+    const gen = ++generation;
+    // 'connecting' only while the guest is still waiting to get IN. Once the
+    // host has accepted this build the page is in its reconnect loop, and
+    // reporting 'connecting' on every attempt would flash the status dot green
+    // and hide the retry control several times a second — a link that is down
+    // and being retried reads as "reconnecting" until it is actually back.
+    if (!established) onStatus('connecting');
+    onDiag({ event: 'attempt', attempt: attemptIndex + 1 });
+    onDiag({ event: 'signaling', state: 'connecting' });
 
-  socket = factories.socket(socketUrl(base, '/v1/join'));
-  socket.onopen = () => onLog('[rendezvous] join socket open');
-  socket.onmessage = (e) => {
-    const msg = decodeFrame(e.data);
-    if (msg) handle(msg);
-  };
-  // An abnormal WS termination fires `error` BEFORE `close` (MDN), so once the
-  // direct channel is up this must not fall through to the same teardown the
-  // signalling socket dying at the entry screen gets: the `linked()` guard
-  // below on `onclose` never even runs in that ordering, and a stale
-  // 'unreachable' would pop the join overlay back over a connected session.
-  socket.onerror = () => { if (closed || linked()) return; onError('unreachable'); onStatus('error'); };
-  // The host half has always had this; the joining half had not, so a
-  // server-initiated close — DO eviction, worker redeploy, idle timeout, an LB
-  // reset — fired `close` with no preceding `error` and left the phone on
-  // "connecting…" forever. Only before the direct channel exists: afterwards
-  // the signalling socket going away is expected, not a failure.
-  socket.onclose = () => {
-    if (closed || linked()) return;
-    onError('unreachable');
-    onStatus('error');
-  };
+    const timeoutMs = connectTimeoutMs(attemptIndex);
+    connectTimer = setTimeout(() => {
+      connectTimer = null;
+      if (closed || gen !== generation || linked()) return;
+      onLog(`[rendezvous] attempt ${attemptIndex + 1} timed out after ${timeoutMs}ms`);
+      onDiag({ event: 'timeout', attempt: attemptIndex + 1 });
+      fail(gen, 'unreachable');
+    }, timeoutMs);
+
+    socket = factories.socket(socketUrl(base, '/v1/join'));
+    const mine = socket;
+    socket.onopen = () => onLog('[rendezvous] join socket open');
+    socket.onmessage = (e) => {
+      if (gen !== generation || socket !== mine) return;
+      const msg = decodeFrame(e.data);
+      if (msg) handle(gen, msg);
+    };
+    // An abnormal WS termination fires `error` BEFORE `close` (MDN), and a
+    // server-initiated close — DO eviction, worker redeploy, idle timeout, an
+    // LB reset — fires `close` with no preceding `error`. Both mean the same
+    // thing here, and neither means anything once the direct channel is up:
+    // afterwards the signalling socket going away is expected, not a failure.
+    const socketGone = () => {
+      if (closed || gen !== generation || socket !== mine || linked()) return;
+      fail(gen, 'unreachable');
+    };
+    socket.onerror = socketGone;
+    socket.onclose = socketGone;
+  }
+
+  attempt();
 
   return {
     get suffix() { return parsed.suffix; },
     get full() { return parsed.full; },
-    send(type, payload) {
-      if (channel && channel.readyState === 'open') {
-        channel.send(JSON.stringify(payload !== undefined ? { type, data: payload } : { type }));
+    get connected() { return linked(); },
+    /**
+     * Send one ClientMessage. `deliveryClass === 'snapshot'` prefers the lossy
+     * channel and falls back to the reliable one when it is not up — the same
+     * per-link rule gui/host-peer-routing.js applies per token on the way down.
+     */
+    send(type, payload, deliveryClass) {
+      const json = JSON.stringify(payload !== undefined ? { type, data: payload } : { type });
+      if (deliveryClass === 'snapshot' && isChannelOpen(snapshot)) {
+        try {
+          snapshot.send(json);
+          return;
+        } catch { /* fall through to the reliable channel */ }
       }
+      if (isChannelOpen(channel)) channel.send(json);
     },
-    get connected() { return !!channel && channel.readyState === 'open'; },
-    close: closeAll,
+    /** The page's "retry now" control: skip the backoff wait and go again. */
+    retryNow() {
+      if (closed || linked()) return;
+      clearTimers();
+      attempt();
+    },
+    close() {
+      closed = true;
+      clearTimers();
+      teardown();
+    },
   };
 }
 
@@ -550,6 +871,8 @@ if (typeof window !== 'undefined') {
     RENDEZVOUS_PROTOCOL,
     DEV_RENDEZVOUS_URL,
     RELIABLE_CHANNEL,
+    SNAPSHOT_CHANNEL,
+    isRetryableReason,
     rendezvousBaseFromLocation,
     joinRouteFromLocation,
     socketUrl,

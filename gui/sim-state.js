@@ -782,7 +782,7 @@ export class ClientSimState {
 
 // ── Outbound ClientMessage builders ─────────────────────────────────────────
 // Each returns a plain `{ type, data? }` object matching the serde wire
-// format; callers JSON.stringify before sending over PeerJS.
+// format; callers JSON.stringify before sending over the crew transport.
 
 export function redAlertSetMessage(active) {
   return {

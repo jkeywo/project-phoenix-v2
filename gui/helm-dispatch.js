@@ -14,8 +14,8 @@
  *
  * Deliberately DOM-free and side-effect-free at import time so it is unit
  * testable in Node: the transport is resolved by `command-gateway.js`, either
- * from the explicit `send` the action-map threads in or the live
- * `ConnectionManager` singleton.
+ * from the explicit `send` the action-map threads in or the page's live link,
+ * `window.phoenixLink`.
  *
  * NOTE: this module carries no gameplay values. Every axis value is passed
  * straight through from the caller; the wire target strings are structural

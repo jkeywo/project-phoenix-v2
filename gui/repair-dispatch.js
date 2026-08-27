@@ -63,7 +63,7 @@ export function dispatchRepairTeamPayload(teamIdx, target) {
  * @param {number} teamIdx
  * @param {string} target station id or `'core'`
  * @param {((type: string, data?: object) => void)} [send] explicit transport;
- *   omitted when called from a context that has the live ConnectionManager.
+ *   omitted when called from a context that has the page's live link.
  * @returns {object|null} the envelope that was sent, or null when offline.
  */
 export function dispatchRepairTeam(teamIdx, target, send) {

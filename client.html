@@ -22,9 +22,10 @@
        `x-phoenix-client-stamp` header. scripts/build-client.mjs writes it at
        build time, because a pure-JS page has no WASM to compile a version
        into. The phone declares it over the Phoenix join handshake and the host
-       answers with `delivery::check_join_stamp`. Empty in an un-built
-       checkout, which means "unstamped" and is admitted exactly as today's
-       PeerJS clients are. -->
+       answers with `delivery::check_join_stamp`. Since #1112 that check
+       REQUIRES the field: an un-built checkout leaves it empty and a host
+       refuses the join with `client-stamp-missing` rather than admitting it,
+       because every client that can reach a Phoenix host is a built bundle. -->
   <meta name="phoenix-client-stamp" content="" />
   <title data-i18n="client.doc_title">Project Phoenix — Console</title>
   <link rel="icon" type="image/x-icon" href="favicon.ico" />
@@ -38,7 +39,9 @@
        focus — see gui/bg-raf-keepalive.js. Must load before any other
        script calls requestAnimationFrame. -->
   <script src="gui/bg-raf-keepalive.js"></script>
-  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <!-- No transport CDN tag: issue #1112 retired PeerJS and its public broker.
+       The crew transport is gui/rendezvous-transport.js, loaded as a module
+       island below alongside the join-code table it needs. -->
   <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <!-- Loads assets/strings/strings.csv before anything renders. Its top-level
        await blocks every module that imports gui/strings.js, so t() is ready
@@ -106,11 +109,12 @@
   <script type="module" src="gui/tutorial-state.js"></script>
   <script type="module" src="gui/device-orientation.js"></script>
   <script type="module" src="gui/comms-state.js"></script>
-  <!-- Connection manager: PeerJS lifecycle extracted into a tested module (issue #603) -->
+  <!-- ICE/TURN server list, relay probe and the connect/backoff schedules the
+       transport is tuned by (issues #603, #1226). -->
   <script type="module" src="gui/connection-manager.js"></script>
-  <!-- Typed five-letter join codes and the Phoenix rendezvous route (issue
-       #1111). Additive: the PeerJS path above is still the default, and the
-       rendezvous route only runs when the page is pointed at a service. -->
+  <!-- Typed five-letter join codes and the Phoenix crew transport (issues
+       #1111/#1112). THE route: every join goes through the rendezvous service,
+       whether the code was typed, pasted or opened from a QR link. -->
   <script type="module" src="gui/join-code.js"></script>
   <script type="module" src="gui/rendezvous-transport.js"></script>
   <!-- Settings panel: client controls plus Station Help and Ship Manual. -->
@@ -1182,8 +1186,9 @@
   <div id="status" data-i18n="client.connecting">Connecting…</div>
   <div id="conn-diag"></div>
 
-  <!-- Typed join entry (issue #1111). Hidden unless this page was opened with
-       nothing in its fragment. One field takes either the five letters a guest
+  <!-- Typed join entry (issue #1111). Hidden while a join from the fragment is
+       in flight; shown when there is nothing to join with, or when an attempt
+       came back with a reason. One field takes either the five letters a guest
        reads off the viewscreen or a whole pasted/QR'd PROJECT_VERSION_CODE —
        gui/join-code.js decides which it is, so there is no second control and
        no wrong box to type into. -->
@@ -1581,13 +1586,16 @@
     function isCaptain(s)     { return playerStation(s) === 'captain'; }
     function isHelm(s)        { return playerStation(s) === 'helm'; }
 
-    // The live link this page speaks through. The PeerJS ConnectionManager by
-    // default; the Phoenix rendezvous joiner (issue #1111) when the page was
-    // opened with a join code rather than a peer id. Both expose the same
-    // `connected` / `send(type, data, deliveryClass)` / `retryNow()` contract,
-    // which is why nothing below this line has to know which route is running.
+    // The live link this page speaks through: the Phoenix joiner from
+    // gui/rendezvous-transport.js, wrapped in a STABLE façade that outlives any
+    // one attempt. `connected` / `send(type, data, deliveryClass)` /
+    // `retryNow()` is the whole contract, and because the façade object itself
+    // is never replaced — only the joiner behind it — a caller (or a smoke
+    // spec) that took a reference to it before a reconnect is still holding the
+    // live link afterwards. Also published as `window.phoenixLink`, which is
+    // what `window.connectionManager` used to be before #1112 retired PeerJS.
     let activeLink = null;
-    function currentLink() { return activeLink || window.connectionManager || null; }
+    function currentLink() { return activeLink; }
 
     function send(type, data) {
       const link = currentLink();
@@ -2989,8 +2997,8 @@
       }
     }
 
-    // -- Connection (PeerJS: gui/connection-manager.js, issue #603.
-    //                Phoenix rendezvous: gui/rendezvous-transport.js, #1111) --
+    // -- Connection (Phoenix transport: gui/rendezvous-transport.js, #1111/#1112;
+    //                ICE + timing policy: gui/connection-manager.js, #603/#1226) --
 
     (async () => {
       // Gate on DOMContentLoaded before touching any module-dependent state.
@@ -3001,24 +3009,24 @@
       }
 
       // Which route this page load is on is one pure decision (tested in
-      // tests/client/rendezvous-transport.test.js), not three ifs here:
-      //   'peerjs'      a 32-hex peer id in the fragment — unchanged
-      //   'rendezvous'  a structured join code in the fragment (QR or paste)
-      //   'entry'       ?rendezvous and nothing in the fragment — ask for the
-      //                 five letters
-      //   'none'        nothing to join and no service asked for — a bare page
-      //                 load, or ?rendezvous=off. Off by default: the Phoenix
-      //                 route is opt-in until #1112 retires PeerJS.
+      // tests/client/rendezvous-transport.test.js), not two ifs here:
+      //   'rendezvous'  something in the fragment — a QR link, a pasted full
+      //                 code, or a stale bookmark: join with it straight away
+      //   'entry'       nothing in the fragment: ask for the five letters
+      // There is no third route since #1112 retired PeerJS, and no route flag:
+      // a fragment that is not a valid code still comes here and gets a stated
+      // reason in front of the entry field, because gui/join-code.js is the one
+      // place that decides what a typed string is.
       // Asked here rather than at script scope: every gui/ module is deferred,
       // so window.rendezvousTransport does not exist until this gate clears.
+      // The 'none' fallback is for the module genuinely failing to load, which
+      // leaves this page with no way to reach any host at all.
       const joinRoute = (window.rendezvousTransport
         ? window.rendezvousTransport.joinRouteFromLocation(location.search, location.hash)
-        : (location.hash.slice(1)
-            ? { route: 'peerjs', hostPeerId: location.hash.slice(1) }
-            : { route: 'none' }));
-      const hostPeerId = joinRoute.route === 'peerjs' ? joinRoute.hostPeerId : '';
+        : { route: 'none' });
 
       if (joinRoute.route === 'none') {
+        console.error('[client] transport module failed to load — cannot join');
         setStatus(t('client.status_no_host_id'));
         return;
       }
@@ -3084,9 +3092,9 @@
         window.applyAccessibilityProfile();
       }
 
-      console.log('[PeerJS] fetching ICE servers');
+      console.log('[client] fetching ICE servers');
       const { servers: iceServers, relayAvailable, relaySource } = await window.fetchIceServers();
-      console.log('[PeerJS] ICE config:', iceServers.map(s => s.urls));
+      console.log('[client] ICE config:', iceServers.map(s => s.urls));
 
       // Connection diagnostics readout (#conn-diag). A phone stuck behind
       // CGNAT shows "connecting…" forever with the real story buried in an
@@ -3138,15 +3146,12 @@
         });
       }
 
-      if (typeof window.connectionManager === 'undefined') {
-        console.warn('[client] connection-manager module not loaded; falling back to inline Peer setup');
-        return;
-      }
-
-      // One options object, two routes. Both transports take the same
-      // callback contract, so everything below — status text, diagnostics,
-      // the console repaint — is written once and neither route can drift
-      // into describing a connection differently from the other.
+      // Everything the transport needs to drive this page: identity, the
+      // inbound message sink, and the four status/diagnostic callbacks that
+      // paint the status line, the console's live/dead treatment and the
+      // #conn-diag readout. `onError` is supplied by startPhoenixJoin below,
+      // because a refusal belongs in front of the entry field with its own
+      // sentence rather than on a status line the guest cannot act on.
       const connectOptions = {
         iceServers,
         getIdent: () => ({ token: myToken, name: myName }),
@@ -3172,13 +3177,6 @@
             setStatus(t('client.status_unreachable'));
           }
         },
-        onError: (type) => {
-          if (type === 'peer-unavailable') {
-            setStatus(t('client.status_host_not_found'));
-          } else {
-            setStatus(t('client.status_peer_error', { type: type }));
-          }
-        },
         onLog: (msg) => console.log(msg),
         onDiag: (e) => {
           if (e.event === 'attempt') { diag.attempt = e.attempt; diag.ice = ''; diag.types = []; }
@@ -3190,20 +3188,22 @@
         },
       };
 
-      if (joinRoute.route === 'peerjs') {
-        window.connectionManager.connect(hostPeerId, connectOptions);
-      } else {
-        await startPhoenixJoin(joinRoute, connectOptions);
-      }
+      await startPhoenixJoin(joinRoute, connectOptions);
     })();
 
-    // -- Phoenix join (issue #1111) ----------------------------------------
+    // -- Phoenix join (issues #1111 / #1112) --------------------------------
     //
-    // Either the code arrived in the fragment (a QR scan, or a pasted full
+    // Either the code arrived in the fragment (a QR link, or a pasted full
     // code) and we join at once, or nothing did and the guest types the five
     // letters they can read off the viewscreen. Both land in the same
     // attempt() below, because gui/join-code.js decides what was typed rather
     // than the form offering two boxes to get wrong.
+    //
+    // attempt() is only ever a NEW code being tried. Keeping an accepted link
+    // alive across a dropped radio is the joiner's own job — it re-resolves the
+    // same code on a backoff and re-sends Identify with the same session token
+    // (#1112 AC3) — so nothing here re-asks for five letters the guest already
+    // typed.
     async function startPhoenixJoin(route, connectOptions) {
       const codes = window.joinCode;
       const transport = window.rendezvousTransport;
@@ -3224,7 +3224,9 @@
       }
 
       // This bundle's own identity, presented to the host's compatibility
-      // handshake. Empty in an un-built checkout, which the host admits.
+      // handshake. Empty only in an un-built checkout, which the host refuses
+      // since #1112 — `scripts/build-client.mjs` writes the field on every
+      // build, so a shipped page always carries one.
       const stampMeta = document.querySelector('meta[name="phoenix-client-stamp"]');
       const stamp = (stampMeta && stampMeta.content) || '';
 
@@ -3240,6 +3242,23 @@
       // these same page callbacks — a late failure on a stale one would pop
       // this overlay back over a session that had since connected.
       let joiner = null;
+
+      // The page's stable handle on whatever joiner is current. Created ONCE,
+      // so a reference taken before a reconnect still drives the live link
+      // afterwards; `retryNow` prefers the joiner's own immediate re-attempt
+      // (same code, same token) and only falls back to re-running the typed
+      // attempt when there is no joiner to ask.
+      activeLink = {
+        get connected() { return !!joiner && joiner.connected; },
+        send: (type, payload, deliveryClass) => {
+          if (joiner) joiner.send(type, payload, deliveryClass);
+        },
+        retryNow: () => {
+          if (joiner) joiner.retryNow();
+          else attempt(lastTyped);
+        },
+      };
+      window.phoenixLink = activeLink;
 
       function showEntry(reason) {
         if (errorEl) errorEl.textContent = reason ? t(codes.reasonStringId(reason)) : '';
@@ -3266,26 +3285,19 @@
           onData: connectOptions.onData,
           onStatus: connectOptions.onStatus,
           onLog: connectOptions.onLog,
+          onDiag: connectOptions.onDiag,
           // Unknown, wrong-type and version-mismatch are three different
           // sentences here — that is the whole point of the typed namespaces —
           // and every one of them puts the guest back in front of the field
           // rather than leaving them on a status line they cannot act on.
+          // Only a refusal a retry cannot fix reaches this callback at all;
+          // an unreachable service on an established link is the joiner's own
+          // backoff loop, and the guest sees "reconnecting", not the field.
           onError: (reason, detail) => {
             console.warn(`[join] ${reason}${detail ? `: ${detail}` : ''}`);
             showEntry(reason);
           },
         });
-        // Bound to THIS attempt's joiner, not to whatever `joiner` holds
-        // later, so a link handed out here can never start driving a
-        // replacement connection. retryNow just re-attempts — attempt() closes
-        // the joiner in flight itself, which is the one discipline both paths
-        // now share.
-        const link = joiner;
-        activeLink = {
-          get connected() { return link.connected; },
-          send: (type, payload) => link.send(type, payload),
-          retryNow: () => attempt(lastTyped),
-        };
       }
 
       if (submit) submit.addEventListener('click', () => attempt(input ? input.value : ''));

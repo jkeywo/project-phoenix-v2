@@ -48,10 +48,13 @@ export function stampField(protocol, content) {
 /**
  * Read the field out of the repository at `root`.
  *
- * Returns `''` when either source cannot be read, and an empty stamp means
- * "unstamped" — which the host admits, exactly as it admits today's PeerJS
- * clients. Failing the build here would make an unrelated refactor of
- * messages.rs break the client build for no safety gain.
+ * Returns `''` when either source cannot be read. An empty stamp means
+ * "unstamped", which since issue #1112 a host REFUSES — so a build that lands
+ * here has produced a client no host will admit. It still does not fail the
+ * build: the failure is loud and immediate at the first join attempt, with a
+ * named reason (`client-stamp-missing`), whereas throwing here would let an
+ * unrelated refactor of messages.rs break the client build outright. Both
+ * sources are committed files that always exist in a real checkout.
  */
 export async function clientStampField(root) {
   try {

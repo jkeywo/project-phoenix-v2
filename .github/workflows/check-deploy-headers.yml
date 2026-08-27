@@ -25,7 +25,7 @@ on:
         description: >
           Also require cross-origin isolation (COOP/COEP). Leave FALSE for the
           current single-threaded build: isolation buys it nothing and breaks the
-          cross-origin PeerJS and TURN requests. Turn it on only once the
+          cross-origin rendezvous and TURN requests. Turn it on only once the
           worker-thread benchmark spike has said yes.
         required: false
         type: boolean

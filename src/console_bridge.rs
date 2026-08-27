@@ -12,7 +12,7 @@ use bevy::prelude::*;
 
 /// Session token used for actions originating from the local HTML consoles
 /// (browser server viewscreen / native wry server), where the operator drives
-/// a console directly rather than through a remote PeerJS session. The host
+/// a console directly rather than through a remote network session. The host
 /// page routes its console actions through `gui/action-map.js` into full
 /// `ClientMessage` JSON and submits them via `wasm_receive_message` under this
 /// token (issue #822); the gameplay console handlers treat it as an authorized

@@ -515,7 +515,7 @@ jobs:
 
           Run as above, this host serves the client, the manifest and game
           content only: the simulation is still the browser host, it does no
-          PeerJS signalling, and it is not safe to expose to the public
+          rendezvous signalling, and it is not safe to expose to the public
           internet (no TLS, no auth, no rate limiting).
 
           The same executable can also run the simulation itself, with the
@@ -523,9 +523,11 @@ jobs:
 
             phoenix-host.exe --world assets/worlds/combat_test.toml --solo
 
-          Browser crew clients cannot yet join a native host -- that needs the
-          Phoenix transport (issue #1112) -- so --solo, the whole ship flown by
-          the AI, is what this mode is good for today.
+          Browser crew clients cannot yet join a native host -- the browser
+          route moved onto the Phoenix transport in issue #1112, but wiring
+          that transport into the native process is still outstanding -- so
+          --solo, the whole ship flown by the AI, is what this mode is good
+          for today.
           EOF
           cd release
           7z a -tzip ../phoenix-host-demo-windows.zip .

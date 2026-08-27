@@ -1,14 +1,14 @@
 // tests/client/host-peer-routing.test.js — issue #1230: server.html's
 // routeOutbound() closed over the live tokenConns/tokenSnapshotConns Maps and
 // called `.send()` inline, so there was no importable target-resolution logic
-// to test without a real PeerJS session. This suite exercises the pure
+// to test without a live WebRTC session. This suite exercises the pure
 // resolution lifted out of it (gui/host-peer-routing.js) with plain
 // `Map([[token, fakeConn]])` fixtures.
 
 import { describe, it, expect } from 'vitest';
 import { outboundTargets } from '../../gui/host-peer-routing.js';
 
-/** A fake PeerJS-shaped DataConnection: `open` is the flag routeOutbound read. */
+/** A fake connection: `open` is the flag routeOutbound reads. */
 const conn = (open = true) => ({ open, sent: [] });
 /** A fake raw-RTCDataChannel-shaped stub: `readyState` instead of `open`. */
 const rtcConn = (readyState = 'open') => ({ readyState, sent: [] });

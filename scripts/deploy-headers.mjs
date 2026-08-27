@@ -18,7 +18,7 @@
  * Cross-origin isolation is deliberately NOT required. The shipped build is
  * single-threaded (`Cargo.toml`'s wasm stanza; rapier's `parallel` is off on
  * both targets since #896), so COOP/COEP would buy nothing and would break the
- * cross-origin PeerJS and TURN fetches the page depends on. PRD #855 puts
+ * cross-origin rendezvous and TURN fetches the page depends on. PRD #855 puts
  * worker threads behind a benchmark spike; `requireIsolation` is the switch that
  * turns this into a requirement on the day that spike says yes.
  */
@@ -256,14 +256,15 @@ function checkIsolation(probe, opts) {
 
   // Not required — but half-applied isolation is worse than none: COEP without
   // COOP does not isolate anything and does block every cross-origin
-  // subresource, which on this page is PeerJS and the TURN credential worker.
+  // subresource, which on this page is the rendezvous service and the TURN
+  // credential worker.
   if (coep && coop !== 'same-origin') {
     return [finding(
       'error',
       probe.path,
       `Cross-Origin-Embedder-Policy is set (${coep}) without Cross-Origin-Opener-Policy: ` +
-      'same-origin — that isolates nothing and blocks the cross-origin PeerJS and ' +
-      'TURN requests the page needs',
+      'same-origin — that isolates nothing and blocks the cross-origin rendezvous ' +
+      'and TURN requests the page needs',
     )];
   }
   return [];

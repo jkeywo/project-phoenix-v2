@@ -699,7 +699,7 @@ pub fn validate_ship_stations(
 ///
 /// On success, stores the parsed `ShipStations` internally and returns
 /// `Ok(JsValue::UNDEFINED)`. On failure, returns `Err(JsValue)` with a
-/// human-readable error string. PeerJS should not start when this returns
+/// human-readable error string. The crew transport should not start when this returns
 /// an error.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
@@ -739,7 +739,7 @@ pub fn wasm_init() {
     // Without this, a panic in any Bevy system traps the wasm instance and
     // every subsequent JS→WASM call surfaces as a bare "RuntimeError: memory
     // access out of bounds" pointing at whatever entry point fired next
-    // (typically `wasm_receive_message` since the host page receives PeerJS
+    // (typically `wasm_receive_message` since the host page receives client
     // messages continuously). `set_once` is idempotent.
     console_error_panic_hook::set_once();
 
@@ -2448,13 +2448,16 @@ pub fn wasm_delivery_stamp() -> String {
     ))
 }
 
-/// Judge a joining client's version stamp against this host's (issue #1111).
+/// Judge a joining client's version stamp against this host's (issue #1111,
+/// made mandatory in #1112).
 ///
 /// The host half of the Phoenix join handshake. `server.html` hands over the
 /// `<protocol>/<content_id>/<content_epoch>` field a joiner declared over its
 /// DataChannel and gets back `{"ok":true,…}` or `{"ok":false,"code":…,…}`; an
-/// empty string means the client declared nothing, which is admitted — see
-/// [`crate::delivery::check_join_stamp`] for why.
+/// empty string means the client declared nothing, which is now REFUSED
+/// (`client-stamp-missing`) rather than admitted — every client that can reach
+/// a Phoenix host is a built Phoenix bundle carrying the field. See
+/// [`crate::delivery::check_join_stamp`] for the full rule.
 ///
 /// This export is the reason the verdict is not re-implemented in JavaScript.
 /// The rendezvous service's version advice is discovery help; the authority

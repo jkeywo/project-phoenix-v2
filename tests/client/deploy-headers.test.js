@@ -172,7 +172,7 @@ describe('cross-origin isolation', () => {
     expect(checkProbe(entry({}))).toEqual([]);
   });
 
-  it('rejects COEP set without COOP — it isolates nothing and blocks PeerJS and TURN', () => {
+  it('rejects COEP set without COOP — it isolates nothing and blocks rendezvous and TURN', () => {
     const findings = checkProbe(entry({ 'cross-origin-embedder-policy': 'require-corp' }));
     expect(errors(findings)).toHaveLength(1);
     expect(messages(findings)).toMatch(/isolates nothing/);

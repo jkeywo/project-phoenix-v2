@@ -220,7 +220,7 @@ pub type BlasterBank = String;
 
 /// How an outbound `ServerMessage` should be delivered over the wire.
 ///
-/// `Reliable` rides the ordered/retransmit DataChannel (PeerJS default).
+/// `Reliable` rides the ordered/retransmitting DataChannel (label `reliable`).
 /// `Snapshot` rides the unordered/no-retransmit DataChannel when available,
 /// falling back to the reliable channel when the snapshot channel has not
 /// opened yet or has failed. The server decides the delivery class; clients

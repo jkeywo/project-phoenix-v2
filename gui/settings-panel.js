@@ -151,7 +151,7 @@ export function debugFlagMessage(flag) {
  * not rendered there either. See the module doc.
  *
  * A unit variant on the wire, so it carries NO `data` key — the frame is
- * `{"type":"TogglePause"}`, which is what `connection-manager.js` emits when
+ * `{"type":"TogglePause"}`, which is what the transport's `send()` emits when
  * `send()` is given no data, and the same shape `ReleaseStation` has always
  * used. `data: {}` would be a different message and the host would reject it;
  * `codec::client_settings_menu_wire_shapes_are_pinned` pins both facts.

@@ -82,31 +82,54 @@ function makeWorld() {
   return { registry, socket };
 }
 
-/** Fake RTCPeerConnection: two ends linked once the offer has been answered. */
+/**
+ * Fake RTCPeerConnection: two ends linked once the offer has been answered.
+ *
+ * Every channel it ever builds is recorded on the returned factory's
+ * `.channels`, with the label, the `createDataChannel` init bag and the
+ * payloads sent on it — that is how the tests below tell "this rode the lossy
+ * channel" from "this fell back to the reliable one" without reaching inside
+ * the module under test. `origin` is `'offer'` for the channel the joiner
+ * created and `'answer'` for the host's mirror of it.
+ *
+ * Closing a channel propagates to its far end, which real WebRTC does and the
+ * reconnect path depends on: a host dropping a connection has to be observable
+ * on the phone as a closed channel, not merely as a local state change.
+ */
 function makePeerFactory() {
   const offerers = new Map();
+  const channels = [];
   let n = 0;
 
-  function makeChannel(label) {
-    return {
+  function makeChannel(label, init, origin) {
+    const ch = {
       label,
+      init: init || {},
+      origin,
+      sent: [],
       readyState: 'connecting',
-      onopen: null, onmessage: null, onclose: null,
+      onopen: null, onmessage: null, onclose: null, onerror: null,
       _remote: null,
       send(payload) {
+        this.sent.push(payload);
         const remote = this._remote;
         queueMicrotask(() => { if (remote && remote.onmessage) remote.onmessage({ data: payload }); });
       },
       close() {
+        if (this.readyState === 'closed') return;
         this.readyState = 'closed';
         if (this.onclose) this.onclose();
+        const remote = this._remote;
+        if (remote && remote.readyState !== 'closed') queueMicrotask(() => remote.close());
       },
     };
+    channels.push(ch);
+    return ch;
   }
 
   function link(offerer, answerer) {
     for (const local of offerer._channels) {
-      const remote = makeChannel(local.label);
+      const remote = makeChannel(local.label, local.init, 'answer');
       local._remote = remote;
       remote._remote = local;
       answerer._channels.push(remote);
@@ -120,7 +143,7 @@ function makePeerFactory() {
     }
   }
 
-  return function peer() {
+  const factory = function peer() {
     const id = `pc-${++n}`;
     const pc = {
       _id: id,
@@ -128,9 +151,11 @@ function makePeerFactory() {
       localDescription: null,
       remoteDescription: null,
       onicecandidate: null,
+      oniceconnectionstatechange: null,
+      iceConnectionState: 'checking',
       ondatachannel: null,
-      createDataChannel(label) {
-        const ch = makeChannel(label);
+      createDataChannel(label, init) {
+        const ch = makeChannel(label, init, 'offer');
         this._channels.push(ch);
         return ch;
       },
@@ -145,11 +170,17 @@ function makePeerFactory() {
         if (d.type === 'offer') link(offerers.get(d.peer), this);
       },
       async addIceCandidate() {},
-      close() { for (const c of this._channels) c.readyState = 'closed'; },
+      close() { for (const c of this._channels) c.close(); },
     };
     return pc;
   };
+  factory.channels = channels;
+  return factory;
 }
+
+/** Channels of one label, newest last. */
+const channelsNamed = (factories, label, origin) =>
+  factories.peer.channels.filter((c) => c.label === label && (!origin || c.origin === origin));
 
 /** Stand up a host on a fake world and wait for its issued code. */
 async function hostOn(world, opts = {}) {
@@ -206,16 +237,28 @@ async function rogueJoin(factories, code, { onOpen, onMessage } = {}) {
 // ── Pure helpers ────────────────────────────────────────────────────────────
 
 describe('service selection', () => {
-  it('is off unless the page asks for it, so PeerJS stays the default route', () => {
-    expect(rendezvousBaseFromLocation('')).toBeNull();
-    expect(rendezvousBaseFromLocation('?scenario=x')).toBeNull();
-    expect(rendezvousBaseFromLocation('?rendezvous=off')).toBeNull();
+  it('uses the built-in service on an ordinary page load — there is no off', () => {
+    // #1112 retired PeerJS and with it the ?rendezvous opt-in. A page with no
+    // parameter is not "off", it is on the only route there is; an old
+    // ?rendezvous=off bookmark selects the default rather than a dead end,
+    // because there is no longer anything for it to fall back to.
+    expect(rendezvousBaseFromLocation('')).toBe(DEV_RENDEZVOUS_URL);
+    expect(rendezvousBaseFromLocation('?scenario=x')).toBe(DEV_RENDEZVOUS_URL);
   });
 
-  it('uses the built-in service for a bare flag and an explicit URL otherwise', () => {
-    expect(rendezvousBaseFromLocation('?rendezvous')).toBe(DEV_RENDEZVOUS_URL);
-    expect(rendezvousBaseFromLocation('?rendezvous=1')).toBe(DEV_RENDEZVOUS_URL);
+  it('ignores the retired opt-in spellings instead of dialling a host called "on"', () => {
+    // A bookmark from the #1111 era must still open the game. Honouring these
+    // as service URLs would throw building the socket URL, which is a worse
+    // answer than the default they were always pointing at.
+    for (const legacy of ['?rendezvous', '?rendezvous=1', '?rendezvous=on', '?rendezvous=off']) {
+      expect(rendezvousBaseFromLocation(legacy), legacy).toBe(DEV_RENDEZVOUS_URL);
+    }
+  });
+
+  it('still points at another service when one is named', () => {
+    // The lever that survives: a local `wrangler dev`, or a staging deployment.
     expect(rendezvousBaseFromLocation('?rendezvous=https://other.test')).toBe('https://other.test');
+    expect(rendezvousBaseFromLocation('?rendezvous=http://localhost:8787')).toBe('http://localhost:8787');
   });
 
   it('upgrades the scheme when building a socket URL', () => {
@@ -237,12 +280,7 @@ describe('service selection', () => {
 });
 
 describe('which route a client page load is on', () => {
-  it('keeps a peer id in the fragment on the PeerJS route', () => {
-    expect(joinRouteFromLocation('', '#0123456789abcdef0123456789abcdef'))
-      .toEqual({ route: 'peerjs', hostPeerId: '0123456789abcdef0123456789abcdef' });
-  });
-
-  it('treats a structured code in the fragment as its own opt-in', () => {
+  it('joins straight away with a structured code in the fragment', () => {
     expect(joinRouteFromLocation('', '#proj_ver_QUARK')).toEqual({
       route: 'rendezvous',
       base: DEV_RENDEZVOUS_URL,
@@ -250,19 +288,26 @@ describe('which route a client page load is on', () => {
     });
   });
 
-  it('is off for a bare page load, exactly like the host half', () => {
-    // The Phoenix route is opt-in per page load until #1112 retires PeerJS. A
-    // client page opened with no fragment and no parameter keeps its old
-    // "no host id in the URL" dead end rather than presenting an entry field
-    // wired to a service that need not be deployed.
-    expect(joinRouteFromLocation('', '')).toEqual({ route: 'none' });
-    expect(joinRouteFromLocation('?scenario=x', '')).toEqual({ route: 'none' });
-  });
-
-  it('asks for five letters when the page asked for a service', () => {
-    expect(joinRouteFromLocation('?rendezvous', '')).toEqual({
+  it('asks for five letters on a bare page load', () => {
+    // No opt-in, no dead end: the rendezvous route is the only route since
+    // #1112, so a client page with nothing in its fragment offers the field
+    // rather than telling the guest there is no host id in the URL.
+    expect(joinRouteFromLocation('', '')).toEqual({
       route: 'entry',
       base: DEV_RENDEZVOUS_URL,
+    });
+    expect(joinRouteFromLocation('?scenario=x', '')).toMatchObject({ route: 'entry' });
+  });
+
+  it('sends a stale PeerJS-era peer id through the same code parse', () => {
+    // A bookmarked `#<32 hex>` from before the cutover is not a third route.
+    // It is a string that is not a code, and gui/join-code.js is the one place
+    // that gets to say so — with a reason the guest can act on, in front of the
+    // entry field, rather than a hang on a status line.
+    expect(joinRouteFromLocation('', '#0123456789abcdef0123456789abcdef')).toEqual({
+      route: 'rendezvous',
+      base: DEV_RENDEZVOUS_URL,
+      code: '0123456789abcdef0123456789abcdef',
     });
   });
 
@@ -271,14 +316,6 @@ describe('which route a client page load is on', () => {
       .toMatchObject({ route: 'rendezvous', base: 'http://x.test' });
     expect(joinRouteFromLocation('?rendezvous=http://x.test', ''))
       .toMatchObject({ route: 'entry', base: 'http://x.test' });
-  });
-
-  it('falls back to the old dead end when the route is switched off', () => {
-    expect(joinRouteFromLocation('?rendezvous=off', '')).toEqual({ route: 'none' });
-    expect(joinRouteFromLocation('?rendezvous=off', '#p_v_QUARK')).toEqual({ route: 'none' });
-    // …but a peer id still connects, because that route never needed a service.
-    expect(joinRouteFromLocation('?rendezvous=off', '#deadbeef'))
-      .toEqual({ route: 'peerjs', hostPeerId: 'deadbeef' });
   });
 });
 
@@ -672,5 +709,342 @@ describe('a joiner that fails cleans up after itself', () => {
 
     expect(errors).toHaveLength(0);
     expect(statuses).not.toContain('error');
+  });
+});
+
+// ── #1112: the transport replaces PeerJS ────────────────────────────────────
+
+describe('one host, several crew clients', () => {
+  it('admits three phones through one code and keeps their identities apart', async () => {
+    const world = makeWorld();
+    const { code, inbound, announced, factories } = await hostOn(world);
+
+    for (const who of ['ada', 'bo', 'cy']) {
+      createRendezvousJoiner({
+        base: 'https://rendezvous.test',
+        data: DATA,
+        code: code.suffix,
+        factories,
+        getIdent: () => ({ token: `tok-${who}`, name: who }),
+      });
+      await settle();
+    }
+
+    expect(announced).toHaveLength(3);
+    // Three distinct rendezvous peers, so the host's peer→token map cannot
+    // collapse two phones onto one seat.
+    expect(new Set(announced.map((c) => c.peer)).size).toBe(3);
+    expect(inbound.map((m) => m.data.token))
+      .toEqual(['tok-ada', 'tok-bo', 'tok-cy']);
+  });
+});
+
+describe('the lossy snapshot channel', () => {
+  const joinWith = async (factories, code, opts = {}) => {
+    const joiner = createRendezvousJoiner({
+      base: 'https://rendezvous.test',
+      data: DATA,
+      code,
+      factories,
+      getIdent: () => ({ token: 'tok-1', name: 'Ada' }),
+      ...opts,
+    });
+    await settle();
+    return joiner;
+  };
+
+  it('negotiates an unordered, non-retransmitting channel alongside the reliable one', async () => {
+    const world = makeWorld();
+    const { code, factories } = await hostOn(world);
+    await joinWith(factories, code.suffix);
+
+    const [lossy] = channelsNamed(factories, 'snapshot', 'offer');
+    expect(lossy).toBeTruthy();
+    // A "snapshot" channel that quietly negotiated as ordered/retransmitting
+    // would be the reliable channel under another name, and every head-of-line
+    // stall this split exists to avoid would still be there.
+    expect(lossy.init).toEqual({ ordered: false, maxRetransmits: 0 });
+    expect(channelsNamed(factories, 'reliable', 'offer')[0].init).toEqual({ ordered: true });
+  });
+
+  it('hands the host the lossy channel for the token that opened it', async () => {
+    const world = makeWorld();
+    const { code, announced, factories } = await hostOn(world);
+    await joinWith(factories, code.suffix);
+
+    // server.html puts exactly this object into tokenSnapshotConns, which is
+    // what gui/host-peer-routing.js routes snapshot deliveries down.
+    const conn = announced[0];
+    expect(conn.snapshotChannel).toBeTruthy();
+    expect(conn.snapshotChannel.label).toBe('snapshot');
+    expect(conn.snapshotChannel.readyState).toBe('open');
+  });
+
+  it('delivers snapshot-class traffic to the page exactly like reliable traffic', async () => {
+    const world = makeWorld();
+    const received = [];
+    const { code, announced, factories } = await hostOn(world);
+    await joinWith(factories, code.suffix, { onData: (m) => received.push(m) });
+
+    announced[0].snapshotChannel.send(JSON.stringify({ type: 'SimState', data: { tick: 7 } }));
+    announced[0].send(JSON.stringify({ type: 'Welcome', data: {} }));
+    await settle();
+
+    expect(received.map((m) => m.type).sort()).toEqual(['SimState', 'Welcome']);
+  });
+
+  it('prefers the lossy channel for a snapshot send and falls back when it is gone', async () => {
+    const world = makeWorld();
+    const { code, factories } = await hostOn(world);
+    const joiner = await joinWith(factories, code.suffix);
+    const lossy = channelsNamed(factories, 'snapshot', 'offer')[0];
+    const reliable = channelsNamed(factories, 'reliable', 'offer')[0];
+    const reliableBefore = reliable.sent.length;
+
+    joiner.send('Ping', { n: 1 }, 'snapshot');
+    expect(lossy.sent).toHaveLength(1);
+    expect(reliable.sent).toHaveLength(reliableBefore);
+
+    // The lossy channel is allowed to go without taking the session with it.
+    lossy.onclose = null;
+    lossy.readyState = 'closed';
+    joiner.send('Ping', { n: 2 }, 'snapshot');
+    expect(lossy.sent).toHaveLength(1);
+    expect(reliable.sent).toHaveLength(reliableBefore + 1);
+    expect(JSON.parse(reliable.sent.at(-1))).toEqual({ type: 'Ping', data: { n: 2 } });
+  });
+
+  it('sends commands on the reliable channel even with the lossy one up', async () => {
+    const world = makeWorld();
+    const { code, factories } = await hostOn(world);
+    const joiner = await joinWith(factories, code.suffix);
+    const lossy = channelsNamed(factories, 'snapshot', 'offer')[0];
+    const reliable = channelsNamed(factories, 'reliable', 'offer')[0];
+
+    joiner.send('SelectStation', { station: 'Helm' }, 'reliable');
+    expect(lossy.sent).toHaveLength(0);
+    expect(JSON.parse(reliable.sent.at(-1)))
+      .toEqual({ type: 'SelectStation', data: { station: 'Helm' } });
+  });
+});
+
+describe('automatic reconnect', () => {
+  it('re-resolves the same code and re-sends Identify with the same token', async () => {
+    const world = makeWorld();
+    const { code, inbound, announced, factories } = await hostOn(world);
+    const statuses = [];
+    const errors = [];
+    const joiner = createRendezvousJoiner({
+      base: 'https://rendezvous.test',
+      data: DATA,
+      code: code.suffix,
+      factories,
+      getIdent: () => ({ token: 'tok-1', name: 'Ada' }),
+      onStatus: (s) => statuses.push(s),
+      onError: (r) => errors.push(r),
+    });
+    await settle();
+    expect(inbound).toEqual([{ type: 'Identify', data: { token: 'tok-1', name: 'Ada' } }]);
+
+    // The phone's radio slept: the channel goes on both ends and nobody said
+    // goodbye. This is the failure gui/connection-manager.js's backoff loop
+    // used to own, and #1112 moved here with it.
+    announced[0].close();
+    await settle();
+    expect(joiner.connected).toBe(false);
+    // "reconnecting", NOT the join screen: the code was already accepted, so
+    // nothing goes back in front of the guest.
+    expect(statuses.at(-1)).toBe('disconnected');
+    expect(errors).toHaveLength(0);
+
+    // The page's "retry now" control, short-circuiting the backoff wait.
+    joiner.retryNow();
+    await settle();
+
+    expect(joiner.connected).toBe(true);
+    expect(announced).toHaveLength(2);
+    // Same token, no second code typed: this is what makes the host restore
+    // the held station and push the current projection.
+    expect(inbound).toEqual([
+      { type: 'Identify', data: { token: 'tok-1', name: 'Ada' } },
+      { type: 'Identify', data: { token: 'tok-1', name: 'Ada' } },
+    ]);
+    expect(joiner.full).toBe(code.full);
+  });
+
+  it('rebuilds the lossy channel with the reconnected link', async () => {
+    const world = makeWorld();
+    const { code, announced, factories } = await hostOn(world);
+    const joiner = createRendezvousJoiner({
+      base: 'https://rendezvous.test',
+      data: DATA,
+      code: code.suffix,
+      factories,
+      getIdent: () => ({ token: 'tok-1', name: 'Ada' }),
+    });
+    await settle();
+
+    announced[0].close();
+    await settle();
+    joiner.retryNow();
+    await settle();
+
+    // Not the first link's channel wearing the second link's name.
+    const lossy = channelsNamed(factories, 'snapshot', 'offer');
+    expect(lossy).toHaveLength(2);
+    expect(announced[1].snapshotChannel).toBe(lossy[1]._remote);
+    expect(announced[1].snapshotChannel.readyState).toBe('open');
+  });
+
+  it('gives up on an answer a retry cannot change, and says which one', async () => {
+    // The host's compatibility verdict and a dead record are answers about the
+    // BUILD and the CODE. Retrying either only gets the same sentence more
+    // slowly, so both end the loop and go back to the entry field.
+    const world = makeWorld();
+    const { host, code, factories } = await hostOn(world);
+    const errors = [];
+    const statuses = [];
+    const joiner = createRendezvousJoiner({
+      base: 'https://rendezvous.test',
+      data: DATA,
+      code: code.suffix,
+      factories,
+      getIdent: () => ({ token: 'tok-1', name: 'Ada' }),
+      onError: (r) => errors.push(r),
+      onStatus: (s) => statuses.push(s),
+    });
+    await settle();
+    expect(joiner.connected).toBe(true);
+
+    host.close();
+    await settle();
+
+    expect(errors).toContain('host-gone');
+    expect(joiner.connected).toBe(false);
+  });
+
+  it('lets a link failure through to the page before the host has accepted it', async () => {
+    // The reconnect loop only starts once a build has been admitted. A guest
+    // still at the entry field who cannot reach the service must be told, not
+    // left watching a silent backoff.
+    const world = makeWorld();
+    const { code } = await hostOn(world);
+    const joinSockets = [];
+    const factories = {
+      socket: (url) => {
+        const s = world.socket(url);
+        if (String(url).endsWith('/v1/join')) joinSockets.push(s);
+        return s;
+      },
+      peer: makePeerFactory(),
+    };
+    const errors = [];
+    const statuses = [];
+    createRendezvousJoiner({
+      base: 'https://rendezvous.test',
+      data: DATA,
+      code: code.suffix,
+      factories,
+      onError: (r) => errors.push(r),
+      onStatus: (s) => statuses.push(s),
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    joinSockets[0].close();
+    await settle();
+
+    expect(errors).toEqual(['unreachable']);
+    expect(statuses.at(-1)).toBe('error');
+  });
+
+  it('reports the connection diagnostics the page renders under the link', async () => {
+    const world = makeWorld();
+    const { code, factories } = await hostOn(world);
+    const events = [];
+    createRendezvousJoiner({
+      base: 'https://rendezvous.test',
+      data: DATA,
+      code: code.suffix,
+      factories,
+      getIdent: () => ({ token: 'tok-1', name: 'Ada' }),
+      onDiag: (e) => events.push(e),
+    });
+    await settle();
+
+    // client.html's #conn-diag readout is written against exactly these event
+    // names; a transport that stopped emitting them would blank the one
+    // on-screen explanation a stuck phone has.
+    expect(events).toContainEqual({ event: 'attempt', attempt: 1 });
+    expect(events).toContainEqual({ event: 'signaling', state: 'connecting' });
+    expect(events).toContainEqual({ event: 'signaling', state: 'open' });
+    expect(events).toContainEqual({ event: 'open' });
+  });
+});
+
+describe('a host that loses its record', () => {
+  it('re-registers and is issued a fresh code rather than sitting unjoinable', async () => {
+    // There is no PeerJS underneath any more: a host whose socket blipped and
+    // simply reported it would be unreachable until someone reloaded the
+    // viewscreen. The replacement code is a DIFFERENT one — the old record
+    // really is gone — which is why the panel repaints instead of holding.
+    vi.useFakeTimers();
+    try {
+      const world = makeWorld();
+      const hostSockets = [];
+      const factories = {
+        socket: (url) => {
+          const s = world.socket(url);
+          if (String(url).endsWith('/v1/host')) hostSockets.push(s);
+          return s;
+        },
+        peer: makePeerFactory(),
+      };
+      const codes = [];
+      const errors = [];
+      createRendezvousHost({
+        base: 'https://rendezvous.test',
+        factories,
+        onCode: (c) => codes.push(c.suffix),
+        onError: (r) => errors.push(r),
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(codes).toHaveLength(1);
+
+      hostSockets[0].onerror();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(errors).toEqual(['unreachable']);
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(codes).toHaveLength(2);
+      expect(hostSockets).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stays put when asked not to re-register', async () => {
+    const world = makeWorld();
+    const hostSockets = [];
+    const factories = {
+      socket: (url) => {
+        const s = world.socket(url);
+        if (String(url).endsWith('/v1/host')) hostSockets.push(s);
+        return s;
+      },
+      peer: makePeerFactory(),
+    };
+    const errors = [];
+    const host = createRendezvousHost({
+      base: 'https://rendezvous.test',
+      factories,
+      reregister: false,
+      onError: (r) => errors.push(r),
+    });
+    await settle();
+    hostSockets[0].onerror();
+    await settle();
+    expect(errors).toEqual(['unreachable']);
+    expect(host.code).toBeNull();
+    host.close();
   });
 });

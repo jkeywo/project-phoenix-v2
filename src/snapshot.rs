@@ -85,7 +85,7 @@
 //!   save taken mid-thread comes back to an empty Comms console with a scenario
 //!   waiting on an answer that can no longer be given.
 //!
-//! **Excluded, and the exclusion is the design.** Browser UI state, PeerJS
+//! **Excluded, and the exclusion is the design.** Browser UI state, transport
 //! sessions, renderer caches, client projections, and raw ECS `Entity` handles
 //! are all absent. Every per-entity row here is keyed by its `EntityUuid` or
 //! `AsteroidUuid` string, never by a handle — the same discipline the command

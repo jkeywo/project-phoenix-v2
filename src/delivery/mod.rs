@@ -93,26 +93,30 @@ pub fn parse_stamp_field(raw: &str) -> Option<DeliveryStamp> {
 /// [`stamp::check_client_stamp`] the native host runs at `/host/manifest.json`,
 /// so a Phoenix host has one version pin rather than two.
 ///
-/// Two departures from the native host's rules, both because a browser host is
-/// a live process rather than a served bundle:
+/// **Every joiner must present a stamp** (issue #1112). #1111 admitted an absent
+/// one, because PeerJS was still the default route and had never stamped
+/// anything, so refusing the unstamped would have locked out the shipped join
+/// path. #1112 retired PeerJS: every client that can reach this host is a
+/// Phoenix client built by `scripts/build-client.mjs`, which writes the field
+/// into `<meta name="phoenix-client-stamp">` on every build. Nothing legitimate
+/// arrives unstamped any more, so an absent stamp is refused with the same
+/// `ClientStampMissing` a garbled one gets — neither is evidence of
+/// compatibility, and admitting the silent case would leave the only
+/// version-skew hole exactly where a stale cached bundle sits.
 ///
-/// 1. **An absent stamp is admitted.** The PeerJS route has never stamped
-///    anything and #1111 is additive, so a client presenting no stamp is
-///    admitted exactly as it is today. A client presenting a *garbled* stamp is
-///    still refused — a broken stamp is not evidence of compatibility. #1112,
-///    where every client on the wire is a Phoenix one, is where that default
-///    can flip.
-/// 2. **A host with no content identity checks the protocol half only.** The
-///    native rule ("an unidentified content set matches nothing") protects a
-///    host serving a bundle it cannot name. A browser host sitting in the lobby
-///    has simply not loaded a manifest yet, and refusing every phone until it
-///    does would be a race, not a safety property.
+/// One departure from the native host's rules remains, because a browser host
+/// is a live process rather than a served bundle: **a host with no content
+/// identity checks the protocol half only.** The native rule ("an unidentified
+/// content set matches nothing") protects a host serving a bundle it cannot
+/// name. A browser host sitting in the lobby has simply not loaded a manifest
+/// yet, and refusing every phone until it does would be a race, not a safety
+/// property.
 pub fn check_join_stamp(
     host: &DeliveryStamp,
     client_field: Option<&str>,
 ) -> Result<(), StampMismatch> {
     let Some(raw) = client_field.map(str::trim).filter(|s| !s.is_empty()) else {
-        return Ok(());
+        return Err(StampMismatch::ClientStampMissing);
     };
     let Some(client) = parse_stamp_field(raw) else {
         return Err(StampMismatch::ClientStampMissing);
@@ -241,14 +245,23 @@ mod tests {
     }
 
     #[test]
-    fn an_unstamped_join_is_admitted_because_the_peerjs_route_never_stamped() {
-        assert!(check_join_stamp(&browser_host(), None).is_ok());
-        assert!(check_join_stamp(&browser_host(), Some("")).is_ok());
-        assert!(check_join_stamp(&browser_host(), Some("  ")).is_ok());
+    fn an_unstamped_join_is_refused_now_that_every_client_is_a_phoenix_one() {
+        // The #1112 flip. Until PeerJS was retired an unstamped joiner was the
+        // shipped client, so admitting it was the only option; now the only way
+        // to arrive unstamped is to not be a built Phoenix bundle.
+        for absent in [None, Some(""), Some("  ")] {
+            assert_eq!(
+                check_join_stamp(&browser_host(), absent)
+                    .unwrap_err()
+                    .code(),
+                "client-stamp-missing",
+                "{absent:?}"
+            );
+        }
     }
 
     #[test]
-    fn a_garbled_join_stamp_is_refused_rather_than_treated_as_absent() {
+    fn a_garbled_join_stamp_is_refused_under_the_same_code_as_an_absent_one() {
         for garbled in ["1/phoenix-base", "1/phoenix-base/1/extra", "nonsense"] {
             assert_eq!(
                 check_join_stamp(&browser_host(), Some(garbled))

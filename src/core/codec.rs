@@ -186,7 +186,7 @@ pub fn encode_debug_surfaces(flags: &[(crate::core::debug_surface::DebugSurface,
     serde_json::to_string(&map).unwrap_or_default()
 }
 
-/// Decode inbound JSON from the HTML/PeerJS bridge.
+/// Decode inbound JSON from the HTML transport bridge.
 ///
 /// The wire shape is a full `ClientMessage` — every emitter (phone consoles,
 /// host-page consoles via `gui/action-map.js`, smoke fixtures) sends the

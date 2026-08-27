@@ -7,12 +7,12 @@
  * `'except:<id>'`) and a `deliveryClass` (`'reliable'` — the default token
  * connection — or `'snapshot'` — the unreliable/unordered channel opened
  * alongside it for `AiState` pushes). `outboundTargets()` is the target ⇒
- * connection-list resolution ONLY: which PeerJS `DataConnection`s the payload
+ * connection-list resolution ONLY: which per-token connections the payload
  * goes out on. server.html keeps the actual `.send(payload)` calls and the
  * live `tokenConns`/`tokenSnapshotConns` Maps (`new Map()`, populated as
  * phones identify and drop as they disconnect) — this module never touches
  * either Map, so it stays reachable from vitest with two plain
- * `Map([[token, fakeConn], ...])` fixtures instead of a real PeerJS session.
+ * `Map([[token, fakeConn], ...])` fixtures instead of a live WebRTC session.
  *
  * ## The snapshot ⇒ reliable fallback
  *
@@ -26,13 +26,13 @@
  * `'token:<id>'` returns AT MOST one connection — the same first-match-wins
  * shape `routeOutbound` always had (primary if open, else the fallback, never
  * both) — while `'all'` and `'except:<id>'` can return several. A token whose
- * connection exists but is not open (`c.open` — PeerJS's own flag — nor its
+ * connection exists but is not open (`c.open` — the adapter's own flag — nor its
  * `readyState === 'open'`, the WebRTC data channel's own state, covering both
  * connection implementations this codebase has carried) is skipped exactly
  * like the original inline loop skipped it, on every branch.
  */
 
-/** True when a PeerJS DataConnection (or a raw RTCDataChannel-shaped stub) is
+/** True when a transport connection adapter (or a raw RTCDataChannel) is
  *  ready to send. */
 function isOpen(conn) {
   return !!(conn && (conn.open || conn.readyState === 'open'));

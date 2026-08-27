@@ -26,8 +26,10 @@
      every console document (which reaches it through gui/console.css). -->
 <link rel="stylesheet" href="gui/tokens.css" />
 
-  <!-- CDN deps loaded before our script so they're in scope synchronously -->
-  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <!-- CDN dep loaded before our script so it's in scope synchronously. The
+       PeerJS tag that used to sit alongside it is gone (issue #1112): the crew
+       transport is gui/rendezvous-transport.js, a module island, and there is
+       no third-party broker left to load. -->
   <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
 
   <!-- Background-tab sim heartbeat ─────────────────────────────────────────
@@ -1109,8 +1111,8 @@
     // here: both carry admission authority no phone is entitled to (god mode
     // and the other simulation overrides via LOCAL_CONSOLE_TOKEN, NPC command
     // routing via `ai:`). Defined in an earlier classic script, so it is a
-    // global before the PeerJS handlers are even parsed — no module load
-    // order can leave the check absent.
+    // global before the transport's connection handlers are even parsed — no
+    // module load order can leave the check absent.
     function isPeerTokenAllowed(token) {
       if (typeof token !== 'string' || token.length === 0) return false;
       if (token === LOCAL_CONSOLE_TOKEN) return false;
@@ -1184,7 +1186,7 @@
 
     // send(type, data?) for the local-console path: wraps the ClientMessage
     // envelope and injects it under the local-console token, exactly like a
-    // PeerJS client message would arrive (issue #822).
+    // phone's client message would arrive (issue #822).
     window.__localConsoleSend = function(type, data) {
       // QR-first pre-scenario selections (issue #755) are resolved by the
       // host-runtime arbiter BEFORE any world is loaded — Bevy isn't running
@@ -1285,7 +1287,8 @@
   <!-- Scenario selector shown before the server boots. The scenario buttons
        are rendered from the #754 pre-load catalog by renderScenarioLockState()
        once WASM is ready (issue #755) — no hardcoded world list (AGENTS.md #11).
-       The QR (initPeerJS) renders immediately at page load, before any
+       The QR (initHostTransport) renders as soon as the rendezvous service
+       issues a code, before any selection,
        selection, so this panel shows the join code while catalog loads. -->
   <div id="scenario-panel">
     <div id="world-list">
@@ -1450,16 +1453,17 @@
             <span id="qr-url"></span>
           </div>
           <!-- The five letters a guest reads across the room and types into
-               their phone (issue #1111). Populated only when this host is
-               registered with a rendezvous service; the URL row above stays
-               the answer for the PeerJS route. -->
+               their phone (issue #1111). Populated once the rendezvous service
+               has issued this host a code, and cleared if that record is lost;
+               the URL row above carries the same code inside the QR link. -->
           <div id="join-code-row" style="display:none">
             <span id="join-code-caption" data-i18n="server.join.code_caption">or type this code</span>
             <span id="join-code"></span>
           </div>
         </div>
         <!-- Relay-degraded warning + inbound-connection ICE stage. Populated by
-             initPeerJS(); empty (and invisible) in the normal healthy case. -->
+             initHostTransport(); empty (and invisible) in the normal healthy
+             case. -->
         <div id="conn-diag" style="margin-top:8px;font-family:monospace;color:#fa4;font-size:13px;text-align:center;white-space:pre-line;"></div>
         <div id="loading-progress-text" style="display:none;margin-top:24px;font-family:monospace;color:#8af;font-size:16px;text-align:center;">
           <span data-i18n="client.preparing_scenario">Preparing scenario&hellip;</span> <span id="loading-progress-pct">0</span>%
@@ -1544,7 +1548,7 @@
        island has mounted go through the window.__pageChromeReady queue
        defined near that script's own #1224-style latch block. Mounted
        FIRST among the new islands (before the ICE-config island below) so
-       initPeerJS's post-ICE-await diagnostics setup — which only resumes
+       initHostTransport's post-ICE-await diagnostics setup — which only resumes
        once that later island runs — always finds this script's `_pageChrome`
        already populated, with no queue needed for that call. -->
   <script type="module">
@@ -1657,8 +1661,8 @@
        resolution behind routeOutbound() (the `set_message_callback` Rust's
        outbound flush calls) lives in gui/host-peer-routing.js so vitest can
        exercise the 'all'/'token:'/'except:' targeting and the snapshot→
-       reliable per-token fallback with plain Map fixtures instead of real
-       PeerJS connections. Publishes window.hostPeerRouting; routeOutbound
+       reliable per-token fallback with plain Map fixtures instead of live
+       WebRTC channels. Publishes window.hostPeerRouting; routeOutbound
        itself, and the `tokenConns`/`tokenSnapshotConns` Maps it reads, stay
        inline below — this module never touches either Map, only resolves
        which entries of them to send on. No queue/latch needed: routeOutbound
@@ -1666,10 +1670,11 @@
        bottom of this page, long after every module island here has loaded. -->
   <script type="module" src="gui/host-peer-routing.js"></script>
 
-  <!-- Typed five-letter join codes and the Phoenix rendezvous route (issue
-       #1111). Both publish onto window for the classic script below. Additive:
-       nothing here runs unless the page is opened with ?rendezvous, so the
-       PeerJS host block is untouched on an ordinary load. -->
+  <!-- Typed five-letter join codes and the Phoenix crew transport (issues
+       #1111/#1112). Both publish onto window for the classic script below.
+       Since #1112 this IS the transport — there is no PeerJS block and no flag
+       choosing between routes; the host registers with the rendezvous service
+       on every load. -->
   <script type="module" src="gui/join-code.js"></script>
   <script type="module" src="gui/rendezvous-transport.js"></script>
 
@@ -2199,47 +2204,45 @@
     // releaseWakeLock above are the classic-script bridge into it (see the
     // #1227 latch block near the top of this script).
 
-    // ── PeerJS host peer ───────────────────────────────────────────────────
+    // ── Phoenix crew transport (issues #1111 / #1112) ──────────────────────
+    //
+    // This host registers with the rendezvous service, is issued a private
+    // five-letter code, and answers WebRTC offers from the phones that type it.
+    // There is no second route any more: PeerJS, its public cloud broker and
+    // the 32-hex peer id that used to be the join URL's fragment were retired
+    // in #1112, and the fragment now carries the structured join code instead.
 
-    // peer connection id → session token (resolved once Identify arrives)
+    // rendezvous peer id → session token (resolved once Identify arrives)
     const peerTokens = new Map();
-    // session token → DataConnection (for routing server→client messages)
+    // session token → reliable connection (for routing server→client messages)
     const tokenConns = new Map();
     // session token → snapshot DataChannel (unordered, no retransmit)
     const tokenSnapshotConns = new Map();
     // messages queued before WASM is ready
     const msgQueue = [];
 
-    const hostPeerId = Array.from(crypto.getRandomValues(new Uint8Array(16)))
-      .map(b => b.toString(16).padStart(2, '0')).join('');
-    const joinUrl = location.href.replace(/[^/]*$/, '') + 'client/index.html#' + hostPeerId;
-
-    // ── Phoenix rendezvous (issue #1111) ───────────────────────────────────
-    // Opt-in per page load: `?rendezvous` uses the built-in service,
-    // `?rendezvous=<url>` another one, and no parameter at all leaves this
-    // host on the PeerJS route exactly as before. The five-letter code the
-    // service issues replaces a 32-hex peer id in a ~90-character URL as the
-    // thing a guest across the room can actually act on.
-    //
-    // Resolved inside initPeerJS() rather than here, and only after its first
-    // await: this classic script is evaluated during parsing, when the deferred
-    // `gui/rendezvous-transport.js` module has not run and window.rendezvousTransport
-    // does not exist yet. Same hazard the ICE-config latch below exists for.
+    // Which rendezvous service this page load uses. `?rendezvous=<url>` points
+    // at another one (a local `wrangler dev`, a staging deployment); absent
+    // means the built-in service. Resolved inside initHostTransport() rather
+    // than here, and only after its first await: this classic script is
+    // evaluated during parsing, when the deferred gui/rendezvous-transport.js
+    // module has not run and window.rendezvousTransport does not exist yet.
+    // Same hazard the ICE-config latch below exists for.
     let rendezvousBase = null;
-    let rendezvousActive = false;
-    // Held so a PeerJS retry — which re-runs initPeerJS() after a transient
-    // signalling error — cannot register a SECOND host record and mint a
-    // second code while the first one is still live. The rendezvous route has
-    // no equivalent transient failure of its own to recover from here.
+    // Held so a second entry into initHostTransport() cannot register a SECOND
+    // host record and mint a second code while the first is still live.
+    // Recovering from a LOST service is the transport's own business — it
+    // re-registers on a backoff and issues a fresh code through onCode.
     let rendezvousHost = null;
-    // Whether a five-letter code is currently on screen. The PeerJS panel and
-    // the rendezvous panel write the same three elements, so "who painted last"
-    // has to be a decision rather than a race: PeerJS paints until a code is
-    // actually issued, and the code panel yields again if the service is lost.
+    // Whether a five-letter code is currently on screen.
     let rendezvousCodeShown = false;
     // Set when the rendezvous service reports a failure, so renderConnDiag()
-    // can tell the operator why no code appeared. Read inside initPeerJS().
+    // can tell the operator why no code appeared.
     let rendezvousFault = null;
+    // Replaced by initHostTransport() once it has built its diagnostics
+    // closure; a no-op before that, so the paint helpers below can call it
+    // unconditionally rather than guarding every site.
+    let renderConnDiag = () => {};
 
     /** Paint the join panel for a URL: the QR, the click-through and the text. */
     function paintJoinPanel(url) {
@@ -2279,24 +2282,34 @@
       rendezvousCodeShown = true;
       rendezvousFault = null;
       setConnectionStatus('ready');
+      renderConnDiag();
     }
 
     /**
      * The rendezvous service went away (unreachable at boot, or the host socket
-     * dropped later). The service has already deleted the record, so the five
-     * letters on screen now resolve to nothing — clear them rather than leave a
-     * dead code being read aloud across the room.
+     * dropped later). The record died with it, so the five letters on screen
+     * now resolve to nothing and the QR link carries a dead code — and since
+     * #1112 there is no PeerJS route left underneath to fall back to. Blank the
+     * whole panel rather than leave a code being read aloud across the room,
+     * and let renderConnDiag name the failure so the operator is not staring at
+     * an empty box.
      *
-     * This host does not re-register: a reconnect would be issued a NEW code,
-     * and code stability across a drop is #1115's (rotation/rebinding) scope,
-     * not something to half-do here. The PeerJS route is still live, so the
-     * panel falls back to its URL and QR, and renderConnDiag names the failure.
+     * gui/rendezvous-transport.js re-registers on a backoff by itself and
+     * repaints through showJoinCode() with a NEW code. Keeping the SAME code
+     * across a host drop needs persistence in the service and is #1115's
+     * (rotation/rebinding), not something to half-do here.
      */
     function clearJoinCode() {
       const codeEl = document.getElementById('join-code');
       if (codeEl) codeEl.textContent = '';
       const row = document.getElementById('join-code-row');
       if (row) row.style.display = 'none';
+      const qrUrl = document.getElementById('qr-url');
+      if (qrUrl) qrUrl.textContent = '';
+      const qrLink = document.getElementById('qr-link');
+      if (qrLink) { qrLink.removeAttribute('href'); qrLink.onclick = null; }
+      const canvas = document.getElementById('qr');
+      if (canvas) canvas.style.display = 'none';
       rendezvousCodeShown = false;
     }
 
@@ -2310,8 +2323,8 @@
     // a single wait-for-ready promise rather than a replay queue: unlike the
     // WASM→JS host-channel callback (which can fire before the module is
     // ready and must not drop messages), getIceServers() is only ever called
-    // from this same script's own initPeerJS(), so there is nothing to queue
-    // — just one await for the module to finish loading.
+    // from this same script's own initHostTransport(), so there is nothing to
+    // queue — just one await for the module to finish loading.
     let _resolveIceConfig;
     const iceConfigReady = new Promise(resolve => { _resolveIceConfig = resolve; });
     window.__iceConfigReady = function(fetchIceServersFn) { _resolveIceConfig(fetchIceServersFn); };
@@ -2321,25 +2334,25 @@
       return fetchIceServersFn();
     }
 
-    async function initPeerJS() {
+    async function initHostTransport() {
       setConnectionStatus('connecting');
-      console.log('[PeerJS] fetching ICE servers…');
+      console.log('[host] fetching ICE servers…');
       const { servers: iceServers, relayAvailable, relaySource } = await getIceServers();
-      console.log('[PeerJS] ICE config:', iceServers.map(s => s.urls));
-      console.log(`[PeerJS] host peer ID: ${hostPeerId}`);
+      console.log('[host] ICE config:', iceServers.map(s => s.urls));
 
       // Safe to ask now: the ICE latch above only resolves once a module has
       // run, so every deferred module island — including the join-code and
-      // rendezvous ones — has evaluated by this point (issue #1111).
-      rendezvousBase = window.rendezvousTransport
-        ? window.rendezvousTransport.rendezvousBaseFromLocation(location.search)
+      // transport ones — has evaluated by this point (issue #1111).
+      const transport = window.rendezvousTransport;
+      rendezvousBase = transport
+        ? transport.rendezvousBaseFromLocation(location.search)
         : null;
-      rendezvousActive = !!rendezvousBase;
 
-      // Lobby diagnostics under the QR: relay-degraded warning plus the ICE
-      // stage of any inbound client that is struggling to complete. When ICE
-      // fails, PeerJS's 'open' never fires — this is the only place the host
-      // operator learns a phone is trying and failing to get through.
+      // Lobby diagnostics under the QR: relay-degraded warning, the reason a
+      // code is missing, plus the ICE stage of any inbound client that is
+      // struggling to complete. When ICE fails no channel ever opens — this is
+      // the only place the host operator learns a phone is trying and failing
+      // to get through.
       //
       // writeDiagLines is the shared mechanical half from gui/page-chrome.js
       // (issue #1227) — guard for a missing #conn-diag, join, set
@@ -2355,62 +2368,70 @@
       // queue) is the guard here.
       const writeDiagLines = _pageChrome ? _pageChrome.mountConnDiag('conn-diag') : () => {};
       const clientIceStages = new Map(); // shortId → troubled ICE state
-      function renderConnDiag() {
+      renderConnDiag = function renderConnDiagImpl() {
         const lines = [];
         if (!relayAvailable) lines.push(t('server.no_relay_warning'));
         else if (relaySource === 'openrelay') lines.push(t('server.relay_fallback_notice'));
         // Why there is no five-letter code on screen. A console.warn is not a
         // diagnostics surface: the operator is looking at the viewscreen, and
-        // an empty join-code row explains nothing by itself.
+        // an empty join panel explains nothing by itself.
         if (rendezvousFault) lines.push(t('server.join.rendezvous_lost'));
         for (const [id, state] of clientIceStages) {
           lines.push(t('server.client_ice_state', { id, state }));
         }
         writeDiagLines(lines);
-      }
+      };
       renderConnDiag();
 
-      const peer = new Peer(hostPeerId, { config: { iceServers } });
-
-      // The PeerJS URL and QR (PRD #1023 user story 4). Also the fallback the
-      // panel returns to if the rendezvous service is unreachable or lost:
-      // this peer stays up either way, so there is always a way in.
-      let peerJsOpen = false;
-      function showPeerJsJoin() {
-        if (!peerJsOpen) return;
-        paintJoinPanel(joinUrl);
+      if (!transport) {
+        // The transport module is the only way in since #1112. Say so loudly:
+        // a silent lobby with no code is indistinguishable from a slow one.
+        console.error('[host] transport module failed to load — no crew can join');
+        rendezvousFault = 'unreachable';
+        setConnectionStatus('error');
+        renderConnDiag();
+        return;
       }
 
-      peer.on('open', () => {
-        console.log('[PeerJS] signaling open — ready for clients');
-        setConnectionStatus('ready');
-        peerJsOpen = true;
-        // Suppressed only once a five-letter code is actually ON SCREEN — not
-        // merely because the page was opened with ?rendezvous. Suppressing on
-        // the parameter is how a host whose rendezvous service is unreachable
-        // ended up showing an empty panel: no code, no QR, no URL, nothing to
-        // join by at all. Both routes stay joinable; whichever has a code
-        // owns the panel.
-        if (rendezvousCodeShown) return;
-        showPeerJsJoin();
-      });
-
-      peer.on('disconnected', () => {
-        console.warn('[PeerJS] signaling disconnected — reconnecting…');
-        setConnectionStatus('disconnected');
-        peer.reconnect();
-      });
-
-      // Everything a client connection does AFTER it exists: the Identify
-      // gate, the reserved-token refusal, the duplicate-token dance, the
-      // host-intercepted message types and the disconnect guard. Extracted
-      // from peer.on('connection') (issue #1111) so the Phoenix rendezvous
-      // route below reuses it verbatim rather than growing a second, quietly
-      // different copy — `conn` only has to offer PeerJS's DataConnection
-      // shape (`peer`, `open`, `send`, `close`, `on('data'|'close')`), which
-      // gui/rendezvous-transport.js's channel adapter also provides.
-      function attachHostConn(conn, onIdentified) {
+      // Everything a client connection does AFTER the compatibility handshake
+      // has admitted it: the Identify gate, the reserved-token refusal, the
+      // duplicate-token dance, the host-intercepted message types, the
+      // per-token snapshot channel and the disconnect guard. `conn` is the
+      // adapter gui/rendezvous-transport.js hands over — `peer`, `open`,
+      // `send`, `close`, `snapshotChannel` and `on('data'|'close'|'snapshot')`.
+      function attachHostConn(conn) {
         const shortId = String(conn.peer).slice(0, 8);
+
+        // The lossy channel negotiated alongside the reliable one, kept in the
+        // per-token map routeOutbound reads. It can finish negotiating either
+        // BEFORE or AFTER Identify names the token, so both transitions run the
+        // same rebind rather than one registering and the other assuming.
+        function bindSnapshot() {
+          const token = peerTokens.get(conn.peer);
+          if (!token) return;
+          const chan = conn.snapshotChannel;
+          if (chan) tokenSnapshotConns.set(token, chan);
+          else if (tokenSnapshotConns.has(token)) tokenSnapshotConns.delete(token);
+        }
+        conn.on('snapshot', bindSnapshot);
+
+        // Log the winning ICE candidate type (host = direct, srflx = STUN,
+        // relay = TURN). Field diagnostics only — a session that works over a
+        // relay and one that works directly are the same session.
+        const pc = conn.peerConnection;
+        if (pc && typeof pc.getStats === 'function') {
+          setTimeout(() => {
+            pc.getStats().then(stats => {
+              const vals = [...stats.values()];
+              const pair = vals.find(r => r.type === 'candidate-pair' && r.nominated);
+              if (pair) {
+                const loc = vals.find(r => r.id === pair.localCandidateId);
+                const rem = vals.find(r => r.id === pair.remoteCandidateId);
+                console.log(`[ICE] ${shortId}… active path: local=${loc?.candidateType} remote=${rem?.candidateType}`);
+              }
+            }).catch(() => {});
+          }, 1500);
+        }
 
         conn.on('data', (raw) => {
           const json = typeof raw === 'string' ? raw : JSON.stringify(raw);
@@ -2454,12 +2475,7 @@
                 const prior = tokenConns.get(token);
                 peerTokens.set(conn.peer, token);
                 tokenConns.set(token, conn);
-                // Only now is this connection's token known. A transport whose
-                // lossy channel can finish negotiating BEFORE Identify names
-                // the token needs that moment to promote it (the PeerJS route
-                // does; see its call site). Passing the hook in keeps one copy
-                // of the gate above rather than one per transport.
-                if (typeof onIdentified === 'function') onIdentified(token, prior);
+                bindSnapshot();
                 if (prior && prior !== conn && (prior.open || prior.readyState === 'open')) {
                   console.warn(
                     `[host] DUPLICATE TOKEN ${token.slice(0, 8)}… — a second device ` +
@@ -2523,225 +2539,76 @@
         });
       }
 
-      // ── Phoenix rendezvous host (issue #1111) ──────────────────────────────
-      // Opt-in and additive: without ?rendezvous this whole branch is dead and
-      // the PeerJS block below is exactly what it was. With it, this host also
-      // registers with the rendezvous service, is issued a five-letter code,
-      // and answers offers into the SAME attachHostConn above.
-      if (rendezvousActive && !rendezvousHost && window.rendezvousTransport) {
-        const transport = window.rendezvousTransport;
-        rendezvousHost = transport.createRendezvousHost({
-          base: rendezvousBase,
-          iceServers,
-          // The authoritative protocol/content verdict, answered by Rust's own
-          // delivery::check_join_stamp — never re-decided in JavaScript, and
-          // never delegated to the rendezvous service's version advice.
-          checkStamp: (clientStamp) => {
-            try {
-              const bindings = window.wasmBindings;
-              if (!bindings || typeof bindings.wasm_check_client_stamp !== 'function') {
-                return { ok: true };
-              }
-              const verdict = JSON.parse(bindings.wasm_check_client_stamp(clientStamp || ''));
-              return verdict.ok
-                ? { ok: true }
-                : { ok: false, code: verdict.code, detail: verdict.detail };
-            } catch (e) {
-              // A host that cannot ask cannot refuse: admit, exactly as the
-              // PeerJS route does today, rather than locking everyone out.
-              console.warn('[rendezvous] stamp check unavailable — admitting', e);
+      if (rendezvousHost) return;
+      rendezvousHost = transport.createRendezvousHost({
+        base: rendezvousBase,
+        iceServers,
+        // The authoritative protocol/content verdict, answered by Rust's own
+        // delivery::check_join_stamp — never re-decided in JavaScript, and
+        // never delegated to the rendezvous service's version advice. Since
+        // #1112 that check REQUIRES a stamp: every client that can reach this
+        // host is a built Phoenix bundle carrying one.
+        checkStamp: (clientStamp) => {
+          try {
+            const bindings = window.wasmBindings;
+            if (!bindings || typeof bindings.wasm_check_client_stamp !== 'function') {
               return { ok: true };
             }
-          },
-          onCode: (code) => showJoinCode(code),
-          onConnection: (conn) => {
-            console.log(`[rendezvous] channel open — ${String(conn.peer).slice(0, 8)}…`);
-            attachHostConn(conn);
-          },
-          onError: (reason, detail) => {
-            console.warn(`[rendezvous] ${reason}${detail ? `: ${detail}` : ''}`);
-            // createRendezvousHost fires onError from four sites, and only two
-            // of them mean the record is actually gone: socket.onerror and
-            // socket.onclose, both reasoned 'unreachable' because the service
-            // holds nothing in storage — the record really did die with the
-            // socket. The other two are per-frame noise about ONE peer, not
-            // the record: a relayed service 'error' frame, and a rejected
-            // setRemoteDescription/addIceCandidate (reasoned 'signal') — e.g.
-            // the registry's signal/no-peer answer when this host trickles ICE
-            // to a peer that just left, an ordinary race. Tearing the whole
-            // code down for either of those used to pop "service unreachable"
-            // over a perfectly live session.
-            if (reason !== 'unreachable') {
-              // A refusal with a code already on screen is per-peer noise; one
-              // with no code is the service declining to issue one (e.g.
-              // protocol skew against a stale deployed worker), and the
-              // operator needs an on-screen reason for the missing letters.
-              // The !rendezvousCodeShown guard keeps the ordinary mid-session
-              // signal/no-peer race off a live session's diagnostics row.
-              if (!rendezvousCodeShown) {
-                rendezvousFault = reason;
-                renderConnDiag();
-              }
-              return;
+            const verdict = JSON.parse(bindings.wasm_check_client_stamp(clientStamp || ''));
+            return verdict.ok
+              ? { ok: true }
+              : { ok: false, code: verdict.code, detail: verdict.detail };
+          } catch (e) {
+            // A host that cannot ask cannot refuse: admit rather than locking
+            // out every phone because the export was not reachable.
+            console.warn('[rendezvous] stamp check unavailable — admitting', e);
+            return { ok: true };
+          }
+        },
+        onCode: (code) => showJoinCode(code),
+        onConnection: (conn) => {
+          console.log(`[rendezvous] channel open — ${String(conn.peer).slice(0, 8)}…`);
+          attachHostConn(conn);
+        },
+        onPeerIce: (peer, state) => {
+          const shortId = String(peer).slice(0, 8);
+          console.log(`[ICE] ${shortId}… → ${state}`);
+          // Surface trouble in the lobby; clear the row once healthy.
+          if (state === 'connected' || state === 'completed' || state === 'closed') {
+            clientIceStages.delete(shortId);
+          } else {
+            clientIceStages.set(shortId, state);
+          }
+          renderConnDiag();
+        },
+        onError: (reason, detail) => {
+          console.warn(`[rendezvous] ${reason}${detail ? `: ${detail}` : ''}`);
+          // createRendezvousHost reasons a lost RECORD as 'unreachable' (its
+          // socket died, or the service swept it) and everything else as
+          // per-frame noise about ONE peer: a relayed service 'error' frame, or
+          // a rejected setRemoteDescription/addIceCandidate ('signal') — e.g.
+          // the registry's signal/no-peer answer when this host trickles ICE to
+          // a peer that just left, an ordinary race. Tearing the whole code
+          // down for either of those would pop "service unreachable" over a
+          // perfectly live session.
+          if (reason !== 'unreachable') {
+            // A refusal with a code already on screen is per-peer noise; one
+            // with no code is the service declining to issue one (e.g.
+            // protocol skew against a stale deployed worker), and the operator
+            // needs an on-screen reason for the missing letters.
+            if (!rendezvousCodeShown) {
+              rendezvousFault = reason;
+              renderConnDiag();
             }
-            rendezvousFault = reason;
-            const hadCode = rendezvousCodeShown;
-            clearJoinCode();
-            if (hadCode) setConnectionStatus('disconnected');
-            showPeerJsJoin();
-            renderConnDiag();
-          },
-          onLog: (msg) => console.log(msg),
-        });
-      }
-
-      peer.on('connection', (conn) => {
-        const shortId = conn.peer.slice(0, 8);
-        console.log(`[PeerJS] inbound connection from ${shortId}…`);
-
-        // Attach ICE state tracking immediately — on a failed connection
-        // 'open' never fires, so listeners installed there see nothing.
-        // conn.peerConnection may not exist yet at 'connection' time; retry
-        // on the next tick until negotiation has created it.
-        let attachTries = 0;
-        const attachIceDiag = () => {
-          const pc = conn.peerConnection;
-          if (!pc) {
-            if (++attachTries < 50) setTimeout(attachIceDiag, 100);
             return;
           }
-          pc.addEventListener('iceconnectionstatechange', () => {
-            const s = pc.iceConnectionState;
-            console.log(`[ICE] ${shortId}… → ${s}`);
-            // Surface trouble in the lobby; clear the row once healthy.
-            if (s === 'connected' || s === 'completed' || s === 'closed') {
-              clientIceStages.delete(shortId);
-            } else {
-              clientIceStages.set(shortId, s);
-            }
-            renderConnDiag();
-          });
-        };
-        attachIceDiag();
-
-        // The phone creates its snapshot DataChannel before sending Identify.
-        // Those events travel on different SCTP streams, so either the channel
-        // opening or the token arriving may win. Retain the channel candidate
-        // and promote it idempotently whenever both facts are available.
-        let snapshotCandidate = null;
-        const promoteSnapshot = () => {
-          const token = peerTokens.get(conn.peer);
-          if (!token || !snapshotCandidate || snapshotCandidate.readyState !== 'open') return;
-          if (tokenSnapshotConns.get(token) === snapshotCandidate) return;
-          tokenSnapshotConns.set(token, snapshotCandidate);
-          console.log(`[PeerJS] snapshot channel open — ${shortId}…`);
-        };
-        const clearSnapshot = (chan) => {
-          const token = peerTokens.get(conn.peer);
-          if (token && tokenSnapshotConns.get(token) === chan) tokenSnapshotConns.delete(token);
-          if (snapshotCandidate === chan) snapshotCandidate = null;
-        };
-        let snapshotAttachTries = 0;
-        let snapshotListenerAttached = false;
-        const attachSnapshotListener = () => {
-          if (snapshotListenerAttached) return;
-          const pc = conn.peerConnection;
-          if (!pc) {
-            if (++snapshotAttachTries < 50) setTimeout(attachSnapshotListener, 100);
-            return;
-          }
-          snapshotListenerAttached = true;
-          // PeerJS owns the first `datachannel` event on an inbound
-          // RTCPeerConnection: its handler turns the library's reliable
-          // RTCDataChannel into this DataConnection. We install before that
-          // event so we cannot miss an early snapshot channel, therefore we
-          // must preserve the library handler and delegate every non-snapshot
-          // channel to it. `addEventListener` is not suitable here because it
-          // would let PeerJS consume the snapshot channel as a replacement
-          // reliable channel too.
-          const peerJsDataChannelHandler = pc.ondatachannel;
-          pc.ondatachannel = (event) => {
-            const chan = event.channel;
-            if (chan.label !== 'snapshot') {
-              if (typeof peerJsDataChannelHandler === 'function') {
-                peerJsDataChannelHandler.call(pc, event);
-              }
-              return;
-            }
-            snapshotCandidate = chan;
-            chan.onopen = promoteSnapshot;
-            chan.onclose = () => clearSnapshot(chan);
-            chan.onerror = () => clearSnapshot(chan);
-            // A browser may surface an already-open channel. Do not rely on a
-            // future open event that will never fire.
-            promoteSnapshot();
-          };
-        };
-        attachSnapshotListener();
-
-        conn.on('open', () => {
-          console.log(`[PeerJS] DataChannel open — ${shortId}…`);
-          attachSnapshotListener();
-          const pc = conn.peerConnection;
-          if (pc) {
-            // Log the winning ICE candidate type (host = direct, srflx = STUN, relay = TURN)
-            setTimeout(() => {
-              pc.getStats().then(stats => {
-                const vals = [...stats.values()];
-                const pair = vals.find(r => r.type === 'candidate-pair' && r.nominated);
-                if (pair) {
-                  const loc = vals.find(r => r.id === pair.localCandidateId);
-                  const rem = vals.find(r => r.id === pair.remoteCandidateId);
-                  console.log(`[ICE] ${shortId}… active path: local=${loc?.candidateType} remote=${rem?.candidateType}`);
-                }
-              }).catch(() => {});
-            }, 1500);
-
-          }
-        });
-
-        // Identify gate, token maps and disconnect handling — shared verbatim
-        // with the Phoenix rendezvous route (issue #1111). The hook is this
-        // route's own: a raw snapshot channel may already have opened before
-        // Identify named the token, so promote it (idempotently) here, and drop
-        // the prior route first on a duplicate-token takeover so a not-yet-open
-        // replacement falls back to its reliable connection rather than
-        // retaining a closed raw channel owned by the old DataConnection.
-        attachHostConn(conn, (token, prior) => {
-          if (prior && prior !== conn) tokenSnapshotConns.delete(token);
-          promoteSnapshot();
-        });
-
-        conn.on('error', (err) => console.error(`[PeerJS] connection error — ${shortId}…`, err));
-      });
-
-      peer.on('error', (err) => {
-        console.error(`[PeerJS] host error (type: ${err.type})`, err);
-        setConnectionStatus('error');
-        // Transient signaling errors — retry after a short delay rather than
-        // requiring a page refresh. Fatal errors (browser-incompatible,
-        // unavailable-id) are not retried.
-        const retryable = new Set(['network', 'server-error', 'socket-error', 'socket-closed']);
-        if (retryable.has(err.type)) {
-          console.warn(`[PeerJS] retryable error — re-initializing in 3 s…`);
-          setTimeout(() => {
-            // Destroy THIS peer — releasing its signaling-server registration
-            // of hostPeerId — before spinning up a replacement. Re-creating
-            // with the same id while the old registration is still live
-            // turns a transient 'network' error into a permanent
-            // 'unavailable-id' loop: the new Peer() is refused the id, and
-            // since 'unavailable-id' isn't retryable that failed peer just
-            // sits there (while the old one may ALSO still be mid-reconnect
-            // from its own 'disconnected' handler below), so every future
-            // attempt collides with one or the other forever.
-            try {
-              peer.destroy();
-            } catch (_) {
-              /* already gone */
-            }
-            initPeerJS();
-          }, 3000);
-        }
+          rendezvousFault = reason;
+          const hadCode = rendezvousCodeShown;
+          clearJoinCode();
+          setConnectionStatus(hadCode ? 'disconnected' : 'error');
+          renderConnDiag();
+        },
+        onLog: (msg) => console.log(msg),
       });
     }
 
@@ -2752,7 +2619,7 @@
     // AFTER the world is loaded (wasm_init throws to unwind the JS stack, so it
     // must run last), which means a Bevy lobby cannot exist before world load
     // without regressing the entire boot. Instead:
-    //   • initPeerJS() is hoisted to page load, so the QR renders on the
+    //   • initHostTransport() is hoisted to page load, so the QR renders on the
     //     scenario panel BEFORE any selection (AC: QR before selection).
     //   • This page holds the authoritative first-valid-wins selection and
     //     validates every request against the #754 pre-load catalog via the
@@ -2818,7 +2685,8 @@
 
     // ── Pre-world phone messaging ─────────────────────────────────────────
     // Bevy isn't running before world load, so the host synthesizes the
-    // ScenarioCatalog ServerMessage and delivers it over PeerJS. The wire shape
+    // ScenarioCatalog ServerMessage and delivers it over the crew transport.
+    // The wire shape
     // matches serde `{ type, data }` so the phone's lobby-state applies it
     // exactly like a Rust-emitted message.
     // The applied mod packs, in {id,name,version} form for the phone's "Mods
@@ -3384,17 +3252,17 @@
         selectedScenario = sp;
         document.getElementById('scenario-panel').style.display = 'none';
         showLobbyPanel();
-        initPeerJS();
+        initHostTransport();
         acquireWakeLock();
       }
     })();
 
     // Hoist peer init + wake lock to page load so the QR renders on the
     // scenario panel BEFORE any selection (issue #755). The ?scenario bypass
-    // above handles its own peer init, so skip when it is active.
+    // above handles its own transport init, so skip when it is active.
     (function hoistQrToPageLoad() {
       if (new URLSearchParams(location.search).get('scenario')) return;
-      initPeerJS();
+      initHostTransport();
       // Lift the QR overlay above the scenario panel so the join code is
       // visible DURING scenario selection, not just after world load (AC1).
       showJoinQrOverPanel();
@@ -3848,8 +3716,8 @@ function showFatalError(message) {
       '<br><br>' + escapeHtml(t('server.fatal.remedy')) + '</div>';
     spinner.style.display = 'flex';
   }
-  // PeerJS is already constructed but we never call startServer(), so it
-  // will open its peer but never receive connections that matter.
+  // The crew transport is already registered but we never call startServer(),
+  // so a phone can still resolve the code and never reach a simulation.
   console.error('[Phoenix] Fatal:', message);
 }
 

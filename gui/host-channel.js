@@ -25,7 +25,7 @@
  * Every host-channel payload is built from authored DATA, so — exactly like a
  * peer message — it can carry string ids: a world's `[global] title` on the
  * lobby channel, a `game_over` trigger's `message` on the hud channel. A
- * phone crosses localiseTree() once, in gui/connection-manager.js, at the
+ * phone crosses localiseTree() once, in gui/rendezvous-transport.js, at the
  * point a peer message is decoded. This dispatcher is the host's equivalent
  * boundary — the single place every channel payload enters the page — so the
  * ids are resolved HERE rather than at each render site. Fixing it per render

@@ -1136,11 +1136,33 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 Update,
                 broadcast_loading_progress.run_if(in_state(GamePhase::Loading)),
             )
+            // `FixedUpdate`, not `Update` (issue #907, applied to this system in
+            // #1121's fix round). The readiness POLL stays frame-paced — it is
+            // asset streaming, which is a function of disk and GPU and has no
+            // business on the logical tick — but the `NextState<GamePhase>`
+            // WRITE moves onto the tick, before `SimSet::Input`, alongside
+            // `tick_countdown` and `native_host::solo_auto_start`, the two other
+            // systems that start a mission.
+            //
+            // A `NextState` write from a frame schedule applies at the
+            // frame-level `StateTransition`, so `OnEnter(GamePhase::InProgress)`
+            // — and the player-ship mint inside it — would fire at a point whose
+            // relationship to `SimTick` depends on frame pacing. That is exactly
+            // what #907 ruled out, and until this moved it was the ONLY route to
+            // `InProgress` for a crewed session: `solo_auto_start` had the
+            // treatment and the path every real crew takes did not.
+            //
+            // The `.after(poll_asset_preload)` edge goes with the move — an
+            // ordering edge is only real inside one schedule — and its loss
+            // costs a frame of latency and nothing else: the poll writes
+            // `preload.complete` in `Update`, this reads it on the next tick,
+            // and `broadcast_loading_progress` keeps the client's bar moving in
+            // the meantime.
             .add_systems(
-                Update,
+                FixedUpdate,
                 auto_transition_from_loading
                     .run_if(in_state(GamePhase::Loading))
-                    .after(poll_asset_preload),
+                    .before(crate::sim_sets::SimSet::Input),
             );
     }
 

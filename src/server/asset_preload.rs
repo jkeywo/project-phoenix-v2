@@ -1076,6 +1076,16 @@ pub fn broadcast_loading_start(mut outbox: ResMut<LobbyOutbox>) {
 }
 
 /// Auto-transition from `Loading` → `InProgress` when preload completes.
+///
+/// **Registered in `FixedUpdate`, before `SimSet::Input`** (issue #907, applied
+/// here in issue #1121's fix round) — see the registration site in
+/// `server_app::registration` for the full note. It is a
+/// `NextState<GamePhase>` writer, and a phase write from a frame schedule
+/// applies at the frame-level `StateTransition`, which would put
+/// `OnEnter(GamePhase::InProgress)` — and the player-ship mint inside it — at a
+/// point whose relationship to `SimTick` depends on frame pacing. The readiness
+/// *poll* this reads (`poll_asset_preload`) stays frame-paced, which is right:
+/// asset streaming is a function of disk and GPU, not of the logical tick.
 pub fn auto_transition_from_loading(
     preload: Res<AssetPreloadResource>,
     mut next_state: ResMut<NextState<GamePhase>>,

@@ -357,9 +357,9 @@ pub fn build_native_host_app(
     // byte-identical whichever route the hull rode in on.
     let _ = crate::entities::loader::FsTemplateLoader.load_template(&ship_path);
     crate::content_ledger::freeze();
-    let ship_config = ship_entity_config.ship_config.ok_or_else(|| {
-        NativeHostError::Ship(format!("{ship_path:?} has no [[station]] blocks"))
-    })?;
+    let ship_config = ship_entity_config
+        .ship_config
+        .ok_or_else(|| NativeHostError::Ship(format!("{ship_path:?} has no [[station]] blocks")))?;
     app.insert_resource(PendingShipConfig(ship_config));
     // Store the CANONICAL key, not the raw `--ship` string: every downstream
     // reader (`lobby::server::update_session_with_config`, `server::radar`,

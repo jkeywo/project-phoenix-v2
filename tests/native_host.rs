@@ -325,7 +325,11 @@ fn a_served_host_can_be_stopped_so_the_simulation_can_own_the_main_thread() {
     // loop must put each accepted socket back into blocking mode, or the read
     // would see `WouldBlock` and answer 400 to a perfectly good request.
     let mut stream = TcpStream::connect(&addr).expect("connects to the host");
-    write!(stream, "GET /host/stamp.json HTTP/1.1\r\nHost: {addr}\r\n\r\n").expect("writes");
+    write!(
+        stream,
+        "GET /host/stamp.json HTTP/1.1\r\nHost: {addr}\r\n\r\n"
+    )
+    .expect("writes");
     let mut response = String::new();
     stream.read_to_string(&mut response).expect("reads");
     assert!(

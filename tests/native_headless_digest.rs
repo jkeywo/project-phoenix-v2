@@ -128,10 +128,9 @@ fn assert_native_and_headless_agree(surface: NativeRenderSurface) {
     // does. Installing the same collector on both sides is what makes the two
     // digests comparable at all, and it adds nothing to `FixedUpdate`: both
     // systems run in `Last` and only read.
-    native.insert_resource(RunTelemetry::default()).add_systems(
-        Last,
-        (collect_outbound, collect_balance_events).chain(),
-    );
+    native
+        .insert_resource(RunTelemetry::default())
+        .add_systems(Last, (collect_outbound, collect_balance_events).chain());
 
     pump(&mut native, FRAMES);
 
@@ -152,7 +151,11 @@ fn assert_native_and_headless_agree(surface: NativeRenderSurface) {
     pump(&mut headless, FRAMES);
 
     assert!(
-        native.world().resource::<project_phoenix::sim_tick::SimTick>().0 > 0,
+        native
+            .world()
+            .resource::<project_phoenix::sim_tick::SimTick>()
+            .0
+            > 0,
         "the native host must actually have simulated, or this comparison is \
          between two worlds at tick zero"
     );

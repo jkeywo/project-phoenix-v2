@@ -216,7 +216,9 @@ fn attach_offscreen_target(
     let (target, copier) = create_render_target(&mut images, &render_device, WIDTH, HEIGHT);
     commands.spawn(copier);
     for camera in cameras.iter() {
-        commands.entity(camera).insert(RenderTarget::from(target.clone()));
+        commands
+            .entity(camera)
+            .insert(RenderTarget::from(target.clone()));
     }
     commands.insert_resource(OffscreenAttached);
 }

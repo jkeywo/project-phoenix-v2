@@ -126,7 +126,10 @@ fn one_executable_loads_ordinary_phoenix_content_and_runs_the_mission() {
     assert_eq!(local_ships, 1, "the player's hull is in the world");
     // And the simulation really advanced, rather than sitting on tick zero.
     assert!(
-        app.world().resource::<project_phoenix::sim_tick::SimTick>().0 > 0,
+        app.world()
+            .resource::<project_phoenix::sim_tick::SimTick>()
+            .0
+            > 0,
         "the fixed logical tick advanced"
     );
 }
@@ -490,7 +493,8 @@ fn the_curated_allowlist_is_read_from_the_manifest_the_host_serves() {
     // fixture, it is what `--manifest` resolves to. `curated_hulls_for_world`
     // is the one function the binary uses, so pin it against the SHIPPED
     // curated manifest rather than a hand-built one.
-    let demo = std::fs::read_to_string("assets/scenarios.demo.toml").expect("the demo manifest reads");
+    let demo =
+        std::fs::read_to_string("assets/scenarios.demo.toml").expect("the demo manifest reads");
     let curated = project_phoenix::native_host::curated_hulls_for_world(&demo, WORLD);
     assert!(
         !curated.is_empty(),
@@ -519,8 +523,9 @@ fn the_curated_allowlist_is_read_from_the_manifest_the_host_serves() {
     // A world the manifest does not publish at all is unrestricted too, not
     // refused: `--world` names a file directly and the manifest is beside the
     // point for an ordinary dev invocation.
-    assert!(
-        project_phoenix::native_host::curated_hulls_for_world(&demo, "assets/worlds/nope.toml")
-            .is_empty()
-    );
+    assert!(project_phoenix::native_host::curated_hulls_for_world(
+        &demo,
+        "assets/worlds/nope.toml"
+    )
+    .is_empty());
 }

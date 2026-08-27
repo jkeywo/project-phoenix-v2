@@ -46,13 +46,25 @@ function allowlist(env) {
     .filter(Boolean);
 }
 
-function originAllowed(request, env) {
+/**
+ * Is this request's Origin on the list?
+ *
+ * `requireOrigin` is the difference between the two kinds of endpoint here.
+ * A WebSocket upgrade from a browser ALWAYS carries an Origin — the pages live
+ * on pp-dev/pp-demo and this service on *.workers.dev, so every legitimate
+ * upgrade is cross-origin — which means an exemption for requests without one
+ * exempts precisely the scripted non-browser caller the 403 exists to stop.
+ * So the upgrade paths demand a present, allow-listed Origin.
+ *
+ * /v1/health keeps the permissive branch, because the deploy-verification
+ * recipe in docs/delivery-checklist.md §3a is a bare `curl` that may send no
+ * Origin at all, and that endpoint answers with liveness, not with a socket.
+ */
+function originAllowed(request, env, { requireOrigin = false } = {}) {
   const allowed = allowlist(env);
   if (allowed.includes('*')) return true;
   const origin = request.headers.get('Origin');
-  // A same-origin or non-browser caller sends no Origin at all; only a browser
-  // cross-origin request carries one, and that is the case the list gates.
-  if (!origin) return true;
+  if (!origin) return !requireOrigin;
   return allowed.includes(origin);
 }
 
@@ -93,7 +105,7 @@ export class RendezvousRegistry {
   }
 
   dispatch(frames) {
-    for (const { to, frame } of frames) {
+    for (const { to, frame, close } of frames) {
       const ws = this.sockets.get(to);
       if (!ws) continue;
       try {
@@ -101,6 +113,16 @@ export class RendezvousRegistry {
       } catch {
         // A socket that has already gone away is not an error worth failing
         // the sending peer's request over; the close event cleans it up.
+      }
+      // The registry cannot hold a socket, so a refusal that should also END
+      // the connection (a connection past its lookup cap) says so on the frame
+      // and this adapter carries it out — after the refusal has been sent, so
+      // the peer learns why rather than seeing an unexplained drop.
+      if (!close) continue;
+      try {
+        ws.close(1008, frame.reason || 'refused');
+      } catch {
+        // Already gone; the close handler will clean up.
       }
     }
   }
@@ -180,7 +202,7 @@ export default {
     // to be here rather than in a header. Refuse loudly and name the origin:
     // a silent refusal here is the 2026-08 TURN incident with nobody able to
     // join instead of nobody able to relay.
-    if (!originAllowed(request, env)) {
+    if (!originAllowed(request, env, { requireOrigin: true })) {
       return json(
         {
           error: 'origin-not-allowed',

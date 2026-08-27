@@ -65,6 +65,16 @@ function openHost(h, connId = 'host-1', namespace = NAMESPACE_CLIENT, extra = {}
   return h.last(connId, 'hosted').code;
 }
 
+/** The draws that mint one specific word, for scripting `randomInt`. */
+const letters = (word) => [...word].map((c) => DATA.suffix.alphabet.indexOf(c));
+
+/**
+ * A release GUID that is not this build's. Registered versions must be
+ * GUID-shaped — it is the one host-supplied value that becomes part of a
+ * record key — so "another release" is another GUID, not a prose label.
+ */
+const OTHER_RELEASE = '11112222-3333-4444-5555-666677778888';
+
 describe('code issue', () => {
   it('issues a five-letter code in the namespace the host asked for', () => {
     const h = harness();
@@ -76,15 +86,18 @@ describe('code issue', () => {
   });
 
   it('never issues the same suffix twice in one namespace', () => {
-    // A draw that always returns 0 would mint AAAAA every time; the registry
-    // must collision-check and move on.
-    const draws = [];
-    const h = harness({
-      randomInt: () => (draws.length++ < DATA.suffix.length ? 0 : 1),
-    });
+    // Scripted so host-2's FIRST draw replays host-1's exact code and the
+    // retry branch in mintSuffix genuinely executes. A draw sequence that
+    // never repeats leaves that branch uncovered while the assertion below
+    // still passes, which is what this test used to do.
+    let i = 0;
+    const script = [...letters('QUARK'), ...letters('QUARK'), ...letters('MOIST')];
+    const h = harness({ randomInt: () => script[i++] });
     const first = openHost(h, 'host-1');
     const second = openHost(h, 'host-2');
-    expect(second.suffix).not.toBe(first.suffix);
+    expect(first.suffix).toBe('QUARK');
+    expect(second.suffix).toBe('MOIST');
+    expect(i, 'the collision was never drawn, so the retry never ran').toBe(script.length);
     expect(h.reg.snapshot()).toHaveLength(2);
   });
 
@@ -159,7 +172,7 @@ describe('typed lookup', () => {
 
   it('answers version-mismatch for the right namespace under another release', () => {
     const h = harness();
-    const code = openHost(h, 'old-host', NAMESPACE_CLIENT, { version: 'older-release-guid' });
+    const code = openHost(h, 'old-host', NAMESPACE_CLIENT, { version: OTHER_RELEASE });
     h.connect('phone', ROLE_CLIENT);
     h.send('phone', {
       type: 'resolve',
@@ -171,7 +184,7 @@ describe('typed lookup', () => {
   it('keeps unknown, wrong-type and version-mismatch as three different answers', () => {
     const h = harness();
     const server = openHost(h, 'fleet-host', NAMESPACE_SERVER);
-    const old = openHost(h, 'old-host', NAMESPACE_CLIENT, { version: 'older-release-guid' });
+    const old = openHost(h, 'old-host', NAMESPACE_CLIENT, { version: OTHER_RELEASE });
     h.connect('phone', ROLE_CLIENT);
     h.send('phone', { type: 'resolve', code: 'ZZZZZ' });
     h.send('phone', { type: 'resolve', code: server.suffix });
@@ -203,9 +216,9 @@ describe('admission state', () => {
     const h = harness();
     const code = openHost(h);
     h.connect('phone', ROLE_CLIENT);
-    h.send('phone', { type: 'join', code: code.suffix, stamp: '1/phoenix-base/1' });
+    h.send('phone', { type: 'join', code: code.suffix });
     expect(h.last('phone', 'joined')).toMatchObject({ peer: 'phone', admission: 'open' });
-    expect(h.last('host-1', 'peer-joined')).toMatchObject({ peer: 'phone', stamp: '1/phoenix-base/1' });
+    expect(h.last('host-1', 'peer-joined')).toMatchObject({ peer: 'phone' });
     expect(h.reg.snapshot()[0].peers).toBe(1);
   });
 
@@ -219,12 +232,100 @@ describe('admission state', () => {
     expect(h.reg.snapshot()[0].admission).toBe('closed');
   });
 
-  it('relays the host stamp as advisory metadata on resolve and join', () => {
+  it('carries no build identity in either direction — that handshake is in-band', () => {
+    // The host's authoritative check runs on the DataChannel
+    // (delivery::check_join_stamp). A copy of either side's stamp relayed
+    // through the service was read by nobody, so v1 does not carry one and
+    // #1114/#1115 have no dead field to maintain.
     const h = harness();
     const code = openHost(h, 'host-1', NAMESPACE_CLIENT, { stamp: '1/phoenix-base/7' });
     h.connect('phone', ROLE_CLIENT);
+    h.send('phone', { type: 'resolve', code: code.suffix });
+    h.send('phone', { type: 'join', code: code.suffix, stamp: '1/phoenix-base/9' });
+    expect(h.last('phone', 'resolved')).not.toHaveProperty('host_stamp');
+    expect(h.last('phone', 'joined')).not.toHaveProperty('host_stamp');
+    expect(h.last('host-1', 'peer-joined')).not.toHaveProperty('stamp');
+  });
+
+  it('refuses joiners past the authored per-record cap', () => {
+    const cap = DATA.limits.max_peers_per_record;
+    const h = harness();
+    const code = openHost(h);
+    for (let i = 0; i < cap; i += 1) {
+      h.connect(`phone-${i}`, ROLE_CLIENT);
+      h.send(`phone-${i}`, { type: 'join', code: code.suffix });
+    }
+    expect(h.reg.snapshot()[0].peers).toBe(cap);
+    h.connect('one-too-many', ROLE_CLIENT);
+    h.send('one-too-many', { type: 'join', code: code.suffix });
+    expect(h.last('one-too-many', 'error')).toMatchObject({ reason: 'admission-closed' });
+    expect(h.reg.snapshot()[0].peers).toBe(cap);
+  });
+});
+
+describe('registry bounds', () => {
+  it('cuts a socket off after the authored number of lookups', () => {
+    const cap = DATA.limits.max_lookups_per_connection;
+    const h = harness();
+    openHost(h);
+    h.connect('scanner', ROLE_CLIENT);
+    for (let i = 0; i < cap; i += 1) h.send('scanner', { type: 'resolve', code: 'ZZZZZ' });
+    expect(h.last('scanner', 'error')).toMatchObject({ reason: 'unknown' });
+
+    // Past the cap the answer changes, and the frame tells the adapter to end
+    // the socket rather than keep answering an enumeration.
+    const [refusal] = h.reg.receive('scanner', { v: RENDEZVOUS_PROTOCOL, type: 'resolve', code: 'ZZZZZ' });
+    expect(refusal.frame).toMatchObject({ type: 'error', reason: 'too-many-attempts' });
+    expect(refusal.close).toBe(true);
+  });
+
+  it('refuses a code longer than a code can be, without parsing it', () => {
+    const h = harness();
+    h.connect('phone', ROLE_CLIENT);
+    h.send('phone', { type: 'resolve', code: 'A'.repeat(DATA.limits.max_code_length + 1) });
+    expect(h.last('phone', 'error')).toMatchObject({ reason: 'malformed' });
+  });
+
+  it('refuses a host release identifier that is not GUID-shaped', () => {
+    // The version is the one host-supplied value that becomes part of a record
+    // key, so it gets a shape rather than being concatenated as sent.
+    const h = harness();
+    h.connect('host-1', ROLE_HOST);
+    h.send('host-1', { type: 'host-open', namespace: NAMESPACE_CLIENT, version: 'x'.repeat(4096) });
+    expect(h.last('host-1', 'error')).toMatchObject({ request: 'host-open', reason: 'malformed' });
+    expect(h.reg.snapshot()).toHaveLength(0);
+  });
+
+  it('expires a record whose TTL has run out and tells its joiners', () => {
+    // The record normally dies with the host socket; this is the sweep for the
+    // close that never arrived, so a code cannot be held by a host that is not
+    // there any more.
+    let clock = 1_000_000;
+    const h = harness({ now: () => clock });
+    const code = openHost(h);
+    h.connect('phone', ROLE_CLIENT);
     h.send('phone', { type: 'join', code: code.suffix });
-    expect(h.last('phone', 'joined').host_stamp).toBe('1/phoenix-base/7');
+
+    clock += DATA.limits.record_ttl_seconds * 1000 + 1;
+    h.send('phone', { type: 'resolve', code: code.suffix });
+    expect(h.last('phone', 'closed')).toMatchObject({ reason: 'host-gone' });
+    expect(h.last('phone', 'error')).toMatchObject({ reason: 'unknown' });
+    expect(h.reg.snapshot()).toHaveLength(0);
+  });
+
+  it('lets a host socket ask nothing of the client namespace', () => {
+    // clientJoin has always had this guard; resolve did not, so a /v1/host
+    // socket could read the crew namespace it is not served for.
+    const h = harness();
+    const code = openHost(h);
+    h.connect('other-host', ROLE_HOST);
+    h.send('other-host', { type: 'resolve', code: code.suffix });
+    expect(h.last('other-host', 'error')).toMatchObject({
+      request: 'resolve',
+      reason: 'forbidden-role',
+    });
+    h.send('other-host', { type: 'join', code: code.suffix });
+    expect(h.last('other-host', 'error')).toMatchObject({ reason: 'forbidden-role' });
   });
 });
 
@@ -294,18 +395,20 @@ describe('code lifecycle', () => {
     expect(h.reg.snapshot()[0].peers).toBe(0);
   });
 
-  it('keeps a code private — the diagnostics snapshot names no peer and no stamp', () => {
+  it('keeps a code private — the diagnostics snapshot names no code, peer or stamp', () => {
     const h = harness();
-    openHost(h, 'host-1', NAMESPACE_CLIENT, { stamp: '1/phoenix-base/1' });
+    const code = openHost(h, 'host-1', NAMESPACE_CLIENT, { stamp: '1/phoenix-base/1' });
     h.connect('phone', ROLE_CLIENT);
-    h.send('phone', { type: 'join', code: h.last('host-1', 'hosted').code.suffix });
+    h.send('phone', { type: 'join', code: code.suffix });
     const [row] = h.reg.snapshot();
     expect(row).toEqual({
       namespace: NAMESPACE_CLIENT,
       version: VERSION,
-      suffix: expect.any(String),
       admission: 'open',
       peers: 1,
     });
+    // The suffix IS the private client code. A view that carries it is a
+    // diagnostics endpoint one route away from handing out every live session.
+    expect(JSON.stringify(h.reg.snapshot())).not.toContain(code.suffix);
   });
 });

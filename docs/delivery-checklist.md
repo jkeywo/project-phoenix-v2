@@ -185,7 +185,14 @@ mitigation, so do not skip the health check.
 
 - [ ] **Decide the Durable Objects tier.** They are an account-plan decision, and
       this is the repository's first use of any Cloudflare primitive beyond
-      Workers and Pages. Nothing deploys until the account allows them.
+      Workers and Pages. Nothing deploys until the account allows them. Both
+      configs declare the class with `new_sqlite_classes` — the SQLite-backed
+      storage class, which works on the free tier as well as the paid one and is
+      Cloudflare's current default for a new class — so nothing here commits the
+      account to the paid path while this box is unticked. `new_classes`
+      (key-value-backed, paid-only) is the deliberate edit to make if the tier
+      decision goes the other way; changing it after a deploy is a migration,
+      not a config tweak.
 - [ ] **Deploy the dev worker** — manual, like the dev TURN worker, and no CI
       step deploys it, which is half of how §3's drift happened:
 
@@ -204,6 +211,12 @@ mitigation, so do not skip the health check.
       sweep-and-verify patch of the service URL literal — the same treatment
       `DEV_TURN_URL` already gets, for the same reason: the literal is baked into
       more than one built file, so a hardcoded file list would miss one.
+
+      **That sweep does not exist yet**, and until it does a demo build's
+      rendezvous route points at the DEV worker. `deploy-demo.yml` patches
+      `DEV_TURN_URL` only. `gui/rendezvous-transport.js`'s comment above
+      `DEV_RENDEZVOUS_URL` says so; update both in the same change, or the next
+      agent trusts a CI guard that is not there.
 - [ ] **Verify each worker by hand after any origin change.** This service has a
       health endpoint precisely because a WebSocket upgrade is awkward to curl
       and an origin refusal is otherwise invisible from the page's side:

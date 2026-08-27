@@ -28,7 +28,12 @@ class_name = "RendezvousRegistry"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["RendezvousRegistry"]
+# SQLite-backed storage class. `new_classes` (the key-value-backed
+# declaration) needs the Workers Paid plan; `new_sqlite_classes` works on both
+# tiers and is Cloudflare's current default for a new class. The tier decision
+# itself is still open — see docs/delivery-checklist.md §3a — so this config
+# deliberately does not commit the account to the paid path before it is made.
+new_sqlite_classes = ["RendezvousRegistry"]
 
 # This service mints no third-party credentials, so it has NO secrets. If one
 # is ever added (a signing key for join records, say), set it per worker NAME

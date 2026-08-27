@@ -30,6 +30,24 @@
  * Failures are always an `error` frame naming the request and one stable
  * machine `reason`; the phone maps that reason to a strings.csv id through
  * gui/join-code.js's `reasonStringId`, so the service never ships prose.
+ *
+ * ── What v1 deliberately does NOT do ────────────────────────────────────────
+ *
+ * All state here is IN MEMORY, in one Durable Object instance: records die
+ * with the instance, and nothing is written to storage. That is the whole of
+ * #1111's scope. A code therefore cannot outlive its host socket, survive a
+ * worker redeploy, or be rebound to a replacement host — code rotation and
+ * stable-code-across-a-drop are #1115 and #1120, and they are what would add
+ * persistence. The `record_ttl_seconds` sweep below is not persistence: it is
+ * the backstop for a record whose close event never arrived.
+ *
+ * The bounds in the authored `[limits]` table are the other half of that
+ * posture. This is an unauthenticated public endpoint whose codes are private
+ * and whose suffix space is small (25^5 ≈ 9.8M), so an unbounded socket could
+ * walk the whole namespace, hold a record open forever, or store whatever it
+ * liked on one. None of them is a rate limiter across sockets — that is
+ * Cloudflare's own to apply at the edge, and it is on the delivery checklist
+ * rather than in here.
  */
 
 import {
@@ -41,10 +59,16 @@ import {
   versionGuid,
   mintSuffix,
   composeJoinCode,
+  checkJoinCodeFormat,
 } from '../../gui/join-code.js';
+import { RENDEZVOUS_PROTOCOL } from '../../gui/rendezvous-protocol.js';
 
-/** Frame-vocabulary revision. Bump only for an incompatible change. */
-export const RENDEZVOUS_PROTOCOL = 1;
+/**
+ * Frame-vocabulary revision, from the one module both ends of the join path
+ * import. Re-exported because src/index.js and the contract tests read it from
+ * the registry — the service's own answer for "what do I speak".
+ */
+export { RENDEZVOUS_PROTOCOL };
 
 /** Roles a socket may open with. The adapter derives these from the path. */
 export const ROLE_HOST = 'host';
@@ -52,6 +76,14 @@ export const ROLE_CLIENT = 'client';
 
 const recordKey = (project, version, suffix) =>
   `${String(project).toLowerCase()}|${String(version).toLowerCase()}|${suffix}`;
+
+/**
+ * The shape a release identifier must have to become part of a record key: a
+ * canonical GUID, which is what `assets/join/join-codes.toml` authors and what
+ * every real host sends. Deliberately strict — this is the one host-supplied
+ * value the registry stores and indexes on.
+ */
+const RELEASE_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function defaultRandomInt(n) {
   // crypto is present in Workers, in browsers and in Node 20+.
@@ -79,10 +111,21 @@ export function createRegistry({
   joinableNamespaces = [NAMESPACE_CLIENT],
 } = {}) {
   if (!data) throw new Error('rendezvous: no join-code format data');
+  // The Worker bundles this table at build time; a mismatch means the service
+  // and the phones are reading different schemas, which is a deploy fault, not
+  // a request to serve badly.
+  checkJoinCodeFormat(data);
+
+  // Authored bounds, with parse-time defaults so an older table still loads.
+  const limits = data.limits || {};
+  const ttlMs = (limits.record_ttl_seconds || 43200) * 1000;
+  const maxLookups = limits.max_lookups_per_connection || 60;
+  const maxPeers = limits.max_peers_per_record || 32;
+  const maxCodeLength = limits.max_code_length || 160;
 
   /** @type {Map<string, object>} recordKey → host record */
   const records = new Map();
-  /** @type {Map<string, object>} connection id → {role, key} */
+  /** @type {Map<string, object>} connection id → {role, key, lookups} */
   const conns = new Map();
 
   const joinable = new Set(joinableNamespaces);
@@ -90,6 +133,13 @@ export function createRegistry({
   const out = (to, frame) => ({ to, frame: { v: RENDEZVOUS_PROTOCOL, ...frame } });
   const fail = (to, request, reason, detail) =>
     out(to, { type: 'error', request, reason, ...(detail ? { detail } : {}) });
+  /**
+   * A refusal the adapter should also CLOSE the socket after sending. The
+   * registry holds no sockets, so "refuse the socket" can only be an
+   * instruction — src/index.js honours the flag, and a transport that ignores
+   * it still gets the refusal because the connection stays capped.
+   */
+  const cut = (to, request, reason) => ({ ...fail(to, request, reason), close: true });
 
   const recordFor = (connId) => {
     const c = conns.get(connId);
@@ -132,9 +182,41 @@ export function createRegistry({
   }
 
   function resolveRequest(code) {
+    // Bound before parsing: a code is a bounded identifier, and a megabyte of
+    // "code" is a request to spend the Durable Object's CPU, not to join.
+    if (typeof code !== 'string' || code.length > maxCodeLength) {
+      return { ok: false, reason: 'malformed' };
+    }
     const parsed = parseJoinCode(code, NAMESPACE_CLIENT, data);
     if (!parsed.ok) return { ok: false, reason: parsed.reason };
     return lookup(parsed.project, parsed.version, parsed.suffix);
+  }
+
+  /**
+   * Charge one lookup to a connection. Returns a refusal frame once the
+   * connection is past its authored cap, and keeps returning one afterwards:
+   * the socket is done regardless of whether the adapter closed it.
+   */
+  function chargeLookup(conn, connId, request) {
+    conn.lookups = (conn.lookups || 0) + 1;
+    return conn.lookups > maxLookups ? [cut(connId, request, 'too-many-attempts')] : null;
+  }
+
+  /**
+   * Drop records whose TTL has passed. A host record normally dies with its
+   * socket; this is the sweep for the case where the close never arrived (an
+   * evicted instance, a half-open socket), so a code cannot be held forever by
+   * a host that is not there. Runs lazily on every inbound frame — there is no
+   * alarm to schedule in a registry that holds no storage.
+   */
+  function expireStale() {
+    const cutoff = now() - ttlMs;
+    let frames = [];
+    for (const record of [...records.values()]) {
+      if (record.createdAt > cutoff) continue;
+      frames = frames.concat(dropRecord(record, 'host-gone'));
+    }
+    return frames;
   }
 
   // ── Host requests ────────────────────────────────────────────────────────
@@ -147,7 +229,13 @@ export function createRegistry({
     const namespace = frame.namespace || NAMESPACE_CLIENT;
     const project = projectGuidFor(namespace, data);
     if (!project) return [fail(connId, 'host-open', 'wrong-type')];
-    const version = frame.version || versionGuid(data);
+    // The one field a host chooses that ends up in a record key, so the one
+    // that needs a shape: a release identifier, not an essay. Everything
+    // downstream lower-cases and concatenates it.
+    const version = frame.version === undefined ? versionGuid(data) : frame.version;
+    if (!RELEASE_GUID.test(String(version))) {
+      return [fail(connId, 'host-open', 'malformed')];
+    }
 
     const minted = mintSuffix(
       data,
@@ -164,10 +252,10 @@ export function createRegistry({
       suffix: minted.suffix,
       namespace,
       host: connId,
-      // The host's delivery stamp, relayed to joiners as ADVISORY discovery
-      // help. The authoritative protocol/content check is the host's own,
-      // over the DataChannel — see delivery::check_join_stamp.
-      stamp: typeof frame.stamp === 'string' ? frame.stamp : null,
+      // No host delivery stamp is stored or relayed. The authoritative
+      // protocol/content check is the host's own, in-band over the DataChannel
+      // (delivery::check_join_stamp), and a copy here was read by nothing —
+      // dead surface #1114 and #1115 would have had to keep maintaining.
       admission: 'open',
       peers: new Set(),
       createdAt: now(),
@@ -230,7 +318,20 @@ export function createRegistry({
 
   // ── Client requests ──────────────────────────────────────────────────────
 
+  /**
+   * The lookup primitive: "does this code name a joinable host, and is it
+   * admitting?" — with no side effect and no presence. `join` answers the same
+   * question and then attaches, so the shipped phone goes straight there; this
+   * verb is what a launcher, a diagnostic or a "check the code before I
+   * commit" step in #1114's fleet flow asks. Kept in v1 deliberately (the PRD's
+   * test decisions name issue/resolve), and role-gated exactly like `join`, so
+   * a host socket cannot use it to read the client namespace.
+   */
   function clientResolve(connId, frame) {
+    const conn = conns.get(connId);
+    if (!conn || conn.role !== ROLE_CLIENT) return [fail(connId, 'resolve', 'forbidden-role')];
+    const capped = chargeLookup(conn, connId, 'resolve');
+    if (capped) return capped;
     const found = resolveRequest(frame.code);
     if (!found.ok) return [fail(connId, 'resolve', found.reason)];
     const record = found.record;
@@ -239,7 +340,6 @@ export function createRegistry({
         type: 'resolved',
         namespace: record.namespace,
         admission: record.admission,
-        host_stamp: record.stamp,
       }),
     ];
   }
@@ -247,10 +347,18 @@ export function createRegistry({
   function clientJoin(connId, frame) {
     const conn = conns.get(connId);
     if (!conn || conn.role !== ROLE_CLIENT) return [fail(connId, 'join', 'forbidden-role')];
+    const capped = chargeLookup(conn, connId, 'join');
+    if (capped) return capped;
     const found = resolveRequest(frame.code);
     if (!found.ok) return [fail(connId, 'join', found.reason)];
     const record = found.record;
     if (record.admission !== 'open') return [fail(connId, 'join', 'admission-closed')];
+    // A full crew list reads to the guest exactly like a closed one, and it is
+    // the same sentence on their phone. The cap is not a party size — it is
+    // the bound that stops one record holding unbounded presence.
+    if (!record.peers.has(connId) && record.peers.size >= maxPeers) {
+      return [fail(connId, 'join', 'admission-closed')];
+    }
 
     const left = conn.key && conn.key !== record.key ? leave(connId) : [];
     conn.key = record.key;
@@ -262,15 +370,11 @@ export function createRegistry({
         type: 'joined',
         peer: connId,
         admission: record.admission,
-        host_stamp: record.stamp,
       }),
-      out(record.host, {
-        type: 'peer-joined',
-        peer: connId,
-        // The joiner's declared build identity, relayed verbatim. The host
-        // decides; the service never refuses a join on it.
-        stamp: typeof frame.stamp === 'string' ? frame.stamp : null,
-      }),
+      // Presence only. The joiner's build identity travels in-band on the
+      // DataChannel, to the host that actually decides on it — relaying a copy
+      // through here was ignored by the host and only widened the surface.
+      out(record.host, { type: 'peer-joined', peer: connId }),
     ];
   }
 
@@ -304,27 +408,38 @@ export function createRegistry({
 
     /** Register a socket. `role` comes from the endpoint the adapter served. */
     connect(connId, role) {
-      conns.set(connId, { role: role === ROLE_HOST ? ROLE_HOST : ROLE_CLIENT, key: null });
+      conns.set(connId, {
+        role: role === ROLE_HOST ? ROLE_HOST : ROLE_CLIENT,
+        key: null,
+        lookups: 0,
+      });
       return [out(connId, { type: 'ready', role, protocol: RENDEZVOUS_PROTOCOL })];
     },
 
     /** Feed one decoded frame in; get the frames to send out. */
     receive(connId, frame) {
       if (!conns.has(connId)) return [fail(connId, 'unknown', 'not-connected')];
-      if (!frame || typeof frame !== 'object') return [fail(connId, 'unknown', 'malformed')];
-      if (frame.v !== RENDEZVOUS_PROTOCOL) {
-        return [fail(connId, frame.type || 'unknown', 'unsupported-protocol')];
-      }
-      switch (frame.type) {
-        case 'host-open': return hostOpen(connId, frame);
-        case 'host-admission': return hostAdmission(connId, frame);
-        case 'host-close': return hostClose(connId);
-        case 'resolve': return clientResolve(connId, frame);
-        case 'join': return clientJoin(connId, frame);
-        case 'signal': return relaySignal(connId, frame);
-        case 'leave': return leave(connId);
-        default: return [fail(connId, String(frame.type || 'unknown'), 'malformed')];
-      }
+      // Sweep first, so a request never resolves a record whose TTL has run
+      // out, and the joiners of an expired one are told before anything else
+      // this frame produces.
+      const expired = expireStale();
+      const handled = (() => {
+        if (!frame || typeof frame !== 'object') return [fail(connId, 'unknown', 'malformed')];
+        if (frame.v !== RENDEZVOUS_PROTOCOL) {
+          return [fail(connId, frame.type || 'unknown', 'unsupported-protocol')];
+        }
+        switch (frame.type) {
+          case 'host-open': return hostOpen(connId, frame);
+          case 'host-admission': return hostAdmission(connId, frame);
+          case 'host-close': return hostClose(connId);
+          case 'resolve': return clientResolve(connId, frame);
+          case 'join': return clientJoin(connId, frame);
+          case 'signal': return relaySignal(connId, frame);
+          case 'leave': return leave(connId);
+          default: return [fail(connId, String(frame.type || 'unknown'), 'malformed')];
+        }
+      })();
+      return [...expired, ...handled];
     },
 
     /** Socket closed. Drops presence and, for a host, its whole record. */
@@ -336,14 +451,18 @@ export function createRegistry({
 
     /**
      * Read-only view for diagnostics and tests: what is registered, in which
-     * namespace, with how many peers. Never includes a host's stamp or a peer
-     * id, so a diagnostics endpoint cannot leak a live session's metadata.
+     * namespace and release, admitting or not, with how many peers.
+     *
+     * It carries NO SUFFIX, no peer id and no connection id. The suffix is the
+     * private client code — the one secret this whole feature exists to
+     * protect — and a shape that includes it is a diagnostics endpoint one
+     * route away from handing every live code out. Count records here; get a
+     * code from the `hosted` frame that issued it.
      */
     snapshot() {
       return [...records.values()].map((r) => ({
         namespace: r.namespace,
         version: r.version,
-        suffix: r.suffix,
         admission: r.admission,
         peers: r.peers.size,
       }));

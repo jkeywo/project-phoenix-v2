@@ -18,6 +18,7 @@ class_name = "RendezvousRegistry"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["RendezvousRegistry"]
+# SQLite-backed, matching wrangler.toml — see the note there.
+new_sqlite_classes = ["RendezvousRegistry"]
 
 # No secrets. See worker-rendezvous/wrangler.toml.

@@ -67,7 +67,7 @@ The strike is a parallel thread, not the next act. The committee and Havelock ar
 
 The design purpose is to distribute first tasks quickly: Captain and Comms establish claims; Science/Sensors gather the condition and record picture; Helm and Navigation orient to the corridor and infrastructure; Engineering prepares power and external operations; Tactical decides whether an armed picket is a target, a deterrent, or an actor to hold at risk.
 
-Depot Ladder B’s structural reading and filed record can disagree. Scanning, obtaining records, and gaining worker corroboration can build an evidence chain. Evidence matters later in negotiation and consequences; it is not just collectible lore.
+Depot Ladder B’s structural reading and filed record can disagree. A genuine Ladder B scan creates the discrepancy finding; Havelock’s supplied maintenance-file copy can support negotiation but cannot substitute for that scan. After a negotiated settlement, worker corroboration opens a sticky, range-gated filing thread from Control. Only the crew’s explicit filing response puts the scan diff and worker account on Control’s record and completes the optional objective. Evidence matters later in negotiation and consequences; it is not just collectible lore.
 
 ### Storm era — Physical crisis
 
@@ -119,11 +119,11 @@ Two workforces are authored: `skyway_workers` begins on strike with disposition 
 
 ### Evidence and dossiers
 
-The Ladder B reading, documentary record, and worker corroboration form separate facts. The crew can discover disagreement, name it, and use it. Evidence is filed through the scenario’s evidence/dossier substrate so later choices can test what the crew actually established.
+The Ladder B reading, documentary record, and worker corroboration form separate facts. The crew can discover disagreement, name it, and use it. Corroboration opens both a Control filing opportunity and a later Havelock confrontation, but those are separate actions: confrontation does not file the evidence, and corroboration alone does not complete the filing objective. The fixed Control thread remains available across travel, while ordinary reciprocal Comms range gates its response. `ClearComms` is still an intentional dismissal of the inbox and does not recreate this optional thread. Admitting the response while the explicit filing state remains open appends the records-provenance scan diff and dialogue-provenance worker account to Control’s dossier, sets the authoritative filed flag, and completes the objective; it does not transfer the maintenance record’s source rows. Force visibly closes and fails an unfiled route. During the negotiated vote’s physical stand-down, filing and force can both have rendered responses, so authoritative admission makes the first irreversible response win and gives the stale reverse response a closed acknowledgement. A physically settled strike or mission finalisation also closes force. Finalisation closes an unresolved filing route before promises, campaign facts, and debrief copy freeze, so neither stale response can rewrite the ending.
 
 ### Commitments
 
-Promises of passage or records access are recorded commitments. The final resolution can determine whether they were fulfilled, broken, or superseded. The design goal is for Comms choices to become operational obligations the rest of the bridge must understand.
+Promises of passage or evidence filing are recorded commitments. The records promise is specifically that the genuine scan discrepancy and the rigger’s corroboration reach Control unedited, not that Ladder B’s maintenance rows move. It is kept at mission close only if Control accepted that bundle, while force can break an open promise when it burns the unfiled route. The witness-protection promise is separate: filing with Control does not settle it, and it remains open through the Havelock confrontation before mission close keeps or breaks it according to whether the crew named Tacket to Havelock. The design goal is for Comms choices to become operational obligations the rest of the bridge must understand.
 
 ### Force and restraint
 

@@ -31,6 +31,25 @@ authored state as it stands, and flags every unratified number it leans on.
 > and eastern ladder routes remain clear; the historical sphere arithmetic
 > below remains the explicitly preserved pre-#1131 baseline.
 
+> **Current evidence note (#1136).** Havelock's maintenance-file copy remains
+> useful ground in the strike negotiation, but it does not set
+> `skyway_records_diff_found` and cannot stand in for scanning Ladder B. Only a
+> negotiated strike plus that genuine scan diff lets the rigger corroborate it.
+> Corroboration opens a sticky, range-gated Control filing thread and the later
+> Havelock confrontation; it completes neither filing nor the optional evidence
+> objective. The crew must submit Control's explicit filing response, which puts
+> the diff and worker account on Control's dossier, sets `skyway_records_put`,
+> and completes the objective. It files that two-part bundle unedited rather
+> than moving the maintenance record's source rows. Force burns and visibly
+> fails an unfiled route; filing first makes a retained force response return
+> only the closed acknowledgement. Confrontation does not file it; mission
+> finalisation closes both stale-response authorities and the explicit
+> `skyway_evidence_filing_open` state before commitments, campaign facts and
+> debrief copy freeze, then fails any active unfiled objective. A stale response
+> after either closure receives only the closed acknowledgement. The thread is
+> sticky across travel and range changes, while ordinary `ClearComms` remains a
+> deliberate dismissal of the inbox and does not auto-reopen this optional route.
+
 ## Method
 
 - Read the three AI fragments the Alliance Destroyer composes:
@@ -248,22 +267,39 @@ gates actually sit ([ai] exploration; every ref verified against the file).
   (`:1080-1083`), so Depot B is below its standard from the first tick — the
   comparison beat is live from t=0, gated only on the crew scanning.
 
-### The evidence chain (what a good outcome could demand)
+### The evidence chain (current runtime after #1136)
 
 - BRIEFING provenance on world load: the maintenance record, filed before the
   crew act (`file_the_ladder_b_record`, `:2634-2645`). A crew who cannot tell a
   briefing from a reading cannot argue with the briefing (`:2631-2633`).
 - The scan diff above produces the RECORDS finding (`ladder_b_maintenance_file`)
-  — deliberately the same entry the operator hands over in Act 2, so the
-  second route is a silent no-op (`:2611-2617`).
+  and raises `skyway_records_diff_found`. Havelock can hand over the same text
+  for negotiation, but that route deliberately does not raise the scan flag.
 - The watcher: `skyway_records_diff_found` → `on_the_diff_lands` (the second
   gate, `:2713`).
 - Worker corroboration: `on_rigger_ask` files `ladder_b_worker_account` under
   `dialogue` + `skyway_worker_corroboration_obtained` (`:2795-2804`).
-- The unlock: `on_corroboration_filed` completes `obj-a2-corroborate` and — if
-  the crew hold the maintenance file (records) AND the worker account
-  (dialogue) — raises `skyway_confront_unlocked` and posts `obj-a3-confront`
-  (`:2857-2873`). Dual provenance is deliberate (`:2845-2851`).
+- The unlock: `on_corroboration_obtained` requires the negotiated-strike flag,
+  the genuine scan flag and both source findings. It raises
+  `skyway_confront_unlocked`, posts `obj-a3-confront`, and opens one fixed
+  `falling-skyway-evidence-filing` thread from Control. It leaves
+  `obj-a2-corroborate` active.
+- The filing: the range-gated `file_evidence` response calls
+  `on_file_evidence`, which revalidates those gates at admission, appends the
+  records diff and dialogue account to Control's dossier, raises
+  `skyway_records_put`, and completes `obj-a2-corroborate`. The Havelock
+  transfer-window shortcut is gone, and confronting Havelock preserves its own
+  effects without setting the filed flag.
+- The route state is explicit: corroboration opens
+  `skyway_evidence_filing_open`; filing, force or mission finalisation closes it.
+  The symmetric force admission gate rejects a retained response after filing,
+  physical strike settlement, an earlier force order or mission finalisation.
+  During the vote's physical stand-down the first irreversible response admitted
+  wins, so neither order can produce both filed and forced state. Finalisation
+  closes the filing state before resolving promises or writing campaign/debrief
+  state, so an admitted stale response cannot rewrite the ending. `ClearComms`
+  intentionally discards the live dialogue without recreating it; the optional
+  objective remains unresolved and later fails visibly.
 - Campaign side: `campaign.skyway.evidence.*` is exclusive
   corroborated > records > none (`:4969-4981`).
 
@@ -280,11 +316,15 @@ gates actually sit ([ai] exploration; every ref verified against the file).
   unconditionally.** #1132 replaced that route with the three-scan plus Control
   pickup contract described below.
 - **Keeping the records promise is evidence-gated.** `skyway_surface_records`
-  is kept iff `skyway_records_put > 0` (`:4778-4783`), and `put_the_file` is
-  offered only while the dossier holds the maintenance file (`:4350-4351,
-  :4375-4377`). So an empty-handed crew can settle the strike (good) but
-  silently break the records ledger — the "accidentally good" run is only
-  half-clean even before the collapse.
+  promises that the genuine scan discrepancy and rigger's corroboration reach
+  Control unedited; it does not promise to transfer Ladder B's maintenance rows.
+  It is kept iff `skyway_records_put > 0`. That flag now has one route: Control's
+  explicit filing response after genuine scan evidence and corroboration. An
+  empty-handed crew can still settle the strike, but cannot silently manufacture
+  a clean records ledger from Havelock's copy or the confrontation. The separate
+  witness-protection promise remains open through filing and Havelock's
+  confrontation, then resolves at mission close against whether Tacket was named
+  to Havelock.
 
 ### What this means for "we should need to do the survey, and need evidence"
 

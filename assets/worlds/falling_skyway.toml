@@ -102,8 +102,9 @@
 #   NEGOTIATE  before hardening, the committee settle for two pieces of ground
 #              out of three: the
 #              captain's word that the corridor is clear in the transfer window,
-#              the captain's word that the maintenance file goes to Control, or
-#              the crew showing they have already read the file. Both promises
+#              the captain's word that the scan discrepancy and corroborating
+#              worker account go to Control unedited, or the crew showing they
+#              have already read the file. Both promises
 #              go onto the commitments ledger with the workers as the party and
 #              stay OPEN — keeping them is #1042's and #1039's business. Once
 #              hardened, all three pieces of ground are required.
@@ -1996,8 +1997,8 @@ fn post_strike_objectives(ctx) {
         mandatory: false,
         source: "mission",
         base_priority: 25,
-        targets: ["world.falling_skyway.entity.strike_committee.name"],
-    }, "skyway_worker_corroboration_obtained");
+        targets: ["world.falling_skyway.entity.skyway_control.name"],
+    }, "skyway_records_put");
     if ctx.flags.skyway_worker_corroboration_closed > 0 {
         ctx.effects.fail_objective("obj-a2-corroborate");
     }
@@ -2312,8 +2313,8 @@ fn on_survey_due(ctx) {
 //
 // The committee want two things and, while the dispute is soft, will settle for
 // two pieces of ground out of three: promise the corridor is clear in the final
-// transfer window, promise the maintenance file goes to Control rather than
-// back to the operator, or show them you have already read the file. Once either
+// transfer window, promise the scan discrepancy and corroborating worker account
+// go to Control unedited, or show them you have already read the file. Once either
 // hardening timer lands they require all three, but every promise, evidence line,
 // stall and force option remains available.
 //
@@ -2545,12 +2546,26 @@ fn on_stall(ctx) {
 // the whole difference in PACE between the two endings — the operator clears a
 // picket in six.
 fn on_settle(ctx) {
+    // Rendering the vote response is not authority. Force, physical settlement
+    // or mission finalisation may have landed while the response remained in
+    // the inbox, and none of those may be rewritten by a stale pick.
+    if ctx.flags.skyway_forced_open > 0 ||
+       ctx.flags.skyway_strike_settled > 0 ||
+       ctx.flags.skyway_mission_finalized > 0 {
+        return #{ message: "world.falling_skyway.comms.committee_settles", responses: [] };
+    }
     engage_strike(ctx);
-    if ctx.flags.skyway_forced_open == 0 &&
-       ctx.flags.skyway_settled_by_negotiation == 0 {
+    if ctx.flags.skyway_settled_by_negotiation == 0 {
         ctx.flags.skyway_settled_by_negotiation = 1;
         ctx.effects.set_workforce_disposition("skyway_workers", 60);
         ctx.schedule.after(20, |ctx| {
+            // The vote is provisional throughout the stand-down. A force order
+            // admitted before this callback clears that provisional flag and
+            // owns the only remaining settlement callback.
+            if ctx.flags.skyway_forced_open > 0 ||
+               ctx.flags.skyway_strike_settled > 0 ||
+               ctx.flags.skyway_mission_finalized > 0 ||
+               ctx.flags.skyway_settled_by_negotiation == 0 { return; }
             ctx.flags.skyway_strike_settled = 1;
         });
     }
@@ -2577,10 +2592,24 @@ fn havelock_hails(ctx) {
     havelock_offer(ctx, "world.falling_skyway.comms.havelock_hails")
 }
 
+// One authoritative predicate owns whether a force response can still be
+// admitted. The accepted vote is not yet the physical settlement — there is an
+// authored twenty-second stand-down in which filing and force can both have
+// been rendered, and admission order decides which one wins. Once evidence has
+// actually been filed, the strike has physically settled, force has already
+// been admitted, or the mission has frozen its ending, that route is spent.
+fn force_route_closed(ctx) {
+    ctx.flags.skyway_records_put > 0 ||
+    ctx.flags.skyway_strike_settled > 0 ||
+    ctx.flags.skyway_forced_open > 0 ||
+    ctx.flags.skyway_mission_finalized > 0
+}
+
 // The offer, under whichever opening line the caller is answering with.
 fn havelock_offer(ctx, body) {
-    // Nothing left to sell once the rung is moving, either way.
-    if ctx.flags.skyway_forced_open > 0 || ctx.flags.skyway_strike_settled > 0 {
+    // Nothing left to sell once the authoritative route is spent. Admission
+    // repeats this gate because an already-rendered response can outlive it.
+    if force_route_closed(ctx) {
         return #{ message: "world.falling_skyway.comms.havelock_stands_off", responses: [] };
     }
     let responses = [];
@@ -2664,10 +2693,13 @@ fn on_force_now(ctx)    { force_the_picket(ctx, false) }
 fn on_force_warned(ctx) { force_the_picket(ctx, true) }
 
 fn force_the_picket(ctx, warned) {
-    engage_strike(ctx);
-    if ctx.flags.skyway_forced_open > 0 {
-        return #{ message: "world.falling_skyway.comms.havelock_acknowledges", responses: [] };
+    // Re-read the route before ANY mutation. Rendering is not authority: a
+    // filing, physical settlement or mission close can all land while an old
+    // Havelock response is still visible in the inbox.
+    if force_route_closed(ctx) {
+        return #{ message: "world.falling_skyway.comms.force_route_closed", responses: [] };
     }
+    engage_strike(ctx);
     // READ THE GROUND BEFORE MOVING IT. Everything below drives the workers'
     // disposition to the floor, so the risk has to be measured first — it is
     // what the situation was when the order was given, not what the order made
@@ -2684,6 +2716,11 @@ fn force_the_picket(ctx, warned) {
     if mood <= 10 { hurt = 4; }
     if warned && hurt > 0 { hurt -= 1; }
 
+    // Force admitted during the vote's stand-down wins that admission race.
+    // Clear the provisional negotiation before scheduling Havelock's outcome,
+    // so the vote callback cannot settle first and the campaign cannot inherit
+    // a negotiated+forced hybrid.
+    ctx.flags.skyway_settled_by_negotiation = 0;
     ctx.flags.skyway_forced_open = 1;
     ctx.flags.skyway_force_casualties = hurt;
     // The campaign flags. `skyway_worker_corroboration_closed` is the route
@@ -2691,6 +2728,7 @@ fn force_the_picket(ctx, warned) {
     // know who the crew are, and they are written as a PAIR because forcing a
     // picket open does not only lose you the workers.
     ctx.flags.skyway_worker_corroboration_closed = 1;
+    ctx.flags.skyway_evidence_filing_open = 0;
     ctx.flags["relationship.skyway_workers.damaged"] = 1;
     ctx.flags["relationship.havelock_operations.favoured"] = 1;
 
@@ -2733,6 +2771,9 @@ fn committee_signs_off(ctx) {
 // banked on a flag, so this handler only reports it — which is also what makes
 // it survive a save between the order and the outcome.
 fn picket_cleared(ctx) {
+    if ctx.flags.skyway_forced_open == 0 ||
+       ctx.flags.skyway_strike_settled > 0 ||
+       ctx.flags.skyway_mission_finalized > 0 { return; }
     let hurt = ctx.flags.skyway_force_casualties;
     // The same lever the negotiation pulls: the rung is working again.
     ctx.flags.skyway_strike_settled = 1;
@@ -3226,20 +3267,11 @@ fn read_the_file_against_the_rung(ctx) {
 //   into the campaign), so this slice deliberately adds NO second announcement:
 //   the route it would announce is one the crew were already told they had lost.
 //
-//   THE CREW HAVE THE FILE.  A conversation needs a subject. Somebody calling to
-//   corroborate a document nobody has read is an exposition scene, and the crew
-//   would have no question to ask her.
-//
-// [ai] THE SECOND GATE READS THE LOG, NOT `skyway_records_diff_found`. The issue
-// names that flag, and every run it describes behaves identically either way —
-// #1038 appends the finding and sets the flag in that order, so the flag's runs
-// are a strict subset of the log's. What the log ALSO admits is the crew who got
-// the same file off Havelock's channel instead of scanning the rung: same
-// finding, same id, same RECORDS provenance, and #1031 dedupes the pair. #1036's
-// own note says the tree must light up for "any route that files the same
-// finding — including the ones #1038/#1039 have not written yet", and a slice
-// that read a flag beside one route's append would be the first one in this file
-// to break that rule about itself.
+//   THE CREW READ THE RUNG.  A conversation needs a subject, and the subject is
+//   specifically the discrepancy this crew established by scanning Ladder B.
+//   Havelock will hand over the same maintenance file on request, but possession
+//   is not comparison: only `skyway_records_diff_found`, written by the real scan
+//   path above, proves the crew read the file against the structure.
 //
 // ── Either order, and no memory of its own ──────────────────────────────────
 //
@@ -3250,18 +3282,16 @@ fn read_the_file_against_the_rung(ctx) {
 on_flag_set("skyway_settled_by_negotiation", "on_the_floor_carries_it");
 on_flag_set("skyway_records_diff_found", "on_the_diff_lands");
 
-// The corroboration's own consequence, chained off the campaign flag rather than
-// written beside the append. The order inside `on_rigger_ask` is load-bearing:
-// the applier runs a call's commands in the order the script authored them, so
-// by the time this handler is dispatched the entry IS on the sheet and the
-// `holds` reads below are asking a question about the world rather than about
-// something still sitting in an effect buffer.
-on_flag_set("skyway_worker_corroboration_obtained", "on_corroboration_filed");
+// The account opens the crew's filing route. It does not itself finish the
+// objective: Control must receive both halves through an admitted response on
+// its own, range-gated channel.
+on_flag_set("skyway_worker_corroboration_obtained", "on_corroboration_obtained");
 
 fn on_the_floor_carries_it(ctx) { call_the_rigger_if_both_halves_hold(ctx) }
 fn on_the_diff_lands(ctx)       { call_the_rigger_if_both_halves_hold(ctx) }
 
 fn call_the_rigger_if_both_halves_hold(ctx) {
+    if ctx.flags.skyway_mission_finalized > 0 { return; }
     if ctx.flags.skyway_rigger_called > 0 { return; }
     // Belt and braces. `on_settle` is unreachable once the picket has been
     // cleared (#1036's `committee_terms` returns an empty node) and the force is
@@ -3270,9 +3300,7 @@ fn call_the_rigger_if_both_halves_hold(ctx) {
     // third way to end the strike should have to come and read this.
     if ctx.flags.skyway_forced_open > 0 { return; }
     if ctx.flags.skyway_settled_by_negotiation == 0 { return; }
-    if !ctx.dossier.holds(#{ text: "world.falling_skyway.evidence.ladder_b_maintenance_file" }) {
-        return;
-    }
+    if ctx.flags.skyway_records_diff_found == 0 { return; }
 
     ctx.flags.skyway_rigger_called = 1;
     // From her own hull, never `_self`, for the reason #1036's two threads are:
@@ -3299,6 +3327,7 @@ fn call_the_rigger_if_both_halves_hold(ctx) {
 // called. [ai] The console-complexity ladder's human-seeking comms is still the
 // real fix for both trees.
 fn rigger_hails(ctx) {
+    if ctx.flags.skyway_mission_finalized > 0 { return rigger_thread_closed(ctx); }
     #{
         message: "world.falling_skyway.comms.rigger_hails",
         responses: [
@@ -3308,9 +3337,14 @@ fn rigger_hails(ctx) {
     }
 }
 
+fn rigger_thread_closed(ctx) {
+    #{ message: "world.falling_skyway.comms.rigger_stands_by", responses: [] }
+}
+
 // Never terminal. A captain in the middle of a tow can put her down and pick her
 // back up, and the node she comes back to has the one thing left to say on it.
 fn on_rigger_later(ctx) {
+    if ctx.flags.skyway_mission_finalized > 0 { return rigger_thread_closed(ctx); }
     #{
         message: "world.falling_skyway.comms.rigger_stands_by",
         responses: [
@@ -3331,6 +3365,7 @@ fn on_rigger_later(ctx) {
 //
 // The append comes BEFORE the flag write — see the trigger registration above.
 fn on_rigger_ask(ctx) {
+    if ctx.flags.skyway_mission_finalized > 0 { return rigger_thread_closed(ctx); }
     ctx.dossier.append(#{
         subject:    "world.falling_skyway.entity.depot_ladder_b.name",
         text:       "world.falling_skyway.evidence.ladder_b_worker_account",
@@ -3353,9 +3388,12 @@ fn on_rigger_ask(ctx) {
 // She has already said it by the time she asks for this, which is the order a
 // person talks in and the reason the promise cannot be a price. It goes on the
 // ledger OPEN, made to her rather than to the committee: keeping it is what the
-// report to Control (#1042) and the confrontation (#1043) have to decide, and a
-// captain who puts her account to the operator has to know whose name is on it.
+// later confrontation (#1043) has to decide, and a captain who puts her account
+// to the operator has to know whose name is on it. Filing the evidence bundle
+// with Control does not settle this promise; mission close reads whether the
+// crew named her to Havelock.
 fn on_rigger_protect(ctx) {
+    if ctx.flags.skyway_mission_finalized > 0 { return rigger_thread_closed(ctx); }
     ctx.commitments.record(#{
         id: "skyway_protect_witness",
         made_to: "world.falling_skyway.entity.rigger_tacket.name",
@@ -3369,33 +3407,34 @@ fn on_rigger_protect(ctx) {
 // instead of a promise, because a captain who would not give her cover is a fact
 // about this crew that #1043's scene should be able to read.
 fn on_rigger_no_promise(ctx) {
+    if ctx.flags.skyway_mission_finalized > 0 { return rigger_thread_closed(ctx); }
     ctx.flags.increment("skyway_witness_unprotected", 1);
     #{ message: "world.falling_skyway.comms.rigger_accepts_risk", responses: [] }
 }
 
 // ── What two entries on one sheet unlock ────────────────────────────────────
 //
-// The optional objective #1036 posted is COMPLETED here, which is the green
-// mirror of the red one the force-open produces. Before this slice it had no
-// resolution on the negotiated branch at all: an optional line that could go
-// wrong and never go right.
+// The rigger's account unlocks TWO things and completes NEITHER of them by
+// itself. The first is a sticky Control thread: it remains in the inbox if the
+// destroyer is outside Control's range, and the shared response router refuses
+// the pick until the ship returns. The response then writes both source entries
+// onto Control's own sheet and only that authoritative pickup raises
+// `skyway_records_put` and completes `obj-a2-corroborate`.
 //
-// Then the unlock, and it is a genuine read of the fact sheet rather than a
-// second name for the pick that just happened. Both entries, each narrowed to
-// its own provenance — the crew hold a records comparison AND somebody's word —
-// because "the sheet says both" is the sentence the confrontation is built on,
-// and a crew who reach the dialogue entry by some route this file has not
-// written yet should unlock it on the same terms.
+// "Sticky" means range changes and travel do not retire it. The ordinary
+// ClearComms command remains an intentional dismissal of the whole inbox and
+// its active dialogues; this optional thread is not silently recreated after a
+// crew explicitly clears it. The route state stays open until filing, force or
+// mission finalisation, so an unfiled dismissal still fails visibly at close.
 //
-// `skyway_confront_unlocked` is the campaign state and `obj-a3-confront` is the
-// crew-facing half of it. #1043 authors the safe-passage scene the option lives
-// in and resolves this objective there; until it lands the objective is an
-// optional lead on the panel saying what the crew have earned, which is the
-// shape `obj-a2-corroborate` itself had between #1036 and this slice.
-fn on_corroboration_filed(ctx) {
-    ctx.effects.complete_objective("obj-a2-corroborate");
-
-    if ctx.flags.skyway_confront_unlocked > 0 { return; }
+// The second is the existing confrontation lead. Confronting Havelock is a
+// separate consequence and never substitutes for filing with Control.
+fn on_corroboration_obtained(ctx) {
+    if ctx.flags.skyway_forced_open > 0 { return; }
+    if ctx.flags.skyway_mission_finalized > 0 { return; }
+    if ctx.flags.skyway_settled_by_negotiation == 0 { return; }
+    if ctx.flags.skyway_records_diff_found == 0 { return; }
+    if ctx.flags.skyway_worker_corroboration_obtained == 0 { return; }
     if !ctx.dossier.holds(#{
         text: "world.falling_skyway.evidence.ladder_b_maintenance_file",
         provenance: "records",
@@ -3405,15 +3444,87 @@ fn on_corroboration_filed(ctx) {
         provenance: "dialogue",
     }) { return; }
 
-    ctx.flags.skyway_confront_unlocked = 1;
-    ctx.effects.add_objective(#{
-        id: "obj-a3-confront",
-        text: "world.falling_skyway.objective.confront.text",
-        mandatory: false,
-        source: "mission",
-        base_priority: 20,
-        targets: ["world.falling_skyway.entity.havelock_cutter.name"],
+    if ctx.flags.skyway_evidence_filing_opened == 0 {
+        ctx.flags.skyway_evidence_filing_opened = 1;
+        ctx.flags.skyway_evidence_filing_open = 1;
+        ctx.effects.open_comms(#{
+            from: "world.falling_skyway.entity.skyway_control.name",
+            node_fn: "control_evidence_filing",
+            thread_id: "falling-skyway-evidence-filing",
+        });
+    }
+
+    if ctx.flags.skyway_confront_unlocked == 0 {
+        ctx.flags.skyway_confront_unlocked = 1;
+        ctx.effects.add_objective(#{
+            id: "obj-a3-confront",
+            text: "world.falling_skyway.objective.confront.text",
+            mandatory: false,
+            source: "mission",
+            base_priority: 20,
+            targets: ["world.falling_skyway.entity.havelock_cutter.name"],
+        });
+    }
+}
+
+fn evidence_filing_ready(ctx) {
+    ctx.flags.skyway_evidence_filing_open > 0 &&
+    ctx.flags.skyway_mission_finalized == 0 &&
+    ctx.flags.skyway_forced_open == 0 &&
+    ctx.flags.skyway_settled_by_negotiation > 0 &&
+    ctx.flags.skyway_records_diff_found > 0 &&
+    ctx.flags.skyway_worker_corroboration_obtained > 0 &&
+    ctx.dossier.holds(#{
+        text: "world.falling_skyway.evidence.ladder_b_maintenance_file",
+        provenance: "records",
+    }) &&
+    ctx.dossier.holds(#{
+        text: "world.falling_skyway.evidence.ladder_b_worker_account",
+        provenance: "dialogue",
+    })
+}
+
+fn control_evidence_filing(ctx) {
+    if ctx.flags.skyway_records_put > 0 {
+        return #{ message: "world.falling_skyway.comms.evidence_filed", responses: [] };
+    }
+    if !evidence_filing_ready(ctx) {
+        return #{ message: "world.falling_skyway.comms.evidence_route_closed", responses: [] };
+    }
+    #{
+        message: "world.falling_skyway.comms.evidence_ready",
+        responses: [#{
+            text: "world.falling_skyway.comms.file_evidence",
+            on_pick: "on_file_evidence",
+            important: true,
+        }],
+    }
+}
+
+fn on_file_evidence(ctx) {
+    // Re-read every gate at admission. The thread can outlive range changes and
+    // a late force order, so rendering an option is never authority to apply it.
+    if ctx.flags.skyway_records_put > 0 { return control_evidence_filing(ctx); }
+    if !evidence_filing_ready(ctx) { return control_evidence_filing(ctx); }
+
+    // Close the route before buffering any consequences. This is the one
+    // authoritative transition from unresolved to filed, shared by every actor;
+    // `skyway_records_put` also closes `force_route_closed` before a stale force
+    // response can mutate the other branch.
+    ctx.flags.skyway_evidence_filing_open = 0;
+    ctx.dossier.append(#{
+        subject:    "world.falling_skyway.entity.skyway_control.name",
+        text:       "world.falling_skyway.evidence.ladder_b_maintenance_file",
+        provenance: "records",
     });
+    ctx.dossier.append(#{
+        subject:    "world.falling_skyway.entity.skyway_control.name",
+        text:       "world.falling_skyway.evidence.ladder_b_worker_account",
+        provenance: "dialogue",
+    });
+    ctx.flags.skyway_records_put = 1;
+    ctx.effects.complete_objective("obj-a2-corroborate");
+    control_evidence_filing(ctx)
 }
 
 // ── THE RESTRAINT INTERACTION (#1041) ────────────────────────────────────────
@@ -4468,20 +4579,18 @@ fn window_closes(ctx) { #{ message: "world.falling_skyway.comms.window_closes", 
 //
 // ── THE OPERATOR'S CHANNEL CARRIES THE OTHER CONVERSATION ───────────────────
 //
-// Havelock's thread is where the evidence lands, because Havelock are who the
-// evidence is about. Two options, and the second is behind #1039's gate:
+// Havelock's thread is where the confrontation lands, because Havelock are who
+// the evidence is about. Filing is not an option on this channel: only Control's
+// fixed, range-gated response can put the evidence bundle on its record and keep
+// `skyway_surface_records`.
 //
-//   PUT THE FILE     available to any crew whose sheet holds the records
-//                    comparison, whichever route filed it. It goes onto the
-//                    OPEN CHANNEL, which is what makes it reach Control — the
-//                    corridor is one net, Control are on it, and that is how
-//                    `skyway_surface_records` gets kept.
 //   CONFRONT         available only when `skyway_confront_unlocked` is up: the
 //                    record AND somebody who was on the arm. It comes in two
 //                    forms, and the difference between them is a promise. A
 //                    captain who names Tacket to the operator she works for
-//                    breaks `skyway_protect_witness`; a captain who says "I have
-//                    a witness and you do not get their name" keeps it.
+//                    leaves `skyway_protect_witness` to break at mission close;
+//                    a captain who says "I have a witness and you do not get
+//                    their name" leaves it to be kept there.
 //
 // Both outlive the lift decision — the node re-presents itself after every pick
 // — because "are you giving us a berth" and "do you know what your own file
@@ -4896,16 +5005,14 @@ fn havelock_claims(ctx) { havelock_node(ctx, "world.falling_skyway.comms.haveloc
 
 fn havelock_node(ctx, body) {
     let decided = claim_decided(ctx, "skyway_granted_havelock", "skyway_refused_havelock");
-    // The record is a different conversation and it outlives the lift decision.
-    let can_file = ctx.flags.skyway_records_put == 0 &&
-        ctx.dossier.holds(#{ text: "world.falling_skyway.evidence.ladder_b_maintenance_file" });
-    let can_confront = ctx.flags.skyway_confront_unlocked > 0 && ctx.flags.skyway_confronted == 0;
+    let can_confront = ctx.flags.skyway_mission_finalized == 0 &&
+        ctx.flags.skyway_confront_unlocked > 0 && ctx.flags.skyway_confronted == 0;
 
     let responses = [];
     // Index 0 stays the hold for as long as there is anything on this node at
     // all — including a node whose only remaining options are the confrontation,
     // which is the last thing a backfilled console should be able to reach for.
-    if !decided || can_file || can_confront {
+    if !decided || can_confront {
         responses.push(#{ text: "world.falling_skyway.comms.claim_stand_by", on_pick: "on_havelock_hold" });
     }
     if !decided {
@@ -4921,9 +5028,6 @@ fn havelock_node(ctx, body) {
             on_pick: "on_deny_havelock",
             important: true,
         });
-    }
-    if can_file {
-        responses.push(#{ text: "world.falling_skyway.comms.put_the_file", on_pick: "on_put_the_file" });
     }
     if can_confront {
         responses.push(#{
@@ -4973,30 +5077,22 @@ fn on_deny_havelock(ctx) {
     havelock_node(ctx, "world.falling_skyway.comms.havelock_denied")
 }
 
-// THE FILE, ON THE OPEN CHANNEL. The corridor is one net and Control are on it,
-// which is what makes this the thing that KEEPS `skyway_surface_records` rather
-// than a second private conversation about a document. It costs the captain
-// nothing they were not already holding and it is available to any crew whose
-// sheet carries the comparison, whichever of the two routes filed it.
-fn on_put_the_file(ctx) {
-    ctx.flags.skyway_records_put = 1;
-    ctx.dossier.append(#{
-        subject:    "world.falling_skyway.entity.skyway_control.name",
-        text:       "world.falling_skyway.evidence.record_on_the_open_channel",
-        provenance: "dialogue",
-    });
-    havelock_node(ctx, "world.falling_skyway.comms.havelock_file_put")
-}
-
 // THE CONFRONTATION, and the promise inside it. #1039 left `obj-a3-confront`
 // posted and Active for this beat to resolve; both forms resolve it, and the
-// difference between them is whose name is on the record when it lands.
+// difference between them is whether Havelock hear Tacket's name. The protection
+// promise remains open through this handler; mission close settles it against
+// `skyway_witness_named`.
 fn on_confront_unnamed(ctx) { confront_havelock(ctx, false) }
 fn on_confront_named(ctx)   { confront_havelock(ctx, true) }
 
 fn confront_havelock(ctx, name_the_witness) {
+    // A retained confrontation response may outlive the mission. The campaign
+    // and debrief are frozen once finalisation begins, so reject it before any
+    // objective, dossier, disposition or relationship mutation.
+    if ctx.flags.skyway_mission_finalized > 0 {
+        return #{ message: "world.falling_skyway.comms.havelock_stands_off", responses: [] };
+    }
     ctx.flags.skyway_confronted = 1;
-    ctx.flags.skyway_records_put = 1;
     ctx.effects.complete_objective("obj-a3-confront");
     ctx.dossier.append(#{
         subject:    "world.falling_skyway.entity.havelock_cutter.name",
@@ -5254,7 +5350,18 @@ fn on_the_window_shuts_for_good(ctx) {
 }
 
 fn the_mission_closes(ctx) {
+    // Finalisation freezes the evidence route before commitments, campaign facts
+    // and debrief copy read it. A stale response admitted after this point can
+    // still receive the closed acknowledgement, but cannot rewrite the ending.
+    ctx.flags.skyway_mission_finalized = 1;
+    ctx.flags.skyway_evidence_filing_open = 0;
     resolve_the_choice(ctx);
+    // Corroboration is not filing. If the Control response is still waiting
+    // when the mission closes, the optional line goes red rather than staying
+    // Active forever or being credited by a confrontation elsewhere.
+    if ctx.flags.skyway_records_put == 0 {
+        ctx.effects.fail_objective("obj-a2-corroborate");
+    }
     // The ledger first: the left-behind beat below reads the promise's SETTLED
     // state, and `ctx.commitments.state` answers with what this call has already
     // written to it.
@@ -5608,19 +5715,23 @@ fn file_the_debrief(ctx) {
         urgent: true,
     });
 
-    // What became of the record.
-    if ctx.flags.skyway_witness_named > 0 {
-        ctx.dossier.append(#{
-            subject:    "world.falling_skyway.entity.skyway_control.name",
-            text:       "world.falling_skyway.evidence.record_named_witness",
-            provenance: "records",
-        });
-    } else if ctx.flags.skyway_records_put > 0 {
-        ctx.dossier.append(#{
-            subject:    "world.falling_skyway.entity.skyway_control.name",
-            text:       "world.falling_skyway.evidence.record_filed",
-            provenance: "records",
-        });
+    // What became of the evidence bundle. Naming Tacket to Havelock never
+    // manufactures a Control filing: the filed flag owns this branch first,
+    // and the nested distinction records what happened in the later confrontation.
+    if ctx.flags.skyway_records_put > 0 {
+        if ctx.flags.skyway_witness_named > 0 {
+            ctx.dossier.append(#{
+                subject:    "world.falling_skyway.entity.skyway_control.name",
+                text:       "world.falling_skyway.evidence.record_named_witness",
+                provenance: "records",
+            });
+        } else {
+            ctx.dossier.append(#{
+                subject:    "world.falling_skyway.entity.skyway_control.name",
+                text:       "world.falling_skyway.evidence.record_filed",
+                provenance: "records",
+            });
+        }
     } else if ctx.dossier.holds(#{ text: "world.falling_skyway.evidence.ladder_b_maintenance_file" }) {
         ctx.dossier.append(#{
             subject:    "world.falling_skyway.entity.skyway_control.name",

@@ -118,7 +118,7 @@ entities:
       confidence: provisional
       origin: ai
       title: Order the Clearance
-      summary: "[ai] Have Havelock clear the picket. Faster than talking, and it costs people; ten minutes' warning is the captain's lever over how many."
+      summary: "[ai] Have Havelock clear the picket. Faster than talking, and it costs people; ten minutes' warning is the captain's lever over how many. Admission rechecks the authoritative route: a filed evidence bundle, a physically settled strike, an already-spent force route or mission finalisation returns a closed acknowledgement without consequences."
     game_design:
       architecture_links: [comms-dialogue-controller]
       owner_role: fs-captain
@@ -144,7 +144,7 @@ entities:
       owner_role: fs-navigation
       produces_facts: [traffic-ordered-clear]
   - verb: fs-file-the-evidence
-    core: {status: proposed, confidence: provisional, origin: ai, title: File the Evidence, summary: "[ai] The scan-vs-record diff plus the rigger's corroboration, onto Control's record. Opens only for a crew who settled the strike by talking and read the rung."}
+    core: {status: proposed, confidence: provisional, origin: ai, title: File the Evidence, summary: "[ai] After a negotiated strike, a genuine Ladder B scan diff and the rigger's corroboration open a Control thread that persists across travel and range changes. The crew must answer it before force or mission finalisation closes the explicit filing state. The admitted response files that two-part bundle unedited; it does not transfer Ladder B's maintenance rows. Havelock's copy is negotiation ground, not proof that the crew read the rung; ordinary ClearComms is an intentional dismissal and does not recreate this optional thread."}
     game_design:
       architecture_links: [scenario-script-host-seam]
       owner_role: fs-science
@@ -313,10 +313,17 @@ entities:
       origin: ai
       title: The Record Can Be Put Right
       summary: >
-        [ai] The falsified maintenance file, the scan-vs-record diff and the
-        rigger's corroboration. Optional for survival, mandatory for the
-        clean ledger; the talking path keeps it open, the force path burns
-        it.
+        [ai] A negotiated strike, the crew's own scan-vs-record diff and the
+        rigger's corroboration open a sticky filing thread from Control. The
+        explicit, range-gated filing response completes the record. Optional
+        for survival, mandatory for the clean ledger; the talking path keeps
+        it open, the force path burns it. Havelock's supplied copy and the
+        later confrontation cannot substitute for filing. Mission finalisation
+        closes the unresolved route before commitments, campaign facts and the
+        debrief freeze, so a stale response cannot rewrite the ending. During
+        the vote's authored stand-down, filing and force can both have rendered
+        responses; whichever is admitted first closes the other route, whose
+        retained response receives only a closed acknowledgement.
     game_design:
       requires_player_action: [fs-file-the-evidence]
       requires: [fs-strike-thread]
@@ -479,9 +486,9 @@ entities:
     game_design:
       handler: on_head_lost
   - consequence: fs-evidence-on-record
-    core: {status: proposed, confidence: provisional, origin: ai, title: The Evidence Is Filed, summary: "[ai] The diff and the corroboration land on Control's record; one of the clean-ledger criteria, and the campaign's memory of who was telling the truth."}
+    core: {status: proposed, confidence: provisional, origin: ai, title: The Evidence Is Filed, summary: "[ai] While the explicit filing state is open, Control accepts the crew's range-gated response, appends the genuine scan diff and worker account to its record, closes the route, sets the filed flag and completes the optional objective. Corroboration, confrontation, a post-force stale filing response or a post-finalisation stale filing response does none of those things; once filed, a retained force response likewise cannot create a contradictory forced outcome."}
     game_design:
-      handler: on_corroboration_filed
+      handler: on_file_evidence
   - consequence: fs-window-opens-short
     core: {status: proposed, confidence: provisional, origin: ai, title: The Window Opens Short, summary: "[ai] Supply is computed, demand is read, and the shortfall is stated in mission copy — the choice scene enforces two-of-three by reading the numbers."}
     game_design:

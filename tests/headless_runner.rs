@@ -1604,6 +1604,19 @@ fn objective_status(
         .status
 }
 
+/// The spatial targets published for one objective, read through the same
+/// authoritative snapshot the captain and navigation surfaces receive.
+fn objective_targets(app: &bevy::prelude::App, id: &str) -> Vec<String> {
+    app.world()
+        .resource::<project_phoenix::world::server::ObjectiveManagerRes>()
+        .0
+        .sorted_snapshots()
+        .into_iter()
+        .find(|objective| objective.id == id)
+        .unwrap_or_else(|| panic!("the world never posted objective '{id}'"))
+        .targets
+}
+
 /// **Issue #1033.** `probe_destroy_chain.toml` driven for twelve mission
 /// seconds: a script destroys a structure at a named deadline, and every
 /// consequence a combat kill would have follows from it - the chaining
@@ -9157,9 +9170,6 @@ fn skyway_options(msg: &project_phoenix::core::messages::CommsMessage) -> Vec<St
 /// tree is that which options are offered depends on the world, so a hard-coded
 /// index would be asserting the opposite of what the slice is for.
 fn skyway_pick(app: &mut bevy::prelude::App, sender: &str, text: &str) {
-    use project_phoenix::core::messages::{ClientMessage, SystemControlPayload};
-    use project_phoenix::lobby::InboundMessage;
-
     let msg = skyway_open_node(app, sender);
     let index = msg
         .responses
@@ -9171,6 +9181,22 @@ fn skyway_pick(app: &mut bevy::prelude::App, sender: &str, text: &str) {
                 skyway_options(&msg)
             )
         });
+    skyway_submit_response(app, &msg.id, index);
+    assert!(
+        skyway_messages(app, sender)
+            .iter()
+            .any(|m| m.id == msg.id && m.selected_response == Some(index)),
+        "the pick '{text}' was refused rather than recorded"
+    );
+}
+
+/// Submit a known response by message identity through ordinary admission.
+/// Keeping this separate from [`skyway_pick`] lets stale-thread tests prove the
+/// exact rendered option they retained is the one the runtime later adjudicates.
+fn skyway_submit_response(app: &mut bevy::prelude::App, message_id: &str, response_index: usize) {
+    use project_phoenix::core::messages::{ClientMessage, SystemControlPayload};
+    use project_phoenix::lobby::InboundMessage;
+
     app.world_mut()
         .resource_mut::<bevy::ecs::message::Messages<InboundMessage>>()
         .write(InboundMessage {
@@ -9178,18 +9204,12 @@ fn skyway_pick(app: &mut bevy::prelude::App, sender: &str, text: &str) {
             msg: ClientMessage::ControlSystem {
                 target: project_phoenix::ship::system_registry::comms_system_id(),
                 payload: SystemControlPayload::RespondToMessage {
-                    message_id: msg.id.clone(),
-                    response_index: index,
+                    message_id: message_id.to_string(),
+                    response_index,
                 },
             },
         });
     run(app, 4);
-    assert!(
-        skyway_messages(app, sender)
-            .iter()
-            .any(|m| m.id == msg.id && m.selected_response == Some(index)),
-        "the pick '{text}' was refused rather than recorded"
-    );
 }
 
 /// **Issue #1132 — engaged path.** The crew take all three readings, prove that
@@ -9334,7 +9354,6 @@ fn falling_skyway_posted_survey_completes_on_the_admitted_control_pickup() {
     use project_phoenix::core::messages::ObjectiveStatus;
 
     const FILE_SURVEY: &str = "world.falling_skyway.comms.file_survey";
-    const MAINTENANCE_EVIDENCE: &str = "world.falling_skyway.evidence.record_on_the_open_channel";
 
     let tether_due = skyway_authored_deadline_secs("tether_slip") as f64;
     let (mut app, ship) = skyway_survey_app(21132);
@@ -9393,8 +9412,8 @@ fn falling_skyway_posted_survey_completes_on_the_admitted_control_pickup() {
     assert!(
         !skyway_sheet_texts(&mut app, SKYWAY_SURVEY_CONTROL)
             .iter()
-            .any(|text| text == MAINTENANCE_EVIDENCE),
-        "survey receipt must not file maintenance evidence on Control's sheet"
+            .any(|text| text == SKYWAY_FILE || text == SKYWAY_ACCOUNT),
+        "survey receipt must not file either maintenance-evidence source on Control's sheet"
     );
     assert_eq!(
         skyway_messages(&app, SKYWAY_SURVEY_CONTROL)
@@ -11896,6 +11915,32 @@ fn the_ladder_b_panel_shows_the_recorded_standard_failing_beside_the_claim() {
 const SKYWAY_RIGGER: &str = "world.falling_skyway.entity.rigger_tacket.name";
 /// What she says, filed under DIALOGUE provenance onto the rung's sheet.
 const SKYWAY_ACCOUNT: &str = "world.falling_skyway.evidence.ladder_b_worker_account";
+/// The explicit Control pickup that turns two gathered findings into a filing.
+const SKYWAY_FILE_EVIDENCE: &str = "world.falling_skyway.comms.file_evidence";
+
+/// Campaign evidence/commitment facts that mission finalisation freezes. The
+/// stale-response regressions compare the whole relevant record rather than one
+/// convenient bit, so a late callback cannot leave live state and campaign state
+/// disagreeing silently.
+fn skyway_frozen_evidence_record(app: &bevy::prelude::App) -> Vec<(&'static str, i64)> {
+    const NAMES: [&str; 11] = [
+        "campaign.skyway.evidence.none",
+        "campaign.skyway.evidence.records",
+        "campaign.skyway.evidence.corroborated",
+        "campaign.skyway.evidence.filed",
+        "campaign.skyway.evidence.confronted",
+        "campaign.skyway.evidence.witness_named",
+        "campaign.skyway.commitments.kept",
+        "campaign.skyway.commitments.broken",
+        "campaign.skyway.commitments.open",
+        "campaign.skyway.commitments.none",
+        "campaign.skyway.commitments.clean",
+    ];
+    NAMES
+        .into_iter()
+        .map(|name| (name, skyway_flag(app, name)))
+        .collect()
+}
 
 /// Whether the rigger has ever been on the channel at all — the read the two
 /// negative runs are built on, where the claim is that nothing was ever sent.
@@ -11964,24 +12009,29 @@ fn skyway_negotiate_to_a_vote(app: &mut bevy::prelude::App) {
     );
 }
 
-/// **Issue #1039, AC1/AC3/AC4/AC5/AC6/AC7 — the beat end to end.**
+/// **Issues #1039/#1136 — the evidence thread end to end.**
 ///
 /// A crew who went and read the rung and then talked the strike down get one of
 /// the people off that rung on an open channel, and what she says lands on the
 /// SAME fact sheet as the document she is talking about, under a different
-/// provenance. They finish able to say both what the structure is and who knew,
-/// which is the sentence the confrontation is built on and the reason it unlocks
-/// here and nowhere else.
+/// provenance. Corroboration opens, but does not complete, the filing objective.
+/// Control receives the two sources only after an admitted, range-gated response.
 ///
 /// The order is asserted causally throughout: she is silent while either gate is
 /// open, and the beat she calls on is the one that closes the second.
 #[test]
-fn a_worker_corroborates_the_record_for_a_crew_who_read_it_and_talked_them_down() {
+fn a_talk_and_read_crew_files_the_scan_diff_and_worker_account_with_control() {
     use project_phoenix::core::messages::ObjectiveStatus;
     use project_phoenix::world::commitments::CommitmentState;
     use project_phoenix::world::server::WorldContentRuntime;
 
     let (mut app, ship) = skyway_at_act_two();
+    assert_eq!(
+        objective_targets(&app, "obj-a2-corroborate"),
+        vec![SKYWAY_SURVEY_CONTROL.to_string()],
+        "the spatial objective points at the authority whose range-gated response \
+         completes it, not at the committee who only opens the route"
+    );
 
     // NEITHER GATE HELD YET, and she is not on the channel.
     assert_eq!(skyway_flag(&app, "skyway_records_diff_found"), 0);
@@ -12004,6 +12054,17 @@ fn a_worker_corroborates_the_record_for_a_crew_who_read_it_and_talked_them_down(
         "ONE gate is not the gate: the strike is still on, and nobody on that \
          picket is talking to a destroyer about anything yet"
     );
+
+    // Hold alongside the committee for the vote and the resulting rigger hail.
+    // Control remains well beyond comms range from this end of Ladder B, which
+    // lets the same fixture prove that filing is enforced at admission.
+    let committee_position = skyway_position(&mut app, SKYWAY_COMMITTEE);
+    skyway_move(
+        &mut app,
+        ship,
+        committee_position + bevy::prelude::Vec3::new(60.0, 0.0, 0.0),
+    );
+    run(&mut app, 3);
 
     // ── The settlement gate: the floor carries the vote ──────────────────────
     skyway_negotiate_to_a_vote(&mut app);
@@ -12086,10 +12147,11 @@ fn a_worker_corroborates_the_record_for_a_crew_who_read_it_and_talked_them_down(
     );
     assert_eq!(
         objective_status(&app, "obj-a2-corroborate"),
-        ObjectiveStatus::Completed,
-        "the optional objective #1036 posted goes GREEN — the mirror of the red \
-         one the force-open produces"
+        ObjectiveStatus::Active,
+        "the account is evidence gathered, not evidence filed"
     );
+    assert_eq!(skyway_flag(&app, "skyway_records_put"), 0);
+    assert_eq!(skyway_flag(&app, "skyway_evidence_filing_open"), 1);
     assert_eq!(
         objective_status_opt(&app, "obj-a3-confront"),
         Some(ObjectiveStatus::Active),
@@ -12116,6 +12178,651 @@ fn a_worker_corroborates_the_record_for_a_crew_who_read_it_and_talked_them_down(
         assert_eq!(promise.made_to, SKYWAY_RIGGER);
     }
     assert_eq!(skyway_flag(&app, "skyway_witness_unprotected"), 0);
+
+    // Control's message is sticky but presently out of range: the crew are still
+    // alongside Ladder B. Submitting its visible response through ordinary
+    // admission must leave both the message and the authoritative flag untouched.
+    let filing = skyway_open_node(&app, SKYWAY_SURVEY_CONTROL);
+    assert_eq!(filing.body, "world.falling_skyway.comms.evidence_ready");
+    assert_eq!(
+        filing.thread_id, "falling-skyway-evidence-filing",
+        "the filing has a stable thread rather than a one-frame prompt"
+    );
+    assert!(
+        !filing.sender_in_range,
+        "Control is beyond range from Ladder B"
+    );
+    let filing_index = filing
+        .responses
+        .iter()
+        .position(|response| response.text == SKYWAY_FILE_EVIDENCE)
+        .expect("Control offers the explicit filing response");
+    assert!(filing.responses[filing_index].important);
+    skyway_submit_response(&mut app, &filing.id, filing_index);
+    let still_open = skyway_messages(&app, SKYWAY_SURVEY_CONTROL)
+        .into_iter()
+        .find(|message| message.id == filing.id)
+        .expect("the out-of-range filing stays in the inbox");
+    assert_eq!(still_open.selected_response, None);
+    assert_eq!(skyway_flag(&app, "skyway_records_put"), 0);
+    assert_eq!(
+        objective_status(&app, "obj-a2-corroborate"),
+        ObjectiveStatus::Active
+    );
+
+    // Return to Control. The same thread becomes answerable; its admitted pick
+    // copies both source findings onto Control's sheet and completes the objective.
+    let control_position = skyway_position(&mut app, SKYWAY_SURVEY_CONTROL);
+    skyway_move(
+        &mut app,
+        ship,
+        control_position + bevy::prelude::Vec3::new(60.0, 0.0, 0.0),
+    );
+    run(&mut app, 3);
+    let filing_in_range = skyway_messages(&app, SKYWAY_SURVEY_CONTROL)
+        .into_iter()
+        .find(|message| message.id == filing.id)
+        .expect("the sticky filing survives the trip to Control");
+    let control_uuid = app
+        .world()
+        .resource::<WorldContentRuntime>()
+        .name_to_uuid
+        .get(SKYWAY_SURVEY_CONTROL)
+        .expect("Control has a runtime UUID");
+    assert_eq!(
+        app.world()
+            .resource::<project_phoenix::comms::server::CommsRuntime>()
+            .range_flags
+            .get(control_uuid),
+        Some(&true),
+        "the authoritative live range pass makes the same thread answerable"
+    );
+    assert_eq!(filing_in_range.thread_id, filing.thread_id);
+    skyway_pick(&mut app, SKYWAY_SURVEY_CONTROL, SKYWAY_FILE_EVIDENCE);
+
+    assert_eq!(skyway_flag(&app, "skyway_records_put"), 1);
+    assert_eq!(skyway_flag(&app, "skyway_evidence_filing_open"), 0);
+    assert_eq!(
+        skyway_promise(&app, "skyway_protect_witness"),
+        "open",
+        "filing with Control does not settle protection from Havelock; the promise \
+         remains open through the later confrontation until mission close"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a2-corroborate"),
+        ObjectiveStatus::Completed,
+        "only Control's admitted pickup turns the objective green"
+    );
+    let control = scan_uuid_named(&mut app, SKYWAY_SURVEY_CONTROL);
+    let control_entries = diff_file(&app, &control);
+    assert!(
+        control_entries
+            .iter()
+            .any(|(text, provenance)| text == SKYWAY_FILE && provenance == "records"),
+        "Control's record carries the scan-vs-record diff: {control_entries:?}"
+    );
+    assert!(
+        control_entries
+            .iter()
+            .any(|(text, provenance)| text == SKYWAY_ACCOUNT && provenance == "dialogue"),
+        "Control's record carries the worker account: {control_entries:?}"
+    );
+}
+
+/// **Issue #1136 review — filing wins the reverse admission race.**
+///
+/// Havelock's force response was rendered before the crew filed with Control.
+/// Once that explicit filing is admitted, submitting the retained force response
+/// must receive a closed acknowledgement without changing either branch's
+/// authoritative state. This is the reverse of the force-then-filing regression
+/// below: the first admitted irreversible choice wins deterministically.
+#[test]
+fn filing_first_closes_a_previously_rendered_force_order() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let (mut app, ship) = skyway_at_act_two();
+    skyway_scan_ladder_b(&mut app, ship);
+    skyway_move(&mut app, ship, CHOICE_LADDER);
+    run(&mut app, 2);
+
+    let force_offer = skyway_open_node(&app, SKYWAY_CUTTER);
+    let force_index = force_offer
+        .responses
+        .iter()
+        .position(|response| response.text == "world.falling_skyway.comms.force_now")
+        .expect("Havelock's force order is visibly available before filing");
+    assert!(
+        force_offer.sender_in_range,
+        "the retained response was genuinely answerable when rendered"
+    );
+
+    skyway_negotiate_to_a_vote(&mut app);
+    skyway_pick(
+        &mut app,
+        SKYWAY_RIGGER,
+        "world.falling_skyway.comms.rigger_ask",
+    );
+    let control_position = skyway_position(&mut app, SKYWAY_SURVEY_CONTROL);
+    skyway_move(
+        &mut app,
+        ship,
+        control_position + bevy::prelude::Vec3::new(60.0, 0.0, 0.0),
+    );
+    run(&mut app, 2);
+    skyway_pick(&mut app, SKYWAY_SURVEY_CONTROL, SKYWAY_FILE_EVIDENCE);
+
+    assert_eq!(skyway_flag(&app, "skyway_records_put"), 1);
+    assert_eq!(skyway_flag(&app, "skyway_forced_open"), 0);
+    assert_eq!(
+        objective_status(&app, "obj-a2-corroborate"),
+        ObjectiveStatus::Completed
+    );
+    let control = scan_uuid_named(&mut app, SKYWAY_SURVEY_CONTROL);
+    let filed_control_entries = diff_file(&app, &control);
+
+    let havelock_position = skyway_position(&mut app, SKYWAY_CUTTER);
+    skyway_move(
+        &mut app,
+        ship,
+        havelock_position + bevy::prelude::Vec3::new(60.0, 0.0, 0.0),
+    );
+    run(&mut app, 2);
+    skyway_submit_response(&mut app, &force_offer.id, force_index);
+
+    assert_eq!(skyway_flag(&app, "skyway_records_put"), 1);
+    assert_eq!(skyway_flag(&app, "skyway_forced_open"), 0);
+    assert_eq!(skyway_flag(&app, "skyway_force_casualties"), 0);
+    assert_eq!(skyway_flag(&app, "skyway_worker_corroboration_closed"), 0);
+    assert_eq!(skyway_flag(&app, "relationship.skyway_workers.damaged"), 0);
+    assert_eq!(
+        skyway_flag(&app, "relationship.havelock_operations.favoured"),
+        0
+    );
+    assert_eq!(
+        skyway_promise(&app, "skyway_surface_records"),
+        "open",
+        "the rejected force response cannot break the filed bundle promise"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a2-corroborate"),
+        ObjectiveStatus::Completed
+    );
+    assert_eq!(
+        diff_file(&app, &control),
+        filed_control_entries,
+        "the rejected force response cannot alter Control's filed bundle"
+    );
+    assert_eq!(
+        skyway_messages(&app, SKYWAY_CUTTER)
+            .last()
+            .expect("Havelock answers the stale force order")
+            .body,
+        "world.falling_skyway.comms.force_route_closed"
+    );
+}
+
+/// **Issue #1136 review — force closes an already-open filing route.**
+///
+/// This is deliberately stronger than forcing before the workers speak: the
+/// crew earn the genuine scan, negotiated settlement, corroboration and visible
+/// Control response first. They then authorise Havelock during the settlement's
+/// twenty-second physical stand-down. The rendered Control response is stale but
+/// still submit-able once the ship returns to range; admission must turn it into
+/// a closed acknowledgement without changing any evidence authority.
+#[test]
+fn forcing_after_corroboration_burns_the_open_control_filing() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let (mut app, ship) = skyway_at_act_two();
+    skyway_scan_ladder_b(&mut app, ship);
+    skyway_move(&mut app, ship, CHOICE_LADDER);
+    run(&mut app, 2);
+    skyway_negotiate_to_a_vote(&mut app);
+    skyway_pick(
+        &mut app,
+        SKYWAY_RIGGER,
+        "world.falling_skyway.comms.rigger_ask",
+    );
+
+    let filing = skyway_open_node(&app, SKYWAY_SURVEY_CONTROL);
+    let filing_index = filing
+        .responses
+        .iter()
+        .position(|response| response.text == SKYWAY_FILE_EVIDENCE)
+        .expect("the earned Control filing is visibly available before force");
+    assert_eq!(skyway_flag(&app, "skyway_evidence_filing_open"), 1);
+    assert_eq!(
+        skyway_promise(&app, "skyway_surface_records"),
+        "open",
+        "the hardened negotiation put the records promise on the ledger"
+    );
+
+    skyway_pick(
+        &mut app,
+        SKYWAY_CUTTER,
+        "world.falling_skyway.comms.force_now",
+    );
+    assert_eq!(skyway_flag(&app, "skyway_forced_open"), 1);
+    assert_eq!(skyway_flag(&app, "skyway_evidence_filing_open"), 0);
+    assert_eq!(skyway_flag(&app, "skyway_records_put"), 0);
+    assert_eq!(
+        objective_status(&app, "obj-a2-corroborate"),
+        ObjectiveStatus::Failed
+    );
+    assert_eq!(
+        skyway_promise(&app, "skyway_surface_records"),
+        "broken",
+        "force closes the route and breaks its promise immediately"
+    );
+    assert!(
+        skyway_messages(&app, SKYWAY_SURVEY_CONTROL)
+            .iter()
+            .any(|message| message.id == filing.id && message.selected_response.is_none()),
+        "the pre-force response remains visible and stale"
+    );
+
+    let control_position = skyway_position(&mut app, SKYWAY_SURVEY_CONTROL);
+    skyway_move(
+        &mut app,
+        ship,
+        control_position + bevy::prelude::Vec3::new(60.0, 0.0, 0.0),
+    );
+    run(&mut app, 2);
+    skyway_submit_response(&mut app, &filing.id, filing_index);
+
+    assert_eq!(skyway_flag(&app, "skyway_records_put"), 0);
+    assert_eq!(
+        objective_status(&app, "obj-a2-corroborate"),
+        ObjectiveStatus::Failed
+    );
+    let control = scan_uuid_named(&mut app, SKYWAY_SURVEY_CONTROL);
+    let control_entries = diff_file(&app, &control);
+    assert!(
+        control_entries
+            .iter()
+            .all(|(text, _)| text != SKYWAY_FILE && text != SKYWAY_ACCOUNT),
+        "the stale response cannot put either source on Control: {control_entries:?}"
+    );
+    assert_eq!(
+        skyway_messages(&app, SKYWAY_SURVEY_CONTROL)
+            .last()
+            .expect("Control answers the stale submission")
+            .body,
+        "world.falling_skyway.comms.evidence_route_closed"
+    );
+}
+
+/// **Issue #1136 review — finalisation is an evidence authority boundary.**
+///
+/// Leave an earned Control response untouched until the mission has written its
+/// commitments, campaign record and debrief. Submitting that exact response
+/// afterwards may receive a closed acknowledgement, but cannot turn a failed
+/// objective green or mutate any frozen record.
+#[test]
+fn a_post_close_stale_filing_cannot_rewrite_the_frozen_ending() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let (mut app, ship) = skyway_at_act_two();
+    skyway_scan_ladder_b(&mut app, ship);
+    skyway_move(&mut app, ship, CHOICE_LADDER);
+    run(&mut app, 2);
+    skyway_negotiate_to_a_vote(&mut app);
+    skyway_pick(
+        &mut app,
+        SKYWAY_RIGGER,
+        "world.falling_skyway.comms.rigger_ask",
+    );
+
+    let filing = skyway_open_node(&app, SKYWAY_SURVEY_CONTROL);
+    let filing_index = filing
+        .responses
+        .iter()
+        .position(|response| response.text == SKYWAY_FILE_EVIDENCE)
+        .expect("the earned filing remains visibly unanswered");
+    assert_eq!(skyway_flag(&app, "skyway_evidence_filing_open"), 1);
+    assert_eq!(skyway_promise(&app, "skyway_surface_records"), "open");
+
+    run_to_the_endings(&mut app, ship, WINDOW_STATION);
+    assert_eq!(skyway_flag(&app, "skyway_mission_finalized"), 1);
+    assert_eq!(skyway_flag(&app, "skyway_evidence_filing_open"), 0);
+    assert_eq!(skyway_flag(&app, "skyway_records_put"), 0);
+    assert_eq!(
+        objective_status(&app, "obj-a2-corroborate"),
+        ObjectiveStatus::Failed
+    );
+    assert_eq!(skyway_promise(&app, "skyway_surface_records"), "broken");
+    assert_eq!(skyway_flag(&app, "campaign.skyway.evidence.filed"), 0);
+    let control = scan_uuid_named(&mut app, SKYWAY_SURVEY_CONTROL);
+    let frozen_control_entries = diff_file(&app, &control);
+    assert!(frozen_control_entries
+        .iter()
+        .all(|(text, _)| text != SKYWAY_FILE && text != SKYWAY_ACCOUNT));
+
+    let control_position = skyway_position(&mut app, SKYWAY_SURVEY_CONTROL);
+    skyway_move(
+        &mut app,
+        ship,
+        control_position + bevy::prelude::Vec3::new(60.0, 0.0, 0.0),
+    );
+    run(&mut app, 2);
+    skyway_submit_response(&mut app, &filing.id, filing_index);
+
+    assert_eq!(skyway_flag(&app, "skyway_records_put"), 0);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.evidence.filed"), 0);
+    assert_eq!(skyway_flag(&app, "a3_endings_written"), 1);
+    assert_eq!(
+        objective_status(&app, "obj-a2-corroborate"),
+        ObjectiveStatus::Failed
+    );
+    assert_eq!(skyway_promise(&app, "skyway_surface_records"), "broken");
+    assert_eq!(
+        diff_file(&app, &control),
+        frozen_control_entries,
+        "the late response cannot append to Control after debrief finalisation"
+    );
+    assert_eq!(
+        skyway_messages(&app, SKYWAY_SURVEY_CONTROL)
+            .last()
+            .expect("Control acknowledges the post-close stale response")
+            .body,
+        "world.falling_skyway.comms.evidence_route_closed"
+    );
+}
+
+/// **Issue #1136 review — finalisation is also a force authority boundary.**
+///
+/// Preserve a genuinely rendered Havelock clearance response while an
+/// unresolved crew runs through the whole mission. Once the ending is frozen,
+/// that exact stale response may be acknowledged but cannot engage the strike,
+/// schedule a clearance, create casualties, or rewrite the campaign record.
+#[test]
+fn a_post_close_stale_force_order_cannot_rewrite_the_frozen_ending() {
+    let (mut app, ship) = skyway_at_act_two();
+    skyway_move(&mut app, ship, CHOICE_LADDER);
+    run(&mut app, 2);
+
+    let force_offer = skyway_open_node(&app, SKYWAY_CUTTER);
+    let force_index = force_offer
+        .responses
+        .iter()
+        .position(|response| response.text == "world.falling_skyway.comms.force_now")
+        .expect("Havelock's force response is visibly available before close");
+    assert_eq!(skyway_flag(&app, "skyway_strike_engaged"), 0);
+
+    run_to_the_endings(&mut app, ship, WINDOW_STATION);
+    assert_eq!(skyway_flag(&app, "skyway_mission_finalized"), 1);
+    assert_eq!(skyway_flag(&app, "skyway_forced_open"), 0);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.strike.unresolved"), 1);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.strike.forced"), 0);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.casualties.picket"), 0);
+    let havelock = scan_uuid_named(&mut app, SKYWAY_CUTTER);
+    let frozen_havelock_entries = diff_file(&app, &havelock);
+
+    let havelock_position = skyway_position(&mut app, SKYWAY_CUTTER);
+    skyway_move(
+        &mut app,
+        ship,
+        havelock_position + bevy::prelude::Vec3::new(60.0, 0.0, 0.0),
+    );
+    run(&mut app, 2);
+    skyway_submit_response(&mut app, &force_offer.id, force_index);
+
+    assert_eq!(skyway_flag(&app, "skyway_strike_engaged"), 0);
+    assert_eq!(skyway_flag(&app, "skyway_forced_open"), 0);
+    assert_eq!(skyway_flag(&app, "skyway_force_casualties"), 0);
+    assert_eq!(skyway_flag(&app, "relationship.skyway_workers.damaged"), 0);
+    assert_eq!(
+        skyway_flag(&app, "relationship.havelock_operations.favoured"),
+        0
+    );
+    assert_eq!(skyway_flag(&app, "campaign.skyway.strike.unresolved"), 1);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.strike.forced"), 0);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.casualties.picket"), 0);
+    assert_eq!(skyway_flag(&app, "a3_endings_written"), 1);
+    assert_eq!(
+        diff_file(&app, &havelock),
+        frozen_havelock_entries,
+        "the late order cannot append force consequences after debrief finalisation"
+    );
+    assert_eq!(
+        skyway_messages(&app, SKYWAY_CUTTER)
+            .last()
+            .expect("Havelock acknowledges the post-close stale force order")
+            .body,
+        "world.falling_skyway.comms.force_route_closed"
+    );
+}
+
+/// **Issue #1136 cycle-four review — force wins at the end of the stand-down.**
+///
+/// The committee's vote has nineteen of its twenty seconds behind it when the
+/// captain admits Havelock's immediate force order. The vote callback lands
+/// first but must no-op; Havelock's later callback is the sole physical
+/// settlement and the campaign records exactly the forced branch.
+#[test]
+fn force_admitted_at_nineteen_seconds_owns_the_only_strike_settlement() {
+    let (mut app, ship) = skyway_at_act_two();
+    skyway_move(&mut app, ship, CHOICE_LADDER);
+    run(&mut app, 2);
+    skyway_negotiate_to_a_vote(&mut app);
+
+    assert_eq!(skyway_flag(&app, "skyway_settled_by_negotiation"), 1);
+    assert_eq!(skyway_flag(&app, "skyway_strike_settled"), 0);
+    let vote_admitted_at = window_now(&app);
+    parley_run_to(&mut app, ship, vote_admitted_at + 19.0, CHOICE_LADDER);
+    skyway_pick(
+        &mut app,
+        SKYWAY_CUTTER,
+        "world.falling_skyway.comms.force_now",
+    );
+
+    assert_eq!(skyway_flag(&app, "skyway_forced_open"), 1);
+    assert_eq!(
+        skyway_flag(&app, "skyway_settled_by_negotiation"),
+        0,
+        "force admission clears the provisional vote before either callback lands"
+    );
+    assert_eq!(skyway_flag(&app, "skyway_strike_settled"), 0);
+
+    // The committee callback has now landed, while Havelock's six-second
+    // clearance callback has not. The rung must still be stopped.
+    parley_run_to(&mut app, ship, vote_admitted_at + 21.0, CHOICE_LADDER);
+    assert_eq!(
+        skyway_flag(&app, "skyway_strike_settled"),
+        0,
+        "the superseded vote callback cannot settle the rung"
+    );
+    assert_eq!(skyway_flag(&app, "strike_resolved"), 0);
+
+    parley_run_to(&mut app, ship, vote_admitted_at + 27.0, CHOICE_LADDER);
+    assert_eq!(skyway_flag(&app, "skyway_strike_settled"), 1);
+    assert_eq!(
+        skyway_flag(&app, "strike_resolved"),
+        1,
+        "Havelock's callback crosses the shared settlement seam exactly once"
+    );
+
+    run_to_the_endings(&mut app, ship, CHOICE_LADDER);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.strike.forced"), 1);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.strike.negotiated"), 0);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.strike.unresolved"), 0);
+}
+
+/// **Issue #1136 cycle-four review — a retained rigger Ask expires at close.**
+#[test]
+fn a_post_close_stale_rigger_ask_cannot_add_evidence_or_campaign_state() {
+    let (mut app, ship) = skyway_at_act_two();
+    skyway_scan_ladder_b(&mut app, ship);
+    skyway_move(&mut app, ship, CHOICE_LADDER);
+    run(&mut app, 2);
+    skyway_negotiate_to_a_vote(&mut app);
+
+    let rigger = skyway_open_node(&app, SKYWAY_RIGGER);
+    let ask_index = rigger
+        .responses
+        .iter()
+        .position(|response| response.text == "world.falling_skyway.comms.rigger_ask")
+        .expect("the rigger's Ask response is visibly available before close");
+    assert_eq!(skyway_flag(&app, "skyway_worker_corroboration_obtained"), 0);
+
+    run_to_the_endings(&mut app, ship, WINDOW_STATION);
+    let frozen_campaign = skyway_frozen_evidence_record(&app);
+    let frozen_sheet = ladder_b_sheet(&mut app);
+    let rigger_position = skyway_position(&mut app, SKYWAY_RIGGER);
+    skyway_move(
+        &mut app,
+        ship,
+        rigger_position + bevy::prelude::Vec3::new(60.0, 0.0, 0.0),
+    );
+    run(&mut app, 2);
+    skyway_submit_response(&mut app, &rigger.id, ask_index);
+
+    assert_eq!(skyway_flag(&app, "skyway_worker_corroboration_obtained"), 0);
+    assert_eq!(skyway_flag(&app, "skyway_confront_unlocked"), 0);
+    assert_eq!(ladder_b_sheet(&mut app), frozen_sheet);
+    assert_eq!(skyway_frozen_evidence_record(&app), frozen_campaign);
+    assert_eq!(skyway_flag(&app, "a3_endings_written"), 1);
+    let rigger_messages = skyway_messages(&app, SKYWAY_RIGGER);
+    let closed = rigger_messages
+        .last()
+        .expect("the rigger acknowledges the expired response");
+    assert_eq!(closed.body, "world.falling_skyway.comms.rigger_stands_by");
+    assert!(closed.responses.is_empty());
+}
+
+/// **Issue #1136 cycle-four review — a retained protection promise expires.**
+#[test]
+fn a_post_close_stale_rigger_protect_cannot_create_a_commitment() {
+    let (mut app, ship) = skyway_at_act_two();
+    skyway_scan_ladder_b(&mut app, ship);
+    skyway_move(&mut app, ship, CHOICE_LADDER);
+    run(&mut app, 2);
+    skyway_negotiate_to_a_vote(&mut app);
+    skyway_pick(
+        &mut app,
+        SKYWAY_RIGGER,
+        "world.falling_skyway.comms.rigger_ask",
+    );
+
+    let account = skyway_open_node(&app, SKYWAY_RIGGER);
+    let protect_index = account
+        .responses
+        .iter()
+        .position(|response| response.text == "world.falling_skyway.comms.rigger_protect")
+        .expect("the protection response is visibly available before close");
+    assert_eq!(skyway_promise(&app, "skyway_protect_witness"), "unknown");
+
+    run_to_the_endings(&mut app, ship, WINDOW_STATION);
+    let frozen_campaign = skyway_frozen_evidence_record(&app);
+    let rigger_position = skyway_position(&mut app, SKYWAY_RIGGER);
+    skyway_move(
+        &mut app,
+        ship,
+        rigger_position + bevy::prelude::Vec3::new(60.0, 0.0, 0.0),
+    );
+    run(&mut app, 2);
+    skyway_submit_response(&mut app, &account.id, protect_index);
+
+    assert_eq!(
+        skyway_promise(&app, "skyway_protect_witness"),
+        "unknown",
+        "mission close cannot be followed by a newly open promise"
+    );
+    assert_eq!(skyway_flag(&app, "skyway_witness_unprotected"), 0);
+    assert_eq!(skyway_frozen_evidence_record(&app), frozen_campaign);
+    assert_eq!(skyway_flag(&app, "a3_endings_written"), 1);
+    let rigger_messages = skyway_messages(&app, SKYWAY_RIGGER);
+    let closed = rigger_messages
+        .last()
+        .expect("the rigger acknowledges the expired promise response");
+    assert_eq!(closed.body, "world.falling_skyway.comms.rigger_stands_by");
+    assert!(closed.responses.is_empty());
+}
+
+/// **Issue #1136 cycle-four review — a retained confrontation expires.**
+#[test]
+fn a_post_close_stale_confrontation_cannot_rewrite_state_or_campaign() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let (mut app, ship) = skyway_at_act_two();
+    let (_, ship_uuid) = window_ship(&mut app);
+    skyway_scan_ladder_b(&mut app, ship);
+    skyway_move(&mut app, ship, CHOICE_LADDER);
+    run(&mut app, 2);
+    skyway_negotiate_to_a_vote(&mut app);
+    skyway_pick(
+        &mut app,
+        SKYWAY_RIGGER,
+        "world.falling_skyway.comms.rigger_ask",
+    );
+
+    // Keep the authored lift route alive so Havelock's transfer-window tree —
+    // the tree that owns the confrontation — opens before the ending. A lost
+    // head falls back to the separate berth dialogue, which deliberately has no
+    // confrontation response to retain.
+    let settled_by = window_now(&app) + 24.0;
+    window_run_to(&mut app, settled_by);
+    window_field_repair(
+        &mut app,
+        ship,
+        &ship_uuid,
+        SKYWAY_DEPOT_B,
+        bevy::prelude::Vec3::new(1180.0, 0.0, 300.0),
+    );
+    let projection = skyway_deadline_secs(&app, "skyhook_failure_due") as f64;
+    let watch_opens = skyway_deadline_secs(&app, "storm_passed_due") as f64;
+    window_run_to(&mut app, watch_opens + 4.0);
+    window_hold_the_tether(&mut app, ship, &ship_uuid, projection);
+
+    let opens_at = skyway_deadline_secs(&app, "skyway_transfer_window") as f64;
+    parley_run_to(&mut app, ship, opens_at + 6.0, CHOICE_LADDER);
+    let havelock = skyway_open_node(&app, SKYWAY_CUTTER);
+    let confront_index = havelock
+        .responses
+        .iter()
+        .position(|response| response.text == "world.falling_skyway.comms.confront_named")
+        .expect("the named confrontation is visibly available before close");
+
+    run_to_the_endings(&mut app, ship, CHOICE_LADDER);
+    let frozen_campaign = skyway_frozen_evidence_record(&app);
+    let havelock_uuid = scan_uuid_named(&mut app, SKYWAY_CUTTER);
+    let frozen_sheet = diff_file(&app, &havelock_uuid);
+    assert_eq!(
+        objective_status(&app, "obj-a3-confront"),
+        ObjectiveStatus::Failed
+    );
+
+    let havelock_position = skyway_position(&mut app, SKYWAY_CUTTER);
+    skyway_move(
+        &mut app,
+        ship,
+        havelock_position + bevy::prelude::Vec3::new(60.0, 0.0, 0.0),
+    );
+    run(&mut app, 2);
+    skyway_submit_response(&mut app, &havelock.id, confront_index);
+
+    assert_eq!(skyway_flag(&app, "skyway_confronted"), 0);
+    assert_eq!(skyway_flag(&app, "skyway_witness_named"), 0);
+    assert_eq!(
+        skyway_flag(&app, "relationship.havelock_operations.damaged"),
+        0
+    );
+    assert_eq!(diff_file(&app, &havelock_uuid), frozen_sheet);
+    assert_eq!(skyway_frozen_evidence_record(&app), frozen_campaign);
+    assert_eq!(
+        objective_status(&app, "obj-a3-confront"),
+        ObjectiveStatus::Failed
+    );
+    assert_eq!(skyway_flag(&app, "a3_endings_written"), 1);
+    let havelock_messages = skyway_messages(&app, SKYWAY_CUTTER);
+    let closed = havelock_messages
+        .last()
+        .expect("Havelock acknowledges the expired confrontation");
+    assert_eq!(
+        closed.body,
+        "world.falling_skyway.comms.havelock_stands_off"
+    );
+    assert!(closed.responses.is_empty());
 }
 
 /// **AC2 — the force-open path, and the closure said out loud.**
@@ -12140,6 +12847,8 @@ fn forcing_the_picket_open_leaves_nobody_willing_to_corroborate_and_says_so() {
     // the one above is how the dispute ended.
     skyway_scan_ladder_b(&mut app, ship);
     assert_eq!(skyway_flag(&app, "skyway_records_diff_found"), 1);
+    skyway_move(&mut app, ship, CHOICE_LADDER);
+    run(&mut app, 2);
 
     skyway_pick(
         &mut app,
@@ -14184,6 +14893,12 @@ fn a_crew_who_did_everything_still_reach_the_window_short() {
     let (mut app, ship) = skyway_at_act_two();
     let (_, ship_uuid) = window_ship(&mut app);
 
+    // Stand alongside the authored parley position before answering either
+    // party. The full-timeline fixture starts at the survey berth, while the
+    // reciprocal Comms admission below must exercise the actual in-range path.
+    skyway_move(&mut app, ship, CHOICE_LADDER);
+    run(&mut app, 2);
+
     // ── Act 2's work: the strike ends at the table ──────────────────────────
     skyway_negotiate_to_a_vote(&mut app);
     assert_eq!(skyway_flag(&app, "skyway_settled_by_negotiation"), 1);
@@ -15026,9 +15741,9 @@ fn assert_the_campaign_record_is_complete(app: &bevy::prelude::App) {
 /// two of the three.
 ///
 /// They take the workers they gave their word to and the convoy who had nothing
-/// to trade, refuse the operator to their face, and put the operator's own file
-/// to them on the open channel without naming the woman who contradicted it.
-/// Both promises on the books come out KEPT, and the ledger says so.
+/// to trade, file both evidence sources with Control, and confront the operator
+/// without naming the woman who contradicted the file.
+/// All three promises on the books come out KEPT, and the ledger says so.
 #[test]
 fn falling_skyway_carries_the_workers_and_the_convoy_and_keeps_the_captains_word() {
     use project_phoenix::core::messages::ObjectiveStatus;
@@ -15039,6 +15754,8 @@ fn falling_skyway_carries_the_workers_and_the_convoy_and_keeps_the_captains_word
     // ── Act 2: read the rung, talk them down, get her on the record ──────────
     skyway_scan_ladder_b(&mut app, ship);
     assert_eq!(skyway_flag(&app, "skyway_records_diff_found"), 1);
+    skyway_move(&mut app, ship, CHOICE_LADDER);
+    run(&mut app, 2);
     skyway_negotiate_to_a_vote(&mut app);
     assert_eq!(skyway_flag(&app, "skyway_settled_by_negotiation"), 1);
     assert_eq!(
@@ -15066,6 +15783,12 @@ fn falling_skyway_carries_the_workers_and_the_convoy_and_keeps_the_captains_word
         ObjectiveStatus::Active,
         "…and #1039 left it Active for this slice to resolve"
     );
+    assert_eq!(
+        objective_status(&app, "obj-a2-corroborate"),
+        ObjectiveStatus::Active,
+        "the worker's account opens the Control pickup but does not file itself"
+    );
+    assert_eq!(skyway_flag(&app, "skyway_records_put"), 0);
 
     let settled_by = window_now(&app) + 24.0;
     window_run_to(&mut app, settled_by);
@@ -15195,9 +15918,40 @@ fn falling_skyway_carries_the_workers_and_the_convoy_and_keeps_the_captains_word
         "her name stayed out of it, which is the promise she was given"
     );
     assert_eq!(
+        skyway_promise(&app, "skyway_protect_witness"),
+        "open",
+        "the Havelock confrontation records whether the crew named Tacket, but the \
+         protection promise remains open until the mission-close settlement"
+    );
+    assert_eq!(
         objective_status(&app, "obj-a3-confront"),
         ObjectiveStatus::Completed
     );
+    assert_eq!(
+        skyway_flag(&app, "skyway_records_put"),
+        0,
+        "confronting Havelock is not a filing with Control"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a2-corroborate"),
+        ObjectiveStatus::Active,
+        "the separate filing objective must still be waiting"
+    );
+    let control_position = skyway_position(&mut app, WINDOW_CONTROL);
+    skyway_move(
+        &mut app,
+        ship,
+        control_position + bevy::prelude::Vec3::new(60.0, 0.0, 0.0),
+    );
+    run(&mut app, 2);
+    skyway_pick(&mut app, WINDOW_CONTROL, SKYWAY_FILE_EVIDENCE);
+    assert_eq!(skyway_flag(&app, "skyway_records_put"), 1);
+    assert_eq!(
+        objective_status(&app, "obj-a2-corroborate"),
+        ObjectiveStatus::Completed
+    );
+    skyway_move(&mut app, ship, CHOICE_LADDER);
+    run(&mut app, 2);
     skyway_pick(
         &mut app,
         SKYWAY_CUTTER,
@@ -15221,8 +15975,8 @@ fn falling_skyway_carries_the_workers_and_the_convoy_and_keeps_the_captains_word
     assert_eq!(
         skyway_promise(&app, "skyway_surface_records"),
         "kept",
-        "the hardened late negotiation demanded this promise as well as the file; the \
-         unnamed confrontation put the record on the open channel and kept it"
+        "the explicit Control filing settles the captain's records commitment on the \
+         same authoritative flag as the optional objective"
     );
     assert_eq!(skyway_flag(&app, "commitment.skyway_safe_passage.kept"), 1);
     assert_eq!(
@@ -15293,7 +16047,11 @@ fn falling_skyway_carries_the_workers_and_the_convoy_and_keeps_the_captains_word
     assert_eq!(skyway_flag(&app, "campaign.skyway.casualties.storm"), 1);
     assert_eq!(skyway_flag(&app, "campaign.skyway.casualties.total"), 1);
     assert_eq!(skyway_flag(&app, "campaign.skyway.skyhook.held"), 1);
-    assert_eq!(skyway_flag(&app, "campaign.skyway.commitments.kept"), 3);
+    assert_eq!(
+        skyway_flag(&app, "campaign.skyway.commitments.kept"),
+        3,
+        "safe passage, witness protection, and the Control filing all settle kept"
+    );
     assert_eq!(skyway_flag(&app, "campaign.skyway.commitments.broken"), 0);
     assert_eq!(skyway_flag(&app, "campaign.skyway.commitments.clean"), 1);
 }
@@ -15368,13 +16126,14 @@ fn a_captain_who_leaves_the_workers_behind_hears_the_promise_read_back() {
     let opens_at = skyway_deadline_secs(&app, "skyway_transfer_window") as f64;
     parley_run_to(&mut app, ship, opens_at + 6.0, CHOICE_LADDER);
 
-    // A crew who never went looking are not offered the file line, on either
-    // tree — the evidence branch reads the fact sheet, and theirs is empty.
+    // A crew who never went looking have neither the Control filing thread nor
+    // the confrontation on Havelock's separate tree.
     let havelock = skyway_open_node(&app, SKYWAY_CUTTER);
     assert!(
-        !skyway_options(&havelock).contains(&"world.falling_skyway.comms.put_the_file".to_string()),
-        "nothing to put: {:?}",
-        skyway_options(&havelock)
+        skyway_messages(&app, WINDOW_CONTROL)
+            .iter()
+            .all(|message| message.body != "world.falling_skyway.comms.evidence_ready"),
+        "nothing gathered means no evidence pickup"
     );
     assert!(!skyway_options(&havelock)
         .contains(&"world.falling_skyway.comms.confront_unnamed".to_string()));
@@ -15474,11 +16233,31 @@ fn the_lift_runs_out_and_the_third_claimant_is_never_offered_one() {
     let (mut app, ship) = skyway_at_act_two();
     let (_, ship_uuid) = window_ship(&mut app);
 
+    skyway_move(&mut app, ship, CHOICE_LADDER);
+    run(&mut app, 2);
     skyway_negotiate_to_a_vote(&mut app);
     assert_eq!(
         skyway_promise(&app, "skyway_surface_records"),
         "open",
-        "precondition: an empty-handed crew give BOTH promises to get the vote called"
+        "precondition: a crew who never scanned give both promises and obtain \
+         Havelock's copy to get the hardened vote called"
+    );
+    assert!(
+        ladder_b_sheet(&mut app)
+            .iter()
+            .any(|(text, provenance)| text == SKYWAY_FILE && provenance == "records"),
+        "the hardened negotiation obtained Havelock's copy of the maintenance file"
+    );
+    assert_eq!(
+        skyway_flag(&app, "skyway_records_diff_found"),
+        0,
+        "possession of Havelock's file must not pretend the crew scanned the rung"
+    );
+    assert!(!rigger_called(&app));
+    assert_eq!(
+        objective_status(&app, "obj-a2-corroborate"),
+        ObjectiveStatus::Active,
+        "the unperformed evidence route remains visible"
     );
     let settled_by = window_now(&app) + 24.0;
     window_run_to(&mut app, settled_by);
@@ -15516,6 +16295,15 @@ fn the_lift_runs_out_and_the_third_claimant_is_never_offered_one() {
         skyway_flag(&app, "skyway_window_supply"),
         40,
         "precondition: Ladder B was never mended, so the ladder puts in one rung's worth"
+    );
+    assert_eq!(
+        skyway_options(&skyway_open_node(&app, SKYWAY_CUTTER)),
+        vec![
+            "world.falling_skyway.comms.claim_stand_by".to_string(),
+            "world.falling_skyway.comms.lift_havelock".to_string(),
+            "world.falling_skyway.comms.deny_havelock".to_string(),
+        ],
+        "Havelock's transfer-window tree cannot file the document it supplied"
     );
 
     // Every option is on the table before anything is spent.
@@ -15627,7 +16415,8 @@ fn the_lift_runs_out_and_the_third_claimant_is_never_offered_one() {
     assert_eq!(
         skyway_promise(&app, "skyway_surface_records"),
         "broken",
-        "the captain swore the file would reach Control and never found the file"
+        "the captain obtained Havelock's file but never verified and filed the \
+         discrepancy with the worker's account"
     );
     let sheet = skyway_sheet_texts(&mut app, WINDOW_CONTROL);
     assert!(sheet.contains(&"world.falling_skyway.evidence.word_broken".to_string()));
@@ -15641,7 +16430,12 @@ fn the_lift_runs_out_and_the_third_claimant_is_never_offered_one() {
         1
     );
     assert_eq!(skyway_flag(&app, "campaign.skyway.strike.negotiated"), 1);
-    assert_eq!(skyway_flag(&app, "campaign.skyway.evidence.records"), 1);
+    assert_eq!(
+        skyway_flag(&app, "campaign.skyway.evidence.records"),
+        1,
+        "the campaign may remember Havelock's supplied record without treating it as \
+         the crew's verified discrepancy or as a filing"
+    );
     assert_eq!(skyway_flag(&app, "campaign.skyway.evidence.none"), 0);
     assert_eq!(skyway_flag(&app, "campaign.skyway.casualties.total"), 3);
     assert_eq!(skyway_flag(&app, "campaign.skyway.skyhook.held"), 1);
@@ -15651,6 +16445,12 @@ fn the_lift_runs_out_and_the_third_claimant_is_never_offered_one() {
     assert_eq!(
         objective_status(&app, "obj-a3-choice"),
         ObjectiveStatus::Completed
+    );
+    assert_eq!(skyway_flag(&app, "skyway_records_put"), 0);
+    assert_eq!(
+        objective_status(&app, "obj-a2-corroborate"),
+        ObjectiveStatus::Failed,
+        "the mission close turns an active, unfiled evidence objective red"
     );
 }
 

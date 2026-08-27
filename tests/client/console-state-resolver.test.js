@@ -10,6 +10,8 @@
 import { describe, it, expect } from 'vitest';
 import '../../gui/console-state.js';
 import { aggregateStationHull } from '../../gui/console-state.js';
+import { ClientSimState } from '../../gui/sim-state.js';
+import { dirtyConsolesFor } from '../../gui/dirty-consoles.js';
 
 describe('buildConsoleStateInner family-span routing', () => {
   it('routes the Destroyer engineering station (shields + power + repair) to the generic payload', () => {
@@ -93,6 +95,102 @@ describe('buildConsoleStateInner family-span routing', () => {
     const s = JSON.parse(window.buildConsoleStateInner('captain', state));
     expect(s).not.toHaveProperty('systems');
     expect(s).toHaveProperty('red_alert');
+  });
+
+  it('selects the Command builder from projected metadata, not either id spelling', () => {
+    const state = {
+      stationSystems: { 'bridge-orders': ['orders-system'] },
+      systemConsoleFamilies: { 'orders-system': 'command' },
+      hasSystemConsoleFamilyProjection: true,
+      blackboards: {
+        command: {
+          command_system_id: 'orders-system',
+          directed_station: 'tactical',
+          directed_station_name: 'Tactical',
+          directed_station_ai: true,
+          stances: [],
+        },
+      },
+    };
+    const s = JSON.parse(window.buildConsoleStateInner('bridge-orders', state));
+    expect(s).not.toHaveProperty('systems');
+    expect(s.command_system_id).toBe('orders-system');
+    expect(s.directed_station).toBe('tactical');
+  });
+
+  it('does not extend the temporary inference fallback to an unmapped Command id', () => {
+    const state = {
+      stationSystems: { 'bridge-orders': ['orders-system'] },
+      systemConsoleFamilies: {},
+      hasSystemConsoleFamilyProjection: true,
+    };
+    expect(JSON.parse(window.buildConsoleStateInner('bridge-orders', state))).toEqual({});
+  });
+
+  it('does not select canonical Command by station name after an empty projection', () => {
+    const state = {
+      stationSystems: { command: ['command'] },
+      systemConsoleFamilies: {},
+      hasSystemConsoleFamilyProjection: true,
+      blackboards: { command: { command_system_id: 'command' } },
+    };
+    expect(JSON.parse(window.buildConsoleStateInner('command', state))).toEqual({});
+  });
+
+  it('retains canonical Command only for the genuine pre-Welcome boot race', () => {
+    const s = JSON.parse(window.buildConsoleStateInner('command', {}));
+    expect(s.command_system_id).toBe('command');
+  });
+
+  it('folds an authored Dock host update into dirty routing and the Helm builder', () => {
+    const state = new ClientSimState();
+    state.apply({
+      type: 'Welcome',
+      data: {
+        state: { phase: 'Lobby', players: [], complexity: {}, world: null },
+        ship_stations: {},
+        ship_config: {
+          station_systems: { 'flight-control': ['berthing-clamps'] },
+          system_console_families: { 'berthing-clamps': 'helm' },
+        },
+      },
+    });
+    const update = {
+      type: 'BlackboardUpdate',
+      data: {
+        updates: [[
+          'berthing-clamps',
+          {
+            kind: 'Dock',
+            data: {
+              range: 275,
+              available: true,
+              available_target: 'berth-1',
+              available_target_name: 'world.berth.one',
+              engaged: false,
+              docked: false,
+            },
+          },
+        ]],
+      },
+    };
+
+    state.apply(update);
+
+    expect(dirtyConsolesFor(
+      update,
+      state.stationSystems,
+      state.systemConsoleFamilies,
+    )).toEqual(new Set(['flight-control']));
+    const payload = JSON.parse(window.buildConsoleStateInner('flight-control', state));
+    expect(payload.dock).toMatchObject({
+      system_id: 'berthing-clamps',
+      range: 275,
+      available: true,
+      available_target: 'berth-1',
+      available_target_name: 'world.berth.one',
+    });
+    expect(state.blackboards).not.toHaveProperty('dock');
   });
 
   it('falls back to the plain builder by name during the boot race (no stationSystems yet)', () => {

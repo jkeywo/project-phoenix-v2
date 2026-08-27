@@ -140,17 +140,19 @@ describe('destroyer helm renderStation', () => {
   });
 
   it('shows the dock panel and toggles dock/undock text+class', () => {
-    const available = { ...payload, dock: { available: true, engaged: false, docked: false, available_target_name: 'console.tractor.idle' } };
+    const available = { ...payload, dock: { system_id: 'berthing-clamps', available: true, engaged: false, docked: false, available_target_name: 'console.tractor.idle' } };
     destroyerRender(available, document);
     expect(el('dock-panel').hidden).toBe(false);
     expect(el('dock-btn').classList.contains('docked')).toBe(false);
     expect(el('dock-btn').textContent).toBe(t('console.dock.dock'));
+    expect(el('dock-btn').dataset.systemId).toBe('berthing-clamps');
     expect(el('dock-status').textContent).toContain(t('console.dock.available'));
 
-    const docked = { ...payload, dock: { available: false, engaged: true, docked: true, docked_to_name: 'console.tractor.idle' } };
+    const docked = { ...payload, dock: { system_id: 'dock', available: false, engaged: true, docked: true, docked_to_name: 'console.tractor.idle' } };
     destroyerRender(docked, document);
     expect(el('dock-btn').classList.contains('docked')).toBe(true);
     expect(el('dock-btn').textContent).toBe(t('console.dock.undock'));
+    expect(el('dock-btn').dataset.systemId).toBe('dock');
     expect(el('dock-status').textContent).toContain(t('console.dock.docked'));
   });
 

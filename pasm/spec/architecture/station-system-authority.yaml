@@ -112,23 +112,44 @@ entities:
 
   - component: system-kind-registry
     core:
-      status: implemented
+      status: partially-implemented
       confidence: confirmed
-      title: System Kind Registry
-      summary: Code-backed registry that validates ship-authored system kinds and names the required AI controller for each kind.
+      title: System Kind Descriptor Registry
+      summary: Code-backed authoritative descriptors that validate ship-authored System kinds and carry kind-level metadata. The Command-and-Dock tracer projects Console Family metadata now; issue #1252 populates every remaining kind and issue #1253 adds command capability to the same descriptor rather than creating parallel registries.
       rationale:
         - "One id, one meaning (#801). Identifiers live in exactly one of three namespaces: system ids (declared [[system]] instances that get a ControlSource, gate admission, and can be damaged), station ids (crew stations that key console-level blackboards and channel-3 coordination routing), and wire targets (the target of a ControlSystem envelope, always a system id)."
         - "The coarse helm and tactical systems were deleted by #801: \"helm\" and \"tactical\" are now station ids only, carried inside SystemId-typed maps via the helm_station_key / tactical_station_key helpers. No [[system]] block declares them, no ControlSource is registered for them, and no ControlSystem message may target them."
+        - "Console Family is presentation metadata, not an authority source: Command projects to Command and Dock projects to Helm regardless of their authored instance or owning Station ids. Dock runtime retains that authored id for command consumption, AI/damage lookup and blackboard publication, and the client returns the same id as command authority. Missing entries mean only that a family is not migrated yet; the client's exact/prefix fallback is explicitly temporary and issue #1252 removes it."
     architecture:
       kind: registry
       authority: authoritative
+      owns: [system-console-family-projection-state]
       reads: [ship-station-system-topology-state]
+      produces: [system-console-family-projection-state]
       validates: [ship-station-system-topology-state]
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/system_registry.rs]
-      symbols: [SystemKindRegistry]
+      paths: [src/ship/system_registry.rs, src/entities/spawner.rs, src/dock/server.rs, src/lobby/server.rs, src/core/messages.rs]
+      symbols: [SystemKindRegistry, SystemKindDescriptor, ConsoleFamily, ShipClientConfig]
+      tests: [cargo test]
+
+  - state: system-console-family-projection-state
+    core:
+      status: partially-implemented
+      confidence: confirmed
+      title: System Console Family Projection State
+      summary: Selected-ship System instance id to Console Family metadata derived from authoritative kind descriptors and replicated in Welcome. The #1251 tracer includes every shipped Command and Dock instance; other kinds remain absent only until issue #1252 completes the descriptor census.
+    architecture:
+      classification: derived
+      owner: system-kind-registry
+      writers: [system-kind-registry]
+      derived_from: [ship-station-system-topology-state]
+      replicas: [client-system-console-family-replica]
+    implementation:
+      status: declared
+      paths: [src/ship/system_registry.rs, src/lobby/server.rs, src/core/messages.rs]
+      symbols: [ConsoleFamily, ShipClientConfig]
       tests: [cargo test]
 
   - component: system-control-source-resolver

@@ -658,10 +658,10 @@ pub struct EntityState {
     /// whether the two hulls are mated, and which berth is held.
     ///
     /// A **projection**, not the whole [`crate::dock::DockControl`] component, for
-    /// `tractor`'s reason: the authored `[dock]` terms and the resolved power
-    /// group ride the component and are re-derived from the template on spawn, so
-    /// writing them into a save would put content into the one artefact
-    /// `content_digest` is answerable for. What travels is the pair the fold
+    /// `tractor`'s reason: the authored Dock System id, `[dock]` terms and
+    /// resolved power group ride the component and are re-derived from the
+    /// template on spawn, so writing them into a save would put content into the
+    /// one artefact `content_digest` is answerable for. What travels is the pair the fold
     /// cannot recover — the engage/dock state and the docked target — which
     /// [`fold_dock_namespace`](crate::sim_digest) folds and which a resume would
     /// otherwise drop, restoring two mated hulls as adrift.

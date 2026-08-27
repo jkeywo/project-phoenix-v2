@@ -90,20 +90,27 @@ describe('fire_phaser', () => {
 describe('dock / undock (issue #1159)', () => {
   it('dock sends ControlSystem Dock targeting the dock system', () => {
     const send = mkSend();
-    ACTION_MAP.dock({ action: 'dock' }, send);
+    ACTION_MAP.dock({ action: 'dock', target: 'berthing-clamps' }, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
-      target: 'dock',
+      target: 'berthing-clamps',
       payload: { type: 'Dock' },
     });
   });
 
   it('undock sends ControlSystem Undock targeting the dock system', () => {
     const send = mkSend();
-    ACTION_MAP.undock({ action: 'undock' }, send);
+    ACTION_MAP.undock({ action: 'undock', target: 'dock' }, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
       target: 'dock',
       payload: { type: 'Undock' },
     });
+  });
+
+  it('sends neither command without an authored Dock SystemId', () => {
+    const send = mkSend();
+    ACTION_MAP.dock({ action: 'dock' }, send);
+    ACTION_MAP.undock({ action: 'undock' }, send);
+    expect(send).not.toHaveBeenCalled();
   });
 });
 

@@ -40,8 +40,9 @@
 //! identical `*_KIND` and `*_SYSTEM_ID` values. New systems must use the same
 //! lowercase-kebab string for both constants to avoid this split.
 
-use crate::core::messages::SystemId;
-use std::collections::HashSet;
+use crate::core::messages::{ConsoleFamily, SystemId};
+use crate::ship::config::SystemInstanceConfig;
+use std::collections::HashMap;
 
 // ── Ownerless capability systems ─────────────────────────────────────────────
 
@@ -352,7 +353,41 @@ pub const POWER_BATTERY_SYSTEM_ID: &str = "power-battery";
 /// matching `[[system]]` entry.
 pub const SHIELD_ARC_KIND: &str = "shield_arc";
 
-/// The set of valid `[[system]]` kind strings a ship TOML may declare.
+/// Authoritative metadata owned by one `[[system]]` kind.
+///
+/// Console Family is optional during the #1251 tracer: Command and Dock carry
+/// it now, while issue #1252 migrates every remaining kind and removes the
+/// client's temporary inference fallback. Command capability joins this same
+/// descriptor in issue #1253 rather than creating a second registry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SystemKindDescriptor {
+    kind: String,
+    console_family: Option<ConsoleFamily>,
+}
+
+impl SystemKindDescriptor {
+    pub fn new(kind: impl Into<String>) -> Self {
+        Self {
+            kind: kind.into(),
+            console_family: None,
+        }
+    }
+
+    pub fn with_console_family(mut self, family: ConsoleFamily) -> Self {
+        self.console_family = Some(family);
+        self
+    }
+
+    pub fn kind(&self) -> &str {
+        &self.kind
+    }
+
+    pub fn console_family(&self) -> Option<ConsoleFamily> {
+        self.console_family
+    }
+}
+
+/// The descriptor registry for valid `[[system]]` kind strings.
 ///
 /// Consumers (`ship_plugin::load_ship_config_from_disk`,
 /// `entities::config`) build the registry via [`Self::with_core_systems`]
@@ -363,7 +398,7 @@ pub const SHIELD_ARC_KIND: &str = "shield_arc";
 /// `ControlSourceResolver::policy_for`, not by registry lookup.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SystemKindRegistry {
-    kinds: HashSet<String>,
+    descriptors: HashMap<String, SystemKindDescriptor>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -401,12 +436,17 @@ impl SystemKindRegistry {
         registry.register(CAPTAIN_KIND)?;
         registry.register(VIEWSCREEN_KIND)?;
         registry.register(REPAIR_KIND)?;
-        // Command capability system (issue #1107).
-        registry.register(COMMAND_KIND)?;
+        // Command is the #1251 Console-Family metadata tracer.
+        registry.register_descriptor(
+            SystemKindDescriptor::new(COMMAND_KIND).with_console_family(ConsoleFamily::Command),
+        )?;
         // Tractor-beam system (issue #1156).
         registry.register(TRACTOR_KIND)?;
-        // Docking system (issue #1159).
-        registry.register(DOCK_KIND)?;
+        // Dock is rendered by Helm regardless of either instance/station id:
+        // the second half of the #1251 Console-Family metadata tracer.
+        registry.register_descriptor(
+            SystemKindDescriptor::new(DOCK_KIND).with_console_family(ConsoleFamily::Helm),
+        )?;
         // Transfer umbilical (issue #1160).
         registry.register(UMBILICAL_KIND)?;
         // Fine-grained Helm systems (issue #511)
@@ -441,23 +481,53 @@ impl SystemKindRegistry {
     }
 
     pub fn register(&mut self, kind: impl Into<String>) -> Result<(), SystemRegistryError> {
-        let kind = kind.into();
-        if kind.trim().is_empty() {
+        self.register_descriptor(SystemKindDescriptor::new(kind))
+    }
+
+    pub fn register_descriptor(
+        &mut self,
+        descriptor: SystemKindDescriptor,
+    ) -> Result<(), SystemRegistryError> {
+        if descriptor.kind.trim().is_empty() {
             return Err(SystemRegistryError::EmptyKind);
         }
-        if self.kinds.contains(&kind) {
-            return Err(SystemRegistryError::DuplicateKind { kind });
+        if self.descriptors.contains_key(&descriptor.kind) {
+            return Err(SystemRegistryError::DuplicateKind {
+                kind: descriptor.kind,
+            });
         }
-        self.kinds.insert(kind);
+        self.descriptors.insert(descriptor.kind.clone(), descriptor);
         Ok(())
     }
 
     pub fn contains(&self, kind: &str) -> bool {
-        self.kinds.contains(kind)
+        self.descriptors.contains_key(kind)
     }
 
     pub fn kinds(&self) -> impl Iterator<Item = &str> {
-        self.kinds.iter().map(|kind| kind.as_str())
+        self.descriptors.keys().map(|kind| kind.as_str())
+    }
+
+    pub fn descriptor(&self, kind: &str) -> Option<&SystemKindDescriptor> {
+        self.descriptors.get(kind)
+    }
+
+    /// Resolve authored System instances to the Console Family declared by
+    /// their kinds. Unmigrated kinds are intentionally omitted: this tracer's
+    /// payload tells the client exactly which ids are authoritative and leaves
+    /// only those missing ids eligible for the temporary #1252 fallback.
+    pub fn project_console_families(
+        &self,
+        systems: &[SystemInstanceConfig],
+    ) -> HashMap<String, ConsoleFamily> {
+        systems
+            .iter()
+            .filter_map(|system| {
+                self.descriptor(&system.kind)
+                    .and_then(SystemKindDescriptor::console_family)
+                    .map(|family| (system.id.0.clone(), family))
+            })
+            .collect()
     }
 }
 
@@ -536,8 +606,11 @@ pub fn tractor_system_id() -> SystemId {
     SystemId(TRACTOR_SYSTEM_ID.to_string())
 }
 
-/// The docking system's wire `SystemId` (issue #1159). The admitted target for
-/// `Dock` / `Undock` and the key its blackboard publishes under.
+/// The conventional shipped docking `SystemId` (issue #1159).
+///
+/// Runtime Dock controls resolve their authored instance id by `kind = "dock"`;
+/// this helper is for canonical topology and fixtures that deliberately use the
+/// conventional `id = "dock"` spelling.
 pub fn dock_system_id() -> SystemId {
     SystemId(DOCK_SYSTEM_ID.to_string())
 }
@@ -770,6 +843,138 @@ mod tests {
         registry.register("red_alert").unwrap();
 
         assert!(registry.contains("red_alert"));
+    }
+
+    #[test]
+    fn command_and_dock_descriptors_own_the_tracer_console_families() {
+        let registry = SystemKindRegistry::with_core_systems().unwrap();
+
+        assert_eq!(
+            registry
+                .descriptor(COMMAND_KIND)
+                .and_then(SystemKindDescriptor::console_family),
+            Some(ConsoleFamily::Command)
+        );
+        assert_eq!(
+            registry
+                .descriptor(DOCK_KIND)
+                .and_then(SystemKindDescriptor::console_family),
+            Some(ConsoleFamily::Helm)
+        );
+        assert_eq!(
+            registry
+                .descriptor(HELM_THRUST_KIND)
+                .and_then(SystemKindDescriptor::console_family),
+            None,
+            "unmigrated kinds stay absent until #1252 rather than gaining guessed metadata"
+        );
+    }
+
+    #[test]
+    fn console_family_projection_resolves_instance_ids_by_kind() {
+        use crate::ship::config::SystemInstanceConfig;
+
+        let systems = vec![
+            SystemInstanceConfig {
+                id: SystemId("bridge-orders".into()),
+                kind: COMMAND_KIND.into(),
+                station: None,
+                ai_only: false,
+                human_seeking: false,
+                seek_order: Vec::new(),
+                power_group: None,
+                marker: None,
+                config: None,
+            },
+            SystemInstanceConfig {
+                id: SystemId("berthing-clamps".into()),
+                kind: DOCK_KIND.into(),
+                station: None,
+                ai_only: false,
+                human_seeking: false,
+                seek_order: Vec::new(),
+                power_group: None,
+                marker: None,
+                config: None,
+            },
+            SystemInstanceConfig {
+                id: SystemId("main-drive".into()),
+                kind: HELM_THRUST_KIND.into(),
+                station: None,
+                ai_only: false,
+                human_seeking: false,
+                seek_order: Vec::new(),
+                power_group: None,
+                marker: None,
+                config: None,
+            },
+        ];
+
+        let projected = SystemKindRegistry::with_core_systems()
+            .unwrap()
+            .project_console_families(&systems);
+        assert_eq!(
+            projected.get("bridge-orders"),
+            Some(&ConsoleFamily::Command)
+        );
+        assert_eq!(projected.get("berthing-clamps"), Some(&ConsoleFamily::Helm));
+        assert!(
+            !projected.contains_key("main-drive"),
+            "the tracer payload must not fabricate metadata for unmigrated families"
+        );
+    }
+
+    #[test]
+    fn every_shipped_command_and_dock_instance_projects_its_console_family() {
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/entities");
+        let mut entries: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+            .expect("assets/entities must be readable")
+            .map(|entry| entry.expect("readable entity entry").path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "toml"))
+            .collect();
+        entries.sort();
+
+        let registry = SystemKindRegistry::with_core_systems().unwrap();
+        let mut command_instances = 0usize;
+        let mut dock_instances = 0usize;
+
+        for path in entries {
+            let source = path.to_string_lossy().replace('\\', "/");
+            let entity = crate::entities::include_resolve::load_entity_config(&source)
+                .unwrap_or_else(|error| panic!("parse {source}: {error}"));
+            let Some(ship) = entity.ship_config.as_ref() else {
+                continue;
+            };
+            let projected = registry.project_console_families(&ship.systems);
+            for system in &ship.systems {
+                let expected = match system.kind.as_str() {
+                    COMMAND_KIND => {
+                        command_instances += 1;
+                        ConsoleFamily::Command
+                    }
+                    DOCK_KIND => {
+                        dock_instances += 1;
+                        ConsoleFamily::Helm
+                    }
+                    _ => continue,
+                };
+                assert_eq!(
+                    projected.get(&system.id.0),
+                    Some(&expected),
+                    "{source}: {:?} must reach the public topology projection by kind",
+                    system.id
+                );
+            }
+        }
+
+        assert_eq!(
+            command_instances, 1,
+            "the shipped Command tracer disappeared"
+        );
+        assert!(
+            dock_instances >= 4,
+            "expected every shipped Dock tracer topology, got {dock_instances}"
+        );
     }
 
     #[test]

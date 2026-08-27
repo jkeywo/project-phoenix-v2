@@ -8,12 +8,11 @@
  *  - STATIC_MESSAGE_CONSOLES covers every non-blackboard message type with a
  *    fixed console list (the exact fan-out handleMessage used to hardcode).
  *  - BlackboardUpdate dirtiness is derived from the server-supplied
- *    station→systems ownership (simState.stationSystems): an update for
- *    system X dirties the console of whichever station owns X. Fine system
- *    ids resolve through consoleForSystemId (the same single-source-of-truth
- *    matcher buildSystemStationConsoleState uses); a coarse blackboard id
- *    that directly names a console family ('helm', 'tactical', …) dirties
- *    that family's owning station too.
+ *    station→systems ownership and authoritative System-id → Console Family
+ *    projection. Unmigrated ids alone use the temporary #1251 matcher
+ *    fallback; issue #1252 removes it once every descriptor is populated. A
+ *    coarse blackboard id that directly names a console family ('helm',
+ *    'tactical', …) dirties that family's owning station too.
  *
  * On the battleship (identity stations) this reproduces the old hardcoded
  * routing exactly. On composite stations (courier 'pilot', destroyer
@@ -77,10 +76,9 @@ export const STATIC_MESSAGE_CONSOLES = Object.freeze({
 export const ALWAYS_PUSH = Object.freeze(new Set(['captain']));
 
 /**
- * Coarse blackboard ids that directly name a console family. Today's server
- * blackboard ids are coarse (helm / captain / viewscreen / tactical / power /
- * shields / repair / comms / sensors / navigation); the ones not already
- * resolved by consoleForSystemId land here via identity.
+ * TEMPORARY #1251 fallback for unmigrated coarse blackboard ids that directly
+ * name a console family. Issue #1252 gives reserved channels authoritative
+ * family metadata and removes this inverse-name census with the System matcher.
  */
 const CONSOLE_FAMILIES = Object.freeze(new Set([
   'captain', 'helm', 'tactical', 'sensors', 'navigation',
@@ -88,8 +86,10 @@ const CONSOLE_FAMILIES = Object.freeze(new Set([
 ]));
 
 /**
- * Reserved blackboard CHANNEL keys — ids no `[[system]]` block declares and no
- * station owns — mapped to the console family that renders them.
+ * TEMPORARY #1251 fallback for reserved blackboard CHANNEL keys — ids no
+ * `[[system]]` block declares and no station owns — mapped to the console
+ * family that renders them. Issue #1252 migrates this table into authoritative
+ * metadata and deletes it.
  *
  * `scan` (issue #1032) is the sensor suite's last reading. It is not a system
  * id (the commandable, damageable thing is `sensors`), so neither the fine
@@ -103,13 +103,13 @@ const CHANNEL_FAMILIES = Object.freeze({
 
 /**
  * The console family a blackboard system id belongs to, or null.
- * Fine ids resolve through the shared matcher; reserved channel keys resolve
- * through the table above; coarse ids that equal a console family name resolve
- * by identity.
+ * System ids resolve through authoritative metadata first. Only absent,
+ * unmigrated entries reach the temporary matcher/table/identity fallbacks above;
+ * issue #1252 removes all three.
  */
-function familyForBlackboardId(id) {
+function familyForBlackboardId(id, systemConsoleFamilies) {
   if (typeof id !== 'string') return null;
-  const fine = consoleForSystemId(id);
+  const fine = consoleForSystemId(id, systemConsoleFamilies);
   if (fine) return fine;
   if (CHANNEL_FAMILIES[id]) return CHANNEL_FAMILIES[id];
   return CONSOLE_FAMILIES.has(id) ? id : null;
@@ -119,8 +119,8 @@ function familyForBlackboardId(id) {
  * Console families a single blackboard update fans out to: its own family,
  * plus — for captain/viewscreen updates — the currentView cascade.
  */
-function familiesForBlackboardId(id) {
-  const family = familyForBlackboardId(id);
+function familiesForBlackboardId(id, systemConsoleFamilies) {
+  const family = familyForBlackboardId(id, systemConsoleFamilies);
   if (!family) return [];
   if (family === 'captain') {
     // Helm/Sensors/Comms/Navigation each derive their own "on screen" button
@@ -140,11 +140,11 @@ function familiesForBlackboardId(id) {
  * when ownership is unknown (boot race before Welcome) or no station owns
  * the family — pushes to unmounted consoles are harmless no-ops.
  */
-function owningConsoles(family, stationSystems) {
+function owningConsoles(family, stationSystems, systemConsoleFamilies) {
   const owners = [];
   if (stationSystems) {
     for (const [stationId, systemIds] of Object.entries(stationSystems)) {
-      if ((systemIds || []).some(id => consoleForSystemId(id) === family)) {
+      if ((systemIds || []).some(id => consoleForSystemId(id, systemConsoleFamilies) === family)) {
         owners.push(stationId);
       }
     }
@@ -188,17 +188,22 @@ function isSeekingBlackboard(entry) {
  * @param {Object<string, string[]>|null|undefined} stationSystems
  *   simState.stationSystems (station id → owned fine system ids); may be
  *   missing before Welcome.
+ * @param {Object<string, string>|null|undefined} systemConsoleFamilies
+ *   authoritative System id → Console Family projection. Missing entries are
+ *   the only ids permitted to use #1251's temporary inference fallback.
  * @returns {Set<string>} console names to push via pushConsoleStateFor
  */
-export function dirtyConsolesFor(msg, stationSystems) {
+export function dirtyConsolesFor(msg, stationSystems, systemConsoleFamilies) {
   if (!msg || !msg.type) return new Set();
   if (msg.type === 'BlackboardUpdate') {
     const dirty = new Set();
     const updates = (msg.data && msg.data.updates) || [];
     for (const entry of updates) {
       const id = Array.isArray(entry) ? entry[0] : entry;
-      for (const family of familiesForBlackboardId(id)) {
-        for (const name of owningConsoles(family, stationSystems)) dirty.add(name);
+      for (const family of familiesForBlackboardId(id, systemConsoleFamilies)) {
+        for (const name of owningConsoles(family, stationSystems, systemConsoleFamilies)) {
+          dirty.add(name);
+        }
       }
       if (isSeekingBlackboard(entry)) {
         for (const name of Object.keys(stationSystems || {})) dirty.add(name);

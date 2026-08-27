@@ -12,10 +12,9 @@
  * The Dock button toggles dock/undock through the action map — human and AI
  * issue the SAME admitted command, this control just picks which. The click
  * handler lives in `helm.html` (it calls `sendAction`, which only exists
- * after `initConsole` runs) and reads the "which one" off the button's own
- * `.docked` class rather than a variable threaded back out of `render` —
- * the class is set here on every render, so it is never stale (the #1235
- * chunk-1 tractor-button precedent).
+ * after `initConsole` runs) and reads the "which one" plus the authored Dock
+ * SystemId off the button's own render-refreshed state — never a second id
+ * inference in the action map (the #1235 chunk-1 tractor-button precedent).
  */
 import { makeHelmRender } from '../stations/helm-console.js';
 
@@ -33,13 +32,14 @@ export const renderStation = makeHelmRender({
     // ── Contextual dock control (issue #1159) ──────────────────────────
     const dockPanel = doc.getElementById('dock-panel');
     const d = s.dock || null;
+    const dockBtn = doc.getElementById('dock-btn');
+    if (dockBtn) dockBtn.dataset.systemId = d?.system_id || '';
     if (dockPanel) {
       if (!d || (!d.available && !d.engaged && !d.docked)) {
         dockPanel.hidden = true;
       } else {
         dockPanel.hidden = false;
         const docked = !!d.docked;
-        const dockBtn = doc.getElementById('dock-btn');
         if (dockBtn) {
           dockBtn.classList.toggle('docked', docked);
           dockBtn.textContent = t(docked ? 'console.dock.undock' : 'console.dock.dock');

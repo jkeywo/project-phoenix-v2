@@ -4,6 +4,7 @@ Use these names consistently. Runtime detail belongs in code/wiki; intended beha
 
 - **Station**: an authored operable surface identified by `StationId`, owning a coherent UI and set of Systems. A primary Station may be a fixed player seat; an auxiliary Station may exist only as a hosted tab. A human-seeking Station retains its identity while being presented by another directly player-held Station.
 - **System**: a fine-grained operable capability identified by `SystemId`.
+- **Console Family**: the presentation taxonomy declared by a System-kind descriptor and projected per System instance to select client payload builders and dirty-console routing. It is separate from Station ownership and System command authority.
 - **Station Rating**: an authored station mode that selects which owned systems are AI-operated. `Backfill` operates every owned system.
 - **Control Source**: `Human`, `Ai`, or `Offline` authority for a system on a tick.
 - **Session**: host-owned player identity and connection record, keyed by session token.

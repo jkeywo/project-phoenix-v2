@@ -250,6 +250,50 @@ pub struct StationId(pub String);
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct SystemId(pub String);
 
+/// Presentation taxonomy for the console surface that renders a System's
+/// state. This is deliberately separate from [`StationId`] (ownership) and
+/// [`SystemId`] (command authority): a Dock System belongs to whichever Station
+/// the hull authors, but its state is presented by the Helm console family.
+///
+/// Issue #1251 projects the Command and Dock tracer entries. The remaining
+/// variants name the existing client families so issue #1252 can migrate their
+/// descriptors without changing the wire vocabulary again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ConsoleFamily {
+    Captain,
+    Helm,
+    Tactical,
+    Sensors,
+    Navigation,
+    Comms,
+    Shields,
+    Power,
+    Repair,
+    Command,
+    Tractor,
+    Umbilical,
+}
+
+impl ConsoleFamily {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Captain => "captain",
+            Self::Helm => "helm",
+            Self::Tactical => "tactical",
+            Self::Sensors => "sensors",
+            Self::Navigation => "navigation",
+            Self::Comms => "comms",
+            Self::Shields => "shields",
+            Self::Power => "power",
+            Self::Repair => "repair",
+            Self::Command => "command",
+            Self::Tractor => "tractor",
+            Self::Umbilical => "umbilical",
+        }
+    }
+}
+
 /// Stable, designer-authored identifier for an operator-facing power group.
 /// `Ord` so it can sit inside a `ModifierSource` that keys a `BTreeMap`.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -1315,6 +1359,14 @@ pub struct ShipClientConfig {
     /// compatibility with older server builds that don't send this field.
     #[serde(default)]
     pub station_systems: HashMap<String, Vec<String>>,
+    /// Resolved System instance id -> Console Family metadata from the
+    /// authoritative System-kind descriptors (issue #1251). Unlike
+    /// `station_systems`, this classifies presentation rather than ownership.
+    /// The tracer projects Command and Dock; an absent entry means the family
+    /// has not yet migrated and the client may use the explicitly temporary
+    /// inference fallback until issue #1252 completes the registry.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub system_console_families: HashMap<String, ConsoleFamily>,
     /// Anonymous accessibility eligibility projection (issue #1103).
     ///
     /// Per station id → per rating name → the T1 assist-function ids the station
@@ -1462,6 +1514,7 @@ impl Default for ShipClientConfig {
             power_rating: None,
             ship_css: None,
             station_systems: HashMap::new(),
+            system_console_families: HashMap::new(),
             station_assist_gaps: HashMap::new(),
             threat_bearing_epsilon_rad: default_threat_bearing_epsilon_rad(),
             helm_systems: Vec::new(),
@@ -2171,8 +2224,8 @@ pub enum SystemControlPayload {
     /// Dock with the nearest hull carrying dock markers inside the authored range
     /// (issue #1159).
     ///
-    /// Targets the helm-owned `dock` system
-    /// (`system_registry::DOCK_SYSTEM_ID`), a real station-owned system, so it
+    /// Targets the helm-owned `kind = "dock"` System instance (conventionally
+    /// `system_registry::DOCK_SYSTEM_ID`), a real station-owned system, so it
     /// takes the ordinary station-tenure admission path — the Helm holder may
     /// send it, an AI operating the dock may emit it (#1162), and nobody else is
     /// admitted.
@@ -4115,11 +4168,11 @@ pub enum SystemBlackboard {
     /// group, carries a damage entry and is commanded and refused through the
     /// engineering console.
     Tractor(TractorBlackboard),
-    /// The dock control's readout (issue #1159). One per ship carrying a `dock`
-    /// system, keyed by `system_registry::dock_system_id` — a REAL system id, not
-    /// a reserved channel, because unlike an operation the dock IS a thing aboard
-    /// the ship: it declares a power group, carries a damage entry and is
-    /// commanded and refused through the helm console.
+    /// The dock control's readout (issue #1159). One per ship carrying a
+    /// `kind = "dock"` system, keyed by that instance's authored `SystemId` — a
+    /// REAL system id, not a reserved channel, because unlike an operation the
+    /// dock IS a thing aboard the ship: it declares a power group, carries a
+    /// damage entry and is commanded and refused through the helm console.
     Dock(DockBlackboard),
     /// The transfer umbilical's readout (issue #1160). One per ship carrying an
     /// `umbilical` system, keyed by `system_registry::umbilical_system_id` — a

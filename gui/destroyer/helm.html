@@ -163,12 +163,13 @@
     var consoleHandle = initConsole({ name: 'helm', family: 'helm', render: renderStation });
 
     // The one dock button toggles dock/undock through the action map, which
-    // sends the same admitted command a dock AI would (issue #1159). "Which
-    // one" is read off the button's own `.docked` class — renderStation sets
-    // it fresh on every push, so it is never stale.
+    // sends the same admitted command a dock AI would (issues #1159, #1251).
+    // "Which one" and the authored Dock SystemId are read off button state
+    // renderStation refreshes on every push, so neither can go stale.
     document.getElementById('dock-btn').addEventListener('click', function() {
-      var docked = document.getElementById('dock-btn').classList.contains('docked');
-      consoleHandle.sendAction(docked ? 'undock' : 'dock');
+      var button = document.getElementById('dock-btn');
+      var docked = button.classList.contains('docked');
+      consoleHandle.sendAction(docked ? 'undock' : 'dock', { target: button.dataset.systemId });
     });
   </script>
 </body>

@@ -53,6 +53,59 @@ fn lenient(source: &str) -> EntityConfig {
     .expect("the fixture parses")
 }
 
+#[test]
+fn dock_spawn_carries_the_authored_instance_id_into_runtime() {
+    let config = lenient(
+        r#"
+        [power_groups.ops]
+        label = "power.group.ops"
+        default_level = 2
+        min_level = 1
+        max_level = 4
+
+        [[station]]
+        id = "flight-control"
+        name = "Flight Control"
+        description = "station.flight_control.description"
+        rank = "Ltn."
+        short_code = "FLT"
+
+        [[station.rating]]
+        name = "Std"
+        automated_systems = []
+
+        [[system]]
+        id = "berthing-clamps"
+        kind = "dock"
+        station = "flight-control"
+        power_group = "ops"
+
+        [dock]
+        range = 200.0
+        engage_distance = 400.0
+        approach_speed = 60.0
+        mate_tolerance = 4.0
+        undock_clear_distance = 120.0
+        min_power_level = 2
+        "#,
+    );
+    let mut app = test_app();
+    let entity = spawn_and_flush(
+        &mut app,
+        &config,
+        Vec3::ZERO,
+        "authored-dock-id".into(),
+        None,
+    );
+
+    let dock = app
+        .world()
+        .get::<crate::dock::DockControl>(entity)
+        .expect("a kind = dock System plus [dock] must spawn DockControl");
+    assert_eq!(dock.system_id.0, "berthing-clamps");
+    assert_eq!(dock.power_group.0, "ops");
+}
+
 /// **AC1.** A template that authors `[infrastructure]` spawns with a live
 /// condition track; one that does not spawns exactly as it did before the
 /// section existed.

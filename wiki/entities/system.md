@@ -1,8 +1,8 @@
 ---
 title: System
 type: entity
-tags: [system, systemid, control-source, ai, wire-protocol, damage-tier]
-sources: [src/ship/config.rs, src/ship/system_registry.rs, src/ship/control_source.rs, src/ship/damage_sync.rs, src/ship/damage.rs, src/command_admission/policy.rs, assets/entities/alliance_destroyer.toml]
+tags: [system, systemid, console-family, control-source, ai, wire-protocol, damage-tier]
+sources: [src/ship/config.rs, src/ship/system_registry.rs, src/core/messages.rs, src/entities/spawner.rs, src/dock/server.rs, src/lobby/server.rs, src/ship/control_source.rs, src/ship/damage_sync.rs, src/ship/damage.rs, src/command_admission/policy.rs, gui/sim-state.js, gui/console-state.js, gui/dirty-consoles.js, gui/action-map.js, assets/entities/alliance_destroyer.toml]
 updated: 2026-08-27
 ---
 
@@ -29,6 +29,12 @@ power_group = "helm"
 to be registered, every station reference to resolve, and every system named by
 a station rating to exist and belong to that station.
 
+`SystemKindDescriptor` in `src/ship/system_registry.rs` is the authoritative
+metadata record for an authored kind. A kind chooses the server behaviour and
+presentation classification; the instance id remains the identity carried by
+topology, control-source and command state. The descriptor registry is separate
+from the `AdmittedConsumerRegistry` that registers command consumers.
+
 System ids are lowercase kebab strings. A fine system normally combines its
 capability and instance (`phaser-fore`, `torpedo-tube-aft`); a single coarse
 capability can use the bare id (`captain`, `navigation`, `comms`). Kind strings
@@ -39,6 +45,27 @@ Station ids and system ids are separate namespaces. `helm` and `tactical` are
 station keys used for console-level blackboards and coordination; Helm axes and
 Tactical operations target declared systems such as `helm-steering`,
 `tactical-radar`, and `phaser-control`.
+
+## Console Family
+
+A Console Family selects the client payload builder and dirty-console routing
+for a System's presentation. It does not own the System, grant access, or
+replace a command target: Station topology remains the ownership source and the
+authored `SystemId` remains command authority.
+
+Issue #1251 adds the first descriptor metadata: `command` projects to the
+Command family and `dock` projects to Helm. The host resolves kind metadata into
+`ShipClientConfig.system_console_families`, keyed by the selected ship's actual
+authored System instance ids, for `Welcome`. Until issue #1252 completes the
+census, an absent entry means an unmigrated family rather than an unknown
+System.
+
+Dock is the complete identity tracer. Spawn resolves the authored
+`kind = "dock"` instance into `DockControl.system_id`; command consumption, AI
+policy, damage lookup and blackboard publication use that field. The client
+reads the blackboard by the projected instance id and sends the same id back as
+the Dock/Undock `ControlSystem.target`. The `"dock"` helper is only the
+conventional shipped topology spelling.
 
 ## Control policy
 

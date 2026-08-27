@@ -79,6 +79,10 @@ impl DockMarkers {
 /// `docked` and `docking_target` clear together — the crew watch the dock end.
 #[derive(Component, Clone, Debug, PartialEq)]
 pub struct DockControl {
+    /// The authored `[[system]].id` for the `kind = "dock"` instance. Commands,
+    /// damage lookup, AI policy and blackboard publication all use this resolved
+    /// identity; `"dock"` is only the conventional id used by shipped hulls.
+    pub system_id: SystemId,
     /// The authored dock terms — range, engage distance, approach speed, mate
     /// tolerance, undock clearance, minimum power level.
     pub config: DockConfig,
@@ -108,10 +112,11 @@ pub struct DockControl {
 }
 
 impl DockControl {
-    /// A fresh, idle dock control carrying its authored terms and resolved power
-    /// group.
-    pub fn new(config: DockConfig, power_group: PowerGroupId) -> Self {
+    /// A fresh, idle dock control carrying its authored System identity, terms
+    /// and resolved power group.
+    pub fn new(system_id: SystemId, config: DockConfig, power_group: PowerGroupId) -> Self {
         Self {
+            system_id,
             config,
             power_group,
             engaged: false,
@@ -135,9 +140,9 @@ impl DockControl {
     }
 
     /// The persistable half — the engage/dock state and the docked target — for
-    /// the snapshot payload. The authored config and power group ride the
-    /// template and are re-derived on spawn, exactly as the tractor leaves its
-    /// coupling terms out of `TractorSaveState`.
+    /// the snapshot payload. The authored System identity, config and power
+    /// group ride the template and are re-derived on spawn, exactly as the
+    /// tractor leaves its coupling terms out of `TractorSaveState`.
     pub fn save_state(&self) -> DockSaveState {
         DockSaveState {
             engaged: self.engaged,
@@ -147,8 +152,8 @@ impl DockControl {
     }
 
     /// Reseed the engage/dock state and docked target from a restored snapshot,
-    /// onto a control that already carries its authored config and resolved power
-    /// group from the fresh spawn.
+    /// onto a control that already carries its authored System identity, config
+    /// and resolved power group from the fresh spawn.
     ///
     /// The last refusal and the undock target are deliberately NOT restored: both
     /// are projections the next `tick_dock` re-derives from the resumed world.
@@ -203,6 +208,10 @@ impl Plugin for DockPlugin {
             app.declare_state::<DockMarkers>(StateClass::Derived, "dock-controller")
                 .declare_state::<DockAiEngaged>(StateClass::Derived, "dock-relationship-state");
         }
+        // Warning-only registry coverage is still the conventional shipped id.
+        // Issue #1253 (blocked by this tracer) derives command capability and
+        // authored-instance coverage from descriptors. Runtime consumption is
+        // already instance-correct below through `DockControl::system_id`.
         app.register_admitted_consumer(ConsumerMatcher::exact(DOCK_SYSTEM_ID));
         app.add_systems(
             FixedUpdate,
@@ -245,7 +254,10 @@ pub fn handle_dock_commands(
     )>,
 ) {
     for (admitted, transform, mut dock) in ships.iter_mut() {
-        for cmd in admitted.for_target(DOCK_SYSTEM_ID) {
+        // Clone the resolved target string before mutating the component below.
+        // The id itself remains authored topology, not a per-command decision.
+        let system_id = dock.system_id.0.clone();
+        for cmd in admitted.for_target(&system_id) {
             match &cmd.payload {
                 SystemControlPayload::Dock if !dock.engaged => {
                     match dock.available_target.clone() {
@@ -329,7 +341,7 @@ pub fn operate_dock_ai(
     for (entity, uuid, sources, config, dock, blackboards, host_engaged, mut admitted) in
         ships.iter_mut()
     {
-        if !sources.0.policy_for(&dock_system_id()).operate_ai {
+        if !sources.0.policy_for(&dock.system_id).operate_ai {
             continue;
         }
         let directive_target: Option<String> = match blackboards
@@ -378,7 +390,7 @@ pub fn operate_dock_ai(
         if let Some(payload) = payload {
             emit_ai_command(
                 uuid,
-                dock_system_id(),
+                dock.system_id.clone(),
                 payload,
                 sources,
                 &sessions,
@@ -474,7 +486,7 @@ pub fn tick_dock(
         let disabled = hull
             .map(|h| {
                 matches!(
-                    h.0.tier_for(&dock_system_id()),
+                    h.0.tier_for(&dock.system_id),
                     DamageTier::Disabled | DamageTier::Destroyed
                 )
             })
@@ -753,7 +765,6 @@ pub fn publish_dock_blackboard(
     mut ships: Query<(&DockControl, &mut crate::server_app::ShipSystemBlackboards)>,
     named: Query<(&EntityUuid, &EntityName)>,
 ) {
-    let key = dock_system_id();
     let name_of = |uuid: &Option<String>| -> Option<String> {
         uuid.as_ref().and_then(|u| {
             named
@@ -763,6 +774,7 @@ pub fn publish_dock_blackboard(
         })
     };
     for (dock, mut blackboards) in ships.iter_mut() {
+        let key = &dock.system_id;
         let blackboard = SystemBlackboard::Dock(DockBlackboard {
             range: dock.config.range,
             available: dock.available_target.is_some() && !dock.docked,
@@ -774,13 +786,17 @@ pub fn publish_dock_blackboard(
             docked_to_name: name_of(&dock.docked_partner().map(|s| s.to_string())),
             refusal: dock.last_refusal.map(|r| r.string_id().to_string()),
         });
-        if blackboards.0.get(&key) != Some(&blackboard) {
+        if blackboards.0.get(key) != Some(&blackboard) {
             blackboards.0.insert(key.clone(), blackboard);
         }
     }
 }
 
-/// The dock's published blackboard channel key — its system id (issue #1159).
+/// The conventional shipped dock blackboard key (issue #1159).
+///
+/// Runtime publication uses [`DockControl::system_id`], resolved from the
+/// authored `kind = "dock"` instance. This helper remains for canonical
+/// topology fixtures and callers that deliberately author `id = "dock"`.
 pub fn dock_blackboard_key() -> SystemId {
     dock_system_id()
 }
@@ -843,8 +859,12 @@ mod tests {
         }
     }
 
+    fn control_with_id(id: &str) -> DockControl {
+        DockControl::new(SystemId(id.into()), config(), PowerGroupId("dock".into()))
+    }
+
     fn control() -> DockControl {
-        DockControl::new(config(), PowerGroupId("dock".into()))
+        control_with_id(DOCK_SYSTEM_ID)
     }
 
     #[test]
@@ -873,6 +893,65 @@ mod tests {
         assert_eq!(c.docked_partner(), None, "approaching is not yet docked");
         c.docked = true;
         assert_eq!(c.docked_partner(), Some("berth-1"));
+    }
+
+    #[test]
+    fn authored_instance_id_is_the_consumed_command_target() {
+        let mut app = App::new();
+        app.add_systems(Update, handle_dock_commands);
+
+        let mut dock = control_with_id("berthing-clamps");
+        dock.available_target = Some("berth-1".into());
+        let entity = app
+            .world_mut()
+            .spawn((
+                dock,
+                Transform::default(),
+                crate::core::messages::AdmittedCommands(vec![
+                    crate::core::messages::AdmittedCommand {
+                        target: SystemId("berthing-clamps".into()),
+                        payload: SystemControlPayload::Dock,
+                        response_token: None,
+                    },
+                ]),
+            ))
+            .id();
+
+        app.update();
+
+        let dock = app.world().entity(entity).get::<DockControl>().unwrap();
+        assert!(dock.engaged, "the authored Dock SystemId must be consumed");
+        assert_eq!(dock.docking_target.as_deref(), Some("berth-1"));
+    }
+
+    #[test]
+    fn authored_instance_id_is_the_published_blackboard_key() {
+        let mut app = App::new();
+        app.add_systems(Update, publish_dock_blackboard);
+
+        let entity = app
+            .world_mut()
+            .spawn((
+                control_with_id("berthing-clamps"),
+                crate::server_app::ShipSystemBlackboards::default(),
+            ))
+            .id();
+
+        app.update();
+
+        let blackboards = app
+            .world()
+            .entity(entity)
+            .get::<crate::server_app::ShipSystemBlackboards>()
+            .unwrap();
+        assert!(matches!(
+            blackboards.0.get(&SystemId("berthing-clamps".into())),
+            Some(SystemBlackboard::Dock(_))
+        ));
+        assert!(
+            !blackboards.0.contains_key(&dock_system_id()),
+            "an arbitrary authored id must not also publish a literal dock channel"
+        );
     }
 
     #[test]

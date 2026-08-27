@@ -8,11 +8,46 @@ entities:
     architecture:
       kind: client-shell
       authority: non-authoritative
-      reads: [session-station-ownership-state, ship-station-system-topology-state]
+      reads: [session-station-ownership-state, ship-station-system-topology-state, client-system-console-family-replica]
       runs_in: [phone-browser-runtime]
     implementation:
       status: declared
       paths: [gui/mount-plan.js, gui/content-switcher.js, gui/console-state.js, gui/console-resolver.js]
+      tests: [npx vitest run]
+
+  - state: client-system-console-family-replica
+    core:
+      status: partially-implemented
+      confidence: confirmed
+      title: Client System Console Family Replica
+      summary: Read-only phone-client copy of the selected ship's System instance id to Console Family projection. The #1251 tracer carries Command and Dock; absence means an unmigrated descriptor until issue #1252, never a new source of ownership or command authority.
+    architecture:
+      classification: replicated
+      owner: system-kind-registry
+      derived_from: [system-console-family-projection-state]
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs, src/lobby/server.rs, gui/sim-state.js]
+      tests: [cargo test, npx vitest run]
+
+  - component: client-console-family-router
+    core:
+      status: partially-implemented
+      confidence: confirmed
+      title: Client Console Family Router
+      summary: Selects console payload builders and BlackboardUpdate dirtiness from authoritative per-System Console Family metadata. Command builder selection plus Dock-to-Helm refresh, authored-id blackboard lookup and action targeting are the #1251 tracer; exact/prefix inference remains only for unmigrated families and the station-name fallback only before Welcome, with both removed by issue #1252.
+      rationale:
+        - "A Console Family describes presentation only. Station topology still decides which surface owns a System, and SystemId still targets command authority."
+        - "The temporary matcher runs only when an instance has no projected descriptor entry; it must not learn new Command or Dock spellings, because that would hide missing authoritative metadata."
+        - "Welcome establishes the metadata boundary even when its map is empty: after that point a missing Command descriptor cannot be replaced by the canonical Station-name builder fallback."
+    architecture:
+      kind: presentation-router
+      authority: non-authoritative
+      reads: [client-system-console-family-replica, ship-station-system-topology-state, ship-system-blackboards-state]
+      runs_in: [phone-browser-runtime]
+    implementation:
+      status: declared
+      paths: [gui/sim-state.js, gui/console-state.js, gui/dirty-consoles.js, gui/action-map.js, gui/destroyer/helm.console.js, gui/destroyer/helm.html, client.html]
       tests: [npx vitest run]
 
   - component: client-simulation-state-store

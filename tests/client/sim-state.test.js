@@ -396,6 +396,27 @@ describe('apply Welcome', () => {
     expect(s.repairTeams).toEqual([]); // no pre-seed during lobby
   });
 
+  it('folds the authoritative Command/Dock Console Family projection', () => {
+    const s = new ClientSimState();
+    expect(s.hasSystemConsoleFamilyProjection).toBe(false);
+    s.apply(welcome(null, {
+      station_systems: { bridge: ['bridge-orders'], flight: ['berthing-clamps'] },
+      system_console_families: {
+        'bridge-orders': 'command',
+        'berthing-clamps': 'helm',
+      },
+    }));
+    expect(s.systemConsoleFamilies).toEqual({
+      'bridge-orders': 'command',
+      'berthing-clamps': 'helm',
+    });
+    expect(s.hasSystemConsoleFamilyProjection).toBe(true);
+
+    s.apply(welcome(null, {}));
+    expect(s.systemConsoleFamilies).toEqual({});
+    expect(s.hasSystemConsoleFamilyProjection).toBe(true);
+  });
+
   it('keeps authority and placement projections through an in-progress reconnect Welcome', () => {
     const s = new ClientSimState();
     s.apply({ type: 'SimState', data: { snapshot: {

@@ -4683,6 +4683,58 @@ fn ship_client_config_station_systems_round_trips() {
 }
 
 #[test]
+fn ship_client_config_console_families_round_trip_as_public_strings() {
+    let system_console_families = HashMap::from([
+        ("command".to_string(), ConsoleFamily::Command),
+        ("dock".to_string(), ConsoleFamily::Helm),
+    ]);
+    let config = ShipClientConfig {
+        system_console_families,
+        ..ShipClientConfig::default()
+    };
+    let msg = ServerMessage::Welcome {
+        state: state(),
+        ship_stations: empty_ship_stations(),
+        ship_config: config.clone(),
+        station_ratings: HashMap::new(),
+    };
+
+    let json = JsonCodec.encode_server(&msg).unwrap();
+    assert!(json.contains("\"command\":\"command\""));
+    assert!(json.contains("\"dock\":\"helm\""));
+    let decoded = JsonCodec.decode_server(&json).unwrap();
+    if let ServerMessage::Welcome { ship_config, .. } = decoded {
+        assert_eq!(
+            ship_config.system_console_families,
+            config.system_console_families
+        );
+    } else {
+        panic!("expected Welcome");
+    }
+}
+
+#[test]
+fn ship_client_config_console_families_default_empty_when_missing() {
+    let msg = ServerMessage::Welcome {
+        state: state(),
+        ship_stations: empty_ship_stations(),
+        ship_config: ShipClientConfig::default(),
+        station_ratings: HashMap::new(),
+    };
+    let json = JsonCodec.encode_server(&msg).unwrap();
+    assert!(
+        !json.contains("system_console_families"),
+        "the empty projection is omitted from the public payload"
+    );
+    let decoded = JsonCodec.decode_server(&json).unwrap();
+    if let ServerMessage::Welcome { ship_config, .. } = decoded {
+        assert!(ship_config.system_console_families.is_empty());
+    } else {
+        panic!("expected Welcome");
+    }
+}
+
+#[test]
 fn ship_client_config_station_systems_defaults_empty_when_missing() {
     // Old server payloads without station_systems should decode cleanly.
     // Build a minimal Welcome message, encode it, strip the station_systems

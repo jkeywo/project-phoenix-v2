@@ -1602,13 +1602,21 @@ impl SpawnSection for DockSpawn {
                     }
                 }
             }
-            if let Some(power_group) = config.ship_config.as_ref().and_then(|sc| {
+            if let Some((system_id, power_group)) = config.ship_config.as_ref().and_then(|sc| {
                 sc.systems
                     .iter()
                     .find(|s| s.kind == crate::ship::system_registry::DOCK_KIND)
-                    .and_then(|s| s.power_group.clone())
+                    .and_then(|s| {
+                        s.power_group
+                            .clone()
+                            .map(|power_group| (s.id.clone(), power_group))
+                    })
             }) {
-                cmds.insert(crate::dock::DockControl::new(dock.clone(), power_group));
+                cmds.insert(crate::dock::DockControl::new(
+                    system_id,
+                    dock.clone(),
+                    power_group,
+                ));
             }
         }
     }

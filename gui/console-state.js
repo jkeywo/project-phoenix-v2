@@ -1018,9 +1018,10 @@ export function buildHelmConsoleState(state) {
     hostile_arc_color:   state.hostileArcColor || null,
     // ── Contextual dock control (issue #1159) ─────────────────────────────
     // The dock's own blackboard, published under its system id by a hull whose
-    // helm owns a `dock` system. A hull without one publishes no such
-    // blackboard, so `dock` is null and the helm console shows no dock control
-    // at all — the destroyer is unchanged until #1164 gives it a dock. The
+    // Helm owns a `kind = "dock"` System. Its blackboard is published under the
+    // authored instance id resolved through Console Family metadata; a hull
+    // without one publishes no such blackboard, so `dock` is null and the helm
+    // console shows no dock control at all. The
     // contextual control appears exactly when `available` is true and becomes
     // the undock control when `docked`; every string it shows is a `t()` id, so
     // no English crosses here.
@@ -1062,22 +1063,44 @@ export function buildHelmTowLoadView(state) {
 }
 
 /**
- * The dock control's view for the helm console (issue #1159), read from the raw
- * `dock` blackboard the helm-owned `dock` system publishes. Returns `null` when
- * the hull has no dock system (no blackboard), so the console renders no control.
+ * The dock control's view for the helm console (issues #1159, #1251), read from
+ * the raw blackboard published under the authored `kind = "dock"` System id.
+ * During #1251 Dock is the authoritative Helm-family descriptor tracer, so its
+ * projected instance id selects the blackboard without relying on either the
+ * System or Station id spelling. Returns `null` when the hull has no Dock
+ * descriptor/blackboard, so the console renders no control.
  *
  * `present` is the server's own gate; the client mirrors it rather than
  * re-deriving range so the human and the AI agree by construction. `available`
  * is when the Dock control shows, `docked` when it becomes Undock, and `refusal`
  * is a `strings.csv` id the console resolves.
  *
- * @param {{ blackboards? }} state
+ * @param {{ blackboards?, systemConsoleFamilies?,
+ *           hasSystemConsoleFamilyProjection? }} state
  * @returns {object|null}
  */
 export function buildHelmDockView(state) {
-  const bb = state.blackboards && state.blackboards['dock'];
+  const blackboards = state.blackboards || {};
+  const projectedIds = Object.entries(state.systemConsoleFamilies || {})
+    .filter(([id, family]) => family === 'helm'
+      && Object.prototype.hasOwnProperty.call(blackboards, id))
+    .map(([id]) => id);
+
+  // This slice projects Dock as the Helm tracer; all other Helm kinds remain on
+  // #1251's temporary inference path until #1252. Requiring exactly one live
+  // projected candidate avoids silently choosing between future descriptors.
+  // The literal is retained only for genuine pre-Welcome state, preserving the
+  // existing canonical boot behavior without overriding an empty projection.
+  const systemId = projectedIds.length === 1
+    ? projectedIds[0]
+    : (!state.hasSystemConsoleFamilyProjection
+        && Object.prototype.hasOwnProperty.call(blackboards, 'dock')
+      ? 'dock'
+      : null);
+  const bb = systemId ? blackboards[systemId] : null;
   if (!bb) return null;
   return {
+    system_id: systemId,
     range: bb.range ?? 0,
     available: !!bb.available,
     available_target: bb.available_target ?? null,
@@ -1864,19 +1887,28 @@ export function buildNavigationConsoleState(state) {
 }
 
 /**
- * Map a fine (TOML) system id to the console family that renders it, or null
- * for ids no console view covers.
+ * Resolve a fine (TOML) System id to the Console Family that renders it, or
+ * null for ids no console view covers.
  *
- * Single source of truth for system-id → console-family matching: used here
- * to pick which owned systems feed each aggregate view, and by
- * gui/dirty-consoles.js to derive which station's console a BlackboardUpdate
- * dirties. Keep the two consumers in sync by editing only this function.
+ * The host-projected `systemConsoleFamilies` map is authoritative. Issue #1251
+ * supplies Command and Dock as the end-to-end tracer. The exact/prefix matcher
+ * below is retained ONLY for ids whose kind has not migrated yet; issue #1252
+ * projects every family and deletes that temporary inference fallback.
  *
  * @param {string} id  fine system id (e.g. 'helm-throttle', 'phaser-bank-1')
+ * @param {Object<string, string>|null|undefined} systemConsoleFamilies
+ *   authoritative instance-id → Console Family projection from Welcome
  * @returns {string|null}  console family name ('captain', 'helm', 'tactical',
- *   'sensors', 'navigation', 'comms', 'shields', 'power', 'repair') or null
+ *   'sensors', 'navigation', 'comms', 'shields', 'power', 'repair',
+ *   'command', 'tractor', 'umbilical') or null
  */
-export function consoleForSystemId(id) {
+export function consoleForSystemId(id, systemConsoleFamilies) {
+  const projected = systemConsoleFamilies && systemConsoleFamilies[id];
+  if (typeof projected === 'string' && projected !== '') return projected;
+
+  // TEMPORARY #1251 migration fallback. It applies only when this System id
+  // has no projected descriptor entry; #1252 removes this whole census once
+  // every shipped kind and reserved blackboard channel declares a family.
   if (id === 'captain' || id === 'viewscreen' || id === 'red-alert') return 'captain';
   if (id.startsWith('helm-')) return 'helm';
   if (id === 'tactical-radar' || id === 'phaser-control' || id.startsWith('phaser-')
@@ -1942,8 +1974,8 @@ export function buildUmbilicalConsoleState(state) {
  * Console family → the flat (plain, non-system-keyed) builder that produces its
  * payload. Used by buildConsoleStateInner to dispatch a single-family station by
  * the family it OWNS rather than by its station-id string (issue #925), so a
- * flat console renders correctly regardless of what the seat is named. Every
- * family here has a matching flat `gui/battleship/*.html` console.
+ * flat console renders correctly regardless of what the seat is named. A
+ * family may use a ship-class-specific surface rather than a battleship page.
  */
 const FAMILY_BUILDERS = {
   captain: buildCaptainConsoleState,
@@ -1955,6 +1987,7 @@ const FAMILY_BUILDERS = {
   shields: buildShieldsConsoleState,
   power: buildPowerConsoleState,
   repair: buildRepairConsoleState,
+  command: buildCommandConsoleState,
 };
 
 /**
@@ -1994,7 +2027,7 @@ export function buildSystemStationConsoleState(stationId, state) {
   const controlSources = state.controlSources || {};
   const add = (group, build, adjust) => {
     const view = JSON.parse(build(state));
-    const owned = ids.filter(id => consoleForSystemId(id) === group);
+    const owned = ids.filter(id => consoleForSystemId(id, state.systemConsoleFamilies) === group);
     if (owned.length === 0) return;
     if (adjust) adjust(view, owned);
     owned.forEach(id => { systems[id] = view; });
@@ -2023,6 +2056,8 @@ export function buildSystemStationConsoleState(stationId, state) {
     (view) => { view.power_auto = controlSources['power-reactor'] === 'Ai'; });
   add('repair', buildRepairConsoleState,
     (view) => { view.repair_auto = controlSources['repair'] === 'Ai'; });
+  add('command', buildCommandConsoleState,
+    (view, owned) => { view.command_auto = allAi(owned); });
   add('tractor', buildTractorConsoleState,
     (view) => { view.tractor_auto = controlSources['tractor'] === 'Ai'; });
   add('umbilical', buildUmbilicalConsoleState,
@@ -2153,7 +2188,7 @@ export function withVisitingSystems(consoleName, state, json) {
     if (visiting.length > 0) {
       const systems = obj.systems || {};
       for (const id of visiting) {
-        const build = FAMILY_BUILDERS[consoleForSystemId(id)];
+        const build = FAMILY_BUILDERS[consoleForSystemId(id, state.systemConsoleFamilies)];
         if (build) systems[id] = JSON.parse(build(state));
       }
       obj.systems = systems;
@@ -2226,7 +2261,11 @@ if (typeof window !== 'undefined') {
     // the station already has — see `withVisitingSystems`.
     const owned = state.stationSystems?.[consoleName];
     if (owned) {
-      const families = [...new Set(owned.map(consoleForSystemId).filter(f => f !== null))];
+      const families = [...new Set(
+        owned
+          .map(id => consoleForSystemId(id, state.systemConsoleFamilies))
+          .filter(f => f !== null),
+      )];
       if (families.length > 1) {
         return buildSystemStationConsoleState(consoleName, state);
       }
@@ -2242,22 +2281,27 @@ if (typeof window !== 'undefined') {
         if (build) return build(state);
       }
     }
-    // Pre-Welcome boot race (stationSystems not yet delivered): fall back to the
-    // plain builder matching the station id ('{}' for ids with no single-family
-    // builder, e.g. 'science', 'engineering' or 'pilot' — they render on the
-    // next update once stationSystems arrives and the family dispatch above runs).
-    switch (consoleName) {
-      case 'tactical':    return buildWeaponsConsoleState(state);
-      case 'captain':     return buildCaptainConsoleState(state);
-      case 'helm':        return buildHelmConsoleState(state);
-      case 'repair':      return buildRepairConsoleState(state);
-      case 'power':       return buildPowerConsoleState(state);
-      case 'shields':     return buildShieldsConsoleState(state);
-      case 'sensors':     return buildSensorsConsoleState(state);
-      case 'comms':       return buildCommsConsoleState(state);
-      case 'navigation':  return buildNavigationConsoleState(state);
-      case 'command':     return buildCommandConsoleState(state);
-      default:            return '{}';
+    // TEMPORARY #1251 pre-Welcome fallback: before topology arrives, use the
+    // plain builder matching the station id ('{}' for ids with no builder).
+    // Once Welcome establishes the projection boundary, a missing descriptor
+    // is authoritative: do not silently select canonical Command (or any other
+    // family) by station spelling. Issue #1252 removes this boot path with the
+    // remaining unmigrated-family matcher.
+    if (!state.hasSystemConsoleFamilyProjection) {
+      switch (consoleName) {
+        case 'tactical':    return buildWeaponsConsoleState(state);
+        case 'captain':     return buildCaptainConsoleState(state);
+        case 'helm':        return buildHelmConsoleState(state);
+        case 'repair':      return buildRepairConsoleState(state);
+        case 'power':       return buildPowerConsoleState(state);
+        case 'shields':     return buildShieldsConsoleState(state);
+        case 'sensors':     return buildSensorsConsoleState(state);
+        case 'comms':       return buildCommsConsoleState(state);
+        case 'navigation':  return buildNavigationConsoleState(state);
+        case 'command':     return buildCommandConsoleState(state);
+        default:            return '{}';
+      }
     }
+    return '{}';
   };
 }

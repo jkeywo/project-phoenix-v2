@@ -184,6 +184,19 @@ describe('dirtyConsolesFor — composite stations route to the owning console', 
 });
 
 describe('dirtyConsolesFor — fallbacks and edge cases', () => {
+  it('routes a Dock blackboard to its Helm console through projected metadata', () => {
+    const stations = { 'flight-control': ['berthing-clamps'] };
+    const families = { 'berthing-clamps': 'helm' };
+    expect(dirtyConsolesFor(bbUpdate(['berthing-clamps']), stations, families))
+      .toEqual(new Set(['flight-control']));
+  });
+
+  it('does not guess an unmapped Dock family from either id spelling', () => {
+    const stations = { 'flight-control': ['berthing-clamps'] };
+    expect(dirtyConsolesFor(bbUpdate(['berthing-clamps']), stations, {}))
+      .toEqual(new Set());
+  });
+
   it('missing stationSystems falls back to coarse identity (boot race before Welcome)', () => {
     expect(dirtyConsolesFor(bbUpdate(['power']), null))
       .toEqual(new Set(['power']));

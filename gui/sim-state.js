@@ -132,6 +132,16 @@ export class ClientSimState {
     /** Station → system id list, populated from Welcome ship_config.station_systems.
      *  Used by aggregateStationHull to compute per-station damage from consoleHull. */
     this.stationSystems = {};
+    /** Authoritative System id → Console Family projection (issue #1251),
+     *  populated from Welcome ship_config.system_console_families. The tracer
+     *  carries Command and Dock; missing ids remain on the explicitly temporary
+     *  client inference path until #1252 completes the descriptor migration. */
+    this.systemConsoleFamilies = {};
+    /** Whether a Welcome has supplied the topology projection boundary.
+     *  `systemConsoleFamilies === {}` alone is ambiguous before Welcome; once
+     *  this is true, an absent descriptor is authoritative and must not revive
+     *  a station-name builder fallback. */
+    this.hasSystemConsoleFamilyProjection = false;
     /** Anonymous eligibility projection (issue #1103): station → rating →
      *  assist-function ids that station forces manual. From Welcome
      *  ship_config.station_assist_gaps. Hull-derived config, never a profile. */
@@ -375,6 +385,11 @@ export class ClientSimState {
         this.stationTutorials  = sc.station_tutorials   || {};
         this.stationRatings = d.station_ratings || {};
         this.stationSystems = sc.station_systems || {};
+        this.systemConsoleFamilies = sc.system_console_families || {};
+        // Welcome is the projection boundary even when the map is empty (or an
+        // older compatible payload omitted the additive field). After this
+        // point a missing Command descriptor must not be guessed by station id.
+        this.hasSystemConsoleFamilyProjection = true;
         // Anonymous eligibility projection (issue #1103): per station → per
         // rating → the assist-functions that station forces manual. Hull-derived
         // config, never anyone's profile; the lobby glue runs the SAME rule as

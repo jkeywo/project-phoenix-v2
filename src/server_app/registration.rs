@@ -512,17 +512,33 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 StateClass::DeferredFold,
                 "comms-range-state",
             )
-            // Both folded since issue #1086: `sim_digest::fold_comms_scope`
-            // walks the inbox, the live dialogues and the open-hail set every
-            // tick. `CommsRuntime`'s derived halves (`contacts`, `range_flags`,
-            // `range_active`, `needs_broadcast`) are recomputed each tick by
-            // `update_comms_range_flags` and are excluded there by name.
+            // Issue #1086 put both types into `sim_digest::fold_comms_scope`,
+            // and they land on DIFFERENT classes because one is folded whole and
+            // the other is not — the standard stated once in
+            // tests/authoritative_state_enumeration.rs's `WorldContentRuntime`
+            // paragraph and applied here: `Folded` means the whole resource is
+            // walked, and a partly-walked one keeps `DeferredFold` plus a comment
+            // naming the halves.
+            //
+            // `CommsInboxRes` IS folded whole: every field of every
+            // `CommsMessage`, the stored `sender_in_range` and per-response
+            // `available` included (they are written once at injection and
+            // carried verbatim by `snapshot::CommsState::inbox` — the per-tick
+            // stamping happens on clones, never on the stored message).
             .declare_state::<crate::comms::server::CommsInboxRes>(
                 StateClass::Folded,
                 "comms-inbox-state",
             )
+            // `CommsRuntime` is folded in HALF: `active_dialogues` and
+            // `open_hails` are walked; `contacts`, `range_flags` and
+            // `range_active` are rebuilt every tick by
+            // `update_comms_range_flags` from live entities and transforms the
+            // entity namespace already folds, and `needs_broadcast` /
+            // `last_broadcast_host` are broadcast bookkeeping (which peer was
+            // last sent a `CommsState`, and whether one is owed) that the restore
+            // re-establishes rather than carries.
             .declare_state::<crate::comms::server::CommsRuntime>(
-                StateClass::Folded,
+                StateClass::DeferredFold,
                 "comms-dialogue-state",
             )
             .declare_state::<crate::console::navigation::NavigationWaypoint>(
@@ -737,13 +753,22 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             StateClass::DeferredFold,
             "world-event-buffer-state",
         )
-        // Folded since issue #1086: `sim_digest::fold_scenario_flags` walks
-        // every ACTIVE layer's path, activation ordinal and `FlagStore`, which
-        // is the composition topology a snapshot recreates. The rest of a
-        // `WorldRuntime` row (anchors, spawned handles, owned objective ids)
-        // stays deferred.
+        // Partly folded since issue #1086, so it keeps `DeferredFold` — the
+        // standard `CommsRuntime` above and `WorldContentRuntime` in
+        // tests/authoritative_state_enumeration.rs are held to.
+        // `sim_digest::fold_scenario_flags` walks every ACTIVE layer's path, its
+        // `loader_path` and its POSITION in the activation order, plus its
+        // `FlagStore` — the composition topology a snapshot recreates. The rest
+        // of a `WorldRuntime` row stays outside the fold: `anchors`,
+        // `delayed_unload_resolve` and `script_units` are authored content
+        // (`snapshot::content_digest` answers for them), `spawned_entities` are
+        // ECS handles whose identities the entity namespace already folds,
+        // `owned_objective_ids` are re-derived from the layer's own trigger
+        // replay, and the raw `activation_order` is deliberately not folded at
+        // all — see `fold_scenario_flags` for why the payload cannot round-trip
+        // it.
         .declare_state::<crate::world::server::WorldLayerMap>(
-            StateClass::Folded,
+            StateClass::DeferredFold,
             "world-layer-runtime-state",
         );
     }

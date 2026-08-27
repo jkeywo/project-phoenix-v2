@@ -560,8 +560,9 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     //
     // Issue #1086 CASHED IN most of the "belongs in the same digest fold"
     // language above, and the two entries stay here for a narrower reason than
-    // they used to. `sim_digest::fold_scenario_scope` now walks, every tick:
-    // `WorldContentRuntime`'s `flags`, `trigger_states` latches,
+    // they used to. `sim_digest::fold_scenario_scope` now walks, on every digest
+    // sample and on every save and restore: `WorldContentRuntime`'s `flags`,
+    // `trigger_states` (authored identity plus latches),
     // `pending_world_events`, `entity_groups`, `deadlines`, `commitments`,
     // `evidence` and `workforce`; and `WorldScriptRuntime`'s `pending_callbacks`
     // and `pending_comms_opens`. So every FIELD the paragraphs above account for
@@ -570,16 +571,34 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // and the campaign handoff counters (#1043) — is folded rather than merely
     // snapshotted.
     //
-    // What keeps both types on THIS list rather than declared `Folded` is that
-    // neither is folded whole, and saying otherwise would be the kind of
-    // explicit-and-wrong claim this file exists to prevent. `WorldContentRuntime`
+    // ── THE CLASSIFICATION RULE, STATED ONCE ────────────────────────────────
+    //
+    // `StateClass::Folded` means `sim_digest::world_digest` walks the WHOLE
+    // type. A type only PART of which is walked keeps `DeferredFold` (or, as
+    // here, stays unclassified) and carries an adjacent comment naming the
+    // folded halves and the excluded ones with their real reasons. Saying
+    // "folded" for a partly-folded type would be the kind of explicit-and-wrong
+    // claim this file exists to prevent — and the rule has to be one rule, so
+    // #1086's other two partly-folded types are held to it as well:
+    // `comms::server::CommsRuntime` (dialogues and hails walked; contacts, range
+    // flags, range_active and the broadcast bookkeeping not) and
+    // `world::server::WorldLayerMap` (each active layer's path, loader_path,
+    // position and flags walked; anchors, spawned handles, owned objective ids,
+    // the unload policy, the script units and the raw activation ordinal not)
+    // are declared `DeferredFold` in `server_app::registration` with exactly
+    // that comment. `comms::server::CommsInboxRes` is the one #1086 type that
+    // genuinely IS folded whole, and it is the only one declared `Folded`.
+    //
+    // What keeps both types below on THIS list, by that rule: `WorldContentRuntime`
     // still carries `pending_delayed_actions` (authoritative, and deliberately
     // out of both the payload and the fold — see `fold_scenario_records`),
     // `name_to_uuid` and `observed_hull_fractions` (re-derived), the
-    // `mission_clock_anchor_secs` reading and `trigger_table_generation` (the
-    // cache token four bullets up). `WorldScriptRuntime` is mostly compiled ASTs,
-    // the per-tick budget and the content hash, none of which the AUTHORITATIVE
-    // fold has any business touching — `content_digest` answers for them.
+    // `mission_clock_anchor_secs` reading, `trigger_table_generation` (the
+    // cache token four bullets up) and `loaded_scenario_paths` (the layer-load
+    // dedup set, which the payload does not carry). `WorldScriptRuntime` is
+    // mostly compiled ASTs, the per-tick budget and the content hash, none of
+    // which the AUTHORITATIVE fold has any business touching — `content_digest`
+    // answers for them.
     "project_phoenix::world::server::BridgeWorldSource",
     "project_phoenix::world::server::PreCompiledScripts",
     "project_phoenix::world::server::RawWorldSource",

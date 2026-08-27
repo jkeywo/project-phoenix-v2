@@ -871,10 +871,14 @@ root(ctx)
 //
 // `default.toml` is the first world whose COMMS moved to `[script]`, and
 // the digest A/B that gates a conversion cannot speak for it: nothing in
-// that world attacks or hails anything during a headless run, and
-// `state_digest` folds no comms state in any case. These three tests are the
-// behavioural half of the evidence — the real shipped script, compiled the
-// way production compiles it, driven through the live path.
+// that world attacks or hails anything during a headless run, so there is no
+// comms state for a digest to differ over. (Since issue #1086 a digest A/B
+// WOULD cover comms state when there is any — `sim_digest::fold_comms_scope`
+// folds the inbox, the dialogues, the open hails and the pending opens — which
+// makes the "nothing happens in this world" half of the argument the whole of
+// it.) These three tests are the behavioural half of the evidence — the real
+// shipped script, compiled the way production compiles it, driven through the
+// live path.
 
 /// The reference id `default.toml` gives Starbase Alpha. The `[[comms]]`
 /// blocks the conversion deleted named it in `from` and `entity`; the

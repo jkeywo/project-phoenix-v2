@@ -2,7 +2,7 @@
 title: System
 type: entity
 tags: [system, systemid, console-family, control-source, ai, wire-protocol, damage-tier]
-sources: [src/ship/config.rs, src/ship/system_registry.rs, src/core/messages.rs, src/entities/spawner.rs, src/dock/server.rs, src/lobby/server.rs, src/ship/control_source.rs, src/ship/damage_sync.rs, src/ship/damage.rs, src/command_admission/policy.rs, gui/sim-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/action-map.js, assets/entities/alliance_destroyer.toml]
+sources: [src/ship/config.rs, src/ship/system_registry.rs, src/command_admission/policy.rs, src/command_admission/router.rs, src/server_app/registration.rs, src/world/server.rs, src/core/messages.rs, src/entities/spawner.rs, src/dock/server.rs, src/lobby/server.rs, src/ship/control_source.rs, src/ship/damage_sync.rs, src/ship/damage.rs, gui/sim-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/action-map.js, assets/entities/alliance_destroyer.toml]
 updated: 2026-08-27
 ---
 
@@ -32,8 +32,23 @@ a station rating to exist and belong to that station.
 `SystemKindDescriptor` in `src/ship/system_registry.rs` is the authoritative
 metadata record for an authored kind. A kind chooses the server behaviour and
 presentation classification; the instance id remains the identity carried by
-topology, control-source and command state. The descriptor registry is separate
-from the `AdmittedConsumerRegistry` that registers command consumers.
+topology, control-source and command state. It also declares whether the kind
+accepts admitted commands, so passive topology does not manufacture a consumer
+requirement.
+
+The descriptor registry remains separate from the `AdmittedConsumerRegistry`:
+domain plugins read `AdmittedCommands` on their existing schedules and register
+the System kind plus the address domain their reader accepts. Fixed-id readers
+claim an exact id, generated banks/tubes/arcs claim a prefix, and readers such
+as Dock that carry the authored id claim any instance of their kind. Undeclared
+host capabilities such as God Mode retain a separate exact-target claim.
+
+The production coverage guard composes the real simulation and World plugins,
+then derives required coverage from commandable descriptors and every resolved
+top-level shipped hull. Each authored instance must fall inside its consumer's
+declared domain; there is no parallel expected-id fixture. The same resolution
+drives the end-of-frame warning for admitted commands with no matching
+consumer.
 
 System ids are lowercase kebab strings. A fine system normally combines its
 capability and instance (`phaser-fore`, `torpedo-tube-aft`); a single coarse

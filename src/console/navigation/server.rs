@@ -24,7 +24,10 @@ impl Plugin for NavigationPlugin {
         crate::ai::cadence::register_ai_cadence(app);
         // Admitted-command consumer (issue #833): `handle_navigation_waypoint`
         // reads the `navigation` system's admitted commands.
-        app.register_admitted_consumer(ConsumerMatcher::exact(NAVIGATION_SYSTEM_ID));
+        app.register_admitted_consumer(ConsumerMatcher::exact(
+            crate::ship::system_registry::NAVIGATION_KIND,
+            NAVIGATION_SYSTEM_ID,
+        ));
         // The admitted-waypoint applier moves Input→Physics (issue #830):
         // `operate_navigation_ai` emits its `SetNavigationWaypoint` into
         // `AdmittedCommands` in Physics, and admission clears `AdmittedCommands`

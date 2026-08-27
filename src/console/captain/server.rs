@@ -34,12 +34,15 @@ impl Plugin for CaptainPlugin {
         // (red-alert), `handle_set_objective_priority` (captain), and
         // `handle_set_view` (viewscreen SetView).
         app.register_admitted_consumer(ConsumerMatcher::exact(
+            crate::ship::system_registry::RED_ALERT_KIND,
             crate::ship::system_registry::RED_ALERT_SYSTEM_ID,
         ))
         .register_admitted_consumer(ConsumerMatcher::exact(
+            crate::ship::system_registry::CAPTAIN_KIND,
             crate::ship::system_registry::CAPTAIN_SYSTEM_ID,
         ))
         .register_admitted_consumer(ConsumerMatcher::exact(
+            crate::ship::system_registry::VIEWSCREEN_KIND,
             crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID,
         ));
         app.init_resource::<crate::server_app::CaptainPriorityBoost>();

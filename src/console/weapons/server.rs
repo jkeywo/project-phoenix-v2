@@ -83,20 +83,32 @@ impl Plugin for WeaponsPlugin {
         // control — now travels as a `ControlSystem` envelope through the
         // admission seam. Each phaser bank (`phaser-{bank}`), torpedo tube
         // (`torpedo-tube-{id}`), and blaster bank (`blaster-{bank}`) is a
-        // routed admitted consumer. The `torpedo-tube-*` prefix also covers
+        // routed admitted consumer. Prefix registration mirrors the canonical
+        // forward mappings for every authored bank/tube id and also covers
         // `SetTorpedoVolleyTarget`.
         app.register_admitted_consumer(ConsumerMatcher::exact(
+            crate::ship::system_registry::TACTICAL_RADAR_KIND,
             crate::ship::system_registry::TACTICAL_RADAR_SYSTEM_ID,
         ))
         .register_admitted_consumer(ConsumerMatcher::exact(
+            crate::ship::system_registry::PHASER_CONTROL_KIND,
             crate::ship::system_registry::PHASER_CONTROL_SYSTEM_ID,
         ))
-        .register_admitted_consumer(ConsumerMatcher::prefix("torpedo-tube-"))
-        .register_admitted_consumer(ConsumerMatcher::prefix("phaser-"))
+        .register_admitted_consumer(ConsumerMatcher::prefix(
+            crate::ship::system_registry::TORPEDO_TUBE_KIND,
+            "torpedo-tube-",
+        ))
+        .register_admitted_consumer(ConsumerMatcher::prefix(
+            crate::ship::system_registry::PHASER_BANK_KIND,
+            "phaser-",
+        ))
         // Blaster banks converge on the admission seam (issue #781): both a
         // human's `ChargeBlasterStart` and the AI decider's emitted one travel
         // as admitted `blaster-{bank}` commands consumed by `handle_fire_blaster`.
-        .register_admitted_consumer(ConsumerMatcher::prefix("blaster-"));
+        .register_admitted_consumer(ConsumerMatcher::prefix(
+            crate::ship::system_registry::BLASTER_BANK_KIND,
+            "blaster-",
+        ));
         app.init_resource::<crate::core::messages::InterSystemQueue>();
         // The ONE shared AI decision cadence (issue #889): the three AI
         // deciders registered below (`ai_phaser_auto_fire`,

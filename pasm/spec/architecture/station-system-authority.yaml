@@ -115,12 +115,13 @@ entities:
       status: implemented
       confidence: confirmed
       title: System Kind Descriptor Registry
-      summary: Code-backed authoritative descriptors that validate ship-authored System kinds and require Console Family metadata for every shipped kind. A separate descriptor table assigns presentation families to reserved/aggregate blackboard keys without registering them as Systems. Issue #1253 adds command capability to the System descriptor rather than creating a parallel registry.
+      summary: Code-backed authoritative descriptors that validate ship-authored System kinds and require both Console Family metadata and authoritative command-capability metadata for every shipped kind. A separate descriptor table assigns presentation families to reserved/aggregate blackboard keys without registering them as Systems.
       rationale:
         - "One id, one meaning (#801). Identifiers live in exactly one of three namespaces: system ids (declared [[system]] instances that get a ControlSource, gate admission, and can be damaged), station ids (crew stations that key console-level blackboards and channel-3 coordination routing), and wire targets (the target of a ControlSystem envelope, always a system id)."
         - "The coarse helm and tactical systems were deleted by #801: \"helm\" and \"tactical\" are now station ids only, carried inside SystemId-typed maps via the helm_station_key / tactical_station_key helpers. No [[system]] block declares them, no ControlSource is registered for them, and no ControlSystem message may target them."
         - "Console Family is presentation metadata, not an authority source: every instance projects by kind regardless of its authored instance or owning Station id, while the authored id remains command authority."
         - "Reserved and aggregate blackboard keys declare their affected Console Family in a separate map because those channels are not Systems and must not acquire control-source, damage, ownership or command semantics."
+        - "Admitted-command capability is authoritative descriptor metadata, independent of Console Family. Passive kinds such as power_battery remain valid topology without manufacturing a consumer requirement; commandable kinds drive the production consumer-coverage guard without a second expected-SystemId fixture."
     architecture:
       kind: registry
       authority: authoritative
@@ -131,8 +132,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/system_registry.rs, src/entities/spawner.rs, src/dock/server.rs, src/lobby/server.rs, src/core/messages.rs]
-      symbols: [SystemKindRegistry, SystemKindDescriptor, BlackboardKeyDescriptor, ConsoleFamily, ShipClientConfig]
+      paths: [src/ship/system_registry.rs, src/entities/spawner.rs, src/dock/server.rs, src/lobby/server.rs, src/core/messages.rs, src/command_admission/router.rs]
+      symbols: [SystemKindRegistry, SystemKindDescriptor, BlackboardKeyDescriptor, accepts_admitted_commands, ConsoleFamily, ShipClientConfig]
       tests: [cargo test]
 
   - state: system-console-family-projection-state
@@ -271,10 +272,11 @@ entities:
       status: implemented
       confidence: confirmed
       title: Admitted Command Router
-      summary: Load-time registry naming which module consumes each admitted SystemId, plus an end-of-frame lint that warns when an admitted command has no registered consumer.
+      summary: Load-time registry naming which module consumes each admitted System kind and the exact, generated-prefix, or arbitrary-instance address domain it really reads, plus an end-of-frame lint that resolves the authored System instance and warns when an admitted command has no matching consumer.
       rationale:
         - "One table answers which module handles a payload (#833). Routing itself already landed across #824–#832: admission drains the inbound ControlSystem stream once per tick into the owning ship's per-entity AdmittedCommands, and every consumer reads only its own slice via AdmittedCommands::for_target. There is no central SystemId→module dispatch table (system_target_for_payload_type was deleted in #822) — a runtime dispatcher would re-introduce the chokepoint the per-entity design removed and collapse the consumer scheduling (appliers run in different SimSets: Input/Physics/Modifiers/Broadcast)."
-        - "[ai] So the router is a registration seam, not a dispatcher: each console/ship plugin registers its consumer(s) at build with one line (RegisterAdmittedConsumer::register_admitted_consumer, keyed by system kind or by prefix for dynamic families like shield-arc-*). Adding a System is one registration; an admitted command whose target matches no registered consumer is warned (pwarn!, LogCat::Admit) by warn_unrouted_admitted_commands rather than silently dropped. The lint keys on the registry (no consumer), not on whether state changed, and mutates nothing — the headless behavioural gate stays bit-identical."
+        - "[ai] So the router is a registration seam, not a dispatcher: each console/ship plugin registers its consumer(s) at build with one line (RegisterAdmittedConsumer::register_admitted_consumer), naming the authoritative System kind plus the address domain the real reader accepts. Canonical fixed-id readers use Exact, generated bank/tube/shield-arc families use Prefix, and Kind is reserved for a consumer such as Dock that carries and reads the arbitrary authored instance id. The undeclared host-only God Mode capability retains its own exact-target registration. An admitted command whose resolved instance falls outside that domain is warned (pwarn!, LogCat::Admit) rather than silently dropped. The lint keys on the registry (no consumer), not on whether state changed, and mutates nothing — no handler or schedule moved."
+        - "Issue #1253 derives completeness from SystemKindDescriptor.accepts_admitted_commands and every resolved top-level shipped hull. The test builds consumer claims through add_simulation_plugins_with plus WorldPlugin — the production registration entry points — proves every commandable descriptor has a declared consumer domain, then proves every shipped instance lies inside it. Missing commandable consumers and noncanonical fixed-target instances fail while passive descriptors remain valid."
         - "Issue #846 retired the last weapons FIRE/LOAD commands outside admission: FirePhaser, FireTorpedo, LoadTube, and UnloadTube now travel as SystemControlPayloads through the ControlSystem envelope, targeting phaser-{bank} or torpedo-tube-{id} SystemIds. The InterSystemQueue remains a separate inter-system bus."
     architecture:
       kind: registry
@@ -283,17 +285,30 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/command_admission/router.rs, src/ship/system_registry.rs]
-      symbols: [AdmittedConsumerRegistry, ConsumerMatcher, RegisterAdmittedConsumer, warn_unrouted_admitted_commands, unrouted_command_targets]
+      paths: [src/command_admission/router.rs, src/ship/system_registry.rs, src/server_app/registration.rs, src/world/server.rs]
+      symbols: [AdmittedConsumerRegistry, ConsumerMatcher, RegisterAdmittedConsumer, warn_unrouted_admitted_commands, unrouted_command_targets, unrouted_commandable_systems]
       tests: [cargo test]
     evidence:
       - kind: test
-        reference: every_admitted_consumer_kind_is_registered
+        reference: every_commandable_shipped_system_has_a_production_consumer
         summary: >-
-          Builds the full set of consumer plugins and asserts every
-          admitted-command-capable system kind (the inverse §2 census) resolves
-          to a registered consumer, and that an unrouted id is flagged by the
-          lint rather than dropped.
+          Resolves every top-level shipped hull, derives its commandable System
+          instances from authoritative descriptors, builds the registry through
+          production composition, and requires every instance to be routed;
+          named coverage includes Command, Tractor, Dock, Umbilical, weapon
+          banks, torpedo tubes and shield arcs.
+      - kind: test
+        reference: missing_commandable_consumer_is_detected_but_passive_kind_is_ignored
+        summary: >-
+          A synthetic commandable descriptor without a consumer is reported,
+          while a passive descriptor with the same absence creates no failure.
+      - kind: test
+        reference: fixed_target_domain_rejects_noncanonical_instance_but_dock_accepts_arbitrary_id
+        summary: >-
+          A valid Tractor-kind topology using a noncanonical id remains
+          unrouted because the runtime reader consumes only the canonical
+          Tractor id, while an arbitrary Dock instance is routed because Dock's
+          runtime component carries that authored id into its reader.
 
   - component: system-command-admission-policy
     core:

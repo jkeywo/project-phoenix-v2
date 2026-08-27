@@ -34,7 +34,7 @@ use crate::entities::spawner::{EntityName, EntitySystemHull, EntityUuid};
 use crate::ship::damage::DamageTier;
 use crate::ship::power::{power_level_for, ShipPowerSystem};
 use crate::ship::state::ShipPhysics;
-use crate::ship::system_registry::{dock_system_id, DOCK_SYSTEM_ID};
+use crate::ship::system_registry::dock_system_id;
 use crate::world::server::WorldContentRuntime;
 
 /// One hull's dock markers, resolved into the hull's OWN frame at spawn (issue
@@ -208,11 +208,12 @@ impl Plugin for DockPlugin {
             app.declare_state::<DockMarkers>(StateClass::Derived, "dock-controller")
                 .declare_state::<DockAiEngaged>(StateClass::Derived, "dock-relationship-state");
         }
-        // Warning-only registry coverage is still the conventional shipped id.
-        // Issue #1253 (blocked by this tracer) derives command capability and
-        // authored-instance coverage from descriptors. Runtime consumption is
-        // already instance-correct below through `DockControl::system_id`.
-        app.register_admitted_consumer(ConsumerMatcher::exact(DOCK_SYSTEM_ID));
+        // Registry coverage is keyed by the authoritative System kind, so an
+        // arbitrary authored Dock id is linted through the same identity the
+        // instance-correct consumer below reads.
+        app.register_admitted_consumer(ConsumerMatcher::kind(
+            crate::ship::system_registry::DOCK_KIND,
+        ));
         app.add_systems(
             FixedUpdate,
             (
@@ -847,6 +848,7 @@ pub const DOCK_MARKER_PREFIX: &str = "dock";
 mod tests {
     use super::*;
     use crate::dock::mating::DockConfig;
+    use crate::ship::system_registry::DOCK_SYSTEM_ID;
 
     fn config() -> DockConfig {
         DockConfig {

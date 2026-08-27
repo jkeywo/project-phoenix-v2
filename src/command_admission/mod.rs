@@ -46,8 +46,8 @@ pub use log::{
 };
 pub use policy::{is_command_authorized, station_for_system};
 pub use router::{
-    unrouted_command_targets, warn_unrouted_admitted_commands, AdmittedConsumerRegistry,
-    ConsumerMatcher, RegisterAdmittedConsumer,
+    unrouted_command_targets, unrouted_commandable_systems, warn_unrouted_admitted_commands,
+    AdmittedConsumerRegistry, ConsumerMatcher, RegisterAdmittedConsumer,
 };
 
 /// System set that `admit_system_commands` belongs to. Handlers that run in

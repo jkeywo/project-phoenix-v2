@@ -255,6 +255,7 @@ impl Plugin for CommsWorldPlugin {
         // (`handle_hail` / `handle_respond_to_message` / `handle_clear_comms`)
         // all read the `comms` system's admitted commands.
         app.register_admitted_consumer(ConsumerMatcher::exact(
+            crate::ship::system_registry::COMMS_KIND,
             crate::ship::system_registry::COMMS_SYSTEM_ID,
         ));
         app.init_resource::<CommsRuntime>()

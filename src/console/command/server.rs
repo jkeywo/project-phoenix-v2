@@ -101,6 +101,7 @@ impl Plugin for CommandPlugin {
     fn build(&self, app: &mut App) {
         use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
         app.register_admitted_consumer(ConsumerMatcher::exact(
+            crate::ship::system_registry::COMMAND_KIND,
             crate::ship::system_registry::COMMAND_SYSTEM_ID,
         ));
         // The ONE shared AI decision cadence (issues #889, #895): re-armed here

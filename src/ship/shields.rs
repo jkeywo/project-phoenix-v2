@@ -205,9 +205,12 @@ impl Plugin for ShipShieldsPlugin {
     fn build(&self, app: &mut App) {
         use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
         // Admitted-command consumer (issue #833): `handle_shields_messages`
-        // reads the dynamic `shield-arc-*` family (one arc id per facing), so
-        // it registers by prefix rather than by concrete id.
-        app.register_admitted_consumer(ConsumerMatcher::prefix("shield-arc-"));
+        // reads every generated `shield-arc-*` instance (one id per authored
+        // facing), so the claim names both its kind and generated-id prefix.
+        app.register_admitted_consumer(ConsumerMatcher::prefix(
+            crate::ship::system_registry::SHIELD_ARC_KIND,
+            "shield-arc-",
+        ));
         app.add_message::<CoordinationEnqueue>()
             .init_resource::<ShieldsAiConfigResource>()
             .add_systems(

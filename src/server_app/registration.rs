@@ -823,7 +823,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     app.init_resource::<GodMode>();
     {
         use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
-        app.register_admitted_consumer(ConsumerMatcher::exact(
+        app.register_admitted_consumer(ConsumerMatcher::undeclared_exact(
             crate::ship::system_registry::GOD_MODE_SYSTEM_ID,
         ));
     }

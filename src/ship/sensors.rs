@@ -100,6 +100,7 @@ impl Plugin for ShipSensorsPlugin {
         // Admitted-command consumer (issue #833): `handle_sensors_messages`
         // reads the `sensors` system's admitted commands.
         app.register_admitted_consumer(ConsumerMatcher::exact(
+            crate::ship::system_registry::SENSORS_KIND,
             crate::ship::system_registry::SENSORS_SYSTEM_ID,
         ));
         // The ONE shared AI decision cadence (issue #889), which also derives

@@ -358,12 +358,14 @@ pub const SHIELD_ARC_KIND: &str = "shield_arc";
 /// Every registered kind declares exactly one Console Family. Presentation
 /// metadata is therefore complete before a ship topology is projected to the
 /// client: an absent instance entry means the topology is invalid, not that the
-/// client should infer a family from the instance id. Command capability joins
-/// this same descriptor in issue #1253 rather than creating a second registry.
+/// client should infer a family from the instance id. Whether the kind accepts
+/// admitted commands lives here too, so consumer coverage derives from the same
+/// authoritative descriptor rather than maintaining a second System-id census.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SystemKindDescriptor {
     kind: String,
     console_family: ConsoleFamily,
+    accepts_admitted_commands: bool,
 }
 
 impl SystemKindDescriptor {
@@ -371,7 +373,18 @@ impl SystemKindDescriptor {
         Self {
             kind: kind.into(),
             console_family,
+            accepts_admitted_commands: false,
         }
+    }
+
+    /// Declare that instances of this kind accept `ControlSystem` payloads
+    /// through the admitted-command seam.
+    ///
+    /// This is capability metadata only. The owning domain plugin still
+    /// registers and schedules its distributed consumer independently.
+    pub fn with_admitted_commands(mut self) -> Self {
+        self.accepts_admitted_commands = true;
+        self
     }
 
     pub fn kind(&self) -> &str {
@@ -380,6 +393,12 @@ impl SystemKindDescriptor {
 
     pub fn console_family(&self) -> ConsoleFamily {
         self.console_family
+    }
+
+    /// Whether an authored instance of this kind must have a registered
+    /// admitted-command consumer.
+    pub fn accepts_admitted_commands(&self) -> bool {
+        self.accepts_admitted_commands
     }
 }
 
@@ -451,55 +470,55 @@ impl SystemKindRegistry {
 
     pub fn with_red_alert() -> Result<Self, SystemRegistryError> {
         let mut registry = Self::new();
-        registry.register(RED_ALERT_KIND, ConsoleFamily::Captain)?;
+        registry.register_commandable(RED_ALERT_KIND, ConsoleFamily::Captain)?;
         Ok(registry)
     }
 
     pub fn with_core_systems() -> Result<Self, SystemRegistryError> {
         let mut registry = Self::with_red_alert()?;
         registry.register(POWER_KIND, ConsoleFamily::Power)?;
-        registry.register(SENSORS_KIND, ConsoleFamily::Sensors)?;
-        registry.register(NAVIGATION_KIND, ConsoleFamily::Navigation)?;
+        registry.register_commandable(SENSORS_KIND, ConsoleFamily::Sensors)?;
+        registry.register_commandable(NAVIGATION_KIND, ConsoleFamily::Navigation)?;
         registry.register(SHIELDS_KIND, ConsoleFamily::Shields)?;
-        registry.register(COMMS_KIND, ConsoleFamily::Comms)?;
-        registry.register(CAPTAIN_KIND, ConsoleFamily::Captain)?;
-        registry.register(VIEWSCREEN_KIND, ConsoleFamily::Captain)?;
-        registry.register(REPAIR_KIND, ConsoleFamily::Repair)?;
-        registry.register(COMMAND_KIND, ConsoleFamily::Command)?;
+        registry.register_commandable(COMMS_KIND, ConsoleFamily::Comms)?;
+        registry.register_commandable(CAPTAIN_KIND, ConsoleFamily::Captain)?;
+        registry.register_commandable(VIEWSCREEN_KIND, ConsoleFamily::Captain)?;
+        registry.register_commandable(REPAIR_KIND, ConsoleFamily::Repair)?;
+        registry.register_commandable(COMMAND_KIND, ConsoleFamily::Command)?;
         // Tractor-beam system (issue #1156).
-        registry.register(TRACTOR_KIND, ConsoleFamily::Tractor)?;
+        registry.register_commandable(TRACTOR_KIND, ConsoleFamily::Tractor)?;
         // Dock is rendered by Helm regardless of either instance/station id.
-        registry.register(DOCK_KIND, ConsoleFamily::Helm)?;
+        registry.register_commandable(DOCK_KIND, ConsoleFamily::Helm)?;
         // Transfer umbilical (issue #1160).
-        registry.register(UMBILICAL_KIND, ConsoleFamily::Umbilical)?;
+        registry.register_commandable(UMBILICAL_KIND, ConsoleFamily::Umbilical)?;
         // Fine-grained Helm systems (issue #511)
         registry.register(HELM_JOYSTICK_KIND, ConsoleFamily::Helm)?;
         registry.register(HELM_ENGINE_KIND, ConsoleFamily::Helm)?;
         registry.register(HELM_RADAR_KIND, ConsoleFamily::Helm)?;
-        registry.register(HELM_IMPULSE_KIND, ConsoleFamily::Helm)?;
-        registry.register(LATERAL_THRUST_KIND, ConsoleFamily::Helm)?;
-        registry.register(VERTICAL_THRUST_KIND, ConsoleFamily::Helm)?;
+        registry.register_commandable(HELM_IMPULSE_KIND, ConsoleFamily::Helm)?;
+        registry.register_commandable(LATERAL_THRUST_KIND, ConsoleFamily::Helm)?;
+        registry.register_commandable(VERTICAL_THRUST_KIND, ConsoleFamily::Helm)?;
         // Per-axis Helm systems (issue #701)
-        registry.register(HELM_THRUST_KIND, ConsoleFamily::Helm)?;
-        registry.register(HELM_STEERING_KIND, ConsoleFamily::Helm)?;
+        registry.register_commandable(HELM_THRUST_KIND, ConsoleFamily::Helm)?;
+        registry.register_commandable(HELM_STEERING_KIND, ConsoleFamily::Helm)?;
         // Helm boost fine system (issue #801)
-        registry.register(HELM_BOOST_KIND, ConsoleFamily::Helm)?;
+        registry.register_commandable(HELM_BOOST_KIND, ConsoleFamily::Helm)?;
         // Fine-grained Tactical systems (issue #512)
-        registry.register(PHASER_BANK_KIND, ConsoleFamily::Tactical)?;
-        registry.register(TORPEDO_TUBE_KIND, ConsoleFamily::Tactical)?;
+        registry.register_commandable(PHASER_BANK_KIND, ConsoleFamily::Tactical)?;
+        registry.register_commandable(TORPEDO_TUBE_KIND, ConsoleFamily::Tactical)?;
         registry.register(TORPEDO_MAGAZINE_KIND, ConsoleFamily::Tactical)?;
         // Blaster bank fine system (issue #631)
-        registry.register(BLASTER_BANK_KIND, ConsoleFamily::Tactical)?;
+        registry.register_commandable(BLASTER_BANK_KIND, ConsoleFamily::Tactical)?;
         // Phaser control fine system (issue #801)
-        registry.register(PHASER_CONTROL_KIND, ConsoleFamily::Tactical)?;
+        registry.register_commandable(PHASER_CONTROL_KIND, ConsoleFamily::Tactical)?;
         // Tactical / sensor radar fine systems
-        registry.register(TACTICAL_RADAR_KIND, ConsoleFamily::Tactical)?;
+        registry.register_commandable(TACTICAL_RADAR_KIND, ConsoleFamily::Tactical)?;
         registry.register(SENSOR_RADAR_KIND, ConsoleFamily::Sensors)?;
         // Fine-grained Power systems (issue #513)
-        registry.register(POWER_REACTOR_KIND, ConsoleFamily::Power)?;
+        registry.register_commandable(POWER_REACTOR_KIND, ConsoleFamily::Power)?;
         registry.register(POWER_BATTERY_KIND, ConsoleFamily::Power)?;
         // Fine-grained Shields systems (issue #514)
-        registry.register(SHIELD_ARC_KIND, ConsoleFamily::Shields)?;
+        registry.register_commandable(SHIELD_ARC_KIND, ConsoleFamily::Shields)?;
 
         // Blackboard keys which are presentation channels rather than System
         // instances. Register them separately so they never enter `kinds()` or
@@ -523,6 +542,17 @@ impl SystemKindRegistry {
         console_family: ConsoleFamily,
     ) -> Result<(), SystemRegistryError> {
         self.register_descriptor(SystemKindDescriptor::new(kind, console_family))
+    }
+
+    /// Register a kind whose instances accept admitted commands.
+    pub fn register_commandable(
+        &mut self,
+        kind: impl Into<String>,
+        console_family: ConsoleFamily,
+    ) -> Result<(), SystemRegistryError> {
+        self.register_descriptor(
+            SystemKindDescriptor::new(kind, console_family).with_admitted_commands(),
+        )
     }
 
     pub fn register_descriptor(
@@ -971,6 +1001,30 @@ mod tests {
                 "{kind:?} has the wrong presentation family"
             );
         }
+    }
+
+    #[test]
+    fn descriptors_own_admitted_command_capability() {
+        let registry = SystemKindRegistry::with_core_systems().unwrap();
+
+        assert!(
+            registry
+                .descriptor(COMMAND_KIND)
+                .is_some_and(SystemKindDescriptor::accepts_admitted_commands),
+            "Command is an admitted-command capability"
+        );
+        assert!(
+            registry
+                .descriptor(SHIELD_ARC_KIND)
+                .is_some_and(SystemKindDescriptor::accepts_admitted_commands),
+            "every authored shield arc is an admitted-command capability"
+        );
+        assert!(
+            !registry
+                .descriptor(POWER_BATTERY_KIND)
+                .is_some_and(SystemKindDescriptor::accepts_admitted_commands),
+            "the battery is an observed/inter-system capability, not a ControlSystem target"
+        );
     }
 
     #[test]

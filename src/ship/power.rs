@@ -243,6 +243,7 @@ impl Plugin for ShipPowerPlugin {
         // Admitted-command consumer (issue #833): `handle_power_messages` reads
         // the `power-reactor` system's admitted commands.
         app.register_admitted_consumer(ConsumerMatcher::exact(
+            crate::ship::system_registry::POWER_REACTOR_KIND,
             crate::ship::system_registry::POWER_REACTOR_SYSTEM_ID,
         ));
         app.init_resource::<crate::core::messages::InterSystemQueue>()

@@ -164,7 +164,10 @@ impl Plugin for UmbilicalPlugin {
             use crate::authoritative::{DeclareState, StateClass};
             app.declare_state::<UmbilicalAiRunning>(StateClass::Derived, "umbilical-flow-state");
         }
-        app.register_admitted_consumer(ConsumerMatcher::exact(UMBILICAL_SYSTEM_ID));
+        app.register_admitted_consumer(ConsumerMatcher::exact(
+            crate::ship::system_registry::UMBILICAL_KIND,
+            UMBILICAL_SYSTEM_ID,
+        ));
         app.add_systems(
             FixedUpdate,
             (

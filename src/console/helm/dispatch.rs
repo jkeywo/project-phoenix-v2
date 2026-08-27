@@ -29,21 +29,27 @@ pub fn register_helm_dispatch(app: &mut bevy::prelude::App) {
     use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
 
     app.register_admitted_consumer(ConsumerMatcher::exact(
+        crate::ship::system_registry::HELM_THRUST_KIND,
         crate::ship::system_registry::HELM_THRUST_SYSTEM_ID,
     ))
     .register_admitted_consumer(ConsumerMatcher::exact(
+        crate::ship::system_registry::HELM_STEERING_KIND,
         crate::ship::system_registry::HELM_STEERING_SYSTEM_ID,
     ))
     .register_admitted_consumer(ConsumerMatcher::exact(
+        crate::ship::system_registry::HELM_IMPULSE_KIND,
         crate::ship::system_registry::HELM_IMPULSE_SYSTEM_ID,
     ))
     .register_admitted_consumer(ConsumerMatcher::exact(
+        crate::ship::system_registry::LATERAL_THRUST_KIND,
         crate::ship::system_registry::LATERAL_THRUST_SYSTEM_ID,
     ))
     .register_admitted_consumer(ConsumerMatcher::exact(
+        crate::ship::system_registry::VERTICAL_THRUST_KIND,
         crate::ship::system_registry::VERTICAL_THRUST_SYSTEM_ID,
     ))
     .register_admitted_consumer(ConsumerMatcher::exact(
+        crate::ship::system_registry::HELM_BOOST_KIND,
         crate::ship::system_registry::HELM_BOOST_SYSTEM_ID,
     ));
 }

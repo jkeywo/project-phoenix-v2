@@ -34,7 +34,10 @@ pub fn register_repair_dispatch(app: &mut App) {
     use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
     // Admitted-command consumer (issue #833): `handle_dispatch_repair_team`
     // reads the `repair` system's admitted commands.
-    app.register_admitted_consumer(ConsumerMatcher::exact(REPAIR_SYSTEM_ID));
+    app.register_admitted_consumer(ConsumerMatcher::exact(
+        crate::ship::system_registry::REPAIR_KIND,
+        REPAIR_SYSTEM_ID,
+    ));
     app.add_systems(
         FixedUpdate,
         (

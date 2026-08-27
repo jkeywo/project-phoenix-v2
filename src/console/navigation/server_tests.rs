@@ -810,6 +810,31 @@ fn civilian_order_ai_emits_the_console_order_through_admission() {
         }],
     );
 
+    // Mission objectives are published onto every ship's viewscreen
+    // blackboard. An AI-operated NPC must not become a second bridge crew and
+    // fulfil the player's Navigation work when the LocalShip is human-held.
+    let (npc_sources, npc_blackboards, npc_config) = {
+        let mut q = app.world_mut().query_filtered::<(
+            &crate::ship_plugin::ShipSystemControlSources,
+            &crate::server_app::ShipSystemBlackboards,
+            &crate::ship_plugin::ShipConfigComponent,
+        ), With<crate::server_app::LocalShip>>();
+        let (sources, blackboards, config) = q
+            .single(app.world())
+            .expect("the local ship carries the Navigation AI inputs");
+        (sources.clone(), blackboards.clone(), config.clone())
+    };
+    let npc = app
+        .world_mut()
+        .spawn((
+            crate::entities::spawner::EntityUuid("npc-navigation-1141".into()),
+            npc_sources,
+            npc_blackboards,
+            npc_config,
+            crate::core::messages::AdmittedCommands::default(),
+        ))
+        .id();
+
     crate::ai::cadence::arm_ai_tick(&mut app);
     tick(&mut app);
     let admitted = {
@@ -834,9 +859,25 @@ fn civilian_order_ai_emits_the_console_order_through_admission() {
         "Backfill must admit the exact target+route command a console button emits"
     );
 
+    // Reset the observable target before checking the human-held path. Without
+    // this reset the first AI order's idempotency latch could make a broken
+    // source gate look inert.
+    {
+        let mut q = app
+            .world_mut()
+            .query::<(&crate::entities::spawner::EntityUuid, &mut CivilianTraffic)>();
+        let (_, mut traffic) = q
+            .iter_mut(app.world_mut())
+            .find(|(entity_uuid, _)| entity_uuid.0 == uuid)
+            .expect("the test civilian remains in the world");
+        traffic.0 = CivilianState::from_config(&CivilianConfig::default());
+    }
+
     // The same objective under a human-held Navigation system is inert. Re-arm
     // cadence explicitly so an empty queue proves the source gate, not a skipped
-    // decision tick.
+    // decision tick. The AI-operated NPC above sees the same mission objective,
+    // so the target staying unordered also proves only the LocalShip can act on
+    // player-crew Navigation work.
     set_navigation_control_source(&mut app, crate::ship::control_source::ControlSource::Human);
     crate::ai::cadence::arm_ai_tick(&mut app);
     tick(&mut app);
@@ -854,6 +895,28 @@ fn civilian_order_ai_emits_the_console_order_through_admission() {
     assert!(
         !has_ai_order,
         "human-held Navigation must suppress the AI emitter"
+    );
+    let civilian_order = {
+        let mut q = app
+            .world_mut()
+            .query::<(&crate::entities::spawner::EntityUuid, &CivilianTraffic)>();
+        q.iter(app.world())
+            .find(|(entity_uuid, _)| entity_uuid.0 == uuid)
+            .and_then(|(_, traffic)| traffic.0.order().cloned())
+    };
+    assert_eq!(
+        civilian_order, None,
+        "an AI-operated NPC must not execute the human-held LocalShip's mission objective"
+    );
+    assert!(
+        app.world()
+            .entity(npc)
+            .get::<crate::core::messages::AdmittedCommands>()
+            .expect("the NPC has an admission queue")
+            .0
+            .iter()
+            .all(|command| !matches!(command.payload, SystemControlPayload::OrderCivilian { .. })),
+        "the player mission order must never enter an NPC ship's queue"
     );
 }
 

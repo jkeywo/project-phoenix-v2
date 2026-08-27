@@ -443,8 +443,11 @@ entities:
       summary: >
         [ai] The destroyer survives crossing a band and does not survive
         living in one; a 60-point civilian hauler cannot cross one at all.
-        The storm era's world-driven terminal: pure silence leaves ships —
-        possibly the crew's — in the weather.
+        Each forty-second front is a narrow, corridor-long physical box: it
+        takes traffic left on the lane while the lateral shelter and ladder
+        routes remain clear. The cadence and damage are unchanged. The storm
+        era's world-driven terminal: pure silence leaves ships — possibly the
+        crew's — in the weather.
     game_design:
       terminal: true
       handler: on_storm_band_one

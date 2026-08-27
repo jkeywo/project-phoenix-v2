@@ -8980,6 +8980,12 @@ fn skyway_at_act_two() -> (bevy::prelude::App, bevy::prelude::Entity) {
     // the forty-second margin before Control's forecast and well before band
     // one; the ordinary compliance machine still carries every order.
     skyway_order_corridor_to_shelter(&mut app);
+    // This fixture substitutes for the crew's Helm travel as well as their
+    // Comms input. The opening safety scan takes the destroyer to the head and
+    // its Backfill Helm continues flying while the survey clock advances, so
+    // explicitly return it to the strike standoff where both dialogue parties
+    // are in range before handing the fixture to a test.
+    skyway_move(&mut app, ship, CHOICE_LADDER);
     run(&mut app, 4);
     (app, ship)
 }
@@ -10353,6 +10359,44 @@ fn region_entity_count(app: &mut bevy::prelude::App) -> usize {
         .count()
 }
 
+/// Whether a named point is inside a named region according to the region's
+/// authoritative authored shape. This deliberately does not infer a radius:
+/// scenario instances may override a template sphere with another shape.
+fn named_region_contains(
+    app: &mut bevy::prelude::App,
+    region: &str,
+    point: bevy::prelude::Vec3,
+) -> bool {
+    app.world_mut()
+        .query::<(
+            &project_phoenix::entities::spawner::EntityName,
+            &bevy::prelude::Transform,
+            &project_phoenix::entities::spawner::RegionShapeSection,
+        )>()
+        .iter(app.world())
+        .find(|(entity_name, _, _)| entity_name.0 == region)
+        .map(|(_, transform, shape)| shape.0.contains(point, transform.translation))
+        .unwrap_or_else(|| panic!("{region} is not a shaped region in this world"))
+}
+
+/// The live shape carried by a named region instance. Runtime-spawn overrides
+/// must be asserted at this seam: a misplaced top-level spawn field is ignored
+/// and otherwise silently falls back to the template's shape.
+fn named_region_shape(
+    app: &mut bevy::prelude::App,
+    region: &str,
+) -> project_phoenix::regions::shape::RegionShape {
+    app.world_mut()
+        .query::<(
+            &project_phoenix::entities::spawner::EntityName,
+            &project_phoenix::entities::spawner::RegionShapeSection,
+        )>()
+        .iter(app.world())
+        .find(|(entity_name, _)| entity_name.0 == region)
+        .map(|(_, shape)| shape.0.clone())
+        .unwrap_or_else(|| panic!("{region} is not a shaped region in this world"))
+}
+
 /// The named ship's remaining hull as a fraction of its maximum.
 fn hull_fraction_of(app: &mut bevy::prelude::App, name: &str) -> f32 {
     app.world_mut()
@@ -10690,10 +10734,10 @@ fn falling_skyway_idle_traffic_is_lost_loudly_while_the_storm_ignores_the_strike
     let mut app = build_headless_app(&args).expect("the scenario world must load and build");
     run(&mut app, 10);
 
-    // Seat a human at Comms before either authored conversation opens. They
-    // answer only Lark's scan-backed safety check; the strike remains genuinely
-    // unresolved and Navigation issues no shelter orders. The weather must not
-    // wait for either silence.
+    // Suppress only Comms Backfill while the crew answers Lark's scan-backed
+    // safety check. Navigation remains unattended until that opening exchange
+    // is complete, avoiding a test-only source mutation that the real visiting
+    // station resolver would overwrite on the next fixed tick.
     let ship = app
         .world_mut()
         .query_filtered::<bevy::prelude::Entity, With<LocalShip>>()
@@ -10703,7 +10747,6 @@ fn falling_skyway_idle_traffic_is_lost_loudly_while_the_storm_ignores_the_strike
     app.world_mut()
         .entity_mut(ship)
         .remove::<project_phoenix::console::comms::server::CommsResponseAiPolicy>();
-
     skyway_scan_for_survey(&mut app, ship, SKYWAY_SURVEY_HEAD);
     let first_hail = skyway_authored_deadline_secs("lark_first_hail_due") as f64;
     window_run_to(&mut app, first_hail + 1.0);
@@ -10724,6 +10767,45 @@ fn falling_skyway_idle_traffic_is_lost_loudly_while_the_storm_ignores_the_strike
         1,
         "the combined fixture must survive #1138's opening through its admitted response"
     );
+
+    // Now put a real connected player in Tactical, the Destroyer's first
+    // authored host for its auxiliary Navigation station. Falling Skyway's
+    // scenario detail floor keeps Navigation manual for that visitor, so doing
+    // nothing is a real idle-crew path; with nobody seated the same objective is
+    // correctly handled by Backfill in the companion test.
+    const IDLE_TACTICAL_TOKEN: &str = "idle-traffic-tactical";
+    {
+        use project_phoenix::core::messages::StationId;
+        use project_phoenix::lobby::Sessions;
+
+        let mut sessions = app.world_mut().resource_mut::<Sessions>();
+        sessions
+            .0
+            .register(IDLE_TACTICAL_TOKEN.into(), "Idle Tactical".into())
+            .expect("the fixture's Tactical player is new");
+        sessions
+            .0
+            .set_station(IDLE_TACTICAL_TOKEN, Some(StationId("tactical".into())));
+    }
+    run(&mut app, 2);
+    let navigation_source = app
+        .world()
+        .entity(ship)
+        .get::<ShipSystemControlSources>()
+        .expect("the crew hull has authoritative system control sources")
+        .0
+        .source_for(&project_phoenix::ship::system_registry::navigation_system_id());
+    assert_eq!(
+        navigation_source,
+        ControlSource::Human,
+        "a Tactical host must retain manual Navigation at this scenario's detail floor"
+    );
+    for name in SKYWAY_CORRIDOR_TRAFFIC {
+        assert!(
+            civilian_state_of(&mut app, name).order().is_none(),
+            "{name} must still be unordered when the human-hosted Navigation crew stays idle"
+        );
+    }
 
     let mut first_band_while_unresolved = false;
     while window_now(&app) < closes_at + 6.0 {
@@ -10753,7 +10835,11 @@ fn falling_skyway_idle_traffic_is_lost_loudly_while_the_storm_ignores_the_strike
     assert_eq!(
         total,
         SKYWAY_CORRIDOR_TRAFFIC.len() as i64,
-        "every endangered craft left unordered on the corridor must be physically lost"
+        "every endangered craft left unordered on the corridor must be physically lost: {:?}",
+        named_losses
+            .iter()
+            .map(|flag| (*flag, skyway_flag(&app, flag)))
+            .collect::<Vec<_>>()
     );
     assert_eq!(
         skyway_flag(&app, "a2_traffic_lost"),
@@ -10920,10 +11006,11 @@ fn falling_skyway_backfill_orders_traffic_clear_of_all_three_bands() {
 
     let mut first: std::collections::BTreeMap<String, f64> = std::collections::BTreeMap::new();
     let mut seen: std::collections::BTreeSet<String> = Default::default();
-    // How far every diverted craft was from each band on the tick that band
-    // arrived. The claim is that they RESPOND to the schedule, and that is a
-    // fact about where they were when the weather turned up.
-    let mut clearance: std::collections::BTreeMap<String, f32> = Default::default();
+    // Whether every diverted craft was outside each band's authoritative shape
+    // on the tick that band arrived. The claim is that they RESPOND to the
+    // schedule, and that is a fact about where they were when the weather
+    // turned up rather than a restated sphere radius.
+    let mut clearance: std::collections::BTreeMap<String, bool> = Default::default();
     let mut compliance_reached: std::collections::BTreeMap<String, bool> = Default::default();
     for tick in 0..args.max_ticks {
         run(&mut app, 1);
@@ -10936,12 +11023,19 @@ fn falling_skyway_backfill_orders_traffic_clear_of_all_three_bands() {
                 // about: a schedule the traffic responded to is one where nobody
                 // is standing under the weather when it turns up.
                 if seen.insert(band.to_string()) {
-                    let centre = position_of(&mut app, band);
+                    assert_eq!(
+                        named_region_shape(&mut app, band),
+                        project_phoenix::regions::shape::RegionShape::Box {
+                            half_extents: [260.0, 260.0, 1100.0],
+                            yaw: 0.0,
+                        },
+                        "{band} must compose the Falling Skyway corridor-front override \
+                         instead of silently falling back to the template sphere"
+                    );
                     for name in SKYWAY_CORRIDOR_TRAFFIC {
                         let craft = position_of(&mut app, name);
-                        let range =
-                            ((craft.x - centre.x).powi(2) + (craft.z - centre.z).powi(2)).sqrt();
-                        clearance.insert(format!("{band} :: {name}"), range);
+                        let clear = !named_region_contains(&mut app, band, craft);
+                        clearance.insert(format!("{band} :: {name}"), clear);
                     }
                 }
                 first.entry(format!("{band}_up")).or_insert(sim_t);
@@ -11031,14 +11125,13 @@ fn falling_skyway_backfill_orders_traffic_clear_of_all_three_bands() {
             "{name} survives the storm, which is the whole point of moving it"
         );
     }
-    // Every craft against every band, on the tick that band arrived. 260 units
-    // is `region_radiation_band.toml`'s own authored radius.
-    for (pair, range) in &clearance {
+    // Every craft against every band, on the tick that band arrived, checked
+    // against the live instance shape rather than the template's default.
+    for (pair, clear) in &clearance {
         assert!(
-            *range > 260.0,
-            "{pair}: the craft was {range:.0} units from the band's centre when it \
-             arrived, which is inside its authored 260-unit radius. Traffic is routed \
-             AROUND a sweep; it does not fly into one and hope."
+            *clear,
+            "{pair}: the craft was inside the band's authoritative shape when it \
+             arrived. Traffic is routed AROUND a sweep; it does not fly into one and hope."
         );
     }
     assert_eq!(
@@ -15247,7 +15340,11 @@ fn a_captain_who_leaves_the_workers_behind_hears_the_promise_read_back() {
         "precondition: #1036 broke it at the order, and this scene must not re-resolve \
          a promise somebody else already settled"
     );
-    assert_eq!(skyway_flag(&app, "skyway_force_casualties"), 1);
+    assert_eq!(
+        skyway_flag(&app, "skyway_force_casualties"),
+        2,
+        "warning the hardened workers removes one casualty from the current three-person risk"
+    );
 
     // Mend the rung the boarding party damaged, and hold the head, so the window
     // has enough in it for the pair this run is about (22 + 26 = 48).
@@ -15335,9 +15432,13 @@ fn a_captain_who_leaves_the_workers_behind_hears_the_promise_read_back() {
     assert_eq!(skyway_flag(&app, "campaign.skyway.strike.forced"), 1);
     assert_eq!(skyway_flag(&app, "campaign.skyway.evidence.none"), 1);
     assert_eq!(skyway_flag(&app, "campaign.skyway.evidence.filed"), 0);
-    assert_eq!(skyway_flag(&app, "campaign.skyway.casualties.picket"), 1);
+    assert_eq!(
+        skyway_flag(&app, "campaign.skyway.casualties.picket"),
+        2,
+        "campaign projection must retain the warned hardened-picket casualty count"
+    );
     assert_eq!(skyway_flag(&app, "campaign.skyway.casualties.storm"), 3);
-    assert_eq!(skyway_flag(&app, "campaign.skyway.casualties.total"), 4);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.casualties.total"), 5);
     assert_eq!(skyway_flag(&app, "campaign.skyway.skyhook.held"), 1);
     assert_eq!(skyway_flag(&app, "campaign.skyway.commitments.kept"), 0);
     assert_eq!(skyway_flag(&app, "campaign.skyway.commitments.broken"), 1);

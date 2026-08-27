@@ -699,6 +699,11 @@
 # easily: `station_keeping` is 247.6 units off the skyhook and
 # `head_debris_field` 184.4, against a 17.04 collider.
 
+# Falling Skyway's clearance work is a mandatory Navigation decision. A human
+# hosting the auxiliary Navigation surface therefore keeps the full controls;
+# an unattended bridge still receives ordinary Backfill orders (#1141).
+scenario_detail_floor = ["navigation"]
+
 [global]
 seed = 1034
 title = "world.falling_skyway.global.title"
@@ -831,16 +836,16 @@ holding_arc = [-640.0, 0.0, 520.0]
 # ── Act 2's places (issue #1037) ─────────────────────────────────────────────
 #
 # Where the radiation storm goes, and where everything that has to get out of
-# its way goes instead. Every one of these was checked against the band radius
-# `region_radiation_band.toml` authors (260 units): the three band centres are
-# ON the corridor, and the three refuges are all more than a radius clear of
-# every one of them. A shelter inside a band would be an authoring bug that
-# nothing in Rust could catch.
+# its way goes instead. Falling Skyway composes the template band into a box
+# with a 260-unit lateral half-width: the three centres are ON the x=0 corridor,
+# and the refuges all sit at least 560 units west of it. A shelter inside a band
+# would be an authoring bug the end-to-end traffic test now catches against the
+# live instance shape.
 
 # The three band centres, stepping down the corridor from the north end to the
-# skyhook head. 340 units apart against a 260-unit radius, so consecutive bands
-# OVERLAP: the storm reads as one front moving south rather than as three
-# separate weather events.
+# skyhook head. They are 340 units apart while each corridor-long box extends
+# 1,100 units north and south, so consecutive bands OVERLAP: the storm reads as
+# one front moving south rather than as three separate weather events.
 storm_band_north = [0.0, 0.0, -760.0]
 storm_band_gate = [0.0, 0.0, -420.0]
 storm_band_head = [0.0, 0.0, -80.0]
@@ -2912,13 +2917,18 @@ fn on_storm_front(ctx) {
 // The three bands. Each one spawns at its own anchor and SCHEDULES ITS OWN
 // RETIREMENT forty seconds out — the deferred `destroy_entity` #1033 proved.
 // The dwell is a property of the band, and a band that spawned without one
-// would be a wall.
+// would be a wall. Falling Skyway overrides the template sphere with a narrow,
+// corridor-long box: the front physically takes traffic left on the lane while
+// the shelter and ladder routes remain laterally clear. The forty-second dwell
+// and template-authored damage are deliberately unchanged (#1044 remains the
+// playtest-tuning issue).
 fn on_storm_band_one(ctx) {
     ctx.effects.spawn_entity(#{
         template_path: "assets/entities/region_radiation_band.toml",
         name: "storm_band_one",
         anchor: "storm_band_north",
         groups: ["storm_bands"],
+        overrides: #{ shape: #{ type: "box", half_extents: [flt("260"), flt("260"), flt("1100")] } },
     });
     ctx.schedule.in_seconds(40).destroy_entity("storm_band_one");
     ctx.flags.increment("a2_band_one", 1);
@@ -2930,6 +2940,7 @@ fn on_storm_band_two(ctx) {
         name: "storm_band_two",
         anchor: "storm_band_gate",
         groups: ["storm_bands"],
+        overrides: #{ shape: #{ type: "box", half_extents: [flt("260"), flt("260"), flt("1100")] } },
     });
     ctx.schedule.in_seconds(40).destroy_entity("storm_band_two");
     ctx.flags.increment("a2_band_two", 1);
@@ -2941,6 +2952,7 @@ fn on_storm_band_three(ctx) {
         name: "storm_band_three",
         anchor: "storm_band_head",
         groups: ["storm_bands"],
+        overrides: #{ shape: #{ type: "box", half_extents: [flt("260"), flt("260"), flt("1100")] } },
     });
     ctx.schedule.in_seconds(40).destroy_entity("storm_band_three");
     ctx.flags.increment("a2_band_three", 1);

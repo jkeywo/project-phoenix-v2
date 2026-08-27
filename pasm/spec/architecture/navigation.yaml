@@ -105,9 +105,10 @@ entities:
       status: implemented
       confidence: confirmed
       title: Civilian Order AI Operator
-      summary: Consumes positive Navigation-affined Order objectives and emits the same admitted OrderCivilian payload as the Navigation console, one target and authored route at a time.
+      summary: On the LocalShip only, consumes positive Navigation-affined Order objectives from the session-global mission pool and emits the same admitted OrderCivilian payload as the Navigation console, one target and authored route at a time.
       rationale:
         - "[ai] Issue #1141 keeps the actor boundary upstream of admission: the objective names the civilian and route, the operator calls emit_ai_command on the Navigation system, and civilian-traffic-adapter remains the sole applier. Nothing downstream asks whether a human button or Backfill produced the order."
+        - "[ai] The mission objective pool is player-crew state even though viewscreen blackboards are carried per ship. The operator therefore queries With<LocalShip>: an NPC may mirror the same blackboard shape for architectural consistency, but it must never consume the player's Order objective or enqueue a second crew command. Backfill still operates normally on the unattended LocalShip."
         - "[ai] Emission is deterministic and idempotent. The scored pool already has a stable order; a craft whose authoritative CivilianState already carries the requested divert is skipped, so its acknowledgement clock is not restarted and the next cadence serves the next objective."
         - "[ai] The world must declare the route and the target must resolve to live CivilianTraffic before anything is emitted. Refusal and compliance remain authored civilian decisions in civilian-traffic-adapter, not policy invented by this operator."
     architecture:
@@ -120,7 +121,7 @@ entities:
       status: declared
       paths: [src/core/messages.rs, src/objectives.rs, src/console/navigation/server.rs]
       symbols: [operate_civilian_order_ai, AiDirective, SystemAffinity]
-      tests: [cargo test, "cargo test --features headless --test headless_runner falling_skyway_backfill_orders_traffic_clear_of_all_three_bands"]
+      tests: [cargo test, "cargo test civilian_order_ai_emits_the_console_order_through_admission", "cargo test --features headless --test headless_runner falling_skyway_backfill_orders_traffic_clear_of_all_three_bands"]
 
   - component: helm-shared-waypoint-consumer
     core:

@@ -25,7 +25,11 @@ authored state as it stands, and flags every unratified number it leans on.
 > bands. An idle human-held Navigation console loses exposed traffic immediately
 > and by name. A fully backfilled bridge consumes three payload-bearing `Order`
 > objectives and emits those same admitted commands; #1134's human surface and
-> authoritative traffic state remain the sole downstream path.
+> authoritative traffic state remain the sole downstream path. The live fronts
+> are narrow, corridor-long boxes (260 lateral by 1,100 longitudinal half-
+> extents), so exposed traffic is physically taken while the westward shelter
+> and eastern ladder routes remain clear; the historical sphere arithmetic
+> below remains the explicitly preserved pre-#1131 baseline.
 
 ## Method
 

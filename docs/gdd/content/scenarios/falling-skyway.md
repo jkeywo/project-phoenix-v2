@@ -111,7 +111,7 @@ The skyhook and depots carry condition and named capacities. The Destroyer carri
 
 ### Traffic and navigation
 
-Three authored routes—`skyway_lane`, `ladder_run`, and `storm_shelter_run`—give civilian entities a persistent spatial life. The three endangered craft author finite `order_options` that Navigation receives through the authoritative traffic snapshot; their buttons emit the existing `order_civilian` action rather than a scenario-only verb. Backfill reads the same target and route from `Order` objectives and enters through that command path. Hold, divert, dock, and corridor decisions affect real movement. Waypoint arrival and destruction can trigger acknowledgement and consequences.
+Three authored routes—`skyway_lane`, `ladder_run`, and `storm_shelter_run`—give civilian entities a persistent spatial life. The three endangered craft author finite `order_options` that Navigation receives through the authoritative traffic snapshot; their buttons emit the existing `order_civilian` action rather than a scenario-only verb. Backfill reads the same target and route from `Order` objectives and enters through that command path. A human hosting the Destroyer's auxiliary Navigation surface retains manual control at this scenario's detail floor. Each storm front is a narrow, corridor-long physical region that takes traffic left on `skyway_lane` while the lateral shelter and ladder routes remain clear; its forty-second dwell and template-authored damage are unchanged. Hold, divert, dock, and corridor decisions affect real movement. Waypoint arrival and destruction can trigger acknowledgement and consequences.
 
 ### Labour and disposition
 

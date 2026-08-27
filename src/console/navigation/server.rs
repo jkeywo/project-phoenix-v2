@@ -103,13 +103,16 @@ pub fn operate_civilian_order_ai(
         &crate::entities::spawner::EntityUuid,
         &crate::civilian::CivilianTraffic,
     )>,
-    mut ships: Query<(
-        Option<&crate::entities::spawner::EntityUuid>,
-        &crate::ship_plugin::ShipSystemControlSources,
-        &crate::server_app::ShipSystemBlackboards,
-        Option<&crate::ship_plugin::ShipConfigComponent>,
-        &mut crate::core::messages::AdmittedCommands,
-    )>,
+    mut ships: Query<
+        (
+            Option<&crate::entities::spawner::EntityUuid>,
+            &crate::ship_plugin::ShipSystemControlSources,
+            &crate::server_app::ShipSystemBlackboards,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
+            &mut crate::core::messages::AdmittedCommands,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
 ) {
     for (entity_uuid, sources, blackboards, ship_config, mut admitted) in ships.iter_mut() {
         if !crate::ai::host::ai_operates(

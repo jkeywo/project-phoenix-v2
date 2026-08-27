@@ -361,7 +361,15 @@ pub fn build_native_host_app(
         NativeHostError::Ship(format!("{ship_path:?} has no [[station]] blocks"))
     })?;
     app.insert_resource(PendingShipConfig(ship_config));
-    app.insert_resource(SelectedShipResource(ship_path.clone()));
+    // Store the CANONICAL key, not the raw `--ship` string: every downstream
+    // reader (`lobby::server::update_session_with_config`, `server::radar`,
+    // `server::reference_grid`, `server_app::world_setup`) looks this path up
+    // in the native template cache with NO filesystem fallback, and that cache
+    // is keyed canonically. The gate two lines above already canonicalises
+    // before checking, so a raw string here would let a `--ship` spelled with
+    // `./` or Windows backslashes pass the gate and then miss every one of
+    // those lookups, silently keeping a Default `ShipClientConfig`.
+    app.insert_resource(SelectedShipResource(ship_key.clone()));
 
     // `ConfigCachePlugin` is wasm-only; its two jobs are the template cache
     // (done by the preload) and the faction registry, which

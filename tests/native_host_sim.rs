@@ -185,8 +185,36 @@ fn the_chosen_hulls_own_configuration_reaches_the_client_config_not_the_default(
     );
 
     // And the same thing said structurally: naming a hull explicitly is honoured.
-    cfg.ship_path = Some(selected);
+    cfg.ship_path = Some(selected.clone());
     let _ = build_native_host_app(&cfg, &preload).expect("an explicit hull assembles");
+
+    // The cache-key mismatch issue #1121 closes (app.rs:337 vs the old :364):
+    // the boot gate canonicalises `--ship` before consulting the cache, but
+    // `SelectedShipResource` used to keep the RAW string, so every downstream
+    // reader above looked up a key the canonically-keyed cache never held.
+    // Windows tab-completion spells a path with backslashes, and a leading
+    // `./` is an ordinary shell habit — both name the SAME cached hull under
+    // `canonical_template_path`, so either spelling must reach the hull's
+    // real authored config, not silently fall back to the Default the
+    // mismatch used to produce.
+    let mut cfg_spelled = solo_config();
+    let spelled_differently = format!("./{}", selected.replace('/', "\\"));
+    cfg_spelled.ship_path = Some(spelled_differently);
+    let mut app_spelled = build_native_host_app(&cfg_spelled, &preload)
+        .expect("a `./`-prefixed, backslash-spelled --ship still assembles");
+    pump(&mut app_spelled, 4);
+    let live_spelled = app_spelled
+        .world()
+        .resource::<project_phoenix::lobby::server::ShipClientConfigResource>()
+        .0
+        .clone();
+    assert_eq!(
+        live_spelled.helm_radar_range, authored_range,
+        "a `./`- or backslash-spelled --ship must reach the SAME cached \
+         configuration as the canonical spelling, not the Default — the \
+         cache-key mismatch issue #1121 closes between app.rs's canonical \
+         gate check and the resource every downstream reader consults"
+    );
 }
 
 #[test]
@@ -345,6 +373,32 @@ fn a_ship_the_template_cache_does_not_hold_is_refused_rather_than_silently_defau
     assert!(
         message.contains("Default"),
         "and must say what would have happened instead: {message}"
+    );
+
+    // The same refusal survives an alternate — but canonically equivalent —
+    // spelling of this SAME uncached path. `canonical_template_path` collapses
+    // `./` and backslashes before the gate ever consults the cache (app.rs's
+    // `ship_key`), so a `./`-prefixed or backslash-spelled --ship naming
+    // genuinely uncached content must be refused exactly like the canonical
+    // spelling — never mistaken, in either direction, for some other key.
+    let mut cfg_spelled = solo_config();
+    let spelled_differently = format!("./{}", hull_path.replace('/', "\\"));
+    cfg_spelled.ship_path = Some(spelled_differently);
+    let err_spelled = build_native_host_app(&cfg_spelled, &preload)
+        .expect_err("a differently-spelled uncached hull must not silently default either");
+    assert!(
+        matches!(err_spelled, NativeHostError::Ship(_)),
+        "expected a ship error, got {err_spelled:?}"
+    );
+    let message_spelled = err_spelled.to_string();
+    assert!(
+        message_spelled.contains(&hull_path),
+        "the refusal must name the SAME canonical path regardless of how \
+         --ship was spelled: {message_spelled}"
+    );
+    assert!(
+        message_spelled.contains("Default"),
+        "and must say what would have happened instead: {message_spelled}"
     );
 
     let _ = std::fs::remove_dir_all(&dir);

@@ -445,20 +445,40 @@ jobs:
         run: cargo build --release --features host --bin phoenix-host
 
       # The bundle is `release/{phoenix-host.exe, dist/, assets/}` — the full
-      # assets/ tree, same as the browser build ships (curation is enforced by
-      # the swapped-in demo manifest and by wasm_add_mod_pack being compiled
-      # out, not by physically pruning files), so the native bundle stays
-      # consistent with what the web demo already does.
+      # assets/ tree, same as the browser build ships. Curation is enforced by
+      # the swapped-in demo manifest (both here AND in dist/, below) and by
+      # wasm_add_mod_pack being compiled out, not by physically pruning files,
+      # so the native bundle stays consistent with what the web demo already
+      # does.
       #
-      # Both README invocations below therefore resolve against `release/`
-      # itself and NEITHER passes --content-dir. The default (`.`) is the only
+      # Which file each README invocation below actually reads, now that BOTH
+      # copies carry the curated manifest:
+      #   `phoenix-host.exe --client-dir dist` serves the web bundle FROM
+      #     `dist/` (client HTML/JS/WASM, plus the startup version pin's
+      #     [content] id/epoch check against `dist/assets/scenarios.toml`),
+      #     but the catalogue it PUBLISHES over HTTP, and the hull it flies by
+      #     default, both come from `release/assets/scenarios.toml`
+      #     (--content-dir defaults to `.`, joined with the --manifest default
+      #     `assets/scenarios.toml`) — a different file from the one the pin
+      #     checks, which is why that pin alone could not catch this: the base
+      #     and demo manifests declare the same id/epoch and differ only in
+      #     which scenarios and hulls they list.
+      #   `phoenix-host.exe --world assets/worlds/combat_test.toml --solo`
+      #     reads the world from `release/assets/worlds/combat_test.toml` and
+      #     ALSO reads `release/assets/scenarios.toml` — the same file the
+      #     delivery command above publishes from, by the same path — to
+      #     compute `curated_hulls_for_world`'s allowlist for the default hull
+      #     (issue #917's native half). Before this file curated `release/`'s
+      #     copy, that lookup silently fell through to the uncurated base
+      #     manifest instead, so the restriction the demo build promises never
+      #     actually applied to this invocation.
+      #
+      # NEITHER invocation passes --content-dir. The default (`.`) is the only
       # value that works for this layout: --content-dir is the root the manifest
       # path is joined to, and the manifest default is already
       # `assets/scenarios.toml` — so the `--content-dir assets` this file used
       # to print asked for `release/assets/assets/scenarios.toml` and the host
       # exited 1 with "cannot read scenario manifest" before it took the port.
-      # The simulation line's `--world assets/worlds/…` resolves the same way,
-      # so the two commands agree about which tree they are reading.
       - name: Assemble the release bundle
         shell: bash
         run: |
@@ -468,6 +488,14 @@ jobs:
           cp target/release/phoenix-host.exe release/
           cp -r dist release/dist
           cp -r assets release/assets
+          # Mirrors the "Swap in the curated demo scenario manifest" step
+          # above (line ~181): that step only reaches dist/, so without this
+          # `release/assets/scenarios.toml` would still be the base dev
+          # checkout's manifest (falling_skyway included, no ships allowlist)
+          # and NEITHER phoenix-host.exe invocation below would ever read the
+          # curated one — see the rewritten comment above "Assemble the
+          # release bundle" for which file each actually reads.
+          cp assets/scenarios.demo.toml release/assets/scenarios.toml
           cat > release/README.txt <<'EOF'
           Project Phoenix demo -- native host (Windows, unsigned)
 

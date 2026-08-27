@@ -49,8 +49,14 @@ TOML-authored `[global] sim_tick_hz` (serde default 60 Hz). `SimTick`
    the `FixedMainScheduleOrder` after `FixedUpdate` (`sim_tick.rs`), so a
    `NextState<GamePhase>` written by the lobby countdown or a game-over setter
    applies on the tick that wrote it, and `OnEnter` spawns land on a tick
-   boundary. It still runs once per frame as well, for the frame-driven writers
-   (JS bridge force-start, asset preloader, headless auto-start).
+   boundary. Since issue #1121's fix round every *production* phase writer —
+   the lobby countdown, the JS bridge's force-start, the asset preloader, and
+   headless' and the native host's auto-start — writes from `FixedUpdate` this
+   way. The frame-level `StateTransition` site (registered once per rendered
+   frame by `StatesPlugin` itself) still runs too, but only bare-`App`
+   fixtures and test drivers that write the phase from a frame schedule land
+   on it now (e.g. `tests/headless_runner.rs` setting `NextState<GamePhase>`
+   directly rather than through a fixed system).
 5. **AI cadence derivation** (`FixedLast`, `src/ai/cadence.rs`) — the AI
    decision tick is every `sim_tick_hz / ai_tick_hz`-th logical tick, and the
    snapshot tick every `ai_tick_hz / ai_snapshot_hz`-th of those; both ratios

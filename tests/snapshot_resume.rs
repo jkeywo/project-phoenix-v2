@@ -3915,8 +3915,13 @@ fn scripted_comms_args() -> HeadlessArgs {
     }
 }
 
-/// The comms state a mid-conversation save resumes from, named rather than left
-/// inside a digest that folds none of it.
+/// The comms state a mid-conversation save resumes from, named field by field.
+///
+/// This used to read "named rather than left inside a digest that folds none of
+/// it". Issue #1086's `sim_digest::fold_comms_scope` folds all of it — the inbox
+/// whole, the live dialogues, the open hails and the pending scripted opens — so
+/// naming the fields says WHAT travelled and the at-restore digest equality says
+/// that it arrived intact.
 fn comms_of(payload: &PhoenixSnapshot) -> &project_phoenix::snapshot::CommsState {
     payload
         .comms
@@ -3962,12 +3967,17 @@ fn step_to_the_open_thread(app: &mut bevy::prelude::App) -> u64 {
 /// The capture is taken on the one frame where thread A is shown and unanswered
 /// (see the fixture). The resumed world is then stepped alongside the live one
 /// across the Backfill Comms AI's answer, and the claim is read off
-/// `world_digest` every frame — which folds no comms state at all, and does not
-/// need to: answering mints the follow-up thread's ids from the tick-scoped
-/// `WorldIdMint` (whose per-namespace counters the digest DOES fold) and the
-/// second thread's `on_pick` ends the run in a declared victory (`GamePhase`,
-/// also folded). A resumed world that came back with an empty `active_dialogues`
-/// answers nothing, mints nothing and never gets there.
+/// `world_digest` every frame. Since issue #1086 that digest folds the comms
+/// state directly (`fold_comms_scope` walks the inbox, the dialogues, the open
+/// hails and the pending opens), so an empty `active_dialogues` in the resumed
+/// world is caught on the restore tick rather than several frames later. The
+/// INDIRECT reading this test was originally written on still holds and is what
+/// makes it a continuation claim rather than a photograph: answering mints the
+/// follow-up thread's ids from the tick-scoped `WorldIdMint` (whose
+/// per-namespace counters the digest folds) and the second thread's `on_pick`
+/// ends the run in a declared victory (`GamePhase`, also folded). A resumed
+/// world that came back with an empty `active_dialogues` answers nothing, mints
+/// nothing and never gets there.
 #[test]
 fn a_scripted_dialogue_open_at_the_save_is_answerable_after_a_resume() {
     let mut live = boot(&scripted_comms_args());

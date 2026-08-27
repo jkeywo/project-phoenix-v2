@@ -61,15 +61,18 @@
 //!   capture's digest counted.
 //! * `flags` (the world `FlagStore`s, base and per-layer) is in because a
 //!   scenario's trigger state is what makes a bounded Combat Test *bounded* —
-//!   `wave_3_cleared` is authoritative even though nothing folds it yet. It is
-//!   named by this issue's own acceptance criteria, and `FlagStore` gained
-//!   serde for exactly this.
+//!   `wave_3_cleared` is authoritative, and was authoritative here before
+//!   anything folded it. It is named by this issue's own acceptance criteria,
+//!   and `FlagStore` gained serde for exactly this. Issue #1086 later folded it
+//!   too (`sim_digest::fold_scenario_flags`), which is the payload's field list
+//!   being used as the fold's membership test rather than the other way round.
 //! * `scenario` ([`ScenarioState`], issue #864) is in for the same reason
 //!   widened one step: flags are what a scenario *remembers*, and this is what
 //!   it has already *done* and is still *owed* — every trigger's single-shot
 //!   latch, the mission clock those latches are timed against, and the queue of
-//!   deferred `after(n, |ctx| …)` script callbacks. Nothing folds any of it
-//!   either, and a resumed scenario without it replays its own opening: spent
+//!   deferred `after(n, |ctx| …)` script callbacks. Nothing folded any of it
+//!   when it landed — issue #1086 does now — and a resumed scenario without it
+//!   replays its own opening: spent
 //!   triggers re-arm and fire a second time, pending callbacks are forgotten,
 //!   and `on_timer` thresholds are measured from the age of the fresh app
 //!   rather than of the run.
@@ -77,9 +80,10 @@
 //!   the conversation a scenario is in the middle of *having*: the inbox, the
 //!   dialogue entries that make its messages answerable, the template latches
 //!   that stop them being injected twice, and the scripted `open_comms`
-//!   requests queued but not yet materialised. Nothing folds any of it, and
-//!   without it a save taken mid-thread comes back to an empty Comms console
-//!   with a scenario waiting on an answer that can no longer be given.
+//!   requests queued but not yet materialised. Nothing folded any of it when it
+//!   landed either — `sim_digest::fold_comms_scope` does now — and without it a
+//!   save taken mid-thread comes back to an empty Comms console with a scenario
+//!   waiting on an answer that can no longer be given.
 //!
 //! **Excluded, and the exclusion is the design.** Browser UI state, PeerJS
 //! sessions, renderer caches, client projections, and raw ECS `Entity` handles

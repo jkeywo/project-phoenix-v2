@@ -255,6 +255,15 @@
 # opens no operations. `probe_strike.toml` is where those numbers move, and its
 # own baseline is where they are written down.
 #
+# RECORDED PRE-#1086, AND NO LONGER REPRODUCIBLE. Issue #1086 widened the
+# authoritative digest over the scenario's own state, so the two reasons above
+# that lean on the old fold — "the register is a field on WorldContentRuntime,
+# which nothing folds, exactly like the flag store and the deadline table beside
+# it" — are no longer true of this build: the register, the flag store and the
+# deadline table are all walked by `sim_digest::fold_scenario_records` /
+# `fold_scenario_flags`. The A/B was a same-build comparison and stands; the
+# recorded value does not.
+#
 # STILL 0x14d6dc5dcf05a3c1 AFTER #1036 as well, and for a reason the header can
 # name rather than a coincidence. The slice adds no entity, moves no position and
 # touches no condition, capacity or deadline number; everything it authors is Act

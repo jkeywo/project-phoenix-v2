@@ -83,7 +83,14 @@ async function main() {
     await cp(
       path.join(root, 'assets', dir),
       path.join(out, 'assets', dir),
-      { recursive: true },
+      {
+        recursive: true,
+        // assets/join/join-codes.toml is the designer-facing source (built
+        // into join-codes.json just above); no client-side reader ever opens
+        // the .toml, so it has no business on a phone alongside the generated
+        // table it was built from.
+        filter: dir === 'join' ? (src) => !src.endsWith('.toml') : undefined,
+      },
     );
   }
 

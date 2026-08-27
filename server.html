@@ -2560,10 +2560,18 @@
           },
           onError: (reason, detail) => {
             console.warn(`[rendezvous] ${reason}${detail ? `: ${detail}` : ''}`);
-            // Whatever the service said, this host no longer holds a code the
-            // service will honour: the record is dropped with the socket. Say
-            // so on the viewscreen, drop the dead letters, and fall back to
-            // the PeerJS panel, which is still a working way in.
+            // createRendezvousHost fires onError from four sites, and only two
+            // of them mean the record is actually gone: socket.onerror and
+            // socket.onclose, both reasoned 'unreachable' because the service
+            // holds nothing in storage — the record really did die with the
+            // socket. The other two are per-frame noise about ONE peer, not
+            // the record: a relayed service 'error' frame, and a rejected
+            // setRemoteDescription/addIceCandidate (reasoned 'signal') — e.g.
+            // the registry's signal/no-peer answer when this host trickles ICE
+            // to a peer that just left, an ordinary race. Tearing the whole
+            // code down for either of those used to pop "service unreachable"
+            // over a perfectly live session.
+            if (reason !== 'unreachable') return;
             rendezvousFault = reason;
             const hadCode = rendezvousCodeShown;
             clearJoinCode();

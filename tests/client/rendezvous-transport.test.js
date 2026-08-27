@@ -634,4 +634,43 @@ describe('a joiner that fails cleans up after itself', () => {
     expect(joiner.connected).toBe(false);
     expect(world.registry.snapshot()[0].peers).toBe(0);
   });
+
+  it('ignores a socket error on the signalling socket once the direct channel is open', async () => {
+    // An abnormal WS termination fires `error` BEFORE `close` (MDN), so the
+    // `linked()` guard `onclose` already had was not enough — a stray error
+    // event on the now-expendable signalling socket used to pop the join
+    // overlay back over a session that had already connected.
+    const world = makeWorld();
+    const { code, factories: base } = await hostOn(world);
+    const joinSockets = [];
+    const factories = {
+      socket: (url) => {
+        const s = base.socket(url);
+        if (String(url).endsWith('/v1/join')) joinSockets.push(s);
+        return s;
+      },
+      peer: base.peer,
+    };
+
+    const errors = [];
+    const statuses = [];
+    const joiner = createRendezvousJoiner({
+      base: 'https://rendezvous.test',
+      data: DATA,
+      code: code.suffix,
+      factories,
+      getIdent: () => ({ token: 'tok-1', name: 'Ada' }),
+      onError: (reason) => errors.push(reason),
+      onStatus: (s) => statuses.push(s),
+    });
+    await settle();
+    expect(joiner.connected).toBe(true);
+    expect(statuses).toContain('ready');
+
+    joinSockets[0].onerror();
+    await settle();
+
+    expect(errors).toHaveLength(0);
+    expect(statuses).not.toContain('error');
+  });
 });

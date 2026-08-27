@@ -39,7 +39,12 @@
  * worker redeploy, or be rebound to a replacement host — code rotation and
  * stable-code-across-a-drop are #1115 and #1120, and they are what would add
  * persistence. The `record_ttl_seconds` sweep below is not persistence: it is
- * the backstop for a record whose close event never arrived.
+ * an idle timeout measured from `lastSeen`, refreshed by every inbound frame
+ * from the record's own host, not from when the record was created — so a
+ * host that has been live for days is never swept merely for being old. It
+ * catches the case a `close` event never arrived for (an evicted instance, a
+ * half-open socket): the host has gone quiet, and once nothing has been heard
+ * from it for that long, the code cannot be held forever.
  *
  * The bounds in the authored `[limits]` table are the other half of that
  * posture. This is an unauthenticated public endpoint whose codes are private
@@ -203,17 +208,20 @@ export function createRegistry({
   }
 
   /**
-   * Drop records whose TTL has passed. A host record normally dies with its
-   * socket; this is the sweep for the case where the close never arrived (an
-   * evicted instance, a half-open socket), so a code cannot be held forever by
-   * a host that is not there. Runs lazily on every inbound frame — there is no
-   * alarm to schedule in a registry that holds no storage.
+   * Drop records that have gone quiet for longer than the TTL — measured from
+   * `lastSeen`, not `createdAt`, so a host that has been live and talking for
+   * days is never mistaken for an orphan just because it is old. A host
+   * record normally dies with its socket; this is the sweep for the case
+   * where the close never arrived (an evicted instance, a half-open socket),
+   * so a code cannot be held forever by a host that is not there. Runs lazily
+   * on every inbound frame — there is no alarm to schedule in a registry that
+   * holds no storage.
    */
   function expireStale() {
     const cutoff = now() - ttlMs;
     let frames = [];
     for (const record of [...records.values()]) {
-      if (record.createdAt > cutoff) continue;
+      if (record.lastSeen > cutoff) continue;
       frames = frames.concat(dropRecord(record, 'host-gone'));
     }
     return frames;
@@ -259,6 +267,11 @@ export function createRegistry({
       admission: 'open',
       peers: new Set(),
       createdAt: now(),
+      // The TTL sweep expires on THIS, refreshed by every inbound frame from
+      // `host` below (see `receive()`) — not on `createdAt` — so a record
+      // stays alive for as long as its host keeps talking, however long that
+      // is, and only a host that has genuinely gone quiet gets swept.
+      lastSeen: now(),
     };
     records.set(key, record);
     conn.key = key;
@@ -313,6 +326,15 @@ export function createRegistry({
     records.delete(record.key);
     const hostConn = conns.get(record.host);
     if (hostConn) hostConn.key = null;
+    // Tell the host too, not just its joiners — an idle-past-TTL sweep drops
+    // a record the host never asked to close, and until now the host's own
+    // viewscreen kept showing a code the service had already forgotten.
+    // 'error'/'unreachable' rather than 'closed': it is the frame
+    // createRendezvousHost's host-side `handle()` already turns into "the
+    // record is gone" teardown (gui/rendezvous-transport.js), the same
+    // reason its own socket.onerror/onclose report, so a stale code clears
+    // on its own instead of surviving the record that backed it.
+    frames.push(out(record.host, { type: 'error', reason: 'unreachable' }));
     return frames;
   }
 
@@ -419,6 +441,16 @@ export function createRegistry({
     /** Feed one decoded frame in; get the frames to send out. */
     receive(connId, frame) {
       if (!conns.has(connId)) return [fail(connId, 'unknown', 'not-connected')];
+      // Every inbound frame from a hosting connection refreshes ITS record's
+      // `lastSeen` — before the sweep below runs, so a live host proves
+      // itself with this very frame rather than needing a second one to
+      // survive the same call. hostOpen stamps the initial value; this is
+      // what keeps it fresh for as long as the host keeps talking.
+      const conn = conns.get(connId);
+      if (conn.role === ROLE_HOST && conn.key) {
+        const hostRecord = records.get(conn.key);
+        if (hostRecord) hostRecord.lastSeen = now();
+      }
       // Sweep first, so a request never resolves a record whose TTL has run
       // out, and the joiners of an expired one are told before anything else
       // this frame produces.

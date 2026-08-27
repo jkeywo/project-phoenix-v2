@@ -514,7 +514,12 @@ export function createRendezvousJoiner(opts) {
     const msg = decodeFrame(e.data);
     if (msg) handle(msg);
   };
-  socket.onerror = () => { if (!closed) { onError('unreachable'); onStatus('error'); } };
+  // An abnormal WS termination fires `error` BEFORE `close` (MDN), so once the
+  // direct channel is up this must not fall through to the same teardown the
+  // signalling socket dying at the entry screen gets: the `linked()` guard
+  // below on `onclose` never even runs in that ordering, and a stale
+  // 'unreachable' would pop the join overlay back over a connected session.
+  socket.onerror = () => { if (closed || linked()) return; onError('unreachable'); onStatus('error'); };
   // The host half has always had this; the joining half had not, so a
   // server-initiated close — DO eviction, worker redeploy, idle timeout, an LB
   // reset — fired `close` with no preceding `error` and left the phone on

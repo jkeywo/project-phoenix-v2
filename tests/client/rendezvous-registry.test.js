@@ -313,6 +313,49 @@ describe('registry bounds', () => {
     expect(h.reg.snapshot()).toHaveLength(0);
   });
 
+  it('does not expire a record whose host keeps sending frames, however long it has run', () => {
+    // The TTL used to be measured from createdAt, so a host that had simply
+    // been live for a long time was as expirable as an orphan. It is measured
+    // from lastSeen now, refreshed by every inbound host frame — so a host
+    // that keeps talking survives arbitrarily far past one TTL window's worth
+    // of wall-clock time since it was minted.
+    let clock = 1_000_000;
+    const h = harness({ now: () => clock });
+    const code = openHost(h);
+    const ttl = DATA.limits.record_ttl_seconds * 1000;
+
+    // Two keepalives, each well inside the TTL of the one before it, but
+    // whose COMBINED span is more than two full TTL windows since createdAt.
+    clock += ttl - 1000;
+    h.send('host-1', { type: 'host-admission', state: 'open' });
+    clock += ttl - 1000;
+    h.send('host-1', { type: 'host-admission', state: 'open' });
+
+    h.connect('phone', ROLE_CLIENT);
+    h.send('phone', { type: 'resolve', code: code.suffix });
+    expect(h.last('phone', 'resolved')).toMatchObject({ admission: 'open' });
+    expect(h.reg.snapshot()).toHaveLength(1);
+  });
+
+  it('expires an idle host past its TTL and tells the host its own code is gone', () => {
+    // dropRecord used to notify only the record's joiners, so an idle host's
+    // own viewscreen kept showing a code the service had already forgotten.
+    let clock = 1_000_000;
+    const h = harness({ now: () => clock });
+    openHost(h);
+
+    clock += DATA.limits.record_ttl_seconds * 1000 + 1;
+    h.connect('phone', ROLE_CLIENT);
+    h.send('phone', { type: 'resolve', code: 'ZZZZZ' });
+
+    expect(h.reg.snapshot()).toHaveLength(0);
+    // 'unreachable' is what createRendezvousHost's own socket.onerror/onclose
+    // report — the frame its host-side handler already treats as "the record
+    // is gone" — so the host's stale code clears the same way a real drop
+    // would clear it, rather than needing a bespoke frame type.
+    expect(h.last('host-1', 'error')).toMatchObject({ reason: 'unreachable' });
+  });
+
   it('lets a host socket ask nothing of the client namespace', () => {
     // clientJoin has always had this guard; resolve did not, so a /v1/host
     // socket could read the crew namespace it is not served for.

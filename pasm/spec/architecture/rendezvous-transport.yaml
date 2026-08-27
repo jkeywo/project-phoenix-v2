@@ -13,7 +13,8 @@ entities:
       rationale:
         - The alphabet excludes every letter the confusable map folds away, so a minted code always survives the normalisation that makes it typeable.
         - Deny-list entries are authored in ordinary spelling and canonicalised before comparison, so one entry refuses every confusable spelling of the word.
-        - Machine reasons map to strings.csv ids in the one module, so the phone and the host page cannot describe the same failure differently. That map covers the HOST's own StampMismatch codes too — an unmapped refusal renders as "no ship is using that code", which is a lie about a build the host authoritatively refused.
+        - Machine reasons map to strings.csv ids in the one module, so the phone and the host page cannot describe the same failure differently.
+        - "[ai] That map covers the HOST's own StampMismatch codes too — an unmapped refusal renders as \"no ship is using that code\", which is a lie about a build the host authoritatively refused."
         - "[ai] The designer-facing source is assets/join/join-codes.toml (AGENTS.md rule 11: the deny-list and its per-entry rationale are exactly the tunable data that rule is about, and TOML gives them real comments). assets/join/join-codes.json is a COMMITTED generated artifact, because the three consumers read the table with no parser and no build step — the phone fetches it, vitest reads it from disk, esbuild bundles it into the Worker. scripts/build-client.mjs regenerates it and a vitest drift gate fails when the two disagree."
         - "[ai] The shape of a typed input is decided before canonicalisation, because `_` is both the part separator and an authored strip character: splitting first reported a player's spaced-out five letters as malformed."
     architecture:

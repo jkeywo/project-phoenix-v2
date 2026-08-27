@@ -283,10 +283,13 @@ describe('reason reporting', () => {
    *
    * Hardcoded on purpose: these five strings cross a language boundary
    * (Rust → encode_join_verdict → server.html → JoinRefused → this module), so
-   * the only way JavaScript can notice a new variant is to be told the list and
-   * fail when it stops matching. If you add or rename a variant in
-   * StampMismatch, this test is where you find out that the phone would have
-   * shown the player "no ship is using that code" for it.
+   * the only way JavaScript can notice a new variant is to be told the list.
+   * Below, this list is checked for SET EQUALITY against the string literals
+   * extracted straight out of `fn code()`'s match arms — not just "these five
+   * are present" — so a sixth `StampMismatch` variant with no row here fails
+   * loudly instead of quietly rendering as `error_unknown` on the phone. If
+   * you add or rename a variant in StampMismatch, this test is where you find
+   * out.
    */
   const STAMP_MISMATCH_CODES = [
     'client-stamp-missing',
@@ -295,6 +298,37 @@ describe('reason reporting', () => {
     'content-id-mismatch',
     'content-epoch-mismatch',
   ];
+
+  /**
+   * Pull the string literals straight out of `StampMismatch::code()`'s match
+   * arms in src/delivery/stamp.rs — the arms are a clean
+   * `Variant { .. } => "literal",` block, so scanning for the balanced brace
+   * that closes the function and regexing the quoted literals inside it is
+   * enough, with no Rust parser involved.
+   */
+  function stampMismatchCodesFromRust() {
+    const src = readFileSync(path.join(root, 'src/delivery/stamp.rs'), 'utf8');
+    const marker = 'fn code(';
+    const fnStart = src.indexOf(marker);
+    if (fnStart === -1) return [];
+    const braceStart = src.indexOf('{', fnStart);
+    if (braceStart === -1) return [];
+    let depth = 0;
+    let braceEnd = -1;
+    for (let i = braceStart; i < src.length; i += 1) {
+      if (src[i] === '{') depth += 1;
+      else if (src[i] === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          braceEnd = i;
+          break;
+        }
+      }
+    }
+    if (braceEnd === -1) return [];
+    const body = src.slice(braceStart, braceEnd + 1);
+    return [...body.matchAll(/"([a-z0-9-]+)"/g)].map((m) => m[1]);
+  }
 
   it('gives unknown, wrong-type and version-mismatch three different strings', () => {
     const ids = ['unknown', 'wrong-type', 'version-mismatch'].map(reasonStringId);
@@ -306,10 +340,22 @@ describe('reason reporting', () => {
   });
 
   it('maps every host refusal code the compatibility handshake can return', () => {
-    const rustCodes = readFileSync(path.join(root, 'src/delivery/stamp.rs'), 'utf8');
+    const rustCodes = stampMismatchCodesFromRust();
+    // A silent zero-match extraction would sail through a set-equality check
+    // against an empty expectation just as quietly as the old containment
+    // check did against a new variant — fail loudly instead, so a Rust
+    // reformatting that breaks the regex is caught here rather than by a
+    // shipped "no ship is using that code" for every refusal.
+    expect(
+      rustCodes.length,
+      'extracted zero string literals from fn code() in src/delivery/stamp.rs — the regex or the fn code( marker is stale',
+    ).toBeGreaterThan(0);
+    // Set equality, not mere containment: this catches BOTH a new Rust
+    // variant with no row here (the bug this test exists to prevent) AND a
+    // stale JS entry for a code Rust no longer emits.
+    expect(new Set(rustCodes)).toEqual(new Set(STAMP_MISMATCH_CODES));
+
     for (const code of STAMP_MISMATCH_CODES) {
-      // The list above really is the list in the Rust file.
-      expect(rustCodes, `StampMismatch::code() no longer emits ${code}`).toContain(`"${code}"`);
       // …and none of them renders as "no ship is using that code", which is
       // what an unmapped reason falls back to.
       expect(reasonStringId(code), code).not.toBe(reasonStringId('unknown'));

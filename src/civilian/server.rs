@@ -248,7 +248,7 @@ pub fn tick_civilian_traffic(
             continue;
         }
         if let Some(outbox) = outbox.as_deref_mut() {
-            outbox.0.push((
+            outbox.push_reliable((
                 crate::lobby::Target::Token(token),
                 crate::core::messages::ServerMessage::CivilianOrderRejected { target, reason },
             ));
@@ -907,7 +907,6 @@ mod tests {
         let bounced: Vec<(String, String)> = app
             .world()
             .resource::<crate::server_app::SimOutbox>()
-            .0
             .iter()
             .filter_map(|(target, msg)| match (target, msg) {
                 (

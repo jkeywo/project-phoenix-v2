@@ -122,13 +122,13 @@ fn push(app: &mut App, token: &str, msg: ClientMessage) {
 
 fn tick(app: &mut App) -> Vec<OutboundMessage> {
     app.update();
-    let sim_entries = std::mem::take(&mut app.world_mut().resource_mut::<SimOutbox>().0);
+    let sim_entries = app.world_mut().resource_mut::<SimOutbox>().drain();
     let mut out = app.world().resource::<Outbox>().0.clone();
-    for (target, msg) in sim_entries {
+    for entry in sim_entries {
         out.push(OutboundMessage {
-            target,
-            msg,
-            delivery: crate::core::messages::DeliveryClass::Reliable,
+            target: entry.target,
+            msg: entry.message,
+            delivery: entry.delivery,
         });
     }
     app.world_mut().resource_mut::<Outbox>().0.clear();

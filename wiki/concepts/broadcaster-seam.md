@@ -1,14 +1,14 @@
 ---
 title: Broadcaster Seam
 type: concept
-tags: [broadcast, messages, audience, cadence, delivery]
-sources: [src/core/broadcast/, src/server_app/broadcast.rs, src/server_app/broadcast_publish.rs, src/console/weapons/blackboard.rs, src/ship/power.rs, src/ship/shields.rs, src/console/repair/server.rs, src/lobby/server.rs]
+tags: [broadcast, messages, audience, cadence, delivery-class, snapshot, reliable]
+sources: [src/core/broadcast/, src/server_app/components.rs, src/server_app/broadcast.rs, src/server_app/broadcast_publish.rs, src/console/weapons/blackboard.rs, src/ship/power.rs, src/ship/shields.rs, src/console/repair/server.rs, src/lobby/server.rs, src/debug_overlay.rs]
 updated: 2026-08-27
 ---
 
 # Broadcaster Seam
 
-The broadcaster seam owns periodic and event-driven publication from authoritative simulation/lobby state to `OutboundMessage`. Producers return messages; the shared dispatcher owns cadence, audience resolution, and delivery to the bridge.
+The broadcaster seam owns periodic and event-driven publication from authoritative simulation/lobby state to `OutboundMessage`. Producers return messages; the shared dispatcher owns cadence, audience resolution, and delivery to the bridge. A registered phase supplies its delivery class, while arbitrary-target simulation producers record their choice in `SimOutbox` at insertion time.
 
 ## Types
 
@@ -38,7 +38,7 @@ The system-derived variants require the current `ShipConfig`; they do not infer 
 | `repair_state_broadcaster` | repair state | holder of `repair`, 10 Hz | `src/console/repair/server.rs` |
 | `shields_state_broadcaster` | shield facings and frequency | holder of `shields-system`, 10 Hz | `src/ship/shields.rs` |
 | `modifier_events_broadcaster` | modifier add/remove edges | all, on event | `src/server_app/broadcast_publish.rs` |
-| `sim_outbox_broadcaster` | arbitrary-target `SimOutbox` entries | target already carried by each entry | `src/server_app/broadcast_publish.rs` |
+| `sim_outbox_broadcaster` | arbitrary-target `SimOutbox` entries | target and class already carried by each entry | `src/server_app/broadcast_publish.rs` |
 
 The lobby deliberately does **not** route its outbox through the phase-gated
 generic broadcaster. `LobbyOutboxPlugin` drains `LobbyOutbox` directly in
@@ -48,13 +48,16 @@ that the countdown transitions from `Lobby` to `InProgress`.
 
 ## Delivery classes
 
-Direct `SimBroadcaster` producers use `Snapshot`; the live 10 Hz
-`ShieldStatus` publisher takes this path. `sim_outbox_broadcaster` classifies
-each queued `ServerMessage` as `Reliable` or `Snapshot`, including the targeted
-one-shot `ShieldStatus` rebuilt for a reconnect. High-frequency replaceable
-state uses the snapshot channel; lifecycle, commands, setup, and one-shot
-notifications remain reliable. `flush_outbound` in `src/server/bridge.rs` is
-the Rust-to-JavaScript boundary that preserves the class.
+Registered `SimBroadcaster` producers use `Snapshot`. `SimOutbox` has no public
+raw insertion path: arbitrary-target producers must call `push_snapshot`,
+`push_reliable`, `extend_snapshot`, or `extend_reliable`, storing the selected
+class beside the target and payload. `sim_outbox_broadcaster` drains those
+entries without reclassifying their `ServerMessage` variant. High-frequency
+replaceable state uses the snapshot channel; lifecycle, setup, and one-shot
+notifications remain reliable. The debug-state publisher is an intentional
+direct Reliable exception because it must still publish while the fixed
+simulation loop is paused. `flush_outbound` in `src/server/bridge.rs` preserves
+the class at the Rust-to-JavaScript boundary.
 
 ## Cache resets
 
@@ -63,8 +66,8 @@ Snapshot delta caches are registered in `src/core/broadcast/cache_registry.rs`. 
 ## Adding a producer
 
 1. Keep authoritative state in its owning domain.
-2. Build a producer that reads that state and returns `ServerMessage` values.
-3. Select the narrowest typed `Audience` and a suitable `Cadence`.
+2. Build a registered producer or use `SimOutbox` for arbitrary per-message targets.
+3. Select the narrowest typed `Audience`, suitable `Cadence`, and explicit delivery class at the owning seam.
 4. Register the broadcaster from the owning plugin or `src/server_app/registration.rs`.
 5. Add an observable routing/cadence test; do not write directly to the bridge from the domain system.
 

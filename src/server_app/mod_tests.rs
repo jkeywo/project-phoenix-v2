@@ -819,13 +819,13 @@ fn tick(app: &mut App) -> Vec<OutboundMessage> {
     // Drain any leftover SimOutbox entries that the sim systems wrote but
     // were not captured by the PostUpdate collect system (SimOutbox is not
     // connected to the OutboundMessage bus for test_app).
-    let sim_entries = std::mem::take(&mut app.world_mut().resource_mut::<SimOutbox>().0);
+    let sim_entries = app.world_mut().resource_mut::<SimOutbox>().drain();
     let mut out = app.world().resource::<Outbox>().0.clone();
-    for (target, msg) in sim_entries {
+    for entry in sim_entries {
         out.push(OutboundMessage {
-            target,
-            msg,
-            delivery: DeliveryClass::Reliable,
+            target: entry.target,
+            msg: entry.message,
+            delivery: entry.delivery,
         });
     }
     app.world_mut().resource_mut::<Outbox>().0.clear();
@@ -3562,7 +3562,7 @@ fn npc_ship_takes_hull_damage_from_asteroid_collision() {
 
     // Player-only messages must NOT be emitted for an NPC-vs-asteroid
     // collision — those are gated on `Has<LocalShip>`.
-    let outbox = &app.world().resource::<SimOutbox>().0;
+    let outbox = app.world().resource::<SimOutbox>();
     assert!(
         !outbox
             .iter()
@@ -4634,28 +4634,32 @@ fn npc_asteroid_collision_emits_attacker_less_balance_event() {
 }
 
 #[test]
-fn drain_sim_outbox_directly() {
-    let mut app = test_app();
-    start_game(&mut app);
-
-    // Write directly to SimOutbox
-    let len_before = app.world().resource::<SimOutbox>().0.len();
-    app.world_mut()
-        .resource_mut::<SimOutbox>()
-        .0
-        .push((Target::All, ServerMessage::GameStarted));
-
-    // Drain manually
-    app.world_mut().resource_mut::<SimOutbox>().0.clear();
-
-    // Check SimOutbox is now empty
-    let len_after = app.world().resource::<SimOutbox>().0.len();
-    assert_eq!(
-        len_after,
-        0,
-        "SimOutbox should be empty after drain, was {} before drain",
-        len_before + 1
+fn sim_outbox_preserves_each_producers_explicit_delivery_class() {
+    let mut app = App::new();
+    app.add_plugins(LobbyPlugin)
+        .add_plugins(bevy::time::TimePlugin)
+        .init_resource::<SimOutbox>()
+        .init_resource::<Outbox>()
+        .add_plugins(sim_outbox_broadcaster())
+        .add_systems(PostUpdate, collect);
+    crate::ship::test_support::drive_one_fixed_step_per_update(
+        &mut app,
+        std::time::Duration::from_millis(100),
     );
+
+    let outbox = &mut app.world_mut().resource_mut::<SimOutbox>();
+    // Deliberately queue the same payload variant through both methods: the
+    // producer's chosen seam, not a payload census, must decide delivery.
+    outbox.push_snapshot((Target::All, ServerMessage::GameStarted));
+    outbox.push_reliable((Target::All, ServerMessage::GameStarted));
+
+    app.update();
+
+    let messages = &app.world().resource::<Outbox>().0;
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0].delivery, DeliveryClass::Snapshot);
+    assert_eq!(messages[1].delivery, DeliveryClass::Reliable);
+    assert!(app.world().resource::<SimOutbox>().is_empty());
 }
 
 // -- Power system integration tests --------------------------------------
@@ -6446,10 +6450,10 @@ fn game_over_broadcasts_the_latched_outcome() {
 
     world.run_system_once(on_game_over_enter).unwrap();
 
-    let outbox = &world.resource::<SimOutbox>().0;
+    let outbox = world.resource::<SimOutbox>();
     assert_eq!(outbox.len(), 1);
-    match &outbox[0].1 {
-        ServerMessage::GameOver { reason, outcome } => {
+    match outbox.iter().next().map(|(_, message)| message) {
+        Some(ServerMessage::GameOver { reason, outcome }) => {
             assert_eq!(reason, "world.falling_skyway.ending.held");
             assert_eq!(outcome.as_deref(), Some("victory"));
         }
@@ -6484,11 +6488,16 @@ fn game_over_publishes_no_outcome_when_none_was_declared() {
 
     world.run_system_once(on_game_over_enter).unwrap();
 
-    match &world.resource::<SimOutbox>().0[0].1 {
-        ServerMessage::GameOver { reason, outcome } => {
+    match world
+        .resource::<SimOutbox>()
+        .iter()
+        .next()
+        .map(|(_, message)| message)
+    {
+        Some(ServerMessage::GameOver { reason, outcome }) => {
             assert_eq!(reason, "");
             assert_eq!(*outcome, None);
         }
         other => panic!("expected GameOver, got {other:?}"),
-    }
+    };
 }

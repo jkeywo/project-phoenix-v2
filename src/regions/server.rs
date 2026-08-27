@@ -373,7 +373,7 @@ fn apply_damage_zone_damage(
                 // events — only emit for the LocalShip.
                 if is_local {
                     if let Some(ref mut ob) = outbox {
-                        ob.0.push((
+                        ob.push_reliable((
                             Target::All,
                             ServerMessage::DamageTaken {
                                 hull: hull_applied,
@@ -383,7 +383,7 @@ fn apply_damage_zone_damage(
                     }
                     if ship_destroyed {
                         if let Some(ref mut ob) = outbox {
-                            ob.0.push((Target::All, ServerMessage::ShipDestroyed));
+                            ob.push_reliable((Target::All, ServerMessage::ShipDestroyed));
                         }
                         if let Some(ref mut reason) = game_over_reason {
                             if reason.0.is_none() {
@@ -430,7 +430,7 @@ fn apply_damage_zone_damage(
                             });
                         }
                         if let Some(ref mut ob) = outbox {
-                            ob.0.push((
+                            ob.push_reliable((
                                 Target::All,
                                 ServerMessage::EntityDespawned {
                                     uuid: uuid.0.clone(),

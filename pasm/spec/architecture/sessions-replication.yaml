@@ -114,6 +114,9 @@ entities:
       confidence: confirmed
       title: Host State Broadcaster
       summary: Host-side broadcaster that emits phase-gated, audience-scoped snapshots and reliable events from authoritative simulation and lobby state.
+      rationale:
+        - Simulation producers choose Snapshot or Reliable at the point where cadence and loss semantics are known. SimOutbox stores that producer-owned class behind explicit push_snapshot/push_reliable insertion methods; its raw queue is private and the forwarding broadcaster never classifies by payload variant.
+        - Reconnect projections are latest-state snapshots targeted at the reconnecting token. Entity-lifecycle, combat, comms, objective, and scenario events remain reliable because losing one is not repaired by the next periodic projection.
     architecture:
       kind: replication-service
       authority: authoritative
@@ -122,9 +125,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/core/broadcast, src/lobby/server.rs, src/server/bridge.rs]
-      symbols: [SimBroadcaster, LobbyBroadcaster, Audience, Cadence]
-      tests: [cargo test]
+      paths: [src/core/broadcast, src/core/broadcast/cache_registry.rs, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/lobby/server.rs, src/server/bridge.rs]
+      symbols: [SimBroadcaster, LobbyBroadcaster, SimOutbox, push_snapshot, push_reliable, Audience, Cadence]
+      tests: [cargo test, tests/smoke/snapshot-channel.spec.js]
 
   - state: lobby-session-replica
     core:

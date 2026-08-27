@@ -663,7 +663,7 @@ pub(crate) fn tick_blaster_system(
                         kind: crate::core::balance::FIRED_KIND_BLASTER.to_string(),
                     });
                 }
-                outbox.0.push((
+                outbox.push_reliable((
                     Target::All,
                     ServerMessage::BlasterFired {
                         bank: bank_id.clone(),
@@ -847,7 +847,7 @@ pub(crate) fn handle_blaster_hits(
     }
 
     for det in detonations {
-        outbox.0.push((
+        outbox.push_reliable((
             Target::All,
             ServerMessage::BlasterHit {
                 bank: det.bank_id.clone(),
@@ -868,7 +868,7 @@ pub(crate) fn handle_blaster_hits(
 
             // God mode: local ship takes no damage.
             if is_local && god_mode {
-                outbox.0.push((
+                outbox.push_reliable((
                     Target::All,
                     ServerMessage::DamageTaken {
                         hull: 0.0,
@@ -936,7 +936,7 @@ pub(crate) fn handle_blaster_hits(
                 hull_applied_total = hull_applied;
                 ship_destroyed = destroyed;
                 if is_local {
-                    outbox.0.push((
+                    outbox.push_reliable((
                         Target::All,
                         ServerMessage::DamageTaken {
                             hull: hull_applied,
@@ -944,7 +944,7 @@ pub(crate) fn handle_blaster_hits(
                         },
                     ));
                     if destroyed {
-                        outbox.0.push((Target::All, ServerMessage::ShipDestroyed));
+                        outbox.push_reliable((Target::All, ServerMessage::ShipDestroyed));
                         if let Some(ref mut ns) = next_state {
                             ns.set(GamePhase::GameOver);
                         }
@@ -987,7 +987,7 @@ pub(crate) fn handle_blaster_hits(
                     world.0.entities.retain(|a| a.uuid != det.target_uuid);
                     if is_asteroid {
                         vfx_events.write(AsteroidDestroyedVfx { x: hit_x, z: hit_z });
-                        outbox.0.push((
+                        outbox.push_reliable((
                             Target::All,
                             ServerMessage::AsteroidDestroyed {
                                 uuid: det.target_uuid.clone(),
@@ -1006,7 +1006,7 @@ pub(crate) fn handle_blaster_hits(
                             z: hit_z,
                             radius,
                         });
-                        outbox.0.push((
+                        outbox.push_reliable((
                             Target::All,
                             ServerMessage::EntityDespawned {
                                 uuid: det.target_uuid.clone(),

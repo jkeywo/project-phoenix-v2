@@ -1854,7 +1854,7 @@ fn a_restored_game_over_reruns_its_entry_effects() {
          on_game_over_enter only takes the reason half"
     );
 
-    let outbox = &resumed.world().resource::<SimOutbox>().0;
+    let outbox = resumed.world().resource::<SimOutbox>();
     let reasons: Vec<&str> = outbox
         .iter()
         .filter_map(|(_, msg)| match msg {

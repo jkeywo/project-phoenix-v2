@@ -598,7 +598,7 @@ pub fn push_hull_updates(world: &mut World) {
     // instead of accumulating forever.
     world.resource_mut::<LastBroadcastHull>().0 = next;
     if !pending.is_empty() {
-        world.resource_mut::<SimOutbox>().0.extend(pending);
+        world.resource_mut::<SimOutbox>().extend_snapshot(pending);
     }
 }
 
@@ -1411,7 +1411,6 @@ station = "engineering"
         push_hull_updates(app.world_mut());
         app.world()
             .resource::<crate::server_app::SimOutbox>()
-            .0
             .iter()
             .filter_map(|(target, msg)| match (target, msg) {
                 (

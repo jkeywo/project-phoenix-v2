@@ -164,7 +164,7 @@ pub fn check_destroyed_asteroids(
             std::slice::from_ref(&uuid.0),
         );
 
-        outbox.0.push((
+        outbox.push_reliable((
             Target::All,
             ServerMessage::AsteroidDestroyed {
                 uuid: uuid.0.clone(),
@@ -790,7 +790,7 @@ fn try_spawn_cell(
         ..EntitySnapshot::default()
     });
 
-    outbox.0.push((
+    outbox.push_reliable((
         Target::All,
         ServerMessage::AsteroidSpawned {
             uuid,

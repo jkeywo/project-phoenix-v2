@@ -182,7 +182,8 @@ pub fn prune(
 /// and thus caused the *next* tick to broadcast full state to *all* clients.
 ///
 /// Constructs `SystemHullUpdate`, `ShieldStatus`, `BlackboardUpdate`, and
-/// (when the reconnecting token currently holds the Tactical station)
+/// (when the reconnecting token currently holds the ship's authored weapons
+/// station)
 /// `WeaponsUpdate` directly from live `LocalShip` component state (the same
 /// projections the regular live publishers use) and pushes them
 /// into `SimOutbox` targeted at `Target::Token(token)`. Entity
@@ -271,31 +272,30 @@ pub fn resync_for_token(world: &mut World, token: &str) {
     }
 
     // ── WeaponsUpdate: only meaningful if the reconnecting token currently
-    // holds the Tactical station — WeaponsUpdate is normally only ever sent
-    // to that holder (Audience::Holding), so anyone else has no use for it.
+    // holds the ship's authored weapons station. WeaponsUpdate is normally
+    // sent through Audience::HoldingWeapons, so anyone else has no use for it.
     // Deliberately does not read/write `LastWeaponsUpdate`.
     {
         // Resolve the weapons owner from the ship config, then check the
         // holder. The StationId is cloned out of the query before touching
         // Sessions so the query borrow on `world` is released first.
         //
-        // Falls back to "tactical" when the config can't answer — either no
-        // ShipConfigComponent or an empty default one. A real LocalShip always
-        // carries a populated config, so this only covers the pre-spawn window;
-        // defaulting to the historical station keeps a reconnecting player from
-        // silently losing their WeaponsUpdate if that ever changes.
-        let weapons_station: StationId = world
+        // A real LocalShip carries a populated config. The legacy station-id
+        // fallback only covers a pre-spawn/bare-test shape where that config is
+        // absent, preserving the old reconnect behavior without defining the
+        // normal ownership rule.
+        let weapons_station_id: StationId = world
             .query_filtered::<&crate::ship_plugin::ShipConfigComponent, With<LocalShip>>()
             .single(world)
             .ok()
             .and_then(|c| c.0.weapons_station())
             .unwrap_or_else(|| StationId(crate::ship::system_registry::TACTICAL_STATION_ID.into()));
-        let holds_tactical = world
+        let holds_weapons_station = world
             .resource::<Sessions>()
             .0
-            .holder_for_station(&weapons_station)
+            .holder_for_station(&weapons_station_id)
             == Some(token);
-        if holds_tactical {
+        if holds_weapons_station {
             let current = compute_current_weapons_update(world);
             messages.push(ServerMessage::WeaponsUpdate {
                 target_uuid: current.target_uuid,
@@ -312,9 +312,11 @@ pub fn resync_for_token(world: &mut World, token: &str) {
 
     if !messages.is_empty() {
         let mut outbox = world.resource_mut::<SimOutbox>();
-        for msg in messages {
-            outbox.0.push((target.clone(), msg));
-        }
+        outbox.extend_snapshot(
+            messages
+                .into_iter()
+                .map(|message| (target.clone(), message)),
+        );
     }
 }
 
@@ -571,18 +573,17 @@ mod tests {
 
         let outbox = app.world().resource::<SimOutbox>();
         assert!(
-            !outbox.0.is_empty(),
+            !outbox.is_empty(),
             "resync_for_token must push at least one message"
         );
-        for (target, _msg) in &outbox.0 {
+        for (target, _msg) in outbox.iter() {
             assert_eq!(
-                *target,
-                Target::Token("reconnector".to_string()),
+                target,
+                &Target::Token("reconnector".to_string()),
                 "every resync message must target only the reconnecting token"
             );
         }
         let has_bb_update = outbox
-            .0
             .iter()
             .any(|(_, msg)| matches!(msg, ServerMessage::BlackboardUpdate { .. }));
         assert!(
@@ -649,9 +650,10 @@ mod tests {
     /// Build a `resync_test_app` whose ship carries the resources
     /// `compute_current_weapons_update` unconditionally reads (torpedo
     /// system, phaser mode, phaser combat config) and register `token` as
-    /// the current holder of the Tactical station, so `resync_for_token`
-    /// takes the "reconnecting client holds Tactical" branch.
-    fn resync_test_app_with_tactical_holder(token: &str) -> App {
+    /// the current holder of an authored `pilot` weapons station, so
+    /// `resync_for_token` proves the `HoldingWeapons` ownership rule rather
+    /// than passing through the legacy station-id fallback.
+    fn resync_test_app_with_weapons_station_holder(token: &str) -> App {
         use crate::console::weapons::{
             CurrentPhaserMode, PhaserCombatConfigResource, TorpedoSystemResource,
         };
@@ -669,10 +671,29 @@ mod tests {
         app.world_mut()
             .resource_mut::<Sessions>()
             .0
-            .set_station(token, Some(StationId("tactical".into())));
+            .set_station(token, Some(StationId("pilot".into())));
 
         let mut q = app.world_mut().query_filtered::<Entity, With<LocalShip>>();
         let ship = q.single(app.world()).expect("LocalShip must exist");
+        let ship_config = crate::ship::config::ShipConfig::from_toml(
+            r#"
+[[station]]
+id = "pilot"
+name = "Pilot"
+description = "Everything."
+rank = "Ltn."
+
+[[system]]
+id = "blaster-fore"
+kind = "blaster_bank"
+station = "pilot"
+"#,
+            &["blaster_bank"],
+        )
+        .expect("authored weapons-station fixture must parse");
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(crate::ship_plugin::ShipConfigComponent(ship_config));
         // #832: `compute_current_weapons_update` reads these per-entity
         // components off `LocalShip` (no global-resource fallback), matching the
         // production player-ship spawn which carries both unconditionally.
@@ -708,13 +729,13 @@ mod tests {
     }
 
     #[test]
-    fn resync_for_token_includes_weapons_update_for_tactical_holder() {
-        let mut app = resync_test_app_with_tactical_holder("reconnector");
+    fn resync_for_token_includes_weapons_update_for_weapons_station_holder() {
+        let mut app = resync_test_app_with_weapons_station_holder("reconnector");
 
         resync_for_token(app.world_mut(), "reconnector");
 
         let outbox = app.world().resource::<SimOutbox>();
-        let weapons_update = outbox.0.iter().find_map(|(target, msg)| match msg {
+        let weapons_update = outbox.iter().find_map(|(target, msg)| match msg {
             ServerMessage::WeaponsUpdate {
                 target_uuid,
                 phaser_mode,
@@ -723,7 +744,7 @@ mod tests {
             _ => None,
         });
         let (target, target_uuid, phaser_mode) = weapons_update.expect(
-            "resync_for_token must include a WeaponsUpdate for a Tactical-holding reconnector",
+            "resync_for_token must include WeaponsUpdate for the authored weapons-station holder",
         );
         assert_eq!(
             target,
@@ -743,24 +764,23 @@ mod tests {
     }
 
     #[test]
-    fn resync_for_token_omits_weapons_update_for_non_tactical_holder() {
+    fn resync_for_token_omits_weapons_update_for_non_weapons_station_holder() {
         // "reconnector" does not hold any station in the plain `resync_test_app`
         // fixture (SessionManager::new() has no registered players at all), so
         // WeaponsUpdate must not appear — this is the "no station -> no weapons
-        // resync" branch that keeps a reconnecting non-Tactical player from
-        // getting a message meant only for whoever currently holds Tactical.
+        // resync" branch that keeps a reconnecting player from getting a
+        // message meant only for the authored weapons-station holder.
         let mut app = resync_test_app();
 
         resync_for_token(app.world_mut(), "reconnector");
 
         let outbox = app.world().resource::<SimOutbox>();
         let has_weapons_update = outbox
-            .0
             .iter()
             .any(|(_, msg)| matches!(msg, ServerMessage::WeaponsUpdate { .. }));
         assert!(
             !has_weapons_update,
-            "resync_for_token must not send WeaponsUpdate to a reconnector who does not hold Tactical"
+            "resync_for_token must not send WeaponsUpdate to a reconnector who does not hold the weapons station"
         );
     }
 
@@ -768,7 +788,7 @@ mod tests {
     fn resync_for_token_does_not_touch_last_weapons_update_cache() {
         use crate::console::weapons::LastWeaponsUpdate;
 
-        let mut app = resync_test_app_with_tactical_holder("reconnector");
+        let mut app = resync_test_app_with_weapons_station_holder("reconnector");
         app.init_resource::<LastWeaponsUpdate>();
 
         // Seed the shared weapons cache as if a prior tick already broadcast

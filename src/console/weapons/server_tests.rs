@@ -616,13 +616,13 @@ fn tick(app: &mut App) -> Vec<OutboundMessage> {
     // the cadence itself is covered in `ai::cadence`.
     crate::ai::cadence::arm_ai_tick(app);
     app.update();
-    let sim_entries = std::mem::take(&mut app.world_mut().resource_mut::<SimOutbox>().0);
+    let sim_entries = app.world_mut().resource_mut::<SimOutbox>().drain();
     let mut out = app.world().resource::<Outbox>().0.clone();
-    for (target, msg) in sim_entries {
+    for entry in sim_entries {
         out.push(OutboundMessage {
-            target,
-            msg,
-            delivery: crate::core::messages::DeliveryClass::Reliable,
+            target: entry.target,
+            msg: entry.message,
+            delivery: entry.delivery,
         });
     }
     app.world_mut().resource_mut::<Outbox>().0.clear();
@@ -4727,7 +4727,7 @@ fn on_beam_started_emits_correct_source_uuid_with_multiple_ships() {
 
     // Find the BeamStarted message in the SimOutbox.
     let outbox = app.world().resource::<crate::server_app::SimOutbox>();
-    let beam_started = outbox.0.iter().find(|(_, msg)| {
+    let beam_started = outbox.iter().find(|(_, msg)| {
         matches!(
             msg,
             crate::core::messages::ServerMessage::BeamStarted { .. }
@@ -9400,7 +9400,6 @@ fn ai_torpedo_auto_fire_writes_admitted_command_without_launching() {
     assert!(
         app.world()
             .resource::<SimOutbox>()
-            .0
             .iter()
             .all(|(_, m)| !matches!(m, ServerMessage::TorpedoLaunched { .. })),
         "ai_torpedo_auto_fire must not launch — that is handle_fire_torpedo's job"
@@ -10186,7 +10185,6 @@ fn warhawk_torpedo_opportunity_never_commands_the_helm() {
     let launched: Vec<&ServerMessage> = app
         .world()
         .resource::<SimOutbox>()
-        .0
         .iter()
         .map(|(_, m)| m)
         .filter(|m| matches!(m, ServerMessage::TorpedoLaunched { .. }))
@@ -10405,7 +10403,6 @@ fn handle_fire_torpedo_launches_from_admitted_command() {
     assert!(
         app.world()
             .resource::<SimOutbox>()
-            .0
             .iter()
             .any(|(_, m)| matches!(m, ServerMessage::TorpedoLaunched { .. })),
         "the consumer must advance the torpedo state machine from the admitted command"
@@ -10501,7 +10498,6 @@ fn handle_fire_torpedo_patterned_launch_resolves_barrel_origin() {
     let launched: Vec<(f32, f32)> = app
         .world()
         .resource::<SimOutbox>()
-        .0
         .iter()
         .filter_map(|(_, m)| match m {
             ServerMessage::TorpedoLaunched { tube, x, z, .. } if tube == "fore-centre" => {
@@ -11571,7 +11567,6 @@ fn launched_from_admitted_command(app: &mut App) -> bool {
         .expect("handle_fire_torpedo should run");
     app.world()
         .resource::<SimOutbox>()
-        .0
         .iter()
         .any(|(_, m)| matches!(m, ServerMessage::TorpedoLaunched { .. }))
 }
@@ -15979,11 +15974,13 @@ fn blaster_hit_does_zero_damage_to_local_ship_under_god_mode() {
     app.world_mut()
         .run_system_once(handle_blaster_hits)
         .expect("handle_blaster_hits should run");
-    let out: Vec<ServerMessage> =
-        std::mem::take(&mut app.world_mut().resource_mut::<SimOutbox>().0)
-            .into_iter()
-            .map(|(_, msg)| msg)
-            .collect();
+    let out: Vec<ServerMessage> = app
+        .world_mut()
+        .resource_mut::<SimOutbox>()
+        .drain()
+        .into_iter()
+        .map(|entry| entry.message)
+        .collect();
 
     let hull_after = app
         .world()

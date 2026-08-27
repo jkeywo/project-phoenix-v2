@@ -2,7 +2,7 @@
 title: Message Flow
 type: concept
 tags: [messages, bridge, wasm, bevy, routing, delivery-class, coordination]
-sources: [src/server/bridge.rs, src/core/codec.rs, src/core/messages.rs, src/core/broadcast/sim.rs, src/lobby/server.rs, src/lobby/handler.rs, src/command_admission/, src/server_app/broadcast_publish.rs, src/ship/shields.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/console/helm/server.rs, src/console/weapons/server.rs, src/console/repair/server.rs, src/console_bridge.rs, server.html, client.html, gui/client-router.js, gui/sim-state.js, gui/console-state.js, gui/coordination-popup.js]
+sources: [src/server/bridge.rs, src/core/codec.rs, src/core/messages.rs, src/core/broadcast/, src/lobby/server.rs, src/lobby/handler.rs, src/command_admission/, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/ship/shields.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/console/helm/server.rs, src/console/weapons/server.rs, src/console/repair/server.rs, src/console_bridge.rs, server.html, client.html, gui/client-router.js, gui/sim-state.js, gui/console-state.js, gui/coordination-popup.js]
 updated: 2026-08-27
 ---
 
@@ -19,7 +19,7 @@ src/server/bridge.rs
   → InboundMessage
 lobby or command-admission/console systems
   → authoritative ECS/session mutation
-  → ServerMessage via lobby/simulation broadcaster
+  → ServerMessage via registered broadcaster, SimOutbox, or LobbyOutbox
 src/server/bridge.rs
   → JsonCodec encode
   → JS callback(target, payload, delivery class)
@@ -46,14 +46,14 @@ In-game actions use `ClientMessage::ControlSystem { target: SystemId, payload }`
 - `Reliable` is ordered/retransmitted for lifecycle, setup, and one-shot state changes;
 - `Snapshot` is unordered and not retransmitted for replaceable periodic state.
 
-Direct `SimBroadcaster` producers are stamped `Snapshot` by
-`src/core/broadcast/sim.rs`; this is the live 10 Hz `ShieldStatus` path.
-Messages queued through `SimOutbox` are classified by `delivery_class_for_msg`
-beside `sim_outbox_broadcaster` in `src/server_app/broadcast_publish.rs`,
-including the targeted one-shot Shields projection rebuilt for reconnect.
-`flush_outbound` is the Rust-to-JavaScript boundary. `routeOutbound` prefers
-the client's unordered snapshot channel for snapshot traffic and falls back to
-reliable when that channel is absent.
+Registered `SimBroadcaster` producers inherit the simulation broadcaster's
+`Snapshot` class. Arbitrary-target simulation producers choose explicitly at
+the insertion site with `SimOutbox::push_snapshot` or `push_reliable`; its raw
+queue is private, and `sim_outbox_broadcaster` forwards the stored class without
+matching on the `ServerMessage` variant. `LobbyOutbox` remains intrinsically
+Reliable. `flush_outbound` is the Rust-to-JavaScript boundary. `routeOutbound`
+prefers the client's unordered snapshot channel for snapshot traffic and falls
+back to reliable when that channel is absent.
 
 ## Reconnect and disconnect
 

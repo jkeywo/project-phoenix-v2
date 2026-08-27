@@ -2,7 +2,7 @@
 title: Networking
 type: concept
 tags: [networking, peerjs, webrtc, session-token, star-topology, datachannel, snapshot]
-sources: [server.html, client.html, gui/connection-manager.js, gui/session-token.js, src/core/broadcast/sim.rs, src/server/bridge.rs, src/server_app/broadcast_publish.rs, src/ship/shields.rs, AGENTS.md]
+sources: [server.html, client.html, gui/connection-manager.js, gui/session-token.js, src/core/broadcast/sim.rs, src/server/bridge.rs, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/ship/shields.rs, AGENTS.md]
 updated: 2026-08-27
 ---
 
@@ -45,7 +45,7 @@ The JS shell on `server.html` keeps three maps:
 | `tokenConns` | `sessionToken → DataConnection` (reliable) | Routing `Target::Token` messages |
 | `tokenSnapshotConns` | `sessionToken → DataChannel` (snapshot) | Routing snapshot-class messages |
 
-The snapshot channel is created on the client side (`gui/connection-manager.js`) during the PeerJS `open` handshake: after the reliable DataConnection opens, it calls `pc.createDataChannel('snapshot', { ordered: false, maxRetransmits: 0 })`. The server registers it via `pc.ondatachannel` with `label === 'snapshot'`. When unavailable, snapshot messages fall back to the reliable channel.
+The snapshot channel is created on the client side (`gui/connection-manager.js`) during the PeerJS `open` handshake: after the reliable DataConnection opens, it calls `pc.createDataChannel('snapshot', { ordered: false, maxRetransmits: 0 })` immediately before sending `Identify`. Channel-open and Identify travel independently, so the server retains the `pc.ondatachannel` candidate and promotes it into `tokenSnapshotConns` only when both the channel is open and the session token is known, in either order. When unavailable, snapshot messages fall back to the reliable channel.
 
 ## Dual DataChannel architecture
 
@@ -56,15 +56,14 @@ Every client maintains two parallel DataChannels on the same `RTCPeerConnection`
 | Reliable | (PeerJS default) | Yes | Yes | `ClientMessage` commands, `ServerMessage` lobby/events |
 | Snapshot | `'snapshot'` | No | 0 (never) | `SimState`, `BlackboardUpdate`, `ShieldStatus`, `RepairState`, `PowerState`, `WeaponsUpdate`, `SystemHullUpdate` |
 
-Direct `SimBroadcaster` producers are stamped `Snapshot` by
-`src/core/broadcast/sim.rs`; the live periodic `ShieldStatus` publisher uses
-that path. `SimOutbox` messages are classified individually by
-`delivery_class_for_msg()` in `src/server_app/broadcast_publish.rs`, including
-the one-shot Shields projection rebuilt for reconnect. `flush_outbound` in
-`src/server/bridge.rs` passes the delivery class as a third string argument to
-the JS callback. `routeOutbound` in `server.html` dispatches to the appropriate
-channel map, falling back to the reliable channel for any token without a
-snapshot channel.
+Delivery class is producer-owned. Registered broadcaster phases stamp their
+own class; arbitrary-target simulation producers call the explicit
+`SimOutbox::push_snapshot` / `push_reliable` seam. The raw queue is private,
+and its forwarding drain preserves the chosen class without matching on
+`ServerMessage`. `flush_outbound` in `src/server/bridge.rs` passes the delivery
+class as a third string argument to the JS callback. `routeOutbound` in
+`server.html` dispatches to the appropriate channel map, falling back to the
+reliable channel for any token without a snapshot channel.
 
 ## Client connection lifecycle (`gui/connection-manager.js`)
 

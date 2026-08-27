@@ -76,37 +76,16 @@ pub fn modifier_events_broadcaster() -> SimBroadcaster {
 /// directly to `OutboundMessage` with their original `Target` routing.
 pub fn sim_outbox_broadcaster() -> SimBroadcaster {
     SimBroadcaster::new().register(Audience::All, Cadence::OnEvent, |world: &mut World| {
-        let mut outbox = world.resource_mut::<SimOutbox>();
-        let entries = std::mem::take(&mut outbox.0);
-        for (target, msg) in entries {
+        let entries = world.resource_mut::<SimOutbox>().drain();
+        for entry in entries {
             world.write_message(OutboundMessage {
-                target,
-                msg: msg.clone(),
-                delivery: delivery_class_for_msg(&msg),
+                target: entry.target,
+                msg: entry.message,
+                delivery: entry.delivery,
             });
         }
         vec![]
     })
-}
-
-/// Derive the delivery class for a `ServerMessage`.
-///
-/// Snapshot-class messages ride the unordered/no-retransmit DataChannel;
-/// everything else (commands, lobby messages, Welcome, etc.) is reliable.
-/// This is the single place where delivery class is decided server-side
-/// (AC 1). The function is not exported — everything routes through
-/// `sim_outbox_broadcaster` or `broadcast::dispatch::<Sim>`.
-fn delivery_class_for_msg(msg: &ServerMessage) -> DeliveryClass {
-    match msg {
-        ServerMessage::SimState { .. }
-        | ServerMessage::BlackboardUpdate { .. }
-        | ServerMessage::ShieldStatus { .. }
-        | ServerMessage::RepairState { .. }
-        | ServerMessage::PowerState { .. }
-        | ServerMessage::WeaponsUpdate { .. }
-        | ServerMessage::SystemHullUpdate { .. } => DeliveryClass::Snapshot,
-        _ => DeliveryClass::Reliable,
-    }
 }
 
 // -- Systems -------------------------------------------------------------------
@@ -412,9 +391,7 @@ pub(crate) fn on_game_over_enter(
 ) {
     let outcome = game_over_reason.1.map(|o| o.as_str().to_string());
     let reason = game_over_reason.0.take().unwrap_or_default();
-    outbox
-        .0
-        .push((Target::All, ServerMessage::GameOver { reason, outcome }));
+    outbox.push_reliable((Target::All, ServerMessage::GameOver { reason, outcome }));
 }
 
 /// Reset all change-detection caches when entering InProgress so the first
@@ -562,7 +539,7 @@ pub fn broadcast_blackboard_updates(
     let pending =
         visibility::project_repair_blackboards(updates, vis.as_ref(), &viewers, &mut cache);
     world.insert_resource(cache);
-    world.resource_mut::<SimOutbox>().0.extend(pending);
+    world.resource_mut::<SimOutbox>().extend_snapshot(pending);
 }
 
 /// When a player reconnects mid-game (Identify during InProgress),
@@ -609,7 +586,7 @@ pub(crate) fn broadcast_world_setup_on_start(
     if sent.sent || state.get() != &GamePhase::InProgress {
         return;
     }
-    outbox.0.push((
+    outbox.push_reliable((
         Target::All,
         ServerMessage::WorldSetup {
             world: world.0.clone(),
@@ -921,9 +898,7 @@ pub(crate) fn reconcile_runtime_entities(
                     snapshot.target_description = t.0.description.clone();
                 }
                 upsert_world_entity(&mut world, snapshot.clone());
-                outbox
-                    .0
-                    .push((Target::All, ServerMessage::EntitySpawned { snapshot }));
+                outbox.push_reliable((Target::All, ServerMessage::EntitySpawned { snapshot }));
             }
         }
     }
@@ -942,7 +917,7 @@ pub(crate) fn reconcile_runtime_entities(
                 &mut health_cache,
                 std::slice::from_ref(uuid),
             );
-            outbox.0.push((
+            outbox.push_reliable((
                 Target::All,
                 ServerMessage::EntityDespawned { uuid: uuid.clone() },
             ));

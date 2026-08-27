@@ -1872,7 +1872,7 @@ pub(crate) fn broadcast_objective_summary(
 
     let objectives_snap = objectives.0.sorted_snapshots();
 
-    outbox.0.push((
+    outbox.push_reliable((
         Target::All,
         ServerMessage::ObjectiveSummary {
             objectives: objectives_snap,

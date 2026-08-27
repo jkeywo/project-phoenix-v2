@@ -456,7 +456,7 @@ pub(crate) fn handle_collisions(
         // Only emit for the LocalShip. NPCs use the AiEntityDestroyed +
         // EntityDespawned path (same as beam-kill).
         if is_local {
-            outbox.0.push((
+            outbox.push_reliable((
                 Target::All,
                 ServerMessage::DamageTaken {
                     hull: hull_applied,
@@ -464,7 +464,7 @@ pub(crate) fn handle_collisions(
                 },
             ));
             if ship_destroyed {
-                outbox.0.push((Target::All, ServerMessage::ShipDestroyed));
+                outbox.push_reliable((Target::All, ServerMessage::ShipDestroyed));
                 if game_over_reason.0.is_none() {
                     // Player-visible via the game-over overlays, so a
                     // `strings.csv` id, not English (issue #977); the HUD and
@@ -496,7 +496,7 @@ pub(crate) fn handle_collisions(
                 destroyed_events.write(crate::ai::server::AiEntityDestroyed {
                     entity_uuid: uuid.0.clone(),
                 });
-                outbox.0.push((
+                outbox.push_reliable((
                     Target::All,
                     ServerMessage::EntityDespawned {
                         uuid: uuid.0.clone(),

@@ -93,13 +93,14 @@
     (this._h[ev] || []).forEach(function (fn) { fn.apply(null, args); });
   };
 
-  function makePeerConnection(localId, remoteId) {
+  function makePeerConnection(localId, remoteId, owner) {
     var listeners = {};
-    return {
+    var pc = {
       iceConnectionState: 'connected',
       iceGatheringState: 'complete',
       createDataChannel: function (label, opts) {
         var dc = new DataChannel(localId, remoteId, label, opts);
+        owner._dataChannels.set(label, dc);
         return dc;
       },
       getStats: function () {
@@ -122,12 +123,23 @@
       },
       ondatachannel: null,
     };
+    // PeerJS owns RTCPeerConnection.ondatachannel until its reliable channel
+    // has been initialised. The real library installs this callback before it
+    // emits Peer's `connection` event; server.html must wrap/delegate it when
+    // attaching its earlier snapshot listener. Keep that callback ownership in
+    // the shim so overwriting it makes the reliable connection fail here too.
+    pc.ondatachannel = function (event) {
+      if (event && event.channel && event.channel.label === '__peerjs-reliable') {
+        owner._peerJsReliableInitialized = true;
+      }
+    };
+    return pc;
   }
 
   // ── DataChannel shim ───────────────────────────────────────────────────────
   // Represents a sub-channel on the same RTCPeerConnection (snapshot channel).
 
-  function DataChannel(localId, remoteId, label, opts) {
+  function DataChannel(localId, remoteId, label, opts, announceRemote) {
     Emitter.call(this);
     this.label = label;
     this._lid = localId;
@@ -146,11 +158,15 @@
       self.readyState = 'open';
       self._emit('open');
       if (typeof self.onopen === 'function') self.onopen();
-      // Notify remote side about this DataChannel
-      getChannel().postMessage({
-        t: 'datachannel', from: localId, to: remoteId,
-        label: label, ordered: self.ordered, maxRetransmits: self.maxRetransmits,
-      });
+      // Only the locally-created side announces the negotiated counterpart.
+      // A remotely-created counterpart must not signal back and recursively
+      // manufacture another pair of channels.
+      if (announceRemote !== false) {
+        getChannel().postMessage({
+          t: 'datachannel', from: localId, to: remoteId,
+          label: label, ordered: self.ordered, maxRetransmits: self.maxRetransmits,
+        });
+      }
     });
   }
   DataChannel.prototype = Object.create(Emitter.prototype);
@@ -179,9 +195,10 @@
     this._lid = localId;
     this._rid = remoteId;
     this.open = false;
+    this._peerJsReliableInitialized = false;
     // DataChannel sub-channels keyed by label (e.g. 'snapshot')
     this._dataChannels = new Map();
-    this.peerConnection = makePeerConnection(localId, remoteId);
+    this.peerConnection = makePeerConnection(localId, remoteId, this);
   }
   Connection.prototype = Object.create(Emitter.prototype);
   Connection.prototype.constructor = Connection;
@@ -221,16 +238,15 @@
    * Called by the remote side when a 'datachannel' control message arrives.
    */
   Connection.prototype._addDataChannel = function (label, opts) {
-    var dc = new DataChannel(this._lid, this._rid, label, opts);
+    // Construct the remote counterpart without announcing it back. Surface
+    // `datachannel` synchronously while its state is still `connecting`; the
+    // constructor's microtask then opens it after the receiver has installed
+    // its onopen handler, matching browser event ordering.
+    var dc = new DataChannel(this._lid, this._rid, label, opts, false);
     this._dataChannels.set(label, dc);
-    var self = this;
-    Promise.resolve().then(function () {
-      dc.readyState = 'open';
-      dc._emit('open');
-      if (typeof self.peerConnection.ondatachannel === 'function') {
-        self.peerConnection.ondatachannel({ channel: dc });
-      }
-    });
+    if (typeof this.peerConnection.ondatachannel === 'function') {
+      this.peerConnection.ondatachannel({ channel: dc });
+    }
     return dc;
   };
 
@@ -370,6 +386,21 @@
       });
       return result;
     },
+
+    /**
+     * Expose whether PeerJS's owned reliable-channel callback ran. Snapshot
+     * smoke asserts this directly so its success cannot be supplied solely by
+     * the shim's transport plumbing.
+     */
+    _reliableChannels: function () {
+      var result = {};
+      registry.forEach(function (peer, peerId) {
+        peer._conns.forEach(function (conn, remoteId) {
+          result[peerId + '->' + remoteId] = conn._peerJsReliableInitialized;
+        });
+      });
+      return result;
+    },
   };
 
   // Close all open connections cleanly when the page is being torn down so
@@ -400,9 +431,18 @@
         // before open fires.
         getChannel().postMessage({ t: 'accept', from: this.id, to: msg.from });
         this._emit('connection', inConn);
-        // Open fires on next microtask so handlers registered in 'connection'
-        // callback are already in place.
-        Promise.resolve().then(function () { inConn._open(); });
+        // Match PeerJS's incoming-channel ownership: the library's pre-existing
+        // `ondatachannel` callback receives the reliable channel after user code
+        // has handled `connection`. Only that callback may initialise/open the
+        // DataConnection. A server listener that clobbers it therefore cannot
+        // pass smoke by relying on the shim's old out-of-band `_open()` path.
+        Promise.resolve().then(function () {
+          var handler = inConn.peerConnection.ondatachannel;
+          if (typeof handler === 'function') {
+            handler({ channel: { label: '__peerjs-reliable', readyState: 'open' } });
+          }
+          if (inConn._peerJsReliableInitialized) inConn._open();
+        });
         break;
       }
       case 'accept': {

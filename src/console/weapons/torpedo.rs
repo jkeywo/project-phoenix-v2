@@ -778,7 +778,7 @@ pub(crate) fn handle_fire_torpedo(
                             kind: crate::core::balance::FIRED_KIND_TORPEDO.to_string(),
                         });
                     }
-                    outbox.0.push((
+                    outbox.push_reliable((
                         Target::All,
                         ServerMessage::TorpedoLaunched {
                             uuid: launched_uuid,
@@ -1245,13 +1245,13 @@ pub(crate) fn tick_torpedo_lifecycle(
             crate::world_id::mint_id_with(id_mint, crate::world_id::IdNamespace::Projectile)
         });
         for expired_uuid in result.expired {
-            outbox.0.push((
+            outbox.push_reliable((
                 Target::All,
                 ServerMessage::TorpedoDestroyed { uuid: expired_uuid },
             ));
         }
         for (tube, uuid, x, y, z, heading) in result.burst_launched {
-            outbox.0.push((
+            outbox.push_reliable((
                 Target::All,
                 ServerMessage::TorpedoLaunched {
                     uuid,
@@ -1268,7 +1268,7 @@ pub(crate) fn tick_torpedo_lifecycle(
             let Some(det) = torpedo_sys.0.handle_collision_full(&torpedo_uuid) else {
                 continue;
             };
-            outbox.0.push((
+            outbox.push_reliable((
                 Target::All,
                 ServerMessage::TorpedoDestroyed { uuid: torpedo_uuid },
             ));
@@ -1292,13 +1292,13 @@ pub(crate) fn tick_torpedo_lifecycle(
             crate::world_id::mint_id_with(id_mint, crate::world_id::IdNamespace::Projectile)
         });
         for expired_uuid in result.expired {
-            outbox.0.push((
+            outbox.push_reliable((
                 Target::All,
                 ServerMessage::TorpedoDestroyed { uuid: expired_uuid },
             ));
         }
         for (tube, uuid, x, y, z, heading) in result.burst_launched {
-            outbox.0.push((
+            outbox.push_reliable((
                 Target::All,
                 ServerMessage::TorpedoLaunched {
                     uuid,
@@ -1315,7 +1315,7 @@ pub(crate) fn tick_torpedo_lifecycle(
             let Some(det) = torpedo_sys_res.0.handle_collision_full(&torpedo_uuid) else {
                 continue;
             };
-            outbox.0.push((
+            outbox.push_reliable((
                 Target::All,
                 ServerMessage::TorpedoDestroyed { uuid: torpedo_uuid },
             ));
@@ -1624,7 +1624,7 @@ pub(crate) fn tick_torpedo_lifecycle(
             // (`tick_beams_apply_damage`) exactly, including the shared
             // first-write `GameOverReason` latch that the `EntityDestroyed`
             // tracer piggybacks on.
-            outbox.0.push((Target::All, ServerMessage::ShipDestroyed));
+            outbox.push_reliable((Target::All, ServerMessage::ShipDestroyed));
             if let Some(ref mut gs) = death_latch.next_state {
                 gs.set(crate::core::messages::GamePhase::GameOver);
             }
@@ -1644,7 +1644,7 @@ pub(crate) fn tick_torpedo_lifecycle(
         } else if asteroid_destroyed {
             world.0.entities.retain(|a| a.uuid != target_uuid);
             vfx_events.write(AsteroidDestroyedVfx { x: hit_x, z: hit_z });
-            outbox.0.push((
+            outbox.push_reliable((
                 Target::All,
                 ServerMessage::AsteroidDestroyed {
                     uuid: target_uuid.clone(),
@@ -1667,7 +1667,7 @@ pub(crate) fn tick_torpedo_lifecycle(
                 z: hit_z,
                 radius: destroyed_ship_radius,
             });
-            outbox.0.push((
+            outbox.push_reliable((
                 Target::All,
                 ServerMessage::EntityDespawned {
                     uuid: target_uuid.clone(),

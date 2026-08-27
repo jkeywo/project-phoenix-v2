@@ -2298,8 +2298,64 @@
         };
         attachIceDiag();
 
+        // The phone creates its snapshot DataChannel before sending Identify.
+        // Those events travel on different SCTP streams, so either the channel
+        // opening or the token arriving may win. Retain the channel candidate
+        // and promote it idempotently whenever both facts are available.
+        let snapshotCandidate = null;
+        const promoteSnapshot = () => {
+          const token = peerTokens.get(conn.peer);
+          if (!token || !snapshotCandidate || snapshotCandidate.readyState !== 'open') return;
+          if (tokenSnapshotConns.get(token) === snapshotCandidate) return;
+          tokenSnapshotConns.set(token, snapshotCandidate);
+          console.log(`[PeerJS] snapshot channel open — ${shortId}…`);
+        };
+        const clearSnapshot = (chan) => {
+          const token = peerTokens.get(conn.peer);
+          if (token && tokenSnapshotConns.get(token) === chan) tokenSnapshotConns.delete(token);
+          if (snapshotCandidate === chan) snapshotCandidate = null;
+        };
+        let snapshotAttachTries = 0;
+        let snapshotListenerAttached = false;
+        const attachSnapshotListener = () => {
+          if (snapshotListenerAttached) return;
+          const pc = conn.peerConnection;
+          if (!pc) {
+            if (++snapshotAttachTries < 50) setTimeout(attachSnapshotListener, 100);
+            return;
+          }
+          snapshotListenerAttached = true;
+          // PeerJS owns the first `datachannel` event on an inbound
+          // RTCPeerConnection: its handler turns the library's reliable
+          // RTCDataChannel into this DataConnection. We install before that
+          // event so we cannot miss an early snapshot channel, therefore we
+          // must preserve the library handler and delegate every non-snapshot
+          // channel to it. `addEventListener` is not suitable here because it
+          // would let PeerJS consume the snapshot channel as a replacement
+          // reliable channel too.
+          const peerJsDataChannelHandler = pc.ondatachannel;
+          pc.ondatachannel = (event) => {
+            const chan = event.channel;
+            if (chan.label !== 'snapshot') {
+              if (typeof peerJsDataChannelHandler === 'function') {
+                peerJsDataChannelHandler.call(pc, event);
+              }
+              return;
+            }
+            snapshotCandidate = chan;
+            chan.onopen = promoteSnapshot;
+            chan.onclose = () => clearSnapshot(chan);
+            chan.onerror = () => clearSnapshot(chan);
+            // A browser may surface an already-open channel. Do not rely on a
+            // future open event that will never fire.
+            promoteSnapshot();
+          };
+        };
+        attachSnapshotListener();
+
         conn.on('open', () => {
           console.log(`[PeerJS] DataChannel open — ${shortId}…`);
+          attachSnapshotListener();
           const pc = conn.peerConnection;
           if (pc) {
             // Log the winning ICE candidate type (host = direct, srflx = STUN, relay = TURN)
@@ -2315,25 +2371,6 @@
               }).catch(() => {});
             }, 1500);
 
-            // Listen for snapshot sub-channels created by the client on this PC
-            pc.ondatachannel = (event) => {
-              const chan = event.channel;
-              if (chan.label === 'snapshot') {
-                chan.onopen = () => {
-                  console.log(`[PeerJS] snapshot channel open — ${shortId}…`);
-                  const token = peerTokens.get(conn.peer);
-                  if (token) tokenSnapshotConns.set(token, chan);
-                };
-                chan.onclose = () => {
-                  const token = peerTokens.get(conn.peer);
-                  if (token && tokenSnapshotConns.get(token) === chan) tokenSnapshotConns.delete(token);
-                };
-                chan.onerror = () => {
-                  const token = peerTokens.get(conn.peer);
-                  if (token && tokenSnapshotConns.get(token) === chan) tokenSnapshotConns.delete(token);
-                };
-              }
-            };
           }
         });
 
@@ -2379,6 +2416,13 @@
                 const prior = tokenConns.get(token);
                 peerTokens.set(conn.peer, token);
                 tokenConns.set(token, conn);
+                // A duplicate-token takeover changes ownership of both
+                // transports. Remove the prior snapshot route before promoting
+                // the replacement so a not-yet-open replacement falls back to
+                // its reliable connection rather than retaining a closed raw
+                // channel entry owned by the old DataConnection.
+                if (prior && prior !== conn) tokenSnapshotConns.delete(token);
+                promoteSnapshot();
                 if (prior && prior !== conn && prior.open) {
                   console.warn(
                     `[PeerJS] DUPLICATE TOKEN ${token.slice(0, 8)}… — a second device ` +

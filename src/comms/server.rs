@@ -699,7 +699,7 @@ pub(crate) fn broadcast_comms_state(
         });
     }
 
-    outbox.0.push((
+    outbox.push_reliable((
         Target::Token(comms_token.to_string()),
         ServerMessage::CommsState {
             messages,

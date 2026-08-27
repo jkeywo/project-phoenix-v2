@@ -358,7 +358,7 @@ pub(crate) fn handle_respond_to_message(
     // client can flash it red. A no-op when no comms holder is seated.
     let reject = |outbox: &mut crate::server_app::SimOutbox, message_id: &str, idx: usize| {
         if let Some(token) = comms_token.as_deref() {
-            outbox.0.push((
+            outbox.push_reliable((
                 crate::lobby::Target::Token(token.to_string()),
                 crate::core::messages::ServerMessage::CommsResponseRejected {
                     message_id: message_id.to_string(),

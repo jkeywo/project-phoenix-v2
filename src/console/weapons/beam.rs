@@ -489,7 +489,7 @@ pub(crate) fn on_beam_started(
             kind: crate::core::balance::FIRED_KIND_BEAM.to_string(),
         });
     }
-    outbox.0.push((
+    outbox.push_reliable((
         Target::All,
         ServerMessage::BeamStarted {
             bank: ev.bank.clone(),
@@ -522,7 +522,7 @@ pub(crate) fn on_beam_ended(
         .get(ev.source_entity)
         .map(|u| u.0.clone())
         .unwrap_or_default();
-    outbox.0.push((
+    outbox.push_reliable((
         Target::All,
         ServerMessage::BeamEnded {
             bank: ev.bank.clone(),
@@ -694,7 +694,7 @@ pub(crate) fn handle_set_target(
             }
 
             if let Some(reply_token) = &cmd.response_token {
-                outbox.0.push((
+                outbox.push_reliable((
                     Target::Token(reply_token.clone()),
                     ServerMessage::TargetLock {
                         uuid: uuid.clone(),
@@ -1920,7 +1920,7 @@ pub(crate) fn tick_beams_apply_damage(
             // God mode: local ship takes no damage.
             if target_is_local && god_mode.as_ref().is_some_and(|g| g.0) {
                 if let Some(ref mut ob) = outbox {
-                    ob.0.push((
+                    ob.push_reliable((
                         Target::All,
                         ServerMessage::DamageTaken {
                             hull: 0.0,
@@ -2021,7 +2021,7 @@ pub(crate) fn tick_beams_apply_damage(
                 // GameOver on kill. Never despawn the LocalShip entity.
                 if target_is_local {
                     if let Some(ref mut ob) = outbox {
-                        ob.0.push((
+                        ob.push_reliable((
                             Target::All,
                             ServerMessage::DamageTaken {
                                 hull: hull_applied,
@@ -2031,7 +2031,7 @@ pub(crate) fn tick_beams_apply_damage(
                     }
                     if destroyed {
                         if let Some(ref mut ob) = outbox {
-                            ob.0.push((Target::All, ServerMessage::ShipDestroyed));
+                            ob.push_reliable((Target::All, ServerMessage::ShipDestroyed));
                         }
                         if let Some(ref mut gs) = next_state {
                             gs.set(GamePhase::GameOver);
@@ -2210,7 +2210,7 @@ pub(crate) fn tick_beams_apply_damage(
                     z: state.effective_target_z,
                 });
                 if let Some(ref mut ob) = outbox {
-                    ob.0.push((
+                    ob.push_reliable((
                         Target::All,
                         ServerMessage::AsteroidDestroyed {
                             uuid: state.effective_target_uuid.clone(),
@@ -2227,7 +2227,7 @@ pub(crate) fn tick_beams_apply_damage(
                     radius: destroyed_ship_radius,
                 });
                 if let Some(ref mut ob) = outbox {
-                    ob.0.push((
+                    ob.push_reliable((
                         Target::All,
                         ServerMessage::EntityDespawned {
                             uuid: state.effective_target_uuid.clone(),

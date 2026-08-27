@@ -353,6 +353,7 @@ component.comms_contacts.empty,Comms contact list when nothing is in hailing ran
 component.comms_contacts.hail,Button that hails a comms contact,HAIL
 component.comms_hails.empty,Comms message list when no transmissions have arrived,NO MESSAGES
 component.comms_hails.label,Accessible name (aria-label) for the comms hail list — the keyboard/pointer message selector (issue #1178),Received hails
+component.comms.priority.critical,Visible text paired with a diamond and danger colour on a live critical Comms hail,CRITICAL
 component.comms_message.no_active_hail,Comms message panel when no hail is open,[NO ACTIVE HAIL]
 component.comms_message.confirm_important,"Comms response button prompt asking the operator to confirm an important, irreversible response before it is sent",CONFIRM?
 component.comms_message.unavailable,Comms response button tooltip shown when the sender is out of comms range and the response cannot be sent,[OUT OF RANGE]
@@ -1243,10 +1244,24 @@ world.falling_skyway.entity.shuttle_wick.name,assets/worlds/falling_skyway.toml 
 world.falling_skyway.capacity.fuel_lift.label,assets/worlds/falling_skyway.toml -> [[entity.overrides.infrastructure.capacity]] label,[Fuel lift per window]
 world.falling_skyway.threshold.pumping.label,assets/worlds/falling_skyway.toml -> [[entity.overrides.infrastructure.threshold]] label,[Pumping]
 world.falling_skyway.deadline.tether_slip.label,assets/worlds/falling_skyway.toml -> [[deadline]] label,[Tether slip]
+world.falling_skyway.deadline.lark_first_hail_due.label,Hidden authored safety beat for Hauler Lark's first check-in,[Lark safety check]
 world.falling_skyway.deadline.skyway_survey_due.label,assets/worlds/falling_skyway.toml -> [[deadline]] label,[Survey due to Control]
-world.falling_skyway.objective.survey.text,Objective text — the Act 1 condition read in Falling Skyway,"[Take station off the skyhook. Get a condition read on the head and on both depots.]"
+world.falling_skyway.deadline.lark_final_hail_due.label,Hidden authored safety beat for Hauler Lark's Critical second check-in,[Lark final safety check]
+world.falling_skyway.deadline.lark_collision_due.label,Hidden authored terminal beat for Hauler Lark's corridor collision,[Lark corridor entry]
+world.falling_skyway.objective.survey.text,Objective text — the Act 1 condition read in Falling Skyway,"[Scan Skyhook Verrow and both ladder depots. File the completed survey with Skyway Control.]"
 world.falling_skyway.objective.corridor.text,Objective text — the Act 1 corridor watch in Falling Skyway,"[Keep the corridor moving. See the lead hauler through the gate.]"
 world.falling_skyway.objective.triage.text,Objective text — the Act 1 triage call in Falling Skyway,[Name the structure that takes the first repair team.]
+world.falling_skyway.comms.survey_incomplete,Dialogue body — Control refuses a partial Falling Skyway survey,"[Control. We cannot accept a corridor survey without readings from the head and both depots. Complete the three scans and call again.]"
+world.falling_skyway.comms.survey_ready,Dialogue body — Control is ready to receive the completed Falling Skyway survey,"[Skyway Control. We have your carrier. Send the head and depot survey when ready.]"
+world.falling_skyway.comms.file_survey,Response text — filing the completed Falling Skyway survey with Control,"[Control, receiving. Filing the skyhook and both depot condition reads now.]"
+world.falling_skyway.comms.survey_received,Dialogue body — Control acknowledges the completed Falling Skyway survey,[Survey received and entered against the corridor record. Control out.]
+world.falling_skyway.comms.survey_unfiled,Dialogue body — Control acts on the existing record after Falling Skyway's survey deadline,"[Destroyer, survey deadline. No complete report reached Control. We are proceeding on Havelock's filed corridor figures.]"
+world.falling_skyway.comms.lark_safety_check,Dialogue body — Hauler Lark narrates its intended corridor transit thirty seconds before the survey deadline,"[Destroyer, Hauler Lark. We are thirty seconds from the Meridian throat on the filed corridor clearance. Confirm it is safe for transit.]"
+world.falling_skyway.comms.lark_final_check,Dialogue body — Hauler Lark's Critical second check at the survey deadline,"[Destroyer, Lark. We are at the survey deadline with no stop order. Send scan proof now or we enter the throat in twenty seconds.]"
+world.falling_skyway.comms.lark_unsafe_response,Response text — the crew use a valid survey scan to stop Hauler Lark,"[Lark, hold outside the throat. Our survey scan proves the filed clearance is unsafe. Do not enter.]"
+world.falling_skyway.comms.lark_holding,Dialogue body — Hauler Lark acknowledges the scan-backed stop order,"[Destroyer, Lark. Scan evidence received. Holding clear of the corridor. Transit cancelled.]"
+world.falling_skyway.comms.lark_collision_report,Dialogue body — Hauler Lark announces entry immediately before the committed corridor collision,"[Destroyer, Lark. No scan-backed stop received. We are entering the corridor now—stand by—]"
+world.falling_skyway.game_over.lark_collision,Defeat reason — uncontrolled Hauler Lark physically destroys the Falling Skyway,"[Hauler Lark struck Skyway Meridian in the uncontrolled corridor. The structure is lost.]"
 world.probe_evidence.entity.skyway_hook.name,"assets/worlds/probe_evidence.toml -> [[entity]] name","[Skyway Hook]"
 world.probe_evidence.entity.line_foreman.name,"assets/worlds/probe_evidence.toml -> [[entity]] name","[Line Foreman]"
 world.probe_evidence.capacity.berths.label,"Crew-facing label for the berths capacity in the #1031 probe world","[Berths]"
@@ -1271,8 +1286,8 @@ world.probe_strike.entity.sister_struck.name,assets/worlds/probe_strike.toml -> 
 world.probe_strike.entity.rig_struck.name,assets/worlds/probe_strike.toml -> [[entity]] name,[Struck Rig]
 world.probe_strike.entity.sister_clear.name,assets/worlds/probe_strike.toml -> [[entity]] name,[Clear-side Sister]
 world.probe_strike.entity.rig_clear.name,assets/worlds/probe_strike.toml -> [[entity]] name,[Unworked Rig]
-world.falling_skyway.objective.line.text,Objective text — the Act 2 dispute in Falling Skyway,[Get the line at Ladder Depot B working again.]
-world.falling_skyway.objective.corroborate.text,Objective text — the optional Act 2 corroboration route in Falling Skyway,[Get a worker on the record about the Ladder B maintenance file.]
+world.falling_skyway.objective.line.text,Objective text — the dispute era in Falling Skyway,[Get the line at Ladder Depot B working again.]
+world.falling_skyway.objective.corroborate.text,Objective text — the optional dispute-era corroboration route in Falling Skyway,[Get a worker on the record about the Ladder B maintenance file.]
 world.falling_skyway.commitment.safe_passage.terms,"Commitment terms — the captain's promise to the strike committee, Falling Skyway","[The corridor stays clear for the workers' craft through the final transfer window.]"
 world.falling_skyway.commitment.safe_passage.resolves,Commitment resolution condition — the safe-passage promise in Falling Skyway,[Settled when the transfer window closes.]
 world.falling_skyway.commitment.surface_records.terms,"Commitment terms — the captain's promise to surface the maintenance file, Falling Skyway","[The Ladder B maintenance file goes to Skyway Control, unedited.]"
@@ -1280,9 +1295,12 @@ world.falling_skyway.commitment.surface_records.resolves,Commitment resolution c
 world.falling_skyway.evidence.ladder_b_maintenance_file,"Evidence text — the operator's own maintenance file on Ladder B, Falling Skyway","[Operator's file on Ladder B: every inspection signed off, none of them by anyone who was on the rung that day.]"
 world.falling_skyway.evidence.picket_cleared_hurt,"Evidence text — what clearing the picket by force cost, Falling Skyway","[The Ladder B picket was cleared by Havelock security on our authorisation. There were casualties.]"
 world.falling_skyway.comms.committee_hails,Dialogue body — the strike committee open the negotiation in Falling Skyway,"[Destroyer, this is the committee at Ladder B. Before you ask: nobody is going back up that rung until somebody fixes what is wrong down here.]"
+world.falling_skyway.comms.committee_hardens_one,Dialogue body — the strike committee's first unanswered escalation in Falling Skyway,"[Destroyer, the tether is slipping and you have left us waiting. The floor will not take promises alone now. Bring us the file as well.]"
+world.falling_skyway.comms.committee_hardens_two,Dialogue body — the strike committee's final unanswered escalation in Falling Skyway,"[Still no answer. Every undertaking and the Ladder B file are the price of a vote now. Havelock will find people braced for them if you send them in.]"
 world.falling_skyway.comms.listen,Response text — hearing the strike committee out in Falling Skyway,[I am listening. Tell me what is wrong down there.]
 world.falling_skyway.comms.dismiss,Response text — talking down to the strike committee in Falling Skyway,[There are forty million people under that tether. Stand your people down.]
 world.falling_skyway.comms.committee_terms,Dialogue body — the strike committee's two demands in Falling Skyway,"[Two things. Nobody works that rung while the tether is slipping, so the corridor is clear when the transfer runs. And the maintenance file on Ladder B goes to Control — not back to the operator who wrote it.]"
+world.falling_skyway.comms.committee_terms_hardened,Dialogue body — the hardened strike committee's three-part settlement threshold in Falling Skyway,"[The floor has heard promises before. This time we need both undertakings and the Ladder B file in our hands before anyone votes.]"
 world.falling_skyway.comms.committee_ready,Dialogue body — the strike committee have enough to take to the floor in Falling Skyway,[That is more than anyone has offered us in six weeks. Say the word and I will put it to the floor.]
 world.falling_skyway.comms.promise_passage,Response text — promising the workers safe passage in the transfer window in Falling Skyway,[You have my word. The corridor is clear when the transfer runs.]
 world.falling_skyway.comms.promise_records,Response text — promising to surface the maintenance file in Falling Skyway,[I will put the file in front of Control myself.]
@@ -1324,7 +1342,20 @@ world.falling_skyway.deadline.storm_band_two.label,assets/worlds/falling_skyway.
 world.falling_skyway.deadline.lyra_clear.label,assets/worlds/falling_skyway.toml -> [[deadline]] label,[Lyra clear of the lane]
 world.falling_skyway.deadline.storm_band_three.label,assets/worlds/falling_skyway.toml -> [[deadline]] label,[Third band]
 world.falling_skyway.deadline.storm_passed.label,assets/worlds/falling_skyway.toml -> [[deadline]] label,[Storm passes]
-world.falling_skyway.objective.shelter.text,Objective text — the Act 2 corridor clearance in Falling Skyway,[Get the corridor traffic off the lane before the front arrives.]
+world.falling_skyway.objective.shelter.text,Objective text — the Act 2 corridor clearance in Falling Skyway,[Get the corridor traffic into storm shelter before the first band arrives.]
+world.falling_skyway.objective.shelter_meridian.text,Objective text — route Convoy Meridian out of the Falling Skyway storm corridor,[Order Convoy Meridian onto the storm shelter run.]
+world.falling_skyway.objective.shelter_lark.text,Objective text — route Hauler Lark out of the Falling Skyway storm corridor,[Order Hauler Lark onto the storm shelter run.]
+world.falling_skyway.objective.shelter_pell.text,Objective text — route Hauler Pell out of the Falling Skyway storm corridor,[Order Hauler Pell onto the storm shelter run.]
+world.falling_skyway.civilian_order.storm_shelter,Navigation order button for endangered Falling Skyway traffic,[ORDER TO STORM SHELTER]
+world.falling_skyway.objective.traffic_loss_report.text,Objective text — mandatory report after civilian traffic is lost in Falling Skyway,[Report the civilian traffic losses to Skyway Control.]
+world.falling_skyway.evidence.traffic_lost_meridian,Dossier ledger entry when Convoy Meridian is destroyed in Falling Skyway,[Convoy Meridian lost during the radiation sweep.]
+world.falling_skyway.evidence.traffic_lost_lark,Dossier ledger entry when Hauler Lark is destroyed in Falling Skyway,[Hauler Lark lost during the radiation sweep.]
+world.falling_skyway.evidence.traffic_lost_pell,Dossier ledger entry when Hauler Pell is destroyed in Falling Skyway,[Hauler Pell lost during the radiation sweep.]
+world.falling_skyway.evidence.traffic_lost_wick,Dossier ledger entry when Shuttle Wick is destroyed in Falling Skyway,[Shuttle Wick lost during the radiation sweep.]
+world.falling_skyway.comms.traffic_lost_meridian,Urgent Skyway Control report when Convoy Meridian is destroyed,[Control to destroyer. Convoy Meridian is gone. We have logged the loss.]
+world.falling_skyway.comms.traffic_lost_lark,Urgent Skyway Control report when Hauler Lark is destroyed,[Control to destroyer. Hauler Lark is gone. We have logged the loss.]
+world.falling_skyway.comms.traffic_lost_pell,Urgent Skyway Control report when Hauler Pell is destroyed,[Control to destroyer. Hauler Pell is gone. We have logged the loss.]
+world.falling_skyway.comms.traffic_lost_wick,Urgent Skyway Control report when Shuttle Wick is destroyed,[Control to destroyer. Shuttle Wick is gone. We have logged the loss.]
 world.falling_skyway.objective.approach.text,Objective text — the Act 2 approach to the stricken craft in Falling Skyway,"[Lyra Ascending is adrift in the lane with no drive. Close on her before the front does.]"
 world.falling_skyway.objective.rescue.text,Objective text — the Act 2 tow rescue in Falling Skyway,"[Get a line on Lyra Ascending and pull her clear before the second band.]"
 world.falling_skyway.objective.storm.text,Objective text — the Act 2 storm watch in Falling Skyway,[See the sweep through. The corridor is yours again when the last band passes.]

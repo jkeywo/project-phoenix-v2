@@ -4,6 +4,7 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { isLatestLiveCriticalMessage } from '../comms-state.js';
 import { PhElement, phDefine } from './ph-element.js';
 
 /**
@@ -29,6 +30,7 @@ export class PhCommsCurrentMessage extends PhElement {
   #placeholderEl = null;
   #threadEl = null;
   #senderEl = null;
+  #priorityEl = null;
   #messagesEl = null;
   #responsesEl = null;
   // Index of the important response currently armed (awaiting a confirm click),
@@ -45,7 +47,10 @@ export class PhCommsCurrentMessage extends PhElement {
     :host * { box-sizing: border-box; }
     .placeholder { font-size: var(--text-xs); color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
     .thread { display: flex; flex-direction: column; gap: 0.5rem; }
-    .sender-label { font-size: var(--text-xs); color: var(--edge); letter-spacing: 0.15em; text-transform: uppercase; padding-bottom: 0.25rem; border-bottom: 1px solid var(--line-faint); }
+    .sender-label { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; font-size: var(--text-xs); color: var(--edge); letter-spacing: 0.15em; text-transform: uppercase; padding-bottom: 0.25rem; border-bottom: 1px solid var(--line-faint); }
+    .priority-cue { display: inline-flex; align-items: center; gap: 0.25rem; flex-shrink: 0; border: 1px solid var(--fire-bright); background: var(--fire-deep); color: var(--fire-bright); padding: 0.12rem 0.35rem; font-weight: 700; letter-spacing: 0.1em; }
+    .priority-cue[hidden] { display: none; }
+    .priority-shape { line-height: 1; }
     .messages { display: flex; flex-direction: column; gap: 0.35rem; max-height: 10rem; overflow-y: auto; }
     .msg { font-size: var(--text-sm); line-height: 1.4; }
     .msg .speaker { font-weight: 700; color: var(--ink-dim); }
@@ -69,7 +74,7 @@ export class PhCommsCurrentMessage extends PhElement {
   <div id="container">
     <div class="placeholder" id="placeholder">${t('component.comms_message.no_active_hail')}</div>
     <div class="thread" id="thread" style="display:none">
-      <div class="sender-label" id="sender-label"></div>
+      <div class="sender-label"><span id="sender-label"></span><span class="priority-cue" id="priority-cue" hidden></span></div>
       <div class="messages" id="messages"><div class="msg"><span class="text"></span></div></div>
     </div>
   </div>
@@ -84,6 +89,7 @@ export class PhCommsCurrentMessage extends PhElement {
     if (!this.#placeholderEl) this.#placeholderEl = root.getElementById('placeholder');
     if (!this.#threadEl) this.#threadEl = root.getElementById('thread');
     if (!this.#senderEl) this.#senderEl = root.getElementById('sender-label');
+    if (!this.#priorityEl) this.#priorityEl = root.getElementById('priority-cue');
     if (!this.#messagesEl) this.#messagesEl = root.getElementById('messages');
 
     if (!thread) {
@@ -102,10 +108,23 @@ export class PhCommsCurrentMessage extends PhElement {
     const responses = (Array.isArray(thread.responses) ? thread.responses : [])
       .map(normalizeResponse);
     const selectedIdx = thread.selected_response;
+    const messages = Array.isArray(s.messages) ? s.messages : [thread];
+    const critical = isLatestLiveCriticalMessage(thread, messages);
     // Rejection targeting THIS thread (#761 AC3): the attempted control flashes.
     const rejection = s.rejection && s.rejection.message_id === tid ? s.rejection : null;
 
     this.#senderEl.textContent = sender;
+    this.#priorityEl.hidden = !critical;
+    this.#priorityEl.replaceChildren();
+    if (critical) {
+      const shape = document.createElement('span');
+      shape.className = 'priority-shape';
+      shape.setAttribute('aria-hidden', 'true');
+      shape.textContent = '◆';
+      const text = document.createElement('span');
+      text.textContent = t('component.comms.priority.critical');
+      this.#priorityEl.append(shape, text);
+    }
 
     if (tid !== this.#prevThreadId) {
       this.#messagesEl.innerHTML = '<div class="msg"><span class="text"></span></div>';

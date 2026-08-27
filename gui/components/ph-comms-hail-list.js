@@ -4,7 +4,12 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
-import { commsPreview } from '../comms-state.js';
+import {
+  COMMS_PRIORITY,
+  commsPreview,
+  commsPriority,
+  isLatestLiveCriticalMessage,
+} from '../comms-state.js';
 import { PhElement, phDefine } from './ph-element.js';
 import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
 
@@ -28,12 +33,18 @@ export class PhCommsHailList extends PhElement {
     .row { display: flex; align-items: center; gap: 0.4rem; width: 100%; margin: 0; font: inherit; text-align: left; background: none; border: 0; color: var(--ink); font-size: var(--text-sm); padding: 0.35rem 0.4rem; cursor: pointer; border-radius: 2px; transition: background 0.15s ease; min-height: var(--control-hit-min); }
     .row:hover { background: var(--cyan-deep); }
     .row[aria-selected="true"] { background: var(--cyan-deep); }
+    .row.critical { background: var(--fire-deep); box-shadow: inset 3px 0 0 var(--fire-bright); }
+    .row.critical:hover, .row.critical[aria-selected="true"] { background: var(--fire-dim); }
     .dot { width: 0.45rem; height: 0.45rem; border-radius: 50%; flex-shrink: 0; }
     .dot.unread { background: var(--science); }
     .dot.read { background: transparent; }
+    .row.critical .dot { background: var(--fire-bright); box-shadow: 0 0 0.35rem var(--fire); }
     .sender { font-weight: 400; color: var(--ink); min-width: 4rem; }
     .sender.unread { font-weight: 700; }
     .preview { color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+    .priority-cue { display: none; align-items: center; gap: 0.2rem; flex-shrink: 0; border: 1px solid var(--fire-bright); color: var(--fire-bright); padding: 0.08rem 0.25rem; font-size: var(--text-xs); font-weight: 700; letter-spacing: 0.08em; }
+    .priority-cue.critical { display: inline-flex; }
+    .priority-shape { line-height: 1; }
     .timestamp { color: var(--edge); font-size: var(--text-xs); flex-shrink: 0; }
   </style>
   <div class="list" id="list"></div>
@@ -96,13 +107,14 @@ export class PhCommsHailList extends PhElement {
       const sender = h.sender_name || '';
       const preview = commsPreview(h);
       const unread = !h.is_read;
+      const critical = isLatestLiveCriticalMessage(h, raw);
       let row = this.#rowCache.get(id);
       if (!row) {
         row = document.createElement('button');
         row.type = 'button';
         row.className = 'row';
         row.setAttribute('role', 'option');
-        row.innerHTML = '<span class="dot"></span><span class="sender"></span><span class="preview"></span>';
+        row.innerHTML = '<span class="dot"></span><span class="sender"></span><span class="preview"></span><span class="priority-cue"><span class="priority-shape" aria-hidden="true">◆</span><span class="priority-text"></span></span>';
         // Enter/Space (native to the button) and a pointer tap alike run this
         // one handler, dispatching the SAME select_comms_message action.
         row.addEventListener('click', () => {
@@ -116,11 +128,16 @@ export class PhCommsHailList extends PhElement {
         list.appendChild(row);
       }
       row.dataset.id = id;
+      row.dataset.priority = critical ? COMMS_PRIORITY.CRITICAL : commsPriority(h);
+      row.classList.toggle('critical', critical);
       row.setAttribute('aria-selected', String(id === this.#selectedId));
       row.children[0].className = unread ? 'dot unread' : 'dot read';
       row.children[1].className = unread ? 'sender unread' : 'sender';
       row.children[1].textContent = sender;
       row.children[2].textContent = preview;
+      row.children[3].className = critical ? 'priority-cue critical' : 'priority-cue';
+      row.children[3].querySelector('.priority-text').textContent = critical
+        ? t('component.comms.priority.critical') : '';
     });
     this.#syncRoving();
   }

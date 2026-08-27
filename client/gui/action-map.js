@@ -481,11 +481,10 @@ export const ACTION_MAP = Object.freeze({
    * navigation blackboard seconds later. Predicting it here would show the
    * operator compliance that has not happened.
    *
-   * No console control emits this yet — `<ph-civilian-traffic>` is the readout
-   * half, and the destination pickers a divert and a dock need are a console
-   * slice of their own. The action exists here because the wire surface is
-   * complete and scripted orders already exercise it end to end; the same shape
-   * as `set_sensors_target`'s deselect, which shipped ahead of its control.
+   * `<ph-civilian-traffic>` emits only the finite order options authored for
+   * that craft and published by the host. Free-form destination pickers remain
+   * out of scope: the world owns what one button means, and this validator still
+   * refuses a malformed option instead of guessing.
    */
   order_civilian: (a, send) => {
     if (typeof a.target !== 'string' || a.target.length === 0) return;

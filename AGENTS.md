@@ -40,20 +40,20 @@ deadline the design model does not claim is an error by design.
 ## Common Commands
 
 ```bash
-# ── CI gates you can run locally — ALL green before each COMMIT, run ONCE ────
+# ── CI gates you can run locally — ALL green before each PUSH, run ONCE ──────
 # These are the three fast CI jobs (test, editor-test, pasm) in full. Anything
 # red here fails the build. `cargo test` alone is NOT sufficient: clippy denies
 # warnings, and `pasm validate` gates on the spec model. The remaining two jobs
 # (build, smoke) need a WASM build — see the trunk/playwright commands below.
 #
-# Do NOT run this list after every edit, implementation pass, or review pass —
-# clippy alone is a near-full rebuild. While iterating, use `cargo check` plus
-# the targeted tests for the area you touched. Run the full list exactly once,
-# as a final gate pass when the change is otherwise sound, before committing.
-# Review passes are read-only and run no gates at all.
+# Do NOT run this list after every edit, implementation pass, review pass, or
+# issue commit — clippy alone is a near-full rebuild. While iterating, use
+# `cargo check` plus targeted tests for the area you touched. After issue
+# commits have been replayed onto local main, run the full list exactly once as
+# the final gate between pushes. Review passes are read-only and run no gates.
 cargo fmt -- --check                           # CI: test job, step 1
-cargo clippy --all-targets --all-features -- -D warnings   # CI: test job, step 2
-cargo test                                     # CI: test job, step 3
+cargo clippy --workspace --all-targets --all-features -- -D warnings  # CI: test job, step 2
+cargo test --workspace --features headless     # CI: test job, step 3
 npx vitest run                                 # CI: editor-test job (tests/client/*.test.js)
 node scripts/check-strings.mjs --strict        # CI: editor-test job
 npm run lods:check                             # CI: editor-test job (LOD drift)
@@ -68,6 +68,11 @@ uv run pasm traceability                       # CI: pasm job, report (still exi
 #   the fleet copy in ada7a172 and its tests went with it to vellum; only the
 #   spec model (pasm/spec/) is phoenix's. Editing a slice still needs the three
 #   commands above, because they assert on that YAML — `cargo test` will not.
+
+# Falling Skyway's 55 full-timeline simulations are manual-only. This enables
+# them and runs only that scenario suite; the 14 narrow probe worlds stay in
+# the ordinary native CI command above.
+cargo test -p project-phoenix --features falling-skyway-sim-tests --test headless_runner falling_skyway_
 
 # Quick compile check while iterating (not a CI gate)
 cargo check

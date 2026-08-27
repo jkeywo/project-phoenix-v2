@@ -104,6 +104,14 @@ jobs:
       # headless` still applies only to `project-phoenix`, which is the only
       # selected package that declares it; cargo ignores it for `phoenix-math`
       # rather than erroring.
+      #
+      # Falling Skyway's 55 full-timeline simulations are compiled here but
+      # ignored unless the explicit `falling-skyway-sim-tests` feature is on.
+      # They are run manually while working on that scenario:
+      #   cargo test -p project-phoenix --features falling-skyway-sim-tests \
+      #     --test headless_runner falling_skyway_
+      # The 14 narrow probe-world tests interleaved with that scenario remain
+      # ordinary CI coverage.
       - name: Run the native test suite
         run: cargo test --workspace --features headless
 

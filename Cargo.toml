@@ -152,6 +152,12 @@ debug = ["bevy/debug"]
 # features are per-package, so bevy's render stack is still *compiled*; headless
 # only avoids instantiating `RenderPlugin`.
 headless = []
+# The 55 shipped Falling Skyway end-to-end simulations are intentionally
+# manual-only. Ordinary native CI still compiles them (they are `#[ignore]`
+# without this feature) but does not spend ~20 minutes executing one scenario's
+# full timeline on every unrelated push. Enable this feature and filter on the
+# `falling_skyway_` prefix while doing Falling Skyway work; see AGENTS.md.
+falling-skyway-sim-tests = ["headless"]
 # Perf feature: builds the `phoenix-perf` asset-budget and baseline tool. It
 # exists to keep that binary out of the wasm target list rather than to gate any
 # code — see the `[[bin]]` note above.

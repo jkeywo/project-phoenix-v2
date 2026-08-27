@@ -7757,6 +7757,14 @@ fn the_dossier_channel_carries_what_the_crew_know_and_not_what_they_do_not() {
 
 // ── Falling Skyway: the skeleton world and Act 1 (issue #1034, parent #852) ──
 
+// These full-timeline simulations are deliberately manual-only. Every real
+// Falling Skyway test must keep both the `falling_skyway_` name prefix and the
+// `cfg_attr(..., ignore)` marker below; narrow probe-world tests remain ordinary
+// CI coverage. Run this suite with:
+//
+// cargo test -p project-phoenix --features falling-skyway-sim-tests \
+//   --test headless_runner falling_skyway_
+
 const SKYWAY_WORLD: &str = "assets/worlds/falling_skyway.toml";
 
 /// Read one authored Falling Skyway deadline before an app exists, so tests
@@ -7850,6 +7858,10 @@ fn ship_positions(app: &mut bevy::prelude::App) -> std::collections::BTreeMap<St
 /// lengthening Act 1 in the TOML (the #1044 tuning pass) does not silently turn
 /// this into a test of an act that never finished.
 #[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
 fn falling_skyway_silent_act_one_fails_the_unfiled_survey_loudly() {
     use project_phoenix::civilian::CivilianTraffic;
     use project_phoenix::core::messages::ObjectiveStatus;
@@ -8408,7 +8420,11 @@ fn a_scan_and_a_dialogue_admission_both_land_on_one_fact_sheet_with_their_proven
 /// range, the mission opens the crew a kilometre off, and closing is helm's job
 /// rather than this test's subject.
 #[test]
-fn the_strike_no_longer_throttles_the_crews_external_work() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_the_strike_no_longer_throttles_the_crews_external_work() {
     use project_phoenix::entities::spawner::EntityName;
     use project_phoenix::infrastructure::InfrastructureCondition;
     use project_phoenix::world::server::WorldContentRuntime;
@@ -9322,6 +9338,10 @@ fn skyway_submit_response(app: &mut bevy::prelude::App, message_id: &str, respon
 /// that authoritative work and posts the objective already complete; the later
 /// deadline cannot turn it red.
 #[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
 fn falling_skyway_three_scans_and_control_pick_complete_the_remembered_survey() {
     use project_phoenix::core::messages::ObjectiveStatus;
 
@@ -9454,6 +9474,10 @@ fn falling_skyway_three_scans_and_control_pick_complete_the_remembered_survey() 
 /// changes it to Completed. Removing `complete_objective` from the pickup would
 /// therefore fail this test even if the flag-backed pre-emption helper survived.
 #[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
 fn falling_skyway_posted_survey_completes_on_the_admitted_control_pickup() {
     use project_phoenix::core::messages::ObjectiveStatus;
 
@@ -9534,7 +9558,11 @@ fn falling_skyway_posted_survey_completes_on_the_admitted_control_pickup() {
 /// authored t=380 deadline commits the collision, removes both physical
 /// participants, and declares defeat without reading an objective status.
 #[test]
-fn idle_crew_fails_every_era_headless_checks() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_idle_crew_fails_every_era_headless_checks() {
     let collision_due = skyway_authored_deadline_secs("lark_collision_due") as f64;
     let args = HeadlessArgs {
         world_path: SKYWAY_WORLD.into(),
@@ -9573,6 +9601,10 @@ fn idle_crew_fails_every_era_headless_checks() {
 /// applier raises the real flags; and Comms hails Control and files the report.
 /// The same scan-backed response also stops Lark, leaving the scenario alive.
 #[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
 fn falling_skyway_full_backfill_scans_and_files_the_opening_survey() {
     use project_phoenix::core::messages::{
         ObjectiveSource, ObjectiveStatus, SystemAffinity, SystemBlackboard,
@@ -9723,6 +9755,10 @@ fn falling_skyway_full_backfill_scans_and_files_the_opening_survey() {
 /// and the shared scan applier can raise `scan.lyra_ascending.taken` and let the
 /// scenario complete the visible step.
 #[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
 fn falling_skyway_full_backfill_scans_lyra_from_the_rescue_objective() {
     use project_phoenix::core::messages::ObjectiveStatus;
 
@@ -9772,6 +9808,10 @@ fn falling_skyway_full_backfill_scans_lyra_from_the_rescue_objective() {
 /// A first scan taken after the routine check-in refreshes that live thread;
 /// the proof response does not have to wait for the Critical second hail.
 #[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
 fn falling_skyway_mid_window_scan_unlocks_the_routine_stop_response() {
     const UNSAFE: &str = "world.falling_skyway.comms.lark_unsafe_response";
 
@@ -9822,6 +9862,10 @@ fn falling_skyway_mid_window_scan_unlocks_the_routine_stop_response() {
 /// crew waits for the second, Critical hail and answers inside its final window;
 /// advancing past t=380 cannot resurrect the cancelled collision.
 #[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
 fn falling_skyway_scan_backed_unsafe_response_cancels_the_collision() {
     const UNSAFE: &str = "world.falling_skyway.comms.lark_unsafe_response";
 
@@ -9886,6 +9930,10 @@ fn falling_skyway_scan_backed_unsafe_response_cancels_the_collision() {
 /// No fixture teleport substitutes for Helm: a crew hail reaches the live
 /// cutter and the immediate-force response is admitted from the opening tick.
 #[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
 fn falling_skyway_havelock_is_hailable_and_forceable_from_the_authored_start() {
     let (mut app, ship) = skyway_strike_app_at_authored_start(51133);
     seat_skyway_comms(&mut app, ship);
@@ -9917,6 +9965,10 @@ fn falling_skyway_havelock_is_hailable_and_forceable_from_the_authored_start() {
 /// incoming post gives Backfill anything to answer. Its first admitted response
 /// then engages the dispute and stops stage 2 without erasing stage 1.
 #[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
 fn falling_skyway_shipped_backfill_encounters_and_preserves_stage_one_hardening() {
     let (mut app, _ship) = skyway_strike_app_at_authored_start(61133);
 
@@ -9953,6 +10005,10 @@ fn falling_skyway_shipped_backfill_encounters_and_preserves_stage_one_hardening(
 /// objective already green, without moving the schedule or firing either
 /// hardening timer.
 #[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
 fn falling_skyway_early_strike_settlement_is_remembered_when_its_objective_posts() {
     use project_phoenix::core::messages::ObjectiveStatus;
 
@@ -10052,6 +10108,10 @@ fn falling_skyway_early_strike_settlement_is_remembered_when_its_objective_posts
 /// requires all three pieces of ground. The crew can still talk, stall, gather
 /// the file, vote, or take the force path; escalation removes no interaction.
 #[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
 fn falling_skyway_late_hardened_strike_still_settles_by_talk_or_force() {
     use project_phoenix::core::messages::ObjectiveStatus;
     use project_phoenix::world::server::WorldContentRuntime;
@@ -10206,7 +10266,11 @@ fn skyway_condition(app: &mut bevy::prelude::App, name: &str) -> f32 {
 /// This is the normal posted-order complement to the early pre-emption case:
 /// the objective is visibly active before the admitted work completes it.
 #[test]
-fn the_negotiation_settles_the_skyway_strike_and_the_ledger_carries_both_promises() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_the_negotiation_settles_the_skyway_strike_and_the_ledger_carries_both_promises() {
     use project_phoenix::world::commitments::CommitmentState;
     use project_phoenix::world::server::WorldContentRuntime;
 
@@ -10410,7 +10474,11 @@ fn the_negotiation_settles_the_skyway_strike_and_the_ledger_carries_both_promise
 /// what makes the difference is a finding on a fact sheet rather than a flag set
 /// beside one.
 #[test]
-fn the_skyway_maintenance_file_opens_a_line_in_the_negotiation_nobody_else_gets() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_the_skyway_maintenance_file_opens_a_line_in_the_negotiation_nobody_else_gets() {
     use project_phoenix::dossier::evidence::EvidenceProvenance;
     use project_phoenix::world::server::WorldContentRuntime;
 
@@ -10504,7 +10572,11 @@ fn the_skyway_maintenance_file_opens_a_line_in_the_negotiation_nobody_else_gets(
 /// the vote, reachable without negotiating, it costs people, and what it shuts
 /// is said out loud rather than latched in silence.
 #[test]
-fn forcing_the_skyway_picket_open_is_faster_and_the_bill_arrives_on_a_console() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_forcing_the_skyway_picket_open_is_faster_and_the_bill_arrives_on_a_console() {
     use project_phoenix::core::messages::ObjectiveStatus;
     use project_phoenix::world::server::WorldContentRuntime;
 
@@ -10597,7 +10669,11 @@ fn forcing_the_skyway_picket_open_is_faster_and_the_bill_arrives_on_a_console() 
 /// the picket ten minutes on the open channel first — and it is the same number
 /// every time for the same seed and the same choices.
 #[test]
-fn the_skyway_casualty_count_is_read_off_the_ground_the_order_was_given_on() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_the_skyway_casualty_count_is_read_off_the_ground_the_order_was_given_on() {
     // Talked down to first: they are further dug in, and it goes worse.
     let mut app = skyway_at_strike_post().0;
     skyway_pick(
@@ -11086,6 +11162,10 @@ fn skyway_rescue_lyra_for_clean_ledger(app: &mut bevy::prelude::App, ship: bevy:
 /// strike is unresolved; physical bands destroy exposed civilians, and every
 /// loss is named immediately on the ledger and Control channel.
 #[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
 fn falling_skyway_idle_traffic_is_lost_loudly_while_the_storm_ignores_the_strike() {
     use project_phoenix::core::messages::ObjectiveStatus;
 
@@ -11303,6 +11383,10 @@ fn falling_skyway_idle_traffic_is_lost_loudly_while_the_storm_ignores_the_strike
 /// passes; clearing the weather cannot turn impossible work against a destroyed
 /// craft green.
 #[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
 fn falling_skyway_pre_front_traffic_loss_stays_failed_after_storm_passage() {
     use project_phoenix::core::messages::ObjectiveStatus;
 
@@ -11351,6 +11435,10 @@ fn falling_skyway_pre_front_traffic_loss_stays_failed_after_storm_passage() {
 /// directive is visible but Engineering has no target to work. The companion
 /// test below gives the same shared systems a real lock and tractor command.
 #[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
 fn falling_skyway_backfill_orders_traffic_clear_of_all_three_bands() {
     use project_phoenix::civilian::ComplianceState;
     use project_phoenix::core::messages::ObjectiveStatus;
@@ -11573,6 +11661,10 @@ fn falling_skyway_backfill_orders_traffic_clear_of_all_three_bands() {
 /// lock, exactly as a console would — the engineering-owned tractor system is
 /// where range, power and the coupling are tested (issues #1156, #1165).
 #[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
 fn falling_skyway_act_2_rescue_lands_when_the_crew_start_before_the_band() {
     use project_phoenix::core::messages::ObjectiveStatus;
     use project_phoenix::world::server::WorldContentRuntime;
@@ -11742,6 +11834,10 @@ fn falling_skyway_act_2_rescue_lands_when_the_crew_start_before_the_band() {
 /// by the world flag, so both the approach and rescue objectives arrive already
 /// complete instead of asking the crew to repeat finished work.
 #[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
 fn falling_skyway_an_early_lyra_tow_resolves_when_the_rescue_objectives_post() {
     use project_phoenix::core::messages::ObjectiveStatus;
 
@@ -12146,7 +12242,11 @@ fn skyway_scan_ladder_b(app: &mut bevy::prelude::App, ship: bevy::prelude::Entit
 /// negotiation reads the evidence log itself rather than a flag beside it, which
 /// is why this route lights that line without #1036 knowing it exists.
 #[test]
-fn scanning_ladder_b_against_its_own_maintenance_record_opens_the_evidence_route() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_scanning_ladder_b_against_its_own_maintenance_record_opens_the_evidence_route() {
     let (mut app, ship) = skyway_at_act_two();
     let rung = scan_uuid_named(&mut app, SKYWAY_DEPOT_B);
 
@@ -12210,7 +12310,11 @@ fn scanning_ladder_b_against_its_own_maintenance_record_opens_the_evidence_route
 /// promises instead of one, which is what "changes the available endings rather
 /// than blocking progress" means in this control.
 #[test]
-fn a_crew_who_never_scan_the_rung_find_nothing_and_are_blocked_by_nothing() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_a_crew_who_never_scan_the_rung_find_nothing_and_are_blocked_by_nothing() {
     let (mut app, _ship) = skyway_strike_app(42);
     skyway_hail(&mut app, SKYWAY_COMMITTEE);
     let rung = scan_uuid_named(&mut app, SKYWAY_DEPOT_B);
@@ -12292,7 +12396,11 @@ fn a_crew_who_never_scan_the_rung_find_nothing_and_are_blocked_by_nothing() {
 /// halves: the recorded claim as a gathered BRIEFING row, and the standard it
 /// claims as a live condition fact off #1025's own published snapshot.
 #[test]
-fn the_ladder_b_panel_shows_the_recorded_standard_failing_beside_the_claim() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_the_ladder_b_panel_shows_the_recorded_standard_failing_beside_the_claim() {
     use project_phoenix::core::messages::{DossierBlackboard, DossierValue, SystemBlackboard};
     use project_phoenix::dossier::{dossier_blackboard_key, FACT_CONDITION};
     use project_phoenix::server_app::ShipSystemBlackboards;
@@ -12458,7 +12566,11 @@ fn skyway_negotiate_to_a_vote(app: &mut bevy::prelude::App) {
 /// The order is asserted causally throughout: she is silent while either gate is
 /// open, and the beat she calls on is the one that closes the second.
 #[test]
-fn a_talk_and_read_crew_files_the_scan_diff_and_worker_account_with_control() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_a_talk_and_read_crew_files_the_scan_diff_and_worker_account_with_control() {
     use project_phoenix::core::messages::ObjectiveStatus;
     use project_phoenix::world::commitments::CommitmentState;
     use project_phoenix::world::server::WorldContentRuntime;
@@ -12715,7 +12827,11 @@ fn a_talk_and_read_crew_files_the_scan_diff_and_worker_account_with_control() {
 /// authoritative state. This is the reverse of the force-then-filing regression
 /// below: the first admitted irreversible choice wins deterministically.
 #[test]
-fn filing_first_closes_a_previously_rendered_force_order() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_filing_first_closes_a_previously_rendered_force_order() {
     use project_phoenix::core::messages::ObjectiveStatus;
 
     let (mut app, ship) = skyway_at_act_two();
@@ -12808,7 +12924,11 @@ fn filing_first_closes_a_previously_rendered_force_order() {
 /// still submit-able once the ship returns to range; admission must turn it into
 /// a closed acknowledgement without changing any evidence authority.
 #[test]
-fn forcing_after_corroboration_burns_the_open_control_filing() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_forcing_after_corroboration_burns_the_open_control_filing() {
     use project_phoenix::core::messages::ObjectiveStatus;
 
     let (mut app, ship) = skyway_at_act_two();
@@ -12897,7 +13017,11 @@ fn forcing_after_corroboration_burns_the_open_control_filing() {
 /// afterwards may receive a closed acknowledgement, but cannot turn a failed
 /// objective green or mutate any frozen record.
 #[test]
-fn a_post_close_stale_filing_cannot_rewrite_the_frozen_ending() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_a_post_close_stale_filing_cannot_rewrite_the_frozen_ending() {
     use project_phoenix::core::messages::ObjectiveStatus;
 
     let (mut app, ship) = skyway_at_act_two();
@@ -12974,7 +13098,11 @@ fn a_post_close_stale_filing_cannot_rewrite_the_frozen_ending() {
 /// that exact stale response may be acknowledged but cannot engage the strike,
 /// schedule a clearance, create casualties, or rewrite the campaign record.
 #[test]
-fn a_post_close_stale_force_order_cannot_rewrite_the_frozen_ending() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_a_post_close_stale_force_order_cannot_rewrite_the_frozen_ending() {
     let (mut app, ship) = skyway_at_act_two();
     skyway_move(&mut app, ship, CHOICE_LADDER);
     run(&mut app, 2);
@@ -13038,7 +13166,11 @@ fn a_post_close_stale_force_order_cannot_rewrite_the_frozen_ending() {
 /// first but must no-op; Havelock's later callback is the sole physical
 /// settlement and the campaign records exactly the forced branch.
 #[test]
-fn force_admitted_at_nineteen_seconds_owns_the_only_strike_settlement() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_force_admitted_at_nineteen_seconds_owns_the_only_strike_settlement() {
     let (mut app, ship) = skyway_at_act_two();
     skyway_move(&mut app, ship, CHOICE_LADDER);
     run(&mut app, 2);
@@ -13088,7 +13220,11 @@ fn force_admitted_at_nineteen_seconds_owns_the_only_strike_settlement() {
 
 /// **Issue #1136 cycle-four review — a retained rigger Ask expires at close.**
 #[test]
-fn a_post_close_stale_rigger_ask_cannot_add_evidence_or_campaign_state() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_a_post_close_stale_rigger_ask_cannot_add_evidence_or_campaign_state() {
     let (mut app, ship) = skyway_at_act_two();
     skyway_scan_ladder_b(&mut app, ship);
     skyway_move(&mut app, ship, CHOICE_LADDER);
@@ -13130,7 +13266,11 @@ fn a_post_close_stale_rigger_ask_cannot_add_evidence_or_campaign_state() {
 
 /// **Issue #1136 cycle-four review — a retained protection promise expires.**
 #[test]
-fn a_post_close_stale_rigger_protect_cannot_create_a_commitment() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_a_post_close_stale_rigger_protect_cannot_create_a_commitment() {
     let (mut app, ship) = skyway_at_act_two();
     skyway_scan_ladder_b(&mut app, ship);
     skyway_move(&mut app, ship, CHOICE_LADDER);
@@ -13179,7 +13319,11 @@ fn a_post_close_stale_rigger_protect_cannot_create_a_commitment() {
 
 /// **Issue #1136 cycle-four review — a retained confrontation expires.**
 #[test]
-fn a_post_close_stale_confrontation_cannot_rewrite_state_or_campaign() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_a_post_close_stale_confrontation_cannot_rewrite_state_or_campaign() {
     use project_phoenix::core::messages::ObjectiveStatus;
 
     let (mut app, ship) = skyway_at_act_two();
@@ -13276,7 +13420,11 @@ fn a_post_close_stale_confrontation_cannot_rewrite_state_or_campaign() {
 /// the crew were already told they had lost — so what is asserted here is that
 /// all three of those still hold with the corroboration authored behind them.
 #[test]
-fn forcing_the_picket_open_leaves_nobody_willing_to_corroborate_and_says_so() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_forcing_the_picket_open_leaves_nobody_willing_to_corroborate_and_says_so() {
     use project_phoenix::core::messages::ObjectiveStatus;
 
     let (mut app, ship) = skyway_at_act_two();
@@ -13354,7 +13502,11 @@ fn forcing_the_picket_open_leaves_nobody_willing_to_corroborate_and_says_so() {
 /// and no timer that knows a witness exists — she calls. Which is the
 /// registration working from its other side.
 #[test]
-fn a_crew_who_settled_the_strike_but_never_read_the_rung_hear_nothing_yet() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_a_crew_who_settled_the_strike_but_never_read_the_rung_hear_nothing_yet() {
     use project_phoenix::core::messages::ObjectiveStatus;
 
     // Settle the soft, passively hailable floor before t=120. A hardened floor
@@ -13440,7 +13592,11 @@ fn a_crew_who_settled_the_strike_but_never_read_the_rung_hear_nothing_yet() {
 /// is written down. A captain who would not give her the promise is a fact about
 /// this crew, and #1043's scene should be able to read it.
 #[test]
-fn refusing_the_witness_cover_keeps_the_corroboration_and_records_the_refusal() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_refusing_the_witness_cover_keeps_the_corroboration_and_records_the_refusal() {
     use project_phoenix::world::server::WorldContentRuntime;
 
     let (mut app, ship) = skyway_at_act_two();
@@ -13903,7 +14059,11 @@ fn a_claimant_can_be_disabled_or_destroyed_and_each_writes_its_own_flags() {
 /// armed hull the mission fields and the only way it can matter is if somebody
 /// shoots at it first.
 #[test]
-fn falling_skyways_picket_sits_there_until_somebody_starts_something() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_picket_sits_there_until_somebody_starts_something() {
     let dt = 1.0 / 60.0;
     let args = HeadlessArgs {
         world_path: "assets/worlds/falling_skyway.toml".into(),
@@ -14196,6 +14356,10 @@ fn skyway_projected_floor(app: &bevy::prelude::App) -> f64 {
 /// directives remain visible without being acted on. The companion tests below
 /// drive the same shared systems with a crew that reacts.
 #[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
 fn falling_skyway_act_3_warns_three_times_then_the_head_falls_into_a_playable_epilogue() {
     use project_phoenix::core::messages::ObjectiveStatus;
     use project_phoenix::world::server::WorldContentRuntime;
@@ -14473,6 +14637,10 @@ fn falling_skyway_act_3_warns_three_times_then_the_head_falls_into_a_playable_ep
 /// behind. What the margin measures is unchanged: how much room the last warning
 /// leaves a crew to notice, decide and give the order in.
 #[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
 fn falling_skyway_act_3_a_crew_who_react_to_the_last_warning_save_the_head() {
     use project_phoenix::core::messages::ObjectiveStatus;
     use project_phoenix::world::server::WorldContentRuntime;
@@ -14597,6 +14765,10 @@ fn falling_skyway_act_3_a_crew_who_react_to_the_last_warning_save_the_head() {
 /// watch posts must resolve the later Stabilise objective immediately and must
 /// not start a fresh decline that asks the crew to repeat the same work.
 #[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
 fn falling_skyway_an_early_skyhook_stabilise_resolves_when_the_watch_posts() {
     use project_phoenix::core::messages::ObjectiveStatus;
 
@@ -14691,6 +14863,10 @@ fn falling_skyway_an_early_skyhook_stabilise_resolves_when_the_watch_posts() {
 /// `skyhook_lift_capable` value may remain true in the shared store. When Act 3
 /// later opens, that fossil must not turn one head into both possible fates.
 #[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
 fn falling_skyway_a_head_destroyed_before_the_back_half_has_exactly_one_fate() {
     use project_phoenix::entities::spawner::{EntityName, EntityUuid};
     use project_phoenix::world::content::WorldEvent;
@@ -14757,6 +14933,10 @@ fn falling_skyway_a_head_destroyed_before_the_back_half_has_exactly_one_fate() {
 /// cross — so the epilogue reuses the act before it rather than inventing a
 /// second rescue mechanic.
 #[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
 fn falling_skyway_act_3_epilogue_is_completable_by_a_crew_that_tows_both_craft() {
     use project_phoenix::core::messages::ObjectiveStatus;
     use project_phoenix::world::server::WorldContentRuntime;
@@ -14890,6 +15070,10 @@ fn falling_skyway_act_3_epilogue_is_completable_by_a_crew_that_tows_both_craft()
 /// own game-over reason, and neither of Act 3's fate flags is written by
 /// anybody, because the act the collapse belongs to was never reached.
 #[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
 fn falling_skyway_losing_the_ship_is_a_hard_fail_and_writes_none_of_the_head_s_flags() {
     use project_phoenix::world::server::WorldContentRuntime;
 
@@ -15515,7 +15699,11 @@ fn window_open_time(app: &mut bevy::prelude::App, give_up_at: f64) -> f64 {
 /// together are larger than the pair of them. The companion tests below prove a
 /// crew can REACH that ceiling; this one proves reaching it is not enough.
 #[test]
-fn no_state_of_falling_skyway_covers_all_three_claimants() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_no_state_of_falling_skyway_covers_all_three_claimants() {
     use project_phoenix::infrastructure::InfrastructureCondition;
 
     let mut app = build_headless_app(&skyway_args(SKYWAY_DT, 2.0)).expect("the world must load");
@@ -15583,6 +15771,10 @@ fn no_state_of_falling_skyway_covers_all_three_claimants() {
 /// fuel over the umbilical crosses the receiver's own authored capacity
 /// threshold; the scenario latches that work and the later post arrives green.
 #[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
 fn falling_skyway_an_early_umbilical_transfer_resolves_when_the_window_work_posts() {
     use project_phoenix::core::messages::ObjectiveStatus;
 
@@ -15630,6 +15822,10 @@ fn falling_skyway_an_early_umbilical_transfer_resolves_when_the_window_work_post
 /// of completing it. Closing an untouched window also leaves the protected
 /// allocation red: neither authored boundary makes the decision for the crew.
 #[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
 fn falling_skyway_unworked_transfer_and_unbooked_window_stay_red() {
     use project_phoenix::core::messages::ObjectiveStatus;
 
@@ -15694,7 +15890,11 @@ fn falling_skyway_unworked_transfer_and_unbooked_window_stay_red() {
 /// crew who stop watching arrive with nothing to lift however well they did in
 /// Acts 1 and 2.
 #[test]
-fn a_crew_who_did_everything_still_reach_the_window_short() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_a_crew_who_did_everything_still_reach_the_window_short() {
     use project_phoenix::core::messages::ObjectiveStatus;
 
     let (mut app, ship) = skyway_at_act_two();
@@ -16011,7 +16211,11 @@ fn a_crew_who_did_everything_still_reach_the_window_short() {
 /// head certified with the picket still up — proving that what the ladder is
 /// short of here is the RUNG and not the catch.
 #[test]
-fn a_crew_who_saved_the_head_and_nothing_else_reach_the_window_shorter() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_a_crew_who_saved_the_head_and_nothing_else_reach_the_window_shorter() {
     let (mut app, ship) = skyway_at_act_two();
     skyway_seat_idle_tactical(&mut app);
     let (_, ship_uuid) = window_ship(&mut app);
@@ -16094,7 +16298,11 @@ fn a_crew_who_saved_the_head_and_nothing_else_reach_the_window_shorter() {
 /// crew are told about it in its own words rather than in the ones written for a
 /// window that has something in it.
 #[test]
-fn a_crew_who_mended_nothing_reach_a_window_with_no_lift_in_it_at_all() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_a_crew_who_mended_nothing_reach_a_window_with_no_lift_in_it_at_all() {
     let probe = build_headless_app(&skyway_args(SKYWAY_DT, 1.0)).expect("the world must load");
     let opens_at = skyway_deadline_secs(&probe, "skyway_transfer_window") as f64;
     drop(probe);
@@ -16583,6 +16791,10 @@ fn assert_the_campaign_record_is_complete(app: &bevy::prelude::App) {
 /// without naming the woman who contradicted the file.
 /// All three promises on the books come out KEPT, and the ledger says so.
 #[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
 fn falling_skyway_clean_ledger_benchmark_lifts_exactly_two_of_three() {
     use project_phoenix::core::messages::ObjectiveStatus;
 
@@ -16972,7 +17184,11 @@ fn falling_skyway_clean_ledger_benchmark_lifts_exactly_two_of_three() {
 /// What comes back is not a severity band. It is the committee reading the terms
 /// of the promise back to the ship that gave them.
 #[test]
-fn a_captain_who_leaves_the_workers_behind_hears_the_promise_read_back() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_a_captain_who_leaves_the_workers_behind_hears_the_promise_read_back() {
     use project_phoenix::core::messages::ObjectiveStatus;
 
     let (mut app, ship) = skyway_at_act_two();
@@ -17131,7 +17347,11 @@ fn a_captain_who_leaves_the_workers_behind_hears_the_promise_read_back() {
 /// promises, then they keep the one about the corridor and break the one about
 /// filing that copy.
 #[test]
-fn the_lift_runs_out_and_the_third_claimant_is_never_offered_one() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_the_lift_runs_out_and_the_third_claimant_is_never_offered_one() {
     use project_phoenix::core::messages::ObjectiveStatus;
 
     let (mut app, ship) = skyway_at_act_two();
@@ -17376,7 +17596,11 @@ fn the_lift_runs_out_and_the_third_claimant_is_never_offered_one() {
 /// and a rung nobody is working, and their casualty numbers are the highest this
 /// mission can produce.
 #[test]
-fn the_early_collapse_leaves_one_berth_and_control_asks_for_a_name() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_the_early_collapse_leaves_one_berth_and_control_asks_for_a_name() {
     use project_phoenix::core::messages::ObjectiveStatus;
 
     let (mut app, ship) = skyway_at_act_two();
@@ -17545,7 +17769,11 @@ fn the_early_collapse_leaves_one_berth_and_control_asks_for_a_name() {
 /// overrides would carry. Building an actual follow-on world would prove the
 /// world file, not the projection.
 #[test]
-fn the_next_mission_opens_on_what_this_one_left_behind() {
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_the_next_mission_opens_on_what_this_one_left_behind() {
     use project_phoenix::campaign::{project, seed_flags, CAMPAIGN_FACTS_VERSION};
     use project_phoenix::content_ledger;
     use project_phoenix::core::balance::Outcome;

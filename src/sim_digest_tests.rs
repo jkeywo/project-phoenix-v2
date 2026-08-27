@@ -871,7 +871,7 @@ fn a_world_flag_moves_the_digest_and_its_counter_is_what_moves_it() {
 /// ACTIVE: a failed-load sentinel occupies its path to suppress retries and is
 /// not part of the composition a peer has to agree with.
 #[test]
-fn only_an_active_layer_folds_and_its_path_and_order_fold_with_it() {
+fn only_an_active_layer_folds_and_its_path_and_loader_fold_with_it() {
     let quiet = world_digest(&scenario_world());
 
     let mut world = scenario_world();
@@ -901,11 +901,77 @@ fn only_an_active_layer_folds_and_its_path_and_order_fold_with_it() {
         .0
         .get_mut("layers/storm.toml")
         .expect("just inserted")
-        .activation_order = 3;
+        .loader_path = Some("layers/act_two.toml".into());
     assert_ne!(
         active,
         world_digest(&world),
-        "the activation ordinal is the composition, so it folds too"
+        "the loader is half the reconcile key and the whole of the `parent:` \
+         chain, so it folds beside the path"
+    );
+}
+
+/// The layer walk folds each layer's PLACE, never its runtime ordinal — and the
+/// two claims are separable, so both are asserted.
+///
+/// `WorldRuntime::activation_order` is `max(active) + 1` at each load, so
+/// unloading from the middle leaves the survivors GAPPED and nothing renumbers
+/// them. `PhoenixSnapshot::layer_flags` stores only the vector position, and
+/// `reconcile_world_layers` reloads a resumed composition from one — so a live
+/// run with a gap and its own restore hold the same composition under different
+/// ordinals. Folding the ordinal made that read as save corruption; folding the
+/// enumerate index keeps the composition claim and drops the unreproducible one.
+#[test]
+fn a_layers_place_is_folded_but_its_absolute_ordinal_is_not() {
+    let layer = |order: u64, flag: &str| {
+        let mut runtime = WorldRuntime {
+            is_active: true,
+            activation_order: order,
+            ..WorldRuntime::default()
+        };
+        runtime.flags.set_flag(flag);
+        runtime
+    };
+
+    let sole = |order: u64| {
+        let mut world = scenario_world();
+        world
+            .resource_mut::<WorldLayerMap>()
+            .0
+            .insert("layers/storm.toml".into(), layer(order, "storm_warning"));
+        world_digest(&world)
+    };
+    assert_eq!(
+        sole(1),
+        sole(7),
+        "the sole active layer's absolute ordinal is NOT folded: a restore \
+         renumbers it from one, and folding it would make a gapped live run fail \
+         its own restore's digest equality"
+    );
+
+    let pair = |storm_order: u64, relief_order: u64| {
+        let mut world = scenario_world();
+        {
+            let mut layers = world.resource_mut::<WorldLayerMap>();
+            layers
+                .0
+                .insert("layers/storm.toml".into(), layer(storm_order, "storm"));
+            layers
+                .0
+                .insert("layers/relief.toml".into(), layer(relief_order, "relief"));
+        }
+        world_digest(&world)
+    };
+    assert_eq!(
+        pair(1, 2),
+        pair(4, 9),
+        "and neither ordinal is folded when the ORDER they imply is unchanged"
+    );
+    assert_ne!(
+        pair(1, 2),
+        pair(2, 1),
+        "but the order itself is the composition — a host that loaded the relief \
+         layer before the storm resolves `parent:` differently and appends \
+         scripted triggers in the other order"
     );
 }
 
@@ -948,6 +1014,44 @@ fn a_trigger_latch_moves_the_digest_and_so_does_the_tables_shape() {
         world_digest(&world),
         "a table that grew a row — a layer loaded on one host and not the other \
          — moves the digest before either new trigger fires"
+    );
+}
+
+/// A table that was RESHAPED without changing size still moves the digest.
+///
+/// Positional keying with the row count as its only shape guard is exactly the
+/// hazard `WorldContentRuntime::trigger_table_generation` exists to name: a
+/// layer unloaded from the middle and another loaded in its place leaves the
+/// count and the `origin_layer` tags alone while every row past the removal now
+/// names a different trigger. Each row's authored identity — its `id`, and its
+/// condition's KIND where there is no id — is what closes it.
+#[test]
+fn a_reshaped_trigger_table_of_the_same_size_moves_the_digest() {
+    let named = |id: &str| {
+        let mut state = trigger_state("raider");
+        state.trigger.id = Some(id.into());
+        state
+    };
+    let table = |rows: Vec<TriggerState>| {
+        let mut world = scenario_world();
+        world.resource_mut::<WorldContentRuntime>().trigger_states = rows;
+        world_digest(&world)
+    };
+
+    assert_ne!(
+        table(vec![named("storm_opens"), named("storm_closes")]),
+        table(vec![named("storm_opens"), named("storm_breaks")]),
+        "same length, same latches, same origin layers — and still a different \
+         set of triggers, which the authored id is what says"
+    );
+
+    let mut timer = trigger_state("raider");
+    timer.trigger.condition = TriggerCondition::OnTimer { after_secs: 30.0 };
+    assert_ne!(
+        table(vec![trigger_state("raider")]),
+        table(vec![timer]),
+        "an anonymous row is keyed by the KIND of trigger occupying it, so a \
+         swap is caught without an authored id to lean on"
     );
 }
 
@@ -1191,10 +1295,18 @@ fn an_inbox_message_moves_the_digest_and_so_does_answering_it() {
     );
 }
 
-/// The two comms fields the range system rewrites every tick are excluded, so a
-/// host whose contact drifted out of range does not read as a divergence.
+/// The inbox folds WHOLE: the stored `sender_in_range` and each response's
+/// stored `available` move the digest like every other field of a message.
+///
+/// They were excluded at first on the premise that `update_comms_range_flags`
+/// rewrote them every tick. It does not touch a `CommsMessage` at all — the
+/// per-tick stamping happens on the CLONES `broadcast_comms_state` and
+/// `publish_comms_blackboard` take — so the stored reading is written once, at
+/// injection, and then carried for the life of the message, `CommsState::inbox`
+/// included. It is also authoritative in its own right: the response router
+/// refuses a reply whose message reads out of range.
 #[test]
-fn the_re_derived_comms_fields_do_not_move_the_digest() {
+fn the_stored_range_reading_on_a_message_moves_the_digest() {
     let mut world = scenario_world();
     world
         .resource_mut::<CommsInboxRes>()
@@ -1205,15 +1317,65 @@ fn the_re_derived_comms_fields_do_not_move_the_digest() {
     let mut out_of_range = scenario_world();
     let mut drifted = message("msg-1", "comms.body.opening");
     drifted.sender_in_range = false;
-    drifted.responses[0].available = false;
     out_of_range.resource_mut::<CommsInboxRes>().0.inject(drifted);
+    let sender_moved = world_digest(&out_of_range);
+    assert_ne!(
+        in_range, sender_moved,
+        "a message stored as out of range is a different authoritative state \
+         from one stored as reachable — and the payload carries it verbatim, so \
+         a restore reproduces it"
+    );
+
+    let mut unavailable = scenario_world();
+    let mut greyed = message("msg-1", "comms.body.opening");
+    greyed.sender_in_range = false;
+    greyed.responses[0].available = false;
+    unavailable.resource_mut::<CommsInboxRes>().0.inject(greyed);
+    assert_ne!(
+        sender_moved,
+        world_digest(&unavailable),
+        "and each response's own stored `available` folds beside its text"
+    );
+}
+
+/// The `CommsRuntime` fields that genuinely ARE re-derived stay out of the fold,
+/// so a host whose contact drifted out of range does not read as a divergence.
+///
+/// `contacts`, `range_flags` and `range_active` are rebuilt from scratch every
+/// tick by `update_comms_range_flags`, from the live hailable entities and the
+/// transforms the entity namespace already folds — which is the same call
+/// `snapshot::CommsState` makes when it declines to carry them. `needs_broadcast`
+/// and `last_broadcast_host` are broadcast bookkeeping: which peer was last sent
+/// a `CommsState`, and whether one is owed. A restore sets the first
+/// unconditionally and re-establishes the second on its next broadcast.
+#[test]
+fn the_re_derived_comms_fields_do_not_move_the_digest() {
+    let mut world = scenario_world();
+    world
+        .resource_mut::<CommsRuntime>()
+        .active_dialogues
+        .insert("msg-1".into(), dialogue("node_opening"));
+    let settled = world_digest(&world);
+
+    {
+        let mut comms = world.resource_mut::<CommsRuntime>();
+        comms.contacts.push(crate::core::messages::CommsContact {
+            uuid: "contact-uuid".into(),
+            name: "Skyway Control".into(),
+            in_range: false,
+            is_urgent: true,
+        });
+        comms.range_flags.insert("contact-uuid".into(), false);
+        comms.range_active = true;
+        comms.needs_broadcast = true;
+        comms.last_broadcast_host = Some("session-token".into());
+    }
 
     assert_eq!(
-        in_range,
-        world_digest(&out_of_range),
-        "`sender_in_range` and a response's `available` are recomputed every \
-         tick by `update_comms_range_flags` from transforms the entity namespace \
-         already folds"
+        settled,
+        world_digest(&world),
+        "the roster, the range map, the range-active latch and the broadcast \
+         bookkeeping are all re-derived or re-established, so none of them folds"
     );
 }
 

@@ -98,23 +98,32 @@
 //! **Folded (scenario scope — issue #1086):** the scenario's own memory, in
 //! five walks, between the run-scope preamble and the entity namespace. The
 //! base world's `FlagStore` and every ACTIVE layer's, sorted by name and folded
-//! with the layer's path and activation ordinal; every trigger's latch (`fired`,
-//! its `OnAllDestroyed` accumulation, and whether a `repeat`'s cooldown stamp is
-//! set — see [`fold_scenario_triggers`] for why the stamp's VALUE is not folded)
-//! with the table's row count and each row's `origin_layer`;
+//! with the layer's path, its `loader_path` and its POSITION in the activation
+//! order (never the raw ordinal — see [`fold_scenario_flags`] for why the
+//! payload cannot round-trip that); every trigger's authored identity (`id` plus
+//! its condition's kind) and latch (`fired`, its `OnAllDestroyed` accumulation,
+//! and whether a `repeat`'s cooldown stamp is set — see
+//! [`fold_scenario_triggers`] for why the stamp's VALUE is not folded) with the
+//! table's row count and each row's `origin_layer`;
 //! the scripted `PendingCallbacks` queue and the queued `WorldEvent`s, both in
 //! queue order because that order is what fires; the named records — entity
 //! groups, the deadline table with its `armed` latch, the commitments ledger,
 //! the evidence log, the workforce register; and the whole of `CommsState` —
-//! inbox in inbox order, live dialogues sorted by message id, the open-hail set
-//! and the pending scripted opens. Before this issue the fold could agree about
-//! every hull in the world while the two hosts disagreed about whether the
-//! mission had been won. Membership was decided by one test — authoritative
-//! state a `PhoenixSnapshot` carries that the fold ignored — and the five walks
-//! take the empty-walk affordance below, so a world with no scenario resources
-//! at all (the cross-target probe) folds exactly as it did before. See
-//! [`fold_scenario_scope`], and [`fold_scenario_records`] for the four scenario
-//! fields deliberately left out with their reasons.
+//! inbox in inbox order (each message whole, its stored `sender_in_range` and
+//! per-response `available` included), live dialogues sorted by message id, the
+//! open-hail set and the pending scripted opens. Before this issue the fold
+//! could agree about every hull in the world while the two hosts disagreed about
+//! whether the mission had been won. Membership was decided by one test —
+//! **scenario-scope** authoritative state a `PhoenixSnapshot` carries that the
+//! fold ignored, which is narrower than it sounds and is qualified at
+//! [`fold_scenario_scope`] — and the five walks take the empty-walk affordance
+//! below, so a world with no scenario resources at all (the cross-target probe)
+//! folds exactly as it did before. See [`fold_scenario_scope`], and
+//! [`fold_scenario_records`] for the six `WorldContentRuntime` fields
+//! deliberately left out — `name_to_uuid`, `observed_hull_fractions`,
+//! `mission_clock_anchor_secs`, `pending_delayed_actions`,
+//! `trigger_table_generation` and `loaded_scenario_paths` — plus the authored
+//! row fields that go with them, each with its reason.
 //!
 //! **Folded (`AsteroidUuid` namespace, in `FoldKey` order):** every asteroid's
 //! id, its `Transform` translation as bit patterns (a rock's position is
@@ -380,6 +389,21 @@ pub fn state_digest(app: &App) -> u64 {
 /// Resources are read through `get_resource` for the same reason, and an absent
 /// resource folds as a distinct marker so "absent" and "present and empty" are
 /// never the same number.
+///
+/// **The scenario scope is the one exception, deliberately** (issue #1086).
+/// [`fold_scenario_scope`]'s five walks take the empty-walk affordance
+/// [`fold_infrastructure_namespace`] established: with nothing to say they fold
+/// nothing at all, so for them "absent" and "present and empty" ARE the same
+/// number. That is safe because the four containers involved are unconditionally
+/// `init_resource`'d by the plugins that own them — `WorldContentRuntime` and
+/// `WorldLayerMap` in `world::server`, `CommsRuntime` and `CommsInboxRes` in
+/// `comms::server` — so on any real host the distinction is unreachable, and the
+/// fifth, `WorldScriptRuntime`, is present exactly when the world (or one of its
+/// layers) authored a `[script]` block, which is content every peer reads the
+/// same way. What the affordance buys is the compatibility claim: a world that
+/// registers no scenario resource at all — the cross-target probe, which builds
+/// its world from Rust literals — folds to precisely the number it folded before
+/// the widening, so `tests/fixtures/cross-target-ledger.json` is untouched.
 pub fn world_digest(world: &World) -> u64 {
     let mut acc = FOLD_SEED;
     acc = fold_run_scope(world, acc);
@@ -535,23 +559,42 @@ fn fold_optional_triple(acc: u64, value: Option<[f32; 3]>) -> u64 {
 ///
 /// # What decides membership
 ///
-/// Authoritative state a [`crate::snapshot::PhoenixSnapshot`] carries and the
-/// fold ignored. That test is deliberate rather than convenient: the payload's
-/// field list is the one place in this repo that has already argued, field by
-/// field, about what a resumed run cannot re-derive, and anything on it is by
-/// construction something a second host cannot re-derive either. What that test
-/// leaves OUT is listed at [`fold_scenario_records`] and in the module docs.
+/// **Scenario-scope** authoritative state a
+/// [`crate::snapshot::PhoenixSnapshot`] carries that the fold ignored. That test
+/// is deliberate rather than convenient: the payload's field list is the one
+/// place in this repo that has already argued, field by field, about what a
+/// resumed run cannot re-derive, and anything on it is by construction something
+/// a second host cannot re-derive either.
+///
+/// The **scenario-scope** qualifier is load-bearing and not decoration. The
+/// payload carries plenty of ENTITY-scope state this walk does not reach — the
+/// weapons rows, the reactor allocation, the repair and control rows, the helm
+/// pass surface, the scan reading, the spawn recipes — and none of it was
+/// considered and rejected here. It is deferred, and the module docs' DEFERRED
+/// paragraph is where it is accounted for. What THIS test leaves out inside its
+/// own scope is listed at [`fold_scenario_records`].
 ///
 /// # Cheapness, and the empty-walk affordance
 ///
-/// This runs once per logical tick, so every walk is a borrow-and-fold: no
-/// clone of the inbox, no serialisation of a whole structure, and a sort only
-/// where the runtime's own container is a `HashMap`/`HashSet` whose iteration
-/// order must never reach a fold (the flag stores, the trigger accumulations,
-/// the entity groups, the live dialogues). Everything else is already an
-/// ordered `Vec`/`BTreeSet` whose order is *load-bearing* — a `PendingCallbacks`
-/// queue fires in its own order, and sorting the fold would hide a reordering
-/// that changes what the mission does.
+/// This runs once per digest sample (and once per save and per restore) rather
+/// than once per logical tick — no Bevy schedule registers it, and its callers
+/// are `headless::replay`'s sampler, `cross_target_probe`, the resume tests, and
+/// `server::bridge`'s save/restore pair. A per-tick exchange is #1118's to
+/// introduce. Every walk is nonetheless a borrow-and-fold: no clone of the
+/// inbox, no serialisation of a whole structure, and a sort only where the
+/// runtime's own container is a `HashMap`/`HashSet` whose iteration order must
+/// never reach a fold (the flag stores, the trigger accumulations, the entity
+/// groups, the live dialogues). Everything else is already an ordered
+/// `Vec`/`BTreeSet` whose order is *load-bearing* — a `PendingCallbacks` queue
+/// fires in its own order, and sorting the fold would hide a reordering that
+/// changes what the mission does.
+///
+/// When #1118 does put this on the per-tick path, the cheap encodings are
+/// already available and do not change a folded number: `FlagStore` and
+/// `entity_groups` can fold through a cached sorted key list invalidated by a
+/// generation counter — the pattern `trigger_table_generation` already
+/// establishes for the trigger table — and the layer vector can be folded from a
+/// scratch buffer rather than a fresh `Vec` per call.
 ///
 /// Each of the five walks takes [`fold_infrastructure_namespace`]'s
 /// empty-walk affordance: with nothing to say it folds **nothing at all**, not
@@ -575,14 +618,38 @@ fn fold_scenario_scope(world: &World, mut acc: u64) -> u64 {
 /// from it. Two hosts that disagree about one counter disagree about which
 /// triggers may still fire.
 ///
-/// The **layer** half is folded with its path and its activation ordinal, not
-/// merely its flags, because that ordinal *is* the composition: a host that
-/// loaded a supporting world its peer did not has a different set of triggers,
-/// a different `parent:` chain and a different `FlagStore` to resolve names
-/// against, and the payload carries the same topology for the same reason
-/// (`PhoenixSnapshot::layer_flags`, `SNAPSHOT_FORMAT` 13). Only ACTIVE layers
-/// are folded — a failed-load sentinel occupies a path to suppress retries and
-/// is explicitly not part of the composition a snapshot recreates.
+/// The **layer** half is folded with its identity and its PLACE, not merely its
+/// flags, because the composition is what decides which triggers exist: a host
+/// that loaded a supporting world its peer did not has a different set of
+/// triggers, a different `parent:` chain and a different `FlagStore` to resolve
+/// names against. Only ACTIVE layers are folded — a failed-load sentinel
+/// occupies a path to suppress retries and is explicitly not part of the
+/// composition a snapshot recreates.
+///
+/// # The place is the ENUMERATE INDEX, never the runtime ordinal
+///
+/// `WorldRuntime::activation_order` is a live counter — `max(active) + 1` at
+/// each load — so unloading a layer from the middle leaves the survivors with
+/// GAPPED ordinals, and nothing puts them back. The payload deliberately does
+/// not carry it: [`crate::snapshot::LayerFlags`] stores `path`, `loader_path`,
+/// the declared entity uuids and the flags, and says in terms that "the vector
+/// position is the stored order". `reconcile_world_layers` rebuilds a resumed
+/// composition by loading the saved paths in that vector order, so the resumed
+/// layers are renumbered from one.
+///
+/// Folding the raw ordinal therefore made a live run with gapped ordinals fail
+/// its OWN restore's digest equality, reported to the player as save corruption
+/// (`snapshot::restore`). The enumerate index of the already-sorted vector is
+/// exactly what the payload's vector position stores and exactly what the
+/// restore reproduces, so it keeps every cross-peer claim — a layer loaded on
+/// one host and not the other still moves the digest, and so does a reordered
+/// composition — without claiming a number the payload cannot round-trip.
+///
+/// `loader_path` folds beside the path because it is the other half of the key
+/// the reconcile compares on, it is payload-carried, and it is what
+/// `layered_flag_chain` resolves every `parent:`-prefixed flag name through: two
+/// hosts that agreed on the layer set but disagreed about who loaded what
+/// resolve the same flag write into different stores.
 ///
 /// Both stores sort by name: a `FlagStore` is a `HashMap` and says so, and
 /// "set" is its whole vocabulary — `set_flag_value(name, 0)` removes the entry
@@ -594,7 +661,8 @@ fn fold_scenario_flags(world: &World, mut acc: u64) -> u64 {
         .map(|runtime| sorted_flags(&runtime.flags))
         .unwrap_or_default();
 
-    let mut layers: Vec<(u64, &str, Vec<(&str, i64)>)> = world
+    type LayerRow<'a> = (u64, &'a str, Option<&'a str>, Vec<(&'a str, i64)>);
+    let mut layers: Vec<LayerRow<'_>> = world
         .get_resource::<WorldLayerMap>()
         .map(|map| {
             map.0
@@ -604,6 +672,7 @@ fn fold_scenario_flags(world: &World, mut acc: u64) -> u64 {
                     (
                         layer.activation_order,
                         path.as_str(),
+                        layer.loader_path.as_deref(),
                         sorted_flags(&layer.flags),
                     )
                 })
@@ -616,15 +685,17 @@ fn fold_scenario_flags(world: &World, mut acc: u64) -> u64 {
     }
     // Activation order first, path as the tiebreak — the same key
     // `snapshot::capture_layer_flags` sorts the payload's topology by, so the
-    // two orders cannot drift.
+    // two orders cannot drift. The ordinal decides the SORT and is then dropped;
+    // what folds is the resulting position. See the doc above.
     layers.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(b.1)));
 
     acc = fold_str(acc, "scenario-flags");
     acc = fold_flag_store(acc, &base);
     acc = fold_u64(acc, layers.len() as u64);
-    for (order, path, flags) in layers {
-        acc = fold_u64(acc, order);
+    for (index, (_order, path, loader_path, flags)) in layers.into_iter().enumerate() {
+        acc = fold_u64(acc, index as u64);
         acc = fold_str(acc, path);
+        acc = fold_optional_str(acc, loader_path);
         acc = fold_flag_store(acc, &flags);
     }
     acc
@@ -662,6 +733,26 @@ fn fold_flag_store(mut acc: u64, pairs: &[(&str, i64)]) -> u64 {
 /// Index is positional and therefore never folded as a number: it is the order
 /// itself that is being pinned.
 ///
+/// # Each row's authored IDENTITY folds with its latch
+///
+/// A latch keyed only by position is exactly the hazard
+/// `WorldContentRuntime::trigger_table_generation` was introduced to name: since
+/// a layer can be unloaded from the MIDDLE of this vec, "same length" stopped
+/// implying "same triggers", and `TriggerFireRecorder` got that wrong by
+/// believing it. Count plus `origin_layer` does not close it either — a reshape
+/// that swapped one base-world trigger for another leaves both unchanged. So
+/// each row also folds the authored `id` (`None` for an anonymous trigger, kept
+/// apart from `Some("")` by [`fold_optional_str`]) and its condition's kind as a
+/// small integer written out at the call site, for [`fold_world_event`]'s
+/// reason. That is identity, not content: the condition's *fields* stay
+/// `snapshot::content_digest`'s to answer for, and a resumed world rebuilds both
+/// from the same TOML, so the pair round-trips through a restore untouched.
+///
+/// The generation counter itself is NOT folded. It is a function of load
+/// HISTORY — how many reshapes this host has seen — rather than of state, so two
+/// hosts that reached the same composition by different routes would disagree
+/// about a number neither the payload carries nor the simulation reads.
+///
 /// The accumulation sorts because it is a `HashSet` in the runtime; the payload
 /// sorts it for the same reason. Nothing else here needs a sort — the table's
 /// order is a deterministic replay of the same load on every host.
@@ -696,6 +787,8 @@ fn fold_scenario_triggers(world: &World, mut acc: u64) -> u64 {
     acc = fold_str(acc, "scenario-triggers");
     acc = fold_u64(acc, runtime.trigger_states.len() as u64);
     for state in &runtime.trigger_states {
+        acc = fold_optional_str(acc, state.trigger.id.as_deref());
+        acc = fold_u64(acc, trigger_condition_code(&state.trigger.condition));
         acc = fold_u64(acc, u64::from(state.fired));
         acc = fold_optional_str(acc, state.origin_layer.as_deref());
         acc = fold_u64(acc, u64::from(state.last_fired_elapsed.is_some()));
@@ -709,6 +802,31 @@ fn fold_scenario_triggers(world: &World, mut acc: u64) -> u64 {
         }
     }
     acc
+}
+
+/// A trigger condition's KIND as a small integer, matched at the call site.
+///
+/// Half of a trigger row's authored identity — see [`fold_scenario_triggers`].
+/// Written out rather than folded through a `derive`, for [`fold_world_event`]'s
+/// reason: `TriggerCondition` is scenario vocabulary whose variant order this
+/// fold has no business pinning. The condition's own fields are content and stay
+/// out; only which KIND of trigger occupies this row is folded.
+fn trigger_condition_code(condition: &crate::world::config::TriggerCondition) -> u64 {
+    use crate::world::config::TriggerCondition as C;
+    match condition {
+        C::OnDestroyed { .. } => 0,
+        C::OnAllDestroyed { .. } => 1,
+        C::OnAttacked { .. } => 2,
+        C::OnHullBelow { .. } => 3,
+        C::OnTimer { .. } => 4,
+        C::OnHailed { .. } => 5,
+        C::OnFlagSet { .. } => 6,
+        C::OnFlagCleared { .. } => 7,
+        C::OnWorldLoaded => 8,
+        C::OnEnteredRegion { .. } => 9,
+        C::OnExitedRegion { .. } => 10,
+        C::OnWaypointReached { .. } => 11,
+    }
 }
 
 /// The scenario's queued FUTURE work: scripted `after(n, |ctx| …)` callbacks and
@@ -872,7 +990,23 @@ fn fold_world_event(mut acc: u64, event: &WorldEvent) -> u64 {
 ///   properly belongs with the issue that widens the payload.
 /// * **`WorldContentRuntime::trigger_table_generation`** — declared at its own
 ///   definition as a cache-invalidation token for index-keyed observers rather
-///   than authoritative state.
+///   than authoritative state. It counts this host's load HISTORY, not its
+///   state; [`fold_scenario_triggers`] closes the hazard it names by folding
+///   each row's authored identity instead.
+/// * **`WorldContentRuntime::loaded_scenario_paths`** — and this one is left out
+///   *honestly rather than comfortably*. It is genuinely behaviour-bearing: it
+///   is the dedup set `apply_world_layer_changes` inserts into on both a
+///   successful and a failed load, and a host that had it and its peer did not
+///   would short-circuit a later `LoadWorld` the peer performed. The reason it
+///   stays out is the membership rule and nothing better: the payload does not
+///   carry it, so a resumed world rebuilds the set from the loads the reconcile
+///   actually replays, and folding what a restore cannot reproduce would break
+///   the at-restore digest equality for exactly the worlds that unload a layer.
+///   The active-layer walk in [`fold_scenario_flags`] covers the composition it
+///   dedupes against, which is why nothing shipped today can diverge on it
+///   invisibly — but a failed-load sentinel's path is in this set and in no
+///   fold, so it is the first candidate for a widening once the payload carries
+///   it (#1118's hardening).
 fn fold_scenario_records(world: &World, mut acc: u64) -> u64 {
     let Some(runtime) = world.get_resource::<WorldContentRuntime>() else {
         return acc;
@@ -975,15 +1109,41 @@ fn fold_scenario_records(world: &World, mut acc: u64) -> u64 {
 /// different ids. Queue order is therefore folded as-is, for
 /// [`fold_scenario_schedule`]'s reason.
 ///
-/// # The two fields that are re-derived, and so are not folded
+/// # The inbox folds WHOLE, `sender_in_range` and `available` included
 ///
-/// `CommsMessage::sender_in_range` and each response's `available` are rewritten
-/// every tick by `update_comms_range_flags` from ship and entity transforms the
-/// entity namespace already folds; `CommsRuntime`'s `contacts`, `range_flags`,
-/// `range_active` and `needs_broadcast` are the same class one level up (a
-/// restore sets `needs_broadcast` unconditionally rather than carrying it, which
-/// is the payload making the same call). Everything else the payload stores
-/// verbatim is folded verbatim.
+/// Those two used to be excluded here on the grounds that
+/// `update_comms_range_flags` rewrote them every tick. It does not, and never
+/// did: that system (`src/comms/server.rs`) writes only `CommsRuntime`'s
+/// `contacts`, `range_flags`, `range_active`, `needs_broadcast` and its
+/// `open_hails` pruning, and touches no `CommsMessage` at all. The per-message
+/// stamping happens on CLONES — `broadcast_comms_state` stamps
+/// `CommsInbox::messages()`, and `publish_comms_blackboard` stamps its own copy
+/// — so the STORED reading is written once, at injection, by
+/// `current_sender_in_range`, and then carried unchanged for the life of the
+/// message. `CommsState::inbox` stores the whole `CommsMessage` verbatim, so a
+/// restore reproduces both fields exactly and folding them cannot break the
+/// at-restore digest equality `tests/snapshot_resume.rs` asserts.
+///
+/// They are worth folding rather than merely safe to fold. A derelict under tow
+/// carries no `ShipPhysics`, so the entity namespace folds nothing about where
+/// it is; a stored `sender_in_range` taken against it is a fact the entity walk
+/// cannot restate. And the field is authoritative in its own right — the Comms
+/// response router refuses a reply whose message reads out of range — so two
+/// hosts that disagreed about it disagree about what the crew may say.
+///
+/// # What is still left out, and why
+///
+/// `CommsRuntime`'s `contacts`, `range_flags` and `range_active` are genuinely
+/// re-derived: `update_comms_range_flags` rebuilds all three every tick from the
+/// live hailable entities and the ship and entity transforms the entity
+/// namespace already folds, which is the same call
+/// [`crate::snapshot::CommsState`] makes when it declines to carry them.
+/// `needs_broadcast` and `last_broadcast_host` are broadcast BOOKKEEPING rather
+/// than scenario state — which network peer was last sent a `CommsState`, and
+/// whether one is owed — and the restore re-establishes both (it sets
+/// `needs_broadcast` unconditionally, because after a restore it is
+/// unconditionally true). Everything else the payload stores verbatim is folded
+/// verbatim.
 fn fold_comms_scope(world: &World, mut acc: u64) -> u64 {
     let inbox = world.get_resource::<CommsInboxRes>();
     let comms = world.get_resource::<CommsRuntime>();
@@ -1011,10 +1171,12 @@ fn fold_comms_scope(world: &World, mut acc: u64) -> u64 {
             acc = fold_str(acc, &message.subject);
             acc = fold_str(acc, &message.body);
             acc = fold_text_params(acc, &message.body_params);
+            acc = fold_u64(acc, u64::from(message.sender_in_range));
             acc = fold_u64(acc, message.responses.len() as u64);
             for response in &message.responses {
                 acc = fold_str(acc, &response.text);
                 acc = fold_u64(acc, u64::from(response.important));
+                acc = fold_u64(acc, u64::from(response.available));
             }
             acc = match message.selected_response {
                 Some(index) => fold_u64(fold_u64(acc, 1), index as u64),

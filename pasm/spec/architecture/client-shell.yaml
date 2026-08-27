@@ -56,7 +56,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Client Simulation State Store
-      summary: Pure-JavaScript simulation, lobby and Comms receivers that fold authoritative server messages into their distinct local presentation stores and return fresh mergeable semantic changes from the branch that owns each mutation. Valid Blackboard entries report changed keys and broader hosting-domain changes; the remaining state-bearing branches report semantic domains. Per-console iframe payload contracts remain documented as JSDoc typedefs beside each builder (issue 827).
+      summary: Pure-JavaScript simulation, lobby and Comms receivers that fold authoritative server messages into their distinct local presentation stores and return fresh mergeable semantic changes plus ordered lifecycle/presentation effects from the branch that owns each decision. Valid Blackboard entries report changed keys and broader hosting-domain changes; the remaining state-bearing branches report semantic domains. Per-console iframe payload contracts remain documented as JSDoc typedefs beside each builder (issue 827).
     architecture:
       kind: client-state-store
       authority: non-authoritative
@@ -74,7 +74,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Client Semantic Change Result
-      summary: Ephemeral, mergeable sets of changed semantic domains, System ids, and blackboard keys returned by the simulation, lobby and Comms reducers after state mutation. Dirty-console routing consumes only this result plus authoritative topology metadata, never the original ServerMessage. Unknown messages and unaccepted entries produce no change; accepted state-bearing branches report their owned domain even when the resulting replica value repeats.
+      summary: Ephemeral reducer output containing mergeable sets of changed semantic domains, System ids and blackboard keys plus an ordered, non-deduplicated effect sequence. Dirty-console routing consumes only the semantic sets plus authoritative topology metadata; the shell-effect router consumes the effects after iframe publication. Neither receives the original ServerMessage. Unknown messages and unaccepted entries produce no output; repeated feedback remains repeated even when its values match.
     architecture:
       classification: derived
       owner: client-simulation-state-store
@@ -82,7 +82,7 @@ entities:
     implementation:
       status: declared
       paths: [gui/reducer-result.js, gui/lobby-state.js, gui/sim-state.js, gui/comms-state.js, gui/dirty-consoles.js, client.html]
-      symbols: [CHANGE_DOMAINS, emptyReducerResult, mergeReducerResults, ClientSimState, LobbyState, ClientCommsState]
+      symbols: [CHANGE_DOMAINS, REDUCER_EFFECTS, emptyReducerResult, mergeReducerResults, ClientSimState, LobbyState, ClientCommsState]
       tests: [npx vitest run]
 
   - state: client-presentation-state
@@ -121,11 +121,11 @@ entities:
       status: implemented
       confidence: confirmed
       title: Client Access Shell
-      summary: Uses authoritative station ownership and the selected ship configuration to show the player's single console (one human = one station; the active console is derived from station ownership — the tab bar, swipe switching, and their helper modules were deleted in issue 827), plus the lobby station roster, responsive phone layout, connection status, and reconnection state. Message routing, roster folding, lobby view selection, and generic Coordination presentation rendering are extracted pure modules; client.html keeps only bootstrap and DOM glue.
+      summary: Uses authoritative station ownership and the selected ship configuration to show the player's single console (one human = one station; the active console is derived from station ownership — the tab bar, swipe switching, and their helper modules were deleted in issue 827), plus the lobby station roster, responsive phone layout, connection status, and reconnection state. Reducers own every ServerMessage decision and return ordered lifecycle/presentation effects; the pure shell router mirrors already-reduced lobby state, applies local render guards and admits named effects only after dirty iframe publication. client.html contains no inbound message census or lobby fallback and only executes the resulting presentation operations.
     architecture:
       kind: client-shell
       authority: non-authoritative
-      reads: [session-station-ownership-state, client-presentation-state]
+      reads: [session-station-ownership-state, client-presentation-state, client-semantic-change-result]
       runs_in: [phone-browser-runtime]
     implementation:
       status: declared

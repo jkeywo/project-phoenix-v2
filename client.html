@@ -2141,14 +2141,6 @@
     // fired by gui/accessibility-profile.js after it persists the change).
     window.onAccessibilityAssistanceChanged = computeAndSendEligibility;
 
-    /** Re-report on the messages that change a published required rating or the
-     *  projection: Welcome (projection + ratings arrive) and RatingChanged. */
-    function maybeReportEligibility(msg) {
-      if (msg && (msg.type === 'Welcome' || msg.type === 'RatingChanged')) {
-        computeAndSendEligibility();
-      }
-    }
-
     function renderLobby(s) {
       renderActiveMods();
       const list = document.getElementById('station-list');
@@ -2833,14 +2825,6 @@
       const changes = typeof window.mergeReducerResults === 'function'
         ? window.mergeReducerResults(...reducerResults)
         : reducerResults.find(Boolean);
-      // The QR-first ScenarioCatalog message (issue #755) is not part of the
-      // client-router case table, so force a render to (re)draw the picker.
-      if (msg && msg.type === 'ScenarioCatalog') { settleScenarioPick(); scheduleRender(); }
-      // The host's debug/session read-back (issue #940) only arrives on change,
-      // and it is the one push that can change what an OPEN settings panel
-      // shows — so repaint here rather than from the render loop, which would
-      // rebuild the volume slider out from under a dragging finger.
-      if (msg && msg.type === 'DebugState' && settingsPanel) settingsPanel.rebuildContent();
       // Semantic iframe fan-out (#1260): gui/dirty-consoles.js maps the merged
       // reducer result to console names without receiving the wire message.
       // Runs after state applies so every push carries fresh data. On Welcome
@@ -2848,40 +2832,34 @@
       // (re)mounted AFTER this fan-out — that is fine: each iframe's load
       // listener re-pushes its snapshot once it actually loads.
       pushDirtyConsoles(changes);
-      // Per-case routing is pure and lives in gui/client-router.js (issue
-      // #827): it applies the uiState mutations and hands back a side-effect
-      // plan for the DOM glue below. Boot race: modules run before
-      // DOMContentLoaded and the connection waits for it, so routeMessage is
-      // present for every real message; drop otherwise (next message repeats).
-      if (typeof window.routeMessage !== 'function') return;
-      const result = window.routeMessage(msg, {
+      // Reducer-result routing (#1261) happens only after dirty iframe
+      // publication. The router receives no wire message: reducers already own
+      // its meaning and report ordered lifecycle/presentation effects. Boot
+      // race: modules run before DOMContentLoaded and the connection waits for
+      // it, so the router is present for every real message.
+      if (typeof window.routeReducerResult !== 'function') return;
+      const result = window.routeReducerResult(changes, {
         uiState,
         myToken,
         pendingMidGameClaim,
         bezelAlertOn,
         lobbyState: window.lobbyState || null,
-        redAlert: !!(window.simState && window.simState.redAlert),
       });
       pendingMidGameClaim = result.pendingMidGameClaim;
       bezelAlertOn = result.bezelAlertOn;
       if (result.myName !== undefined) myName = result.myName;
       for (const fx of result.sideEffects) applySideEffect(fx);
-      if (result.rebuildStations) rebuildStations();
-      // Re-derive and report anonymous eligibility AFTER the roster/projection/
-      // ratings have folded in (issue #1103): only the ineligible station-id set
-      // — no reason, no setting — goes back to the host.
-      maybeReportEligibility(msg);
       // Console input-to-feedback latency (issue #1169), on the same "report a
-      // locally-derived minimum" footing as the eligibility report above: only
+      // locally-derived minimum" footing as the eligibility effect: only
       // durations this device measured for itself leave the phone, batched.
       // Driven off inbound traffic rather than a timer so a disconnected phone
       // stops reporting by itself.
       maybeReportConsoleLatency();
-      if (result.shouldRender) scheduleRender();
     }
 
-    // DOM side effects named by the router (see gui/client-router.js for the
-    // catalogue). Everything here is a plain element write.
+    // Presentation effects named by the reducers and admitted by the pure
+    // router. This is execution only: no ServerMessage variant is interpreted
+    // in the HTML shell.
     function applySideEffect(fx) {
       switch (fx.effect) {
         case 'mount-consoles':
@@ -2929,6 +2907,28 @@
           break;
         case 'coordination-popup':
           showCoordinationPopup(fx.presentation, fx.senderLabel, fx.targetLabel);
+          break;
+        case 'settle-scenario-pick':
+          settleScenarioPick();
+          break;
+        case 'refresh-settings':
+          // Authoritative debug/session read-back only repaints an OPEN panel;
+          // the normal render loop deliberately leaves its controls alone.
+          if (settingsPanel) settingsPanel.rebuildContent();
+          break;
+        case 'rebuild-stations':
+          rebuildStations();
+          break;
+        case 'report-eligibility':
+          // Re-derive and report anonymous eligibility AFTER the authoritative
+          // roster/projection/ratings fold (issue #1103). Only the ineligible
+          // station-id set — no reason, no setting — goes back to the host.
+          computeAndSendEligibility();
+          break;
+        case 'request-render':
+          scheduleRender();
+          break;
+        default:
           break;
       }
     }

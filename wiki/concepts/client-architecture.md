@@ -18,36 +18,38 @@ PeerJS message (JSON)
   → gui/lobby-state.js apply(msg)         # folds lobby state and reports semantic changes
   → gui/sim-state.js apply(msg)           # folds simulation state and reports semantic changes
   → gui/comms-state.js apply(msg)         # folds Comms state and reports semantic changes
-  → gui/reducer-result.js mergeReducerResults(...results)
+  → gui/reducer-result.js mergeReducerResults(...results)  # sets + ordered effects
   → gui/dirty-consoles.js dirtyConsolesFor(changes, stationSystems,
                                                systemConsoleFamilies,
                                                blackboardConsoleFamilies)
                                                        # which consoles changed
   → gui/console-state.js buildConsoleState(name, simState)        # rebuild ONLY the dirty consoles → JSON string
   → gui/iframe-bridge.js push()           # __updateConsole(name, json) into the iframe
-  → gui/client-router.js route(msg)        # uiState mutation + semantic shell-effect plan
-  → client.html applySideEffect(effect)   # executes the planned DOM effects
+  → gui/client-router.js routeReducerResult(changes)       # lobby mirror + render guards
+  → client.html applySideEffect(effect)   # executes ordered presentation effects
 ```
 
-`simState` (`gui/sim-state.js`) is the single client store. `client-router.js`
-drives each inbound message and `dirty-consoles.js` narrows the rebuild to just
-the consoles a given message affects, rather than rebuilding every console every
-tick.
+`simState` (`gui/sim-state.js`) is the single simulation store. The three state
+reducers interpret each inbound message, `dirty-consoles.js` narrows iframe
+publication to the affected consoles, and `client-router.js` consumes only the
+merged reducer result.
 
 `systemConsoleFamilies` is the host-projected presentation classification for
 actual System instance ids. `blackboardConsoleFamilies` separately classifies
 reserved and aggregate channels. Neither duplicates Station ownership, and a
 channel does not become a commandable System.
 
-The simulation, lobby and Comms reducers return fresh, mergeable sets of
-changed semantic domains, Systems and blackboards through
-`gui/reducer-result.js`. Only valid Blackboard entries that were actually
-folded become changed keys, and human-seeking host changes report the broader
-`station-hosting` domain. Every other accepted state-bearing reducer branch
-reports its owned semantic domain. Dirty routing consumes only that merged
-result plus authoritative topology metadata after state reduction; it never
-receives or inspects the original `ServerMessage`. Domain-to-family routing is
-presentation-consumer knowledge, not a replacement per-message census.
+The simulation, lobby and Comms reducers return fresh semantic results through
+`gui/reducer-result.js`: mergeable sets of changed domains, Systems and
+blackboards, plus an ordered effect array. The sets coalesce duplicate keys;
+the effect array deliberately does not, so two equal damage or Coordination
+events still produce two pieces of feedback. Only valid Blackboard entries that
+were actually folded become changed keys, and human-seeking host changes report
+the broader `station-hosting` domain. Dirty routing consumes only the sets plus
+authoritative topology metadata after state reduction. Once those iframe
+snapshots have been published, `client-router.js` consumes the effect array,
+mirrors the already-reduced lobby store and applies local render/bezel guards.
+Neither router receives or inspects the original `ServerMessage`.
 
 Outbound: each console iframe posts `console_action` messages; `gui/action-map.js` is the table-driven dispatcher mapping `action.action` values to `ClientMessage`s (mostly `ControlSystem { target, payload }`) via `send(type, data?)`.
 
@@ -58,7 +60,7 @@ Outbound: each console iframe posts `console_action` messages; `gui/action-map.j
 | `mount-plan.js` | **Single home** of the station-id → DOM-id naming scheme (`${id}-ui`/`${id}-iframe`, one tactical → weapons alias) and `planMounts(shipStations)` — the manifest is the server-supplied `ship_stations` |
 | `hero-bar.js` | Shared complete-Station tab model over `SimSnapshot.station_hosts`: direct Station pinned first, visiting Stations in hull order, selected identity/rating/ownership, and roving keyboard focus |
 | `sim-state.js` | JS port of the old Rust `ClientSimState`: `apply(msg)`, per-console radar configs, message builders, typed blackboard discriminants, both read-only Console Family replicas from `Welcome`, and the latest explicitly Station- or Ship-addressed Coordination popup with producer-authored presentation retained beside its typed payload |
-| `reducer-result.js` | Fresh, mergeable semantic change results (`changedDomains`, `changedSystems`, `changedBlackboards`) shared by the distinct client reducers and downstream presentation routing |
+| `reducer-result.js` | Fresh reducer results: mergeable semantic change sets plus an ordered, repeatable lifecycle/presentation effect sequence |
 | `lobby-state.js` | Lobby view-model (stations, players, ready states) and lobby-domain reducer results |
 | `comms-state.js` | Comms inbox/contact view-model and Comms-domain reducer results |
 | `console-state.js` | Pure view-model builders. One family registry contains all builders, including Command, Tractor and Umbilical; flat and composed consoles carry actual owned `SystemId`s and projected families, while typed blackboard discriminants select semantic data independently of id spelling. |
@@ -67,7 +69,7 @@ Outbound: each console iframe posts `console_action` messages; `gui/action-map.j
 | `iframe-bridge.js` | `push()` / `wireLoad()` state-push into console iframes (ADR-0001 §2) |
 | `content-switcher.js` | Section visibility over the ship's mounted stations; one human directly holds one station |
 | `station-roster.js` | Pure fold: players + station defs → lobby roster rows + aggregates |
-| `client-router.js` | Pure per-message driver: uiState mutations + named side-effect plan for the client.html glue; Coordination effects carry the authoritative address through to presentation |
+| `client-router.js` | Pure reducer-result driver: mirrors accepted LobbyState, applies local render/bezel guards, and emits the ordered named side-effect plan without receiving a ServerMessage; Coordination effects carry the authoritative address through to presentation |
 | `dirty-consoles.js` | Merged semantic domains, changed Systems and changed blackboards → Console Families → actual owning Stations. It has no `ServerMessage` input or message-variant census; unknown domains/ids and pre-`Welcome` metadata route nowhere rather than guessing. |
 | `lobby-view.js` | Lobby view model (row classes, ready-button state, status-line string-id selection) |
 | `coordination-popup.js` | Generic producer-owned Coordination presentation resolver plus the phone's two-content-line and Viewscreen's one-line DOM builders; it knows no semantic payload variants and owns each surface's single bracket pair |

@@ -8,7 +8,11 @@
  * DOM-free; exposed on `window` as `window.commsState` (singleton).
  */
 
-import { CHANGE_DOMAINS, emptyReducerResult } from './reducer-result.js';
+import {
+  CHANGE_DOMAINS,
+  REDUCER_EFFECTS,
+  emptyReducerResult,
+} from './reducer-result.js';
 
 /**
  * Effective thread id for a message. Old wire payloads (pre-threading) have
@@ -129,7 +133,7 @@ export class ClientCommsState {
   /**
    * Apply a single inbound ServerMessage. Only CommsState is handled.
    * Mirrors `ClientCommsState::apply` and reports the semantic Comms change
-   * from the reducer that owns the state.
+   * plus its shell-render request from the reducer that owns the state.
    */
   apply(msg) {
     const changes = emptyReducerResult();
@@ -145,6 +149,7 @@ export class ClientCommsState {
     }
     this.version += 1;
     changes.changedDomains.add(CHANGE_DOMAINS.COMMS);
+    changes.effects.push({ effect: REDUCER_EFFECTS.REQUEST_RENDER });
     return changes;
   }
 

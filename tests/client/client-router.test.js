@@ -1,10 +1,19 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  routeMessage,
-  showingLobbyDuringGame,
   isSpectator,
   playerStation,
+  routeReducerResult,
+  showingLobbyDuringGame,
 } from '../../gui/client-router.js';
+import { ClientCommsState } from '../../gui/comms-state.js';
+import { LobbyState } from '../../gui/lobby-state.js';
+import {
+  CHANGE_DOMAINS,
+  REDUCER_EFFECTS,
+  emptyReducerResult,
+  mergeReducerResults,
+} from '../../gui/reducer-result.js';
+import { ClientSimState } from '../../gui/sim-state.js';
 
 const MY = 'tok-me';
 
@@ -31,388 +40,374 @@ function ctx(uiState, overrides = {}) {
     pendingMidGameClaim: false,
     bezelAlertOn: false,
     lobbyState: null,
-    redAlert: false,
     ...overrides,
   };
 }
 
-const effects = (r) => r.sideEffects.map(fx => fx.effect);
+function mirrorFrom(uiState) {
+  const lobby = new LobbyState();
+  lobby.phase = uiState.phase;
+  lobby.players = uiState.players;
+  lobby.shipStations = uiState.shipStations;
+  lobby.countdownSecs = uiState.countdownSecs;
+  lobby.gameOverReason = uiState.gameOverReason;
+  return lobby;
+}
+
+const effectNames = result => result.sideEffects.map(effect => effect.effect);
 
 describe('showingLobbyDuringGame', () => {
-  it('is false outside InProgress', () => {
+  it('suppresses a stationless or not-ready participant, but not a ready holder', () => {
     expect(showingLobbyDuringGame(baseUiState(), MY, false)).toBe(false);
-    expect(showingLobbyDuringGame(baseUiState({ phase: 'GameOver' }), MY, false)).toBe(false);
-  });
-
-  it('is true for a spectator (no station) during InProgress', () => {
-    const s = baseUiState({ phase: 'InProgress', players: [] });
-    expect(showingLobbyDuringGame(s, MY, false)).toBe(true);
-  });
-
-  it('is true while a mid-game claim is pending', () => {
-    const s = baseUiState({
-      phase: 'InProgress',
-      players: [{ token: MY, station: 'helm', ready: true }],
-    });
-    expect(showingLobbyDuringGame(s, MY, true)).toBe(true);
-  });
-
-  it('is true when the player holds a station but has not pressed Ready', () => {
-    const s = baseUiState({
+    expect(showingLobbyDuringGame(baseUiState({ phase: 'InProgress' }), MY, false)).toBe(true);
+    expect(showingLobbyDuringGame(baseUiState({
       phase: 'InProgress',
       players: [{ token: MY, station: 'helm', ready: false }],
-    });
-    expect(showingLobbyDuringGame(s, MY, false)).toBe(true);
-  });
-
-  it('is false for a seated, ready player', () => {
-    const s = baseUiState({
+    }), MY, false)).toBe(true);
+    expect(showingLobbyDuringGame(baseUiState({
       phase: 'InProgress',
       players: [{ token: MY, station: 'helm', ready: true }],
-    });
-    expect(showingLobbyDuringGame(s, MY, false)).toBe(false);
+    }), MY, false)).toBe(false);
   });
 
-  it('is false for an explicit Spectator (issue #1105) — they get the summary surface', () => {
-    const s = baseUiState({
+  it('does not suppress an explicit Spectator live-summary render', () => {
+    const state = baseUiState({
       phase: 'InProgress',
       players: [{ token: MY, station: null, ready: false, spectator: true }],
     });
-    expect(showingLobbyDuringGame(s, MY, false)).toBe(false);
+    expect(isSpectator(state, MY)).toBe(true);
+    expect(showingLobbyDuringGame(state, MY, false)).toBe(false);
   });
 });
 
-describe('isSpectator', () => {
-  it('is true only for an explicit spectator flag', () => {
-    const spec = baseUiState({ players: [{ token: MY, spectator: true }] });
-    const stationless = baseUiState({ players: [{ token: MY, station: null }] });
-    expect(isSpectator(spec, MY)).toBe(true);
-    expect(isSpectator(stationless, MY)).toBe(false);
-    expect(isSpectator(baseUiState(), MY)).toBe(false); // unknown token
-  });
-});
-
-describe('routeMessage — Welcome', () => {
+describe('Welcome reducer effects', () => {
   const welcome = {
     type: 'Welcome',
     data: {
       state: {
         phase: 'Lobby',
         players: [{ token: MY, name: 'Ada', ready: false, station: null }],
-        world: { scenario_title: 'Falling Skyway', scenario_description: 'Hold the line' },
+        world: {
+          scenario_title: 'Falling Skyway',
+          scenario_description: 'Hold the line',
+        },
       },
-      ship_stations: { stations: [{ id: 'helm', console: 'gui/battleship/helm.html' }] },
+      ship_stations: {
+        stations: [{ id: 'helm', console: 'gui/battleship/helm.html' }],
+      },
       ship_config: { ship_css: 'gui/battleship/theme.css' },
     },
   };
 
-  it('applies the msg fallback mutations when lobbyState is absent', () => {
-    const s = baseUiState();
-    const r = routeMessage(welcome, ctx(s));
-    expect(s.phase).toBe('Lobby');
-    expect(s.shipStations.stations).toHaveLength(1);
-    expect(s.players).toHaveLength(1);
-    expect(r.rebuildStations).toBe(true);
-  });
-
-  it('emits mount-consoles, ship-theme, ship-info and status in order', () => {
-    const s = baseUiState();
-    const r = routeMessage(welcome, ctx(s));
-    expect(effects(r)).toEqual(['mount-consoles', 'ship-theme', 'ship-info', 'status']);
-    expect(r.sideEffects[0].shipStations).toBe(s.shipStations);
-    expect(r.sideEffects[1].href).toBe('gui/battleship/theme.css');
-    expect(r.sideEffects[2]).toEqual({
-      effect: 'ship-info', title: 'Falling Skyway', description: 'Hold the line',
+  it('initialises the shell from reduced state without a message fallback', () => {
+    const ui = baseUiState({
+      phase: 'GameOver',
+      players: [{ token: 'stale' }],
+      countdownSecs: 9,
+      gameOverReason: 'stale',
     });
-    expect(r.sideEffects[3].id).toBe('client.status_connected');
+    const lobby = new LobbyState();
+    const sim = new ClientSimState();
+    const merged = mergeReducerResults(lobby.apply(welcome), sim.apply(welcome));
+    const routed = routeReducerResult(merged, ctx(ui, {
+      lobbyState: lobby,
+      bezelAlertOn: true,
+    }));
+
+    expect(ui.phase).toBe('Lobby');
+    expect(ui.players).toBe(lobby.players);
+    expect(playerStation(ui, MY)).toBeNull();
+    expect(ui.shipStations).toBe(lobby.shipStations);
+    expect(ui.countdownSecs).toBe(0);
+    expect(ui.gameOverReason).toBeNull();
+    expect(effectNames(routed)).toEqual([
+      REDUCER_EFFECTS.MOUNT_CONSOLES,
+      REDUCER_EFFECTS.SHIP_THEME,
+      REDUCER_EFFECTS.SHIP_INFO,
+      REDUCER_EFFECTS.STATUS,
+      REDUCER_EFFECTS.REBUILD_STATIONS,
+      REDUCER_EFFECTS.BEZEL_ALERT,
+      REDUCER_EFFECTS.REPORT_ELIGIBILITY,
+    ]);
+    expect(routed.sideEffects[0].shipStations).toBe(lobby.shipStations);
+    expect(routed.sideEffects[2]).toMatchObject({
+      title: 'Falling Skyway', description: 'Hold the line',
+    });
+    expect(routed.sideEffects[5].on).toBe(false);
   });
 
-  it('omits ship-theme / ship-info when absent, and prefers the lobbyState mirror', () => {
-    const s = baseUiState();
-    const mirror = {
-      phase: 'Lobby',
-      players: [{ token: 'x', name: 'Mirror' }],
-      shipStations: { stations: [] },
+  it('re-emits complete reconnect initialisation for an identical Welcome', () => {
+    const lobby = new LobbyState();
+    const first = lobby.apply(welcome);
+    const second = lobby.apply(welcome);
+
+    expect(first.effects).toEqual(second.effects);
+    expect(first.effects.map(effect => effect.effect)).toEqual([
+      REDUCER_EFFECTS.MOUNT_CONSOLES,
+      REDUCER_EFFECTS.SHIP_THEME,
+      REDUCER_EFFECTS.SHIP_INFO,
+      REDUCER_EFFECTS.STATUS,
+      REDUCER_EFFECTS.REBUILD_STATIONS,
+    ]);
+  });
+
+  it('retains an active bezel through InProgress Welcome until Captain resync', () => {
+    const reconnect = {
+      ...welcome,
+      data: {
+        ...welcome.data,
+        state: {
+          ...welcome.data.state,
+          phase: 'InProgress',
+          players: [{ token: MY, name: 'Ada', ready: true, station: 'captain' }],
+        },
+      },
     };
-    const msg = { type: 'Welcome', data: { state: { phase: 'Lobby', players: [] } } };
-    const r = routeMessage(msg, ctx(s, { lobbyState: mirror }));
-    expect(s.players).toBe(mirror.players);
-    expect(effects(r)).toEqual(['mount-consoles', 'status']);
-  });
-});
+    const ui = baseUiState();
+    const lobby = new LobbyState();
+    const sim = new ClientSimState();
+    const welcomeResult = routeReducerResult(
+      mergeReducerResults(lobby.apply(reconnect), sim.apply(reconnect)),
+      ctx(ui, { lobbyState: lobby, bezelAlertOn: true }),
+    );
 
-describe('routeMessage — StationAssigned', () => {
-  it('clears any other holder of the same station (msg fallback path)', () => {
-    const s = baseUiState({
-      players: [
-        { token: 'other', name: 'Bob', station: 'helm', ready: true },
-        { token: MY, name: 'Ada', station: null, ready: false },
-      ],
+    expect(welcomeResult.bezelAlertOn).toBe(true);
+    expect(welcomeResult.sideEffects).not.toContainEqual({
+      effect: REDUCER_EFFECTS.BEZEL_ALERT,
+      on: false,
     });
-    const msg = { type: 'StationAssigned', data: { token: MY, station_id: 'helm' } };
-    const r = routeMessage(msg, ctx(s));
-    expect(s.players.find(p => p.token === 'other').station).toBeNull();
-    expect(s.players.find(p => p.token === MY).station).toBe('helm');
-    expect(r.rebuildStations).toBe(true);
+
+    const captainResult = routeReducerResult(sim.apply({
+      type: 'BlackboardUpdate',
+      data: {
+        updates: [['bridge-orders', { kind: 'Captain', data: { red_alert: false } }]],
+      },
+    }), ctx(ui, {
+      lobbyState: lobby,
+      bezelAlertOn: welcomeResult.bezelAlertOn,
+    }));
+    expect(captainResult.sideEffects).toContainEqual({
+      effect: REDUCER_EFFECTS.BEZEL_ALERT,
+      on: false,
+    });
   });
 
-  it('accepts an object station_id { id }', () => {
-    const s = baseUiState({ players: [{ token: MY, station: null }] });
-    const msg = { type: 'StationAssigned', data: { token: MY, station_id: { id: 'captain' } } };
-    routeMessage(msg, ctx(s));
-    expect(playerStation(s, MY)).toBe('captain');
-  });
+  it('has no raw-payload fallback when the lobby reducer is unavailable', () => {
+    const ui = baseUiState({ players: [{ token: 'stale' }] });
+    const changed = emptyReducerResult();
+    changed.changedDomains.add(CHANGE_DOMAINS.LOBBY);
 
-  it('clears pendingMidGameClaim when my assignment is severed (null station)', () => {
-    const s = baseUiState({ players: [{ token: MY, station: 'helm' }] });
-    const msg = { type: 'StationAssigned', data: { token: MY, station_id: null } };
-    const r = routeMessage(msg, ctx(s, { pendingMidGameClaim: true }));
-    expect(r.pendingMidGameClaim).toBe(false);
-  });
+    const routed = routeReducerResult(changed, ctx(ui));
 
-  it('keeps pendingMidGameClaim on someone ELSE being severed', () => {
-    const s = baseUiState({ players: [{ token: 'other', station: 'helm' }] });
-    const msg = { type: 'StationAssigned', data: { token: 'other', station_id: null } };
-    const r = routeMessage(msg, ctx(s, { pendingMidGameClaim: true }));
-    expect(r.pendingMidGameClaim).toBe(true);
+    expect(ui.players).toEqual([{ token: 'stale' }]);
+    expect(routed.sideEffects).toEqual([]);
   });
 });
 
-describe('routeMessage — SimState render guard', () => {
-  it('skips the render entirely while showing the lobby over a game (spectator)', () => {
-    const s = baseUiState({ phase: 'InProgress', players: [] });
-    const r = routeMessage({ type: 'SimState', data: {} }, ctx(s));
-    expect(r.shouldRender).toBe(false);
-    expect(r.rebuildStations).toBe(false);
-    expect(r.sideEffects).toEqual([]);
+describe('ordered repeatable feedback', () => {
+  it('keeps equal vibration effects from separate reductions', () => {
+    const sim = new ClientSimState();
+    const merged = mergeReducerResults(
+      sim.apply({ type: 'DamageTaken', data: { hull: 30 } }),
+      sim.apply({ type: 'DamageTaken', data: { hull: 30 } }),
+    );
+    const routed = routeReducerResult(merged, ctx(baseUiState()));
+
+    expect(routed.sideEffects).toEqual([
+      { effect: REDUCER_EFFECTS.VIBRATE, duration: 300 },
+      { effect: REDUCER_EFFECTS.VIBRATE, duration: 300 },
+    ]);
   });
 
-  it('renders for a seated, ready player', () => {
-    const s = baseUiState({
+  it('keeps #1255 presentation envelopes and repeated Coordination displays', () => {
+    const sim = new ClientSimState();
+    const message = {
+      type: 'CoordinationPopup',
+      data: {
+        address: { type: 'Station', data: 'tactical' },
+        payload: { type: 'Alert' },
+        presentation: { title: 'coordination.alert.title', body: 'Brace' },
+        sender_label: 'chatter.sender.helm',
+        to_label: 'station.tactical.name',
+      },
+    };
+    const merged = mergeReducerResults(sim.apply(message), sim.apply(message));
+    const routed = routeReducerResult(merged, ctx(baseUiState()));
+
+    expect(routed.sideEffects).toHaveLength(2);
+    for (const effect of routed.sideEffects) {
+      expect(effect).toEqual({
+        effect: REDUCER_EFFECTS.COORDINATION_POPUP,
+        address: message.data.address,
+        presentation: message.data.presentation,
+        senderLabel: message.data.sender_label,
+        targetLabel: message.data.to_label,
+      });
+      expect(effect).not.toHaveProperty('payload');
+    }
+  });
+
+  it('ignores an unknown effect without swallowing later known feedback', () => {
+    const result = emptyReducerResult();
+    result.effects.push(
+      { effect: 'future-shell-effect', payload: 1 },
+      { effect: REDUCER_EFFECTS.VIBRATE, duration: 80 },
+    );
+
+    expect(routeReducerResult(result, ctx(baseUiState())).sideEffects)
+      .toEqual([{ effect: REDUCER_EFFECTS.VIBRATE, duration: 80 }]);
+  });
+});
+
+describe('render and bezel policy', () => {
+  const midGameLobby = () => baseUiState({
+    phase: 'InProgress',
+    players: [{ token: MY, station: 'helm', ready: false }],
+  });
+
+  it('suppresses the mid-game lobby repaint but still applies bezel feedback', () => {
+    const sim = new ClientSimState();
+    const changes = sim.apply({
+      type: 'BlackboardUpdate',
+      data: {
+        updates: [[
+          'arbitrarily-named-command-system',
+          { kind: 'Captain', data: { red_alert: true } },
+        ]],
+      },
+    });
+    const routed = routeReducerResult(changes, ctx(midGameLobby()));
+
+    expect(routed.sideEffects).toEqual([
+      { effect: REDUCER_EFFECTS.BEZEL_ALERT, on: true },
+    ]);
+    expect(routed.bezelAlertOn).toBe(true);
+  });
+
+  it('uses the typed Captain blackboard kind, not a literal System id', () => {
+    const sim = new ClientSimState();
+    const captain = sim.apply({
+      type: 'BlackboardUpdate',
+      data: { updates: [['bridge-orders', { kind: 'Captain', data: { red_alert: true } }]] },
+    });
+    const unrelated = sim.apply({
+      type: 'BlackboardUpdate',
+      data: { updates: [['captain', { kind: 'Helm', data: { yaw: 0 } }]] },
+    });
+
+    expect(captain.effects).toContainEqual({
+      effect: REDUCER_EFFECTS.BEZEL_ALERT, on: true,
+    });
+    expect(unrelated.effects.some(effect => effect.effect === REDUCER_EFFECTS.BEZEL_ALERT))
+      .toBe(false);
+  });
+
+  it('filters repeated bezel observations but not other feedback', () => {
+    const result = emptyReducerResult();
+    result.effects.push(
+      { effect: REDUCER_EFFECTS.BEZEL_ALERT, on: true },
+      { effect: REDUCER_EFFECTS.BEZEL_ALERT, on: true },
+      { effect: REDUCER_EFFECTS.VIBRATE, duration: 60 },
+      { effect: REDUCER_EFFECTS.VIBRATE, duration: 60 },
+    );
+
+    const routed = routeReducerResult(result, ctx(baseUiState()));
+    expect(routed.sideEffects).toEqual([
+      { effect: REDUCER_EFFECTS.BEZEL_ALERT, on: true },
+      { effect: REDUCER_EFFECTS.VIBRATE, duration: 60 },
+      { effect: REDUCER_EFFECTS.VIBRATE, duration: 60 },
+    ]);
+  });
+
+  it('renders a seated ready player from reducer-owned simulation and Comms effects', () => {
+    const ui = baseUiState({
       phase: 'InProgress',
       players: [{ token: MY, station: 'helm', ready: true }],
     });
-    const r = routeMessage({ type: 'SimState', data: {} }, ctx(s));
-    expect(r.shouldRender).toBe(true);
+    const sim = new ClientSimState();
+    const comms = new ClientCommsState();
+
+    expect(effectNames(routeReducerResult(
+      sim.apply({ type: 'SimState', data: { snapshot: {} } }), ctx(ui),
+    ))).toEqual([REDUCER_EFFECTS.REQUEST_RENDER]);
+    expect(effectNames(routeReducerResult(
+      comms.apply({ type: 'CommsState', data: {} }), ctx(ui),
+    ))).toEqual([REDUCER_EFFECTS.REQUEST_RENDER]);
   });
 });
 
-// Issue #1099 AC1: console iframes are (re)mounted ONLY on the Welcome
-// `mount-consoles` side effect. A hosting change (SimState.station_hosts) or a
-// station reassignment must NOT re-mount, or a visiting Station's persistent
-// iframe — and its session-local interface context — would be torn down under
-// the player. The iframe-node persistence itself is pinned in
-// console-persistence.test.js; this pins the router seam that must never ask
-// for a remount outside Welcome.
-describe('routeMessage — consoles re-mount only on Welcome (issue #1099 AC1)', () => {
-  const seated = () => baseUiState({
-    phase: 'InProgress',
-    players: [{ token: MY, name: 'Ada', station: 'helm', ready: true }],
-  });
-
-  it('a SimState hosting update emits no mount-consoles side effect', () => {
-    const msg = {
-      type: 'SimState',
-      data: { snapshot: { station_hosts: [{ station: 'comms', host: 'helm', rating: 'Std' }] } },
-    };
-    const r = routeMessage(msg, ctx(seated()));
-    expect(effects(r)).not.toContain('mount-consoles');
-    expect(effects(r)).toEqual([]);
-  });
-
-  it('non-Welcome lifecycle messages never re-mount consoles', () => {
-    for (const msg of [
-      { type: 'StationAssigned', data: { token: MY, station_id: 'comms' } },
-      { type: 'RatingChanged', data: { station_id: 'comms', rating_name: 'Std' } },
-      { type: 'BlackboardUpdate', data: { updates: [['comms', {}]] } },
-      { type: 'PlayerJoined', data: { player: { token: 'x', name: 'X' } } },
-    ]) {
-      const r = routeMessage(msg, ctx(seated()));
-      expect(effects(r)).not.toContain('mount-consoles');
-    }
-  });
-});
-
-describe('routeMessage — BlackboardUpdate', () => {
-  const bbMsg = (systems) => ({
-    type: 'BlackboardUpdate',
-    data: { updates: systems.map(id => [id, {}]) },
-  });
-  const seated = () => baseUiState({
-    phase: 'InProgress',
-    players: [{ token: MY, station: 'helm', ready: true }],
-  });
-
-  it('emits bezel-alert only when the captain/viewscreen alert flag CHANGES', () => {
-    const r1 = routeMessage(bbMsg(['captain']), ctx(seated(), { redAlert: true, bezelAlertOn: false }));
-    expect(effects(r1)).toEqual(['bezel-alert']);
-    expect(r1.sideEffects[0].on).toBe(true);
-    expect(r1.bezelAlertOn).toBe(true);
-
-    const r2 = routeMessage(bbMsg(['captain']), ctx(seated(), { redAlert: true, bezelAlertOn: true }));
-    expect(r2.sideEffects).toEqual([]);
-    expect(r2.bezelAlertOn).toBe(true);
-  });
-
-  it('ignores the bezel for non-captain system updates', () => {
-    const r = routeMessage(bbMsg(['helm-throttle']), ctx(seated(), { redAlert: true }));
-    expect(r.sideEffects).toEqual([]);
-    expect(r.bezelAlertOn).toBe(false);
-  });
-
-  it('applies the bezel side effect but SKIPS the render while lobby-over-game', () => {
-    const spect = baseUiState({ phase: 'InProgress', players: [] });
-    const r = routeMessage(bbMsg(['viewscreen']), ctx(spect, { redAlert: true }));
-    expect(effects(r)).toEqual(['bezel-alert']);
-    expect(r.shouldRender).toBe(false);
-  });
-
-  it('renders for a seated player', () => {
-    const r = routeMessage(bbMsg(['captain']), ctx(seated()));
-    expect(r.shouldRender).toBe(true);
-  });
-});
-
-describe('routeMessage — GameOver / lifecycle', () => {
-  it('GameOver sets the phase and reason and renders', () => {
-    const s = baseUiState({ phase: 'InProgress' });
-    const r = routeMessage({ type: 'GameOver', data: { reason: 'Mission failed' } }, ctx(s));
-    expect(s.phase).toBe('GameOver');
-    expect(s.gameOverReason).toBe('Mission failed');
-    expect(r.shouldRender).toBe(true);
-  });
-
-  it('ShipDestroyed sets the flag', () => {
-    const s = baseUiState();
-    routeMessage({ type: 'ShipDestroyed', data: {} }, ctx(s));
-    expect(s.shipDestroyed).toBe(true);
-  });
-
-  it('GameStarted flips the phase and hides the loading overlay', () => {
-    const s = baseUiState({ countdownSecs: 3 });
-    const r = routeMessage({ type: 'GameStarted', data: {} }, ctx(s));
-    expect(s.phase).toBe('InProgress');
-    expect(s.countdownSecs).toBe(0);
-    expect(effects(r)).toEqual(['hide-loading']);
-  });
-
-  it('LoadingProgress emits show-loading with a rounded pct', () => {
-    const r = routeMessage({ type: 'LoadingProgress', data: { fraction: 0.427 } }, ctx(baseUiState()));
-    expect(r.sideEffects).toEqual([{ effect: 'show-loading', pct: 43 }]);
-  });
-});
-
-describe('routeMessage — no-render cases', () => {
-  it('DamageTaken vibrates scaled by hull damage and never renders', () => {
-    const r = routeMessage({ type: 'DamageTaken', data: { hull: 30 } }, ctx(baseUiState()));
-    expect(r.sideEffects).toEqual([{ effect: 'vibrate', duration: 300 }]);
-    expect(r.shouldRender).toBe(false);
-
-    const r0 = routeMessage({ type: 'DamageTaken', data: { hull: 0 } }, ctx(baseUiState()));
-    expect(r0.sideEffects).toEqual([]);
-  });
-
-  it('CoordinationPopup emits the popup effect and never renders', () => {
-    const address = { type: 'Station', data: 'tactical' };
-    const presentation = { title: 'Alert', body: 'Brace' };
-    const msg = {
-      type: 'CoordinationPopup',
-      data: {
-        address, payload: { type: 'Alert' }, presentation,
-        sender_label: 'Helm AI', to_label: 'Tactical',
-      },
-    };
-    const r = routeMessage(msg, ctx(baseUiState()));
-    expect(r.sideEffects).toEqual([{
-      effect: 'coordination-popup', address, presentation,
-      senderLabel: 'Helm AI', targetLabel: 'Tactical',
-    }]);
-    expect(r.shouldRender).toBe(false);
-  });
-
-  it('ship-wide CoordinationPopup keeps its typed address and authoritative Ship label', () => {
-    const address = { type: 'Ship' };
-    const presentation = { title: 'Standing down', body: '' };
-    const r = routeMessage({
-      type: 'CoordinationPopup',
-      data: {
-        address, payload: { type: 'IntentAdvisory' }, presentation,
-        sender_label: 'Tactical', to_label: 'Ship',
-      },
-    }, ctx(baseUiState()));
-    expect(r.sideEffects[0]).toMatchObject({
-      effect: 'coordination-popup', address, presentation, targetLabel: 'Ship',
+describe('lobby lifecycle effects', () => {
+  it('settles and force-renders a ScenarioCatalog without a shell message exception', () => {
+    const lobby = new LobbyState();
+    const changes = lobby.apply({
+      type: 'ScenarioCatalog',
+      data: { scenarios: [], locked_scenario: null, locked_ship: null },
     });
+    const routed = routeReducerResult(changes, ctx(baseUiState(), { lobbyState: lobby }));
+
+    expect(routed.sideEffects).toEqual([
+      { effect: REDUCER_EFFECTS.SETTLE_SCENARIO_PICK },
+      { effect: REDUCER_EFFECTS.REQUEST_RENDER, force: true },
+    ]);
   });
 
-  it('WorldSetup / EntitySpawned / AsteroidSpawned skip the render', () => {
-    for (const type of ['WorldSetup', 'EntitySpawned', 'AsteroidSpawned']) {
-      expect(routeMessage({ type, data: {} }, ctx(baseUiState())).shouldRender).toBe(false);
+  it('routes loading progress and GameStarted overlay lifecycle', () => {
+    const lobby = new LobbyState();
+    const progress = routeReducerResult(
+      lobby.apply({ type: 'LoadingProgress', data: { fraction: 0.427 } }),
+      ctx(baseUiState(), { lobbyState: lobby }),
+    );
+    expect(progress.sideEffects).toEqual([
+      { effect: REDUCER_EFFECTS.SHOW_LOADING, pct: 43 },
+      { effect: REDUCER_EFFECTS.REQUEST_RENDER },
+    ]);
+
+    const started = routeReducerResult(
+      lobby.apply({ type: 'GameStarted' }),
+      ctx(baseUiState(), { lobbyState: lobby }),
+    );
+    // Once GameStarted folds the empty fixture into InProgress, the stationless
+    // client is showing the mid-game lobby: hide the loader, but suppress the
+    // full repaint that would tear down its claim controls.
+    expect(started.sideEffects).toEqual([{ effect: REDUCER_EFFECTS.HIDE_LOADING }]);
+  });
+
+  it('updates local claim/name state from reducer effects', () => {
+    const lobby = new LobbyState();
+    lobby.players = [{ token: MY, name: 'Old', station: 'helm', ready: false }];
+    const ui = baseUiState({ players: lobby.players });
+
+    const renamed = routeReducerResult(
+      lobby.apply({ type: 'NameChanged', data: { token: MY, name: 'New' } }),
+      ctx(ui, { lobbyState: lobby }),
+    );
+    expect(renamed.myName).toBe('New');
+    expect(effectNames(renamed)).toEqual([REDUCER_EFFECTS.REBUILD_STATIONS]);
+
+    const ready = routeReducerResult(
+      lobby.apply({ type: 'ReadyChanged', data: { token: MY, ready: true } }),
+      ctx(ui, { lobbyState: lobby, pendingMidGameClaim: true }),
+    );
+    expect(ready.pendingMidGameClaim).toBe(false);
+
+    const released = routeReducerResult(
+      lobby.apply({ type: 'StationAssigned', data: { token: MY, station_id: null } }),
+      ctx(ui, { lobbyState: lobby, pendingMidGameClaim: true }),
+    );
+    expect(released.pendingMidGameClaim).toBe(false);
+  });
+
+  it('only Welcome asks to mount consoles', () => {
+    const lobby = new LobbyState();
+    lobby.players = [{ token: MY, station: null }];
+    for (const message of [
+      { type: 'PlayerJoined', data: { player: { token: 'other' } } },
+      { type: 'StationAssigned', data: { token: MY, station_id: 'helm' } },
+      { type: 'ReadyChanged', data: { token: MY, ready: true } },
+    ]) {
+      const changes = lobby.apply(message);
+      expect(changes.effects.some(effect => effect.effect === REDUCER_EFFECTS.MOUNT_CONSOLES))
+        .toBe(false);
     }
-  });
-
-  it('unknown message types skip the render', () => {
-    const r = routeMessage({ type: 'Bogus', data: {} }, ctx(baseUiState()));
-    expect(r.shouldRender).toBe(false);
-    expect(r.sideEffects).toEqual([]);
-  });
-});
-
-describe('routeMessage — player list bookkeeping', () => {
-  it('ReadyChanged for me clears pendingMidGameClaim and rebuilds', () => {
-    const s = baseUiState({ players: [{ token: MY, ready: false }] });
-    const msg = { type: 'ReadyChanged', data: { token: MY, ready: true } };
-    const r = routeMessage(msg, ctx(s, { pendingMidGameClaim: true }));
-    expect(r.pendingMidGameClaim).toBe(false);
-    expect(s.players[0].ready).toBe(true);
-    expect(r.rebuildStations).toBe(true);
-  });
-
-  it('SpectatorChanged sets the role flag and rebuilds (issue #1105)', () => {
-    const s = baseUiState({ players: [{ token: MY, spectator: false }] });
-    const r = routeMessage({ type: 'SpectatorChanged', data: { token: MY, spectator: true } }, ctx(s));
-    expect(s.players[0].spectator).toBe(true);
-    expect(r.rebuildStations).toBe(true);
-    // And the inverse toggle clears it.
-    routeMessage({ type: 'SpectatorChanged', data: { token: MY, spectator: false } }, ctx(s));
-    expect(s.players[0].spectator).toBe(false);
-  });
-
-  it('AfkChanged sets the presence flag and rebuilds (issue #1104)', () => {
-    const s = baseUiState({ players: [{ token: MY, afk: false }] });
-    const r = routeMessage({ type: 'AfkChanged', data: { token: MY, afk: true } }, ctx(s));
-    expect(s.players[0].afk).toBe(true);
-    expect(r.rebuildStations).toBe(true);
-    // And the inverse toggle clears it — the presence delta only tracks the flag.
-    routeMessage({ type: 'AfkChanged', data: { token: MY, afk: false } }, ctx(s));
-    expect(s.players[0].afk).toBe(false);
-  });
-
-  it('NameChanged for my token surfaces the new name', () => {
-    const s = baseUiState({ players: [{ token: MY, name: 'Old' }] });
-    const r = routeMessage({ type: 'NameChanged', data: { token: MY, name: 'New' } }, ctx(s));
-    expect(r.myName).toBe('New');
-    expect(s.players[0].name).toBe('New');
-  });
-
-  it("NameChanged for another token leaves myName undefined", () => {
-    const s = baseUiState({ players: [{ token: 'other', name: 'Old' }] });
-    const r = routeMessage({ type: 'NameChanged', data: { token: 'other', name: 'New' } }, ctx(s));
-    expect(r.myName).toBeUndefined();
-  });
-
-  it('PlayerJoined upserts by token in the msg fallback path', () => {
-    const s = baseUiState({ players: [{ token: 'a', name: 'Ada' }] });
-    routeMessage({ type: 'PlayerJoined', data: { player: { token: 'a', name: 'Ada2' } } }, ctx(s));
-    expect(s.players).toHaveLength(1);
-    expect(s.players[0].name).toBe('Ada2');
-    routeMessage({ type: 'PlayerJoined', data: { player: { token: 'b', name: 'Bob' } } }, ctx(s));
-    expect(s.players).toHaveLength(2);
-  });
-
-  it('PlayerLeft removes by token in the msg fallback path', () => {
-    const s = baseUiState({ players: [{ token: 'a' }, { token: 'b' }] });
-    routeMessage({ type: 'PlayerLeft', data: { token: 'a' } }, ctx(s));
-    expect(s.players.map(p => p.token)).toEqual(['b']);
   });
 });

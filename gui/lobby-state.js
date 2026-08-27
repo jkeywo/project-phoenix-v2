@@ -11,7 +11,11 @@
  * as `window.lobbyState` (singleton) for the inline script in client.html.
  */
 
-import { CHANGE_DOMAINS, emptyReducerResult } from './reducer-result.js';
+import {
+  CHANGE_DOMAINS,
+  REDUCER_EFFECTS,
+  emptyReducerResult,
+} from './reducer-result.js';
 
 /** All ship stations the lobby UI knows how to render, in display order.
  *
@@ -117,7 +121,8 @@ export class LobbyState {
   /**
    * Apply a single inbound ServerMessage `{ type, data }`. Variants that
    * don't affect the lobby are ignored. Mirrors `LobbyState::apply` and
-   * reports accepted lobby-state changes through the shared reducer seam.
+   * reports accepted lobby-state changes and their ordered shell effects
+   * through the shared reducer seam.
    */
   apply(msg) {
     const changes = emptyReducerResult();
@@ -135,6 +140,30 @@ export class LobbyState {
         // survive world load. Welcome carries no pack data of its own, so the
         // last catalog broadcast's list is the right thing to keep.
         changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
+        // A Welcome is also the complete shell bootstrap/reconnect projection.
+        // Emit it every time, even when the values equal the previous Welcome:
+        // the DOM and its iframes may have been recreated while disconnected.
+        changes.effects.push({
+          effect: REDUCER_EFFECTS.MOUNT_CONSOLES,
+          shipStations: this.shipStations,
+        });
+        if (this.shipConfig.ship_css) {
+          changes.effects.push({
+            effect: REDUCER_EFFECTS.SHIP_THEME,
+            href: this.shipConfig.ship_css,
+          });
+        }
+        if (d.state && d.state.world) {
+          changes.effects.push({
+            effect: REDUCER_EFFECTS.SHIP_INFO,
+            title: this.scenarioTitle || 'Phoenix',
+            description: this.scenarioBody,
+          });
+        }
+        changes.effects.push(
+          { effect: REDUCER_EFFECTS.STATUS, id: 'client.status_connected' },
+          { effect: REDUCER_EFFECTS.REBUILD_STATIONS },
+        );
         break;
       case 'ScenarioCatalog': {
         // QR-first pre-scenario catalog + current lock state, synthesized by
@@ -162,6 +191,10 @@ export class LobbyState {
           this.scenarioCatalog = Array.isArray(d.scenarios) ? d.scenarios : [];
         }
         changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
+        changes.effects.push(
+          { effect: REDUCER_EFFECTS.SETTLE_SCENARIO_PICK },
+          { effect: REDUCER_EFFECTS.REQUEST_RENDER, force: true },
+        );
         break;
       }
       case 'PlayerJoined': {
@@ -170,12 +203,16 @@ export class LobbyState {
         if (idx >= 0) this.players[idx] = player;
         else this.players.push(player);
         changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
+        changes.effects.push({ effect: REDUCER_EFFECTS.REBUILD_STATIONS });
         break;
       }
       case 'PlayerLeft': {
         const before = this.players.length;
         this.players = this.players.filter(p => p.token !== d.token);
-        if (this.players.length !== before) changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
+        if (this.players.length !== before) {
+          changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
+          changes.effects.push({ effect: REDUCER_EFFECTS.REBUILD_STATIONS });
+        }
         break;
       }
       case 'NameChanged': {
@@ -183,6 +220,10 @@ export class LobbyState {
         if (p) {
           p.name = d.name;
           changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
+          changes.effects.push(
+            { effect: REDUCER_EFFECTS.NAME_CHANGED, token: d.token, name: d.name },
+            { effect: REDUCER_EFFECTS.REBUILD_STATIONS },
+          );
         }
         break;
       }
@@ -191,6 +232,10 @@ export class LobbyState {
         if (p) {
           p.ready = d.ready;
           changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
+          changes.effects.push(
+            { effect: REDUCER_EFFECTS.READY_CHANGED, token: d.token, ready: !!d.ready },
+            { effect: REDUCER_EFFECTS.REBUILD_STATIONS },
+          );
         }
         break;
       }
@@ -202,6 +247,7 @@ export class LobbyState {
         if (p) {
           p.spectator = d.spectator;
           changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
+          changes.effects.push({ effect: REDUCER_EFFECTS.REBUILD_STATIONS });
         }
         break;
       }
@@ -213,6 +259,7 @@ export class LobbyState {
         if (p) {
           p.afk = d.afk;
           changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
+          changes.effects.push({ effect: REDUCER_EFFECTS.REBUILD_STATIONS });
         }
         break;
       }
@@ -243,23 +290,50 @@ export class LobbyState {
           // would stay stuck on the read-only spectator surface (issue #1106).
           if (stationId) target.spectator = false;
         }
-        if (accepted) changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
+        if (accepted) {
+          changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
+          changes.effects.push(
+            {
+              effect: REDUCER_EFFECTS.STATION_ASSIGNED,
+              token: d.token,
+              stationId,
+            },
+            { effect: REDUCER_EFFECTS.REBUILD_STATIONS },
+          );
+        }
         break;
       }
       case 'GameStartCountdown':
         this.countdownSecs = d.remaining_secs || 0;
         changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
+        changes.effects.push({ effect: REDUCER_EFFECTS.REBUILD_STATIONS });
         break;
       case 'GameStarted':
         this.phase = 'InProgress';
         this.countdownSecs = 0;
         changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
+        changes.effects.push(
+          { effect: REDUCER_EFFECTS.HIDE_LOADING },
+          { effect: REDUCER_EFFECTS.REQUEST_RENDER },
+        );
         break;
+      case 'LoadingProgress': {
+        const fraction = d.fraction ?? 0;
+        changes.effects.push(
+          {
+            effect: REDUCER_EFFECTS.SHOW_LOADING,
+            pct: Math.round(fraction * 100),
+          },
+          { effect: REDUCER_EFFECTS.REQUEST_RENDER },
+        );
+        break;
+      }
       case 'GameOver':
         this.phase = 'GameOver';
         this.gameOverReason = d.reason != null ? d.reason : '';
         this.gameOverOutcome = d.outcome != null ? d.outcome : null;
         changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
+        changes.effects.push({ effect: REDUCER_EFFECTS.REQUEST_RENDER });
         break;
       case 'ReturnedToLobby':
         this.phase = 'Lobby';
@@ -268,6 +342,7 @@ export class LobbyState {
         this.countdownSecs = 0;
         this.waitingForScenario = true;
         changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
+        changes.effects.push({ effect: REDUCER_EFFECTS.REQUEST_RENDER });
         break;
       default:
         // Not relevant to the lobby model.

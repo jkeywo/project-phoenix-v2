@@ -43,12 +43,40 @@ export const CHANGE_DOMAINS = Object.freeze({
   LOBBY: 'lobby',
 });
 
-/** A fresh, empty result. Reducers may add to any set they own. */
+/**
+ * Ordered lifecycle and presentation facts emitted by the reducer that owns
+ * the corresponding message semantics.  Unlike changed-key sets, effects are
+ * deliberately repeatable: two equal damage or Coordination messages must
+ * still produce two pieces of feedback.
+ */
+export const REDUCER_EFFECTS = Object.freeze({
+  MOUNT_CONSOLES: 'mount-consoles',
+  SHIP_THEME: 'ship-theme',
+  SHIP_INFO: 'ship-info',
+  STATUS: 'status',
+  HIDE_LOADING: 'hide-loading',
+  SHOW_LOADING: 'show-loading',
+  BEZEL_ALERT: 'bezel-alert',
+  VIBRATE: 'vibrate',
+  COORDINATION_POPUP: 'coordination-popup',
+  SETTLE_SCENARIO_PICK: 'settle-scenario-pick',
+  REFRESH_SETTINGS: 'refresh-settings',
+  REBUILD_STATIONS: 'rebuild-stations',
+  REQUEST_RENDER: 'request-render',
+  REPORT_ELIGIBILITY: 'report-eligibility',
+  STATION_ASSIGNED: 'station-assigned',
+  READY_CHANGED: 'ready-changed',
+  NAME_CHANGED: 'name-changed',
+  SHIP_DESTROYED: 'ship-destroyed',
+});
+
+/** A fresh, empty result. Reducers add semantic keys and ordered effects. */
 export function emptyReducerResult() {
   return {
     changedDomains: new Set(),
     changedSystems: new Set(),
     changedBlackboards: new Set(),
+    effects: [],
   };
 }
 
@@ -63,6 +91,7 @@ export function mergeReducerResults(...results) {
     for (const domain of result.changedDomains || []) merged.changedDomains.add(domain);
     for (const system of result.changedSystems || []) merged.changedSystems.add(system);
     for (const key of result.changedBlackboards || []) merged.changedBlackboards.add(key);
+    for (const effect of result.effects || []) merged.effects.push(effect);
   }
   return merged;
 }

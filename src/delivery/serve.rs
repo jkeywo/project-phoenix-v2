@@ -296,6 +296,10 @@ impl HostServer {
     /// Accept and serve until the listener errors. One thread per connection,
     /// each closed when its response is written: a client fetching a 38 MiB
     /// WASM must not block the phone asking for the manifest behind it.
+    ///
+    /// Blocks forever and cannot be stopped — which is right for the
+    /// delivery-only host, whose whole job is this loop, and wrong for a host
+    /// that also runs a simulation. That one uses [`serve_until`](Self::serve_until).
     pub fn serve_forever<F>(&self, on_event: F)
     where
         F: Fn(HostEvent) + Send + Sync + 'static,
@@ -306,26 +310,114 @@ impl HostServer {
         });
         for stream in self.listener.incoming() {
             match stream {
-                Ok(stream) => {
-                    let state = Arc::clone(&self.state);
-                    let events = Arc::clone(&on_event);
-                    // A panic in one connection must not take the host down, and
-                    // a spawn failure is worth saying out loud rather than
-                    // silently dropping the client.
-                    if let Err(e) = std::thread::Builder::new()
-                        .name("phoenix-host-conn".to_string())
-                        .spawn(move || handle_connection(stream, &state, events.as_ref()))
-                    {
-                        on_event(HostEvent::Failed {
-                            detail: format!("cannot spawn connection thread: {e}"),
-                        });
-                    }
+                Ok(stream) => self.spawn_connection(stream, &on_event),
+                Err(e) => on_event(HostEvent::Failed {
+                    detail: format!("accept failed: {e}"),
+                }),
+            }
+        }
+    }
+
+    /// [`serve_forever`](Self::serve_forever), with a way out (issue #1121).
+    ///
+    /// A native *authoritative* host runs this on a worker thread while Bevy
+    /// owns the main one — winit requires the main thread on Windows — and the
+    /// two have to be able to stop together. `serve_forever`'s blocking
+    /// `accept()` has no such seam: nothing short of process exit unblocks it,
+    /// so the delivery thread would outlive a clean `AppExit`.
+    ///
+    /// So this polls instead. The listener goes non-blocking and the loop
+    /// checks `shutdown` between accepts, sleeping [`ACCEPT_POLL`] when there
+    /// is nothing waiting. Each accepted stream is put **back** into blocking
+    /// mode before it is handled: on Windows an accepted socket inherits the
+    /// listener's non-blocking flag, and a non-blocking read would make
+    /// `read_head` see `WouldBlock`, give up, and answer 400 to a
+    /// perfectly good request.
+    pub fn serve_until<F>(&self, shutdown: ShutdownSignal, on_event: F)
+    where
+        F: Fn(HostEvent) + Send + Sync + 'static,
+    {
+        let on_event = Arc::new(on_event);
+        on_event(HostEvent::Bound {
+            addr: self.local_addr(),
+        });
+        if let Err(e) = self.listener.set_nonblocking(true) {
+            // Without the poll seam there is no shutdown path, so say so and
+            // fall back to the blocking loop rather than spinning on errors.
+            on_event(HostEvent::Failed {
+                detail: format!("cannot poll for shutdown ({e}); serving without one"),
+            });
+            for stream in self.listener.incoming() {
+                match stream {
+                    Ok(stream) => self.spawn_connection(stream, &on_event),
+                    Err(e) => on_event(HostEvent::Failed {
+                        detail: format!("accept failed: {e}"),
+                    }),
+                }
+            }
+            return;
+        }
+        while !shutdown.is_stopped() {
+            match self.listener.accept() {
+                Ok((stream, _)) => {
+                    let _ = stream.set_nonblocking(false);
+                    self.spawn_connection(stream, &on_event);
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(ACCEPT_POLL);
                 }
                 Err(e) => on_event(HostEvent::Failed {
                     detail: format!("accept failed: {e}"),
                 }),
             }
         }
+    }
+
+    /// Hand one accepted stream to its own thread. A panic in one connection
+    /// must not take the host down, and a spawn failure is worth saying out
+    /// loud rather than silently dropping the client.
+    fn spawn_connection<F>(&self, stream: TcpStream, on_event: &Arc<F>)
+    where
+        F: Fn(HostEvent) + Send + Sync + 'static,
+    {
+        let state = Arc::clone(&self.state);
+        let events = Arc::clone(on_event);
+        if let Err(e) = std::thread::Builder::new()
+            .name("phoenix-host-conn".to_string())
+            .spawn(move || handle_connection(stream, &state, events.as_ref()))
+        {
+            on_event(HostEvent::Failed {
+                detail: format!("cannot spawn connection thread: {e}"),
+            });
+        }
+    }
+}
+
+/// How long [`HostServer::serve_until`] waits between accept attempts when
+/// nothing is connecting. Short enough that shutdown is imperceptible, long
+/// enough that an idle host is not a busy loop.
+const ACCEPT_POLL: std::time::Duration = std::time::Duration::from_millis(25);
+
+/// The stop lever for [`HostServer::serve_until`]. Cheap to clone; every clone
+/// refers to the same flag, so the thread that runs the simulation can stop the
+/// thread that serves the bundle.
+#[derive(Clone, Default)]
+pub struct ShutdownSignal(Arc<std::sync::atomic::AtomicBool>);
+
+impl ShutdownSignal {
+    /// A signal that has not been raised.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Ask the serving loop to return after at most one [`ACCEPT_POLL`].
+    pub fn stop(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether [`stop`](Self::stop) has been called.
+    pub fn is_stopped(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 

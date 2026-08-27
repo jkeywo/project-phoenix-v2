@@ -474,10 +474,19 @@ jobs:
           home LAN, Public is not needed and should be left unchecked. To
           restrict it to this machine only, run with --addr 127.0.0.1:8080.
 
-          This host serves the client, the manifest, and game content only. It
-          does not run the simulation (still the browser host or
-          phoenix-headless), does not do PeerJS signalling, and is not safe to
-          expose to the public internet (no TLS, no auth, no rate limiting).
+          Run as above, this host serves the client, the manifest and game
+          content only: the simulation is still the browser host, it does no
+          PeerJS signalling, and it is not safe to expose to the public
+          internet (no TLS, no auth, no rate limiting).
+
+          The same executable can also run the simulation itself, with the
+          viewscreen drawn natively instead of in a browser tab:
+
+            phoenix-host.exe --world assets/worlds/combat_test.toml --solo
+
+          Browser crew clients cannot yet join a native host -- that needs the
+          Phoenix transport (issue #1112) -- so --solo, the whole ship flown by
+          the AI, is what this mode is good for today.
           EOF
           cd release
           7z a -tzip ../phoenix-host-demo-windows.zip .

@@ -188,13 +188,27 @@ Windows prompts to allow it through the firewall on first run. Pass
 - `--client-dir` is version-pinned at startup against the manifest the host
   serves: a bundle built for other content refuses to start, before the port is
   taken. `/host/manifest.json` pins a running client's protocol per request.
-- Serves **delivery only**. The authoritative simulation is still `server.html`
-  or `phoenix-headless`, PeerJS signalling is unchanged, and there is no TLS or
-  auth — LAN or behind something else, never a public address.
+- With no `--world` it serves **delivery only**, exactly as PRD #855 shipped it:
+  the authoritative simulation is `server.html` or `phoenix-headless`, and
+  PeerJS signalling is unchanged. Either way there is no TLS or auth — LAN or
+  behind something else, never a public address.
 
 The catalogue it publishes is the browser host's own: `src/delivery/payload.rs`
 holds the single field list that both `wasm_get_scenario_catalog` and the JSON
 encoder walk. See `pasm/spec/architecture/native-delivery.yaml`.
+
+## Native authoritative host (issue #1121)
+
+`--world` turns the same binary into an authoritative host with a native
+Bevy/wgpu viewscreen — see [Native Host](./native-host.md). Every delivery flag
+above keeps its exact meaning; the bundle serving, the catalogue restriction and
+the startup version pin are the same code in both modes, which is why #1121
+evolved this binary instead of adding a second one.
+
+```bash
+./target/release/phoenix-host --world assets/worlds/combat_test.toml \
+  --client-dir dist --solo
+```
 
 ## Related
 

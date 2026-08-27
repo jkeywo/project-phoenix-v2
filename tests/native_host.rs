@@ -19,7 +19,9 @@ use project_phoenix::core::codec;
 use project_phoenix::core::messages::PROTOCOL_VERSION;
 use project_phoenix::delivery::args::{ClientSource, HostArgs};
 use project_phoenix::delivery::payload::{catalog_payload, PayloadValue};
-use project_phoenix::delivery::serve::{load_content, preload_templates, HostServer};
+use project_phoenix::delivery::serve::{
+    load_content, preload_templates, HostServer, ShutdownSignal,
+};
 use project_phoenix::delivery::stamp::DeliveryStamp;
 use project_phoenix::delivery::DeliveryManifest;
 use project_phoenix::world::manifest::{build_catalog, build_merged_catalog, parse_manifest};
@@ -36,6 +38,11 @@ fn args(manifest: &str) -> HostArgs {
         manifest: manifest.to_string(),
         content_dir: ".".to_string(),
         skip_bundle_check: false,
+        // Delivery only. Issue #1121 added the authoritative mode to this same
+        // binary rather than a parallel one, and every claim in this file is
+        // about the delivery half — which must be unchanged by that, in both
+        // modes. `tests/native_host_sim.rs` owns the simulation half.
+        sim: None,
     }
 }
 
@@ -298,6 +305,44 @@ fn the_native_hosts_catalogue_is_the_browser_hosts_catalogue_with_no_packs_appli
          catalogue JSON for the same content"
     );
     assert!(native.contains("\"source\":\"base\""), "{native}");
+}
+
+#[test]
+fn a_served_host_can_be_stopped_so_the_simulation_can_own_the_main_thread() {
+    // Issue #1121. `serve_forever` blocks on `accept()` with no way out, which
+    // is right when that loop IS the process and wrong when Bevy owns the main
+    // thread (winit requires it on Windows) and the delivery half is a worker:
+    // a clean window close would leave the worker running. `serve_until` polls
+    // instead, and this pins both halves of that — it still serves, and it
+    // still stops.
+    let server = HostServer::bind(&args(BASE_MANIFEST)).expect("host binds");
+    let addr = server.local_addr();
+    let shutdown = ShutdownSignal::new();
+    let serving = shutdown.clone();
+    let handle = std::thread::spawn(move || server.serve_until(serving, |_| {}));
+
+    // A request is served exactly as `serve_forever` would serve it — the poll
+    // loop must put each accepted socket back into blocking mode, or the read
+    // would see `WouldBlock` and answer 400 to a perfectly good request.
+    let mut stream = TcpStream::connect(&addr).expect("connects to the host");
+    write!(stream, "GET /host/stamp.json HTTP/1.1\r\nHost: {addr}\r\n\r\n").expect("writes");
+    let mut response = String::new();
+    stream.read_to_string(&mut response).expect("reads");
+    assert!(
+        status_line(&response).starts_with("HTTP/1.1 200 OK"),
+        "{response}"
+    );
+
+    shutdown.stop();
+    // Joinable, rather than leaked for the process to clean up. The poll
+    // interval is 25ms; anything approaching the timeout below is a hang.
+    let start = std::time::Instant::now();
+    handle.join().expect("the serving thread returns");
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(5),
+        "the serving thread took {:?} to stop",
+        start.elapsed()
+    );
 }
 
 #[test]

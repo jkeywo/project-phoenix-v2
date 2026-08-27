@@ -101,13 +101,45 @@ npm run balance:cruiser
 # Local dev — client page (pure HTML/JS, no WASM)
 node scripts/build-client.mjs                  # → dist/client/, then serve dist/ statically
 
-# Native delivery host (PRD #855) — serves a built bundle, the content manifest,
-# the scenario catalogue and a version stamp from a native process instead of an
-# open browser tab. DELIVERY ONLY: the authoritative simulation is still
-# server.html or phoenix-headless, PeerJS signalling is unchanged, and there is
-# no TLS or auth — LAN or behind something else, never a public address.
+# Native host (PRD #855 delivery + issue #1121 simulation) — ONE binary, two
+# modes. With no --world it serves a built bundle, the content manifest, the
+# scenario catalogue and a version stamp from a native process instead of an
+# open browser tab: DELIVERY ONLY, the authoritative simulation is still
+# server.html or phoenix-headless and PeerJS signalling is unchanged. There is
+# no TLS or auth in either mode — LAN or behind something else, never a public
+# address.
 cargo build --release --features host --bin phoenix-host
 ./target/release/phoenix-host --client-dir dist
+#
+# --world makes the SAME process authoritative, running the ordinary simulation
+# and plugin graph with the shared viewscreen drawn by native Bevy/wgpu through
+# winit (issue #1121). Every delivery flag keeps its exact meaning: the bundle
+# serving, the catalogue restriction and the startup version pin are shared
+# rather than duplicated, which is why this evolved instead of forking a second
+# binary. Bevy owns the main thread (winit requires it on Windows) and the HTTP
+# host moves to a worker with a shutdown path.
+./target/release/phoenix-host --world assets/worlds/combat_test.toml --solo
+#   --ship <PATH>   the player's hull [default: the world's first available_ships]
+#   --seed <N>      overrides the world's [global] seed
+#   --solo          start with nobody connected, every station on Backfill
+#   --log / --log-entity  same grammar as phoenix-headless
+#   The composition seam is BootProfile::NativeHost in src/boot/ — a fourth
+#   profile, not a fourth hand-rolled App; src/boot/tests.rs's parity test
+#   covers all four. A native host refuses to boot when the world's declared
+#   templates are not in the native config cache: six call sites read that
+#   cache with NO filesystem fallback and answer Default on a miss, so a
+#   configless boot would run a plausible mission with the wrong numbers.
+#   src/entities/template_preload.rs is the one strict populate every native
+#   process shares.
+#   NOT YET: browser clients cannot join a native host. That needs the Phoenix
+#   transport (issue #1112) — PeerJS is browser JS and cannot run natively.
+#   src/native_host/transport.rs is the seam it plugs into.
+
+# The native viewscreen render assertion (issue #1121). Needs a real GPU, so it
+# is #[ignore]d: every ci.yml job is ubuntu-latest and the one windows-latest
+# runner (deploy-demo.yml's package-native-demo) runs no tests. Renders
+# offscreen through the same wgpu path capture-billboard uses.
+cargo test --features capture --test native_viewscreen_render -- --ignored --nocapture
 #   Binds 0.0.0.0:8080 by default — LAN-reachable out of the box; Windows
 #   prompts to allow it through the firewall on first run. Pass
 #   --addr 127.0.0.1:8080 to restrict to this machine only.

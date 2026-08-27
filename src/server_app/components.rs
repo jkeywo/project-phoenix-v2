@@ -94,9 +94,6 @@ pub struct AsteroidUuid(pub String);
 pub struct AsteroidShieldPierce(pub f32);
 
 // ── Resources ────────────────
-#[derive(Resource)]
-pub(crate) struct SimBroadcastTimer(pub(crate) Timer);
-
 /// The ship's impulse drive state. Cancelled automatically when hull damage is taken.
 ///
 /// Per-ship `Component` post ship-parity audit; every ship (player + NPC)
@@ -316,31 +313,34 @@ pub struct CollisionCooldown {
 }
 
 /// Pending outbound messages produced by simulation systems.
-/// Drained each frame by the `SimBroadcaster` dispatch.
+/// Drained each logical fixed tick by the `SimBroadcaster` dispatch in
+/// `SimSet::Broadcast` while the in-progress fixed loop advances.
 ///
 /// ## Migration note (PRD #253)
 /// The old preamble pattern (`MessageWriter<OutboundMessage>`) has been
-/// eliminated from all domain plugins. All systems that previously wrote
-/// `OutboundMessage` directly now write `(Target, ServerMessage)` tuples
-/// into `SimOutbox`. The `sim_outbox_broadcaster()` or a manual drain
-/// (in tests) flushes these entries to the `OutboundMessage` bus.
-/// To verify the absence of the old pattern, run:
-///   rg 'MessageWriter<OutboundMessage>' src/  # must return no matches
+/// eliminated from simulation domain plugins. Those systems now write
+/// `(Target, ServerMessage)` tuples into `SimOutbox`; the
+/// `sim_outbox_broadcaster()` or a manual drain (in tests) flushes them to the
+/// `OutboundMessage` bus. The intentional exception is
+/// `debug_overlay::report_debug_state`: it emits Reliable `DebugState` directly
+/// from `PreUpdate`, because a pause stops the fixed loop that drains this
+/// outbox and the client still has to receive confirmation.
 #[derive(Resource, Default)]
 pub struct SimOutbox(pub Vec<(Target, ServerMessage)>);
 
 /// Broadcast delta caches — [`LastBroadcastEntityPositions`],
-/// [`LastBroadcastEntityHealth`], [`LastBroadcastHull`], [`LastBroadcastShields`],
+/// [`LastBroadcastEntityHealth`], [`LastBroadcastHull`],
 /// [`LastBroadcastBlackboards`] — now live in
 /// [`crate::core::broadcast::cache_registry`] (issue #613), which is the
-/// single module that knows about all six delta caches (the sixth,
-/// `LastWeaponsUpdate`, stays in `console::weapons`) and owns
+/// single module that knows about all five `reset_all`-covered broadcast delta
+/// caches (the fifth member, `LastWeaponsUpdate`, stays in `console::weapons`)
+/// and owns
 /// `reset_all` / `resync_for_token` / `prune`. Re-exported here so existing
 /// `crate::server_app::LastBroadcastX` / `crate::server_app::LastBroadcastX`
 /// references are unaffected by the move.
 pub use crate::core::broadcast::cache_registry::{
     LastBroadcastBlackboards, LastBroadcastEntityHealth, LastBroadcastEntityPositions,
-    LastBroadcastHull, LastBroadcastShields,
+    LastBroadcastHull,
 };
 
 /// Tracks non-asteroid entities that have been reported to clients via

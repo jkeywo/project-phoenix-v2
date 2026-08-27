@@ -5,7 +5,7 @@
 //! Public surface: the `SimBroadcaster` factories [`modifier_events_broadcaster`]
 //! and [`sim_outbox_broadcaster`]; and the publish systems
 //! (`publish_viewscreen_blackboard`, `broadcast_blackboard_updates`,
-//! `broadcast_shield_status`, the game-over / world-setup / cache-reset /
+//! the game-over / world-setup / cache-reset /
 //! reconnect broadcasts, and `reconcile_runtime_entities`). All re-exported
 //! through `crate::server_app`.
 //!
@@ -26,9 +26,9 @@ use super::*;
 /// Returns a [`SimBroadcaster`] pre-configured with the `ModifierAdded` and
 /// `ModifierRemoved` producers.
 ///
-/// Drains pending modifier events from [`ShipModifiers`] once per frame and
+/// Drains pending modifier events from [`ShipModifiers`] once per fixed tick and
 /// broadcasts each as a separate `ServerMessage` to all players (`Audience::All`).
-/// Uses `Cadence::OnEvent` so the producer is called every frame regardless of
+/// Uses `Cadence::OnEvent` so the producer is called every fixed tick regardless of
 /// any Hz timer; an empty drain produces no outbound messages.
 /// Registered by [`add_simulation_plugins`] and the test harness in `test_app()`.
 ///
@@ -67,10 +67,10 @@ pub fn modifier_events_broadcaster() -> SimBroadcaster {
     })
 }
 
-/// Returns a [`SimBroadcaster`] that drains [`SimOutbox`] each frame and writes
+/// Returns a [`SimBroadcaster`] that drains [`SimOutbox`] each fixed tick and writes
 /// each entry as an `OutboundMessage` with per-message target routing.
 ///
-/// Uses `Cadence::OnEvent` so the producer fires every frame.  When the outbox
+/// Uses `Cadence::OnEvent` so the producer fires every fixed tick. When the outbox
 /// is empty the producer returns an empty `Vec` and no messages are emitted.
 /// When populated (by any simulation system) the queued entries are flushed
 /// directly to `OutboundMessage` with their original `Target` routing.
@@ -389,44 +389,6 @@ pub(crate) fn emit_phase_change_balance_events(
     }
 }
 
-/// Broadcast `ShieldStatus` at 10 Hz.
-/// Sends to all players only when shield state changed; always sends to the
-/// Shields console holder so their panel stays smooth during regeneration.
-pub(crate) fn broadcast_shield_status(
-    time: Res<Time>,
-    mut timer: ResMut<SimBroadcastTimer>,
-    mut outbox: ResMut<SimOutbox>,
-    sessions: Res<Sessions>,
-    ship_query: Query<&ShipShields, With<LocalShip>>,
-    mut last: ResMut<LastBroadcastShields>,
-) {
-    let Some(shields) = ship_query.iter().next() else {
-        return;
-    };
-    if !timer.0.tick(time.delta()).just_finished() {
-        return;
-    }
-    let facings: Vec<ShieldFacingStatus> =
-        crate::ship::shields::shield_facing_statuses(&shields.0.snapshot());
-
-    let frequency = shields.frequency();
-    if facings != last.0 {
-        // State changed — broadcast to everyone.
-        last.0 = facings.clone();
-        outbox.0.push((
-            Target::All,
-            ServerMessage::ShieldStatus { facings, frequency },
-        ));
-    } else if let Some(token) = sessions.0.holder_for_station(&StationId("shields".into())) {
-        // Nothing changed but the Shields holder still gets a periodic refresh
-        // so regenerating HP stays smooth on their panel.
-        outbox.0.push((
-            Target::Token(token.to_string()),
-            ServerMessage::ShieldStatus { facings, frequency },
-        ));
-    }
-}
-
 /// Tracks whether the initial WorldSetup broadcast has fired, so it only
 /// goes out once per game.
 #[derive(Resource, Default)]
@@ -461,24 +423,25 @@ pub(crate) fn on_game_over_enter(
 /// otherwise suppress initial updates.
 ///
 /// Delegates to [`crate::core::broadcast::cache_registry::reset_all`] (issue
-/// #613), the single place that knows about all six broadcast delta caches.
+/// #613), the single place that knows about all five shared, registry-covered
+/// broadcast delta caches. The repair path's per-token projection cache is
+/// cleared here too, without making it a registry member.
 pub(crate) fn reset_broadcast_caches_on_start(
     mut hull: ResMut<LastBroadcastHull>,
-    mut shields: ResMut<LastBroadcastShields>,
     mut positions: ResMut<LastBroadcastEntityPositions>,
     mut health: ResMut<LastBroadcastEntityHealth>,
     mut weapons: ResMut<LastWeaponsUpdate>,
     mut last_bb: ResMut<LastBroadcastBlackboards>,
     last_repair_bb: Option<ResMut<crate::console::repair::visibility::LastVisibleRepairBlackboard>>,
 ) {
-    // Per-token repair-blackboard projections (issue #737) are a seventh delta
-    // cache; clear them alongside the shared six so a restarted game re-sends.
+    // `LastVisibleRepairBlackboard` stores per-token Repair projections (issue
+    // #737) outside the five-member `reset_all` registry; clear it alongside
+    // those registry-covered caches so a restarted game re-sends.
     if let Some(mut last_repair_bb) = last_repair_bb {
         last_repair_bb.clear();
     }
     crate::core::broadcast::cache_registry::reset_all(
         &mut hull,
-        &mut shields,
         &mut positions,
         &mut health,
         &mut weapons,
@@ -608,11 +571,11 @@ pub fn broadcast_blackboard_updates(
 /// token. Detect this and push a full-state resync to *just that token* via
 /// [`crate::core::broadcast::cache_registry::resync_for_token`] (issue #613).
 ///
-/// This replaces the #599 quick fix, which reset all six shared broadcast
-/// delta caches — correct for the reconnecting player, but it also forced
-/// the *next* 10 Hz tick to broadcast full state to *every other* connected
-/// client, since those caches are shared across all `Audience::All`
-/// producers. The targeted resync leaves the shared caches untouched, so
+/// This replaces the #599 quick fix, which reset every then-registered shared
+/// broadcast delta cache — correct for the reconnecting player, but it also
+/// invalidated the global delta state. On the *next* 10 Hz tick, shared
+/// `Audience::All` paths resent full state to *every other* connected client.
+/// The targeted resync leaves the shared caches untouched, so
 /// every other client's next tick remains a normal delta.
 pub(crate) fn refresh_caches_on_midgame_reconnect(world: &mut World) {
     let state = world.resource::<State<GamePhase>>();

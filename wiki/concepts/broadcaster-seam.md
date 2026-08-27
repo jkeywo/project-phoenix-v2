@@ -2,7 +2,7 @@
 title: Broadcaster Seam
 type: concept
 tags: [broadcast, messages, audience, cadence, delivery]
-sources: [src/core/broadcast/, src/server_app/broadcast.rs, src/server_app/broadcast_publish.rs, src/console/weapons/blackboard.rs, src/ship/power.rs, src/console/repair/server.rs, src/lobby/server.rs]
+sources: [src/core/broadcast/, src/server_app/broadcast.rs, src/server_app/broadcast_publish.rs, src/console/weapons/blackboard.rs, src/ship/power.rs, src/ship/shields.rs, src/console/repair/server.rs, src/lobby/server.rs]
 updated: 2026-08-27
 ---
 
@@ -36,6 +36,7 @@ The system-derived variants require the current `ShipConfig`; they do not infer 
 | `weapons_update_broadcaster` | Tactical weapons state | weapons holder, 10 Hz | `src/console/weapons/blackboard.rs` |
 | `power_state_broadcaster` | reactor/power state | holder of `power-reactor`, 10 Hz | `src/ship/power.rs` |
 | `repair_state_broadcaster` | repair state | holder of `repair`, 10 Hz | `src/console/repair/server.rs` |
+| `shields_state_broadcaster` | shield facings and frequency | holder of `shields-system`, 10 Hz | `src/ship/shields.rs` |
 | `modifier_events_broadcaster` | modifier add/remove edges | all, on event | `src/server_app/broadcast_publish.rs` |
 | `sim_outbox_broadcaster` | arbitrary-target `SimOutbox` entries | target already carried by each entry | `src/server_app/broadcast_publish.rs` |
 
@@ -47,11 +48,17 @@ that the countdown transitions from `Lobby` to `InProgress`.
 
 ## Delivery classes
 
-`sim_outbox_broadcaster` classifies each `ServerMessage` as `Reliable` or `Snapshot`. High-frequency replaceable state uses the snapshot channel; lifecycle, commands, setup, and one-shot notifications remain reliable. `flush_outbound` in `src/server/bridge.rs` is the Rust-to-JavaScript boundary that preserves the class.
+Direct `SimBroadcaster` producers use `Snapshot`; the live 10 Hz
+`ShieldStatus` publisher takes this path. `sim_outbox_broadcaster` classifies
+each queued `ServerMessage` as `Reliable` or `Snapshot`, including the targeted
+one-shot `ShieldStatus` rebuilt for a reconnect. High-frequency replaceable
+state uses the snapshot channel; lifecycle, commands, setup, and one-shot
+notifications remain reliable. `flush_outbound` in `src/server/bridge.rs` is
+the Rust-to-JavaScript boundary that preserves the class.
 
 ## Cache resets
 
-Snapshot delta caches are registered in `src/core/broadcast/cache_registry.rs`. `reset_all` clears them on entry to `InProgress`, forcing a complete first publication for a new run. Domain caches such as `LastWeaponsUpdate` remain defined beside their producers but participate in the same reset contract.
+Snapshot delta caches are registered in `src/core/broadcast/cache_registry.rs`. `reset_all` clears them on entry to `InProgress`, forcing a complete first publication for a new run. Domain caches such as `LastWeaponsUpdate` remain defined beside their producers but participate in the same reset contract. Shields has no delta cache: its sole periodic publisher reads the current authoritative component and targets only the live holder of the authored Shields System.
 
 ## Adding a producer
 

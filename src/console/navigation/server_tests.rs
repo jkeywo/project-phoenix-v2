@@ -2,8 +2,7 @@ use super::*;
 use crate::core::messages::{ClientMessage, ServerMessage};
 use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage};
 use crate::server_app::{
-    sim_state_broadcaster, LastBroadcastEntityPositions, LastBroadcastHull, LastBroadcastShields,
-    ShipImpulse,
+    sim_state_broadcaster, LastBroadcastEntityPositions, LastBroadcastHull, ShipImpulse,
 };
 
 #[derive(Resource, Default)]
@@ -54,7 +53,6 @@ fn test_app() -> App {
         .init_resource::<LastBroadcastEntityPositions>()
         .init_resource::<crate::server_app::LastBroadcastEntityHealth>()
         .init_resource::<LastBroadcastHull>()
-        .init_resource::<LastBroadcastShields>()
         .add_message::<crate::ship_plugin::CoordinationEnqueue>()
         .add_systems(PostUpdate, collect);
     // Spawn the player ship entity so handle_navigation_waypoint can query it.

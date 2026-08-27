@@ -1,9 +1,8 @@
 use super::*;
 use crate::core::messages::{ClientMessage, *};
-use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage};
+use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Target};
 use crate::server_app::{
-    LastBroadcastEntityPositions, LastBroadcastHull, LastBroadcastShields, ShipImpulse,
-    ShipShields, SimOutbox,
+    LastBroadcastEntityPositions, LastBroadcastHull, ShipImpulse, ShipShields, SimOutbox,
 };
 use crate::server_app::{LocalShip, ShipSystemBlackboards};
 use crate::ship::control_source::ControlSource;
@@ -197,7 +196,6 @@ fn test_app() -> App {
         .init_resource::<LastBroadcastEntityPositions>()
         .init_resource::<crate::server_app::LastBroadcastEntityHealth>()
         .init_resource::<LastBroadcastHull>()
-        .init_resource::<LastBroadcastShields>()
         .init_resource::<Outbox>()
         .init_resource::<CoordEnqueueBox>()
         .add_plugins(ShipShieldsPlugin)
@@ -247,6 +245,97 @@ fn drain_coord(app: &mut App) -> Vec<CoordinationEnqueue> {
 }
 
 // ── Blackboard publish tests ─────────────────────────────────────────────
+
+fn shipped_hull_shield_status(
+    hull_path: &str,
+    station_id: &str,
+    holder: &str,
+    station_systems: &[&str],
+) -> Vec<OutboundMessage> {
+    let config = crate::entities::include_resolve::load_entity_config(hull_path)
+        .unwrap_or_else(|e| panic!("{hull_path} must compose and parse: {e}"))
+        .ship_config
+        .expect("a shipped player hull must declare stations and systems");
+    let station = StationId(station_id.into());
+
+    for system_id in station_systems {
+        let system = config
+            .system(&SystemId((*system_id).into()))
+            .unwrap_or_else(|| panic!("{hull_path} must declare {system_id}"));
+        assert_eq!(
+            system.station.as_ref(),
+            Some(&station),
+            "{system_id} must be owned by the {station_id} Station in this fixture"
+        );
+    }
+
+    let mut app = test_app();
+    let ship = ship_e(&mut app);
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(crate::ship_plugin::ShipConfigComponent(config));
+    {
+        let mut sessions = app.world_mut().resource_mut::<crate::lobby::Sessions>();
+        sessions
+            .0
+            .register(holder.into(), "Shield operator".into())
+            .expect("a fresh holder token registers");
+        sessions.0.set_station(holder, Some(station));
+    }
+
+    // Bevy's first update after TimePlugin reports a zero delta, so the 10 Hz
+    // broadcaster's timer first finishes on the following 100 ms logical step.
+    tick(&mut app);
+    tick(&mut app)
+        .into_iter()
+        .filter(|message| matches!(message.msg, ServerMessage::ShieldStatus { .. }))
+        .collect()
+}
+
+fn assert_shield_status_reaches_only_holder(messages: &[OutboundMessage], holder: &str) {
+    assert!(
+        !messages.is_empty(),
+        "the Shields System holder must receive an authoritative ShieldStatus snapshot"
+    );
+    assert!(
+        messages.iter().all(|message| {
+            matches!(&message.target, Target::Token(token) if token == holder)
+                && message.delivery == DeliveryClass::Snapshot
+        }),
+        "every periodic ShieldStatus must be a snapshot addressed to the Shields System holder"
+    );
+    assert!(
+        messages.iter().all(|message| matches!(
+            &message.msg,
+            ServerMessage::ShieldStatus { facings, .. } if !facings.is_empty()
+        )),
+        "the delivered ShieldStatus must carry the ship's authored facings"
+    );
+}
+
+#[test]
+fn conventional_shields_station_receives_the_authoritative_snapshot() {
+    let messages = shipped_hull_shield_status(
+        "assets/entities/alliance_battleship.toml",
+        "shields",
+        "shields-officer",
+        &["shields-system"],
+    );
+
+    assert_shield_status_reaches_only_holder(&messages, "shields-officer");
+}
+
+#[test]
+fn composite_engineering_station_receives_the_authoritative_shields_snapshot() {
+    let messages = shipped_hull_shield_status(
+        "assets/entities/alliance_destroyer.toml",
+        "engineering",
+        "engineering-officer",
+        &["shields-system", "power-reactor", "repair"],
+    );
+
+    assert_shield_status_reaches_only_holder(&messages, "engineering-officer");
+}
 
 fn shields_bb(app: &mut App) -> ShieldsBlackboard {
     let mut q = app
@@ -311,7 +400,6 @@ fn publish_shields_blackboard_four_facings() {
         .init_resource::<LastBroadcastEntityPositions>()
         .init_resource::<crate::server_app::LastBroadcastEntityHealth>()
         .init_resource::<LastBroadcastHull>()
-        .init_resource::<LastBroadcastShields>()
         .add_plugins(ShipShieldsPlugin);
     // One fixed step per update (issue #895).
     crate::ship::test_support::drive_one_fixed_step_per_update(
@@ -423,7 +511,6 @@ fn test_app_with_helm() -> App {
         .init_resource::<LastBroadcastEntityPositions>()
         .init_resource::<crate::server_app::LastBroadcastEntityHealth>()
         .init_resource::<LastBroadcastHull>()
-        .init_resource::<LastBroadcastShields>()
         .init_resource::<Outbox>()
         .init_resource::<CoordEnqueueBox>()
         .add_plugins(ShipShieldsPlugin)

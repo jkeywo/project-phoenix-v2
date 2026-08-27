@@ -30,8 +30,7 @@ use crate::core::messages::{ModifierSlot, ServerMessage, *};
 use crate::modifiers::power_system::SHIELDS_POWER_GROUP;
 use crate::modifiers::ShipModifiers;
 use crate::server_app::{
-    LastBroadcastEntityPositions, LastBroadcastHull, LastBroadcastShields, ShipImpulse,
-    ShipShields, SimOutbox,
+    LastBroadcastEntityPositions, LastBroadcastHull, ShipImpulse, ShipShields, SimOutbox,
 };
 use crate::weapons::shield::ShieldSystem;
 
@@ -76,7 +75,6 @@ fn test_app() -> App {
         .init_resource::<LastBroadcastEntityPositions>()
         .init_resource::<crate::server_app::LastBroadcastEntityHealth>()
         .init_resource::<LastBroadcastHull>()
-        .init_resource::<LastBroadcastShields>()
         .init_resource::<Outbox>()
         .add_plugins(ShipPowerPlugin)
         .add_systems(
@@ -742,7 +740,6 @@ fn reactor_offline_refuses_allocation_input() {
         .init_resource::<LastBroadcastEntityPositions>()
         .init_resource::<crate::server_app::LastBroadcastEntityHealth>()
         .init_resource::<LastBroadcastHull>()
-        .init_resource::<LastBroadcastShields>()
         .init_resource::<Outbox>()
         .add_plugins(ShipPowerPlugin)
         .add_plugins(crate::server_app::sim_state_broadcaster());

@@ -9,7 +9,7 @@ pub use audience::Audience;
 pub use broadcaster::{BroadcastKind, BroadcastRegistry, Broadcaster, Producer, Registration};
 pub use cache_registry::{
     LastBroadcastBlackboards, LastBroadcastEntityHealth, LastBroadcastEntityPositions,
-    LastBroadcastHull, LastBroadcastShields,
+    LastBroadcastHull,
 };
 pub use cadence::Cadence;
 pub use lobby::{Lobby, LobbyBroadcaster};

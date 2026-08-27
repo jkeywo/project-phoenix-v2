@@ -490,16 +490,11 @@ fn test_app() -> App {
     .add_plugins(bevy::time::TimePlugin)
     .init_resource::<WorldResource>()
     .init_resource::<TrackedEntities>()
-    .insert_resource(SimBroadcastTimer(Timer::new(
-        std::time::Duration::from_nanos(1),
-        TimerMode::Repeating,
-    )))
     .init_resource::<WorldSetupBroadcast>()
     .init_resource::<SimOutbox>()
     .init_resource::<LastBroadcastEntityPositions>()
     .init_resource::<LastBroadcastEntityHealth>()
     .init_resource::<LastBroadcastHull>()
-    .init_resource::<LastBroadcastShields>()
     .init_resource::<LastBroadcastBlackboards>()
     .init_resource::<crate::core::messages::InterSystemQueue>()
     .init_resource::<crate::ai::server::AiTokenRegistry>()
@@ -520,7 +515,6 @@ fn test_app() -> App {
         FixedUpdate,
         (
             handle_impulse_messages,
-            broadcast_shield_status,
             reconcile_runtime_entities
                 .after(crate::lobby::LobbySystemSet)
                 .before(broadcast_world_setup_on_start),

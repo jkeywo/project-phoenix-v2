@@ -2,7 +2,7 @@
 title: Server App Composition
 type: concept
 tags: [architecture, plugins, server, composition, fixed-tick]
-sources: [src/server_app/mod.rs, src/server_app/registration.rs, src/server_app/components.rs, src/server_app/broadcast.rs, src/server_app/broadcast_publish.rs, src/server_app/collision.rs, src/server_app/world_setup.rs, src/server_app_render.rs, src/server/bridge.rs]
+sources: [src/server_app/mod.rs, src/server_app/registration.rs, src/server_app/components.rs, src/server_app/broadcast.rs, src/server_app/broadcast_publish.rs, src/server_app/collision.rs, src/server_app/world_setup.rs, src/server_app_render.rs, src/ship/shields.rs, src/server/bridge.rs]
 updated: 2026-08-27
 ---
 
@@ -18,7 +18,7 @@ updated: 2026-08-27
 | `src/server_app/registration.rs` | The composition root: `SimPluginOptions`, fixed-tick setup, Rapier ordering, plugin registration, resources, systems, and broadcaster registration. |
 | `src/server_app/components.rs` | Cross-cutting ECS components, resources, and `SystemParam` bundles owned by the simulation assembly. |
 | `src/server_app/broadcast.rs` | Authoritative simulation snapshot builders, including `sim_state_broadcaster`. |
-| `src/server_app/broadcast_publish.rs` | Publish/HUD systems plus `modifier_events_broadcaster`, `sim_outbox_broadcaster`, delivery classification, shield status, and world-setup publication. |
+| `src/server_app/broadcast_publish.rs` | Publish/HUD systems plus `modifier_events_broadcaster`, `sim_outbox_broadcaster`, delivery classification, and world-setup publication. |
 | `src/server_app/collision.rs` | Rapier contact handling and collision damage. |
 | `src/server_app/world_setup.rs` | Static world setup and game-start entity spawning. |
 | `src/server_app_render.rs` | Render-only entity materialisation and mesh LOD updates, registered only when `SimPluginOptions::render` is true. |
@@ -43,7 +43,8 @@ The registration root installs:
 
 - `weapons_update_broadcaster` from `src/console/weapons/blackboard.rs`;
 - `sim_state_broadcaster` from `src/server_app/broadcast.rs`;
-- `modifier_events_broadcaster` and `sim_outbox_broadcaster` from `src/server_app/broadcast_publish.rs`.
+- `modifier_events_broadcaster` and `sim_outbox_broadcaster` from `src/server_app/broadcast_publish.rs`;
+- `shields_state_broadcaster` from `src/ship/shields.rs`, registered by `ShipShieldsPlugin` and routed to the holder of the Station that owns `shields-system`.
 
 `SimOutbox` is the arbitrary-target simulation queue. `sim_outbox_broadcaster` drains it and assigns `Reliable` or `Snapshot` delivery from the message variant. See [Broadcaster Seam](./broadcaster-seam.md).
 

@@ -288,23 +288,7 @@ pub fn shields_state_broadcaster() -> SimBroadcaster {
             else {
                 return vec![];
             };
-            let facings: Vec<ShieldFacingStatus> = shields
-                .0
-                .snapshot()
-                .into_iter()
-                .map(|s| ShieldFacingStatus {
-                    label: s.label,
-                    hp: s.hp,
-                    max_hp: s.max_hp,
-                    online: s.online,
-                    offline_remaining: s.offline_remaining,
-                    is_focused: s.is_focused,
-                    center_deg: s.center_deg,
-                    width_deg: s.width_deg,
-                    arc_id: s.id,
-                    priority: s.priority,
-                })
-                .collect();
+            let facings = shield_facing_statuses(&shields.0.snapshot());
             let frequency = shields.frequency();
             vec![crate::core::messages::ServerMessage::ShieldStatus { facings, frequency }]
         },
@@ -508,7 +492,8 @@ pub fn emit_shields_coordination(
 /// `SimState` world snapshot other ships see this ship's facings through
 /// when it is their Sensors target (issue #927,
 /// `server_app::build_sim_state_entity_states`), and the periodic 10 Hz
-/// `ShieldStatus` broadcast to all players (`server_app::broadcast_shield_status`).
+/// `ShieldStatus` broadcast to the holder of the authored Shields System
+/// (`shields_state_broadcaster`).
 /// One producer, four callers, so a facing field added here reaches all
 /// four without a second hand-written mapping to drift out of sync.
 pub fn shield_facing_statuses(

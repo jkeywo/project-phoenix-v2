@@ -10,17 +10,19 @@
 //! cache entries for despawned entities — respawning asteroids get a fresh
 //! UUID every cycle, so their old health-cache entries lived forever.
 //!
-//! This module is the single place that knows about all six delta caches and
-//! exposes three operations against them:
+//! This module is the single place that knows about all five shared,
+//! registry-covered delta caches and exposes three operations against them:
 //!
-//! - [`reset_all`] — zero every cache. Used on `OnEnter(GamePhase::InProgress)`
-//!   (covers the multi-game restart case where stale cache from a previous
-//!   game would otherwise suppress the first tick's updates).
+//! - [`reset_all`] — zero all five registry-covered caches. Used on
+//!   `OnEnter(GamePhase::InProgress)` (covers the multi-game restart case where
+//!   stale cache from a previous game would otherwise suppress the first
+//!   tick's updates).
 //! - [`resync_for_token`] — push a full-state snapshot to exactly one session
 //!   token (used on a mid-game `Welcome`, i.e. a reconnect) **without**
 //!   touching the shared caches, so every other client's next tick remains a
 //!   normal delta and is not force-resent. This replaces the #599 quick fix,
-//!   which reset every cache globally — causing the *next* 10 Hz tick to
+//!   which reset the registry-covered caches globally — causing the *next* 10
+//!   Hz tick to
 //!   broadcast full state to *all* clients whenever *anyone* reconnected.
 //! - [`prune`] — remove a set of despawned entity UUIDs from the two
 //!   UUID-keyed caches (`LastBroadcastEntityPositions`,
@@ -31,22 +33,29 @@
 //!
 //! ## What it owns
 //!
-//! The five UUID-agnostic / ship-scoped cache resources live in this module:
+//! The four registry-owned cache resources live in this module:
 //! [`LastBroadcastEntityPositions`], [`LastBroadcastEntityHealth`],
-//! [`LastBroadcastHull`], [`LastBroadcastShields`],
-//! [`LastBroadcastBlackboards`]. They are re-exported from `server_app` (and
-//! transitively `crate::server_app`) so existing `ResMut<LastBroadcastX>`
-//! system parameters across the codebase are unaffected by the move.
+//! [`LastBroadcastHull`], [`LastBroadcastBlackboards`]. They are re-exported
+//! from `server_app` (and transitively `crate::server_app`) so existing
+//! `ResMut<LastBroadcastX>` system parameters across the codebase are
+//! unaffected by the move.
 //!
-//! The sixth cache, `LastWeaponsUpdate` (`src/console/weapons/mod.rs`),
+//! The fifth cache, `LastWeaponsUpdate` (`src/console/weapons/blackboard.rs`),
 //! stays defined in its natural home next to the weapons producer that reads
 //! and writes it every tick — moving the type would ripple through that
 //! file's producer closure for no behavioural benefit. This registry's
 //! `reset_all` still resets it (via a `ResMut` parameter), so the registry's
-//! *interface* still covers all six caches even though one struct definition
-//! lives elsewhere, exactly as the module-level docs on
+//! *interface* still covers all five registry-covered caches even though one
+//! struct definition lives elsewhere, exactly as the module-level docs on
 //! `src/ship/system_registry.rs` describe conventions without forcing every
 //! consumer through one physical type.
+//!
+//! [`crate::console::repair::visibility::LastVisibleRepairBlackboard`] is a
+//! separate per-token Repair projection cache. It remains owned by the
+//! repair-visibility path and is not part of this registry's
+//! [`reset_all`], [`resync_for_token`], or [`prune`] operations.
+//! `reset_broadcast_caches_on_start` clears it explicitly alongside the five
+//! registry-covered caches when a game starts.
 //!
 //! ## Session bookkeeping (PRD story 9)
 //!
@@ -113,11 +122,6 @@ pub struct LastBroadcastHull(
     pub HashMap<String, crate::console::repair::visibility::HullProjection>,
 );
 
-/// Last-broadcast shield facings. Used to suppress the per-tick `ShieldStatus`
-/// broadcast to all players when nothing has changed.
-#[derive(Resource, Default)]
-pub struct LastBroadcastShields(pub Vec<ShieldFacingStatus>);
-
 /// Last-broadcast blackboard state per system. The `broadcast_blackboard_updates`
 /// system compares `ShipSystemBlackboards` against this and only emits a
 /// `BlackboardUpdate` for systems whose blackboard has changed.
@@ -126,7 +130,7 @@ pub struct LastBroadcastBlackboards(pub HashMap<SystemId, SystemBlackboard>);
 
 // ── Registry interface ──────────────────────────────────────────────────────
 
-/// Zero all six broadcast delta caches.
+/// Zero all five shared, registry-covered broadcast delta caches.
 ///
 /// Called from `OnEnter(GamePhase::InProgress)` so the first broadcast tick
 /// of a (re)started game always sends full state to all players — this also
@@ -134,14 +138,12 @@ pub struct LastBroadcastBlackboards(pub HashMap<SystemId, SystemBlackboard>);
 /// game would otherwise suppress initial updates.
 pub fn reset_all(
     hull: &mut LastBroadcastHull,
-    shields: &mut LastBroadcastShields,
     positions: &mut LastBroadcastEntityPositions,
     health: &mut LastBroadcastEntityHealth,
     weapons: &mut crate::console::weapons::LastWeaponsUpdate,
     blackboards: &mut LastBroadcastBlackboards,
 ) {
     *hull = LastBroadcastHull::default();
-    *shields = LastBroadcastShields::default();
     *positions = LastBroadcastEntityPositions::default();
     *health = LastBroadcastEntityHealth::default();
     *weapons = crate::console::weapons::LastWeaponsUpdate::default();
@@ -151,7 +153,7 @@ pub fn reset_all(
 /// Remove a set of despawned entity UUIDs from the UUID-keyed caches.
 ///
 /// Only [`LastBroadcastEntityPositions`] and [`LastBroadcastEntityHealth`]
-/// are keyed by entity UUID; the other four caches are ship-scoped or
+/// are keyed by entity UUID; the other three caches are ship-scoped or
 /// station-scoped (not entity-scoped) and are untouched by prune. Hooked
 /// into the despawn/reconciliation paths so respawning entities that reuse
 /// UUIDs (they don't — new UUIDs every cycle) or entities that simply vanish
@@ -182,7 +184,7 @@ pub fn prune(
 /// Constructs `SystemHullUpdate`, `ShieldStatus`, `BlackboardUpdate`, and
 /// (when the reconnecting token currently holds the Tactical station)
 /// `WeaponsUpdate` directly from live `LocalShip` component state (the same
-/// computations the regular cache-diffing producers use) and pushes them
+/// projections the regular live publishers use) and pushes them
 /// into `SimOutbox` targeted at `Target::Token(token)`. Entity
 /// positions/health for the wider world are already covered by the
 /// `Welcome` message's `GameState.world` snapshot (built from the live
@@ -196,9 +198,11 @@ pub fn prune(
 /// that station has no use for it and should not receive it here either.
 /// The owning station is resolved from the ship config — it's "tactical" on
 /// the crewed hulls but "pilot" on the single-station Courier.
-/// This deliberately does **not** touch `LastWeaponsUpdate` — same rule as
-/// the other three shared caches, so the next periodic broadcaster tick
-/// still diffs normally instead of being forced to re-send to everyone.
+/// This deliberately does **not** touch `LastWeaponsUpdate`,
+/// `LastBroadcastHull`, or `LastBroadcastBlackboards`, so their next periodic
+/// broadcaster ticks still diff normally instead of being forced to re-send.
+/// `ShieldStatus` has no delta cache after issue #1250; reconnect builds that
+/// one-shot projection directly from the live `ShipShields` component.
 pub fn resync_for_token(world: &mut World, token: &str) {
     use crate::console::weapons::compute_current_weapons_update;
     use crate::core::messages::StationId;
@@ -337,18 +341,6 @@ mod tests {
                 destroyed_fraction: Some(0.0),
             },
         );
-        let mut shields = LastBroadcastShields(vec![ShieldFacingStatus {
-            label: "Fore".into(),
-            hp: 50,
-            max_hp: 100,
-            online: true,
-            offline_remaining: 0.0,
-            is_focused: false,
-            center_deg: 0.0,
-            width_deg: 90.0,
-            arc_id: "fore".into(),
-            priority: 1,
-        }]);
         let mut positions = LastBroadcastEntityPositions::default();
         positions
             .0
@@ -381,7 +373,6 @@ mod tests {
 
         reset_all(
             &mut hull,
-            &mut shields,
             &mut positions,
             &mut health,
             &mut weapons,
@@ -391,10 +382,6 @@ mod tests {
         assert!(
             hull.0.is_empty(),
             "hull cache must be empty after reset_all"
-        );
-        assert!(
-            shields.0.is_empty(),
-            "shields cache must be empty after reset_all"
         );
         assert!(
             positions.0.is_empty(),
@@ -609,8 +596,6 @@ mod tests {
         let mut app = resync_test_app();
         app.init_resource::<LastBroadcastBlackboards>();
         app.init_resource::<LastBroadcastHull>();
-        app.init_resource::<LastBroadcastShields>();
-
         // Seed the shared caches as if a prior tick already broadcast state.
         app.world_mut()
             .resource_mut::<LastBroadcastBlackboards>()

@@ -2,7 +2,7 @@
 title: Networking
 type: concept
 tags: [networking, peerjs, webrtc, session-token, star-topology, datachannel, snapshot]
-sources: [server.html, client.html, gui/connection-manager.js, gui/session-token.js, src/server/bridge.rs, src/server_app/broadcast_publish.rs, AGENTS.md]
+sources: [server.html, client.html, gui/connection-manager.js, gui/session-token.js, src/core/broadcast/sim.rs, src/server/bridge.rs, src/server_app/broadcast_publish.rs, src/ship/shields.rs, AGENTS.md]
 updated: 2026-08-27
 ---
 
@@ -56,7 +56,15 @@ Every client maintains two parallel DataChannels on the same `RTCPeerConnection`
 | Reliable | (PeerJS default) | Yes | Yes | `ClientMessage` commands, `ServerMessage` lobby/events |
 | Snapshot | `'snapshot'` | No | 0 (never) | `SimState`, `BlackboardUpdate`, `ShieldStatus`, `RepairState`, `PowerState`, `WeaponsUpdate`, `SystemHullUpdate` |
 
-The server classifies each `ServerMessage` via `delivery_class_for_msg()` in `src/server_app/broadcast_publish.rs`. `flush_outbound` in `src/server/bridge.rs` passes the delivery class as a third string argument to the JS callback. `routeOutbound` in `server.html` dispatches to the appropriate channel map, falling back to the reliable channel for any token without a snapshot channel.
+Direct `SimBroadcaster` producers are stamped `Snapshot` by
+`src/core/broadcast/sim.rs`; the live periodic `ShieldStatus` publisher uses
+that path. `SimOutbox` messages are classified individually by
+`delivery_class_for_msg()` in `src/server_app/broadcast_publish.rs`, including
+the one-shot Shields projection rebuilt for reconnect. `flush_outbound` in
+`src/server/bridge.rs` passes the delivery class as a third string argument to
+the JS callback. `routeOutbound` in `server.html` dispatches to the appropriate
+channel map, falling back to the reliable channel for any token without a
+snapshot channel.
 
 ## Client connection lifecycle (`gui/connection-manager.js`)
 

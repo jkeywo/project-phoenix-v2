@@ -311,7 +311,6 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         app
             // Timers / outboxes: wall-clock / transport bookkeeping, not sim state.
             .declare_state::<SimOutbox>(StateClass::Timer, "digest-exclusion-classes")
-            .declare_state::<SimBroadcastTimer>(StateClass::Timer, "digest-exclusion-classes")
             .declare_state::<crate::debug_overlay::DamageLog>(
                 StateClass::Timer,
                 "digest-exclusion-classes",
@@ -327,7 +326,6 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 "digest-exclusion-classes",
             )
             .declare_state::<LastBroadcastHull>(StateClass::Cache, "digest-exclusion-classes")
-            .declare_state::<LastBroadcastShields>(StateClass::Cache, "digest-exclusion-classes")
             .declare_state::<LastBroadcastBlackboards>(
                 StateClass::Cache,
                 "digest-exclusion-classes",
@@ -717,7 +715,6 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         .init_resource::<LastBroadcastEntityPositions>()
         .init_resource::<LastBroadcastEntityHealth>()
         .init_resource::<LastBroadcastHull>()
-        .init_resource::<LastBroadcastShields>()
         .init_resource::<LastBroadcastBlackboards>()
         .init_resource::<crate::core::messages::InterSystemQueue>()
         // `handle_collisions` (registered below, in SimSet::Damage) writes this,
@@ -725,10 +722,6 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         // — idempotent — but that plugin is absent headless, and the sim must not
         // depend on the debug overlay being present.
         .init_resource::<crate::debug_overlay::DamageLog>()
-        .insert_resource(SimBroadcastTimer(Timer::from_seconds(
-            0.1,
-            TimerMode::Repeating,
-        )))
         .add_systems(
             Startup,
             setup_world
@@ -954,7 +947,6 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     .add_systems(
         FixedUpdate,
         (
-            broadcast_shield_status.in_set(crate::sim_sets::SimSet::Broadcast),
             handle_collisions.in_set(crate::sim_sets::SimSet::Damage),
             sim_processing_anchor,
         )

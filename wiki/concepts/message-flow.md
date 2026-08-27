@@ -2,7 +2,7 @@
 title: Message Flow
 type: concept
 tags: [messages, bridge, wasm, bevy, routing, delivery-class, coordination]
-sources: [src/server/bridge.rs, src/core/codec.rs, src/core/messages.rs, src/lobby/server.rs, src/lobby/handler.rs, src/command_admission/, src/server_app/broadcast_publish.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, server.html, client.html, gui/sim-state.js, gui/console-state.js]
+sources: [src/server/bridge.rs, src/core/codec.rs, src/core/messages.rs, src/core/broadcast/sim.rs, src/lobby/server.rs, src/lobby/handler.rs, src/command_admission/, src/server_app/broadcast_publish.rs, src/ship/shields.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, server.html, client.html, gui/sim-state.js, gui/console-state.js]
 updated: 2026-08-27
 ---
 
@@ -46,7 +46,14 @@ In-game actions use `ClientMessage::ControlSystem { target: SystemId, payload }`
 - `Reliable` is ordered/retransmitted for lifecycle, setup, and one-shot state changes;
 - `Snapshot` is unordered and not retransmitted for replaceable periodic state.
 
-`delivery_class_for_msg` lives with `sim_outbox_broadcaster` in `src/server_app/broadcast_publish.rs`. `flush_outbound` is the Rust-to-JavaScript boundary. `routeOutbound` prefers the client's unordered snapshot channel for snapshot traffic and falls back to reliable when that channel is absent.
+Direct `SimBroadcaster` producers are stamped `Snapshot` by
+`src/core/broadcast/sim.rs`; this is the live 10 Hz `ShieldStatus` path.
+Messages queued through `SimOutbox` are classified by `delivery_class_for_msg`
+beside `sim_outbox_broadcaster` in `src/server_app/broadcast_publish.rs`,
+including the targeted one-shot Shields projection rebuilt for reconnect.
+`flush_outbound` is the Rust-to-JavaScript boundary. `routeOutbound` prefers
+the client's unordered snapshot channel for snapshot traffic and falls back to
+reliable when that channel is absent.
 
 ## Reconnect and disconnect
 

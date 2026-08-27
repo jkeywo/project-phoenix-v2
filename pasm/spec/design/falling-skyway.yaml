@@ -642,7 +642,7 @@ entities:
         clean-ledger benchmark met implies exactly two of the three claims
         lifted; benchmark criteria never alter claim amounts or lift
         capacity.
-      asserted_by: [a_crew_who_did_everything_still_reach_the_window_short]
+      asserted_by: [falling_skyway_clean_ledger_benchmark_lifts_exactly_two_of_three]
       anchors:
         # The benchmark criteria never alter the claim amounts; pin one so a
         # scenario edit that couples them breaks here.

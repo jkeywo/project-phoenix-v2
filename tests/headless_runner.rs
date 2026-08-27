@@ -9048,6 +9048,63 @@ fn skyway_at_act_two() -> (bevy::prelude::App, bevy::prelude::Entity) {
     (app, ship)
 }
 
+/// Enter the crowded middle of Falling Skyway with the opening-era benchmark
+/// work genuinely complete. Every state change travels through the ordinary
+/// Sensors or Comms command seam: three structure scans, Control's filing
+/// pickup, and Lark's scan-backed stop after the Critical second hail.
+fn skyway_after_clean_opening(seed: u64) -> (bevy::prelude::App, bevy::prelude::Entity) {
+    const FILE_SURVEY: &str = "world.falling_skyway.comms.file_survey";
+    const UNSAFE: &str = "world.falling_skyway.comms.lark_unsafe_response";
+
+    let survey_due = skyway_authored_deadline_secs("skyway_survey_due") as f64;
+    let (mut app, ship) = skyway_survey_app(seed);
+
+    for target in [SKYWAY_SURVEY_HEAD, SKYWAY_SURVEY_DEPOT_A, SKYWAY_DEPOT_B] {
+        skyway_scan_for_survey(&mut app, ship, target);
+    }
+    let control_position = skyway_position(&mut app, SKYWAY_SURVEY_CONTROL);
+    skyway_move(
+        &mut app,
+        ship,
+        control_position + bevy::prelude::Vec3::new(60.0, 0.0, 0.0),
+    );
+    run(&mut app, 2);
+    skyway_hail(&mut app, SKYWAY_SURVEY_CONTROL);
+    skyway_pick(&mut app, SKYWAY_SURVEY_CONTROL, FILE_SURVEY);
+    assert_eq!(skyway_flag(&app, "skyway_survey_reported"), 1);
+
+    // Let the first routine check go unanswered. The final check at the survey
+    // boundary is the generic Critical-priority contract ratified in #1138.
+    let limit = ticks_for_sim_seconds(survey_due + 5.0, SKYWAY_DT);
+    for _ in 0..limit {
+        run(&mut app, 1);
+        if skyway_flag(&app, "lark_final_hail_sent") > 0 {
+            break;
+        }
+    }
+    assert_eq!(skyway_flag(&app, "lark_first_hail_sent"), 1);
+    assert_eq!(skyway_flag(&app, "lark_final_hail_sent"), 1);
+    let lark_position = skyway_position(&mut app, SKYWAY_LARK);
+    skyway_move(
+        &mut app,
+        ship,
+        lark_position + bevy::prelude::Vec3::new(40.0, 0.0, 0.0),
+    );
+    run(&mut app, 2);
+    skyway_pick(&mut app, SKYWAY_LARK, UNSAFE);
+    assert_eq!(skyway_flag(&app, "lark_corridor_cancelled"), 1);
+
+    // The clean road clears all three named civilians through the same admitted
+    // Navigation orders a crew console sends. The storm objectives may not have
+    // posted yet; the civilian state is authoritative pre-emption memory.
+    skyway_order_corridor_to_shelter(&mut app);
+    run(&mut app, 4);
+
+    skyway_move(&mut app, ship, CHOICE_LADDER);
+    run(&mut app, 4);
+    (app, ship)
+}
+
 fn skyway_move(app: &mut bevy::prelude::App, ship: bevy::prelude::Entity, to: bevy::prelude::Vec3) {
     let mut physics = app
         .world_mut()
@@ -10935,6 +10992,41 @@ fn skyway_order_corridor_to_shelter(app: &mut bevy::prelude::App) {
             },
         });
     }
+}
+
+/// Recover Lyra on the benchmark road through the real tractor command and
+/// target lock. The authored first-band and rescue deadlines choose the start
+/// and limit; no test-only operation flag or condition edit substitutes for the
+/// work.
+fn skyway_rescue_lyra_for_clean_ledger(app: &mut bevy::prelude::App, ship: bevy::prelude::Entity) {
+    let band_at = skyway_deadline_secs(app, "storm_band_one_due") as f64;
+    let clear_by = skyway_deadline_secs(app, "lyra_clear_due") as f64;
+    let start_at = band_at - 10.0;
+    window_run_to(app, start_at);
+
+    let drift = position_of(app, SKYWAY_LYRA);
+    let station = bevy::prelude::Vec3::new(drift.x + 40.0, drift.y, drift.z + 40.0);
+    skyway_move(app, ship, station);
+    skyway_engage_tractor(app, ship, SKYWAY_LYRA);
+
+    while window_now(app) < clear_by && skyway_flag(app, "a2_lyra_recovered") == 0 {
+        skyway_move(app, ship, station);
+        let lyra = skyway_uuid(app, SKYWAY_LYRA);
+        skyway_set_lock(app, ship, Some(lyra));
+        run(app, 1);
+    }
+    assert_eq!(
+        skyway_flag(app, "a2_lyra_recovered"),
+        1,
+        "the clean-ledger road must recover Lyra before her authored deadline"
+    );
+    skyway_release_tractor(app);
+    skyway_move(
+        app,
+        ship,
+        bevy::prelude::Vec3::new(station.x + 900.0, station.y, station.z),
+    );
+    run(app, 2);
 }
 
 /// **Issue #1134.** Beyond the opening scan-backed Lark stop, silence does not
@@ -16390,8 +16482,8 @@ fn assert_the_campaign_record_is_complete(app: &bevy::prelude::App) {
     );
 }
 
-/// **Issue #1043, AC1/AC2/AC4/AC5/AC6/AC7 — the best road through the mission,
-/// and it still leaves somebody on the rock.**
+/// **Issue #1137 — the clean-ledger benchmark still leaves somebody on the
+/// rock.**
 ///
 /// This crew did everything the scenario had to offer: they read the rung, got
 /// the strike settled at the table, got a worker on the record, mended Ladder B
@@ -16404,14 +16496,14 @@ fn assert_the_campaign_record_is_complete(app: &bevy::prelude::App) {
 /// without naming the woman who contradicted the file.
 /// All three promises on the books come out KEPT, and the ledger says so.
 #[test]
-fn falling_skyway_carries_the_workers_and_the_convoy_and_keeps_the_captains_word() {
+fn falling_skyway_clean_ledger_benchmark_lifts_exactly_two_of_three() {
     use project_phoenix::core::messages::ObjectiveStatus;
 
-    let (mut app, ship) = skyway_at_act_two();
+    let (mut app, ship) = skyway_after_clean_opening(1137);
     let (_, ship_uuid) = window_ship(&mut app);
 
-    // ── Act 2: read the rung, talk them down, get her on the record ──────────
-    skyway_scan_ladder_b(&mut app, ship);
+    // The survey's genuine Ladder B reading is also the maintenance-file diff;
+    // one physical scan feeds both threads rather than being fabricated twice.
     assert_eq!(skyway_flag(&app, "skyway_records_diff_found"), 1);
     skyway_move(&mut app, ship, CHOICE_LADDER);
     run(&mut app, 2);
@@ -16449,9 +16541,14 @@ fn falling_skyway_carries_the_workers_and_the_convoy_and_keeps_the_captains_word
     );
     assert_eq!(skyway_flag(&app, "skyway_records_put"), 0);
 
-    let settled_by = window_now(&app) + 24.0;
-    window_run_to(&mut app, settled_by);
+    // Act 2's other mandatory verb is equally real: hold the tractor on Lyra
+    // before the band and let her own recovered-condition signal resolve it.
+    skyway_rescue_lyra_for_clean_ledger(&mut app, ship);
     assert_eq!(skyway_flag(&app, "skyway_strike_settled"), 1);
+    assert_eq!(
+        objective_status(&app, "obj-a2-rescue"),
+        ObjectiveStatus::Completed
+    );
 
     // "Everything" includes the optional manifold run-up. Do it after the
     // time-sensitive parley setup and before the back half opens.
@@ -16717,6 +16814,63 @@ fn falling_skyway_carries_the_workers_and_the_convoy_and_keeps_the_captains_word
     );
     assert_eq!(skyway_flag(&app, "campaign.skyway.commitments.broken"), 0);
     assert_eq!(skyway_flag(&app, "campaign.skyway.commitments.clean"), 1);
+
+    // #1130's canonical end-of-run projection is the scoreboard consumed by
+    // balance-runs.mjs. Prove the benchmark through that public report seam,
+    // including the locked six-objective spine, rather than by a second private
+    // interpretation of the objective manager.
+    let report_args = skyway_args(SKYWAY_DT, window_now(&app) + 1.0);
+    let report = build_report(&mut app, &report_args, 0.0);
+    let scenario = report
+        .scenario
+        .as_ref()
+        .expect("Falling Skyway must project its terminal scenario state");
+    for id in [
+        "obj-a1-survey",
+        "obj-a1-triage",
+        "obj-a2-line",
+        "obj-a2-rescue",
+        "obj-a2-storm",
+        "obj-a3-head",
+    ] {
+        let objective = scenario
+            .objectives
+            .iter()
+            .find(|objective| objective.id == id)
+            .unwrap_or_else(|| panic!("the mandatory spine never posted '{id}'"));
+        assert!(
+            objective.mandatory,
+            "'{id}' drifted out of the mandatory spine"
+        );
+        assert_eq!(
+            objective.status,
+            ObjectiveStatus::Completed,
+            "the clean-ledger benchmark left '{id}' incomplete"
+        );
+    }
+    let campaign: std::collections::BTreeMap<&str, i64> = scenario
+        .flags
+        .iter()
+        .filter(|flag| flag.name.starts_with("campaign.skyway."))
+        .map(|flag| (flag.name.as_str(), flag.value))
+        .collect();
+    for flag in [
+        "campaign.skyway.traffic.none",
+        "campaign.skyway.commitments.clean",
+        "campaign.skyway.skyhook.held",
+        "campaign.skyway.evidence.filed",
+    ] {
+        assert_eq!(
+            campaign.get(flag),
+            Some(&1),
+            "the canonical report does not meet clean-ledger criterion '{flag}'"
+        );
+    }
+    assert_eq!(
+        campaign.get("campaign.skyway.passage.taken"),
+        Some(&2),
+        "the benchmark cannot turn scarce lift into a third passage"
+    );
 }
 
 /// **Issue #1043, AC4 — the captain who promised these people the corridor and

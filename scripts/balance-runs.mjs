@@ -24,6 +24,7 @@
 //   report.damage_by_ship[uuid].death      [tick, sim_t] | null
 //   report.station_activity.buckets[].stations[]  {station, human, ai, offline}
 //   report.scenario.objectives[]           {id, mandatory, status, ...}
+//   report.scenario.flags[]                {name, value}
 //   report.seed, report.final_phase, report.sim_seconds
 //
 // Merge conventions (documented so the numbers are unambiguous):
@@ -48,6 +49,13 @@
 //     with no usable objective projection are excluded from the denominator
 //     and counted by telemetry-gap reason; process failures remain failures and
 //     are excluded too.
+//   - The Falling Skyway clean-ledger classification applies only when a report
+//     carries `campaign.skyway.*` flags. A sampled run is `clean` when the
+//     locked six-objective spine is complete and all four campaign facts hold
+//     (no traffic lost, commitments clean, skyhook held, evidence filed),
+//     `completedButMid` when that spine completed but a campaign fact did not,
+//     and `incomplete` when the spine did not complete. Malformed objective or
+//     flag telemetry is unmeasurable, never silently classified.
 //
 // The pure exports (mergeReports / formatMarkdown / formatMatrix / expandMatchups
 // / buildRunTasks / buildRunArgs
@@ -266,11 +274,8 @@ function runTtk(report) {
   return latest;
 }
 
-/**
- * Classify one report's mandatory-objective set without allowing absent
- * telemetry to masquerade as either a loss or vacuous success.
- */
-function mandatorySetObservation(report) {
+/** Validate the canonical objective rows once for every scenario metric. */
+function objectiveRowsObservation(report) {
   const scenario = report?.scenario;
   if (scenario === null || typeof scenario !== 'object' || Array.isArray(scenario)) {
     return { sampled: false, reason: 'missingScenario' };
@@ -294,6 +299,17 @@ function mandatorySetObservation(report) {
     }
     ids.add(objective.id);
   }
+  return { sampled: true, objectives };
+}
+
+/**
+ * Classify one report's generic mandatory-objective set without allowing absent
+ * telemetry to masquerade as either a loss or vacuous success.
+ */
+function mandatorySetObservation(report) {
+  const observation = objectiveRowsObservation(report);
+  if (!observation.sampled) return observation;
+  const { objectives } = observation;
   const mandatory = objectives.filter((objective) => objective.mandatory);
   if (mandatory.length === 0) {
     return { sampled: false, reason: 'noMandatoryObjectives' };
@@ -301,6 +317,81 @@ function mandatorySetObservation(report) {
   return {
     sampled: true,
     completed: mandatory.every((objective) => objective.status === 'Completed'),
+  };
+}
+
+const FALLING_SKYWAY_CAMPAIGN_PREFIX = 'campaign.skyway.';
+const FALLING_SKYWAY_CLEAN_FLAGS = [
+  'campaign.skyway.traffic.none',
+  'campaign.skyway.commitments.clean',
+  'campaign.skyway.skyhook.held',
+  'campaign.skyway.evidence.filed',
+];
+const FALLING_SKYWAY_MANDATORY_SPINE = [
+  'obj-a1-survey',
+  'obj-a1-triage',
+  'obj-a2-line',
+  'obj-a2-rescue',
+  'obj-a2-storm',
+  'obj-a3-head',
+];
+
+/**
+ * Classify the Falling Skyway clean-ledger benchmark from the canonical
+ * end-of-run scenario projection. Reports from other scenarios are explicitly
+ * not applicable; telemetry gaps in an identifiable Falling Skyway report are
+ * unmeasurable rather than a benchmark failure.
+ */
+function fallingSkywayCleanLedgerObservation(report) {
+  const scenario = report?.scenario;
+  if (scenario === null || typeof scenario !== 'object' || Array.isArray(scenario)) {
+    return { applicable: false };
+  }
+
+  const flags = scenario.flags;
+  const applicable = Array.isArray(flags) && flags.some((flag) => (
+    flag !== null
+    && typeof flag === 'object'
+    && typeof flag.name === 'string'
+    && flag.name.startsWith(FALLING_SKYWAY_CAMPAIGN_PREFIX)
+  ));
+  if (!applicable) return { applicable: false };
+
+  const values = new Map();
+  for (const flag of flags) {
+    if (
+      flag === null
+      || typeof flag !== 'object'
+      || Array.isArray(flag)
+      || typeof flag.name !== 'string'
+      || flag.name.trim().length === 0
+      || !Number.isSafeInteger(flag.value)
+      || flag.value === 0
+      || values.has(flag.name)
+    ) {
+      return { applicable: true, sampled: false, reason: 'malformedFlags' };
+    }
+    values.set(flag.name, flag.value);
+  }
+
+  const objectiveRows = objectiveRowsObservation(report);
+  if (!objectiveRows.sampled) {
+    return { applicable: true, sampled: false, reason: objectiveRows.reason };
+  }
+  const objectivesById = new Map(objectiveRows.objectives.map((objective) => [objective.id, objective]));
+  const mandatorySpineComplete = FALLING_SKYWAY_MANDATORY_SPINE.every((id) => {
+    const objective = objectivesById.get(id);
+    return objective?.mandatory === true && objective.status === 'Completed';
+  });
+  if (!mandatorySpineComplete) {
+    return { applicable: true, sampled: true, classification: 'incomplete' };
+  }
+
+  const clean = FALLING_SKYWAY_CLEAN_FLAGS.every((name) => (values.get(name) ?? 0) > 0);
+  return {
+    applicable: true,
+    sampled: true,
+    classification: clean ? 'clean' : 'completedButMid',
   };
 }
 
@@ -338,6 +429,17 @@ export function mergeReports(runs) {
           missingScenario: 0,
           malformedObjectives: 0,
           noMandatoryObjectives: 0,
+        },
+        fallingSkywayCleanLedgerApplicable: false,
+        fallingSkywayCleanLedgerSampled: 0,
+        fallingSkywayCleanLedgerClean: 0,
+        fallingSkywayCleanLedgerCompletedButMid: 0,
+        fallingSkywayCleanLedgerIncomplete: 0,
+        fallingSkywayCleanLedgerUnmeasurable: {
+          missingScenario: 0,
+          malformedObjectives: 0,
+          noMandatoryObjectives: 0,
+          malformedFlags: 0,
         },
       };
       byMatchup.set(run.matchup, m);
@@ -409,6 +511,23 @@ export function mergeReports(runs) {
     } else {
       m.mandatorySetUnmeasurable[mandatorySet.reason] += 1;
     }
+
+    const cleanLedger = fallingSkywayCleanLedgerObservation(run.report);
+    if (cleanLedger.applicable) {
+      m.fallingSkywayCleanLedgerApplicable = true;
+      if (cleanLedger.sampled) {
+        m.fallingSkywayCleanLedgerSampled += 1;
+        if (cleanLedger.classification === 'clean') {
+          m.fallingSkywayCleanLedgerClean += 1;
+        } else if (cleanLedger.classification === 'completedButMid') {
+          m.fallingSkywayCleanLedgerCompletedButMid += 1;
+        } else {
+          m.fallingSkywayCleanLedgerIncomplete += 1;
+        }
+      } else {
+        m.fallingSkywayCleanLedgerUnmeasurable[cleanLedger.reason] += 1;
+      }
+    }
   }
 
   const matchups = {};
@@ -417,6 +536,10 @@ export function mergeReports(runs) {
     const mandatorySetUnmeasurable = {
       total: Object.values(m.mandatorySetUnmeasurable).reduce((a, n) => a + n, 0),
       ...m.mandatorySetUnmeasurable,
+    };
+    const fallingSkywayCleanLedgerUnmeasurable = {
+      total: Object.values(m.fallingSkywayCleanLedgerUnmeasurable).reduce((a, n) => a + n, 0),
+      ...m.fallingSkywayCleanLedgerUnmeasurable,
     };
     matchups[m.label] = {
       label: m.label,
@@ -445,6 +568,13 @@ export function mergeReports(runs) {
           : null,
         unmeasurable: mandatorySetUnmeasurable,
       },
+      fallingSkywayCleanLedger: m.fallingSkywayCleanLedgerApplicable ? {
+        clean: m.fallingSkywayCleanLedgerClean,
+        completedButMid: m.fallingSkywayCleanLedgerCompletedButMid,
+        incomplete: m.fallingSkywayCleanLedgerIncomplete,
+        sampled: m.fallingSkywayCleanLedgerSampled,
+        unmeasurable: fallingSkywayCleanLedgerUnmeasurable,
+      } : null,
       // Phase → summed sim-seconds, keys sorted and values rounded to ms so
       // merged.json is stable and diffably free of float-sum noise.
       phases: Object.fromEntries(
@@ -500,23 +630,58 @@ function formatMandatorySet(metric) {
   return `${metric.completed}/${metric.sampled} (${pct(metric.rate)}${gap})`;
 }
 
+function formatFallingSkywayCleanLedger(metric) {
+  if (metric === null) return '—';
+  const unmeasurable = metric.unmeasurable;
+  const reasons = [
+    [unmeasurable.missingScenario, 'missing scenario'],
+    [unmeasurable.malformedObjectives, 'malformed objectives'],
+    [unmeasurable.noMandatoryObjectives, 'no mandatory objectives'],
+    [unmeasurable.malformedFlags, 'malformed flags'],
+  ]
+    .filter(([count]) => count > 0)
+    .map(([count, reason]) => `${count} ${reason}`)
+    .join(', ');
+  const gap = reasons ? `; ${reasons}` : '';
+  return `${metric.clean} clean / ${metric.completedButMid} completed but mid / ${metric.incomplete} incomplete (${metric.sampled} sampled${gap})`;
+}
+
 /**
  * Render a per-matchup summary table. PURE — string in, string out. Works for
  * every config shape (one row per matchup).
  */
 export function formatMarkdown(summary) {
   const rows = Object.values(summary.matchups);
+  const showFallingSkywayCleanLedger = rows.some((s) => s.fallingSkywayCleanLedger !== null);
   const lines = [];
-  lines.push('| Matchup | Runs | Win% | W/L/D/T | Fail | Mandatory set complete | TTK min/med/max (s) | Dmg margin |');
-  lines.push('|---|---:|---:|:---:|---:|:---:|:---:|---:|');
+  const headings = ['Matchup', 'Runs', 'Win%', 'W/L/D/T', 'Fail', 'Mandatory set complete'];
+  const separators = ['---', '---:', '---:', ':---:', '---:', ':---:'];
+  if (showFallingSkywayCleanLedger) {
+    headings.push('Falling Skyway clean ledger');
+    separators.push(':---:');
+  }
+  headings.push('TTK min/med/max (s)', 'Dmg margin');
+  separators.push(':---:', '---:');
+  lines.push(`| ${headings.join(' | ')} |`);
+  lines.push(`|${separators.join('|')}|`);
   for (const s of rows) {
     const wldt = `${s.wins}/${s.losses}/${s.draws}/${s.timeouts}`;
     const ttk = s.ttk.count
       ? `${num(s.ttk.min)} / ${num(s.ttk.median)} / ${num(s.ttk.max)}`
       : '—';
-    lines.push(
-      `| ${s.label} | ${s.total} | ${pct(s.winRate)} | ${wldt} | ${s.failures} | ${formatMandatorySet(s.mandatorySetCompletion)} | ${ttk} | ${num(s.damageMargin.mean)} |`,
-    );
+    const cells = [
+      s.label,
+      s.total,
+      pct(s.winRate),
+      wldt,
+      s.failures,
+      formatMandatorySet(s.mandatorySetCompletion),
+    ];
+    if (showFallingSkywayCleanLedger) {
+      cells.push(formatFallingSkywayCleanLedger(s.fallingSkywayCleanLedger));
+    }
+    cells.push(ttk, num(s.damageMargin.mean));
+    lines.push(`| ${cells.join(' | ')} |`);
   }
   const t = summary.totals;
   lines.push('');

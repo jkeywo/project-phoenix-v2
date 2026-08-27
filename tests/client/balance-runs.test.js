@@ -62,6 +62,32 @@ function report({
 }
 
 const objective = (status, mandatory = true, id = `objective-${status}`) => ({ id, status, mandatory });
+const scenarioFlag = (name, value = 1) => ({ name, value });
+const fallingSkywayCleanFlags = () => [
+  scenarioFlag('campaign.skyway.traffic.none'),
+  scenarioFlag('campaign.skyway.commitments.clean'),
+  scenarioFlag('campaign.skyway.skyhook.held'),
+  scenarioFlag('campaign.skyway.evidence.filed'),
+];
+const fallingSkywayMandatorySpine = (overrides = {}) => [
+  'obj-a1-survey',
+  'obj-a1-triage',
+  'obj-a2-line',
+  'obj-a2-rescue',
+  'obj-a2-storm',
+  'obj-a3-head',
+].map((id) => objective(overrides[id] ?? 'Completed', true, id));
+
+const fallingSkywayRun = (seed, scenario) => ({
+  matchup: 'falling_skyway',
+  seed,
+  report: report({
+    outcome: 'timeout',
+    playerDealt: 0,
+    enemyDealt: 0,
+    scenario,
+  }),
+});
 
 describe('matchupLabel', () => {
   it('joins side compositions, dropping side_b for a scenario sweep', () => {
@@ -422,6 +448,172 @@ describe('mergeReports — mandatory objective sets', () => {
     expect(summary.matchups.complete.mandatorySetCompletion).toMatchObject({ completed: 1, sampled: 1, rate: 1 });
     expect(summary.matchups.zero.mandatorySetCompletion).toMatchObject({ completed: 0, sampled: 2, rate: 0 });
     expect(summary.matchups.no_data.mandatorySetCompletion).toMatchObject({ completed: 0, sampled: 0, rate: null });
+  });
+});
+
+describe('mergeReports — Falling Skyway clean ledger', () => {
+  it('classifies a completed mandatory set with all four clean campaign facts as clean', () => {
+    const summary = mergeReports([
+      fallingSkywayRun(1, {
+        objectives: [
+          ...fallingSkywayMandatorySpine(),
+          objective('Failed', true, 'obj-a2-conditional-loss-report'),
+        ],
+        flags: fallingSkywayCleanFlags(),
+      }),
+    ]);
+
+    expect(summary.matchups.falling_skyway.fallingSkywayCleanLedger).toEqual({
+      clean: 1,
+      completedButMid: 0,
+      incomplete: 0,
+      sampled: 1,
+      unmeasurable: {
+        total: 0,
+        missingScenario: 0,
+        malformedObjectives: 0,
+        noMandatoryObjectives: 0,
+        malformedFlags: 0,
+      },
+    });
+  });
+
+  it('classifies any missing clean campaign fact as completed but mid', () => {
+    const without = (name) => fallingSkywayCleanFlags().filter((flag) => flag.name !== name);
+    const trafficLost = [
+      ...without('campaign.skyway.traffic.none'),
+      scenarioFlag('campaign.skyway.traffic.lost', 1),
+    ];
+    const commitmentBroken = [
+      ...without('campaign.skyway.commitments.clean'),
+      scenarioFlag('campaign.skyway.commitments.broken', 1),
+    ];
+    const skyhookLost = [
+      ...without('campaign.skyway.skyhook.held'),
+      scenarioFlag('campaign.skyway.skyhook.lost', 1),
+    ];
+    const evidenceUnfiled = [
+      ...without('campaign.skyway.evidence.filed'),
+      scenarioFlag('campaign.skyway.evidence.records', 1),
+    ];
+    const complete = fallingSkywayMandatorySpine();
+
+    const metric = mergeReports([
+      fallingSkywayRun(1, { objectives: complete, flags: trafficLost }),
+      fallingSkywayRun(2, { objectives: complete, flags: commitmentBroken }),
+      fallingSkywayRun(3, { objectives: complete, flags: skyhookLost }),
+      fallingSkywayRun(4, { objectives: complete, flags: evidenceUnfiled }),
+    ]).matchups.falling_skyway.fallingSkywayCleanLedger;
+
+    expect(metric).toMatchObject({
+      clean: 0,
+      completedButMid: 4,
+      incomplete: 0,
+      sampled: 4,
+    });
+  });
+
+  it('classifies an unfinished mandatory set as incomplete even when the campaign facts are clean', () => {
+    const metric = mergeReports([
+      fallingSkywayRun(1, {
+        objectives: fallingSkywayMandatorySpine({ 'obj-a2-rescue': 'Active' }),
+        flags: fallingSkywayCleanFlags(),
+      }),
+    ]).matchups.falling_skyway.fallingSkywayCleanLedger;
+
+    expect(metric).toMatchObject({
+      clean: 0,
+      completedButMid: 0,
+      incomplete: 1,
+      sampled: 1,
+    });
+  });
+
+  it('classifies a missing locked-spine objective as incomplete, not unmeasurable', () => {
+    const objectives = fallingSkywayMandatorySpine()
+      .filter((objectiveRow) => objectiveRow.id !== 'obj-a3-head');
+    const metric = mergeReports([
+      fallingSkywayRun(1, { objectives, flags: fallingSkywayCleanFlags() }),
+    ]).matchups.falling_skyway.fallingSkywayCleanLedger;
+
+    expect(metric).toMatchObject({
+      clean: 0,
+      completedButMid: 0,
+      incomplete: 1,
+      sampled: 1,
+      unmeasurable: { total: 0 },
+    });
+  });
+
+  it('counts malformed canonical flags as unmeasurable rather than a benchmark failure', () => {
+    const metric = mergeReports([
+      fallingSkywayRun(1, {
+        objectives: fallingSkywayMandatorySpine(),
+        flags: [
+          scenarioFlag('campaign.skyway.skyhook.held'),
+          { name: 'campaign.skyway.traffic.none', value: '1' },
+        ],
+      }),
+    ]).matchups.falling_skyway.fallingSkywayCleanLedger;
+
+    expect(metric).toEqual({
+      clean: 0,
+      completedButMid: 0,
+      incomplete: 0,
+      sampled: 0,
+      unmeasurable: {
+        total: 1,
+        missingScenario: 0,
+        malformedObjectives: 0,
+        noMandatoryObjectives: 0,
+        malformedFlags: 1,
+      },
+    });
+  });
+
+  it('does not apply the benchmark or its markdown column to unrelated scenarios', () => {
+    const summary = mergeReports([{
+      matchup: 'combat_test',
+      seed: 1,
+      report: report({
+        outcome: 'victory',
+        playerDealt: 10,
+        enemyDealt: 0,
+        scenario: {
+          objectives: [objective('Completed', true, 'survive')],
+          flags: [scenarioFlag('campaign.combat_test.waves_cleared')],
+        },
+      }),
+    }]);
+
+    expect(summary.matchups.combat_test.fallingSkywayCleanLedger).toBeNull();
+    expect(formatMarkdown(summary)).not.toContain('Falling Skyway clean ledger');
+  });
+
+  it('renders clean, completed-but-mid, incomplete, and unmeasurable runs distinctly', () => {
+    const complete = fallingSkywayMandatorySpine();
+    const trafficLost = fallingSkywayCleanFlags()
+      .filter((flag) => flag.name !== 'campaign.skyway.traffic.none')
+      .concat(scenarioFlag('campaign.skyway.traffic.lost'));
+    const summary = mergeReports([
+      fallingSkywayRun(1, { objectives: complete, flags: fallingSkywayCleanFlags() }),
+      fallingSkywayRun(2, { objectives: complete, flags: trafficLost }),
+      fallingSkywayRun(3, {
+        objectives: fallingSkywayMandatorySpine({ 'obj-a1-survey': 'Failed' }),
+        flags: fallingSkywayCleanFlags(),
+      }),
+      fallingSkywayRun(4, {
+        objectives: complete,
+        flags: [
+          scenarioFlag('campaign.skyway.skyhook.held'),
+          { name: 'campaign.skyway.evidence.filed', value: null },
+        ],
+      }),
+    ]);
+    const markdown = formatMarkdown(summary);
+
+    expect(markdown).toContain('| Falling Skyway clean ledger |');
+    expect(markdown).toContain('1 clean / 1 completed but mid / 1 incomplete (3 sampled; 1 malformed flags)');
   });
 });
 

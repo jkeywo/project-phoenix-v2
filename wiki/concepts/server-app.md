@@ -1,93 +1,59 @@
 ---
-title: Server App Composition (server_app.rs)
+title: Server App Composition
 type: concept
-tags: [architecture, plugins, server, composition]
-sources: [src/server_app.rs, src/server/bridge.rs]
-updated: 2026-05-16
+tags: [architecture, plugins, server, composition, fixed-tick]
+sources: [src/server_app/mod.rs, src/server_app/registration.rs, src/server_app/components.rs, src/server_app/broadcast.rs, src/server_app/broadcast_publish.rs, src/server_app/collision.rs, src/server_app/world_setup.rs, src/server_app_render.rs, src/server/bridge.rs]
+updated: 2026-08-27
 ---
 
 # Server App Composition
 
-`src/server_app.rs` is the **composition root** for the server-side Bevy simulation. It replaces the former `simulation.rs` god-module (deleted in issue #261, the final slice of the simulation-split series #227).
+`crate::server_app` is the server-side Bevy composition facade. The browser host and headless runner both call `add_simulation_plugins` (or `add_simulation_plugins_with`) rather than owning parallel simulation registrations.
 
-## Entry point
+## Module seams
 
-```rust
-pub fn add_simulation_plugins(app: &mut App)
+| File | Current responsibility |
+|---|---|
+| `src/server_app/mod.rs` | Thin facade and re-exports. It keeps existing `crate::server_app::…` imports stable while implementation lives in focused sibling modules. |
+| `src/server_app/registration.rs` | The composition root: `SimPluginOptions`, fixed-tick setup, Rapier ordering, plugin registration, resources, systems, and broadcaster registration. |
+| `src/server_app/components.rs` | Cross-cutting ECS components, resources, and `SystemParam` bundles owned by the simulation assembly. |
+| `src/server_app/broadcast.rs` | Authoritative simulation snapshot builders, including `sim_state_broadcaster`. |
+| `src/server_app/broadcast_publish.rs` | Publish/HUD systems plus `modifier_events_broadcaster`, `sim_outbox_broadcaster`, delivery classification, shield status, and world-setup publication. |
+| `src/server_app/collision.rs` | Rapier contact handling and collision damage. |
+| `src/server_app/world_setup.rs` | Static world setup and game-start entity spawning. |
+| `src/server_app_render.rs` | Render-only entity materialisation and mesh LOD updates, registered only when `SimPluginOptions::render` is true. |
+
+## Registration contract
+
+`add_simulation_plugins` uses the default `SimPluginOptions`. `add_simulation_plugins_with` is the test/headless seam: it can omit render-coupled systems, move Rapier registration to prove explicit schedule edges, and deterministically shuffle top-level plugin registration to expose accidental order dependencies.
+
+The simulation runs in `FixedUpdate` on the authored logical tick. `SimSet` remains the authoritative chain:
+
+```text
+Input → Physics → Damage → Modifiers → Publish → PublishAggregate → Broadcast
 ```
 
-Called from `wasm_init()` in `src/server/bridge.rs` instead of the old `.add_plugins(SimulationPlugin)`. All plugin registrations are centralised here.
+Rapier's backend sync runs after `SimSet::Physics`; its writeback completes before `SimSet::Damage`. Collision outcomes therefore depend on logical ticks, not rendered frames or plugin insertion order.
 
-## Plugin catalogue
+The registration root installs the console, ship, AI, world-support, infrastructure, campaign, civilian, tractor, dock, umbilical, delivery, and broadcast plugins. Each domain plugin still owns its own systems and authoritative state; `server_app` owns only their composition and genuinely cross-domain seams.
 
-| Plugin | File | Responsibility |
-|---|---|---|
-| `RapierPhysicsPlugin` | bevy_rapier3d | Contacts + raycasts. Registered by `register_physics` in `FixedUpdate` on the logical tick, ordered between `SimSet::Physics` and `SimSet::Damage` (#896) |
-| `RegionPlugin` | `src/regions/server.rs` | Region entry/exit, effect membership |
-| `ConsoleAiPlugin` | `src/console_ai/server.rs` | Server-side AI for hidden consoles (Low complexity) |
-| `AiPlugin` | `src/ai/server.rs` | NPC entity state machines (PRD #142) |
-| `CaptainPlugin` | `src/captain_plugin.rs` | Red-alert toggle, view mode switching |
-| `ShipPlugin` | `src/ship_plugin.rs` | Helm physics, impulse drive |
-| `WeaponsPlugin` | `src/weapons_plugin.rs` | Phasers, torpedoes, target locking |
-| `RepairPlugin` | `src/repair_plugin.rs` | Shape-matching repair, team dispatch, breakdown queue |
-| `PowerPlugin` | `src/power_plugin.rs` | 6+2 power allocation, battery exhaustion |
-| `SciencePlugin` | `src/science_plugin.rs` | Science target hand-off, CancelImpulse |
+## Broadcast path
 
-## Shared resources initialised here
+The registration root installs:
 
-Resources that do not belong to any single plugin live in `server_app.rs`:
+- `weapons_update_broadcaster` from `src/console/weapons/blackboard.rs`;
+- `sim_state_broadcaster` from `src/server_app/broadcast.rs`;
+- `modifier_events_broadcaster` and `sim_outbox_broadcaster` from `src/server_app/broadcast_publish.rs`.
 
-| Resource | Type | Purpose |
-|---|---|---|
-| `ShipState` | `Resource` | Ship position, yaw, red-alert, view-mode |
-| `ShipShields` | `Resource` | Four-quadrant shield model |
-| `WorldResource` | `Resource` | `WorldData` snapshot for reconnect Welcome |
-| `SimOutbox` | `Resource` | Per-frame outbound message buffer (drained by `sim_outbox_broadcaster`) |
-| `TrackedEntities` | `Resource` | Entity reconciliation registry (EntitySpawned / EntityDespawned) |
+`SimOutbox` is the arbitrary-target simulation queue. `sim_outbox_broadcaster` drains it and assigns `Reliable` or `Snapshot` delivery from the message variant. See [Broadcaster Seam](./broadcaster-seam.md).
 
-`ShipHullIntegrity` was previously listed here as a `Resource`; it was deleted
-in PRD #597 PR 10 (`EntitySystemHull` is the sole hull store — see
-PRD #597). `ShipImpulse` was previously
-listed here as a `Resource` too; issue #606 removed its `Resource` derive, so
-it is now a per-entity `Component` only, populated on the ship entity at spawn
-(`spawn_game_start_entities` for the player ship) rather than initialised as a
-shared resource in this file.
+## Tests
 
-## Systems in server_app.rs
-
-Systems that are too cross-cutting to belong to a single plugin remain here:
-
-- `handle_set_sensors_target` — Sensors→Tactical target suggestion routing
-- `handle_set_shield_focus` — Shield-focus message handler
-- `tick_shields` — Shield regen + offline timer
-- `handle_collisions` — Rapier collision → hull damage (needs Rapier context + ShipState + shields + breakdowns)
-- `broadcast_shield_status` — ShieldStatus at 10 Hz
-- `broadcast_world_setup_on_start` — One-shot WorldSetup on first InProgress frame
-- `reconcile_runtime_entities` — EntitySpawned / EntityDespawned delta tracking
-- `setup_world` / `spawn_game_start_entities` / `render_spawned_entities` — World and entity lifecycle
-
-## Broadcaster registrations
-
-`add_simulation_plugins` also wires:
-
-- `weapons_update_broadcaster()` — WeaponsUpdate at 10 Hz → Tactical holder
-- `sim_state_broadcaster()` — SimState at 10 Hz → All
-- `modifier_events_broadcaster()` — ModifierAdded / ModifierRemoved on every change → All
-- `sim_outbox_broadcaster()` — drains `SimOutbox` every frame
-
-See [Broadcaster Seam](./broadcaster-seam.md) for the full catalogue and API.
-
-## Backward-compatible alias
-
-`src/lib.rs` declares `pub use server_app as simulation;` so all existing `crate::simulation::*` import paths in other modules continue to compile without modification. The alias will be removed in a future cleanup pass once callers are updated to import from `crate::server_app` directly.
+Module-level composition tests live in `src/server_app/mod_tests.rs`. Cross-binary and schedule-order properties live in integration tests, including the headless runner and registration-order determinism checks. Render code stays outside those headless paths behind `SimPluginOptions::render`.
 
 ## Related
 
-- [CaptainPlugin](./captain-plugin.md) — view mode + red alert
-- [ShipPlugin](./ship-plugin.md) — helm + impulse
-- [WeaponsPlugin](./weapons-plugin.md) — phasers + torpedoes
-- [RepairPlugin](./repair-plugin.md) — breakdown repair loop
-- [PowerPlugin](./power-plugin.md) — 6+2 power allocation
-- [SciencePlugin](./science-plugin.md) — science target + impulse cancel
-- [Broadcaster Seam](./broadcaster-seam.md) — SimBroadcaster API
-- [WorldPlugin](./world-plugin.md) — scenario + world content (registered separately in bridge.rs)
+- [Game Loop](./game-loop.md)
+- [Message Flow](./message-flow.md)
+- [Broadcaster Seam](./broadcaster-seam.md)
+- [WorldPlugin](./world-plugin.md)

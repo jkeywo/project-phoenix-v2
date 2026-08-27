@@ -2,13 +2,22 @@
 title: Radar Projection
 type: concept
 tags: [radar, helm, navigation, viewscreen, pure-iterator, shared]
-sources: [gui/console-state.js, gui/components/ph-scope-chrome.js, gui/battleship/navigation.html, gui/sim-state.js, gui/components/ph-radar.js, gui/components/ph-tactical-radar.js, gui/components/ph-navigation-map.js, client.html, src/radar.rs, src/radar_config.rs, src/entities/tags.rs, src/console/weapons/blackboard.rs, CONTEXT.md]
-updated: 2026-08-12
+sources: [gui/console-state.js, gui/components/ph-scope-chrome.js, gui/battleship/navigation.html, gui/sim-state.js, gui/components/ph-radar.js, gui/components/ph-tactical-radar.js, gui/components/ph-navigation-map.js, client.html, src/gui/radar.rs, src/radar.rs, src/radar_config.rs, src/entities/tags.rs, src/console/weapons/blackboard.rs, CONTEXT.md]
+updated: 2026-08-27
 ---
 
 # Radar Projection
 
-A single pure iterator that turns 3D asteroid positions into 2D radar dots, ship-relative.
+Radar projection has three explicit surfaces rather than one cross-target
+implementation:
+
+- phone consoles use the pure-JS `buildBlips()` family in
+  `gui/console-state.js` over authoritative entity and blackboard snapshots;
+- the Bevy viewscreen uses `project_radar_entity` in `src/gui/radar.rs`;
+- `src/radar.rs` now owns only the pure ship-local phaser range/forward-arc
+  readiness check used by the weapons server.
+
+The client remains pure JavaScript and does not call the Rust projection.
 
 ## Shared radar artwork
 
@@ -18,37 +27,18 @@ circular screen rotated opposite `ship_heading`. Pre-projected blips, markers,
 and console-specific SVG overlays remain above those artwork layers. The
 navigation chart is a separate north-up world map and does not use this treatment.
 
-## API
-
-```rust
-pub fn radar_dots(
-    asteroids: &[AsteroidInfo],
-    ship_x: f32,
-    ship_z: f32,
-    ship_yaw: f32,
-) -> impl Iterator<Item = (f32, f32, f32)>  // (radar_x, radar_y, scaled_radius)
-```
-
-Lives in `src/radar.rs` so both server and client can use it.
-
-## Two consumers
-
-1. **Helm console (client):** the helm UI renders an overhead mini-radar of nearby asteroids.
-2. **Server viewscreen Radar mode:** when `ViewMode == Radar`, the viewscreen renders the same projection full-screen.
-
-Same input → same output → same visual semantics. This was an explicit deepening (commit `f3ef92c`) — before that, server and helm had two separate projection implementations that drifted.
-
-## Why an iterator
-
-- Caller decides how to consume (filter by range, take top-N, collect).
-- No allocation in the hot path.
-- Easy to test: collect into a `Vec` and assert.
-
 ## HTML console waypoint blips
 
 The HTML console path uses `gui/console-state.js::buildBlips()` and `buildWaypointBlip()` before passing pre-projected blips into `gui/components/ph-radar.js`. Navigation owns one shared custom waypoint via server `SimSnapshot.navigation_waypoint`; Helm projects it ship-relative and clamps it to radius `0.96` with `edge: true` when it is outside Helm radar range. The radar widget renders `kind: "waypoint"` as a cyan diamond/ring without a bitmap asset.
 
-`gui/battleship/navigation.html` — and the other four `ph-navigation-map` hosts, `gui/cruiser/comms.html`, `gui/destroyer/tactical.html`, `gui/courier/captain.html`, and `gui/courier/pilot.html` — feed the same `blips` + `regions` state into the shared `<ph-navigation-map>` component. It draws the live chart background and grid, then region hulls (sphere/torus/box, matching the viewscreen radar's shapes) between the grid and the blips, then the waypoint, own-ship marker, and server-derived blips, with a gold ring marking `objective_target` regions and blips alike. It does not carry hardcoded sector polygons; region overlays arrive data-driven from the server via `buildRadarRegions()` rather than baked into the Navigation background. Moon-tagged contacts (`EntityTag::Moon`, now in each hull's `[navigation_console.system_chart] shows` list) ride the same blip path as any other point contact, with no bespoke chart glyph of their own.
+The three `ph-navigation-map` host files — `gui/battleship/navigation.html`,
+`gui/cruiser/comms.html`, and `gui/courier/captain.html` — feed the same `blips`
+and `regions` state into the shared component. It draws the live chart background
+and grid, then region hulls (sphere, torus, and box) between the grid and blips,
+then the waypoint, own-ship marker, and server-derived contacts. Objective
+regions and blips receive a gold marker. Region overlays arrive from
+`buildRadarRegions()` rather than hardcoded polygons; Moon-tagged contacts use
+the same blip path as any other point contact.
 
 `gui/console-state.js::buildRadarRegions()` is the HTML path for shaped map overlays. It emits `region`, `asteroid_field`, and objective-marker entities as sphere/box/torus payloads for Navigation and Sensors. Region entities normally carry `shape` from the server snapshot; asteroid-field entities may be normalised from `radius` + `inner_radius` into a torus/sphere overlay so fields remain visible on the Navigation map even when they are not point blips.
 
@@ -64,16 +54,16 @@ Entity TOML `[radar_appearance].icon` flows into `EntitySnapshot.radar_icon` whe
 
 ## Navigation's two-stage filter
 
-`buildNavigationConsoleState` (`gui/console-state.js:1523`) is the odd one out among the per-console builders: it runs **two** filters in series.
+`buildNavigationConsoleState` in `gui/console-state.js` is the odd one out among the per-console builders: it runs **two** filters in series.
 
-1. **Outer filter** (`console-state.js:1536-1541`) walks every entity and keeps it only if it is either an active objective target *or* one of its tags appears in `navChartShows`.
+1. **Outer filter** walks every entity and keeps it only if it is either an active objective target *or* one of its tags appears in `navChartShows`.
 2. **Inner filter** is the standard `buildBlips()` range/`shows` filter, applied to whatever the outer filter let through.
 
 This means an empty `navChartShows` is **not** a no-op for Navigation — it makes the outer filter drop every non-objective entity, leaving the chart blank. Tactical and Sensors only have the inner filter, where an empty `shows` falls through and shows everything.
 
-`navChartShows` / `navChartSelects` / `navChartRange` live on `ShipClientConfig` (`src/core/messages.rs:963-991`), sourced from `[navigation_console.system_chart]` in the per-hull ship TOML (e.g. `assets/entities/alliance_battleship.toml`). Since the client-shell rework (#819–#823) there is a **single** client store: `gui/sim-state.js` (`window.simState`), applied from `Welcome` and each `SimSnapshot`. The per-console builders read straight off that store — there is no longer a separate `client.html` `state` mirror to keep in sync (and no `blips arrive when state is built via the client.html Welcome mirror path` regression test guarding it; that path was removed). `gui/dirty-consoles.js` tracks which consoles changed each tick and `gui/client-router.js` drives the fan-out, calling `window.buildConsoleState(consoleName, simState)` per dirty console.
+`navChartShows` / `navChartSelects` / `navChartRange` live on `ShipClientConfig` in `src/core/messages.rs`, sourced from `[navigation_console.system_chart]` in the per-hull ship TOML (e.g. `assets/entities/alliance_battleship.toml`). The client has one store: `gui/sim-state.js` (`window.simState`), applied from `Welcome` and each `SimSnapshot`. The per-console builders read straight from that store. `gui/dirty-consoles.js` tracks which consoles changed each tick and `gui/client-router.js` drives the fan-out, calling `window.buildConsoleState(consoleName, simState)` per dirty console.
 
-Tactical radar blips follow the same single-store path: the server publishes them into the ship's `tactical-radar` blackboard (`TacticalRadarBlackboard.blips`, #829), `simState` carries the blackboards, and `buildWeaponsConsoleState` (`gui/console-state.js:597`) reads `state.blackboards['tactical-radar'].blips` as the authoritative source (falling back to a local `buildBlips()` projection only when the blackboard carries none). It **copies** that array rather than aliasing it: the science marker and waypoint are appended to the result, and the store's array is replaced only when a `BlackboardUpdate` arrives — which the server's `LastBroadcastBlackboards` delta cache withholds while nothing changes — so aliasing would grow the store's array on every build.
+Tactical radar blips follow the same single-store path: the server publishes them into the ship's `tactical-radar` blackboard, `simState` carries the blackboards, and `buildWeaponsConsoleState` in `gui/console-state.js` reads `state.blackboards['tactical-radar'].blips` as the authoritative source (falling back to a local `buildBlips()` projection only when the blackboard carries none). It **copies** that array rather than aliasing it: the science marker and waypoint are appended to the result, and the store's array is replaced only when a `BlackboardUpdate` arrives.
 
 ## Torpedo-armed contacts (#957)
 
@@ -81,7 +71,7 @@ Tactical radar blips follow the same single-store path: the server publishes the
 us", sent so the Tactical console can badge a torpedo boat **before** the first
 torpedo is in flight. `publish_tactical_radar_blackboard` sets it from the
 contact's own live `TorpedoSystemResource` (tubes non-empty) AND
-`crate::faction::is_enemy` against the observing ship — the same faction
+`crate::ai::faction::is_enemy` against the observing ship — the same faction
 predicate the helm hostile-arc overlay (#874) uses, so a friendly torpedo boat
 and the player's own ship never badge themselves. The client never re-derives it
 from a hull name, icon or model.
@@ -112,11 +102,6 @@ the `localiseTree` ingress boundary that resolves *server-sent* ids — and
 spelling the id out in a `t()` call is what keeps `check-strings.mjs` able to
 see it.
 
-## Future filters
-
-PRD #66 mentions extending `radar.rs` for **range-based** and **type-based** filtering — Weapons console wants 60-unit targeting range; Science (Draft 3) wants only stars/planets, no asteroids. The current iterator can be wrapped in standard `.filter()` calls; explicit filter combinators may follow.
-
 ## Related
 
 - [Helm Console](../entities/helm-console.md) · [View Modes](./view-modes.md)
-- PRD #66

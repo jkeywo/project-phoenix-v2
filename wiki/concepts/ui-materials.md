@@ -3,7 +3,7 @@ title: UiMaterial Shader Pattern
 type: concept
 tags: [ui, shader, wgsl, ui-material, viewscreen, vignette]
 sources: [src/server/viewscreen_border.rs, assets/shaders/red_alert_vignette.wgsl]
-updated: 2026-05-12
+updated: 2026-08-27
 ---
 
 # UiMaterial Shader Pattern
@@ -53,11 +53,10 @@ The handle is cached in a `Resource` so the per-frame system that drives the uni
 
 A custom `UiMaterial` is the right tool when **a UI region needs a procedural visual that depends on game state**, not a static texture or a simple colour. Cases that justify the WGSL hop:
 
-- Radial / linear gradients with state-driven parameters (the vignette).
-- Alert / damage / shield state visualisations that pulse, sweep, or animate.
-- Procedural backgrounds for station chrome (PRD #119) where a tiled texture would feel static.
-- Chrome around the comms console that fades by message priority (PRD #119).
-- Future hull / shield damage indicators that bleed in from the edges of a panel.
+- Radial or linear gradients with state-driven parameters, such as the current
+  Red Alert vignette.
+- Presentation effects that require a procedural pulse, sweep, or animation
+  which cannot be represented by a static texture or colour.
 
 If the visual is just an image or a tint, a plain `ImageNode` or `BackgroundColor` is enough — don't reach for a shader.
 
@@ -73,5 +72,4 @@ Bevy UI renders children in spawn order. The vignette `MaterialNode` is spawned 
 
 ## Related
 
-- PRD #180 — first use; full context
 - [Build & Deployment](./build-and-deployment.md) — Trunk asset pipeline

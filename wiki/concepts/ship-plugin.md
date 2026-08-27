@@ -1,63 +1,38 @@
 ---
 title: ShipPlugin
+type: concept
+tags: [ship, helm, physics, coordination, control-source, ai]
+sources: [src/ship_plugin.rs, src/ship/helm_ai/, src/ship/helm_admission.rs, src/ship/physics_systems.rs, src/ship/coordination_systems.rs, src/ship/rating_systems.rs, src/server_app/collision.rs]
+updated: 2026-08-27
 ---
 
 # ShipPlugin
 
-Extracted from `simulation.rs` as part of the simulation split ([PRD #227](https://github.com/jkeywo/project-phoenix-v2/issues/227), issue [#239](https://github.com/jkeywo/project-phoenix-v2/issues/239)).
+`ShipPlugin` is the Bevy adapter for ship motion, helm policy, station-control state, and inter-station coordination. Pure state and calculations remain under `src/ship/`; plugin registration and cross-module ordering live in `src/ship_plugin.rs`.
 
-## Ownership
+## Helm command path
 
-`ShipPlugin` owns the ship's motion and impulse drive, but not collision handling (which remains in `SimulationPlugin` because it depends on `RapierPhysicsPlugin`).
+Human and AI commands enter the same per-ship `AdmittedCommands` queue. The AI helm hosts build one frozen decision surface, emit ordinary `ControlSystem` payloads for the authored helm systems, and run before `process_helm_inputs`. That applier is the sole writer of helm intent components. `apply_helm_commands` handles impulse/boost transitions, then `integrate_ship_physics` consumes the complete intent set and writes `ShipPhysics`.
 
-### Systems moved from `simulation.rs`
+The current AI axes are thrust, steering, lateral thrust, vertical thrust, impulse, and boost. Each host is gated by the `ControlSourceResolver` policy for its own fine system and by the shared logical-tick AI cadence. See [AI Helm Decomposition](./ai-helm-decomposition.md).
 
-| System | Responsibility |
-|---|---|
-| `process_helm_inputs` | Turns admitted per-axis `ControlSystem` commands (`SetThrust` → `helm-thrust`, `SetSteering` → `helm-steering`, #801) into the shared helm intent components for every ship, human- and AI-admitted alike (authority is checked once at admission, #824) |
-| `sync_ship_position` | Syncs `ShipState` → Rapier `Transform` for the ship entity |
-| `handle_impulse_messages` | Handles `StartImpulseCharge` / `CancelImpulse`, auto-cancels on hull damage |
-| `process_coordination_lag` | Delivers channel-3 `CoordinationEnqueue` messages from each ship's `CoordinationQueue`; sets `PendingArcBearingRequest` for AI Helm on `ArcBearingRequest` delivery; emits popup for human Helm |
-| `ai_helm_thrust` / `ai_helm_steering` / `ai_helm_lateral_thrust` / `ai_helm_impulse` | Per-axis AI helm ([details](./ai-helm-decomposition.md)); `ai_helm_steering` reads `PendingArcBearingRequest` and biases steering toward the requested bearing via `steer_toward` |
-| `integrate_ship_physics` | Sole helm-path writer of `ShipPhysics`; consumes the intent components for the player ship and every `AiHighFidelity` NPC |
+## Coordination and station state
 
-### Systems that stayed in `simulation.rs`
+The plugin registers `CoordinationEnqueue`, owns the per-ship coordination queue adapters, resolves human-seeking station hosts, and updates control sources when station ratings or tenure change. `process_coordination_lag` delivers the typed coordination payload after the hull's authored lag; recipients then consume the same delivered fact whether the station is human- or AI-operated.
 
-| System | Reason |
-|---|---|
-| `handle_collisions` | Requires `ReadRapierContext` — tightly coupled to Rapier, which `SimulationPlugin` owns |
+## Physics ownership
 
-### Resources
+`integrate_ship_physics` is the normal helm-path writer. `sync_ship_position` projects authoritative `ShipPhysics` into the entity `Transform` before Rapier sync. The sanctioned out-of-band writers are documented on `ShipPhysics` in `src/ship/state.rs`.
 
-| Resource | Defined In | Purpose |
-|---|---|---|
-| `AiTickTimer` / `AiTickReady` / `AiSnapshotReady` | `src/ai/cadence.rs` | The ONE shared AI decision cadence (issues #803, #889): a `run_if(ai_tick_ready)` gate on every AI policy host — the six per-axis helm systems plus shield focus, power allocation, torpedo load/auto-fire, frequency hint, phaser and blaster auto-fire, AI target selection — decoupling AI decision cadence from frame rate. Rate is TOML-authored via `[global] ai_tick_hz` (default 30 Hz, alias `ai_helm_tick_hz`); `AiSnapshotReady` is derived from it as a whole number of base ticks (`[global] ai_snapshot_hz`, default 10 Hz) and gates the `WorldSnapshot` rebuild, Captain and Sensors. Installed by `register_ai_cadence` from every plugin that registers a gated system |
-| `LastHelmInput` (pub) | `src/ship/components.rs` | Holds last thrust/steering (read by `ConsoleAiPlugin`) |
-| `CollisionCooldown` | `simulation.rs` | 1-second immunity after a collision hit |
-| `PendingArcBearingRequest` | `src/ship/components.rs` | Set by `process_coordination_lag` when AI Helm consumes an `ArcBearingRequest`; `ai_helm_steering` biases steering via `steer_toward`; cleared when the target is no longer visible or a phaser arc already bears |
+Collision response is deliberately outside `ShipPlugin`: `handle_collisions` lives in `src/server_app/collision.rs`, where it can consume Rapier contacts and apply damage while remaining explicitly ordered between the physics and damage sets.
 
-## Registration
+## Registration and tests
 
-```rust
-.add_plugins(crate::ship_plugin::ShipPlugin)
-```
+`src/server_app/registration.rs` installs `ShipPlugin` as one member of the fixed `SimSet` chain. Unit and schedule tests live beside their owning ship modules; the plugin's larger integration fixtures remain in `src/ship_plugin.rs` and the server-app integration suite.
 
-Registered by `SimulationPlugin` in `simulation.rs` (after `CaptainPlugin`, before `AsteroidDestroyedVfx` message type).
+## Related
 
-## Future
-
-Final home will be `src/ship/server.rs` once Deepening A ([#223](https://github.com/jkeywo/project-phoenix-v2/issues/223)) lands.
-
-## Sources
-
-- `src/ship_plugin.rs` (plugin registration + re-exports)
-- `src/ship/components.rs`
-- `src/ship/helm_ai.rs`
-- `src/ship/helm_admission.rs`
-- `src/ship/physics_systems.rs`
-- `src/ship/impulse_boost_systems.rs`
-- `src/ship/rating_systems.rs`
-- `src/ship/coordination_systems.rs`
-- `src/ship/damage_sync.rs`
-- `src/server_app.rs:handle_collisions`
-- Issue [#239](https://github.com/jkeywo/project-phoenix-v2/issues/239)
+- [Ship Physics](./ship-physics.md)
+- [Helm Runtime](./helm-control-intent.md)
+- [Modifier Coordination](./modifier-coordination.md)
+- [Station](../entities/station.md)

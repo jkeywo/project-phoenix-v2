@@ -1,3 +1,11 @@
+---
+title: Localisation
+type: concept
+tags: [localisation, strings, client, display-text]
+sources: [assets/strings/strings.csv, gui/strings.js, gui/strings-boot.js, gui/connection-manager.js, scripts/check-strings.mjs, docs/strings-authoring-guide.md]
+updated: 2026-08-27
+---
+
 # Localisation
 
 All display text lives in `assets/strings/strings.csv` (`id,context,en`). The

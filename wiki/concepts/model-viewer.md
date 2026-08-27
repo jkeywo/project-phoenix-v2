@@ -3,7 +3,7 @@ title: Model Viewer
 type: concept
 tags: [tooling, rendering, shaders, wasm, trunk]
 sources: [viewer.html, viewer-trunk.toml, start-viewer.bat, scripts/dev-viewer.mjs, scripts/capture-billboards.mjs, scripts/generate-entity-index.mjs, scripts/stitch-planet-textures.mjs, scripts/viewer-lods.mjs, scripts/lod-capture-manifest.toml, assets/planets/, assets/shaders/planet_surface.wgsl, assets/shaders/planet_clouds.wgsl, src/viewer/, src/render_setup.rs, src/entities/glb_visual.rs, src/entities/celestial_visual.rs, src/entities/mesh_stats.rs]
-updated: 2026-08-26
+updated: 2026-08-27
 ---
 
 # Model Viewer
@@ -12,9 +12,8 @@ A second Trunk target (`viewer.html`, port 8081) that renders **one** subject �
 a GLB model, or a star/planet from an entity TOML — through the game's own
 render path, with lighting switchable between off / ambient / directional.
 
-It exists because judging appearance previously meant booting `server.html`,
-joining a lobby, starting a scenario and flying to the thing. That loop is too
-slow for tuning lighting or WGSL.
+It provides a short feedback loop for tuning lighting, rigs, LODs, textures,
+and WGSL without starting a scenario and flying to the subject.
 
 ```bash
 npm run dev:viewer     # → :8081
@@ -25,7 +24,7 @@ start-viewer.bat       # Windows: same, plus a compile check and opens the brows
 |---|---|
 | `model=assets/models/alliance_cruiser.glb` | GLB to render (default) |
 | `variant=large` | rig sidecar variant (`large`, `small`, `cosmetic`, `lod1`…) |
-| `entity=assets/entities/sol.toml` | render that config's `[star]`, `[planet]` or `[mesh]` |
+| `entity=assets/entities/star_sun.toml` | render that config's `[star]`, `[planet]` or `[mesh]` |
 | `lighting=off\|ambient\|directional` | initial lighting mode (default `ambient`) |
 | `gizmos=1` | overlay rig markers, target points and the extents box |
 
@@ -109,7 +108,7 @@ setup, so the shared pieces were extracted and both callers now use them:
 `spawn_glb_visual` is deliberately ignorant of the simulation: it returns the
 `SceneRoot` child it spawned, and callers decorate it. The game's local ship
 adds `Visibility::Hidden` + `NoFrustumCulling` that way
-(`decorate_local_ship_model` in `server_app.rs`).
+(`decorate_local_ship_model` in `src/server_app_render.rs`).
 
 ## Lighting modes
 
@@ -134,15 +133,17 @@ same longitude remap. Normal vectors are renormalised after resampling.
 
 ## Notes
 
-- The `viewer` cargo feature depends on `server`, because the simulation
-  modules reference `crate::bridge` and `crate::server::renderer` directly and
-  the crate does not compile without it. The viewer registers none of the
-  simulation systems, so this costs binary size, not behaviour.
+- The viewer ships as `--no-default-features --features viewer`; the `viewer`
+  feature does not imply the presentation `server` feature. CI's `boundary`
+  job compiles that exact feature set, while `viewer-test` executes its tests
+  with the default feature set also present. Shared visual constructors live
+  outside `crate::server`, so the viewer can exercise the real asset/material
+  path without carrying the browser-host bridge or viewscreen renderer.
 - Bevy asset hot-reload does not work on wasm. Editing a `.wgsl` triggers a
   Trunk rebuild and page reload — that reload *is* the iteration loop.
-- The model dropdown reads `assets/models/index.json`, regenerated on every
-  build by `scripts/generate-model-index.mjs` (a Trunk `pre_build` hook) so it
-  cannot go stale. The file is gitignored, and `dev-viewer.mjs` also writes it
+- The model dropdown reads the gitignored index generated on every
+  build by `scripts/generate-model-index.mjs` (a Trunk `pre_build` hook), so it
+  cannot go stale. `dev-viewer.mjs` also writes it
   once *before* starting Trunk: the file is on Trunk's `[watch] ignore` list,
   and Trunk canonicalises those paths at startup, so in a fresh checkout the
   hook that creates it never got to run.
@@ -162,7 +163,3 @@ same longitude remap. Normal vectors are renormalised after resampling.
 - `start-viewer.bat` waits for port 8081 to accept a connection before opening
   the browser. Trunk does not bind it until the first wasm build finishes,
   which is minutes from cold.
-- `trunk build` (as opposed to `trunk serve`) currently fails on Windows for
-  *any* target in this repo when the output directory is fresh — Trunk cannot
-  rename the staged `assets` tree into place (`os error 5`). Pre-existing;
-  unrelated to this tool.

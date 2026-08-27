@@ -2,99 +2,69 @@
 title: View Modes
 type: concept
 tags: [view, camera, captain, viewscreen, radar]
-sources: [src/core/messages.rs, src/console/captain/server.rs, src/server/renderer.rs, src/server/radar.rs]
-updated: 2026-07-12
+sources: [src/core/messages.rs, src/ship/viewscreen.rs, src/ship/state.rs, src/console/captain/server.rs, src/server/renderer.rs, src/server/radar.rs, src/server/viewscreen_border.rs, gui/console-state.js]
+updated: 2026-08-27
 ---
 
 # View Modes
 
-What the **viewscreen** (server display) is showing. Captain camera views are captain-controlled; Helm, Sensors, Navigation, and Comms can temporarily put their own overlay views on the screen.
+`ViewMode` is the authoritative description of what the shared host viewscreen
+is presenting. It is stored on the local ship's `ShipViewMode` component and
+published in `SimSnapshot`, so reconnecting clients and every mounted console
+derive their controls from the same state.
 
-## Wire shape
+## Modes
 
-```rust
-pub enum ViewMode {
-    Camera(ViewDirection),   // Fore | Aft | Port | Starboard
-    Radar,                   // top-down asteroid map
-    SensorsRadar,
-    NavigationChart,
-    Comms,
-}
-```
+- `Camera(CameraView)` selects a named `camera_*` marker from the ship's model
+  rig. `camera_fore` is the default. The renderer resolves the marker's world
+  position and direction; a missing marker falls back to the ship centre and
+  forward direction.
+- `Cinematic` uses the authored cinematic camera section to follow the local
+  ship and nearby entities.
+- `Radar`, `ScienceRadar`, and `SensorsRadar` select the helm or science radar
+  presentation.
+- `SystemChart` and `NavigationChart` select the navigation chart family.
+- `Comms` presents the Comms surface.
 
-Default: `Camera(Fore)`.
+Overlay modes keep the game camera rendering behind their radar, chart, or
+Comms layer. The viewscreen border and HUD are independent presentation state
+and remain around the active mode while a game is in progress.
 
-## Camera modes (PRD #36)
+## Requests and arbitration
 
-For each direction, the viewscreen camera is parented to the ship and offset by **6.0 units** (the capsule radius) along the ship-local axis, looking outward parallel to the ground:
+Every valid request goes through `ViewscreenArbiter` on the ship:
 
-| Direction | Offset | Looking |
-|---|---|---|
-| `Fore` | +forward | along ship heading |
-| `Aft` | −forward | opposite heading |
-| `Port` | −right | left |
-| `Starboard` | +right | right |
+- the latest valid command wins, with a monotonically increasing sequence and
+  no source-priority ranking;
+- a camera or cinematic request returns control to Captain presentation;
+- repeating the exact active overlay from the same requester dismisses it and
+  restores the remembered Captain camera;
+- requests admitted in the same tick have an explicit deterministic order:
+  `SetView` is applied before Comms `ShowOnScreen`.
 
-A top-centre text label on the viewscreen (`FORE` / `AFT` / `PORT` / `STARBOARD`) shows the current direction so the room knows which way they're looking.
+The arbiter is part of `ShipViewMode`, so its remembered Captain view and
+sequence survive client reconnects. A reconnect alone cannot replace a newer
+view; only a newly admitted request can do that.
 
-## Radar mode
+## Authority
 
-The viewscreen renders the asteroid field as a top-down map using [`radar_dots()`](./radar-projection.md). Useful as an alternative tactical view.
+Admission maps each mode to its owning system before applying it:
 
-## Live overlay backgrounds
+| Mode family | Source system |
+|---|---|
+| `Camera(_)`, `Cinematic` | Captain |
+| `Radar` | Helm radar |
+| `ScienceRadar`, `SensorsRadar` | Sensors |
+| `SystemChart`, `NavigationChart` | Navigation |
+| `Comms` | Comms |
 
-All in-game `ViewMode`s keep the 3D `GameCamera` active. Radar, chart, and Comms modes are UI overlays on top of the live space scene, not replacements for it.
-
-Helm and Sensors/Science radar modes use a semi-transparent circular black backing behind the radar widget. System Chart, Navigation Chart, and Comms use a semi-transparent full-screen black backing so the map/message remains readable while stars, ships, and effects continue updating underneath.
-
-## Overlay toggle behaviour
-
-`ShipState` remembers the last camera direction requested by the captain. When Helm, Sensors, Navigation, or Comms requests an overlay view that is not currently active, the server switches to that overlay. When the same non-captain overlay is requested while it is already active, the server restores `Camera(last_captain_direction)`.
-
-Captain camera buttons are not toggles: pressing the currently-active captain camera direction leaves the view unchanged. Pressing a captain camera direction while an overlay is active updates the remembered captain direction and immediately restores the camera.
-
-There is deliberately no separate default-camera action. Captain reclaims the
-shared screen by selecting **Fore** or **Cinematic**, as appropriate.
-
-## Captain panel synchronisation
-
-The Captain console state push reports `view_direction` only for camera modes. When another console takes the viewscreen (`Radar`, `SensorsRadar`, `SystemChart`, `NavigationChart`, or `Comms`), `CaptainConsoleState.view_direction` is an empty string; `gui/captain-console.html` treats that as no selected direction so the Fore/Port/Starboard/Aft buttons lose their active highlight.
-
-HTML console panels derive their own `on_screen` flag from `SimSnapshot.view_mode`. The active non-captain console button shows `CLEAR SCREEN`; inactive buttons show `ON SCREEN`.
-
-## Intended arbitration
-
-The current arbiter gives source families fixed priorities. The intended PASM
-rule is simpler: the most recent admitted request wins regardless of its console
-of origin. Admission still decides which views a station may request; arbitration
-does not give Captain or Comms a separate source-priority override.
-
-## Captain authority
-
-`SetView { mode }` is authorized per view family and InProgress-only. Server checks:
-
-```
-Camera(_)       -> CaptainChair holder
-Radar           -> Helm holder
-SensorsRadar    -> Sensors holder
-NavigationChart -> Navigation holder
-Comms           -> Comms holder
-```
-
-Ignored otherwise — silently, no error.
-
-## Reconnect persistence
-
-`SimSnapshot.view_mode` is included in the 10 Hz broadcast, so a captain who refreshes their phone immediately sees the correct button highlighted. Same mechanism keeps the client UI in sync after a brief disconnect.
-
-The shared web-component Sensors control path (`gui/components/ph-sensor-radar.js`) requests `set_view { direction: "SensorsRadar" }` so Science and combined Captain/Sensors stations target the Sensors viewscreen mode, rather than Helm's `set_radar_view` helper (`ViewMode::Radar`).
-
-## Viewscreen chrome (PRD #180)
-
-The 3D camera output is now framed by the viewscreen border (`ViewscreenBorderPlugin`, `src/viewscreen_border.rs`): a ten-sprite tiled pixel-art frame with a designation label (`AEV-074 · PHOENIX`) centred on the top cap and a three-column `HEADING / HULL / CONDITION` HUD strip on the bottom cap. The frame is gated to `GameState::InProgress` and is independent of the current `ViewMode` — both `Camera(_)` and `Radar` modes render inside the same chrome. On Red Alert the border sprites swap to their alert variants, the designation and HUD values turn alert-red (labels stay neutral), and a [`UiMaterial`](./ui-materials.md) vignette pulses behind the frame.
+Station ownership, system control source, and game phase are checked at the
+command-admission boundary. Downstream arbitration therefore compares only
+already-valid requests.
 
 ## Related
 
-- [Captain Console](../entities/captain-console.md) · [Radar Projection](./radar-projection.md)
-- PRD #36 · PRD #180
-- [`UiMaterial` shader pattern](./ui-materials.md)
+- [Captain Console](../entities/captain-console.md)
+- [Radar Projection](./radar-projection.md)
+- [System](../entities/system.md)
+- [UI Materials](./ui-materials.md)

@@ -1,87 +1,65 @@
 ---
 title: Testing Strategy
 type: concept
-tags: [tests, cargo, playwright, smoke, pyramid]
-sources: [tests/smoke/, src/server/, AGENTS.md]
-updated: 2026-06-24
+tags: [tests, rust, javascript, playwright, pasm, ci]
+sources: [AGENTS.md, .github/workflows/ci.yml, tests/client/, tests/smoke/, tests/headless_runner.rs, src/core/codec_tests.rs]
+updated: 2026-08-27
 ---
 
 # Testing Strategy
 
-Two layers, sharply separated.
+Tests are placed at the narrowest public seam that can prove the behavior, with
+the full CI workflow providing integration coverage across Rust, client JavaScript,
+PASM, WebAssembly, rendering, performance, and balance.
 
-## 1. Rust unit tests (`cargo test`)
+## Rust
 
-Inline `#[cfg(test)] mod tests` in each module. The Rust side is the test-heavy layer because so many seams are pure functions.
+Pure modules use native unit tests: arrange public state, perform an action, and
+assert on observable output. Bevy adapters use small `App` fixtures where
+schedule ordering or ECS integration is part of the contract. Large test modules
+live in sibling `*_tests.rs` files while remaining children of the production
+module.
 
-| Module | What it covers |
-|---|---|
-| `session.rs` | Registration, duplicates, console assignment, vacancy, reconnect, conflict resolution, `helm_token()`/`captain_token()` |
-| `codec.rs` | Round-trip for **every** `ClientMessage` and `ServerMessage` variant |
-| `lobby.rs` / `lobby_handler.rs` | Bevy App harness: Identify→Welcome, station selection, SetReady auto-start, `ControlSystem` (e.g. `SetThrust`) phase-gating, disconnect |
-| `ship_physics.rs` | Zero input, accel curve, decel curve, steering yaw, dt scaling, speed cap |
-| `ship_state.rs` | Red Alert toggle, snapshot generation |
-| `asteroid_spawner.rs` | Count, bounds, clear zone, no duplicates |
+The headless runner is an integration test because it loads native entity
+templates and boots the whole authoritative simulation. Tests that populate
+the process-global native config cache belong there rather than in the library
+test binary.
 
-Test-style rule (from `AGENTS.md`):
+## Client JavaScript
 
-> Set up state → perform action → assert on observable output through the public interface. Do **not** assert on private fields, internal call counts, or implementation-specific details.
+Vitest under `tests/client/` covers pure state builders, routing, localization,
+components, authoring scripts, and other browser-independent modules. Player
+console behavior stays in pure HTML/CSS/JS; tests do not introduce a client
+WASM layer.
 
-## 2. Smoke tests (Playwright + Chromium)
+## Browser smoke and rendering
 
-Live in `tests/smoke/`. Boot the **real** WASM server in a headless browser; mock only the WebRTC layer.
+Playwright boots the real server WASM and client pages in Chromium, replacing
+only PeerJS transport with the `BroadcastChannel` shim. The normal project
+checks message flow and DOM behavior without a GPU. The render project uses
+SwiftShader and includes a pixel-level viewscreen check so a clean-console
+render-graph failure cannot silently produce a blank scene.
 
-### The PeerJS shim
+## PASM
 
-`peerjs-shim.js` replaces `window.Peer` with a `BroadcastChannel`-backed fake before any page script runs (Playwright's `addInitScript`). Same surface as PeerJS — `open`, `connection`, `data`, `close` events. Production HTML is **never modified** for tests.
+`uv run pasm validate`, `uv run pasm scan`, and `uv run pasm traceability`
+check the repository-owned model under `pasm/spec/`. The PASM tool and its unit
+suite live in Vellum; Phoenix does not have a local PASM pytest suite.
 
-### WASM readiness and host ticking
+## CI gates
 
-The shim sets `window.__wasmReady` (and fires `wasm-ready`) only after **both** the fake peer opens **and** `server.html` dispatches `PhoenixReady`. `PhoenixReady` fires after async config preload, station validation, callback registration, and `wasm_receive_message` exposure, just before `wasm_init()`.
+The workflow runs independent `pasm`, Rust `test`, and `editor-test` jobs. The
+WASM build follows Rust tests; smoke follows the build; performance and balance
+run on their declared dependencies. The asset performance capture and ratified
+Cruiser balance matrix are gating, while other machine-sensitive performance
+and balance results remain reports.
 
-The server WASM uses continuous Bevy updates while focused and unfocused. This matters because Playwright often brings a client page to the front immediately after reading the host peer ID; if the backgrounded host stalls, `Identify` remains queued and the client times out waiting for `Welcome`.
-
-Chromium reports Bevy's WASM app-runner handoff as a bare `unreachable` page error. `captureServerPageErrors()` ignores that exact message, but still records Rust panic messages and other runtime errors.
-
-### Default scenario stub
-
-`fixtures.js` installs a context-wide route that fulfils every `**/assets/worlds/default.toml` request with `MINIMAL_DEFAULT_WORLD` — an inline TOML with the player ship, "Starbase Alpha", and a `[script]` block whose `on_hailed` handler opens a one-response thread. The production `default.toml` references a planet (~36 MB GLB), an asteroid field (12 asteroid templates, ~150 MB of GLBs), a sun, and a nebula region; the [asset-preload](./asset-preload.md) gate waits for every GLB to reach a terminal `LoadState` before allowing game start, and headless Chromium can't realistically fetch + parse all of that within the smoke-test timeouts.
-
-The minimal world keeps only what the smoke suite actually inspects:
-
-- the player ship (no GLB — `player_ship.toml` is icon-only);
-- "Starbase Alpha" (one ~16 MB station GLB) — `comms.spec.js` hails it and `world-bootstrap.spec.js` asserts on its tag;
-- a `[script]` `on_hailed` handler opening a thread whose one response's `on_pick` adds an objective — required by `comms.spec.js`.
-
-Tests that need a different scenario (`tactical-fire-flow.spec.js` with its inline `MINIMAL_TEST_WORLD`, `patrol.spec.js` and `ship-mesh-load.spec.js` with `patrol.toml`) keep routing their own world; Playwright matches the most-recently-added route first, so the per-test override wins.
-
-For tests that route a real production TOML but don't need its heavy entities, `fixtures.js` exports `stripHeavyEntities(toml)` — a regex helper that removes any `[[entity]]` block whose `template_path` references the asteroid field, planet, sun, or nebula. `patrol.spec.js` and `ship-mesh-load.spec.js` use this on `patrol.toml` to drop the asteroid field while preserving the raider they actually inspect.
-
-### What's covered
-
-| Spec | Issue | Verifies |
-|---|---|---|
-| `shim.spec.js` | #52 | The shim itself (BroadcastChannel routing) |
-| `server-load.spec.js` | #54 | WASM boots, no JS console errors |
-| `client-connect.spec.js` | #55 | Real `client.html` connects, `#status` = "Connected" after Welcome |
-| `lobby.spec.js` | #56/#57 | Station assignment and lobby phase transitions |
-| `sim-state.spec.js` | #58/#59 | `SimState` shape valid; `SetThrust` changes ship position |
-
-CI runs the suite on every push and pull request via `.github/workflows/ci.yml`.
-
-## What's **not** automated
-
-- Visual rendering (3D camera, Bevy UI layout, Red Alert vignette, button highlights)
-- WASM/JS bridge internals (covered by smoke tests end-to-end)
-- Actual WebRTC over the public PeerJS broker
-
-## Why this shape
-
-- The pure-function seams (physics, codec, asteroid spawner, lobby handler) make unit tests cheap and dense.
-- The smoke harness covers the integration layer that unit tests can't reach.
-- Manual smoke remains for visual concerns — explicit, not aspirational.
+During implementation, use `cargo check` and targeted tests. Before a commit,
+run the repository's documented fast gate set once. The build and smoke gates
+are exercised between pushes as required by the issue workflow.
 
 ## Related
 
-- [Codec Seam](./codec-seam.md) · [Architecture](./architecture.md)
-- PRD #51
+- [PASM Runtime](./pasm-runtime.md)
+- [Build and Deployment](./build-and-deployment.md)
+- [Codec Seam](./codec-seam.md)

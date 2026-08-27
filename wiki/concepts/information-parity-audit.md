@@ -1,370 +1,46 @@
 ---
-title: Information-Parity Audit — Fact to Console Checklist
+title: Information-Parity Audit
 type: concept
-tags: [ai, backfill, parity, consoles, audit]
-sources: [pasm/spec/DATA_DRIVEN_FINE_SYSTEM_AI.md, src/entities/ai_flag_hosts.rs, src/ship/helm_ai.rs, src/ai/server.rs, src/ai/core.rs, src/ship/power.rs, src/ship/sensors.rs, src/ship/shields.rs, src/console_ai/core.rs, src/console_ai/server.rs, src/console/captain/server.rs, src/console/comms/server.rs, src/console/repair/server.rs, src/console/navigation/mod.rs, src/console/weapons/mod.rs, src/console/weapons/beam.rs, src/console/weapons/blaster.rs, src/console/weapons/torpedo.rs, src/console/helm/server.rs, src/ship/coordination.rs, src/core/messages.rs, gui/console-state.js, gui/mount-plan.js, gui/console-resolver.js, gui/components/ph-helm-radar.js, gui/components/ph-sensor-panel.js, gui/battleship/shields.html, gui/destroyer/engineering.html]
-updated: 2026-08-01
+tags: [ai, backfill, parity, consoles, blackboards, coordination]
+sources: [pasm/spec/DATA_DRIVEN_FINE_SYSTEM_AI.md, src/entities/ai_flag_hosts.rs, src/ai/host.rs, src/ship/helm_ai/, src/ai/server.rs, src/console_ai/core.rs, src/console_ai/server.rs, src/console/captain/server.rs, src/console/comms/server.rs, src/console/repair/server.rs, src/console/navigation/server.rs, src/console/weapons/server.rs, src/console/weapons/blackboard.rs, src/ship/power.rs, src/ship/sensors.rs, src/ship/shields.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/core/messages.rs, gui/console-state.js, gui/mount-plan.js]
+updated: 2026-08-27
 ---
 
-Summary
+# Information-Parity Audit
 
-Issue #880 under PRD #870. Every typed fact a Backfill policy reads to make a
-decision must have a human-visible counterpart on the console that owns the
-system reading it, so a backfilled seat and a human seat play with the same
-information. This page is that checklist, taken over the doctrine and fact
-surface as shipped.
+Backfill may derive private policy memory from facts available to the station it replaces, but it must not receive a privileged world view. The server projects authoritative facts into per-ship blackboards and typed coordination messages; both the AI host and the human console consume those same surfaces.
 
-The result: **47 authored fact references (46 distinct fact names) across the
-19 AI policy hosts. 41 have a rendered console counterpart on the hull that
-authors them; 4 are derived policy state where no parity is owed; 2 render on
-the battleship only. Three findings filed: #925, #926, #927 — all now
-resolved.** That per-fact tally is for the four player hulls — on the NPC hulls
-the seat authored no console at all, the structural gap #925 (now resolved:
-every NPC-hull seat mounts a console chosen by its owned systems — the per-console
-family coverage documented in the `CONSOLE_SPECS` map of
-`gui/console-families.js`, with `tests/client/mount-plan.test.js` asserting
-`planMounts` yields an iframe for every seat); one sensors-family follow-up
-noted under finding 1.
+## Station checklist
 
-The three candidates #880 names — threat bearing, safe-range ring, closest
-approach — are assessed individually below; one is a real gap (threat
-bearing), two are not (safe range is parity-by-construction already; closest
-approach is derived policy state, not a world reading).
+| Domain | Shared facts | Human surface | Backfill consumer |
+|---|---|---|---|
+| Captain | objectives, selected priority, combat activity, red alert, weapons hold, current view | Captain blackboard and controls | `operate_captain_ai` |
+| Helm | own motion, authored limits, combat lock, waypoint/clearance, scored objectives, visible contacts, weapon/shield geometry | Helm blackboard/radar and controls | hosts under `src/ship/helm_ai/` |
+| Tactical | combat lock, visible/acquirable contacts, weapon readiness/arcs/range, scored operate/destroy directives | Tactical radar and weapons controls | `ai_target_selection` plus weapon-family hosts |
+| Shields | own arc health/focus, damage history, threat bearing | Shields blackboard and arc controls | `ai_shield_focus` |
+| Power | group allocations, battery charge, authored limits, brownout state | Power state/blackboard | `ai_power_allocation` |
+| Sensors | sensor contacts, selected target, scan progress/results | Sensors radar and scan panel | `operate_sensors_ai` |
+| Repair | visible system damage, team state, queue severity, external targets | Repair blackboard and team controls | `operate_repair_ai` and external-repair host |
+| Comms | inbox, contacts, range flags, scripted replies, urgency | Comms blackboard/panels | Comms hosts in `src/console/comms/server.rs` |
+| Navigation | chart contacts, waypoint, route cursors, civilian traffic/order state | Navigation map and traffic controls | `operate_navigation_ai` and civilian-order host |
 
-The audit covers all doctrine that exists today. The courier arc-dance
-doctrine (#877) is still open and deferred, so the three hostile-arc facts it
-would read are authored by no hull yet; their row is recorded as **pending
-#877** rather than blocking this audit — and their console counterpart already
-shipped with #874, so that row is satisfied in advance.
+Static selection inputs such as a hull's authored power rating may be shown at ship choice rather than repeated on every console. Derived timers, deltas, and bounded-window verdicts do not need a separate display when they are computed only from already-visible facts.
 
-## The rule this audit applies
+## Coordination facts
 
-Parity is owed on **world readings** — anything the policy learns about the
-ship, the target, or the situation. It is not owed on **derived policy state**:
-a fact the host computes by folding a world reading against that system's own
-private memory, its authored parameters, or a bounded window. Those are the
-AI's *judgement*, and the human analogue is the officer watching the same
-readout and reaching the same conclusion. The line matters because two of
-#880's three named candidates fall on the derived side.
+Cross-station requests use the typed coordination queue and serve the hull's authored lag before delivery. Current payloads cover target designation, threat bearing, shield-frequency hints, weapon arc bearing, navigation clearance, repair requests, shield-facing changes, and power brownout. A human recipient receives a popup/console projection; an AI recipient reads the corresponding delivered state. Producers do not choose a privileged AI-only route.
 
-Where a gap is closed, it is closed the way #874 closed the first one: **one
-producer feeding both the AI fact and the console field**, never two
-derivations that agree by coincidence. `entity_direct_fire_banks`
-(`src/ai/server.rs:544`) is the model — its doc comment states the rule
-outright, and both `entity_direct_fire_range` (`src/ai/server.rs:488`) and
-`entity_weapon_arc_sectors` (`src/ai/server.rs:522`) are projections of that
-one bank list.
+## Audit guardrails
 
-## Method
+- AI hosts read `AiHostEnv`, per-ship blackboards, live authoritative components explicitly granted to that station, and typed coordination delivery.
+- A target selected through Tactical, Sensors, or Navigation can remain actionable without granting the Helm a general long-range scan.
+- Fine-system control, damage, power, and station rating gate whether the host may act; there is no coarse-console fallback.
+- Policy memory is deterministic and snapshot-safe. It may fold visible facts over time but cannot introduce hidden world knowledge.
+- Human and AI actions converge at admitted `ControlSystem` commands. Downstream appliers never branch on actor type.
 
-- Hosts: the 19 entries in `AI_HOSTS` (`src/entities/ai_flag_hosts.rs:316`).
-- Facts read: every `fact(...)`, `candidate_fact(...)` and `self_fact(...)`
-  reference in `assets/entities/**.toml`, including the shared fragment library
-  under `assets/entities/fragments/ai/`. A seeded fact no shipped hull authors
-  a guard over is marked *unauthored* — it is not a parity risk today, but it
-  is listed so the checklist stays complete against §5.2.
-- Console counterpart: the field must survive all the way to a rendered
-  element. A field present in a `gui/console-state.js` builder but dropped by
-  the hull's console HTML is **not** a counterpart — see finding 2 and 3.
-- Channel 3: every `CoordinationPayload` an AI receiver consumes is checked for
-  a visible sender-side console origin.
+## Related
 
-## Fact families (§5.2) against consoles
-
-| §5.2 family | Read by | Console counterpart | Verdict |
-| --- | --- | --- | --- |
-| Scenario flags/counters | Power, Comms ×2 (the three `FlagChain::Plumbed` hosts) | Objectives list on Captain; comms threads | OK — scenario state is surfaced as objectives/messages, never as raw counters, for either actor |
-| Entity identity/tags/faction/hostility/threat | Sensors + Tactical selectors | Radar blips with stance/faction colouring; Sensors panel `THREAT` row | OK |
-| `power_rating(self)` | all four selectors | Ship picker stat (`gui/components/ph-ship-picker.js:70`) | OK — authored, static, shown at ship choice |
-| Objectives (score, directive affinity, anchors) | Navigation, Comms, Tactical selectors | Captain objective list; nav-chart objective markers | OK |
-| Contacts and targets | Sensors, Tactical, Helm | Radar blips; tactical/science target markers on every radar; Sensors panel | OK |
-| Navigation waypoint | Navigation selector, Helm | Waypoint blip on helm, tactical, sensors and nav radars | OK |
-| Motion — range, bearing, closing rate | Helm ×6 | Sensors panel `BRG`/`RNG`; every radar's target marker | OK |
-| Motion — closest approach, separation progress | Helm ×6 | none directly | **Derived policy state — no parity owed.** See candidate 3 |
-| Ship capability (actuators, boost, availability) | Helm ×6 | Boost/impulse buttons, joystick, station damage bar | OK |
-| Shields and damage (own) | Shields focus, Helm, Power, Repair | Shield facing bars, hull hero bar, core-damage panel, station damage bar | OK |
-| Shields and damage (target) | Torpedo tube, Helm | `target_shields` / `target_shield_fraction` / `target_shield_freq` — every hull via `ph-sensor-panel` (#927) | OK — resolved, was **Finding 3** |
-| Weapons — arc, range, readiness, magazine, in-flight | Phaser/Blaster/Tube/Magazine, Helm | Bank + tube readiness widgets, magazine counter, phaser/torpedo arc overlays | OK |
-| Threat bearing (Sensors → Shields, channel 3) | Shields focus | `ShieldsBlackboard.threat_bearing`, rendered on every hull's shields surface (#926) | OK — resolved, was **Finding 2** |
-| Enemy weapon arcs | Helm ×6 | Helm-radar wedge overlay at red alert (#874) | OK — parity by construction; *pending #877* for the reader |
-| Policy runtime (`state_time`, `memory(...)`, history windows) | Helm engines/steering/boost | n/a | Not world information — the AI's own bookkeeping |
-
-## Authored facts, host by host
-
-Every fact reference authored today, with the console field and the element
-that renders it. `dest` = Alliance Destroyer (the demo hull); a field marked
-*battleship only* renders on `gui/battleship/*` and is dropped by the composed
-consoles the other three hulls use.
-
-### Captain — `[captain_console.ai]`
-
-| Fact | Producer | Console counterpart | Verdict |
-| --- | --- | --- | --- |
-| `fact(hostile_contact)` | `src/console/captain/server.rs:296` | Sensors radar blips (dest: captain station owns `sensors` + `sensor-radar`) | OK |
-| `fact(hostile_range)` | `src/console/captain/server.rs:300` | Sensors panel `RNG`; blip distance | OK |
-| `fact(secs_since_combat)` | `src/console/captain/server.rs:282` | none | Derived timer over visible events (fire, damage) — no parity owed |
-| `fact(red_alert)` | shared | Red-alert control, `ph-red-alert` | OK |
-
-### Helm ×6 axes — `[helm_console.{engines,steering,lateral,vertical,impulse,boost}_ai]`
-
-| Fact | Producer | Console counterpart | Verdict |
-| --- | --- | --- | --- |
-| `fact(posture)` | `helm_ai.rs:1420` | Red-alert control state; `red_alert` on the helm payload | OK |
-| `fact(target_valid)` | `helm_ai.rs:1444` | Tactical target marker on the helm radar | OK |
-| `fact(range_to_target)` | `helm_ai.rs:1437` | Sensors panel `RNG`; target marker | OK |
-| `fact(closing_rate)` | `helm_ai.rs:1440` | Target marker motion; Sensors `SPEED`/`HEADING` rows | OK — the range readout it differentiates is visible |
-| `fact(speed_fraction)` | `helm_ai.rs:1446` | Helm `speed`, joystick, throttle | OK |
-| `fact(shield_fraction)` | `helm_ai.rs:1549` | Shield facing bars (dest: engineering) | OK |
-| `fact(boost_available)` | `helm_ai.rs:3040` | Boost button availability + battery | OK |
-| `fact(safe_distance_held)` | `helm_ai.rs:1571` | none | Bounded-window verdict over `range_to_target` — derived, no parity owed |
-| `fact(separation_progress)` | `helm_ai.rs:1603` | none | Bounded-window verdict over `range_to_target` — derived |
-| `fact(range_above_min_seen)` | `helm_ai.rs:1456` | none | Folds `range_to_target` against private memory — **candidate 3**, derived |
-| `fact(inside_threat_range)` | `helm_ai.rs:1616` | Enemy arc wedges drawn to each bank's own range | OK — **candidate 2**, parity by construction |
-| `fact(tubes_full)` / `fact(tubes_fillable)` | `helm_ai.rs:2133` / `:2091` | Torpedo tube slot widget + magazine counter | OK |
-| `fact(torpedoes_in_flight)` | `helm_ai.rs:2041` | Torpedo blips on the tactical radar | OK |
-| `fact(target_facing_shield_down)` | `helm_ai.rs:1987` | `target_shields` — every hull via `ph-sensor-panel` (#927) | OK — resolved, was **Finding 3** |
-| `fact(hostile_arc_exposure)` / `_escape_deg` / `_inescapable` | `helm_ai.rs:1495`–`:1517` | Helm-radar wedge overlay at red alert (`gui/components/ph-helm-radar.js:207`) | **Pending #877** — counterpart already delivered by #874; no hull authors a reader yet |
-
-### Weapons — phaser bank, blaster bank, torpedo tube, torpedo magazine
-
-| Fact | Producer | Console counterpart | Verdict |
-| --- | --- | --- | --- |
-| `fact(in_arc)` | `beam.rs:342`, `blaster.rs:76`, `torpedo.rs:106` | Phaser/torpedo arc overlays on the tactical radar | OK |
-| `fact(loaded)` | `torpedo.rs:103` | Tube slot state (`torpSlotStates`) | OK |
-| `fact(target_facing_shields)` | `torpedo.rs:107` | `target_shields` — every hull via `ph-sensor-panel` (#927) | OK — resolved, was **Finding 3** |
-| `fact(red_alert)` | `beam.rs:345`, `blaster.rs:78`, `torpedo.rs:110` | Red-alert control | OK |
-| `in_range`, `on_cooldown`, `cooldown_remaining`, `frequency`, `tubes_full`, `magazine`, `in_flight`, `loaded_count`, `target_count`, `ai_target_count`, `operates_ai` | seeded | Arc wedge radius + radar range rings; bank readiness + magazine widgets; AUTO badges | OK — *unauthored* by any shipped hull |
-
-### Shields focus — `[shields_console.ai_policy]`
-
-| Fact | Producer | Console counterpart | Verdict |
-| --- | --- | --- | --- |
-| `fact(recent_damage_pct_max)` | `src/console_ai/core.rs:553` | Shield facing HP bars — the level whose fall *is* the recent damage | OK |
-| `recent_damage_<facing>`, `recent_damage_total`, `recent_damage_fraction_max`, `health_fraction_min_ratio`, `health_ratio_pct` | `console_ai/core.rs:540`–`:573` | same, plus hull hero bar | OK — *unauthored* |
-| threat bearing (channel 3, overrides the damage decision) | `src/console_ai/server.rs:190`–`194` | `ShieldsBlackboard.threat_bearing` (#926) — every hull's shields surface | OK — resolved, was **Finding 2** |
-
-### Power — `[power.ai_policy]`
-
-| Fact | Producer | Console counterpart | Verdict |
-| --- | --- | --- | --- |
-| `fact(battery_pct)` | `src/ship/power.rs:103` | Battery bar | OK |
-| `fact(thrust)` | `power.rs:107` | Helm throttle/joystick; helm power-group level | OK |
-| `fact(red_alert)` | `power.rs:108` | Red-alert control | OK |
-| `power_<group>`, `total_allocation`, `offline_system_count`, `nearest_enemy_dist`, `has_destroy_objective`, `secs_since_combat` | `power.rs:113`–`:129` | Power group controls, total; core-damage panel; radar blips; objective list | OK — *unauthored* |
-
-### Selectors — Sensors, Tactical, Navigation, Repair, Comms
-
-| Fact | Console counterpart | Verdict |
-| --- | --- | --- |
-| `candidate_fact(detectable)`, `candidate_fact(hostile)` | Radar blips with stance colouring | OK |
-| `candidate_fact(source_radar)`, `source_combat_lock`, `source_sensors_designation`, `source_last_attacker`, `source_objective`, `source_retained` | Each source has its own console surface: radar blip, Combat Lock marker, Sensors designation popup, incoming-fire beam/impact, objective list, current lock | OK |
-| `candidate_fact(source_nav_objective)`, `source_chart_contact`, `reachable` | Nav-chart blips + objective markers | OK |
-| `candidate_fact(objective_score)` | Captain objective list (priority order) | OK |
-| `candidate_fact(tier_ordinal)`, `damage_fraction`, `assigned`, `source_repair_request` | Repair `dispatch_targets` damage %, `core_systems`, team status | OK |
-| `candidate_fact(in_range)`, `has_open_hail_thread`, `source_hail_objective` | Comms contacts + thread list | OK |
-| `fact(sender_in_range)`, `fact(comms_available)`, `self_fact(comms_available)` | Comms contact list; station damage bar | OK |
-| `deficit`, `worst_system_damage_fraction`, `system_count`, `is_core`, `source_core_bucket`, `free_team_count`, `total_hull_health_fraction`, `is_urgent`, `is_read`, `is_orphaned`, `mandatory`, `response_count`, `contact_count`, `has_unread_from_sender`, `source_comms_contact` | Repair and Comms console widgets | OK — *unauthored* |
-
-## Channel 3 — every payload an AI receiver consumes
-
-The check is the one #870 asks for: the fact must fire from **authoritative
-system state**, so a human-operated sender still feeds an AI receiver, and the
-sender-side reading must be visible on the sender's own console.
-
-| Payload | Emitted from | Sender-side console origin | AI receiver | Verdict |
-| --- | --- | --- | --- | --- |
-| `TargetDesignation` | `src/ship/sensors.rs:206` | Sensors radar selection | Tactical | OK |
-| `ThreatBearing` | `src/ship/sensors.rs:491` — nearest hostile in sensor range, authoritative | Nearest hostile blip on the Sensors radar; `ShieldsBlackboard.threat_bearing` on the receiving ship's shields surface (#926) | Shields focus | OK — resolved, was **Finding 2** |
-| `FrequencyHint` | `src/console_ai/server.rs:1327` | `target_shield_freq` — every hull via `ph-sensor-panel` (#927) | Tactical | OK — resolved, was **Finding 3** |
-| `ArcBearingRequest` | `src/console/weapons/mod.rs:684` | Phaser/torpedo arc overlay + target lock | Helm | OK |
-| `NavigateTo` | `src/console/navigation/mod.rs:337` | Waypoint marker on the nav chart | Helm | OK |
-| `RepairRequest` | `src/ship/damage_sync.rs:161` | Core-damage panel + dispatch targets (#737 projection applies to both actors) | Repair | OK |
-| `ShieldFacingDown` / `ShieldFacingRestored` | `src/ship/shields.rs:419` / `:441` | Shield facing bars | Helm | OK |
-| `PowerBrownout` | `src/ship/power.rs:638` | Power group levels + battery bar | crew (popup) | OK |
-| `IntentAdvisory` | `src/ship/intent_narration.rs` | n/a — this one *is* the human-facing surface (#879) | broadcast to human seats | OK |
-
-Routing itself is symmetric: `route_coordination` (`src/ship/coordination.rs:25`)
-and `broadcast_to_ship` (`:100`) branch on the target's control source and the
-sender's origin tag only, never on which actor produced the underlying state.
-
-## The three named candidates
-
-### 1. Threat bearing — **resolved by #926**
-
-The backfilled Shields focus consumes `PendingShieldsThreatBearing`, the
-relative bearing of the nearest hostile in sensor range, and it **overrides**
-the damage-based focus decision for that tick
-(`src/console_ai/server.rs:190`–`194`). A human Shields officer used to get
-only the transient coordination popup.
-
-The old `ShieldsConsolePayload.target_bearing` field was not this quantity: it
-is the bearing to this ship's *own* Combat Lock (`src/ship/shields.rs:552`
-pre-#926), and it rendered on one console in the game —
-`gui/battleship/shields.html:40,80`, mislabelled "Threat Bearing". The demo
-hull put shields on `gui/destroyer/engineering.html:87`, which rendered
-facings and focus and no bearing at all.
-
-Closed the way #874 closed the first gap: one producer, both consumers.
-`ShieldsBlackboard` now carries two distinct fields — `combat_lock_bearing`
-(the renamed old field, unchanged Combat Lock meaning) and `threat_bearing`
-(new), the latter read straight off `ship::sensors::SensorsThreatState` on
-the same ship, the same authoritative state
-`console_ai::server::ai_shield_focus` reads via the delayed
-`PendingShieldsThreatBearing` coordination copy — no second derivation.
-`publish_shields_blackboard` (`src/ship/shields.rs`) is the one producer;
-`gui/battleship/shields.html`'s "Threat Bearing" row now shows the actual
-threat bearing, and every other shields-owning console gained the same
-compact threat-bearing readout: `gui/destroyer/engineering.html`'s Shields
-column, `gui/cruiser/science.html`'s Shields column, and
-`gui/courier/captain.html`'s Shields & Power column — all reached via
-`buildSystemStationConsoleState` → `buildShieldsConsoleState` like every
-other shields-owning console. The marker clears whenever
-`SensorsThreatState.last_bearing_rad` clears (`src/ship/sensors.rs:449`).
-
-### 2. Safe-range ring — **no gap; already parity by construction**
-
-`safe_range` (`src/ship/helm_ai.rs:1563`) is `target_direct_fire_range` plus
-this hull's authored `safe_range_margin`. The two halves separate cleanly:
-
-- **The enemy's reach is already visible.** `entity_direct_fire_banks`
-  (`src/ai/server.rs:544`) is one producer feeding both
-  `entity_direct_fire_range` → `AiWorldEntity::direct_fire_range`
-  (`src/ai/core.rs:220`) → the fact, *and* `entity_weapon_arc_sectors` → 
-  `HelmBlackboard::hostile_weapon_arcs` (`src/core/messages.rs:2283`) → the
-  helm-radar overlay. The overlay draws each wedge out to that bank's own
-  range (`gui/components/ph-helm-radar.js:207`), and
-  `target_direct_fire_range` is the maximum over exactly those banks. The
-  human helm and the backfilled helm are reading the same geometry from the
-  same list — the producer's own doc comment states this as its reason to
-  exist.
-- **The margin is not world information.** `safe_range_margin` is this hull's
-  authored doctrine tuning, in its own TOML. Rendering it would show the
-  human the AI's chosen standoff, which is a UX nicety, not parity.
-
-Residual, recorded rather than filed: the overlay is gated on red alert and on
-radar range while the fact is not. That is a deliberate #870 decision — "the
-red-alert restriction applies to *display*, not to knowledge" — so it is
-recorded here as a known, chosen asymmetry rather than reopened.
-
-### 3. Closest approach — **no gap; derived policy state**
-
-`range_above_min_seen` (`src/ship/helm_ai.rs:1456`) is
-`range_to_target − memory(min_range_seen)`, where `min_range_seen`
-(`src/ship/helm_ai.rs:1623`) is per-fine-system private memory, scoped to the
-policy state *and* to the target identity. The doctrine compares it against
-its own authored `closest_approach_hysteresis`.
-
-Nothing in it is information about the world that a human lacks: the world
-reading is `range_to_target`, which is on the Sensors panel `RNG` row
-(`gui/components/ph-sensor-panel.js:128`) and on every radar's target marker.
-"We are past closest approach" is the conclusion a human helm officer draws
-from watching that number bottom out — the AI's running minimum is the
-mechanisation of the judgement, not an extra input. No parity owed, and no
-follow-up filed.
-
-## Findings
-
-1. **NPC-hull seats mount no console, so no fact on those hulls has a
-   counterpart.** Filed as #925 — **resolved**. #871 gave the Harrow and Requiem
-   hulls `[[station]]` blocks and rating structure, and a human can be admitted
-   to those seats, but none of those stations authored a `console` path
-   (`console: Option<String>`, `src/ship/config.rs:48`), so `resolveConsoleUrl`
-   returned `null` and `planMounts` skipped the seat — a blank station. #925 now
-   authors a `console` on every NPC-hull seat, chosen by the fine systems the
-   seat OWNS (not by hull name — AGENTS.md #11), reusing the console of a
-   similar player class. Reuse hinges on family coverage: the seat's owned
-   *families* must be covered by the console. `buildConsoleStateInner` emits a
-   FLAT plain-builder payload for a single-family seat and a system-id-KEYED
-   payload for a multi-family seat; `gui/console-core.js` normalises every
-   inbound payload to the keyed shape before a console's `render` sees it
-   (issue #1233, `normalizeConsolePayload` in `gui/console-payload.js`), so a
-   console reading through `systemView`/`system(s, …)` gets the right data
-   whichever shape the wire payload arrived in — payload shape is no longer a
-   second dimension a hull's reuse has to get right. The four four-seat Harrow hulls
-   (`ship_harrow_cruiser`, `ship_harrow_destroyer`, `ship_harrow_warhawk`,
-   `ship_harrow_patrol`) each have four single-family seats (captain→captain,
-   helm→helm, tactical→tactical, engineering→power), so they reuse the FLAT
-   `gui/battleship/{captain,helm,tactical,power}.html` consoles; the single-family
-   dispatch in `gui/console-state.js` keys on the owned family (via
-   `FAMILY_BUILDERS`) so the `engineering` seat, owning only the power family,
-   correctly gets the flat power payload despite its id not matching a builder
-   name. `battleship/tactical.html` gained a hidden-when-empty
-   `ph-blasters-controls` so the blaster-armed Harrow destroyer/warhawk Tactical
-   seats render their real banks (the battleship mounts no blaster bank, so it is
-   visually unchanged). The two-seat `ship_requiem_courier` has two MULTI-family
-   seats ({captain,power} and {helm,tactical}), so it reuses the KEYED
-   `gui/courier/{captain,tactical}.html`. Family coverage is tracked by a
-   console spec map (`gui/console-families.js` — `CONSOLE_SPECS`, `{ families }`
-   per console, the ground truth verified by reading each console's HTML), and
-   `tests/client/mount-plan.test.js` asserts `planMounts` yields an iframe for
-   every seat of an NPC hull's `ship_stations`. The former second dimension
-   (payload shape) is checked nowhere
-   because there is nothing left to check: console-core's normalisation makes
-   every console's `render` shape-agnostic (see above).
-
-   The four facts only Harrow hulls author — their human counterparts:
-
-   | Fact | Hulls | Counterpart | Status |
-   |------|-------|-------------|--------|
-   | `inside_threat_range` | destroyer | Red-alert hostile weapon-arc overlay on the Helm radar (`hostile_arcs`, `gui/battleship/helm.html` → `ph-helm-radar`). The Helm seat owns the helm family and reads it. | **covered** |
-   | `separation_progress` | destroyer | None by design — an AI-only derived policy quantity (closest-approach state, candidate 3), no widget. | **no gap (AI-only)** |
-   | `target_facing_shields` | cruiser, warhawk | Target shield rows via `ph-sensor-panel` (sensors family, #927). But the seat that reads this fact (Tactical, via the torpedo/weapons doctrine) owns NO sensors system, and neither the mounted flat `gui/battleship/tactical.html` nor the Captain seat's `gui/battleship/captain.html` embeds a sensors panel — and even a sensors-panel console would render nothing, since no Harrow four-seat seat owns a sensors system (the captain owns only `red-alert`). | **follow-up gap** — see below |
-   | `target_facing_shield_down` | cruiser, warhawk | Same as above — `ph-sensor-panel` sensors-family readout, but no Harrow seat on these hulls owns a sensors system to populate it. | **follow-up gap** — see below |
-
-   **Follow-up gap (sensors on four-seat Harrow hulls).** `target_facing_shields`
-   and `target_facing_shield_down` have a rendered home only where a seat owns a
-   sensors system. On the Harrow cruiser and warhawk no seat does, so the
-   #927-era shield rows never populate for a human there. Closing it means either
-   authoring a `sensors`/`sensor_radar` system onto one of those hulls' seats
-   (which would make that seat multi-family and so need a KEYED console covering
-   the sensors family — e.g. `gui/destroyer/captain.html`, which already does) or
-   a dedicated follow-up issue; tracked here rather than blocking #925, whose
-   structural fix (every seat mounts a working, shape-matched console) is
-   complete.
-2. **Threat bearing has no persistent console counterpart outside the
-   battleship, and the battleship's is a different quantity.** See candidate 1.
-   Filed as #926 — **resolved**.
-3. **Target shield state renders on one console family only.**
-   `target_shields`, `target_shield_fraction` and `target_shield_freq` are
-   built into every Sensors payload (`gui/console-state.js:1264`–`:1266`) but
-   rendered only by `gui/battleship/sensors.html:77`. `ph-sensor-panel`, the
-   component the destroyer, cruiser and courier use, drops all three
-   (`gui/components/ph-sensor-panel.js:133`–`:140`). The backfilled torpedo
-   tube reads `fact(target_facing_shields)`, the backfilled helm reads
-   `fact(target_facing_shield_down)`, and the `FrequencyHint` channel carries
-   the target's shield frequency to Tactical. On three of four player hulls the
-   human seat cannot see any of it. Filed as #927 — **resolved**:
-   `ph-sensor-panel.js` now adds a per-facing-or-fraction shield row and a
-   shield-frequency row to its scan data, using the same classification
-   `gui/battleship/sensors.html`'s `renderShieldFacings()` applies (no second
-   derivation), and degrading to no row when the target has no shields. Every
-   station that embeds the shared panel — including the destroyer's captain
-   station — picks it up via the same `buildSensorsConsoleState()` payload,
-   no per-hull change needed. The battleship already had its own dedicated
-   readout (`renderShieldFacings()`), so the new shared-panel rows initially
-   duplicated it there; `ph-sensor-panel` now takes a `hide-shield-rows`
-   boolean attribute, the battleship sets it and folds Shield Freq into its
-   own Target Analysis section instead, and every other hull leaves the
-   attribute unset and keeps the shared rows.
-
-## Deferred
-
-**Courier arc-dance doctrine (#877)** is open. `hostile_arc_exposure`,
-`hostile_arc_escape_deg` and `hostile_arc_inescapable`
-(`src/ship/helm_ai.rs:1495`–`:1517`) are seeded on all seven helm hosts but
-authored by no hull, so no policy reads them yet. Their console counterpart —
-the red-alert helm-radar wedge overlay — already shipped with #874, so when
-#877 lands the parity row is satisfied on arrival. Re-check that row when the
-courier doctrine is authored; no other row in this checklist depends on #877.
-
-**Courier frozen-battery exception (issue #923, `alliance_courier.toml`).**
-Once a sustained red alert drains the courier's battery far enough to shed
-`helm` and then `weapons` below their reserves, its `rates = [3, 2, 1, 0, -1,
--3]` put a flat 0 at the resulting resting total (6), so the battery never
-recovers and the `weapons` red-alert elevation can never re-arm for the rest
-of the encounter. Unlike the #923-era version of this exception, the freeze
-costs the courier nothing in practice: `weapons` buys only
-`ModifierSlot::PhaserDamage` (#955), and this hull mounts no phaser bank, so
-no console needs to show the frozen level, and the rates should not be
-retuned to chase a consequence that no longer exists — accepted rather than
-filed; revisit with #877/#922.
+- [AI Ship Unification](./ai-ship-unification.md)
+- [AI Helm Decomposition](./ai-helm-decomposition.md)
+- [Message Flow](./message-flow.md)
+- [Station](../entities/station.md)

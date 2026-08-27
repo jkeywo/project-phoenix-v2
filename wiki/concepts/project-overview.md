@@ -2,54 +2,55 @@
 title: Project Overview
 type: concept
 tags: [overview, intro]
-sources: [README.md, AGENTS.md]
-updated: 2026-08-11
+sources: [README.md, AGENTS.md, assets/scenarios.toml, assets/scenarios.demo.toml]
+updated: 2026-08-27
 ---
 
 # Project Overview
 
-**Project Phoenix** is a browser-based spaceship bridge simulator for groups.
+Project Phoenix is a browser-based cooperative spaceship bridge simulator. One
+shared host tab runs the authoritative Rust/Bevy simulation and 3D viewscreen.
+Players scan its QR code and join from phone browsers; their consoles are pure
+HTML, CSS, and JavaScript connected to the host over PeerJS WebRTC.
 
-- One browser tab on a shared screen (TV / monitor) is the **view screen** — a 3D view of space.
-- Each player joins from their own phone by **scanning a QR code**. No app install. No network setup.
-- The view screen is the authoritative server; phones are stateless spokes connected over **WebRTC (PeerJS)** in a star topology.
+## Runtime shape
 
-Live: https://pp-dev.kiwigamedesign.co.uk/
+- The host owns game phase, sessions, station tenure, command admission,
+  physics, damage, AI, world scripts, objectives, and published state.
+- Phones send typed commands and fold targeted or shared snapshots into local
+  presentation state. They never simulate outcomes or communicate peer-to-peer
+  with each other.
+- Session tokens stored by the browser provide reconnect identity; PeerJS ids
+  are transport details.
+- Human operators and Backfill AI emit the same `ControlSystem` commands. A
+  ship's authored station ratings decide which source operates each system.
+- Simulation decisions advance on a deterministic fixed tick. AI decision
+  cadences are derived from that tick rather than rendered frames or wall time.
 
-## Why this exists
+## Content
 
-Existing bridge sims (e.g. Artemis SBS) require dedicated installs on a shared LAN. Phoenix removes both barriers: open a URL, scan a code, play. The tradeoff is that the simulation has to fit in a browser tab.
+Scenario manifests select a world and the hulls it offers. World TOML provides
+the root composition and Rhai scenario script; entity TOML provides ships,
+stations, systems, ratings, physics, weapons, rendering, and AI doctrine. Hulls
+can expose different direct seats and auxiliary hosted stations, so the server
+roster is authoritative and the client mounts consoles dynamically.
 
-## What's in the box today
+The normal catalogue and the curated demo catalogue are separate assets. The
+demo build also removes client-reachable debug, pause, and mod-pack upload
+routes at compile time while retaining the host's own presentation controls.
 
-- **Lobby** with QR code, player list, name editing, console picking, session-token reconnect.
-- **Two consoles:** Captain's Chair (Red Alert + view selector) and Helm (thrust + steering + radar).
-- **Physics-simulated ship** (Bevy + Rapier) on the XZ plane.
-- **Deterministic asteroid field** spawned per session.
-- **Hull-camera viewscreen** with four directional views (Fore/Aft/Port/Starboard) + a top-down Radar mode.
-- **End-to-end smoke tests** (Playwright + Chromium with a BroadcastChannel PeerJS shim).
-- Auto-deploy to GitHub Pages on every push to `main`.
+## Delivery and testing
 
-## What's in flight or drafted
-
-- PRD #66 (open) — Weapons + Engineering consoles, Hull Integrity, repair loop.
-- Drafts 1–8 in `docs/` — entity config files, multi-system maps, science console, combat update (torpedoes + 4-quadrant shields), ship's power, space stations, scenario files, comms console.
-- Architecture note — per-console message subscriptions to reduce traffic as consoles multiply.
-
-See the Roadmap Overview for the synthesis.
-
-## Tech stack at a glance
-
-| Layer | Tech |
-|---|---|
-| Game engine | Bevy 0.18 (Rust) |
-| Physics | bevy_rapier3d 0.33 |
-| Networking | PeerJS (WebRTC) |
-| Build | Trunk → WASM |
-| Hosting | GitHub Pages |
-| Smoke tests | Playwright + Chromium |
+The browser host is built to WebAssembly with Trunk. `phoenix-host` can serve a
+version-pinned client bundle and scenario catalogue on a LAN, but the browser
+host or headless runner still owns simulation authority. CI validates Rust,
+client JavaScript, PASM, WASM/smoke rendering, asset performance, and the
+ratified Cruiser balance matrix.
 
 ## Related
 
-- [Architecture](./architecture.md) · [Networking](./networking.md) · [Game Loop](./game-loop.md)
-- PRD #1 — original product spec
+- [Architecture](./architecture.md)
+- [Message Flow](./message-flow.md)
+- [Stations](./stations.md)
+- [World Plugin](./world-plugin.md)
+- [Build and Deployment](./build-and-deployment.md)

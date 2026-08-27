@@ -2,13 +2,19 @@
 title: Navigation Console
 type: entity
 tags: [console, navigation, waypoint, map, radar, ship]
-sources: [gui/battleship/navigation.html, gui/cruiser/comms.html, gui/destroyer/tactical.html, gui/components/ph-navigation-map.js, gui/components/ph-civilian-traffic.js, gui/console-state.js, gui/sim-state.js, gui/action-map.js, src/console/navigation/mod.rs, src/console/navigation/server.rs, src/civilian/traffic.rs, src/civilian/server.rs, src/core/messages.rs, src/entities/config.rs, assets/entities/alliance_battleship.toml]
-updated: 2026-08-26
+sources: [gui/battleship/navigation.html, gui/cruiser/comms.html, gui/components/ph-navigation-map.js, gui/components/ph-civilian-traffic.js, gui/console-state.js, gui/sim-state.js, gui/action-map.js, gui/hero-bar.js, src/console/navigation/mod.rs, src/console/navigation/server.rs, src/civilian/traffic.rs, src/civilian/server.rs, src/core/messages.rs, src/entities/config.rs, src/ship/coordination_systems.rs, assets/entities/alliance_battleship.toml, assets/entities/alliance_cruiser.toml, assets/entities/alliance_destroyer.toml]
+updated: 2026-08-27
 ---
 
 # Navigation Console
 
-Navigation provides the shared strategic chart and desired-destination surface. The Battleship has a dedicated Navigation console, while the Cruiser embeds Navigation in Comms and the Destroyer embeds it in Tactical. All three consume the same Navigation state and shared `ph-navigation-map` component; there is no Rust client panel.
+Navigation provides the shared strategic chart and desired-destination surface.
+The selected hull authors both the Navigation station and its console URL. The
+Battleship exposes a directly claimable Navigation seat; the Cruiser and
+Destroyer author Navigation as auxiliary, human-seeking stations presented on
+an eligible holder's Hero Bar. Their layouts consume the same authoritative
+Navigation state and shared `ph-navigation-map` component; there is no Rust
+client panel.
 
 ## Chart contents
 
@@ -35,25 +41,28 @@ An anchored waypoint follows the source entity's live transform. If the source d
 
 ## Authority and sharing
 
-Navigation commands enter through the same `ControlSystem` command path as other fine-system controls and are admitted for the Navigation system. The Navigation blackboard publishes the waypoint for all consumers. Helm and other consoles can display it, and AI Helm should treat it as the normal shared desired destination whether a human or Navigation AI wrote it.
+Navigation commands enter through the same `ControlSystem` command path as other fine-system controls and are admitted for the Navigation system. The Navigation blackboard publishes the waypoint for all consumers. Helm and other consoles display it, and AI Helm consumes it as the shared desired destination whether a human or Navigation AI wrote it.
 
-`NavigateTo` is the level-3 clearance that releases the AI Helm to follow the waypoint: it carries the waypoint's `generation` (not a position), serves the ship's `coordination_lag_secs` in the coordination queue, and latches into `HelmWaypointClearance` on delivery. It is issued from one origin-agnostic place — `issue_navigate_to_clearance` in `src/console/navigation/mod.rs` — once per new waypoint generation, and re-issued when the helm axes flip Human→AI while the current generation is unlatched (so a waypoint set under a human helm is still flown after a disconnect/Backfill flip). Neither waypoint writer sends its own clearance.
+`NavigateTo` is the level-3 clearance that releases the AI Helm to follow the waypoint: it carries the waypoint's `generation` (not a position), serves the ship's `coordination_lag_secs` in the coordination queue, and latches into `HelmWaypointClearance` on delivery. It is issued from one origin-agnostic place — `issue_navigate_to_clearance` in `src/console/navigation/server.rs` — once per new waypoint generation, and re-issued when the helm axes flip Human→AI while the current generation is unlatched (so a waypoint set under a human helm is still flown after a disconnect/Backfill flip). Neither waypoint writer sends its own clearance.
 
 ## Civilian traffic
 
-Since issue #1028 the console also carries a traffic picture: every civilian craft in the world, with the authored `[[route]]` it is flying, which leg of how many, its standing order, and whether it is doing as it was asked. `<ph-civilian-traffic>` renders it — beside the chart on the Battleship, under the map in the Destroyer's Nav overlay.
+The console also carries a traffic picture: every civilian craft in the world,
+with the authored `[[route]]` it is flying, which leg of how many, its standing
+order, and whether it is doing as it was asked. `<ph-civilian-traffic>` renders
+that authoritative projection where the hull's Navigation layout includes it.
 
 Compliance is published, never inferred client-side, because "has not started turning yet" and "has decided not to" look identical on a chart. `refused` and `non_compliant` are different words and different row styles for the same reason: a refusal is a decision (the craft declined and carried on down its own lane), non-compliance is a failure (it agreed, set off, and the world moved). Only the second needs a crew.
 
 Orders are issued as `SystemControlPayload::OrderCivilian`, admitted for the same Navigation system the waypoint payloads are, and answered on the craft's own authored clock rather than immediately — an order is a negotiation with an actor, not a remote-control input. An order the host cannot deliver at all (unknown craft, malformed divert) bounces as `ServerMessage::CivilianOrderRejected`; a craft that simply says no does not bounce, it changes compliance state. The mechanism lives in `src/civilian/`.
 
-The human control surface is finite and authored. A civilian's optional `[civilian].order_options` list gives each control a stable id, a `strings.csv` label and one existing `hold`, `divert` or `dock` order. The host validates those options with the entity config, copies them into `CivilianTrafficSnapshot`, and `<ph-civilian-traffic>` renders them as native buttons. A button submits `order_civilian` with the published target and order; the browser does not choose destinations or carry scenario policy. Civilians without options keep the read-only row they had before issue #1134.
+The human control surface is finite and authored. A civilian's optional `[civilian].order_options` list gives each control a stable id, a `strings.csv` label and one existing `hold`, `divert` or `dock` order. The host validates those options with the entity config, copies them into `CivilianTrafficSnapshot`, and `<ph-civilian-traffic>` renders them as native buttons. A button submits `order_civilian` with the published target and order; the browser does not choose destinations or carry scenario policy. Civilians without options have a read-only row.
 
 ## Wire surface
 
 - `SystemControlPayload::SetNavigationWaypoint { x, z, source_uuid }` sets a free or anchored waypoint.
 - `SystemControlPayload::ClearNavigationWaypoint` clears it.
-- `SystemControlPayload::OrderCivilian { target, order }` orders a civilian to hold, divert or dock (issue #1028).
+- `SystemControlPayload::OrderCivilian { target, order }` orders a civilian to hold, divert or dock.
 - `ServerMessage::CivilianOrderRejected { target, reason }` is the rejection-only reply for an order that could not be delivered.
 - `NavigationBlackboard.navigation_waypoint: Option<WaypointSnapshot>` publishes the current shared value.
 - `NavigationBlackboard.civilians: Vec<CivilianTrafficSnapshot>` publishes the traffic picture and each craft's finite `order_options`, on the local ship only.

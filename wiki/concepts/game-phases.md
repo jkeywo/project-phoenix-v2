@@ -2,68 +2,57 @@
 title: Game Phases
 type: concept
 tags: [phases, lobby, loading, in-progress, game-over, reconnect]
-sources:
-  - src/core/messages.rs
-  - src/lobby/handler.rs
-  - src/lobby/server.rs
-updated: 2026-06-24
+sources: [src/core/messages.rs, src/lobby/handler.rs, src/lobby/server.rs, src/server_app/registration.rs, src/server_app/broadcast_publish.rs]
+updated: 2026-08-27
 ---
 
 # Game Phases
 
-`GamePhase` is a Bevy state in `src/core/messages.rs:440`:
-
-```rust
-pub enum GamePhase {
-    Lobby,
-    Loading,
-    InProgress,
-    GameOver,
-}
-```
+`GamePhase` is authoritative server state with four values: `Lobby`, `Loading`,
+`InProgress`, and `GameOver`. Systems and command admission use that state to
+decide which messages and simulation work are valid.
 
 ## Lobby
 
-- Players connect, set names, and claim stations with `SelectStation`.
-- Station ownership is stored as `Player.station: Option<StationId>`.
-- Players send `SetReady { ready }`; the legacy captain-only start command is gone.
-- When every connected player is ready, the lobby handler moves to `Loading` if assets still need preloading, or directly to `InProgress` if preload is complete.
-- When a player **disconnects**, auto-start is re-evaluated: the disconnecting player's ready flag is cleared, then `all_ready()` is checked again. If the remaining players are all ready, the same phase-transition + `GameStarted` broadcast fires (including the `Loading` gate when preload is incomplete). A returning player must re-confirm readiness. (#600)
-- The server derives available consoles from unclaimed stations in the loaded `ShipConfig`.
+Players identify, set their names, claim a direct station or Spectator role,
+choose an authored station rating, and set readiness. When every connected
+non-spectator participant is ready, the server enters `Loading` if render
+assets still need preloading or begins `InProgress` immediately if the preload
+gate is already complete.
+
+A disconnect clears readiness and triggers the same all-ready re-evaluation for
+the remaining crew. Claimable seats come from the selected hull's non-auxiliary
+station roster; there is no queue or fixed console list.
 
 ## Loading
 
-`Loading` is the transient asset-preload phase after all connected players are ready. The server broadcasts `LoadingProgress { fraction }` while render assets warm up. Once preload finishes, the server broadcasts `GameStarted` and transitions to `InProgress`.
+The server publishes `LoadingProgress` while required render assets reach a
+terminal load state. Reconnect and station restoration remain available. Once
+the preload completes, `GameStarted` is broadcast and the fixed simulation
+enters `InProgress`.
 
-Reconnect is still accepted during `Loading`; a refreshing player receives `Welcome` and any restored station assignment before play begins.
+## InProgress
 
-## In-Progress
+Admitted console and AI commands drive the fixed-tick simulation. The ordered
+sets are `Input -> Physics -> Damage -> Modifiers -> Publish ->
+PublishAggregate -> Broadcast`. World scripts, objectives, AI, regions,
+weapons, engineering, and other gameplay plugins run under their registered
+phase and cadence conditions.
 
-- Console handlers process station-authorized inputs.
-- Simulation systems run in `SimSet::Input -> Physics -> Damage -> Modifiers -> Broadcast`.
-- `SimState` broadcasts at the simulation cadence, and `Welcome` for late join/reconnect includes live `WorldData`.
-- World, region, asteroid, NPC AI, objective, comms, repair, and power systems run server-side.
-
-## Disconnect And Reconnect
-
-Disconnect no longer vacates a per-player player console vector because players do not own one. Instead:
-
-1. `process_disconnect_with_stations` resolves the player's `StationId`.
-2. It records the station's current rating in `Player.last_rating`.
-3. It applies the station's `Backfill` rating through `rating::apply_rating`, switching station-owned systems to AI control.
-4. It broadcasts `PlayerLeft` and `RatingChanged { rating_name: "Backfill" }`.
-5. Auto-start is re-evaluated (see Lobby above).
-
-On reconnect, `Identify` restores the previous station only if no other connected player has claimed it. If restore succeeds, the server broadcasts `StationAssigned` and `RatingChanged` with the saved `last_rating` (or the fallback used by the handler). If the station was claimed, the reconnecting player remains without a station and can select another available one.
-
-**Spectator queue removed (#605):** The write-only `spectator_queue` field on `SessionManager` was deleted (all 5 API methods, push/remove call sites, and 6 unit tests). At-capacity join behaviour is unchanged — players still receive `StationAssigned { station: None }` when all slots are taken, but there is no FIFO queue backing the empty-station assignment: a cap-reached player simply has no station and must wait for a slot to open via another player's departure.
+Late joiners and reconnecting players receive `Welcome` plus current world and
+station state. A disconnect preserves the remembered station, stores its
+rating, and applies Backfill AI; a successful reconnect restores the claim and
+rating if no connected player took the seat.
 
 ## GameOver
 
-`GameOver` exists in the wire/state enum, but the current gameplay loop still treats end-of-scenario ceremony as future polish rather than a full round-management system.
+Player-ship destruction or a scripted `game_over` action records an optional
+reason and outcome, enters `GameOver`, and broadcasts the terminal message.
+The game-over UI can issue `ReturnToLobby`; the server resets round readiness
+and returns to the lobby through the authoritative lobby handler.
 
 ## Related
 
-- [Player](../entities/player.md)
-- [Session](../entities/session.md)
 - [Game Loop](./game-loop.md)
+- [Session](../entities/session.md)
+- [Asset Preload](./asset-preload.md)

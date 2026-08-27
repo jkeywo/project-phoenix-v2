@@ -3,7 +3,7 @@ title: World Data
 type: entity
 tags: [world, scenario, transform, ambient_light, snapshot, includes]
 sources: [src/world/config.rs, src/world/server.rs, src/world/server_tests.rs, src/world/layers.rs, src/world/validate.rs, src/world/deadlines.rs, src/world/script/load.rs, src/world/script/schedule.rs, src/comms/scripted.rs, src/entities/config_cache.rs, src/snapshot.rs, src/server/bridge.rs, server.html, src/server/renderer.rs, src/entities/config.rs, src/entities/include_resolve.rs, tests/snapshot_resume.rs, assets/worlds/default.toml]
-updated: 2026-08-26
+updated: 2026-08-27
 ---
 
 # World Data
@@ -16,33 +16,32 @@ or loaded during play.
 ## Source schema (`src/world/config.rs`)
 
 ```toml
-seed = 42
-
 # Hull-agnostic selectors: Station ids (console families) or System kinds.
 scenario_detail_floor = ["navigation"]
 
 [global]
-seed = 42                                # optional global block; merged into WorldConfig
+seed = 42                                # optional; drawn from the OS when omitted
 
-[ambient_light]                          # src/world/config.rs:117
+[ambient_light]                          # AmbientLightConfig in src/world/config.rs
 color = [0.6, 0.55, 0.5]                 # sRGB; default Color::srgb(0.6, 0.55, 0.5)
 brightness = 300.0                       # default 300.0
 
-[[anchor]]
-name = "starbase"
-position = [0.0, 0.0, 0.0]               # normalised to [f32; 3]
+[anchors]
+starbase = [0.0, 0.0, 0.0]               # normalised to [f32; 3]
 
-[[entity]]                               # src/world/config.rs:276
-template = "assets/entities/station_axiom.toml"
+[[entity]]                               # WorldEntity in src/world/config.rs
+template_path = "assets/entities/station_axiom.toml"
 name = "axiom"                           # optional; overrides EntityConfig.name
 transform = { anchor = "starbase", offset = [10.0, 0.0, 0.0] }
 
 [[entity]]
-template = "assets/entities/star_sun.toml"
+template_path = "assets/entities/star_sun.toml"
 transform = { position = [0.0, 50.0, 0.0], rotation = [0.0, 0.0, 0.0], scale = [1.0, 1.0, 1.0] }
 ```
 
-Scenario logic — event registrations, effects and comms dialogue — is authored in `[script]` and documented under [World Plugin](../concepts/world-plugin.md); the declarative `[[trigger]]` / `[[comms]]` blocks that preceded it were deleted in issue #985.
+Scenario logic — event registrations, effects, and Comms dialogue — is authored
+in `[script]` and documented under [World Plugin](../concepts/world-plugin.md).
+Declarative `[[trigger]]` and `[[comms]]` blocks are rejected at load.
 
 `scenario_detail_floor` is root-world-only: additive/supporting world loads reject
 it rather than ambiguously overriding or discarding the selected scenario's
@@ -95,22 +94,12 @@ sentinel as terminal rather than retrying, and only then restores callbacks,
 deadlines and Comms state. That preserves index-aligned handlers and prevents
 bootstrap duplicate arming.
 
-## Proposed Authoring Contract
+## TransformConfig (`src/world/config.rs`)
 
-PASM records the next world-file design as proposed, not shipped. `name` becomes the unique internal reference key; `display_name` is separate player-facing text. This avoids using UI copy as a lookup key.
-
-Before any root world activates, validation must resolve all templates, entity names, flags, objectives, scripted trigger and comms-sender references, and child-world paths. A duplicate or unresolved reference is a source-located authoring error that prevents the **entire** root composition from loading, with no partial spawn.
-
-Layered-world resolution is also proposed to grow beyond the current flag-only `parent:` convention: `parent.<name>` addresses the enclosing world (repeatable to climb further) and `child_world.<name>` addresses a named child layer. The validator must detect collisions in every namespace where an unqualified name would be ambiguous. Current code supports `extra_worlds`, `load_world`, `unload_world`, and `parent:` only for flags; general object namespaces are not yet implemented.
-
-A scripted `open_comms` carries a sender reference for runtime resolution and separate sender display text. Every message still goes to the ship Comms system; world files do not define per-role message visibility.
-
-## TransformConfig (`src/world/config.rs:46`)
-
-Single struct replaces the old flat `position` / `anchor` / `relative_to` / `offset` fields on `WorldEntity`. Resolution precedence (see `TransformConfig::resolve` at `src/world/config.rs:80` and `resolve_entity_position_with` at `src/world/config.rs:1700`):
+Single struct replaces the old flat `position` / `anchor` / `relative_to` / `offset` fields on `WorldEntity`. Resolution precedence is defined by `TransformConfig::resolve` and `resolve_entity_position_with` in `src/world/config.rs`:
 
 1. `relative_to = "<id-or-name>" + offset` — resolved against another `[[entity]]` in the **same world file**, named by its `id` or its `name`. Declaration order is irrelevant: `build_named_entity_positions` builds the whole lookup table before anything is positioned, so a target below the reference resolves as readily as one above it. A `name` beats another entity's `id` of the same spelling. The target must not itself use `relative_to` — chains are unsupported — and a reference that resolves to nothing is an `unresolved-relative-to` **error** that blocks activation of the whole world (`validate_relative_to`, issue #969), rather than dropping the one entity
-2. `anchor = "<anchor-name>" + offset` — resolved against a `[[anchor]]`
+2. `anchor = "<anchor-name>" + offset` — resolved against an entry in `[anchors]`
 3. `position = [x, y, z]` — absolute
 4. otherwise origin
 
@@ -118,14 +107,14 @@ Additional fields:
 - `rotation: [f32; 3]` — XYZ Euler radians, applied via `Quat::from_euler(EulerRot::XYZ, x, y, z)`. Default `[0, 0, 0]`.
 - `scale: [f32; 3]` — uniform-per-axis scale; default `[1, 1, 1]`. **Scale lives only on `TransformConfig`**; there is no `EntityConfig.scale` field.
 
-## AmbientLightConfig (`src/world/config.rs:117`)
+## AmbientLightConfig (`src/world/config.rs`)
 
-Optional top-level `[ambient_light]` block on the world TOML. Applied by the `spawn_world_ambient_light` system (`src/server/renderer.rs:296`, registered in `PostStartup` at `src/server/renderer.rs:94`) after `insert_world_config_resource` (`src/world/server.rs:632`) has placed the `WorldConfig` resource. If absent, the renderer falls back to `Color::srgb(0.6, 0.55, 0.5)` at brightness `300.0`.
+Optional top-level `[ambient_light]` block on the world TOML. `apply_world_ambient_light` in `src/server/renderer.rs` applies it in `PostStartup`, after `insert_world_config_resource` has placed `WorldConfig`. Missing fields use `render_setup::default_ambient_light`.
 
 ## EntityConfig name + lights
 
-- `EntityConfig.name: Option<String>` (`src/entities/config.rs:1693`) is a template-level default. A `WorldEntity.name` override beats it. Both are stored as the `EntityName` component (`src/entities/spawner.rs:22`).
-- `[[light]]` array-of-tables on `EntityConfig` (`src/entities/config.rs`) spawns Bevy lights as children of the entity. Each `LightConfig` has `kind = "point" | "directional"`, `colour: [f32; 3]`, `intensity: f32`, optional `range: f32`. Collected into the `Lights` component (`src/entities/spawner.rs:28`) and instantiated by `render_spawned_entities` (`src/server_app.rs:2966`).
+- `EntityConfig.name: Option<String>` in `src/entities/config.rs` is a template-level default. A `WorldEntity.name` override beats it. Both are stored as the `EntityName` component in `src/entities/spawner.rs`.
+- `[[light]]` array-of-tables on `EntityConfig` spawns Bevy lights as children of the entity. Each `LightConfig` has `kind = "point" | "directional"`, `colour: [f32; 3]`, `intensity: f32`, optional `range: f32`. The `Lights` component in `src/entities/spawner.rs` carries them to `render_spawned_entities` in `src/server_app_render.rs`.
 - `[mesh].emissive: Option<f32>` on `EntityConfig` controls the StandardMaterial emissive multiplier (renderer default `0.4`; star templates use `2.0`).
 
 ## Entity template composition (`includes`)
@@ -135,14 +124,11 @@ paths resolve **relative to the declaring template**, are lexically canonicalise
 (`\` → `/`, `.`/`..` collapsed), and are merged depth-first in declared order, with
 the declaring template merged **last** so the includer wins.
 
-### The two layers no longer share one array rule (issue #911)
+### Compose and instance merge policies
 
 Both layers call `entity_override::merge_entity_config_toml_with`, but they pass
-**different `MergePolicy` values**, and this is the one place where "composing
-fragments" and "overriding an instance" genuinely mean different things. Before
-#911 there was a single shared rule, and that sharing is exactly why #869 could
-not let a hull extend a fragment's arrays: widening the rule for fragments would
-have widened it for every world override too.
+different `MergePolicy` values because composing reusable fragments and
+overriding one world instance have different array semantics.
 
 | | `ComposeFragments` (`includes`) | `InstanceOverride` (`[[entity]].overrides`) |
 |---|---|---|
@@ -169,20 +155,14 @@ at any depth, under `InstanceOverride`. It has to: relying on the parser to
 catch a stray marker does not work. `behaviour.doctrine` is the one array that
 reconciles at that layer, so a tombstone written there deep-merges *into* the
 matching template entry — and `DoctrineObjective` is **not**
-`deny_unknown_fields`, so serde ignores it, the load succeeds, and the doctrine
-the author asked to remove is still there. Nothing in `src/ship/config.rs` is
-`deny_unknown_fields` either. A subtractive marker that silently does nothing is
-the exact failure mode #838 existed to end, so the rejection lives in the merge,
-where the guarantee is stated.
+`deny_unknown_fields`, so serde could ignore it and leave the doctrine present.
+The merge therefore rejects every instance-override tombstone before parsing.
 
 To take an entry away in a world override, restate the array without it, or
 clear the whole array with `[]`.
 
-`behaviour.state` was reconciled by `name` before #911 and is not any more. The
-FSM was dissolved in #572, `BehaviourConfig` is `deny_unknown_fields` with no
-`state` field, and no shipped hull or fragment has one — a resolved document
-carrying `[[behaviour.state]]` does not parse. The special case was retired
-rather than generalised.
+`BehaviourConfig` is `deny_unknown_fields` and has no `behaviour.state` array;
+a resolved document carrying one does not parse.
 
 ### What a fragment author writes
 
@@ -221,14 +201,12 @@ author bumping a priority would silently "rename" a rule and get an append
 instead of an edit. **A fragment contributing an AI policy contributes it
 whole** — that is the intended granularity.
 
-### Known divergence: the browser override editor (issue #910)
+### Browser override preview
 
-`editor/override-editor.js`'s `deepMerge` is a hand-rolled JS reimplementation
-of the merge with **no by-id casing at all**. It was already divergent from Rust
-before #911 — it does not reconcile `behaviour.doctrine` by `id`, which has been
-Rust's behaviour since `68bda1be` — and #911 widens the gap on the compose side.
-Pre-existing, larger than #911, and tracked as **#910**; recorded here because
-it was not written down anywhere.
+`editor/override-editor.js` has an independent `deepMerge` used for browser
+preview and does not implement Rust's keyed array reconciliation. The
+authoritative result is the Rust resolver and its validation; do not use the
+browser preview to infer exact composed-array behavior.
 
 Resolution is pure and lives in `src/entities/include_resolve.rs`. It returns one
 resolved TOML document plus **provenance** — which template authored each dotted
@@ -244,30 +222,23 @@ and in the browser via `config_cache::drain_resolved_templates`, which reports t
 fragments JS must still fetch through the existing `PENDING_QUEUE`/`IN_FLIGHT`
 pair. Fragments are held as raw text only and never enter the config cache.
 
-Shipped hulls are not composed yet — `assets/entities/fragments/` holds the
-mechanism fixtures, deliberately outside `assets/entities/` where every
-"shipped template still loads" scan would try to parse them as hulls.
+Shipped Alliance, Harrow, tender, and civilian hulls compose reusable AI policy
+fragments from `assets/entities/fragments/ai/`. The parent
+`assets/entities/fragments/` directory also holds the nested `npc_escort_core` /
+`composed_escort` fixtures that exercise include ordering and provenance without
+presenting fragments as root hull templates.
 
 ## Lifecycle
 
 1. **Startup:** Trunk fires `wasm_load_world`; `parse_world` populates the `WORLD_CONFIG` thread-local.
 2. **`WorldPlugin` startup chain:** `insert_world_config_resource` → `spawn_world_entities` → `init_world_runtime` → `load_extra_worlds`. Production always loads a world TOML via the WASM bridge; native unit tests without a `WorldConfig` see an empty world.
 3. **Renderer backdrop:** `RendererPlugin` attaches the shared `assets/skybox/phoenix_space_cubemap.png` cubemap to `GameCamera`; it is independent of world TOML content.
-4. **`spawn_world_ambient_light` (`PostStartup`)** reads `WorldConfig.ambient_light` and inserts the `AmbientLight` resource.
+4. **`apply_world_ambient_light` (`PostStartup`)** reads `WorldConfig.ambient_light` and inserts the `GlobalAmbientLight` resource.
 5. **`WorldSetup` broadcast** carries the per-instance entity snapshots to clients on `GameStart` and re-broadcasts via `Welcome` to late joiners.
 6. **Supporting layer changes:** `apply_world_layer_changes` composition-validates retained TOML and its exact resolved script sources before UUID minting, then atomically activates entities/triggers/deadlines and publishes `WorldLoaded` only afterwards. Validation sees root + currently active + candidate doctrine anchors and is recomputed per queued change. It runs before scripted callback draining, so an unload on a callback's due tick retracts the callback deterministically.
 7. **For the rest of the session:** anchors and ambient light are immutable. Entities can be destroyed (asteroids, hull-zero stations); triggers, callbacks, deadlines, Comms and objectives mutate through authoritative runtime state.
-
-## Migration notes (2026-05 entity-schema refactor)
-
-- Old per-section blocks `[star]`, `[planet]`, `[station]`, `[science_console]` on entity TOMLs are **gone**. Stars are now plain entities with `[mesh] + [[light]]`; planets are `[mesh] + [collider]`; stations are `[mesh] + [hull]`, with hull damage tracked via `[hull].hull_integrity`.
-- Old `WorldEntity` flat fields `position` / `anchor` / `relative_to` / `offset` have been folded into the single `transform = { ... }` table.
-- See refactor-2026-05-entity-schema for the full slice-by-slice account.
 
 ## Related
 
 - [Asteroid](./asteroid.md) · [Asteroid Field](../concepts/asteroid-field.md)
 - [World Plugin](../concepts/world-plugin.md)
-- Draft 1 — Entity Config Files
-- Draft 2 — Game Map
-- Refactor 2026-05 — Entity Schema

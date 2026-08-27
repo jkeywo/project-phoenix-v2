@@ -3,12 +3,12 @@ title: Server HTML Lobby UI
 type: concept
 tags: [lobby, server, html, ui, bridge, responsive]
 sources: [server.html, gui/host-lobby-view.js, src/server/viewscreen_border.rs, src/console_bridge.rs, src/server/bridge.rs]
-updated: 2026-08-26
+updated: 2026-08-27
 ---
 
 # Server HTML Lobby UI
 
-The lobby UI on the **server** (viewscreen) page is rendered entirely as HTML/CSS/JS in `server.html`. It is mutated by the global `window.__updateLobby(json)` callback whenever the Bevy server pushes a new `LobbyStatePayload` snapshot. The Bevy `LobbyScreenRoot` tree that previously rendered this UI was deleted in 2026-06-08 as part of issue [#436](https://github.com/jkeywo/project-phoenix-v2/issues/436).
+The lobby UI on the **server** (viewscreen) page is rendered entirely as HTML/CSS/JS in `server.html`. The global `window.__updateLobby(json)` callback applies each `LobbyStatePayload` snapshot pushed by the Bevy server.
 
 The host page is the only consumer of this push channel: each viewer of `server.html` sees the same lobby state because the data originates from a single authoritative Bevy world.
 
@@ -83,18 +83,20 @@ Wide mode uses the same claimable cards in an adaptive multi-column grid.
 
 A scroll fallback (`overflow-y: auto` on `#station-grid`) handles rosters that do not fit after reflow.
 
-## Rust — what stays in `viewscreen_border.rs`
+## Rust ownership
 
-After the #436 sweep:
+`ViewscreenBorderPlugin` owns the host-overlay producers and presentation effects:
 
-- `ViewscreenBorderPlugin` and its plugin registration scaffold
-- `RedAlertVignetteMaterial` (a `UiMaterial` for the red-alert tint)
-- `push_lobby_state` (the producer this page is about)
-- `push_hud_state` (analogous channel for `__updateHud`)
-- `process_shield_flash`, `process_hull_shake`, `apply_camera_shake`
-- `compute_hud_state`, `load_viewscreen_assets`, `spawn_border_on_startup`, `spawn_hud_state_entity`
+- `push_lobby_state` emits `LobbyStateChanged` when the authoritative lobby
+  projection changes;
+- `recompute_hud_state` and `push_hud_state` emit the in-game HUD projection,
+  with a final game-over push on phase entry;
+- `RedAlertVignetteMaterial`, shield flash, hull shake, camera shake, and the
+  reduced-motion preference remain renderer-side presentation state.
 
-The Bevy lobby UI tree (`LobbyScreenRoot`, `LobbyGridRoot`, `LobbyStationCard`, `LobbyCrewDisplay`, `LobbyReadyVal`, plus `spawn_lobby_screen`, `rebuild_lobby_station_grid`, `update_lobby_header_values`, `toggle_lobby_screen_visibility`, `spawn_station_card`, `spawn_station_placeholder`, `ready_status`, `complexity_label`, and their tests) was removed in the same PR (~870 lines).
+The lobby cards, rail, QR area, and responsive layout are DOM owned by
+`server.html` and `gui/host-lobby-view.js`; Bevy publishes data but does not
+build a lobby UI tree.
 
 ## Tests
 
@@ -103,7 +105,9 @@ Smoke coverage in `tests/smoke/lobby-responsive.spec.js`:
 - Portrait viewport (480×900): rail below the claimable-station grid, no horizontal body scroll, and spectator pills rendered.
 - Landscape viewport (1280×720): rail right of the claimable-station grid with multiple card columns.
 
-Protocol-level lobby coverage stays in `tests/smoke/lobby.spec.js` (`SelectStation`, `StartGame`, captain authority, etc.). Those tests do not touch the DOM.
+Protocol-level lobby coverage stays in `tests/smoke/lobby.spec.js` (station
+selection, readiness, assignment broadcasts, and invalid claims). Those tests
+do not assert responsive DOM layout.
 
 ## Sources
 
@@ -112,6 +116,4 @@ Protocol-level lobby coverage stays in `tests/smoke/lobby.spec.js` (`SelectStati
 - `src/server/bridge.rs` — `set_host_channel_callback`, `flush_host_channels` (named Host Channel table, #818)
 - `src/console_bridge.rs` — `LobbyStateChanged` event
 - `src/core/messages.rs` — `LobbyStatePayload` / `StationPayload`
-- Issue [#436](https://github.com/jkeywo/project-phoenix-v2/issues/436) — original HTML rebuild
 - [Message Flow](./message-flow.md), [Codec Seam](./codec-seam.md)
-- PRD #120 — Station-Based Lobby

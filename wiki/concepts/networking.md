@@ -2,8 +2,8 @@
 title: Networking
 type: concept
 tags: [networking, peerjs, webrtc, session-token, star-topology, datachannel, snapshot]
-sources: [server.html, client.html, gui/connection-manager.js, AGENTS.md]
-updated: 2026-07-05
+sources: [server.html, client.html, gui/connection-manager.js, gui/session-token.js, src/server/bridge.rs, src/server_app/broadcast_publish.rs, AGENTS.md]
+updated: 2026-08-27
 ---
 
 # Networking
@@ -56,17 +56,26 @@ Every client maintains two parallel DataChannels on the same `RTCPeerConnection`
 | Reliable | (PeerJS default) | Yes | Yes | `ClientMessage` commands, `ServerMessage` lobby/events |
 | Snapshot | `'snapshot'` | No | 0 (never) | `SimState`, `BlackboardUpdate`, `ShieldStatus`, `RepairState`, `PowerState`, `WeaponsUpdate`, `SystemHullUpdate` |
 
-The server classifies each `ServerMessage` via `delivery_class_for_msg()` (`src/server_app.rs:664`). `flush_outbound` (`src/server/bridge.rs:836`) passes the delivery class as a third string argument to the JS callback. `routeOutbound` (`server.html:1510`) dispatches to the appropriate channel map, falling back to the reliable channel for any token without a snapshot channel.
+The server classifies each `ServerMessage` via `delivery_class_for_msg()` in `src/server_app/broadcast_publish.rs`. `flush_outbound` in `src/server/bridge.rs` passes the delivery class as a third string argument to the JS callback. `routeOutbound` in `server.html` dispatches to the appropriate channel map, falling back to the reliable channel for any token without a snapshot channel.
 
-## Client connection lifecycle (`gui/connection-manager.js`, #603 / #614)
+## Client connection lifecycle (`gui/connection-manager.js`)
 
-PeerJS peer creation, connect/retry/timeout, DataConnection handlers, and `Identify`-on-open were extracted from `client.html` inline script into `gui/connection-manager.js` (issue #603). The module exposes a `ConnectionManager` class with a small callback-based interface that `client.html` wires up: `onData`, `onStatus`, `onLog`, `onError`, and a `getIdent` callback for the session token. Vitest suite (`tests/client/connection-manager.test.js`) covers the pure module logic.
+`ConnectionManager` owns PeerJS peer creation, connect/retry/timeout,
+DataConnection handlers, and `Identify` on every open. `client.html` wires its
+callback interface: `onData`, `onStatus`, `onLog`, `onError`, and `getIdent` for
+the session token. `tests/client/connection-manager.test.js` covers the pure
+module logic.
 
-**Auto-reconnect with backoff (#614):** The old hard 3-attempt ICE give-up was replaced with exponential backoff starting at 100ms, capped at 30s, with persistent retry. `_identSent` is reset on DataChannel close/error so `Identify` is re-sent on every reopen, restoring seat + rating through the existing server-side reconnect flow. `client.html` shows a "Retry now" affordance button. A generation guard ignores stale connection callbacks after a retry cycles the generation counter. A Playwright smoke test (`reconnect-midgame-sever.spec.js`) exercises sever + revive mid-game and verifies the seat is restored and console reflects current system state within one broadcast tick.
+Reconnect uses persistent exponential backoff from 100 ms to a 30 s cap.
+`_identSent` resets on DataChannel close/error so every reopen re-identifies and
+enters the server-side seat/rating restore flow. The client offers **Retry now**,
+and a generation guard ignores callbacks from superseded attempts.
+`reconnect-midgame-sever.spec.js` exercises sever and revive during play.
 
-## Host page cues via HUD/lobby push (#604)
+## Host page cues via HUD/lobby push
 
-`server.html`'s `routeOutbound` previously sniffed JSON payloads to drive the loading overlay, red-alert siren, and engine hum volume from wire content. With #604, these cues are now driven by dedicated push callbacks:
+Host-local presentation cues use dedicated push callbacks rather than inspecting
+peer message JSON in `routeOutbound`:
 - `__updateHud` — carries `ViewscreenHudState` with `engine_thrust` (engine hum volume), `red_alert` (siren), etc.
 - `__updateLobby` — carries `LobbyStatePayload` with `phase` (loading overlay visibility) and `loading_progress` (progress bar value).
 
@@ -87,7 +96,7 @@ Both pages show a coloured dot in the top-right:
 
 ## ICE servers, TURN relay, and on-device diagnostics (2026-08 hotspot fix)
 
-The base ICE list (`defaultIceServers()`) is **STUN-only**; TURN relay credentials come primarily from the Cloudflare worker (`worker/`, deployed per-target as `phoenix-turn-credentials` / `phoenix-turn-credentials-demo`). If the worker is unreachable, `fetchIceServers()` falls back to Metered's free shared OpenRelay TURN (`openRelayFallbackServers()`) and reports `relaySource: 'openrelay'`, which both pages surface as a mild "using free fallback relay" notice. Note the hostname: OpenRelay lives at `staticauth.openrelay.metered.ca` — the bare `openrelay.metered.ca` the code used pre-2026-08 has **no DNS records** (NODATA from public resolvers), which is why the old hardcoded entries could never connect and only stalled gathering while pretending relay existed.
+The base ICE list (`defaultIceServers()`) is **STUN-only**; TURN relay credentials come primarily from the Cloudflare worker (`worker/`, deployed per-target as `phoenix-turn-credentials` / `phoenix-turn-credentials-demo`). If the worker is unreachable, `fetchIceServers()` falls back to Metered's shared OpenRelay TURN (`openRelayFallbackServers()`) and reports `relaySource: 'openrelay'`, which both pages surface as a mild fallback notice. OpenRelay uses `staticauth.openrelay.metered.ca`.
 
 **Relay is mandatory on hotspot/CGNAT networks** (phone tethering, two phones on separate mobile data): STUN hairpinning through carrier NAT essentially never works, and host candidates are mDNS-obfuscated. Three things therefore surface degraded relay instead of failing silently:
 
@@ -97,17 +106,19 @@ The base ICE list (`defaultIceServers()`) is **STUN-only**; TURN relay credentia
 
 The per-attempt connect timeout escalates 8s → 16s → 30s (`connectTimeoutMs()`) since TURN-over-TCP allocation on cellular can exceed the old flat 8s.
 
-**Deploy trap (caused the 2026-08 field failure):** the worker validates CORS against `ALLOWED_ORIGIN` in `worker/wrangler.toml`, and the deployed value only updates on `wrangler deploy`. A stale origin (e.g. the pre-custom-domain `github.io` value) CORS-blocks every credential fetch, silently stripping TURN for all players. `ALLOWED_ORIGIN` is now a comma-separated allowlist and the worker echoes the matching origin.
+The worker validates CORS against the comma-separated `ALLOWED_ORIGIN` list in
+`worker/wrangler.toml` and echoes the matching origin. The deployed value only
+changes after `wrangler deploy`; an incorrect allowlist blocks credential
+fetches and removes TURN availability for clients.
 
 ## Why no real backend
 
 - Game data is peer-to-peer. Only the WebRTC handshake touches PeerJS's public broker.
 - Hosting is GitHub Pages — pure static.
-- Self-hosted PeerJS is an explicit out-of-scope item from PRD #1, deferred post-PoC.
 
 ## Smoke testing without WebRTC
 
-The Playwright suite swaps `window.Peer` for a `BroadcastChannel`-backed shim before any page script runs (`addInitScript`). The shim (`tests/smoke/peerjs-shim.js`) includes a `DataChannel` implementation that propagates sub-channel creation via control messages, so the snapshot DataChannel works end-to-end in smoke tests. Same surface, no signalling server. See [Testing Strategy](./testing-strategy.md), PRD #51, and `tests/smoke/snapshot-channel.spec.js`.
+The Playwright suite swaps `window.Peer` for a `BroadcastChannel`-backed shim before any page script runs (`addInitScript`). The shim (`tests/smoke/peerjs-shim.js`) includes a `DataChannel` implementation that propagates sub-channel creation via control messages, so the snapshot DataChannel works end-to-end in smoke tests. Same surface, no signalling server. See [Testing Strategy](./testing-strategy.md) and `tests/smoke/snapshot-channel.spec.js`.
 
 ## Related
 

@@ -1,13 +1,12 @@
 ---
 title: Console UI Authoring Library
-kind: concept
-status: decided
+type: concept
+tags: [client, console, components, html, css, javascript]
 sources:
   - gui/components/
   - gui/console-ui.js
-related:
-  - wiki/entities/console.md
-  - wiki/concepts/client-architecture.md
+  - gui/mount-plan.js
+updated: 2026-08-27
 ---
 
 ## Decision

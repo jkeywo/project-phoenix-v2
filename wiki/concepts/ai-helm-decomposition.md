@@ -1,130 +1,54 @@
 ---
 title: AI Helm Decomposition
 type: concept
-tags: [ai, helm, per-axis, intent, lod, control-source, tick]
-sources: [src/ship/helm_ai.rs, src/ship_plugin.rs, src/ai/core.rs, src/ai/lod.rs, src/ai/server.rs, src/ship/helm.rs, src/world/config.rs, src/server_app.rs, src/entities/config.rs]
-updated: 2026-07-16
+tags: [ai, helm, per-axis, commands, control-source, tick, lod]
+sources: [src/ship/helm_ai/mod.rs, src/ship/helm_ai/surfaces.rs, src/ship/helm_ai/facts.rs, src/ship/helm_ai/steering.rs, src/ship/helm_ai/lateral.rs, src/ship/helm_ai/vertical.rs, src/ship/helm_ai/impulse.rs, src/ship/helm_ai/boost.rs, src/ship/helm_ai/engines.rs, src/ship_plugin.rs, src/ship/helm_planner.rs, src/ai/core.rs, src/ai/cadence.rs, src/ai/lod.rs, src/ai/server.rs, src/server_app_render.rs]
+updated: 2026-08-27
 ---
 
 # AI Helm Decomposition
 
-The `operate_helm_ai` monolith is gone (#704). AI helm control is four per-axis Bevy systems, each the sole writer of one intent component, gated on its own declared system's `ControlSource` — never a coarse fallback. Human and AI input converge on the same intent components, which one integrator consumes. This page covers the per-axis pattern, the intent-component surface, and the two LOD systems that scope it.
+AI Helm is split by fine system. Each host decides one authored axis or drive capability, emits the same admitted command a human console would send, and is gated by that system's own `ControlSourceResolver` policy.
 
-## Per-axis AI systems
+## Module layout
 
-All four live in `src/ship/helm_ai.rs`:
-
-| System | Intent component written | Gate (own axis only) |
-|---|---|---|
-| `ai_helm_thrust` | `ThrustInput` | `helm-thrust`.operate_ai |
-| `ai_helm_steering` | `SteeringInput` | `helm-steering`.operate_ai |
-| `ai_helm_lateral_thrust` | `LateralThrustInput` | `helm-lateral-thrust`.operate_ai |
-| `ai_helm_impulse` | `ImpulseCommand` | `helm-impulse`.operate_ai |
-
-Rule-6 gating: each system checks `ControlSourceResolver::policy_for(<own system id>).operate_ai` and nothing else. The coarse `helm` id was deleted as a system by #801 (it survives as `HELM_STATION_ID`, the Helm console blackboard key), so there is no coarse policy for an axis to fall back on. An axis a hull does not declare is an axis no AI drives — `ControlSource::default()` is Human — which is why every shipped hull declares all four axes. `helm_axes_operate_ai` (used by display-mirror logic) means "both stick axes AI", derived from the per-axis declarations.
-
-Decisions come from the pure `operate_helm` in `src/ai/core.rs` (thrust + steering; `ai_helm_lateral_thrust` uses the separate pure `operate_lateral_thrust`). Because `operate_helm` is a pure function of identical inputs, each per-axis system calls it independently and keeps only its own axis — there is deliberately no shared cached decision component. `ai_helm_steering` additionally folds in the Weapons→Helm `PendingArcBearingRequest` (channel-3 `ArcBearingRequest`, issue #677) via `apply_arc_bearing_request`, clearing it when the target is gone or a phaser arc already bears.
-
-### Console-owned goal surfaces
-
-The helm AI owns no goals; it reads shared surfaces a human could equally drive (`HelmAiSurfaces` in `src/ship/helm_ai.rs`):
-
-| Surface | Owner | Answers |
-|---|---|---|
-| `TacticalRadarSelection` | Tactical (human `SetTarget` / `ai_target_selection`) | who to pursue |
-| `NavigationWaypoint` + `HelmWaypointClearance` | Navigation (+ the channel-3 lag) | where to travel |
-| `ObjectiveCursors` | `advance_objective_cursors` (`SimSet::Modifiers`, sole writer) | where on the route |
-
-A missing surface means "no goal from that console", never a fabricated default.
-
-### Shared combat targets
-
-For an active `Destroy` directive, Helm also consumes explicit targets already
-selected by Tactical, Sensors, or an entity-anchored Navigation waypoint.
-Those selections add only the selected live entity to Helm's actionable view,
-so Helm may pursue it beyond its own radar range without gaining general
-long-range detection. Untargeted `Destroy` combat doctrine accepts only an
-opposing-faction candidate (Tactical first, then Sensors, Navigation, then
-Helm's own radar-limited hostile scan); named Destroy objectives retain their
-authored target.
-
-### Shared sim tick (issue #803)
-
-All four systems share one `run_if(ai_tick_ready)` gate — since issue #889 the *same* gate every other AI policy host uses. `AiTickTimer` is a repeating timer; `tick_ai_cadence` (registered in Bevy's `Last`, so it always runs after the `Update` systems it gates) advances it and latches `AiTickReady`. This decouples AI cadence from the rAF-driven frame rate — without it a 144 Hz host would steer on ~4x fresher data than a 60 Hz one, the nondeterminism PRD #620 exists to remove. The rate is TOML-authored: `[global] ai_tick_hz` (`GlobalConfig::ai_tick_hz`, serde default 30 Hz; the pre-#889 key `ai_helm_tick_hz` remains a serde alias), reconciled against the loaded world config each frame. See `src/ai/cadence.rs`.
-
-### Ordering
-
-Since #824 the AI systems emit admitted commands rather than writing intents: `build_helm_ai_surfaces_frame` runs after `AiTickLabel` and before all four per-axis systems; the four emit `SetThrust`/`SetSteering`/lateral/impulse payloads through `command_admission::ai_emit::emit_ai_command` (the shared AI-emit helper over `validate_and_admit`, issue #738) into their own ship's `AdmittedCommands`, all **before** `process_helm_inputs`, which applies every admitted helm payload per-entity (human- and AI-sourced alike) and is the single writer of `LastHelmInput` (LocalShip only). `apply_helm_commands` runs after it, consuming `ImpulseCommand`. The registration comments in `src/ship_plugin.rs` state the full contract.
-
-## Intent-component surface
-
-`src/ship/helm.rs` declares the five components that decouple *admission* from *physics integration*:
-
-| Component | Meaning |
+| File | Responsibility |
 |---|---|
-| `ThrustInput(f32)` | Desired forward/reverse thrust, `[-1, 1]` (same range as `SetThrust`) |
-| `SteeringInput(f32)` | Desired yaw input, `[-1, 1]` (same range as `SetSteering`) |
-| `LateralThrustInput(f32)` | Desired strafe thrust |
-| `ImpulseCommand(ImpulsePhase)` | Desired impulse phase transition (only `Idle`/`Charging` ever commanded; idempotent) |
-| `BoostCommand(bool)` | Desired boost engagement |
+| `src/ship/helm_ai/mod.rs` | Shared policy-machine state and the public module surface. |
+| `surfaces.rs` | Builds one frozen, read-only decision frame per ship and projects policy output. |
+| `facts.rs` | Seeds authored facts and parameters into each policy host. |
+| `steering.rs` | Steering host and arc-bearing override. |
+| `lateral.rs` / `vertical.rs` | Translation-axis hosts. |
+| `impulse.rs` / `boost.rs` | Drive-transition hosts. |
+| `engines.rs` | Engine-specific publishing and AI adapters. |
 
-Writer contract — one writer per axis per tick (#824):
+The forward-thrust host remains part of the shared module surface. Together the active hosts are thrust, steering, lateral thrust, vertical thrust, impulse, and boost.
 
-- `process_helm_inputs` is the sole intent-component writer for every ship: it applies each ship's `AdmittedCommands` (per-axis wire: `SetThrust` → `helm-thrust`, `SetSteering` → `helm-steering`, since #801) regardless of whether the command was admitted from a human token or an `ai:` token — authority is checked once at admission.
-- The four per-axis AI systems decide and **emit admitted commands**; they no longer write intent components directly.
+## Frozen decision surface
 
-Sole consumer: `integrate_ship_physics`, the single helm-path writer of `ShipPhysics` for the player ship and every AI-promoted NPC. A debug-only tripwire (`HelmPhysicsWriteGuard` + `HelmPhysicsFrame`, issue #699) panics if two helm-path writers stamp the same ship in one frame; the four sanctioned out-of-band `ShipPhysics` writers (collision, recoil, slow-zone clamp, low-LOD dead reckoning) are documented on `ShipPhysics` in `src/ship/state.rs` and do not opt in.
+`build_helm_ai_surfaces_frame` runs once before the hosts on each eligible AI tick. It folds authoritative, console-owned state into a per-ship frame: the viewscreen combat lock and scored objectives, Navigation waypoint and coordination clearance, current physics, world snapshot, shields, weapons reach, authored behaviour, and per-host policy memory.
 
-All five components are scoped to `AiHighFidelity`: they exist only on ships running full-fidelity helm (the player's `LocalShip`, always, and NPCs while promoted).
+Missing information remains missing; the Helm AI does not invent a goal. Named scenario targets resolve through the same world/runtime names available to the crew-facing surfaces. Private policy memory is snapshot-safe and scoped per fine system.
 
-## LOD architecture
+## Command symmetry and ordering
 
-Two independent LOD systems share nothing but the word.
+The hosts call `command_admission::ai_emit::emit_ai_command`. Their payloads enter that ship's `AdmittedCommands` before `process_helm_inputs`, alongside admitted human payloads. `process_helm_inputs` is the sole normal writer of helm intent components; `apply_helm_commands` applies drive transitions; `integrate_ship_physics` consumes the complete intent set.
 
-### AI simulation LOD
+Authority is checked at admission. Nothing downstream can distinguish a human-issued command from an AI-issued command, and no host falls back to a coarse `helm` system id.
 
-Pure evaluation in `src/ai/lod.rs`: `evaluate_lod(current, distance, sensor_range, …) -> LodState` (High/Low). Promotion (Low→High) is immediate when `distance <= sensor_range`; demotion requires `distance > sensor_range * 1.2` (`LOD_HYSTERESIS = 0.2`) **and** a 2 s dwell (`LOD_DWELL_SECS`) since the last transition — hysteresis plus dwell prevent oscillation at the range boundary.
+## Shared cadence
 
-`lod_ai_ships` (`src/ai/server.rs`) applies it per NPC against the player ship's position, inserting/removing the `AiHighFidelity` marker **and its scoped intent bundle** together: the five helm intent components plus `ShipFrequencyHintState`, `ShipPowerAiState`, `TorpedoIntents` (`ShieldArcIntents` retired into admitted emissions by issue #826; `PowerReactorIntents` likewise retired by issue #831 — NPC power now flows as admitted `SetPowerGroupAllocation`). `LocalShip` is never evaluated and always keeps its marker.
+All policy hosts run on the deterministic logical-tick cadence in `src/ai/cadence.rs`. The world authors `sim_tick_hz`, `ai_tick_hz`, and `ai_snapshot_hz`; validation requires whole cadence ratios. Decisions therefore depend on `SimTick`, not rendered frames or wall-clock timers.
 
-What each fidelity level runs:
+## Simulation and render LOD
 
-- **High**: the full per-axis AI decision systems, physics via `integrate_ship_physics`.
-- **Low**: `simulate_low_lod_ships` (`src/ai/server.rs`) dead-reckons `ShipPhysics.x/z/yaw` directly — a sanctioned out-of-band writer, filtered `Without<AiHighFidelity>` so it can never fight the integrator. A low-LOD ship with a Patrol/Reach objective still cheaply follows its route: it reads the same `ObjectiveCursors` the high-LOD path reads (one cursor surface since #702), so promotion/demotion resumes the route exactly where it left off. A ship that flies a **non-looping** route to its end (`route_completed`, `src/ai/patrol_cursor.rs`) has arrived, but arriving is not the same as being done (issue #1012): if a scored `Destroy` directive names a target that resolves in the `WorldSnapshot`, the ship diverts and commits to it — steering straight at the target's position at the hull's authored `low_lod_turn_rate_fraction`/`low_lod_cruise_fraction` — instead of parking on the route's anchor. Only when nothing is left to fly at does it coast to a stop and hold station, matching the high-LOD path's zero decision inside the arrival radius. A genuinely routeless ship with no scored Destroy gets the dumb forward-drift, decaying toward cruise speed.
-- Low-LOD NPCs **keep firing phasers**: `ai_phaser_auto_fire` (`src/console/weapons/mod.rs`) is deliberately not filtered on `AiHighFidelity` — phaser fire is the main damage low-LOD NPCs contribute, and `phaser_auto_fire_runs_for_low_lod_npc_without_ai_high_fidelity` pins it. Torpedo auto-fire and shield-focus AI are high-LOD only (`ai_shield_focus` in `src/console_ai/server.rs` skips low-LOD ships, which retain whatever focus they had when demoted).
+AI simulation LOD in `src/ai/lod.rs` promotes nearby NPCs to `AiHighFidelity` and demotes distant ones with authored thresholds, hysteresis, and dwell. High-fidelity ships run the full helm command/integration path. Low-fidelity ships use the cheaper deterministic path in `src/ai/server.rs` while retaining objective cursors and combat intent.
 
-### Mesh (render) LOD
+Mesh LOD is unrelated. It is selected by the renderer in `src/server_app_render.rs` from the model rig's authored levels and only changes visuals.
 
-Entirely separate, client-visual only. `MeshConfig.lod: Vec<LodLevel>` (`src/entities/config.rs`) declares near→far distance bands; each `LodLevel` is a GLB (`model`) or procedural (`shape`) level with optional per-band visual overrides falling back to the flat `MeshConfig` fields. `select_lod` picks the band for the camera distance with a `LOD_HYSTERESIS_MARGIN = 5.0` world-unit band against flip-flopping. `update_mesh_lod` (`src/server_app.rs`) drives entities carrying the `MeshLods` component, swapping the active visual (GLB scene child vs procedural mesh on the parent) when the level changes.
+## Related
 
-## The fighting ring's two levers (issue #929)
-
-A broadside orbit exists to hold the target abeam so the guns bear. Instrumented on `probe_duel`, it was not managing it: **every** beam the player cruiser lit ended because the target left the burning bank's arc, never because the burn expired. The banks are arc-limited, so arc dwell — not damage, not duty cycle — is what the ring was wasting.
-
-Two authored levers on the steering axis now trade against that, both absent-by-default so an unauthored hull flies exactly the ring it always did.
-
-**Arc-keeping** — `arc_keep_margin_deg` / `arc_keep_speed`. When the target drifts within the authored margin of an arc edge, the ring is flown at the slower throttle. The mechanism it leans on is older than the issue: `ShipPhysicsConfig::low_speed_turn_boost` gives `max_yaw_rate * (1 + boost * (1 - speed_fraction))`, so backing off the throttle buys turn authority. The cruiser had authored `low_speed_turn_boost = 0.2` long before anything spent it.
-
-The fact it reads is `own_bank_arc_margin_deg`, and it is the **minimum over bearing banks**, not the best one. Two 270° arcs on the centreline overlap so heavily that their union has no gap — the best margin never falls below 45° at any bearing — while `tick_beams_prepare` asks about the one bank that is *burning*. The actionable reading is how soon the broadside goes from two guns to one.
-
-**The weak-broadside flip** — `weak_shield_flip_hp` / `weak_shield_restore_hp` / `weak_shield_flip_dwell_secs`. When the arc the hull is presenting has been beaten down, the ring reverses so the healthy side faces the enemy. The trip fact is `own_facing_shield_hp`, this ship's own arc facing the target through `ShieldSystem::hp_facing_bearing` — the mirror of `target_facing_shields`, resolved through the same router the damage path uses. Priority order is deliberate: **shield protection beats arc-keeping**, and the flip is allowed to cost dwell.
-
-The thresholds form a deadband, and the latch lives in policy memory, folded per tick beside `min_range_seen`. It records the flip state, the specific shield-arc index that triggered it, and the policy-clock time of the trip. Restore decisions read that named arc rather than whichever arc the manoeuvre has now brought to bear; otherwise the geometry creates a feedback loop that immediately clears and re-trips the latch. The authored minimum dwell also prevents a brief regeneration or focus change from undoing a turn still in progress. All three memory values travel in the snapshot payload as `PolicyState.memory`, and the snapshot/resume integration test pins their round trip.
-
-The flip mirrors **direction only** — same radius, same speed, same tangent geometry — so the `torpedo_run` bow hold opens from either broadside and nothing else in the doctrine has to know.
-
-Measured, 12 seeds of `probe_duel` at 90 s, one variable at a time:
-
-| | arc off, flip off | arc ON, flip off | arc ON, flip ON |
-| --- | --- | --- | --- |
-| duels resolving | 10/12 | 12/12 | 12/12 |
-| damage taken | 479 | 296 | 270 |
-| bow hold (mean) | 10.6 s | 0.5 s | 0.5 s |
-
-Arc-keeping is the large effect: a 38% cut in damage taken and a bow hold that all but disappears, because a hull that keeps its guns on the target does not need to break its ring to point them. **What it did not buy is coverage** — distinct ticks on which a bank landed damage sit at 4.5–5.3% before and 4.2–5.5% after. The gain is a better firing position and far less return fire, not dwell; a pass wanting to measure dwell should count *burning* ticks at the beam site rather than landing ticks from the balance ledger.
-
-## Cross-references
-
-- [Helm Runtime](./helm-control-intent.md) — the human/console side of the same intent surface
-- [Coarse-system migration](./coarse-system-migration.md) — the id namespaces and per-axis wire
-- [AI Ship Unification](./ai-ship-unification.md) — the per-kind AI plugin pattern this decomposes
+- [Helm Runtime](./helm-control-intent.md)
+- [AI Ship Unification](./ai-ship-unification.md)
+- [ShipPlugin](./ship-plugin.md)
+- [Information-Parity Audit](./information-parity-audit.md)

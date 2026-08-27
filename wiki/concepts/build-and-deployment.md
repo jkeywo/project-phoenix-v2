@@ -3,7 +3,7 @@ title: Build & Deployment
 type: concept
 tags: [trunk, wasm, github-pages, cloudflare, native-host, ci]
 sources: [Trunk.toml, scripts/build-client.mjs, scripts/check-deploy-headers.mjs, .github/workflows/, README.md, worker/wrangler.toml, worker/wrangler.demo.toml, deploy/cloudflare/_headers, src/delivery/, docs/delivery-checklist.md, pasm/spec/architecture/native-delivery.yaml]
-updated: 2026-08-26
+updated: 2026-08-27
 ---
 
 # Build & Deployment
@@ -12,7 +12,7 @@ updated: 2026-08-26
 
 | Build step | Output | Notes |
 |---|---|---|
-| `trunk build --release` | `dist/index.html` (server.html → view screen) | Builds the Rust/Bevy WASM host with the default `server` feature. |
+| `TRUNK_BUILD_RELEASE=true trunk build --release` | `dist/index.html` (server.html → view screen) | Builds the Rust/Bevy WASM host with the default `server` feature and enables the release-only post-build optimisation hook. |
 | `node scripts/build-client.mjs` | `dist/client/index.html` plus GUI assets | Copies the pure HTML/JS phone client; there is no client-side WASM feature. |
 
 The server is authoritative and runs the simulation. The client is a pure JS shell that connects to the host via PeerJS/WebRTC and renders HTML console panels.
@@ -27,7 +27,7 @@ node scripts/build-client.mjs                        # copies client into dist/c
 ## Production build
 
 ```
-trunk build --release
+TRUNK_BUILD_RELEASE=true trunk build --release
 node scripts/build-client.mjs
 ```
 
@@ -35,11 +35,29 @@ Outputs land in `dist/` with the client at `dist/client/`. The QR code on the vi
 
 ## CI workflows
 
-- **`.github/workflows/ci.yml`** — on push and pull_request: `cargo fmt --check`, `clippy -D warnings`, native `cargo test`, WASM server build, pure JS client copy, editor Vitest suite, Playwright smoke suite; on push to `main`: also deploy to `gh-pages`.
+- **`.github/workflows/ci.yml`** runs eleven jobs on pushes to and pull requests
+  against `main`: `pasm`, `test`, `viewer-test`, `boundary`, `build`,
+  `editor-test`, `smoke`, `native-build`, `perf`, `balance`, and `deploy`.
+  The first six independent jobs plus `native-build` start in parallel.
+- `pasm` validates/scans the design model and uploads traceability reports.
+  `test` owns formatting, workspace Clippy, the headless-enabled native suite,
+  demo-build gates, and native feature-binary compile checks. `viewer-test`
+  executes the viewer feature suite, while `boundary` proves the simulation
+  and standalone viewer compile without the presentation feature.
+- `build` produces the release WASM and pure-JS client artifact independently
+  of `test`; `smoke` consumes that artifact. `native-build` produces the shared
+  release binaries consumed by the warnings-only `perf` report and the balance
+  batches. `balance` keeps the ratified Cruiser matrix gating. `deploy` runs
+  only for a push to `main` and requires `test`, `build`, `editor-test`,
+  `smoke`, `viewer-test`, and `boundary`; `perf` and `balance` do not gate the
+  dev deployment.
 
-Formatting and lint gates run before `cargo test` to fail fast and cheaply. The build job depends on test (`needs: test`), so a fmt or clippy failure blocks the expensive WASM/trunk build, which transitively blocks smoke and deploy. (#612)
-
-The smoke suite runs the host page in headless Chromium with render-heavy plugins skipped. The host stays on continuous Bevy updates even when unfocused so backgrounded server pages still drain `wasm_receive_message` and send `Welcome` to test clients.
+The Playwright smoke suite has two projects. Its ordinary message/DOM project
+runs under WebDriver with `RenderPlugin` omitted; the separate `render` project
+uses SwiftShader, hides the WebDriver flag, and boots the real render path so a
+blank or broken viewscreen fails CI. The host stays on continuous Bevy updates
+when unfocused so a backgrounded server page still drains inbound messages and
+sends lobby responses.
 
 ## Cargo notes
 
@@ -64,9 +82,14 @@ physics throughput that the (non-gating) perf baselines register.
 `the_deterministic_build_runs_rapier_serially` in `tests/headless_runner.rs`
 fails if the feature comes back.
 
-### Bevy debug feature (#598)
+### Bevy debug feature
 
-The bevy `debug` feature (enabling Bevy debug internals like system-name recording and visual debug overlays) was removed from default dependencies and is now a **conditional Cargo feature** (`debug`), opt-in via `--features debug`. Release builds exclude it entirely. Overlays that depend on it (entity inspector, behaviour overlay, region wireframes, modifier overlay, damage log) are functional only when the feature is active — the `wasm_bindgen` exports that gate them compile on all targets, but their Bevy-internal backing resources are no-ops without `debug`.
+The Bevy `debug` feature is an opt-in Cargo feature enabled with
+`--features debug`; release builds exclude it. Overlays that depend on it
+(entity inspector, behaviour overlay, region wireframes, modifier overlay,
+damage log) are functional only when the feature is active. Their
+`wasm_bindgen` gate exports compile on all targets, while the Bevy backing
+resources are no-ops without `debug`.
 
 ## Demo deployment (issue #931)
 
@@ -91,7 +114,8 @@ that value in as `turn_worker_url` on the next run so the patch step below
 targets the right host.
 
 Steps, in order: mirror `ci.yml`'s `build` job exactly (Rust/Trunk/Node
-toolchain → `trunk build --release` → `node scripts/build-client.mjs`), swap
+toolchain → `TRUNK_BUILD_RELEASE=true PHOENIX_DEMO_BUILD=true trunk build
+--release` → `node scripts/build-client.mjs`), swap
 in the demo manifest, patch the TURN credential URL literal from the dev
 worker to the demo worker's URL in the two built files that embed it
 (`dist/index.html` — server.html's inline script, renamed by trunk — and
@@ -163,6 +187,3 @@ encoder walk. See `pasm/spec/architecture/native-delivery.yaml`.
 ## Related
 
 - [Architecture](./architecture.md) · [Testing Strategy](./testing-strategy.md)
-- PRD #1 — original deploy decision
-- Issue #931 — demo release: manual Cloudflare Pages deploy
-- PRD #855 — native host, curated catalogue gate, deployed caching contract

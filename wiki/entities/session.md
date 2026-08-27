@@ -2,41 +2,49 @@
 title: Session
 type: entity
 tags: [session, server, identity, reconnect]
-sources: [src/lobby/session.rs, src/lobby/handler.rs]
-updated: 2026-05-08
+sources: [src/lobby/session.rs, src/lobby/handler.rs, src/lobby/server.rs, src/server/bridge.rs]
+updated: 2026-08-27
 ---
 
 # Session
 
-The server-side record of a [Player](./player.md). Lives in `SessionManager` (`src/lobby/session.rs`). Survives disconnects and reconnects.
+`SessionManager` is the authoritative server-side record of every connected or
+recently disconnected [Player](./player.md). Identity is a UUID session token
+stored by the browser, not the ephemeral PeerJS peer id. The host bridge maps a
+peer to that token after `Identify` and passes only the token into simulation
+message handling.
 
-## Why sessions, not peer IDs
+## Owned state
 
-PeerJS assigns a random peer ID per `new Peer()`. That changes every refresh, every transient drop. A player who refreshes their phone would otherwise lose their console.
+Each player record carries connection/readiness state, its directly claimed
+station, spectator and AFK state, and the rating snapshots needed to restore a
+seat after Backfill. Disconnected records are retained because the same token
+must find the original identity on reconnect.
 
-The session token (UUIDv4 in `localStorage`) gives stable identity. The JS shell in `server.html` resolves *peer ID → session token* on the first `Identify` message of every connection.
+`holder_for_station` returns only a connected direct holder. This distinction
+lets a disconnected player retain the station on their record for restoration
+without blocking another connected player from claiming the seat.
 
-## What `SessionManager` owns
+## Disconnect and reconnect
 
-- The set of known players (by token).
-- Console assignments — at most one player per console.
-- Connection status.
-- Helpers used by the simulation: `helm_token()`, `captain_token()`.
+On disconnect, readiness is cleared. If the player held a station, the handler
+records its current rating and changes the station to the runtime-only
+`Backfill` rating so AI operates the unmanned systems. AFK and spectator state
+survive the transport drop.
 
-## Vacancy and reconnect rules
+On reconnect with the same token:
 
-- **On disconnect:** the player's console becomes immediately vacant, in *any* game phase.
-- **On reconnect with a known token:**
-  - If the previous console is still free → auto-reassign it.
-  - If it's been claimed by someone else → player rejoins consoleless and re-picks.
-- **Console picks during In-Progress phase** are allowed (late joiners can take any free console).
+- if the remembered station is still available, the direct claim and saved
+  rating are restored;
+- if another connected player has claimed it, the returning player rejoins
+  without that station and can select an available seat;
+- a spectator remains a spectator until they explicitly claim a seat.
 
-## Test surface
-
-`src/server/session.rs` is one of the most-tested modules in the repo: registration, duplicates, console assignment/clearing, vacancy, auto-reconnect, conflict resolution, captain/helm lookup. See `#[cfg(test)] mod tests` at the bottom of the file.
+The lobby handler and its server adapter own these transitions and broadcasts;
+`SessionManager` supplies the pure identity and occupancy operations.
 
 ## Related
 
-- [Player](./player.md) — the wire-side counterpart
-- [Console](./console.md) — what a Session may hold
+- [Player](./player.md)
+- [Station](./station.md)
 - [Game Phases](../concepts/game-phases.md)

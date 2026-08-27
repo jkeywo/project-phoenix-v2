@@ -1,201 +1,37 @@
 ---
 title: Editor
 type: entity
-tags: [editor, tooling, scenario, entity, definitions, fsa, vitest]
-sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/script-editor.js, editor/world-toml.js, editor/entity-toml.js]
-updated: 2026-08-14
+tags: [editor, tooling, scenario, entity, definitions, models, mod]
+sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js]
+updated: 2026-08-27
 ---
 
 # Editor
 
-The Scenario Editor is an in-browser TOML authoring tool for editing scenario worlds, entity templates, factions, and complexity presets directly on disk via the File System Access API. It is structured as three top-level modes — **World**, **Entity**, **Definitions** — built as part of the PRD #350 rewrite. The codebase is heavily decomposed into pure ESM modules so every non-UI behaviour is unit-testable under Vitest without a browser.
+The browser editor is a project-root-aware authoring shell for World, Entity, Definitions, Models, and MOD modes. It edits repository-native TOML/assets through the File System Access API; it is not part of the simulation runtime.
 
-The editor is **not part of the game runtime**. It does not link into the WASM binary, does not run in `server.html` or `client.html`, and does not speak the wire codec. It is a separate static page that targets the same TOML schemas the runtime parses in `src/world/config.rs`, `src/entities/config.rs`, `src/ai/faction.rs`, and `src/console_ai/complexity.rs`.
+## Shell and persistence
 
-## Single Entry Point, Three Modes
+`ModeShell` owns the active mode, per-mode open files, dirty state, and undo history. `project-root.js` persists a granted directory handle in IndexedDB and exposes path-based reads/writes. `SaveFlow` centralises validation, serialisation, writes, dirty-state clearing, and invalidation events.
 
-`editor/app-v2.js` is the sole boot entry. It wires up the `ModeShell`, `SaveFlow`, `InvalidationBus`, project-root picker, and mounts each of the three modes uniformly:
+`InvalidationBus` tells dependent modes when an entity, world, faction, or other shared definition changes. `entity-cache.js` keeps parsed entity TOML keyed by repository path and invalidates affected entries after saves.
 
-- `mountScenarioMode(...)` (`editor/scenario-mode.js:66`) — World Mode. Owns the Konva spawn canvas, layers panel, properties panel, world-content sidebar, Rhai script panel, and the "+ New World" / "Open World…" dialogs.
-- `mountEntityMode(...)` (`editor/entity-mode-view.js`) — Entity Mode.
-- `mountDefinitionsMode(...)` (`editor/definitions-mode-view.js`) — Definitions Mode.
+## Modes
 
-`app-v2.js` sets `stringifyDefinitionsPayload` (`editor/app-v2.js:20`) to route Definitions saves through `{ kind: 'faction'|'complexity', data }`. All three modes share the same `ModeShell`, `SaveFlow`, `InvalidationBus`, and project-root I/O.
+- World mode (`scenario-mode.js`) edits scenario/world TOML, entity placement, layers, content, and Rhai script.
+- Entity mode edits template sections against the shared component schema.
+- Definitions mode edits faction and complexity data through typed save payloads.
+- Models mode edits model-rig/LOD authoring surfaces.
+- MOD mode packages and inspects mod content against the project layout.
 
-The legacy `editor/app.js` entry point has been deleted; everything it did is now owned by `mountScenarioMode`.
+## Validation boundary
 
-## Three Modes (PRD #350)
+The editor performs fast client-side structural checks in `validation.js`, `world-toml.js`, and `entity-toml.js`. Runtime/PASM remain authoritative: saved scenario changes still need `uv run pasm validate`, `scan`, and `traceability`, while entity/config changes still pass Rust parsing and the repository's normal gates.
 
-`ModeShell` (`editor/mode-shell.js:5`) manages per-mode open files, dirty state, active file, and undo history. Default modes: `['World', 'Entity', 'Definitions']` (`editor/mode-shell.js:1`).
+World composition uses `extra_worlds` and Rhai `load_world`/`unload_world` actions. Both flow into the same runtime `WorldLayerChange` path documented in [World Data](./world-data.md) and [WorldPlugin](../concepts/world-plugin.md).
 
-- **World Mode** — edit unified world TOML files (`assets/worlds/*.toml`). Canvas renders entities by their `[radar_appearance]` colour and a tag-derived shape (Ship → triangle, Station → diamond, Asteroid → dot, Planet → ring, X fallback for missing appearance). Regions render as outlined sphere/box/torus shapes with a 15% alpha fill and a centre cluster of effect icons. Anchors are draggable canvas objects with rename-safety (in-layer ref rewrite + cross-layer warning) and delete-safety (blocked by references) — both cover `[[entity]]` references only; an anchor named from a `[script]` body is not tracked (issue #985). A World Content sidebar lists anchors and named entities. Spawn `[entity.overrides]` are edited per-field against a resolved-template view. Scenario logic is authored in the SCRIPTS panel: a world's `[script]` Rhai units, edited with host-fn completion and WASM-backed diagnostics (`editor/script-editor.js`, `editor/script-editor-view.js`, `editor/script-wasm.js`). There is no declarative trigger or comms editor — issue #983 deleted the card editors, and issue #985 deleted the `[[trigger]]` / `[[comms]]` TOML front-end they wrote to, so `parse_world` now refuses a world authoring either array.
+## Related
 
-- **Entity Mode** — edit entity template TOML files (`assets/entities/*.toml`). Three-pane: file list, component cards (one card per present TOML section + raw-TOML toggle + "+ Add component" picker with common-combo templates and a raw-section submenu), and a static top-down preview pane (collider, radar appearance, region shape, asteroid-field donut, forward arrow, overlay text). NPC behaviour editor: structured states-and-transitions two-list. Player-ship `[stations]` editor: tab-strip per player count with next/previous dropdowns populated from adjacent counts; dangling-chain and duplicate-name validation. Coordinator: `editor/entity-mode-view.js`.
-
-- **Definitions Mode** — edit factions (`assets/factions/*.toml`) and complexity presets (`assets/complexity/*.toml`). Faction editor: UUID, name, enemy multi-select resolving other faction names. Complexity preset editor: preset list, `hidden_elements` multi-select, delegated controls table, AI tuning blocks. Coordinator: `editor/definitions-mode-view.js`.
-
-## File System Access + Project Root
-
-`editor/project-root.js` wraps the File System Access API:
-
-- `pickProjectRoot()` (`editor/project-root.js:37`) prompts `showDirectoryPicker({ mode: 'readwrite' })` and persists the granted handle in IndexedDB under DB `phoenix-editor` / store `project-root` (DB v1, see `editor/project-root.js:3`).
-- `getProjectRoot()` (`editor/project-root.js:44`) restores the handle on next visit, no re-prompt.
-- `readFile(path)` / `writeFile(path, content)` (`editor/project-root.js:50`, `:62`) operate against the persisted handle.
-- `onRootChanged(cb)` (`editor/project-root.js:14`) is a listener bus so dependent modules (entity cache, mode panes) can rebuild when the root switches.
-
-Browsers without FSA (Firefox, Safari at time of writing) show a "browser not supported" message; the editor refuses to start. Chromium only.
-
-## Save Flow + Invalidation
-
-`SaveFlow` (`editor/save-flow.js:3`) is constructed in `editor/app-v2.js:32` with:
-
-- A per-mode stringifier map (`World`, `Entity`, `Definitions` payload → TOML text).
-- An optional `writeFile` (defaults to `project-root.writeFile`).
-- An optional `InvalidationBus`.
-- An optional `commentConfirm` gate (the one-time-per-session "comments will be lost" warning from `editor/comment-warning.js`).
-- A `setSessionOnlyChecker` hook so session-only layers are excluded from disk writes. Nothing creates one now: the triggerable-worlds preview panel that did was deleted with the declarative scenario front-end (issue #985), and "Open World…" adds file-backed layers.
-
-`InvalidationBus` (`editor/invalidation-bus.js:1`) emits `EntitySaved`, `WorldSaved`, and `FactionSaved` events. Subscribers (entity cache, open canvases, file lists) re-fetch and re-render. There is no `ComplexitySaved` event yet — complexity presets only re-read on explicit mode re-open.
-
-Save model: explicit save only. Cmd/Ctrl+S saves the active file; a "Save All" button saves every dirty file. No auto-save. Each layer in the tree shows a dirty indicator.
-
-## Entity Cache
-
-`editor/entity-cache.js` is a `path → parsed-TOML` Map (`entity-cache.js:3`) seeded by `preloadEntityCache()` (`entity-cache.js:33`), which walks `assets/entities/` via the JS-global `window.tomlParse`. `invalidateEntity(path)` (`entity-cache.js:71`) and `invalidateAll()` (`entity-cache.js:79`) are wired to `InvalidationBus.EntitySaved` so cross-mode edits propagate immediately. `onInvalidate(callback)` (`entity-cache.js:87`) lets canvas/sidebar code subscribe to a single signal.
-
-## Validation Surface
-
-`validation.js` (`editor/validation.js:103`) composes the file-level validator:
-
-- `validateWorldToml(obj)` (`editor/world-toml.js:11`) — minimal `[global]` + `[anchors]` presence checks.
-- `validateEntityToml(obj)` (`editor/entity-toml.js:28`) — required `tags` non-empty + section sanity.
-- `validateEntitySections(obj)` (`editor/entity-toml.js:80`) — per-section schema checks against `component-schema.js`.
-- `validateStations(stationsConfig)` (`editor/stations-validate.js`) — dangling next/previous chains, duplicate names per player count, invalid console enum values.
-- `validateBehaviourBlock(behaviour)` (`editor/validation.js:53`) — exactly one `initial_state`, no orphan transitions.
-- `validateEntityMarkers` / `validateBlasterBanks` / `validateTorpedoTubes` — marker, blaster barrel-pattern, and torpedo-tube schema checks.
-
-All validation surfaces as inline error/warning badges (`editor/validation-badge.js`).
-
-A **world** file is checked for `[global]` / `[anchors]` shape and nothing else. The per-action schema (`action-schema.js`) and the entity cross-reference passes (`world-references.js`, `world-references-indexed.js`) are gone: every site they read lived in `[[trigger]]` / `[[comms]]`, which issues #983 and #985 removed. A scripted world names its entities inside its `[script]` Rhai body, which this TOML walk cannot read; those references are resolved by the script diagnostics in the editor and by `src/world/script/validate.rs` at activation.
-
-### Save admission (issue #757)
-
-`SaveFlow._saveOne` (`editor/save-flow.js`) is the single save chokepoint. It runs
-`validateFile` and splits the findings by severity via the pure admission
-primitive in `editor/validation.js` — `partitionFindings(results)` and
-`hasBlockingErrors(results)`, which mirror the Rust atomic-activation gate
-(`src/world/validate.rs`: `WorldFinding::is_error` / `has_error`). Any
-**error**-severity finding blocks the save: `_saveOne` returns
-`{ ok: false, errors, warnings }` **before** `writeFile` runs and **before** any
-dirty/undo/invalidation state changes, so a blocked save never reaches disk,
-leaves the file dirty, keeps its undo history, and fires no cache invalidation.
-**Warnings** never block — they flow through on every path and are surfaced to
-the author. Blocking errors are shown in the shared `#v2-status` element (not
-only `console.error`). Models Mode is validation-exempt (it caches a ready-made
-TOML string). The mod-pack exporter (issue #759) reuses the same admission
-primitive to block export.
-
-Severity classification is aligned with the host composition validator (#750):
-structural/duplicate/malformed problems are **errors** that block (missing
-`[global]`/`[anchors]`, duplicate station names, empty consoles, dangling
-station next/previous chains, missing/duplicate behaviour states), while
-softer findings (an `initial_state` naming no declared state, an unknown
-console, a missing `next`) are **non-blocking warnings**. The editor no longer
-raises the dangling entity cross-reference warning that mirrored the Rust
-validator's `Severity::Warning`; on the Rust side that check survives but is
-vacuous for the same reason — `collect_entity_references`
-(`src/world/validate.rs`) returns empty now that `config.triggers` is gone.
-
-A WASM-compiled full Rust pre-save pass remains deferred to a later phase.
-
-### No live host reload (implemented boundary)
-
-A save does **not** hot-reload a running host simulation. `writeFile`
-(`editor/project-root.js`) only touches disk within the granted project root,
-and `InvalidationBus` (`editor/invalidation-bus.js`) only notifies **editor-local**
-subscribers (the entity cache, open canvases, file lists) — it never crosses the
-wire codec and there is no host/runtime reload channel. Saved authored content is
-picked up the **next** time a runtime loads those files; an already-running host
-is unaffected. This boundary is modelled by the `editor-runtime-reload-boundary`
-PASM component and covered by tests in `editor/tests/save-admission.test.js`.
-
-## Planned Mod-Pack Export
-
-The editor will export selected validated authored TOML files as a ZIP mod pack
-with a required manifest naming its selectable root scenarios.
-On the server page, before scenario selection, the host will upload one pack for
-the current host session. Validated files overlay base content by exact supported
-path: matching paths replace the base file and new supported paths add content.
-Only root worlds named by the manifest join the selectable scenario list;
-supporting world files remain private composition content. The whole pack is
-rejected if its archive, manifest, paths, parse, or composed references are
-invalid; it cannot modify an in-progress round.
-
-Regular scenarios will use the same explicit contract in
-`assets/scenarios.toml` at the asset root. The selection catalog will merge
-that base manifest with a validated uploaded mod manifest.
-
-## TOML Parsers (Pure)
-
-`world-toml.js` and `entity-toml.js` wrap `smol-toml` (declared in the root `package.json` devDependencies) behind a tiny pure surface:
-
-- `parseWorldToml(text)` / `stringifyWorldToml(obj)` (`editor/world-toml.js:3`, `:7`).
-- `parseEntityToml(text)` / `stringifyEntityToml(obj)` (`editor/entity-toml.js:9`, `:18`).
-- `buildFactionMap(factionFiles)` (`editor/entity-toml.js:46`) and `buildComplexityPaths(complexityFilenames)` (`editor/entity-toml.js:68`) feed the cross-resolution dropdowns (UUID → faction name, path → complexity preset).
-
-Comments are lost on round-trip (`smol-toml` is lossy); the comment-warning gate is the chosen mitigation.
-
-## Undo / Redo
-
-Per-file op-log undo/redo (Cmd/Ctrl+Z, Shift+Cmd/Ctrl+Z) capped at 100 ops per file (`editor/undo-stack.js`, controller in `editor/undo-controller.js`, global keyboard wiring in `editor/app-v2.js:161` (`setupGlobalUndoShortcuts`)). Stacks are cleared on save so the undo history never drifts across persisted states.
-
-## Schema Additions (runtime landed; editor UI in-flight)
-
-The two PRD #350 runtime additions have **landed** in `src/world/config.rs` and `src/world/server.rs` (shipped via issue #352):
-
-- World TOML carries a top-level `extra_worlds: Vec<String>` field (`src/world/config.rs:577`). Paths listed here are auto-loaded additively at startup by `load_extra_worlds` (`src/world/server.rs:730`), which pushes one `WorldLayerChange::Load` per path onto `PendingWorldLayerChanges` so the same code path handles startup and trigger-fired loads.
-- Two actions: `TriggerAction::LoadWorld { path }` (`src/world/config.rs:680`) and `TriggerAction::UnloadWorld { path }` (`src/world/config.rs:684`). Since issue #985 they are reached only from a world's `[script]` Rhai body — `parse_action` (`src/world/config.rs:1185` / `:1191`) still builds them, but no `[[trigger]]` array feeds it. Decided by the pure dispatch table (`dispatch_action`, `src/world/dispatch.rs`); the applier `apply_dispatch_result` turns each into a `WorldLayerChange` queued onto `PendingWorldLayerChanges`.
-- Additive-loading runtime state: `WorldLayerMap(HashMap<String, WorldRuntime>)` and `PendingWorldLayerChanges(Vec<WorldLayerChange>)` (`src/world/server.rs`). `apply_world_layer_changes` drains the queue each frame, mutating `WorldLayerMap` and `WorldContentRuntime`.
-
-The editor-side work this PRD once planned — a "triggerable worlds" section listing `load_world`-reachable worlds with a session-only preview toggle, and file-picker wiring inside a trigger action editor — is **cancelled, not pending**. Both read the `[[trigger]]` front-end that issue #985 deleted; the modules (`triggerable-worlds.js`, `triggerable-worlds-panel.js`, `world-file-picker.js`) are gone. Worlds are opened from disk through the "Open World…" picker instead.
-
-## Test Infrastructure
-
-Vitest (`npm run test:editor` → `vitest run`; root `package.json`). Tests live in `editor/tests/` and run on Node, importing deep modules directly — no browser DOM, no Konva.
-
-Coverage spans the deep modules and slice integration paths:
-
-- **Parsers/serializers:** `world-toml.test.js`, `entity-toml.test.js`, `toml-utils-transform.test.js`.
-- **Validation:** `validation.test.js`, `validation-fixtures.test.js`, `validation-badge.test.js`, `stations-validate.test.js`, `marker-validate.test.js`, `blaster-validate.test.js`, `torpedo-validate.test.js`, `cross-references.test.js`.
-- **Schemas/templates:** `tag-shape-map.test.js`, `component-templates.test.js`.
-- **Editors:** `override-editor.test.js`, `behaviour-editor.test.js`, `complexity-editor.test.js`, `complexity-form-view.test.js`, `faction-editor.test.js`, `faction-form-view.test.js`, `script-editor.test.js`, `script-editor-view.test.js`, `script-wasm.test.js`.
-- **Mode views:** `entity-mode.test.js`, `entity-component-card-view.test.js`, `entity-add-component-menu.test.js`, `entity-preview.test.js`, `entity-preview-view.test.js`, `definitions-file-list-view.test.js`.
-- **Anchors:** `anchor-rename.test.js`, `anchor-rename-integration.test.js`, `anchor-delete.test.js`, `canvas-anchor.test.js`, `canvas-region.test.js`, `canvas-world.test.js`.
-- **Shell / IO / lifecycle:** `mode-shell.test.js`, `save-flow.test.js`, `save-flow-comment-gate.test.js`, `save-confirm.test.js`, `comment-warning.test.js`, `invalidation-bus.test.js`, `entity-cache.test.js`, `project-root.test.js`, `project-root-listeners.test.js`, `undo-stack.test.js`, `undo-integration.test.js`, `new-world.test.js`, `faction-complexity-discovery.test.js`, `layer-manager.test.js`, `world-content-panel.test.js`, `save-admission.test.js`, `scenario-mode-mount.test.js`, `scenario-script-panel.test.js`.
-- **Slice integration:** `slice-3-override-cycle`, `slice-4b-new-world`, `slice-5-add-component`, `slice-5-behaviour-edit`, `slice-5-entity-mode-cycle`, `slice-6-definitions-mode`, `slice-6-faction-invalidation`, `slice-7-canvas-entity-invalidation`, `slice-7-stations-warning-badge`.
-- **Bootstrapping:** `smoke.test.js`.
-
-## What is NOT tested (manual QA only)
-
-- Canvas visuals (Konva output).
-- File System Access API integration (browser-only).
-- Mode-switcher and component-card DOM rendering.
-- The script editor's CodeMirror-side DOM behaviour (its data layer and the WASM diagnostics adapter are unit-tested).
-- Drag interactions, keyboard shortcuts beyond Cmd/Ctrl+S/Z.
-- Cross-mode live cache invalidation end-to-end.
-- The full save flow end-to-end (each step is unit-tested in isolation).
-
-The editor's Vitest suite is **separate from** the runtime's Playwright smoke tests in `tests/smoke/` and does not run in the existing smoke-test CI job. A dedicated CI job for `npm run test:editor` is implied by PRD #350 slice 1.
-
-## Where the Editor Lives
-
-- `editor/` — all source, tests, and the two HTML entry points.
-- Run locally via any static server pointed at `editor/`. No build step (ESM + browser-native imports).
-- Targets only Chromium-based browsers (FSA dependency).
-- Not deployed alongside `server.html` / `client.html`.
-
-## Cross-Links
-
-- Source: PRD #350 — Scenario Editor Rewrite
-- Runtime parser the editor mirrors: `src/world/config.rs`
-- Related runtime sources: PRD #341 — Entity Schema Refactor, PRD #153 — Region Entities + Entity Pipeline, PRD #119 — Stations, Scenarios & Comms
+- [World Data](./world-data.md)
+- [Model Viewer](../concepts/model-viewer.md)
+- [LOD Generation](../concepts/lod-generation.md)

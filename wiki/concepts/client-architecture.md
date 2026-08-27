@@ -3,12 +3,12 @@ title: Client Architecture
 type: concept
 tags: [client, javascript, iframe, console, state, vitest]
 sources: [client.html, gui/mount-plan.js, gui/hero-bar.js, gui/sim-state.js, gui/console-state.js, gui/action-map.js, gui/iframe-bridge.js, tests/client/]
-updated: 2026-08-19
+updated: 2026-08-27
 ---
 
 ## Summary
 
-The client (`client.html`) is **pure HTML/CSS/JS — no WASM, no Bevy, no `client` Cargo feature** (the Bevy client was deleted in PRD #438 / issues #442, #463). It connects to the host over PeerJS, folds `ServerMessage`s into a plain JS state object, and renders each console as a standalone HTML iframe. All logic lives in pure, Vitest-tested modules under `gui/`; `client.html` itself is thin wiring.
+The client (`client.html`) is **pure HTML/CSS/JS — no WASM or Bevy**. It connects to the host over PeerJS, folds `ServerMessage`s into a plain JS state object, and renders each console as a standalone HTML iframe. All logic lives in pure, Vitest-tested modules under `gui/`; `client.html` itself is thin wiring.
 
 ## Data flow
 
@@ -24,8 +24,7 @@ PeerJS message (JSON)
   → gui/iframe-bridge.js push()           # __updateConsole(name, json) into the iframe
 ```
 
-`simState` (`gui/sim-state.js`) is the single client store; there is no
-separate `client.html` state mirror (removed in #819–#823). `client-router.js`
+`simState` (`gui/sim-state.js`) is the single client store. `client-router.js`
 drives each inbound message and `dirty-consoles.js` narrows the rebuild to just
 the consoles a given message affects, rather than rebuilding every console every
 tick.
@@ -44,7 +43,7 @@ Outbound: each console iframe posts `console_action` messages; `gui/action-map.j
 | `console-state.js` | Pure view-model builders. System-composed consoles use the station's TOML-authored fine `SystemId`s and receive views keyed by those ids. |
 | `action-map.js` | Table-driven `console_action` → `ClientMessage` dispatch |
 | `iframe-bridge.js` | `push()` / `wireLoad()` state-push into console iframes (ADR-0001 §2) |
-| `content-switcher.js` | Section visibility over the ship's mounted stations (one human = one station — the tab bar was deleted in #827) |
+| `content-switcher.js` | Section visibility over the ship's mounted stations; one human directly holds one station |
 | `station-roster.js` | Pure fold: players + station defs → lobby roster rows + aggregates |
 | `client-router.js` | Pure per-message driver: uiState mutations + named side-effect plan for the client.html glue |
 | `dirty-consoles.js` | Declarative `ServerMessage` → dirty-console mapping (`dirtyConsolesFor(msg, stationSystems)`, #823); narrows each tick's rebuild to only the consoles a message affects |
@@ -66,16 +65,11 @@ cues. In landscape it becomes a vertical strip on the left, with upright tab
 buttons and sideways selected-Station metadata. It exposes ARIA tabs with
 Arrow/Home/End focus movement; a departed visitor returns selection to the
 direct Station.
-The destroyer's bespoke Nav/Comms overlay toggles (`gui/visiting-systems.js`)
-are retired — issues #1097 and #1098 moved both onto this shared path, and
-only Tactical's unrelated Intel toggle still uses the generic overlay pattern
-(`gui/console-overlays.js`).
+Navigation and Comms visiting surfaces use this shared mounted-station path.
+Tactical's unrelated Intel toggle uses the generic overlay pattern in
+`gui/console-overlays.js`.
 
 ## Build & test
 
 - `node scripts/build-client.mjs` — file copy → `dist/client/` (no compile step).
 - `npx vitest run` — `tests/client/*.test.js` cover every pure module above.
-
-## History
-
-The Rust/Bevy client and its panel plugins (`src/client/`, `src/*_panel.rs`, `ShipView`, `PhoneBorderPlugin`) were removed in the #438 slice series (#439 bezel, #440 lobby, #441 tab bar, #442 Bevy cleanup) and #463 (client WASM removal). The wiki pages describing those deleted panels (CaptainPanel, HelmPanel, WeaponsPanel, RepairPanel, PowerPanel, SciencePanel, ShipView) were deleted in the 2026-07-03 docs audit — this page is their replacement.

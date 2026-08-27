@@ -2,100 +2,50 @@
 title: Console
 type: entity
 tags: [console, role, lobby, station]
-sources: [src/core/messages.rs, src/lobby/stations_config.rs, gui/mount-plan.js]
-updated: 2026-07-03
+sources: [src/core/messages.rs, src/ship/config.rs, src/lobby/stations_config.rs, src/command_admission/policy.rs, gui/mount-plan.js, gui/console-resolver.js, gui/action-map.js]
+updated: 2026-08-27
 ---
 
 # Console
 
-The GUI panel owned by a [Station](./station.md). Each of the 9 bridge stations
-has exactly one console. Access derives from `Player.station: Option<StationId>`
-— the station a player claimed in the lobby.
+A Console is the browser surface authored for a [Station](./station.md). It is
+not a server-side enum: a hull's `[[station]]` blocks declare the station id,
+display metadata, ratings, and optional `console` URL, and `Welcome` carries
+that roster to the client.
 
-**The old `Console` enum was deleted in issue #619** (part of PRD #516). The
-canonical identity for lobby/session/authority is now the lowercase-kebab
-`StationId` string (`"captain"`, `"helm"`, `"tactical"`, `"repair"`,
-`"sensors"`, `"shields"`, `"navigation"`, `"power"`, `"comms"`). Client per-panel
-routing keys on the same lowercase strings via the `gui/mount-plan.js`
-naming scheme (one human = one station since #827 - there is no tab
-switching).
+`gui/mount-plan.js` turns each mountable station into stable section and iframe
+ids (`<station>-ui` and `<station>-iframe`). Tactical retains the sole legacy
+DOM alias, `weapons-ui` / `weapons-iframe`. `gui/console-resolver.js` resolves
+the authored URL, and stations without a resolvable URL are not mounted.
 
-Fine-grained authority routing keys on `SystemId` (see [System](./system.md)).
-A single station may own multiple systems (e.g. `tactical` owns `phaser-fore`,
-`phaser-aft`, `torpedo-tube-*`, `torpedo-magazine` — see the
-[coarse-system migration](../concepts/coarse-system-migration.md) fine-system
-table).
+## Identity and authority
 
-## Current consoles (9)
+- `StationId` identifies the operable seat or hosted surface.
+- `SystemId` identifies the fine-grained capability being controlled.
+- `Player.station` records the directly claimed lobby seat.
+- `ClientMessage::ControlSystem { target, payload }` is the common command
+  envelope used by human consoles and AI controllers.
 
-| StationId | Console panel | Role |
-|---|---|---|
-| `"captain"` | Captain | Start game, toggle Red Alert, change View Mode |
-| `"helm"` | Helm | Drive the ship; radar overlay; impulse charge |
-| `"tactical"` | Tactical | Lock targets, fire phasers/torpedoes, set phaser mode |
-| `"repair"` | Repair | Direct team dispatch (per SystemId); three teams |
-| `"sensors"` | Sensors | Advisory target hand-off; long-range radar |
-| `"shields"` | Shields | Manage shield facings (per-arc SystemIds) |
-| `"navigation"` | Navigation | Plot waypoints; view navigation chart |
-| `"power"` | Power | Distribute power across groups |
-| `"comms"` | Comms | Hail stations; relay intelligence |
+Command admission resolves the sender's station, the target system's owner,
+the active station rating, any visiting-station host, and the game-phase rule.
+Console HTML never grants authority by hiding or showing a control.
 
-Defined by the `[[station]]` blocks in `assets/entities/player_ship.toml` and
-the `gui/mount-plan.js` naming scheme (`stationId → ${id}-ui / ${id}-iframe`,
-with the one tactical → weapons alias).
-There is no runtime enum for these — the strings are the authority.
+## Composition
 
-## Authority model
+Station rosters and console composition vary by hull. A station can own several
+systems and present them in one page; an auxiliary human-seeking station can be
+mounted as a hosted tab without becoming a separately claimable lobby seat.
+The server-supplied roster and station-host snapshot are therefore the source
+of truth. Client code must not assume a fixed number or fixed list of consoles.
 
-Handler systems gate input on:
-
-1. **Station ownership** — the sender's `Player.station` must equal the
-   required `StationId` (checked via `Sessions::holder_for_station`).
-2. **SystemId routing** — all console actions arrive as
-   `ClientMessage::ControlSystem { target: SystemId, payload }`. The handler
-   checks `ShipSystemControlSources::accept_human_input(target)` before
-   processing.
-
-`StationId` is the "who owns the console" address; `SystemId` is the "what
-capability is being addressed" address. Both are just lowercase-kebab strings.
-
-## Console invariants
-
-1. **One player per station.** Server enforces in `SessionManager`.
-2. **Captain authority is checked server-side.** `SetRedAlert` and
-   `SetViewMode` are no-ops unless the sender holds `"captain"`.
-3. **Helm is the only station that can move the ship.** `SetThrust`/`SetSteering` from any
-   other token is silently dropped (also gated per axis by the `helm-thrust` /
-   `helm-steering` system ids).
-4. **Tactical authorization is checked server-side.** `FirePhaser` requires a
-   locked target plus `is_fire_ready()` (range + arc) on the addressed phaser
-   bank SystemId; `FireTorpedo` requires a loaded tube SystemId and a target.
-5. **Repair authorization is checked server-side.** Only the `"repair"`
-   station holder may issue `DispatchRepairTeam`; the target is a
-   `RepairTarget::Station(StationId)` or `RepairTarget::Core`.
-6. **Power authorization is checked server-side.**
-   `SetPowerGroupAllocation` is only accepted from `"power"`; bounded by
-   capacity and emergency threshold.
-
-## How a new console is added
-
-1. Add a `[[station]]` block to `assets/entities/player_ship.toml` with a new
-   `id`, `name`, `description`, `rank`, `short_code`, and at least one
-   `[[station.rating]]`.
-2. Add a `[[system]]` block for each system the station owns.
-3. Add the station id to `ALL_STATIONS` in `gui/lobby-state.js`.
-4. Point the station TOML `console` field at the panel URL - DOM ids
-   derive automatically from the id via `gui/mount-plan.js` (no registry).
-5. Add the client HTML panel (`gui/<name>-console.html`) and wire its actions
-   through `gui/action-map.js` as `ControlSystem` envelopes.
-6. Implement the server-side handler plugin under `src/console/<name>/server.rs`.
+To add or change a console, update the hull's station/system authoring, provide
+or reuse a panel URL, route its actions through `gui/action-map.js`, and add the
+matching server handler or system-kind policy. The mount plan needs no per-hull
+registry entry.
 
 ## Related
 
-- [Station](./station.md) — the lobby seat that owns a Console
-- [System](./system.md) — fine-grained capability addressed by SystemId
-- [Player](./player.md) · [Session](./session.md)
+- [Station](./station.md)
+- [System](./system.md)
+- [Session](./session.md)
 - [Console UI Authoring Library](../concepts/console-ui-library.md)
-- PRD #487 — station/system redesign
-- Issue #518 — B1–B6 config migration
-- Issue [#619](https://github.com/jkeywo/project-phoenix-v2/issues/619) — Console enum deletion (final slice of PRD #516)

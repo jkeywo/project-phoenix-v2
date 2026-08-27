@@ -142,16 +142,16 @@ impl Injection {
                     .world_mut()
                     .get_resource_mut::<WorldScriptRuntime>()
                     .expect("the probe world authors scripts");
-                script
-                    .pending_callbacks
-                    .push(project_phoenix::world::script::schedule::ScheduledCall {
+                script.pending_callbacks.push(
+                    project_phoenix::world::script::schedule::ScheduledCall {
                         // Never due inside this run, so the entry perturbs the
                         // QUEUE without perturbing what the scenario does.
                         fire_tick: u64::MAX,
                         script_path: "injected#script.divergence".into(),
                         fn_name: "never_called".into(),
                         origin_layer: None,
-                    });
+                    },
+                );
             }
             Self::TriggerLatch => {
                 let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();

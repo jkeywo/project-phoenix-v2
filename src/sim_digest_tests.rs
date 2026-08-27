@@ -852,7 +852,11 @@ fn a_world_flag_moves_the_digest_and_its_counter_is_what_moves_it() {
         .resource_mut::<WorldContentRuntime>()
         .flags
         .set_flag_value("lyra_clear", 2);
-    assert_ne!(one, world_digest(&world), "the counter is folded, not a bit");
+    assert_ne!(
+        one,
+        world_digest(&world),
+        "the counter is folded, not a bit"
+    );
 
     // Clearing removes the entry, which is the store's whole vocabulary — so a
     // cleared flag and one never set are the same authoritative state.
@@ -992,7 +996,10 @@ fn a_trigger_latch_moves_the_digest_and_so_does_the_tables_shape() {
 
     world.resource_mut::<WorldContentRuntime>().trigger_states[0].fired = true;
     let fired = world_digest(&world);
-    assert_ne!(armed, fired, "the single-shot latch is the point of the walk");
+    assert_ne!(
+        armed, fired,
+        "the single-shot latch is the point of the walk"
+    );
 
     world.resource_mut::<WorldContentRuntime>().trigger_states[0]
         .seen_destroyed
@@ -1110,7 +1117,9 @@ fn a_scheduled_callback_moves_the_digest_and_so_does_its_place_in_the_queue() {
         script
             .pending_callbacks
             .push(scheduled_call(120, "on_admission"));
-        script.pending_callbacks.push(scheduled_call(120, "on_survey"));
+        script
+            .pending_callbacks
+            .push(scheduled_call(120, "on_survey"));
     }
     assert_ne!(
         both,
@@ -1213,15 +1222,12 @@ fn each_named_scenario_record_moves_the_digest() {
         .state = CommitmentState::Kept;
     step(&world, "keeping a promise", &mut previous);
 
-    world
-        .resource_mut::<WorldContentRuntime>()
-        .evidence
-        .append(
-            "subject-uuid",
-            "world.evidence.stress_fracture",
-            EvidenceProvenance::Scan,
-            420,
-        );
+    world.resource_mut::<WorldContentRuntime>().evidence.append(
+        "subject-uuid",
+        "world.evidence.stress_fracture",
+        EvidenceProvenance::Scan,
+        420,
+    );
     step(&world, "a gathered finding", &mut previous);
 
     world
@@ -1317,7 +1323,10 @@ fn the_stored_range_reading_on_a_message_moves_the_digest() {
     let mut out_of_range = scenario_world();
     let mut drifted = message("msg-1", "comms.body.opening");
     drifted.sender_in_range = false;
-    out_of_range.resource_mut::<CommsInboxRes>().0.inject(drifted);
+    out_of_range
+        .resource_mut::<CommsInboxRes>()
+        .0
+        .inject(drifted);
     let sender_moved = world_digest(&out_of_range);
     assert_ne!(
         in_range, sender_moved,
@@ -1413,7 +1422,10 @@ fn every_other_comms_surface_moves_the_digest() {
         .open_hails
         .insert("contact-uuid".into());
     let hailed = world_digest(&world);
-    assert_ne!(previous, hailed, "a hail this ship made and has not cleared");
+    assert_ne!(
+        previous, hailed,
+        "a hail this ship made and has not cleared"
+    );
     previous = hailed;
 
     world
@@ -1464,7 +1476,9 @@ fn insertion_order_does_not_reach_the_fold() {
         {
             let mut comms = world.resource_mut::<CommsRuntime>();
             for name in order {
-                comms.active_dialogues.insert((*name).into(), dialogue(name));
+                comms
+                    .active_dialogues
+                    .insert((*name).into(), dialogue(name));
                 comms.open_hails.insert((*name).into());
             }
         }

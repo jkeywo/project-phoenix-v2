@@ -5118,8 +5118,7 @@ fn an_armed_but_record_less_table_survives_the_save_and_the_restore() {
     let captured_digest = world_digest(live.world());
 
     assert!(
-        !scenario_of(&payload).deadlines.is_empty()
-            && !scenario_of(&payload).workforce.is_empty(),
+        !scenario_of(&payload).deadlines.is_empty() && !scenario_of(&payload).workforce.is_empty(),
         "an armed table is not an empty one, so neither may skip serialisation"
     );
 

@@ -1,0 +1,239 @@
+# Authored join-code format data (issue #1111). THIS FILE is the ONE place the
+# join-identifier scheme is written down, and the one a designer edits.
+#
+# assets/join/join-codes.json beside it is a GENERATED artifact, committed
+# because three consumers must read the table with no parser and no build step:
+# the phone fetches it as plain JSON, tests/client/*.test.js read it from disk,
+# and worker-rendezvous/src/registry.js has it bundled into the Cloudflare
+# Worker by esbuild. None of those three can parse TOML. `node
+# scripts/build-client.mjs` regenerates the JSON from this file, and
+# tests/client/join-codes-data.test.js fails if the committed JSON has drifted
+# from it — the same discipline as the LOD manifest's `npm run lods:check`.
+#
+# Design source: docs/gdd/systems/native-network-foundation.md "Join-code
+# model" and pasm/spec/design/p2p-design-deltas.yaml decision
+# p2p-human-readable-join-namespaces.
+
+# Wire/format revision. gui/join-code.js refuses a table whose format_version
+# it does not implement (JOIN_CODE_FORMAT_VERSION), rather than reading fields
+# that may have moved.
+format_version = 1
+
+[suffix]
+# Five typed letters. The alphabet deliberately EXCLUDES L, because L
+# normalises to I — a letter that can never survive canonicalisation must never
+# be minted, or the printed code would not round-trip through the very
+# normalisation that makes it typeable. O and I stay in: they are the canonical
+# forms of 0 and 1. J stays distinct and is minted normally.
+length = 5
+alphabet = "ABCDEFGHIJKMNOPQRSTUVWXYZ"
+# Punctuation a player adds while reading a code aloud, dropped before the
+# comparison. `_` is here as well as being the separator inside a full code:
+# gui/join-code.js decides which shape it is looking at BEFORE stripping.
+strip = "-_ \t"
+
+[suffix.normalise]
+# The confusable map, applied after upper-casing.
+"0" = "O"
+"1" = "I"
+"L" = "I"
+
+[namespaces]
+# Two stable project GUIDs, one per join type, so a suffix typed into the crew
+# field can never silently resolve a fleet host. These values are permanent —
+# changing one orphans every printed code of that type.
+#
+# `client` is what a phone/console types; `server` admits ship hosts to a fleet
+# (issue #1114 owns joining it; #1111 only needs it to EXIST so a wrong-type
+# answer is distinguishable from an unknown one).
+client = "2f6b0a11-9c4e-4d7a-8f31-5b90c2d47e18"
+server = "8d13c7a4-0e52-49bb-9a6c-4f27ed3b90d1"
+
+[version]
+# One version GUID marks a compatible release. Bump it when a release can no
+# longer join a host built from the previous one, so the rendezvous can answer
+# "version-mismatch" instead of "unknown" for a suffix registered under an
+# older build. ADVISORY discovery help only: the authoritative protocol/content
+# check is the host's own delivery stamp handshake (src/delivery/stamp.rs,
+# delivery::check_join_stamp).
+guid = "5c0a3e91-7b18-4f26-8d43-9e61af07c25b"
+
+[limits]
+# Registry bounds (issue #1111). The rendezvous registry is an untrusted-facing
+# service: every one of these exists to stop one socket costing the Durable
+# Object unbounded work or memory. See worker-rendezvous/src/registry.js.
+#
+# How long a host record survives without its socket being seen again. The
+# record normally dies with the socket; this is the sweep for the case where a
+# close event never arrives.
+record_ttl_seconds = 43200
+# Lookups (resolve + join) one socket may make before it is cut off. The suffix
+# space is 25^5 ≈ 9.8M and codes are private, so an unbounded socket could walk
+# the whole namespace.
+max_lookups_per_connection = 60
+# Joiners one host record may hold at once.
+max_peers_per_record = 32
+# Longest accepted code string on a resolve/join frame — comfortably longer
+# than PROJECT_GUID_VERSION_GUID_SUFFIX, short enough that parsing is cheap.
+# (There is no stamp bound here: no frame carries a delivery stamp. The
+# compatibility handshake is in-band, host to phone, and the service stores
+# nothing about either build.)
+max_code_length = 160
+
+# ── Deny-list ────────────────────────────────────────────────────────────────
+# Words never minted and never accepted, in ordinary spelling: gui/join-code.js
+# canonicalises each entry before comparing, so one row refuses every
+# confusable spelling of the word (LOGIN also refuses IOGIN, HELLO also refuses
+# HE110). Every entry must be exactly `suffix.length` letters after
+# canonicalisation — tests/client/join-code.test.js checks that.
+#
+# `reason` is for the next person reading the list, not for the player: the
+# phone only ever says "that is not a code we hand out".
+
+[[deny]]
+word = "ADMIN"
+reason = "misleading: reads as a privileged account rather than a room code"
+
+[[deny]]
+word = "DEBUG"
+reason = "misleading: reads as a diagnostic mode"
+
+[[deny]]
+word = "ERROR"
+reason = "misleading: a player would read the code itself as a failure"
+
+[[deny]]
+word = "FATAL"
+reason = "misleading: reads as a crash report"
+
+[[deny]]
+word = "ABORT"
+reason = "misleading: reads as an instruction to stop"
+
+[[deny]]
+word = "RESET"
+reason = "misleading: reads as an instruction, not an identifier"
+
+[[deny]]
+word = "LOGIN"
+reason = "misleading: implies an account system Phoenix does not have"
+
+[[deny]]
+word = "CRASH"
+reason = "misleading: reads as a failure report"
+
+[[deny]]
+word = "EMPTY"
+reason = "misleading: reads as 'no code issued'"
+
+[[deny]]
+word = "FALSE"
+reason = "misleading: reads as a boolean, not an identifier"
+
+[[deny]]
+word = "STAFF"
+reason = "misleading: implies an official/organiser channel"
+
+[[deny]]
+word = "BITCH"
+reason = "offensive: profanity"
+
+[[deny]]
+word = "CUNTS"
+reason = "offensive: profanity"
+
+[[deny]]
+word = "TWATS"
+reason = "offensive: profanity"
+
+[[deny]]
+word = "SHITE"
+reason = "offensive: profanity"
+
+[[deny]]
+word = "SHITS"
+reason = "offensive: profanity"
+
+[[deny]]
+word = "WANKS"
+reason = "offensive: profanity"
+
+[[deny]]
+word = "PISST"
+reason = "offensive: profanity"
+
+[[deny]]
+word = "WHORE"
+reason = "offensive: slur"
+
+[[deny]]
+word = "SLUTS"
+reason = "offensive: slur"
+
+[[deny]]
+word = "PENIS"
+reason = "offensive: sexual"
+
+[[deny]]
+word = "PUSSY"
+reason = "offensive: sexual"
+
+[[deny]]
+word = "PORNO"
+reason = "offensive: sexual"
+
+[[deny]]
+word = "RAPES"
+reason = "offensive: sexual violence"
+
+[[deny]]
+word = "RAPED"
+reason = "offensive: sexual violence"
+
+[[deny]]
+word = "PEDOS"
+reason = "offensive: sexual abuse"
+
+[[deny]]
+word = "NAZIS"
+reason = "offensive: hate"
+
+[[deny]]
+word = "KKKKK"
+reason = "offensive: hate"
+
+[[deny]]
+word = "COONS"
+reason = "offensive: racial slur"
+
+[[deny]]
+word = "CHINK"
+reason = "offensive: racial slur"
+
+[[deny]]
+word = "SPICS"
+reason = "offensive: racial slur"
+
+[[deny]]
+word = "KIKES"
+reason = "offensive: racial slur"
+
+[[deny]]
+word = "NEGRO"
+reason = "offensive: racial slur"
+
+[[deny]]
+word = "GYPSY"
+reason = "offensive: ethnic slur"
+
+[[deny]]
+word = "DYKES"
+reason = "offensive: homophobic slur"
+
+[[deny]]
+word = "FAGOT"
+reason = "offensive: homophobic slur"
+
+[[deny]]
+word = "TRANY"
+reason = "offensive: transphobic slur"

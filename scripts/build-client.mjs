@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { emitShipCards } from './ship-cards.mjs';
 import { assertDebugSurfaceModuleCurrent } from './generate-debug-surfaces.mjs';
 import { clientStampField } from './client-stamp.mjs';
+import { joinCodesJson, JOIN_CODES_JSON } from './join-codes.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(root, 'dist', 'client');
@@ -50,6 +51,13 @@ async function main() {
 
   await rm(out, { recursive: true, force: true });
   await mkdir(path.join(out, 'assets'), { recursive: true });
+
+  // Authored join-code data is TOML (issue #1111); the JSON its three
+  // parser-free consumers read is generated from it and committed. Written
+  // into assets/ rather than straight into dist/, because the Worker bundle
+  // and the vitest suites read the committed copy too — the drift gate is
+  // tests/client/join-codes-data.test.js.
+  await writeFile(path.join(root, JOIN_CODES_JSON), await joinCodesJson(root), 'utf8');
 
   // index.html ← client.html, with this build's delivery stamp written into
   // the placeholder meta tag (issue #1111). The client page has no WASM to

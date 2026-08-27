@@ -2,7 +2,7 @@
 title: AI Ship Unification
 type: concept
 tags: [ai, npc, ship, ecs, components, control-source, backfill]
-sources: [src/entities/spawner.rs, src/ship/control_source.rs, src/ship_plugin.rs, src/ship/helm_ai/, src/console/weapons/server.rs, src/console/weapons/beam.rs, src/tractor/server.rs, src/console/navigation/server.rs, src/ai/server.rs, src/ai/host.rs]
+sources: [src/entities/spawner.rs, src/ship/control_source.rs, src/ship/components.rs, src/ship_plugin.rs, src/ship/helm_ai/, src/console/helm/server.rs, src/console/weapons/server.rs, src/console/weapons/beam.rs, src/tractor/server.rs, src/console/navigation/server.rs, src/ai/server.rs, src/ai/host.rs]
 updated: 2026-08-27
 ---
 
@@ -19,6 +19,12 @@ Runtime ships carry their own authored `ShipConfigComponent`,
 physics/damage state, and any capability-specific components their template
 declares. Coordination queues and policy state are also scoped to the ship that
 owns them.
+
+The generic Coordination router emits a typed, outcome-tagged handoff after
+the authored delay. Helm's owning receiver accepts only an AI delivery for its
+authored Station, rechecks live `helm-steering` control, and writes the ship's
+`PendingArcBearingRequest` or `HelmWaypointClearance`; the router does not own
+those Helm representations.
 
 An NPC template with behaviour is seeded for AI operation. The LocalShip changes
 each system's control source from live station tenure/rating: an occupied

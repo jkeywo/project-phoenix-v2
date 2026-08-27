@@ -482,7 +482,7 @@ entities:
         - src/core/messages.rs
         - src/core/codec.rs
         - src/ship/components.rs
-        - src/ship/coordination_systems.rs
+        - src/console/helm/server.rs
         - src/ship/helm_ai/surfaces.rs
         - gui/coordination-popup.js
       symbols:
@@ -495,6 +495,7 @@ entities:
         - WeaponFamily
         - WeaponEmitterArc
         - PendingArcBearingRequest
+        - receive_helm_coordination
         - apply_arc_bearing_request
         - CoordinationPresentation
         - coordination_weapon_family_param

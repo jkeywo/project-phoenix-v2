@@ -1435,10 +1435,11 @@ fn power_brownout_coordination_payload_round_trips() {
 /// follow the ship's waypoint).
 ///
 /// The `generation` is the navigation contract: the waypoint itself is the
-/// shared goal, `process_coordination_lag` latches only this, and it names
-/// which waypoint the Helm is cleared for. The `x` / `z` alongside it are
-/// display-only (issue #977 — the chatter popup formats them, replacing the
-/// English label Rust used to compose). The generation is a `u64`
+/// shared goal, Helm's `receive_helm_coordination` latches only this after the
+/// generic lag router delivers it, and it names which waypoint the Helm is
+/// cleared for. The `x` / `z` alongside it are display-only (issue #977 — the
+/// chatter popup formats them, replacing the English label Rust used to
+/// compose). The generation is a `u64`
 /// (not a timestamp) for PRD #620 lockstep determinism, so a value beyond
 /// f64's exact-integer range is used here to pin that it survives the JSON
 /// codec without precision loss — the failure mode a naive `f32`/`f64`

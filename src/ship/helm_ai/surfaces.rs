@@ -303,7 +303,8 @@ pub(crate) fn helm_destroy_target(
 /// `SetNavigationWaypoint` alike (AGENTS.md rule 6) — sets `NavigationWaypoint`
 /// and enqueues a `NavigateTo`
 /// carrying its `generation`; that message serves the delivery lag in the queue;
-/// `process_coordination_lag` then latches the generation into
+/// the generic router emits a typed delivery and Helm's
+/// `receive_helm_coordination` latches the generation into
 /// `HelmWaypointClearance`. Until the latch matches, the Helm has been given the
 /// waypoint but not yet the order, so this returns `None` — every *new* waypoint
 /// re-incurs the lag, not merely the first.
@@ -741,7 +742,8 @@ pub(crate) fn helm_ai_decision(
 /// family named by its own debounce state (`WeaponsArcRequestState`) drops out
 /// of the qualifying set, it enqueues a channel-3 `ArcBearingWithdraw` for
 /// that family over the same bus the original request travelled.
-/// `process_coordination_lag` consumes it unconditionally — clearing
+/// After the generic lag router delivers it, Helm's
+/// `receive_helm_coordination` consumes it unconditionally — clearing
 /// `PendingArcBearingRequest` is expiry, not a steering decision, so
 /// `leg_yields_to_arc_requests` plays no part in it, exactly as satisfaction
 /// and the geometry clears above are never gated on it either. A withdrawn

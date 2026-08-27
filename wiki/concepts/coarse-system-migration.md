@@ -2,7 +2,7 @@
 title: System Addressing
 type: concept
 tags: [stations, systems, system-registry, command-admission, coordination]
-sources: [src/core/messages.rs, src/ship/system_registry.rs, src/ship/config.rs, src/ship/control_source.rs, src/command_admission/policy.rs, src/command_admission/router.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/ship/rating_systems.rs]
+sources: [src/core/messages.rs, src/ship/system_registry.rs, src/ship/config.rs, src/ship/control_source.rs, src/command_admission/policy.rs, src/command_admission/router.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/console/helm/server.rs, src/ship/rating_systems.rs]
 updated: 2026-08-27
 ---
 
@@ -62,6 +62,11 @@ Cross-system requests use the coordination channel with an explicit Station or
 Ship recipient. Producers resolve a fine System to its owning Station before
 enqueue; the payload does not select its own route. Requests never bypass
 command admission to mutate another system's state directly.
+
+After delivery, the owning module interprets the typed fact. Helm resolves its
+Station and live AI authority through `helm-steering`, matching the router's
+representative-axis fallback, before applying arc-bearing or waypoint-clearance
+state. Other Helm axes neither receive nor veto that steering-owned work.
 
 ## Related
 

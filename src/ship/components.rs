@@ -100,8 +100,9 @@ impl VisitingStationHosts {
 pub struct CoordinationQueue(pub CoordinationLagQueue);
 
 /// Pending Weapons->Helm arc-bearing request, delivered via the channel-3
-/// coordination bus (issues #677, #767). Set by `process_coordination_lag`
-/// when a `CoordinationPayload::ArcBearingRequest` is consumed by an
+/// coordination bus (issues #677, #767). Set by Helm's
+/// [`crate::console::helm::server::receive_helm_coordination`] after the generic
+/// lag router delivers a `CoordinationPayload::ArcBearingRequest` to an
 /// AI-controlled Helm; read by `ai_helm_steering` to bias steering toward the
 /// requested bearing.
 ///
@@ -148,8 +149,9 @@ pub struct PendingTacticalFrequencyHint(pub Option<f32>);
 ///
 /// Every member is the same shape: the post-lag receiving path lands a consumed
 /// Coordination value in it, and a System one tick later folds that value into
-/// its state. Legacy Helm/Shields slots are still written inside the lag router;
-/// Tactical is written by its owning receiver from `DeliveredCoordination`.
+/// its state. Helm and Tactical are written by their owning receivers from
+/// `DeliveredCoordination`; the legacy Shields slot is still written inside the
+/// lag router pending issue #1258.
 /// Each is inserted by hand at
 /// [`PER_SHIP_BUS_SPAWN_SITES`], and a ship that misses one silently cannot
 /// RECEIVE that advisory at all — the consumer writes into a component that is
@@ -210,10 +212,11 @@ pub struct DockingMotionIntent(pub Option<uuid::Uuid>);
 ///
 /// The Channel-3 Navigation→Helm lag, reduced to one integer. `Navigation` sets
 /// the waypoint and enqueues `CoordinationPayload::NavigateTo` carrying its
-/// `generation`; the message spends the delivery lag in the queue; when
-/// `process_coordination_lag` finally consumes it, it latches the generation
-/// here. The AI Helm travels to the waypoint only while
-/// `clearance == waypoint.generation()`.
+/// `generation`; the message spends the delivery lag in the queue; after the
+/// generic router emits `DeliveredCoordination`, Helm's
+/// [`crate::console::helm::server::receive_helm_coordination`] latches the
+/// generation here. The AI Helm travels to the waypoint only while `clearance
+/// == waypoint.generation()`.
 ///
 /// Because the waypoint bumps its generation whenever it names somewhere new,
 /// *every* new waypoint re-incurs the lag. There is only ever one waypoint and
@@ -281,8 +284,20 @@ pub struct CoordinationEnqueue {
     pub sender_system: crate::core::messages::SystemId,
 }
 
+/// Outcome already resolved by the generic Coordination lag router.
+///
+/// `Suppress` and offline `Consume` outcomes do not cross this seam. Domain
+/// receivers must still match the outcome they own: an AI-only receiver must
+/// never accept a human-popup delivery merely because its address and payload
+/// happen to look valid.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CoordinationDelivery {
+    Ai,
+    HumanPopup { token: String, sender_label: String },
+}
+
 /// Typed handoff emitted after a delayed Station-addressed Coordination
-/// message resolves to an AI consumer.
+/// message resolves to a live recipient.
 ///
 /// The lag router owns time, live routing, and the Popup/Consume/Suppress
 /// decision. System modules read this message to own the resulting behavior;
@@ -293,6 +308,7 @@ pub struct DeliveredCoordination {
     pub address: crate::core::messages::CoordinationAddress,
     pub payload: CoordinationPayload,
     pub presentation: crate::core::messages::CoordinationPresentation,
+    pub delivery: CoordinationDelivery,
 }
 
 /// Load `ShipConfigComponent` from `assets/entities/alliance_battleship.toml`.

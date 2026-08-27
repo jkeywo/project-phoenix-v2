@@ -2,7 +2,7 @@
 title: Navigation Console
 type: entity
 tags: [console, navigation, waypoint, map, radar, ship]
-sources: [gui/battleship/navigation.html, gui/cruiser/comms.html, gui/components/ph-navigation-map.js, gui/components/ph-civilian-traffic.js, gui/console-state.js, gui/sim-state.js, gui/action-map.js, gui/hero-bar.js, src/console/navigation/mod.rs, src/console/navigation/server.rs, src/civilian/traffic.rs, src/civilian/server.rs, src/core/messages.rs, src/entities/config.rs, src/ship/coordination_systems.rs, assets/entities/alliance_battleship.toml, assets/entities/alliance_cruiser.toml, assets/entities/alliance_destroyer.toml]
+sources: [gui/battleship/navigation.html, gui/cruiser/comms.html, gui/components/ph-navigation-map.js, gui/components/ph-civilian-traffic.js, gui/console-state.js, gui/sim-state.js, gui/action-map.js, gui/hero-bar.js, src/console/navigation/mod.rs, src/console/navigation/server.rs, src/console/helm/server.rs, src/civilian/traffic.rs, src/civilian/server.rs, src/core/messages.rs, src/entities/config.rs, src/ship/coordination_systems.rs, assets/entities/alliance_battleship.toml, assets/entities/alliance_cruiser.toml, assets/entities/alliance_destroyer.toml]
 updated: 2026-08-27
 ---
 
@@ -43,7 +43,7 @@ An anchored waypoint follows the source entity's live transform. If the source d
 
 Navigation commands enter through the same `ControlSystem` command path as other fine-system controls and are admitted for the Navigation system. The Navigation blackboard publishes the waypoint for all consumers. Helm and other consoles display it, and AI Helm consumes it as the shared desired destination whether a human or Navigation AI wrote it.
 
-`NavigateTo` is the level-3 clearance that releases the AI Helm to follow the waypoint: it carries the waypoint's `generation` (not a position), serves the ship's `coordination_lag_secs` in the coordination queue, and latches into `HelmWaypointClearance` on delivery. It is issued from one origin-agnostic place — `issue_navigate_to_clearance` in `src/console/navigation/server.rs` — once per new waypoint generation, and re-issued when the helm axes flip Human→AI while the current generation is unlatched (so a waypoint set under a human helm is still flown after a disconnect/Backfill flip). Neither waypoint writer sends its own clearance.
+`NavigateTo` is the level-3 clearance that releases the AI Helm to follow the waypoint: it carries the waypoint's `generation` (not a position), serves the ship's `coordination_lag_secs` in the generic queue/router, and Helm's `receive_helm_coordination` latches that exact generation into `HelmWaypointClearance` only for a live AI `helm-steering` recipient. It is issued from one origin-agnostic place — `issue_navigate_to_clearance` in `src/console/navigation/server.rs` — once per new waypoint generation, and re-issued when the helm axes flip Human→AI while the current generation is unlatched (so a waypoint set under a human helm is still flown after a disconnect/Backfill flip). Neither waypoint writer sends its own clearance.
 
 ## Civilian traffic
 

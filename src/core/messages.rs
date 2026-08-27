@@ -2972,11 +2972,12 @@ pub enum CoordinationPayload {
     ///
     /// Navigation control is the `generation`: the waypoint is the goal and
     /// lives on the ship as one per-entity component that both consoles read;
-    /// `process_coordination_lag` latches only the generation, never a wire
-    /// position, so the `AiMemory.nav_goal` split brain this replaced cannot
-    /// return. `x` / `z` ride alongside for DISPLAY only (issue #977): the
-    /// chatter popup renders "steer toward waypoint (x, z)" from them, replacing
-    /// the English `label` Rust used to compose. No navigation logic reads them.
+    /// Helm's `receive_helm_coordination` latches only the generation after the
+    /// generic lag router delivers it, never a wire position, so the
+    /// `AiMemory.nav_goal` split brain this replaced cannot return. `x` / `z`
+    /// ride alongside for DISPLAY only (issue #977): the chatter popup renders
+    /// "steer toward waypoint (x, z)" from them, replacing the English `label`
+    /// Rust used to compose. No navigation logic reads them.
     /// See [`NavigationWaypoint::generation`].
     ///
     /// [`NavigationWaypoint::generation`]: crate::console::navigation::NavigationWaypoint::generation

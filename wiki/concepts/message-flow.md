@@ -2,7 +2,7 @@
 title: Message Flow
 type: concept
 tags: [messages, bridge, wasm, bevy, routing, delivery-class, coordination]
-sources: [src/server/bridge.rs, src/core/codec.rs, src/core/messages.rs, src/core/broadcast/sim.rs, src/lobby/server.rs, src/lobby/handler.rs, src/command_admission/, src/server_app/broadcast_publish.rs, src/ship/shields.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/console/weapons/server.rs, src/console_bridge.rs, server.html, client.html, gui/client-router.js, gui/sim-state.js, gui/console-state.js, gui/coordination-popup.js]
+sources: [src/server/bridge.rs, src/core/codec.rs, src/core/messages.rs, src/core/broadcast/sim.rs, src/lobby/server.rs, src/lobby/handler.rs, src/command_admission/, src/server_app/broadcast_publish.rs, src/ship/shields.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/console/helm/server.rs, src/console/weapons/server.rs, src/console_bridge.rs, server.html, client.html, gui/client-router.js, gui/sim-state.js, gui/console-state.js, gui/coordination-popup.js]
 updated: 2026-08-27
 ---
 
@@ -86,6 +86,12 @@ Damage-tier destruction alerts address the Station that owns Captain. Tactical
 arc-bearing requests and Navigation clearances resolve their fine System to its
 authored owning Station; they do not widen to all clients when an address is
 valid but vacant.
+
+For an AI Helm recipient, the router emits an AI-tagged
+`DeliveredCoordination`. `receive_helm_coordination` accepts no other delivery
+outcome, rechecks the explicit Station and live `helm-steering` policy, then
+preserves exact `NavigateTo` generations and arc geometry. `ArcBearingWithdraw`
+clears the standing request across weapon families in delivered queue order.
 
 ## Codec resilience
 

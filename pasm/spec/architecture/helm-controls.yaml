@@ -733,7 +733,8 @@ entities:
       summary: Host-owned temporary request that biases helm AI steering toward a target until the emitting weapon family can bear.
       rationale:
         - This is an internal coordination state, not a player-authored objective.
-        - "Weapon-family-aware (issue #767): the component carries the emitting family's usable ONLINE emitter arcs (`Vec<WeaponEmitterArc { facing_deg, arc_deg, range }>`), copied from the `ArcBearingRequest` payload by `process_coordination_lag`. `apply_arc_bearing_request` biases facing-only steering against those carried arcs — no longer a hard-coded phaser scan."
+        - "Weapon-family-aware (issue #767): the component carries the emitting family's usable ONLINE emitter arcs (`Vec<WeaponEmitterArc { facing_deg, arc_deg, range }>`), copied from the post-lag `ArcBearingRequest` delivery by HelmPlugin's `receive_helm_coordination`. `apply_arc_bearing_request` biases facing-only steering against those carried arcs — no longer a hard-coded phaser scan."
+        - "Issue #1256 makes that write Helm-local: the generic lag router emits DeliveredCoordination but no longer queries PendingArcBearingRequest or branches on ArcBearingRequest / ArcBearingWithdraw. The Helm receiver preserves delivery order and clears this state unconditionally on a withdrawal before any later yielding decision reads it."
         - "Helm AI clears it when the target leaves visibility, leaves the range of every carried arc, or enters some carried arc (the emitting family can already bear) — the same geometry the emitter uses to decide whether to ask."
         - "Issue #918: a doctrine leg may DECLINE the request instead of obeying it, by authoring `yields_to_arc_requests = false` on its current state — a ring tangent or a frozen escape heading the leg has already committed to. `apply_arc_bearing_request` then writes no steering at all for that tick, leaving the leg's own solved facing standing. Declining does not clear the request: nothing about the decline touches `PendingArcBearingRequest`, so it persists on the component exactly as any other un-acted-on request does, until the clearing geometry above resolves it or the ship transitions onto a leg that yields, which then honours it on the first tick it is current."
     architecture:
@@ -747,9 +748,10 @@ entities:
         - src/ship/components.rs
         - src/ship_plugin.rs
         - src/ship/helm_ai/surfaces.rs
-        - src/ship/coordination_systems.rs
+        - src/console/helm/server.rs
       symbols:
         - PendingArcBearingRequest
+        - receive_helm_coordination
         - apply_arc_bearing_request
 
   - state: docking-motion-intent-state

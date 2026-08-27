@@ -285,9 +285,10 @@ impl NavigationWaypoint {
     /// actually change which waypoint is named. This is what carries the
     /// Channel-3 Navigation→Helm lag now that `AiMemory.nav_goal` is gone:
     /// `CoordinationPayload::NavigateTo` carries a generation rather than a
-    /// position, `process_coordination_lag` latches it into
-    /// `HelmWaypointClearance` when the message comes due, and the AI Helm
-    /// follows the waypoint only while `clearance == generation`. Every *new*
+    /// position, the generic lag router delivers it when due, and Helm's
+    /// `receive_helm_coordination` latches it into `HelmWaypointClearance`.
+    /// The AI Helm follows the waypoint only while `clearance == generation`.
+    /// Every *new*
     /// waypoint therefore re-incurs the lag — which a bare "has been cleared"
     /// bool would not: that would delay only the first.
     ///

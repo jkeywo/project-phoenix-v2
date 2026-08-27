@@ -51,9 +51,11 @@ hostiles while Red Alert is active. Arc geometry is computed by the server and
 sent to the panel; the component only projects it into scope coordinates.
 
 Tactical can send an arc-bearing coordination request when a locked target is
-in range but outside the available direct-fire arcs. A human Helm sees the
-request on the console, while Backfill Helm consumes the same coordination fact
-when choosing steering.
+in range but outside the selected usable weapon family's carried direct-fire
+arcs. A human Helm sees the request on the console. Backfill Helm's receiver
+accepts only an AI delivery for the authored Helm Station, rechecks the live
+`helm-steering` policy, and preserves the exact arc geometry for the next
+steering decision. A withdrawal clears that request across weapon families.
 
 ## Related
 

@@ -2101,12 +2101,12 @@ pub(crate) fn receive_tactical_coordination(
 ///
 /// # Why the receiver's control source IS re-checked
 ///
-/// The router's decision and this application are a tick apart:
-/// `process_coordination_lag` (Modifiers) lands the value, and this runs in the
-/// FOLLOWING tick's Input. A human claiming Tactical inside that window used to
-/// get their freshly-dialled phaser frequency silently overwritten by an
-/// advisory addressed to the AI that was holding the guns a tick ago. So the
-/// applier repeats the router's own predicate,
+/// The receiver's write and this application are a tick apart:
+/// `receive_tactical_coordination` lands the router's typed delivery later in
+/// `Modifiers`, and this runs in the FOLLOWING tick's Input. A human claiming
+/// Tactical inside that window used to get their freshly-dialled phaser
+/// frequency silently overwritten by an advisory addressed to the AI that was
+/// holding the guns a tick ago. So the applier repeats the router's own predicate,
 /// [`shared::any_tactical_system_operates_ai`], and **drops** — never applies —
 /// a value whose addressee no longer exists. That is not a human/AI branch on
 /// behaviour: it is the same admission question the router asked, re-asked

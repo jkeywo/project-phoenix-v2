@@ -1,15 +1,19 @@
 use bevy::prelude::*;
 
 use crate::core::messages::{
-    HelmBlackboard, HelmEngineBlackboard, HelmLateralThrustBlackboard, InterSystemPayload,
-    InterSystemQueue, ModifierSlot, SystemBlackboard, SystemId,
+    CoordinationPayload, HelmBlackboard, HelmEngineBlackboard, HelmLateralThrustBlackboard,
+    InterSystemPayload, InterSystemQueue, ModifierSlot, SystemBlackboard, SystemId,
 };
 use crate::server_app::{ShipBoost, ShipImpulse};
+use crate::ship::components::{
+    CoordinationDelivery, DeliveredCoordination, HelmWaypointClearance, PendingArcBearingRequest,
+    ShipConfigComponent, ShipSystemControlSources,
+};
 use crate::ship::damage::DamageTier;
 use crate::ship::state::ShipPhysics;
 use crate::ship::system_registry::{
     helm_engine_port_system_id, helm_engine_starboard_system_id, helm_station_key,
-    lateral_thrust_system_id,
+    helm_steering_system_id, lateral_thrust_system_id,
 };
 use crate::ship_plugin::BoostConfigResource;
 
@@ -17,10 +21,89 @@ pub struct HelmPlugin;
 
 impl Plugin for HelmPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            FixedUpdate,
-            publish_helm_blackboard.in_set(crate::sim_sets::SimSet::Publish),
+        app.add_message::<DeliveredCoordination>()
+            .add_systems(
+                FixedUpdate,
+                receive_helm_coordination
+                    .in_set(crate::sim_sets::SimSet::Modifiers)
+                    .after(crate::ship_plugin::process_coordination_lag),
+            )
+            .add_systems(
+                FixedUpdate,
+                publish_helm_blackboard.in_set(crate::sim_sets::SimSet::Publish),
+            );
+    }
+}
+
+/// Helm-owned receiver for delayed Coordination deliveries (issue #1256).
+///
+/// The generic lag router owns the delay and resolves whether the addressed
+/// Station is AI-operated. Once it emits [`DeliveredCoordination`], Helm owns
+/// the meaning of its typed payloads: arc requests and withdrawals mutate the
+/// pending facing request, while `NavigateTo` latches the waypoint generation.
+///
+/// The address and live steering-axis policy are deliberately re-checked at
+/// consumption. Steering is the lag router's representative Helm axis when
+/// Helm axes diverge, so a damaged or human-held thrust axis must not discard a
+/// delivery that the AI steering axis can still act on. The live check keeps a
+/// delivery from crossing a late human steering claim and preserves custom
+/// hull topology without baking the `helm` Station id into the consumer. The
+/// receiver runs after the router in the same `Modifiers` phase, so Helm's
+/// `Physics` readers still observe the result on the following logical tick,
+/// exactly as they did when the router performed these writes.
+pub(crate) fn receive_helm_coordination(
+    mut delivered: MessageReader<DeliveredCoordination>,
+    mut ships: Query<
+        (
+            &ShipConfigComponent,
+            &ShipSystemControlSources,
+            Option<&mut PendingArcBearingRequest>,
+            Option<&mut HelmWaypointClearance>,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+) {
+    for message in delivered.read() {
+        let Ok((ship_config, control_sources, mut pending_bearing, mut waypoint_clearance)) =
+            ships.get_mut(message.source_entity)
+        else {
+            continue;
+        };
+        let helm_address = crate::ship::coordination::address_for_system(
+            &ship_config.0,
+            &helm_steering_system_id(),
         );
+        let steering_operates_ai = control_sources
+            .0
+            .policy_for(&helm_steering_system_id())
+            .operate_ai;
+        if !matches!(&message.delivery, CoordinationDelivery::Ai)
+            || helm_address.as_ref() != Some(&message.address)
+            || !steering_operates_ai
+        {
+            continue;
+        }
+
+        match &message.payload {
+            CoordinationPayload::ArcBearingRequest { uuid, arcs, .. } => {
+                if let Some(pending) = pending_bearing.as_deref_mut() {
+                    pending.target = uuid::Uuid::parse_str(uuid).ok();
+                    pending.arcs = arcs.clone();
+                }
+            }
+            CoordinationPayload::ArcBearingWithdraw { .. } => {
+                if let Some(pending) = pending_bearing.as_deref_mut() {
+                    pending.target = None;
+                    pending.arcs.clear();
+                }
+            }
+            CoordinationPayload::NavigateTo { generation, .. } => {
+                if let Some(clearance) = waypoint_clearance.as_deref_mut() {
+                    clearance.0 = Some(*generation);
+                }
+            }
+            _ => {}
+        }
     }
 }
 
@@ -292,7 +375,9 @@ fn publish_helm_blackboard(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::messages::SystemBlackboard;
+    use crate::core::messages::{
+        CoordinationAddress, CoordinationPayload, SystemBlackboard, WeaponEmitterArc, WeaponFamily,
+    };
     use crate::server_app::ShipSystemBlackboards;
     use crate::ship::boost::BoostState;
 
@@ -314,6 +399,308 @@ mod tests {
             crate::ship_plugin::LastHelmInput::default(),
         ));
         app
+    }
+
+    fn helm_coordination_app() -> (App, Entity, CoordinationAddress) {
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin)
+            .init_resource::<InterSystemQueue>()
+            .insert_resource(crate::lobby::server::ShipClientConfigResource::default())
+            .add_plugins(HelmPlugin);
+        crate::ship::test_support::drive_one_fixed_step_per_update(
+            &mut app,
+            crate::ship::test_support::TEST_TICK,
+        );
+
+        let config = ShipConfigComponent::default();
+        let address =
+            crate::ship::coordination::address_for_system(&config.0, &helm_steering_system_id())
+                .expect("shipped test hull assigns Helm steering to a Station");
+        let ship = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                config,
+                ShipSystemControlSources::default(),
+                PendingArcBearingRequest::default(),
+                HelmWaypointClearance::default(),
+            ))
+            .id();
+        crate::ship::test_support::set_helm_control_source(
+            &mut app,
+            crate::ship::control_source::ControlSource::Ai,
+        );
+        (app, ship, address)
+    }
+
+    fn deliver_to_helm(
+        app: &mut App,
+        ship: Entity,
+        address: CoordinationAddress,
+        payload: CoordinationPayload,
+    ) {
+        app.world_mut()
+            .resource_mut::<Messages<DeliveredCoordination>>()
+            .write(DeliveredCoordination {
+                source_entity: ship,
+                address,
+                payload,
+                presentation: crate::core::messages::CoordinationPresentation::new(
+                    "test.coordination.title",
+                    "test.coordination.body",
+                ),
+                delivery: CoordinationDelivery::Ai,
+            });
+    }
+
+    #[test]
+    fn helm_coordination_receiver_preserves_payload_values_and_delivery_order() {
+        let (mut app, ship, address) = helm_coordination_app();
+        let target = uuid::Uuid::new_v4();
+        let arcs = vec![WeaponEmitterArc {
+            facing_deg: 37.0,
+            arc_deg: 83.0,
+            range: 412.5,
+        }];
+
+        deliver_to_helm(
+            &mut app,
+            ship,
+            address.clone(),
+            CoordinationPayload::ArcBearingRequest {
+                uuid: target.to_string(),
+                label: "test target".into(),
+                family: WeaponFamily::Blasters,
+                arcs: arcs.clone(),
+            },
+        );
+        deliver_to_helm(
+            &mut app,
+            ship,
+            address.clone(),
+            CoordinationPayload::ArcBearingWithdraw {
+                family: WeaponFamily::Blasters,
+            },
+        );
+        crate::ship::test_support::tick(&mut app);
+
+        let pending = app
+            .world()
+            .entity(ship)
+            .get::<PendingArcBearingRequest>()
+            .expect("test ship carries pending arc state");
+        assert_eq!(pending.target, None, "later withdrawal wins in bus order");
+        assert!(
+            pending.arcs.is_empty(),
+            "withdrawal clears carried geometry"
+        );
+
+        deliver_to_helm(
+            &mut app,
+            ship,
+            address.clone(),
+            CoordinationPayload::NavigateTo {
+                generation: 73,
+                x: 900.0,
+                z: -450.0,
+            },
+        );
+        deliver_to_helm(
+            &mut app,
+            ship,
+            address,
+            CoordinationPayload::ArcBearingRequest {
+                uuid: target.to_string(),
+                label: "test target".into(),
+                family: WeaponFamily::Blasters,
+                arcs: arcs.clone(),
+            },
+        );
+        crate::ship::test_support::tick(&mut app);
+
+        let pending = app
+            .world()
+            .entity(ship)
+            .get::<PendingArcBearingRequest>()
+            .unwrap();
+        assert_eq!(pending.target, Some(target));
+        assert_eq!(
+            pending.arcs, arcs,
+            "arc geometry is copied without reduction"
+        );
+        assert_eq!(
+            app.world()
+                .entity(ship)
+                .get::<HelmWaypointClearance>()
+                .expect("test ship carries waypoint clearance")
+                .0,
+            Some(73),
+            "NavigateTo latches only its exact generation"
+        );
+    }
+
+    #[test]
+    fn helm_coordination_receiver_rechecks_address_and_live_ai_ownership() {
+        let (mut app, ship, address) = helm_coordination_app();
+        let payload = CoordinationPayload::ArcBearingRequest {
+            uuid: uuid::Uuid::new_v4().to_string(),
+            label: "test target".into(),
+            family: WeaponFamily::Phasers,
+            arcs: vec![WeaponEmitterArc {
+                facing_deg: 0.0,
+                arc_deg: 90.0,
+                range: 300.0,
+            }],
+        };
+
+        crate::ship::test_support::set_helm_control_source(
+            &mut app,
+            crate::ship::control_source::ControlSource::Human,
+        );
+        deliver_to_helm(&mut app, ship, address.clone(), payload.clone());
+        crate::ship::test_support::tick(&mut app);
+        assert_eq!(
+            app.world()
+                .entity(ship)
+                .get::<PendingArcBearingRequest>()
+                .unwrap()
+                .target,
+            None,
+            "a late human claim invalidates an already-emitted AI delivery"
+        );
+
+        crate::ship::test_support::set_helm_control_source(
+            &mut app,
+            crate::ship::control_source::ControlSource::Ai,
+        );
+
+        app.world_mut()
+            .resource_mut::<Messages<DeliveredCoordination>>()
+            .write(DeliveredCoordination {
+                source_entity: ship,
+                address: address.clone(),
+                payload: payload.clone(),
+                presentation: crate::core::messages::CoordinationPresentation::new(
+                    "test.coordination.title",
+                    "test.coordination.body",
+                ),
+                delivery: CoordinationDelivery::HumanPopup {
+                    token: "test-token".into(),
+                    sender_label: "test-sender".into(),
+                },
+            });
+        crate::ship::test_support::tick(&mut app);
+        assert_eq!(
+            app.world()
+                .entity(ship)
+                .get::<PendingArcBearingRequest>()
+                .unwrap()
+                .target,
+            None,
+            "Helm's AI receiver must reject a human-popup delivery"
+        );
+
+        deliver_to_helm(&mut app, ship, CoordinationAddress::Ship, payload);
+        crate::ship::test_support::tick(&mut app);
+        assert_eq!(
+            app.world()
+                .entity(ship)
+                .get::<PendingArcBearingRequest>()
+                .unwrap()
+                .target,
+            None,
+            "a Ship broadcast is not a Helm Station delivery"
+        );
+    }
+
+    #[test]
+    fn helm_coordination_receiver_uses_ai_steering_when_thrust_is_offline() {
+        let (mut app, ship, address) = helm_coordination_app();
+        let target = uuid::Uuid::new_v4();
+        let arcs = vec![WeaponEmitterArc {
+            facing_deg: -42.0,
+            arc_deg: 67.0,
+            range: 318.0,
+        }];
+
+        let mut ship_entity = app.world_mut().entity_mut(ship);
+        let mut control_sources = ship_entity
+            .get_mut::<ShipSystemControlSources>()
+            .expect("test ship carries control sources");
+        control_sources
+            .0
+            .set_offline(crate::ship::system_registry::helm_thrust_system_id(), true);
+        assert!(
+            control_sources
+                .0
+                .policy_for(&helm_steering_system_id())
+                .operate_ai,
+            "steering remains AI-operated"
+        );
+        assert!(
+            !crate::ship_plugin::helm_axes_operate_ai(&control_sources),
+            "offline thrust makes the old composite receiver gate false"
+        );
+        drop(control_sources);
+
+        deliver_to_helm(
+            &mut app,
+            ship,
+            address.clone(),
+            CoordinationPayload::ArcBearingRequest {
+                uuid: target.to_string(),
+                label: "test target".into(),
+                family: WeaponFamily::Phasers,
+                arcs: arcs.clone(),
+            },
+        );
+        deliver_to_helm(
+            &mut app,
+            ship,
+            address.clone(),
+            CoordinationPayload::NavigateTo {
+                generation: 91,
+                x: -25.0,
+                z: 640.0,
+            },
+        );
+        crate::ship::test_support::tick(&mut app);
+
+        let ship_state = app.world().entity(ship);
+        let pending = ship_state
+            .get::<PendingArcBearingRequest>()
+            .expect("test ship carries pending arc state");
+        assert_eq!(pending.target, Some(target));
+        assert_eq!(pending.arcs, arcs);
+        assert_eq!(
+            ship_state
+                .get::<HelmWaypointClearance>()
+                .expect("test ship carries waypoint clearance")
+                .0,
+            Some(91),
+            "offline thrust does not swallow steering-owned clearance"
+        );
+
+        deliver_to_helm(
+            &mut app,
+            ship,
+            address,
+            CoordinationPayload::ArcBearingWithdraw {
+                family: WeaponFamily::Blasters,
+            },
+        );
+        crate::ship::test_support::tick(&mut app);
+
+        let pending = app
+            .world()
+            .entity(ship)
+            .get::<PendingArcBearingRequest>()
+            .unwrap();
+        assert_eq!(pending.target, None);
+        assert!(
+            pending.arcs.is_empty(),
+            "withdrawal remains unconditional across weapon families"
+        );
     }
 
     /// Spawn an NPC ship (no `LocalShip`) carrying the components the

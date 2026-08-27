@@ -5,9 +5,9 @@ use crate::core::messages::{ClientMessage, CoordinationAddress, CoordinationPayl
 use crate::lobby::{InboundMessage, Sessions};
 use crate::server_app::LocalShip;
 use crate::ship::components::{
-    ActiveStationRatings, CoordinationEnqueue, CoordinationQueue, DeliveredCoordination,
-    HelmWaypointClearance, HumanSeekingHosts, PendingArcBearingRequest, RepairHumanAlerted,
-    ScenarioDetailFloor, ShipConfigComponent, ShipSystemControlSources, VisitingStationHosts,
+    ActiveStationRatings, CoordinationDelivery, CoordinationEnqueue, CoordinationQueue,
+    DeliveredCoordination, HumanSeekingHosts, RepairHumanAlerted, ScenarioDetailFloor,
+    ShipConfigComponent, ShipSystemControlSources, VisitingStationHosts,
 };
 use crate::ship::control_source::ControlSource;
 use crate::ship::coordination;
@@ -459,8 +459,6 @@ pub fn process_coordination_lag(
             &ShipConfigComponent,
             &ShipSystemControlSources,
             &mut CoordinationQueue,
-            Option<&mut PendingArcBearingRequest>,
-            Option<&mut HelmWaypointClearance>,
             Option<&mut RepairHumanAlerted>,
             Option<&mut crate::console::repair::server::RepairRequestQueue>,
             Option<&mut crate::ship::shields::PendingShieldsThreatBearing>,
@@ -476,15 +474,12 @@ pub fn process_coordination_lag(
     mut delivered_writer: MessageWriter<DeliveredCoordination>,
 ) {
     let repair_id = crate::ship::system_registry::repair_system_id();
-    let helm_system = crate::ship::system_registry::helm_steering_system_id();
     let now = time.elapsed_secs();
     for (
         ship_entity,
         ship_config,
         control_sources,
         mut queue,
-        mut pending_bearing,
-        mut waypoint_clearance,
         mut alerted,
         mut repair_queue,
         mut pending_shields_threat,
@@ -498,7 +493,6 @@ pub fn process_coordination_lag(
             &ship_config.0,
             crate::ship::system_registry::SHIELD_ARC_KIND,
         );
-        let helm_address = coordination::address_for_system(&ship_config.0, &helm_system);
         let repair_vis = entity_hull.map(|hull| {
             crate::console::repair::visibility::ship_hull_visibility(
                 &hull.0,
@@ -568,13 +562,14 @@ pub fn process_coordination_lag(
                             address: msg.address.clone(),
                             payload: msg.payload.clone(),
                             presentation: msg.presentation.clone(),
+                            delivery: CoordinationDelivery::Ai,
                         });
                     }
 
-                    // Legacy consumers move behind DeliveredCoordination in
-                    // issues #1256-#1258. Tactical's FrequencyHint is the
-                    // tracer implemented in this slice and is intentionally
-                    // absent from this router.
+                    // Repair and Shields remain legacy consumers until issues
+                    // #1257-#1258. Helm and Tactical own their typed behavior
+                    // behind DeliveredCoordination and are absent from this
+                    // router.
                     if target_policy.operate_ai && repair_address.as_ref() == Some(&msg.address) {
                         if let CoordinationPayload::RepairRequest {
                             station_id,
@@ -593,27 +588,6 @@ pub fn process_coordination_lag(
                                         deficit: deficit.unwrap_or(0.0),
                                     },
                                 );
-                            }
-                        }
-                    }
-                    if target_policy.operate_ai && helm_address.as_ref() == Some(&msg.address) {
-                        if let CoordinationPayload::ArcBearingRequest { uuid, arcs, .. } =
-                            &msg.payload
-                        {
-                            if let Some(pending) = pending_bearing.as_deref_mut() {
-                                pending.target = uuid::Uuid::parse_str(uuid).ok();
-                                pending.arcs = arcs.clone();
-                            }
-                        }
-                        if let CoordinationPayload::ArcBearingWithdraw { .. } = &msg.payload {
-                            if let Some(pending) = pending_bearing.as_deref_mut() {
-                                pending.target = None;
-                                pending.arcs.clear();
-                            }
-                        }
-                        if let CoordinationPayload::NavigateTo { generation, .. } = &msg.payload {
-                            if let Some(clearance) = waypoint_clearance.as_deref_mut() {
-                                clearance.0 = Some(*generation);
                             }
                         }
                     }

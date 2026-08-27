@@ -126,6 +126,16 @@ pub fn test_app() -> App {
                 .chain(),
         )
         .add_plugins(ShipPlugin);
+    // ShipPlugin owns the generic delayed router, while production registers
+    // this typed consumer through HelmPlugin. Keep the test twin's historical
+    // end-to-end Helm coordination behavior without pulling in Helm's publisher
+    // and its unrelated display resources.
+    app.add_systems(
+        FixedUpdate,
+        crate::console::helm::server::receive_helm_coordination
+            .in_set(crate::sim_sets::SimSet::Modifiers)
+            .after(crate::ship_plugin::process_coordination_lag),
+    );
     // The shared AI host spine's read-only world context (issue #1205), the same
     // single wiring point the AI host plugin calls. `AiHostEnv` takes bare `Res`,
     // so a fixture that runs a host through it must register these here or fail
@@ -649,6 +659,12 @@ pub fn test_app_with_engine_hull() -> App {
                 .chain(),
         )
         .add_plugins(ShipPlugin);
+    app.add_systems(
+        FixedUpdate,
+        crate::console::helm::server::receive_helm_coordination
+            .in_set(crate::sim_sets::SimSet::Modifiers)
+            .after(crate::ship_plugin::process_coordination_lag),
+    );
     // The shared AI host spine's read-only world context (issue #1205), the same
     // single wiring point the AI host plugin calls. `AiHostEnv` takes bare `Res`,
     // so a fixture that runs a host through it must register these here or fail

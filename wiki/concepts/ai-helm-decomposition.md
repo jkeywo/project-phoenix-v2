@@ -2,7 +2,7 @@
 title: AI Helm Decomposition
 type: concept
 tags: [ai, helm, per-axis, commands, control-source, tick, lod]
-sources: [src/ship/helm_ai/mod.rs, src/ship/helm_ai/surfaces.rs, src/ship/helm_ai/facts.rs, src/ship/helm_ai/steering.rs, src/ship/helm_ai/lateral.rs, src/ship/helm_ai/vertical.rs, src/ship/helm_ai/impulse.rs, src/ship/helm_ai/boost.rs, src/ship/helm_ai/engines.rs, src/ship_plugin.rs, src/ship/helm_planner.rs, src/ai/core.rs, src/ai/cadence.rs, src/ai/lod.rs, src/ai/server.rs, src/server_app_render.rs]
+sources: [src/console/helm/server.rs, src/ship/helm_ai/mod.rs, src/ship/helm_ai/surfaces.rs, src/ship/helm_ai/facts.rs, src/ship/helm_ai/steering.rs, src/ship/helm_ai/lateral.rs, src/ship/helm_ai/vertical.rs, src/ship/helm_ai/impulse.rs, src/ship/helm_ai/boost.rs, src/ship/helm_ai/engines.rs, src/ship_plugin.rs, src/ship/helm_planner.rs, src/ai/core.rs, src/ai/cadence.rs, src/ai/lod.rs, src/ai/server.rs, src/server_app_render.rs]
 updated: 2026-08-27
 ---
 
@@ -29,6 +29,13 @@ The forward-thrust host remains part of the shared module surface. Together the 
 `build_helm_ai_surfaces_frame` runs once before the hosts on each eligible AI tick. It folds authoritative, console-owned state into a per-ship frame: the viewscreen combat lock and scored objectives, Navigation waypoint and coordination clearance, current physics, world snapshot, shields, weapons reach, authored behaviour, and per-host policy memory.
 
 Missing information remains missing; the Helm AI does not invent a goal. Named scenario targets resolve through the same world/runtime names available to the crew-facing surfaces. Private policy memory is snapshot-safe and scoped per fine system.
+
+Helm's `receive_helm_coordination` owns post-lag `ArcBearingRequest`,
+`ArcBearingWithdraw`, and `NavigateTo` effects. It accepts only the AI outcome,
+resolves the authored Helm Station from `helm-steering`, and rechecks that fine
+system's live policy before preserving arc geometry or the exact waypoint
+generation. Withdrawal clears the standing request regardless of weapon family;
+the steering host then reads the resulting state on the following logical tick.
 
 ## Command symmetry and ordering
 

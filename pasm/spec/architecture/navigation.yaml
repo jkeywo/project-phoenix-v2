@@ -131,16 +131,18 @@ entities:
       summary: Helm AI destination input that reads the authoritative shared waypoint no matter whether a human Navigation operator or Navigation AI wrote it.
       rationale:
         - "Issue #742: both the human console and navigation-ai-operator emit the same admitted SetNavigationWaypoint into the shared NavigationWaypoint, latched for the Helm through the one HelmWaypointClearance generation (rule 6 symmetry), so the consumer reads the authoritative waypoint without branching on origin. cleared_nav_waypoint withholds the waypoint until the Channel-3 clearance latches its generation; build_helm_ai_surfaces_frame carries the cleared waypoint into the per-ship frame; helm_motion_planner turns it into the desired-motion contract's forward travel via helm_ai_decision."
+        - "Issue #1256: the generic lag router now stops at DeliveredCoordination. HelmPlugin's receive_helm_coordination owns the NavigateTo effect, re-checks live helm-steering AI ownership (the router's representative Helm axis when axes diverge), and latches the payload's exact generation into HelmWaypointClearance. An offline thrust axis does not discard that steering-owned clearance. It remains in Modifiers after the router, so the existing Physics consumer observes it on the same following logical tick."
     architecture:
       kind: ai-input-adapter
       authority: authoritative
-      reads: [navigation-waypoint-state, system-control-source-state]
+      reads: [navigation-waypoint-state, system-control-source-state, coordination-delivery-state]
       writes: [desired-motion-state]
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/helm_ai/surfaces.rs, src/ship/helm_planner.rs]
+      paths: [src/console/helm/server.rs, src/ship/helm_ai/surfaces.rs, src/ship/helm_planner.rs]
       symbols:
+        - receive_helm_coordination
         - cleared_nav_waypoint
         - build_helm_ai_surfaces_frame
         - helm_ai_decision

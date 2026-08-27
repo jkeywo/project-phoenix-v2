@@ -2,7 +2,7 @@
 title: WeaponsPlugin
 type: concept
 tags: [weapons, tactical, phaser, torpedo, blaster, targeting, ai]
-sources: [src/console/weapons/mod.rs, src/console/weapons/server.rs, src/console/weapons/beam.rs, src/console/weapons/torpedo.rs, src/console/weapons/blaster.rs, src/console/weapons/blackboard.rs, src/console/weapons/shared.rs, src/weapons/, src/server_app/registration.rs, src/server_app/world_setup.rs]
+sources: [src/console/weapons/mod.rs, src/console/weapons/server.rs, src/console/weapons/beam.rs, src/console/weapons/torpedo.rs, src/console/weapons/blaster.rs, src/console/weapons/blackboard.rs, src/console/weapons/shared.rs, src/console/helm/server.rs, src/weapons/, src/server_app/registration.rs, src/server_app/world_setup.rs]
 updated: 2026-08-27
 ---
 
@@ -34,7 +34,10 @@ The Tactical selector ranks the ship's visible/scored objective surface determin
 
 Weapons resolves its fine Tactical/Helm Systems to explicit owning-Station
 addresses before enqueue. An out-of-arc target produces an
-`ArcBearingRequest` addressed to Helm. A delayed `FrequencyHint` addressed to
+`ArcBearingRequest` addressed to Helm with the selected usable family's exact
+arc geometry. AI Helm's owning receiver preserves that geometry; a delivered
+withdrawal clears the standing request even if a different family most recently
+held it. A delayed `FrequencyHint` addressed to
 Tactical reaches `receive_tactical_coordination`; that Tactical-owned receiver
 rechecks the live control policy before latching the unchanged frequency for
 the existing next-tick applier. The payload never selects or widens its own

@@ -104,7 +104,7 @@ fn set_ship_weapons_target(app: &mut App, uuid: &str) {
 }
 
 /// Give this ship a Navigation waypoint *and* the Channel-3 clearance to
-/// fly it, as `operate_navigation_ai` → `process_coordination_lag` would
+/// fly it, as `operate_navigation_ai` → the lag router → Helm's receiver would
 /// once the order came due (issue #702). Returns the waypoint's generation.
 use crate::console::navigation::WaypointMode;
 
@@ -2839,7 +2839,7 @@ fn cleared_nav_waypoint_withholds_a_waypoint_newer_than_the_clearance() {
          every waypoint after the first would be followed instantly"
     );
 
-    // …and once `process_coordination_lag` latches the new generation, it is.
+    // …and once Helm's post-lag receiver latches the new generation, it is.
     let caught_up = HelmWaypointClearance(Some(waypoint.generation()));
     assert_eq!(
         cleared_nav_waypoint(Some(&waypoint), Some(&caught_up)),
@@ -2910,7 +2910,7 @@ fn ai_helm_flies_the_nav_waypoint_only_once_cleared() {
     );
     assert!(
         get_thrust_input(&mut app_with_waypoint(true)) > 0.0,
-        "once process_coordination_lag latches the clearance, the same \
+        "once Helm's post-lag receiver latches the clearance, the same \
          waypoint must be flown"
     );
 }
@@ -7089,9 +7089,9 @@ fn a_travelling_leg_still_turns_to_bear_under_the_same_request() {
 // ── #932: a standing request is WITHDRAWN when its family goes unusable ──
 
 /// Withdraw the standing arc-bearing request through the REAL channel-3
-/// wire — `handle_coordination_enqueue` then `process_coordination_lag`,
-/// both part of `ShipPlugin` and already running in this fixture — rather
-/// than poking `PendingArcBearingRequest` directly the way
+/// wire — `handle_coordination_enqueue`, `process_coordination_lag`, then
+/// Helm's `receive_helm_coordination`, all already running in this fixture —
+/// rather than poking `PendingArcBearingRequest` directly the way
 /// `stand_up_fore_arc_request` stands one up.
 ///
 /// `stand_up_fore_arc_request` pokes state because no real Weapons system
@@ -7099,15 +7099,15 @@ fn a_travelling_leg_still_turns_to_bear_under_the_same_request() {
 /// withdrawing it the same way would prove nothing about the wire issue
 /// #932 actually changed. `tick_weapons_arc_request` — the real emitter,
 /// exercised on its own terms in `console::weapons::server_tests` — raises
-/// exactly this `ArcBearingWithdraw` when the family it last asked for
-/// drains to empty; this helper drives the SAME payload down the SAME bus
-/// `process_coordination_lag` consumes, so what's under test here is
+/// exactly this `ArcBearingWithdraw` when the family it last asked for drains
+/// to empty; this helper drives the SAME payload down the SAME bus the lag
+/// router delivers and Helm's receiver consumes, so what's under test here is
 /// entirely the consuming half.
 ///
 /// Zeroes `coordination_lag_secs` first so the withdrawal is due the same
 /// tick it's enqueued (production ships lag it; see the `coord_test_app`
 /// pattern in `coordination_systems.rs`'s own tests for the precedent).
-/// `process_coordination_lag` runs in `SimSet::Modifiers`, AFTER
+/// The lag router and Helm receiver run in `SimSet::Modifiers`, AFTER
 /// `ai_helm_steering` in `SimSet::Physics`, so the clear lands too late to
 /// affect the tick it's consumed in — callers tick once more to observe a
 /// cleared `PendingArcBearingRequest` reflected in steering.

@@ -1,7 +1,7 @@
 use super::*;
 use crate::core::messages::{CoordinationAddress, SystemId};
 use crate::server_app::Ship;
-use crate::ship::components::LastSystemTiers;
+use crate::ship::components::{LastSystemTiers, PendingArcBearingRequest};
 use crate::ship::control_source::ControlSource;
 use crate::ship::test_support::*;
 
@@ -881,6 +881,7 @@ fn tactical_receiver_consumes_a_delivered_frequency_hint_without_router_state_mu
             )),
             payload: CoordinationPayload::FrequencyHint { frequency: 0.61 },
             presentation: test_coordination_presentation(),
+            delivery: CoordinationDelivery::Ai,
         });
     tick(&mut app);
 
@@ -937,8 +938,9 @@ fn human_sensors_advisory_reaches_and_moves_a_backfilled_tactical() {
     // Tick 1: tick_sensors_frequency_hint (Input) reads the Combat Lock and
     //         the target's shield frequency and writes CoordinationEnqueue →
     //         handle_coordination_enqueue queues it (lag 0) →
-    //         process_coordination_lag (Modifiers) consumes it into the
-    //         pending slot, because Tactical operates AI.
+    //         process_coordination_lag emits DeliveredCoordination → Tactical's
+    //         receiver consumes it into the pending slot, because Tactical
+    //         operates AI.
     // Tick 2: apply_tactical_frequency_hint (Input) folds it into the guns.
     tick(&mut app);
     tick(&mut app);
@@ -1536,6 +1538,11 @@ fn human_sender_advisory_is_consumed_by_a_backfilled_helm() {
         .insert(PendingArcBearingRequest::default());
 
     let target_uuid = uuid::Uuid::new_v4();
+    let arcs = vec![crate::core::messages::WeaponEmitterArc {
+        facing_deg: 25.0,
+        arc_deg: 70.0,
+        range: 240.0,
+    }];
     enqueue_coordination(
         &mut app,
         ControlSource::Human,
@@ -1546,7 +1553,7 @@ fn human_sender_advisory_is_consumed_by_a_backfilled_helm() {
             uuid: target_uuid.to_string(),
             label: "Harrow Raider".into(),
             family: crate::core::messages::WeaponFamily::Phasers,
-            arcs: Vec::new(),
+            arcs: arcs.clone(),
         },
     );
     tick(&mut app);
@@ -1559,6 +1566,14 @@ fn human_sender_advisory_is_consumed_by_a_backfilled_helm() {
             .target,
         Some(target_uuid),
         "a backfilled Helm must act on a human-origin arc-bearing request"
+    );
+    assert_eq!(
+        app.world()
+            .get::<PendingArcBearingRequest>(ship)
+            .unwrap()
+            .arcs,
+        arcs,
+        "the generic handoff and Helm receiver must preserve exact arc geometry"
     );
     assert_eq!(
         coordination_popups(&app),

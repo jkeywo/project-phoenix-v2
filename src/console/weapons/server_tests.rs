@@ -1,3 +1,4 @@
+use super::super::blackboard::WeaponsUpdateFirstTick;
 use super::*;
 use crate::ai::server::AiTokenRegistry;
 use crate::console::weapons::shared::system_is_registered;
@@ -1148,6 +1149,160 @@ fn backfilled_tactical_does_not_lock_a_non_objective_named_derelict() {
 }
 
 // ── WeaponsUpdate / fire_ready tests ───────────────────────────────────
+
+fn register_reconnect_player(app: &mut App, token: &str, station: Option<&str>) {
+    let mut sessions = app.world_mut().resource_mut::<crate::lobby::Sessions>();
+    sessions
+        .0
+        .register(token.to_string(), format!("Player {token}"))
+        .expect("test session must register");
+    sessions
+        .0
+        .set_station(token, station.map(|id| StationId(id.into())));
+}
+
+fn set_reconnect_weapons_state(app: &mut App) {
+    *app.world_mut().resource_mut::<CurrentPhaserMode>() = CurrentPhaserMode(PhaserMode::Manual);
+
+    let ship = app
+        .world_mut()
+        .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
+        .single(app.world())
+        .expect("test app must have one LocalShip");
+    let mut blackboards = app
+        .world_mut()
+        .get_mut::<crate::server_app::ShipSystemBlackboards>(ship)
+        .expect("LocalShip must carry blackboards");
+    blackboards.0.insert(
+        crate::ship::system_registry::viewscreen_system_id(),
+        SystemBlackboard::Viewscreen(ViewscreenBlackboard {
+            combat_lock: Some("current-target".into()),
+            ..Default::default()
+        }),
+    );
+}
+
+fn assert_weapons_update_matches_live_state(message: &ServerMessage, expected: &LastWeaponsUpdate) {
+    let ServerMessage::WeaponsUpdate {
+        target_uuid,
+        target_name,
+        banks,
+        tubes,
+        torpedo_count,
+        phaser_mode,
+        blasters,
+        phaser_frequency,
+    } = message
+    else {
+        panic!("expected WeaponsUpdate, got {message:?}");
+    };
+
+    assert_eq!(target_uuid, &expected.target_uuid);
+    assert_eq!(target_name, &expected.target_name);
+    assert_eq!(banks, &expected.banks);
+    assert_eq!(tubes, &expected.tubes);
+    assert_eq!(*torpedo_count, expected.torpedo_count);
+    assert_eq!(*phaser_mode, expected.phaser_mode);
+    assert_eq!(blasters, &expected.blasters);
+    assert_eq!(*phaser_frequency, expected.phaser_frequency);
+}
+
+#[test]
+fn registered_weapons_lifecycle_resets_its_cache() {
+    let mut app = test_app();
+    assert_eq!(
+        app.world()
+            .resource::<crate::core::broadcast::ReplicationLifecycleRegistry>()
+            .keys()
+            .collect::<Vec<_>>(),
+        vec!["weapons"],
+        "WeaponsPlugin must register its lifecycle under the stable owner key"
+    );
+    assert_eq!(
+        app.world()
+            .resource::<crate::authoritative::StateCensus>()
+            .get(std::any::type_name::<LastWeaponsUpdate>()),
+        Some((
+            crate::authoritative::StateClass::Cache,
+            "digest-exclusion-classes"
+        )),
+        "the Weapons owner must keep its delta cache classified in StateCensus"
+    );
+    assert_eq!(
+        app.world()
+            .resource::<crate::authoritative::StateCensus>()
+            .get(std::any::type_name::<WeaponsUpdateFirstTick>()),
+        Some((
+            crate::authoritative::StateClass::Cache,
+            "digest-exclusion-classes"
+        )),
+        "the Weapons owner must keep its first-tick suppression state classified in StateCensus"
+    );
+    *app.world_mut().resource_mut::<LastWeaponsUpdate>() = LastWeaponsUpdate {
+        target_uuid: Some("old-target".into()),
+        torpedo_count: 7,
+        phaser_mode: PhaserMode::Manual,
+        ..Default::default()
+    };
+    *app.world_mut().resource_mut::<WeaponsUpdateFirstTick>() = WeaponsUpdateFirstTick(false);
+
+    crate::core::broadcast::reset_registered_replication(app.world_mut());
+
+    assert_eq!(
+        *app.world().resource::<LastWeaponsUpdate>(),
+        LastWeaponsUpdate::default()
+    );
+    assert!(app.world().resource::<WeaponsUpdateFirstTick>().0);
+}
+
+#[test]
+fn registered_weapons_reconnect_targets_owner_with_live_state_without_mutating_cache() {
+    let mut app = test_app();
+    register_reconnect_player(&mut app, "owner", Some("tactical"));
+    register_reconnect_player(&mut app, "observer", None);
+    set_reconnect_weapons_state(&mut app);
+    let expected = compute_current_weapons_update(app.world_mut());
+    let seeded_cache = LastWeaponsUpdate {
+        target_uuid: Some("cached-target".into()),
+        torpedo_count: 7,
+        ..Default::default()
+    };
+    *app.world_mut().resource_mut::<LastWeaponsUpdate>() = seeded_cache.clone();
+
+    crate::core::broadcast::cache_registry::resync_for_token(app.world_mut(), "owner");
+
+    let entries = app.world_mut().resource_mut::<SimOutbox>().drain();
+    let weapon_entry = entries
+        .iter()
+        .find(|entry| matches!(&entry.message, ServerMessage::WeaponsUpdate { .. }))
+        .expect("the current Weapons owner must receive a reconnect projection");
+    assert_eq!(weapon_entry.target, Target::Token("owner".into()));
+    assert_eq!(weapon_entry.delivery, DeliveryClass::Snapshot);
+    assert_weapons_update_matches_live_state(&weapon_entry.message, &expected);
+    assert!(entries
+        .iter()
+        .all(|entry| &entry.target != &Target::Token("observer".into())));
+    assert_eq!(
+        *app.world().resource::<LastWeaponsUpdate>(),
+        seeded_cache,
+        "reconnect must not change the shared live delta cache"
+    );
+}
+
+#[test]
+fn registered_weapons_reconnect_omits_non_owner_while_an_owner_exists() {
+    let mut app = test_app();
+    register_reconnect_player(&mut app, "owner", Some("tactical"));
+    register_reconnect_player(&mut app, "observer", None);
+
+    crate::core::broadcast::cache_registry::resync_for_token(app.world_mut(), "observer");
+
+    assert!(app
+        .world()
+        .resource::<SimOutbox>()
+        .iter()
+        .all(|(_, message)| !matches!(message, ServerMessage::WeaponsUpdate { .. })));
+}
 
 #[test]
 fn weapons_update_fire_ready_true_when_target_in_range_and_arc() {

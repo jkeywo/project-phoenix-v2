@@ -485,8 +485,8 @@ pub(crate) fn on_game_over_enter(
 /// otherwise suppress initial updates.
 ///
 /// The transitional cache census resets its remaining owners first; the
-/// stable-keyed lifecycle runner then invokes the migrated Blackboard and Hull
-/// owners without knowing their resource types.
+/// stable-keyed lifecycle runner then invokes the migrated Blackboard, Hull,
+/// and Weapons owners without knowing their resource types.
 pub(crate) fn reset_broadcast_caches_on_start(world: &mut World) {
     crate::core::broadcast::cache_registry::reset_unregistered(world);
     crate::core::broadcast::reset_registered_replication(world);

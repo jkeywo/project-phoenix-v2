@@ -278,7 +278,6 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     "project_phoenix::console::weapons::beam::PhaserBankAiPolicies",
     "project_phoenix::console::weapons::beam::PhaserCombatConfigResource",
     "project_phoenix::console::weapons::beam::TacticalTargetSelector",
-    "project_phoenix::console::weapons::blackboard::WeaponsUpdateFirstTick",
     "project_phoenix::console::weapons::blaster::BlasterBankAiPolicies",
     "project_phoenix::console::weapons::blaster::BlasterSystemResource",
     "project_phoenix::console::weapons::shared::BeamContext",

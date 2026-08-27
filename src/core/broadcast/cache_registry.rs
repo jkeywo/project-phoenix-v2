@@ -45,11 +45,9 @@
 //! message shapes. Issue #1250 removed `LastBroadcastShields` when the live
 //! Shields publisher moved to an owner-local broadcaster without a delta cache.
 //!
-//! `LastWeaponsUpdate` (`src/console/weapons/blackboard.rs`)
-//! stays defined in its natural home next to the weapons producer that reads
-//! and writes it every tick — moving the type would ripple through that
-//! file's producer closure for no behavioural benefit. Until issue #1265 moves
-//! it onto the lifecycle seam, [`reset_unregistered`] still resets it.
+//! `LastWeaponsUpdate` and its reset/reconnect projection now live entirely
+//! beside the Weapons publisher. The registered adapter keeps this transitional
+//! module from knowing either the cache resource or `WeaponsUpdate` shape.
 //!
 //! [`crate::console::repair::visibility::LastVisibleRepairBlackboard`] is a
 //! separate per-token Repair projection cache owned by the Blackboard
@@ -118,8 +116,6 @@ pub struct LastBroadcastEntityHealth(
 pub fn reset_unregistered(world: &mut World) {
     *world.resource_mut::<LastBroadcastEntityPositions>() = LastBroadcastEntityPositions::default();
     *world.resource_mut::<LastBroadcastEntityHealth>() = LastBroadcastEntityHealth::default();
-    *world.resource_mut::<crate::console::weapons::LastWeaponsUpdate>() =
-        crate::console::weapons::LastWeaponsUpdate::default();
 }
 
 /// Remove a set of despawned entity UUIDs from the UUID-keyed caches.
@@ -153,33 +149,17 @@ pub fn prune(
 /// (`refresh_caches_on_midgame_reconnect`), which zeroed the shared caches
 /// and thus caused the *next* tick to broadcast full state to *all* clients.
 ///
-/// Constructs the still-unregistered `ShieldStatus` and (when the reconnecting
-/// token currently holds the ship's authored weapons station) `WeaponsUpdate`
-/// directly from live `LocalShip` component state. Registered lifecycle owners
-/// contribute their projections in stable key order, without this runner
-/// knowing their cache or payload types. The combined
+/// Constructs the still-unregistered `ShieldStatus` directly from live
+/// `LocalShip` component state. Registered lifecycle owners contribute their
+/// projections in stable key order, without this runner knowing their cache or
+/// payload types. The combined
 /// batch is pushed into `SimOutbox` targeted at `Target::Token(token)`. Entity
 /// positions/health for the wider world are already covered by the
 /// `Welcome` message's `GameState.world` snapshot (built from the live
 /// `WorldResource`), so this function does not duplicate that here.
-///
-/// `WeaponsUpdate` is gated on station ownership (unlike the other current
-/// messages, which are unconditional) because, unlike hull/shields/
-/// blackboards, it is genuinely station-scoped: it's normally only ever sent
-/// to whoever holds the ship's weapons station (`Audience::HoldingWeapons` in
-/// `weapons_update_broadcaster`), so a reconnecting client who does not hold
-/// that station has no use for it and should not receive it here either.
-/// The owning station is resolved from the ship config — it's "tactical" on
-/// the crewed hulls but "pilot" on the single-station Courier.
-/// This deliberately does **not** touch `LastWeaponsUpdate` — same rule as
-/// every registered lifecycle projection — so the next periodic broadcaster
-/// tick still diffs normally instead of being forced to re-send to everyone.
 /// `ShieldStatus` has no delta cache after issue #1250; reconnect builds that
 /// one-shot projection directly from the live `ShipShields` component.
 pub fn resync_for_token(world: &mut World, token: &str) {
-    use crate::console::weapons::compute_current_weapons_update;
-    use crate::core::messages::StationId;
-    use crate::lobby::Sessions;
     use crate::server_app::{LocalShip, SimOutbox};
     use crate::ship::shields::ShipShields;
 
@@ -201,45 +181,6 @@ pub fn resync_for_token(world: &mut World, token: &str) {
     messages.extend(crate::core::broadcast::reconnect_registered_replication(
         world, token,
     ));
-
-    // ── WeaponsUpdate: only meaningful if the reconnecting token currently
-    // holds the ship's authored weapons station. WeaponsUpdate is normally
-    // sent through Audience::HoldingWeapons, so anyone else has no use for it.
-    // Deliberately does not read/write `LastWeaponsUpdate`.
-    {
-        // Resolve the weapons owner from the ship config, then check the
-        // holder. The StationId is cloned out of the query before touching
-        // Sessions so the query borrow on `world` is released first.
-        //
-        // A real LocalShip carries a populated config. The legacy station-id
-        // fallback only covers a pre-spawn/bare-test shape where that config is
-        // absent, preserving the old reconnect behavior without defining the
-        // normal ownership rule.
-        let weapons_station_id: StationId = world
-            .query_filtered::<&crate::ship_plugin::ShipConfigComponent, With<LocalShip>>()
-            .single(world)
-            .ok()
-            .and_then(|c| c.0.weapons_station())
-            .unwrap_or_else(|| StationId(crate::ship::system_registry::TACTICAL_STATION_ID.into()));
-        let holds_weapons_station = world
-            .resource::<Sessions>()
-            .0
-            .holder_for_station(&weapons_station_id)
-            == Some(token);
-        if holds_weapons_station {
-            let current = compute_current_weapons_update(world);
-            messages.push(ServerMessage::WeaponsUpdate {
-                target_uuid: current.target_uuid,
-                target_name: current.target_name,
-                banks: current.banks,
-                tubes: current.tubes,
-                torpedo_count: current.torpedo_count,
-                phaser_mode: current.phaser_mode,
-                blasters: current.blasters,
-                phaser_frequency: current.phaser_frequency,
-            });
-        }
-    }
 
     if !messages.is_empty() {
         let mut outbox = world.resource_mut::<SimOutbox>();
@@ -270,15 +211,9 @@ mod tests {
         health
             .0
             .insert("uuid-1".into(), (Some(1.0), Some(1.0), None, None));
-        let weapons = crate::console::weapons::LastWeaponsUpdate {
-            target_uuid: Some("uuid-1".into()),
-            ..Default::default()
-        };
-
         let mut app = App::new();
         app.insert_resource(positions);
         app.insert_resource(health);
-        app.insert_resource(weapons);
 
         reset_unregistered(app.world_mut());
 
@@ -295,13 +230,6 @@ mod tests {
                 .0
                 .is_empty(),
             "health cache must be empty after reset_unregistered"
-        );
-        assert_eq!(
-            &*app
-                .world()
-                .resource::<crate::console::weapons::LastWeaponsUpdate>(),
-            &crate::console::weapons::LastWeaponsUpdate::default(),
-            "weapons cache must be default after reset_unregistered"
         );
     }
 
@@ -619,177 +547,6 @@ mod tests {
                 .map(|station| station.0.as_str()),
             Some("engineering"),
             "reconnect must not invalidate another client's live Repair projection"
-        );
-    }
-
-    // ── resync_for_token: WeaponsUpdate (issue #613 review fix) ────────────
-
-    /// Build a `resync_test_app` whose ship carries the resources
-    /// `compute_current_weapons_update` unconditionally reads (torpedo
-    /// system, phaser mode, phaser combat config) and register `token` as
-    /// the current holder of an authored `pilot` weapons station, so
-    /// `resync_for_token` proves the `HoldingWeapons` ownership rule rather
-    /// than passing through the legacy station-id fallback.
-    fn resync_test_app_with_weapons_station_holder(token: &str) -> App {
-        use crate::console::weapons::{
-            CurrentPhaserMode, PhaserCombatConfigResource, TorpedoSystemResource,
-        };
-        use crate::core::messages::StationId;
-        use crate::lobby::Sessions;
-        use crate::weapons::torpedo::{TorpedoConfig, TorpedoSystem};
-
-        let mut app = resync_test_app();
-        app.insert_resource(CurrentPhaserMode(crate::core::messages::PhaserMode::Manual));
-        app.world_mut()
-            .resource_mut::<Sessions>()
-            .0
-            .register(token.to_string(), "Reconnecting Player".to_string())
-            .unwrap();
-        app.world_mut()
-            .resource_mut::<Sessions>()
-            .0
-            .set_station(token, Some(StationId("pilot".into())));
-
-        let mut q = app.world_mut().query_filtered::<Entity, With<LocalShip>>();
-        let ship = q.single(app.world()).expect("LocalShip must exist");
-        let ship_config = crate::ship::config::ShipConfig::from_toml(
-            r#"
-[[station]]
-id = "pilot"
-name = "Pilot"
-description = "Everything."
-rank = "Ltn."
-
-[[system]]
-id = "blaster-fore"
-kind = "blaster_bank"
-station = "pilot"
-"#,
-            &["blaster_bank"],
-        )
-        .expect("authored weapons-station fixture must parse");
-        app.world_mut()
-            .entity_mut(ship)
-            .insert(crate::ship_plugin::ShipConfigComponent(ship_config));
-        // #832: `compute_current_weapons_update` reads these per-entity
-        // components off `LocalShip` (no global-resource fallback), matching the
-        // production player-ship spawn which carries both unconditionally.
-        app.world_mut().entity_mut(ship).insert((
-            TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())),
-            PhaserCombatConfigResource::default(),
-        ));
-        // The combat lock reaches `compute_current_weapons_update` through the
-        // ship's own frozen `ViewscreenBlackboard`, never the live
-        // `TacticalRadarSelection` component (spec §3). Production aggregates it
-        // in `SimSet::PublishAggregate`; here we write the aggregated fact
-        // directly, merging so the other resync fixtures' entries survive.
-        {
-            use crate::core::messages::{SystemBlackboard, ViewscreenBlackboard};
-            let mut bbs = app
-                .world_mut()
-                .get_mut::<crate::server_app::ShipSystemBlackboards>(ship)
-                .expect("LocalShip must carry ShipSystemBlackboards");
-            let mut vbb = match bbs
-                .0
-                .get(&crate::ship::system_registry::viewscreen_system_id())
-            {
-                Some(SystemBlackboard::Viewscreen(v)) => v.clone(),
-                _ => ViewscreenBlackboard::default(),
-            };
-            vbb.combat_lock = Some("target-uuid".into());
-            bbs.0.insert(
-                crate::ship::system_registry::viewscreen_system_id(),
-                SystemBlackboard::Viewscreen(vbb),
-            );
-        }
-        app
-    }
-
-    #[test]
-    fn resync_for_token_includes_weapons_update_for_weapons_station_holder() {
-        let mut app = resync_test_app_with_weapons_station_holder("reconnector");
-
-        resync_for_token(app.world_mut(), "reconnector");
-
-        let outbox = app.world().resource::<SimOutbox>();
-        let weapons_update = outbox.iter().find_map(|(target, msg)| match msg {
-            ServerMessage::WeaponsUpdate {
-                target_uuid,
-                phaser_mode,
-                ..
-            } => Some((target.clone(), target_uuid.clone(), *phaser_mode)),
-            _ => None,
-        });
-        let (target, target_uuid, phaser_mode) = weapons_update.expect(
-            "resync_for_token must include WeaponsUpdate for the authored weapons-station holder",
-        );
-        assert_eq!(
-            target,
-            Target::Token("reconnector".to_string()),
-            "WeaponsUpdate resync must target only the reconnecting token"
-        );
-        assert_eq!(
-            target_uuid.as_deref(),
-            Some("target-uuid"),
-            "WeaponsUpdate resync must reflect the ship's current locked target"
-        );
-        assert_eq!(
-            phaser_mode,
-            crate::core::messages::PhaserMode::Manual,
-            "WeaponsUpdate resync must reflect the ship's current phaser mode"
-        );
-    }
-
-    #[test]
-    fn resync_for_token_omits_weapons_update_for_non_weapons_station_holder() {
-        // "reconnector" does not hold any station in the plain `resync_test_app`
-        // fixture (SessionManager::new() has no registered players at all), so
-        // WeaponsUpdate must not appear — this is the "no station -> no weapons
-        // resync" branch that keeps a reconnecting player from getting a
-        // message meant only for the authored weapons-station holder.
-        let mut app = resync_test_app();
-
-        resync_for_token(app.world_mut(), "reconnector");
-
-        let outbox = app.world().resource::<SimOutbox>();
-        let has_weapons_update = outbox
-            .iter()
-            .any(|(_, msg)| matches!(msg, ServerMessage::WeaponsUpdate { .. }));
-        assert!(
-            !has_weapons_update,
-            "resync_for_token must not send WeaponsUpdate to a reconnector who does not hold the weapons station"
-        );
-    }
-
-    #[test]
-    fn resync_for_token_does_not_touch_last_weapons_update_cache() {
-        use crate::console::weapons::LastWeaponsUpdate;
-
-        let mut app = resync_test_app_with_weapons_station_holder("reconnector");
-        app.init_resource::<LastWeaponsUpdate>();
-
-        // Seed the shared weapons cache as if a prior tick already broadcast
-        // this exact state — if resync_for_token wrote to this cache (it must
-        // not), the next periodic broadcaster tick would wrongly treat this
-        // reconnect resync as its own "last sent" baseline.
-        let seeded = LastWeaponsUpdate {
-            target_uuid: Some("stale-target".into()),
-            target_name: Some("Stale Target".into()),
-            banks: vec![],
-            tubes: vec![],
-            torpedo_count: 7,
-            phaser_mode: crate::core::messages::PhaserMode::Auto,
-            blasters: vec![],
-            phaser_frequency: 0.5,
-        };
-        *app.world_mut().resource_mut::<LastWeaponsUpdate>() = seeded.clone();
-
-        resync_for_token(app.world_mut(), "reconnector");
-
-        let cache = app.world().resource::<LastWeaponsUpdate>();
-        assert_eq!(
-            *cache, seeded,
-            "resync_for_token must not mutate the shared LastWeaponsUpdate cache"
         );
     }
 }

@@ -72,6 +72,10 @@ pub struct WeaponsPlugin;
 impl Plugin for WeaponsPlugin {
     fn build(&self, app: &mut App) {
         use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
+        // Weapons owns its delta cache and ownership-filtered reconnect
+        // projection beside the live publisher in `blackboard.rs`. The generic
+        // lifecycle runner receives only the registered callbacks.
+        super::blackboard::register_weapons_replication_lifecycle(app);
         // The AI host spine's read-only world context (issue #1207): the phaser,
         // blaster, torpedo, doctrine and tactical-selector hosts in this plugin
         // now consume `AiHostEnv`, a bare-`Res` param, so every app that runs
@@ -115,21 +119,9 @@ impl Plugin for WeaponsPlugin {
         // `ai_target_selection`, `tick_blaster_auto_fire`) were ungated, i.e.
         // deciding once per rendered frame.
         crate::ai::cadence::register_ai_cadence(app);
-        // Authoritative-state exclusion declaration (issue #1221, Track 3 step C9).
-        // `LastWeaponsUpdate` is a CACHE — a delta-suppression mirror of what the
-        // weapons blackboard last SENT over the wire, compared against to skip
-        // identical ticks, never a second copy of simulation truth. Declared at its
-        // owning site, replacing the `EXCLUSIONS` const in
-        // `tests/authoritative_state_enumeration.rs`; inert to the digest.
-        {
-            use crate::authoritative::{DeclareState, StateClass};
-            app.declare_state::<LastWeaponsUpdate>(StateClass::Cache, "digest-exclusion-classes");
-        }
-        app.init_resource::<LastWeaponsUpdate>()
-            .init_resource::<CurrentPhaserMode>()
+        app.init_resource::<CurrentPhaserMode>()
             .init_resource::<PhaserRenderConfig>()
             .init_resource::<PhaserCombatConfigResource>()
-            .init_resource::<WeaponsUpdateFirstTick>()
             .init_resource::<NpcFrequencyMatchStates>()
             .init_resource::<BlasterSystemResource>()
             .init_resource::<BeamContext>()
@@ -374,16 +366,17 @@ pub use super::torpedo::{
 // Blackboard publish systems, broadcaster, and cache resources extracted to
 // `blackboard.rs` (issue #729). `LastWeaponsUpdate`, `compute_current_weapons_update`,
 // and `weapons_update_broadcaster` stay `pub` here for external consumers
-// (`src/server_app.rs` chained re-exports, `src/core/broadcast/cache_registry.rs`);
-// the publish systems and `WeaponsUpdateFirstTick` are re-exported so the plugin
-// build fn and the test module keep resolving them.
+// (`src/server_app.rs` chained re-exports); the lifecycle callbacks stay owned
+// privately beside them in `blackboard.rs`.
+// The publish systems are re-exported so the plugin build fn and test module
+// keep resolving them.
 pub use super::blackboard::{
     compute_current_weapons_update, weapons_update_broadcaster, LastWeaponsUpdate,
 };
 pub(crate) use super::blackboard::{
     publish_phaser_bank_blackboards, publish_tactical_radar_blackboard,
     publish_torpedo_magazine_blackboard, publish_torpedo_tube_blackboards,
-    publish_weapons_core_blackboard, WeaponsUpdateFirstTick,
+    publish_weapons_core_blackboard,
 };
 
 /// Tracks the last arc-bearing request Weapons asked Helm for, so the

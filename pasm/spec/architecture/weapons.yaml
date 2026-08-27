@@ -301,15 +301,18 @@ entities:
       confidence: confirmed
       title: Tactical Weapons Projection
       summary: Publishes configured arcs, target lock, per-bank readiness and cooldown, blaster charge, tube status, magazine, and in-flight visual events to Tactical GUI.
+      rationale:
+        - WeaponsPlugin classifies both LastWeaponsUpdate and the WeaponsUpdateFirstTick suppression state as Cache state, and resets both through the stable `weapons` lifecycle key when a run enters InProgress. The owner-filtered reconnect projector resolves the authored Weapons Station exactly as HoldingWeapons does, returns the same computed WeaponsUpdate only for its current holder, and never changes either publisher cache.
     architecture:
       kind: projection
       authority: authoritative
-      reads: [weapons-target-state, phaser-beam-state, blaster-projectile-state, torpedo-state]
+      reads: [session-station-ownership-state, ship-station-system-topology-state, weapons-target-state, phaser-beam-state, blaster-projectile-state, torpedo-state]
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/weapons/mod.rs, src/console/weapons/blackboard.rs, gui/weapon-readiness.js, gui/components/ph-phasers-controls.js, gui/components/ph-blasters-controls.js, gui/components/ph-torpedo-controls.js]
-      symbols: [weapons_update_broadcaster, compute_current_weapons_update, publish_weapons_core_blackboard]
+      paths: [src/console/weapons/mod.rs, src/console/weapons/server.rs, src/console/weapons/blackboard.rs, gui/weapon-readiness.js, gui/components/ph-phasers-controls.js, gui/components/ph-blasters-controls.js, gui/components/ph-torpedo-controls.js]
+      symbols: [weapons_update_broadcaster, compute_current_weapons_update, publish_weapons_core_blackboard, LastWeaponsUpdate, WeaponsUpdateFirstTick, register_weapons_replication_lifecycle]
+      messages: [WeaponsUpdate]
       tests: [cargo test, npx vitest run]
 
   - component: phaser-attack-target-lock

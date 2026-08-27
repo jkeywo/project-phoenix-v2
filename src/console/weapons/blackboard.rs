@@ -37,6 +37,65 @@ pub struct LastWeaponsUpdate {
     pub phaser_frequency: f32,
 }
 
+/// Stable lifecycle key for the owner-filtered Weapons snapshot.
+const WEAPONS_REPLICATION_KEY: &str = "weapons";
+
+/// Register Weapons-owned replication lifecycle behavior beside its publisher.
+///
+/// The generic lifecycle runner sees only a stable key and function pointers;
+/// it knows neither [`LastWeaponsUpdate`], [`WeaponsUpdateFirstTick`], nor the
+/// [`ServerMessage::WeaponsUpdate`] payload shape.
+pub(crate) fn register_weapons_replication_lifecycle(app: &mut App) {
+    use crate::authoritative::{DeclareState, StateClass};
+    use crate::core::broadcast::{RegisterReplicationLifecycle, ReplicationLifecycleAdapter};
+
+    app.init_resource::<LastWeaponsUpdate>()
+        .init_resource::<WeaponsUpdateFirstTick>()
+        .declare_state::<LastWeaponsUpdate>(StateClass::Cache, "digest-exclusion-classes")
+        .declare_state::<WeaponsUpdateFirstTick>(StateClass::Cache, "digest-exclusion-classes")
+        .register_replication_lifecycle(
+            ReplicationLifecycleAdapter::new(WEAPONS_REPLICATION_KEY)
+                .with_reset(reset_weapons_replication)
+                .with_reconnect(reconnect_weapons_projection),
+        );
+}
+
+fn reset_weapons_replication(world: &mut World) {
+    *world.resource_mut::<LastWeaponsUpdate>() = LastWeaponsUpdate::default();
+    *world.resource_mut::<WeaponsUpdateFirstTick>() = WeaponsUpdateFirstTick::default();
+}
+
+/// Build the reconnecting session's current permitted Weapons projection.
+///
+/// Ownership is resolved from the same authored `ShipConfig::weapons_station`
+/// rule as the live broadcaster's `Audience::HoldingWeapons`. The projection
+/// reads no delta cache and writes no cache, so one reconnect cannot perturb
+/// another client's next live update.
+fn reconnect_weapons_projection(world: &mut World, token: &str) -> Vec<ServerMessage> {
+    let weapons_station = {
+        let mut q = world.query_filtered::<
+            &crate::ship_plugin::ShipConfigComponent,
+            With<crate::server_app::LocalShip>,
+        >();
+        q.single(world)
+            .ok()
+            .and_then(|config| config.0.weapons_station())
+    };
+    let holds_weapons_station = weapons_station.as_ref().is_some_and(|station| {
+        world
+            .get_resource::<crate::lobby::Sessions>()
+            .and_then(|sessions| sessions.0.holder_for_station(station))
+            == Some(token)
+    });
+    if !holds_weapons_station {
+        return Vec::new();
+    }
+
+    vec![weapons_update_message(compute_current_weapons_update(
+        world,
+    ))]
+}
+
 /// True on the first tick of the weapons broadcaster, then cleared.
 /// Used to force-send the first `WeaponsUpdate` even when the computed
 /// state happens to match the default `LastWeaponsUpdate`.
@@ -56,10 +115,9 @@ impl Default for WeaponsUpdateFirstTick {
 /// torpedo count, and phaser mode.
 ///
 /// This is the same computation `weapons_update_broadcaster` runs every tick
-/// to decide whether to send a fresh `WeaponsUpdate`; it's factored out here
-/// so [`crate::core::broadcast::cache_registry::resync_for_token`] can reuse
-/// it to build a reconnect resync without duplicating the target/range/arc
-/// logic. Callers that need the diff-and-broadcast behaviour (comparing
+/// to decide whether to send a fresh `WeaponsUpdate`; the owner-local reconnect
+/// projector reuses it without duplicating the target/range/arc logic. Callers
+/// that need the diff-and-broadcast behaviour (comparing
 /// against [`LastWeaponsUpdate`] and updating it) must do that themselves —
 /// this function only computes the current snapshot and never reads or
 /// writes the cache resources.
@@ -78,8 +136,8 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
     // the live `TacticalRadarSelection` (spec §3). `weapons_update_broadcaster`
     // runs in `SimSet::Broadcast`, i.e. *after* the viewscreen aggregators in
     // `SimSet::PublishAggregate`, so this reads the current tick's lock with no
-    // lag; the reconnect-resync caller (`cache_registry::resync_for_token`)
-    // reads whatever the last completed tick aggregated.
+    // lag; the reconnect projector reads whatever the last completed tick
+    // aggregated.
     let target_uuid: Option<String> = {
         let mut q = world
             .query_filtered::<&crate::server_app::ShipSystemBlackboards, With<crate::server_app::LocalShip>>();
@@ -369,47 +427,86 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
     }
 }
 
+fn weapons_update_message(current: LastWeaponsUpdate) -> ServerMessage {
+    let LastWeaponsUpdate {
+        target_uuid,
+        target_name,
+        banks,
+        tubes,
+        torpedo_count,
+        phaser_mode,
+        blasters,
+        phaser_frequency,
+    } = current;
+
+    ServerMessage::WeaponsUpdate {
+        target_uuid,
+        target_name,
+        banks,
+        tubes,
+        torpedo_count,
+        phaser_mode,
+        blasters,
+        phaser_frequency,
+    }
+}
+
 pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
     crate::core::broadcast::SimBroadcaster::new().register(
         crate::core::broadcast::Audience::HoldingWeapons,
         crate::core::broadcast::Cadence::Hz(10.0),
         |world: &mut World| {
             let current = compute_current_weapons_update(world);
-
-            let is_first_tick = world.resource::<WeaponsUpdateFirstTick>().0;
-            if !is_first_tick {
-                let last = world.resource::<LastWeaponsUpdate>();
-                if *last == current {
-                    return vec![];
-                }
-            }
-            if is_first_tick {
-                *world.resource_mut::<WeaponsUpdateFirstTick>() = WeaponsUpdateFirstTick(false);
-            }
-            let LastWeaponsUpdate {
-                target_uuid,
-                target_name,
-                banks,
-                tubes,
-                torpedo_count,
-                phaser_mode,
-                blasters,
-                phaser_frequency,
-            } = current.clone();
-            *world.resource_mut::<LastWeaponsUpdate>() = current;
-
-            vec![ServerMessage::WeaponsUpdate {
-                target_uuid,
-                target_name,
-                banks,
-                tubes,
-                torpedo_count,
-                phaser_mode,
-                blasters,
-                phaser_frequency,
-            }]
+            publish_weapons_update_if_changed(world, current)
         },
     )
+}
+
+fn publish_weapons_update_if_changed(
+    world: &mut World,
+    current: LastWeaponsUpdate,
+) -> Vec<ServerMessage> {
+    let is_first_tick = world.resource::<WeaponsUpdateFirstTick>().0;
+    if !is_first_tick {
+        let last = world.resource::<LastWeaponsUpdate>();
+        if *last == current {
+            return vec![];
+        }
+    }
+    if is_first_tick {
+        *world.resource_mut::<WeaponsUpdateFirstTick>() = WeaponsUpdateFirstTick(false);
+    }
+    let message = weapons_update_message(current.clone());
+    *world.resource_mut::<LastWeaponsUpdate>() = current;
+
+    vec![message]
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    #[test]
+    fn registered_reset_rearms_initial_default_projection_for_a_second_run() {
+        let mut app = App::new();
+        register_weapons_replication_lifecycle(&mut app);
+        let default_projection = LastWeaponsUpdate::default();
+
+        *app.world_mut().resource_mut::<WeaponsUpdateFirstTick>() = WeaponsUpdateFirstTick(false);
+        assert!(
+            publish_weapons_update_if_changed(app.world_mut(), default_projection.clone())
+                .is_empty()
+        );
+
+        crate::core::broadcast::reset_registered_replication(app.world_mut());
+
+        assert!(app.world().resource::<WeaponsUpdateFirstTick>().0);
+        assert_eq!(
+            publish_weapons_update_if_changed(app.world_mut(), default_projection.clone()),
+            vec![weapons_update_message(default_projection)]
+        );
+        assert!(!app.world().resource::<WeaponsUpdateFirstTick>().0);
+    }
 }
 
 // ── Blackboard publish (issue #560) ─────────────────────────────────────────

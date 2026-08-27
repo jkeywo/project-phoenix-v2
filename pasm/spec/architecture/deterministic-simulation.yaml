@@ -189,7 +189,6 @@ entities:
         - src/core/messages.rs
         - src/sim_tick.rs
         - src/core/broadcast/cache_registry.rs
-        - src/console/weapons/blackboard.rs
         - src/server_app/registration.rs
         - src/debug_overlay.rs
       # src/command_admission/mod.rs (clear_inter_system_queue's real home) is
@@ -213,13 +212,13 @@ entities:
         - DamageLog
         - LastBroadcastEntityPositions
         - LastBroadcastEntityHealth
-        - LastWeaponsUpdate
-      # LastBroadcastHull and LastBroadcastBlackboards are still named in the
-      # BROADCAST CACHES policy above, but their checked symbol/path mappings
-      # moved to the owning repair-visibility-publisher (engineering-damage.yaml)
-      # and system-blackboard-publisher (coordination-blackboards.yaml) entities.
-      # Claiming those owner files here as well would make PASM attribution
-      # ambiguous rather than improve the exclusion record.
+      # LastBroadcastHull, LastBroadcastBlackboards, and LastWeaponsUpdate are
+      # still named in the BROADCAST CACHES policy above, but their checked
+      # symbol/path mappings moved to the owning repair-visibility-publisher
+      # (engineering-damage.yaml), system-blackboard-publisher
+      # (coordination-blackboards.yaml), and tactical-weapons-projection
+      # (weapons.yaml) entities. Claiming those owner files here as well would
+      # make PASM attribution ambiguous rather than improve the exclusion record.
 
   - component: digest-census-traceability-symbols
     core:

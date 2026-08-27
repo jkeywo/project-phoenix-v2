@@ -2,7 +2,7 @@
 title: Server App Composition
 type: concept
 tags: [architecture, plugins, server, composition, fixed-tick]
-sources: [src/server_app/mod.rs, src/server_app/registration.rs, src/server_app/components.rs, src/server_app/broadcast.rs, src/server_app/broadcast_publish.rs, src/server_app/collision.rs, src/server_app/world_setup.rs, src/server_app_render.rs, src/core/broadcast/lifecycle.rs, src/core/broadcast/cache_registry.rs, src/console/repair/visibility.rs, src/ship/shields.rs, src/server/bridge.rs]
+sources: [src/server_app/mod.rs, src/server_app/registration.rs, src/server_app/components.rs, src/server_app/broadcast.rs, src/server_app/collision.rs, src/server_app/broadcast_publish.rs, src/server_app/world_setup.rs, src/server_app_render.rs, src/core/broadcast/lifecycle.rs, src/core/broadcast/cache_registry.rs, src/console/repair/visibility.rs, src/console/weapons/blackboard.rs, src/console/weapons/server.rs, src/lobby/server.rs, src/ship/power.rs, src/ship/shields.rs, src/ship/sensors.rs, src/server/bridge.rs, src/headless/app.rs]
 updated: 2026-08-28
 ---
 
@@ -57,8 +57,11 @@ and targeted reconnect projector under the stable `blackboards` key.
 `RepairPlugin` likewise registers token-keyed `LastBroadcastHull` beside the
 Hull visibility publisher under the stable `hull` key. The generic lifecycle
 runners invoke registered owners in key order without knowing their cache
-resources or message shapes. Shared composition retains only the transitional
-cache census for owners not yet migrated.
+resources or message shapes. `WeaponsPlugin` registers `LastWeaponsUpdate`
+beside the Weapons publisher under the stable `weapons` key; reconnect uses the
+same authored Weapons Station ownership and current message builder as live
+publication without mutating the delta cache. Shared composition retains only
+the transitional cache census for owners not yet migrated.
 
 ## Tests
 

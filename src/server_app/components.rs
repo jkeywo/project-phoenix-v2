@@ -406,9 +406,9 @@ impl SimOutbox {
 
 /// Owner-local Hull delta-cache compatibility export.
 pub use crate::console::repair::visibility::LastBroadcastHull;
-/// Remaining transitional delta-cache compatibility exports. Hull and
-/// Blackboard caches now live beside their publishers and register their own
-/// lifecycle; `LastWeaponsUpdate` stays in `console::weapons`.
+/// Remaining transitional delta-cache compatibility exports. Hull, Blackboard,
+/// and Weapons caches live beside their publishers and register their own
+/// lifecycle; only the position and health caches remain in the central census.
 pub use crate::core::broadcast::cache_registry::{
     LastBroadcastEntityHealth, LastBroadcastEntityPositions,
 };

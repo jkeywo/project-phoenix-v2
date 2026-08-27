@@ -2571,7 +2571,19 @@
             // to a peer that just left, an ordinary race. Tearing the whole
             // code down for either of those used to pop "service unreachable"
             // over a perfectly live session.
-            if (reason !== 'unreachable') return;
+            if (reason !== 'unreachable') {
+              // A refusal with a code already on screen is per-peer noise; one
+              // with no code is the service declining to issue one (e.g.
+              // protocol skew against a stale deployed worker), and the
+              // operator needs an on-screen reason for the missing letters.
+              // The !rendezvousCodeShown guard keeps the ordinary mid-session
+              // signal/no-peer race off a live session's diagnostics row.
+              if (!rendezvousCodeShown) {
+                rendezvousFault = reason;
+                renderConnDiag();
+              }
+              return;
+            }
             rendezvousFault = reason;
             const hadCode = rendezvousCodeShown;
             clearJoinCode();

@@ -220,6 +220,10 @@ pub fn directive_relevance(directive: &AiDirective) -> Vec<SystemAffinity> {
         // A civilian order belongs to Navigation. It is not a Helm travel goal:
         // the ordered craft's own doctrine and helm fly the resulting route.
         AiDirective::Order { .. } => vec![SystemAffinity::Navigation],
+        // Scan is a Sensors action (issue #1139). The Backfill Sensors host
+        // consumes it and emits the ordinary admitted ScanTarget command; no
+        // other affinity gets the directive and the scan applier stays shared.
+        AiDirective::Scan { .. } => vec![SystemAffinity::Sensors],
         // The tractor operate directives (issue #1162): each routes to the
         // owning system's affinity — Engineering, which owns the tractor. The
         // seat decides the concrete `EngageTractor`/`ReleaseTractor`, so these
@@ -301,6 +305,15 @@ pub fn field_repair_directive_target(directive: &AiDirective) -> Option<&str> {
 pub fn order_directive(directive: &AiDirective) -> Option<(&str, &str)> {
     match directive {
         AiDirective::Order { target, route } => Some((target.as_str(), route.as_str())),
+        _ => None,
+    }
+}
+
+/// The target a `Scan` directive names, or `None` for another directive
+/// (issue #1139). Shared by the Sensors host and its pure selection tests.
+pub fn scan_directive_target(directive: &AiDirective) -> Option<&str> {
+    match directive {
+        AiDirective::Scan { target } => Some(target.as_str()),
         _ => None,
     }
 }
@@ -728,6 +741,24 @@ mod tests {
             Some(("Meridian Freight", "storm_shelter_run"))
         );
         assert_eq!(order_directive(&AiDirective::None), None);
+    }
+
+    #[test]
+    fn scan_routes_to_sensors_only_and_exposes_its_target() {
+        let directive = AiDirective::Scan {
+            target: "Ladder Depot B".into(),
+        };
+        assert_eq!(
+            directive_relevance(&directive),
+            vec![SystemAffinity::Sensors]
+        );
+        assert_eq!(scan_directive_target(&directive), Some("Ladder Depot B"));
+        assert_eq!(
+            scan_directive_target(&AiDirective::Hail {
+                target: "Control".into()
+            }),
+            None
+        );
     }
 
     fn scored_dir(id: &str, score: f32, directive: AiDirective) -> ScoredObjective {

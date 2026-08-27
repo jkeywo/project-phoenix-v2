@@ -747,7 +747,8 @@ pub(crate) struct RawActionEntry {
     pub(crate) enemy: Option<String>,
     // ── add_objective extended fields (issue #571) ─────────────────────────
     /// Directive kind: `"Patrol"`, `"Destroy"`, `"Reach"`, `"Retreat"`,
-    /// `"Hail"`, or omit for `None`.
+    /// `"Hail"`, `"Scan"`, `"Dock"`, `"Tow"`, `"Stabilise"`, `"Escort"`,
+    /// `"Transfer"`, `"FieldRepair"`, `"Order"`, or omit for `None`.
     #[serde(default)]
     pub(crate) directive_kind: Option<String>,
     /// Anchor names for a `Patrol` directive.
@@ -1157,19 +1158,21 @@ pub struct Trigger {
 ///
 /// The mission-side twin of `DIRECTIVE_FIELD_OWNERS` in
 /// `src/entities/config.rs`. One shape difference: a mission objective names its
-/// target-naming directives (`Destroy`/`Hail`/`Dock` and the issue-#1162 operate
-/// verbs `Tow`/`Stabilise`/`Escort`/`Transfer`/`FieldRepair`) with the ONE
+/// target-naming directives (`Destroy`/`Hail`/`Scan`/`Dock`, the issue-#1162
+/// operate verbs `Tow`/`Stabilise`/`Escort`/`Transfer`/`FieldRepair`, and
+/// `Order`) with the ONE
 /// shared `target` field, where a doctrine entry has a `directive_target`, a
 /// `directive_hail_target`, a `directive_dock_target` and a
-/// `directive_operate_target` of its own. Both tables carry every directive kind
-/// — `Dock` used to be here on the doctrine side only, which this fixes.
+/// `directive_operate_target` of its own. `Order` additionally owns `route`.
+/// Both tables carry every directive kind — `Dock` used to be here on the
+/// doctrine side only, which this fixes.
 const DIRECTIVE_FIELD_OWNERS: &[(&str, &str)] = &[
     ("directive_anchors", "Patrol"),
     ("directive_loop", "Patrol"),
     ("directive_anchor", "Reach / Retreat"),
     (
         "target",
-        "Destroy / Hail / Dock / Tow / Stabilise / Escort / Transfer / FieldRepair / Order",
+        "Destroy / Hail / Scan / Dock / Tow / Stabilise / Escort / Transfer / FieldRepair / Order",
     ),
     ("route", "Order"),
 ];
@@ -1202,16 +1205,18 @@ fn parse_directive(raw: &RawActionEntry) -> Result<AiDirective, String> {
         None | Some("None") => &[],
         Some("Patrol") => &["directive_anchors", "directive_loop"],
         // Every target-naming directive reads the ONE shared `target` field on
-        // the mission side, including `Dock` (issue #1028) and the issue-#1162
-        // operate verbs.
-        Some("Destroy") | Some("Hail") | Some("Dock") | Some("Tow") | Some("Stabilise")
-        | Some("Escort") | Some("Transfer") | Some("FieldRepair") => &["target"],
+        // the mission side, including Scan (#1139), `Dock` (issue #1028) and
+        // the issue-#1162 operate verbs. Order (#1141) also reads `route`.
+        Some("Destroy") | Some("Hail") | Some("Scan") | Some("Dock") | Some("Tow")
+        | Some("Stabilise") | Some("Escort") | Some("Transfer") | Some("FieldRepair") => {
+            &["target"]
+        }
         Some("Order") => &["target", "route"],
         Some("Reach") | Some("Retreat") => &["directive_anchor"],
         Some(other) => {
             return Err(format!(
                 "Unknown directive_kind '{}'; valid: Patrol, Destroy, Reach, Retreat, Hail, \
-                 Dock, Tow, Stabilise, Escort, Transfer, FieldRepair, Order",
+                 Scan, Dock, Tow, Stabilise, Escort, Transfer, FieldRepair, Order",
                 other
             ))
         }
@@ -1306,6 +1311,14 @@ fn parse_directive(raw: &RawActionEntry) -> Result<AiDirective, String> {
                 .clone()
                 .ok_or_else(|| "Directive 'Hail' requires a 'target' field".to_string())?,
         }),
+        Some("Scan") => Ok(AiDirective::Scan {
+            target: raw
+                .target
+                .as_ref()
+                .filter(|target| !target.trim().is_empty())
+                .cloned()
+                .ok_or_else(|| "Directive 'Scan' requires a 'target' field".to_string())?,
+        }),
         // Dock (issue #1028) named the mission side's `target`, but the mission
         // parser never carried it — the "out of step over Dock" the #1162
         // decision fixes.
@@ -1366,7 +1379,7 @@ fn parse_directive(raw: &RawActionEntry) -> Result<AiDirective, String> {
         // unknown kind.
         Some(other) => Err(format!(
             "Unknown directive_kind '{}'; valid: Patrol, Destroy, Reach, Retreat, Hail, \
-             Dock, Tow, Stabilise, Escort, Transfer, FieldRepair, Order",
+             Scan, Dock, Tow, Stabilise, Escort, Transfer, FieldRepair, Order",
             other
         )),
     }

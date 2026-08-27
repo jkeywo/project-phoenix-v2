@@ -727,6 +727,9 @@ pub fn parse_doctrine_directive(
         Some("Hail") => crate::core::messages::AiDirective::Hail {
             target: d.directive_hail_target.clone().unwrap_or_default(),
         },
+        Some("Scan") => crate::core::messages::AiDirective::Scan {
+            target: d.directive_scan_target.clone().unwrap_or_default(),
+        },
         Some("Retreat") => crate::core::messages::AiDirective::Retreat {
             anchor: d.directive_anchor.clone().unwrap_or_default(),
         },

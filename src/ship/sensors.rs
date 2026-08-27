@@ -857,6 +857,56 @@ pub fn operate_sensors_ai(
             continue;
         };
 
+        // Mission/doctrine Scan is an operate request for this same Sensors
+        // host (issue #1139). Resolve the top positive Sensors-affined request
+        // from the frozen viewscreen pool and emit the exact ScanTarget payload
+        // a human console sends. Deliberately do NOT pre-check range, mutate the
+        // scan record or latch an attempt here: `science::server::tick_scans` is
+        // the sole applier and owns capability/range refusals. A refused scan is
+        // therefore retried on the next authored AI snapshot while its objective
+        // remains active.
+        let viewscreen_bb = blackboards
+            .0
+            .get(&crate::ship::system_registry::viewscreen_system_id());
+        if let Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) = viewscreen_bb {
+            let requested_target = crate::objectives::top_operate_directive(
+                &bb.scored_objectives,
+                crate::core::messages::SystemAffinity::Sensors,
+                |directive| crate::objectives::scan_directive_target(directive).is_some(),
+            )
+            .and_then(crate::objectives::scan_directive_target)
+            .filter(|target| !target.is_empty());
+
+            if let Some(target) = requested_target {
+                // Tier 1 is the authoritative world name table. The fallback
+                // accepts an already-resolved UUID or an EntityName in fixtures
+                // and dynamically spawned content, matching the existing
+                // Destroy-objective target resolution below.
+                let target_uuid = ai_env
+                    .content_runtime()
+                    .name_to_uuid
+                    .get(target)
+                    .cloned()
+                    .or_else(|| {
+                        entity_q.iter().find_map(|(uuid, name, _)| {
+                            (uuid.0 == target || name.is_some_and(|name| name.0 == target))
+                                .then(|| uuid.0.clone())
+                        })
+                    });
+                if let Some(uuid) = target_uuid {
+                    emit_ai_command(
+                        entity_uuid,
+                        crate::ship::system_registry::sensors_system_id(),
+                        crate::core::messages::SystemControlPayload::ScanTarget { uuid },
+                        sources,
+                        &sessions,
+                        ship_config_comp,
+                        &mut admitted,
+                    );
+                }
+            }
+        }
+
         let range = effective_sensor_range(ai_profile, console_range, modifiers);
         let range_sq = range * range;
         let in_range = |tf: &Transform| {
@@ -884,9 +934,6 @@ pub fn operate_sensors_ai(
         let mut candidates: Vec<SelectorCandidate> = Vec::new();
 
         // Combat Lock read from the frozen viewscreen blackboard (#829).
-        let viewscreen_bb = blackboards
-            .0
-            .get(&crate::ship::system_registry::viewscreen_system_id());
         if let Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) = viewscreen_bb {
             // Source: combat-lock — mirror Tactical's designated firing target.
             if let Some(target_uuid) = bb.combat_lock.as_deref() {

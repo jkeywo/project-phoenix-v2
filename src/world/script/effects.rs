@@ -1548,6 +1548,33 @@ mod tests {
         assert_eq!(effs, vec![BufferedEffect::Action(toml)]);
     }
 
+    /// Issue #1139: the script front-end carries Scan's shared target through
+    /// the same mission directive parser as declarative TOML.
+    #[test]
+    fn add_objective_scan_matches_toml() {
+        let effs = run_buffered(
+            r#"fn f(ctx) {
+                ctx.effects.add_objective(#{
+                    id: "obj-scan-rung",
+                    text: "world.objective.scan_rung",
+                    target: "Ladder Depot B",
+                    directive_kind: "Scan",
+                    base_priority: 52,
+                });
+            }"#,
+            "f",
+        );
+        let toml = toml_action(
+            "type = \"add_objective\"\n\
+             id = \"obj-scan-rung\"\n\
+             text = \"world.objective.scan_rung\"\n\
+             target = \"Ladder Depot B\"\n\
+             directive_kind = \"Scan\"\n\
+             base_priority = 52.0",
+        );
+        assert_eq!(effs, vec![BufferedEffect::Action(toml)]);
+    }
+
     /// `add_objective` now READS `modifiers`/`zero_gates` (the utility-config
     /// milestone): the script arrays-of-maps, with `flt("…")` fractional thresholds
     /// and weights, build the identical `TriggerAction::AddObjective` — same

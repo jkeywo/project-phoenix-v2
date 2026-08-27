@@ -5059,6 +5059,14 @@ pub enum AiDirective {
     /// its AI host turns them into `OrderCivilian { Divert { route } }` through
     /// command admission rather than mutating civilian state.
     Order { target: String, route: String },
+    /// Scan the named target entity (issue #1139).
+    ///
+    /// Sensors resolves the mission/doctrine name to the target's live UUID and
+    /// emits the same admitted `ScanTarget` payload a human Sensors operator
+    /// sends. The scan applier remains `science::server::tick_scans`, so this
+    /// directive names intent rather than bypassing range, capability or the
+    /// subject's live condition.
+    Scan { target: String },
     /// Retreat to the named anchor position.
     Retreat { anchor: String },
     /// Proceed to and berth at the named structure (issue #1028).
@@ -5123,6 +5131,10 @@ pub enum SystemAffinity {
     /// Navigation host emits the same `OrderCivilian` payload as the console's
     /// authored traffic-control button.
     Navigation,
+    /// Sensors cares about `Scan` directives (issue #1139): Backfill resolves
+    /// the named subject and emits the same admitted `ScanTarget` action a human
+    /// Sensors operator sends. The science scan applier remains authoritative.
+    Sensors,
     /// Engineering cares about the tractor and umbilical operate directives
     /// (issue #1162): `Tow`/`Stabilise`/`Escort` (the tractor) and `Transfer`
     /// (the umbilical over a mated dock). The backfilled Engineering AI hosts

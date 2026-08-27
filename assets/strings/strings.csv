@@ -1249,6 +1249,10 @@ world.falling_skyway.deadline.skyway_survey_due.label,assets/worlds/falling_skyw
 world.falling_skyway.deadline.lark_final_hail_due.label,Hidden authored safety beat for Hauler Lark's Critical second check-in,[Lark final safety check]
 world.falling_skyway.deadline.lark_collision_due.label,Hidden authored terminal beat for Hauler Lark's corridor collision,[Lark corridor entry]
 world.falling_skyway.objective.survey.text,Objective text — the Act 1 condition read in Falling Skyway,"[Scan Skyhook Verrow and both ladder depots. File the completed survey with Skyway Control.]"
+world.falling_skyway.objective.survey_scan_depot_b.text,Objective step — Falling Skyway survey reading at Ladder Depot B,[Scan Ladder Depot B.]
+world.falling_skyway.objective.survey_scan_depot_a.text,Objective step — Falling Skyway survey reading at Ladder Depot A,[Scan Ladder Depot A.]
+world.falling_skyway.objective.survey_scan_head.text,Objective step — Falling Skyway survey reading at Skyhook Verrow,[Scan Skyhook Verrow.]
+world.falling_skyway.objective.survey_report.text,Objective step — file the completed Falling Skyway survey with Control,[Hail Skyway Control and file the completed survey.]
 world.falling_skyway.objective.corridor.text,Objective text — the Act 1 corridor watch in Falling Skyway,"[Keep the corridor moving. See the lead hauler through the gate.]"
 world.falling_skyway.objective.triage.text,Objective text — the Act 1 triage call in Falling Skyway,[Name the structure that takes the first repair team.]
 world.falling_skyway.comms.survey_incomplete,Dialogue body — Control refuses a partial Falling Skyway survey,"[Control. We cannot accept a corridor survey without readings from the head and both depots. Complete the three scans and call again.]"

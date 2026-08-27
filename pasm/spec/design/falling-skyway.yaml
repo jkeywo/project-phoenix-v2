@@ -91,7 +91,7 @@ entities:
   - verb: fs-compile-the-survey
     core: {status: proposed, confidence: provisional, origin: ai, title: Compile the Survey, summary: "[ai] Scan all three published structures (skyhook, depot A, depot B) and report to Control on the comms channel; the three scan.<id>.taken flags gate the report pickup, so a partial survey cannot file a full one."}
     game_design:
-      architecture_links: [scenario-script-host-seam]
+      architecture_links: [scenario-script-host-seam, sensors-ai-operator, science-scan-deriver, comms-objective-ai]
       owner_role: fs-science
       produces_facts: [scan-skyhook-taken, scan-depot-a-taken, scan-depot-b-taken, survey-reported]
   - verb: fs-stop-lark
@@ -196,12 +196,14 @@ entities:
       origin: ai
       title: The Survey Falls Due
       summary: >
-        [ai] The survey is crew work: scan the skyhook and both ladder depots,
-        then file the report through Control's comms target. All three latched
-        scan flags gate the report pickup, so a partial survey cannot pass.
-        Whatever is unreported when the clock lands fails loudly and Control
-        proceeds on the falsified record; early work is remembered in the flag
-        store and auto-resolves the objective when it posts.
+        [ai] The mandatory aggregate sends Helm on one non-looping Depot B →
+        Depot A → station-keeping tour. Three visible optional Scan steps name
+        the structures in that travel order; each completes from its real
+        latched scan flag. Once all three exist, a high-priority Hail(Control)
+        report step posts, and only its admitted response completes both report
+        and aggregate. Whatever remains at t=360 fails loudly and Control
+        proceeds on the falsified record. Early scans and an early filing are
+        remembered in the flag store, so #1132 pre-emption remains intact.
     game_design:
       requires_player_action: [fs-compile-the-survey]
       deadline_id: skyway_survey_due
@@ -336,10 +338,12 @@ entities:
         it open, the force path burns it. Havelock's supplied copy and the
         later confrontation cannot substitute for filing. Mission finalisation
         closes the unresolved route before commitments, campaign facts and the
-        debrief freeze, so a stale response cannot rewrite the ending. During
-        the vote's authored stand-down, filing and force can both have rendered
-        responses; whichever is admitted first closes the other route, whose
-        retained response receives only a closed acknowledgement.
+        debrief freeze, so a stale response cannot rewrite the ending. A fixed
+        ten-second non-mutating acknowledgement grace follows finalisation;
+        retained responses receive only their guarded closed reply before the
+        authoritative terminal victory stops input. During the vote's authored
+        stand-down, filing and force can both have rendered responses; whichever
+        is admitted first closes the other route.
     game_design:
       requires_player_action: [fs-file-the-evidence]
       requires: [fs-strike-thread]
@@ -408,8 +412,11 @@ entities:
         rest forward. An untouched allocation objective fails rather than a
         timer choosing for the captain. The temporary receiving manifold ends
         here and the unpublished player transfer ledger remains mission-local.
-        The envelope anchor below holds the whole mission to 20-30 minutes,
-        and the authored 1800s close lands exactly on that boundary.
+        Twenty-six seconds later the final record freezes; a fixed ten-second
+        acknowledgement grace permits only guarded closed replies, then the
+        episode declares authoritative victory. The envelope anchor below holds
+        the whole mission to 20-30 minutes, and the authored 1800s close lands
+        exactly on that boundary.
     game_design:
       deadline_id: skyway_window_closes
       requires: [fs-window-opens]
@@ -729,15 +736,17 @@ entities:
         [ai] With the Scan/Operate/Order verb surface, a fully backfilled
         crew completes the mandatory objective set in 80-95% of seeded runs
         — high enough that AI teammates are real, low enough that humans
-        still matter. Today's AI sits near 0%, which is the regression
-        baseline.
+        still matter. Issue #1139 proves the opening slice end to end: the
+        ordinary Sensors and Comms emitters scan all three structures and file
+        the report before the unchanged t=360 deadline. Whole-scenario balance
+        remains the aggregate measure after the remaining verbs land.
     game_design:
       strength: hard
       context: fully AI-backfilled crew, seeded balance-runs sweeps over the mandatory set
       construction: [fs-survey-thread, fs-lyra-clear, fs-traffic-thread, fs-skyhook-holds-or-falls]
       expected_dynamic: every mandatory objective is AI-addressable by construction; humans and AI differ only in engagement timing
       experience_hypothesis: a short-handed crew experiences a functioning bridge, not a haunted one
-      measured_by: [balance-runs mandatory-objective completion aggregate (80-95% target)]
+      measured_by: [falling_skyway_full_backfill_scans_and_files_the_opening_survey, balance-runs mandatory-objective completion aggregate (80-95% target)]
   - design_principle: fs-silence-fails-loudly
     core:
       status: proposed
@@ -745,20 +754,24 @@ entities:
       origin: ai
       title: Silence Fails Loudly in Every Era
       summary: >
-        [ai] An idle opening ends in world-driven terminal defeat when uncontrolled Hauler
-        Lark collides in the corridor, unless the crew sends the scan-backed
-        unsafe response. Lark narrates its intent; its first hail arrives 30
+        [ai] A crew that holds Sensors and Comms but sends nothing ends in
+        world-driven terminal defeat when uncontrolled Hauler Lark collides in
+        the corridor. Lark narrates its intent; its first hail arrives 30
         seconds before the survey deadline, a second generic authoritative
         `critical` hail lands at the deadline, and a final 20-second response
-        window remains. Later, the storm takes what is left in it and the head
-        falls without a stabilise.
+        window remains. This is deliberately distinct from full Backfill,
+        which now performs the scan-backed stop. Later, the storm takes what is
+        left in it and the head falls without a stabilise.
     game_design:
       strength: hard
-      context: fully idle crew, every intensity era
+      context: explicit human-held or idle fixtures across the opening, storm and back-half eras
       construction: [fs-survey-thread, fs-lark-collision, fs-storm-exposure, fs-skyhook-holds-or-falls]
       expected_dynamic: each era posts a visible failure an idle crew cannot avoid; nothing completes by accident
       experience_hypothesis: doing nothing is never mistaken for doing fine
-      measured_by: [idle_crew_fails_every_era_headless_checks]
+      measured_by:
+        - idle_crew_fails_every_era_headless_checks
+        - falling_skyway_idle_traffic_is_lost_loudly_while_the_storm_ignores_the_strike
+        - falling_skyway_act_3_warns_three_times_then_the_head_falls_into_a_playable_epilogue
   - playtest-claim: fs-window-choice-claim
     core:
       status: proposed

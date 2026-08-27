@@ -60,6 +60,7 @@ pub fn directive_label(directive: &AiDirective) -> String {
         AiDirective::Reach { anchor } => format!("Reach({anchor})"),
         AiDirective::Hail { target } => format!("Hail({target})"),
         AiDirective::Order { target, route } => format!("Order({target} -> {route})"),
+        AiDirective::Scan { target } => format!("Scan({target})"),
         AiDirective::Retreat { anchor } => format!("Retreat({anchor})"),
         AiDirective::Dock { target } => format!("Dock({target})"),
         AiDirective::Tow { target } => format!("Tow({target})"),
@@ -80,6 +81,7 @@ pub fn directive_target(directive: &AiDirective) -> Option<&str> {
     match directive {
         AiDirective::Destroy { target }
         | AiDirective::Hail { target }
+        | AiDirective::Scan { target }
         | AiDirective::Dock { target }
         | AiDirective::Tow { target }
         | AiDirective::Stabilise { target }
@@ -238,6 +240,12 @@ mod tests {
             }),
             "Patrol(a>b loop)"
         );
+        assert_eq!(
+            directive_label(&AiDirective::Scan {
+                target: "Ladder B".into()
+            }),
+            "Scan(Ladder B)"
+        );
     }
 
     #[test]
@@ -254,6 +262,12 @@ mod tests {
                 loop_path: false,
             }),
             Some("first")
+        );
+        assert_eq!(
+            directive_target(&AiDirective::Scan {
+                target: "Skyhook".into()
+            }),
+            Some("Skyhook")
         );
         assert_eq!(directive_target(&AiDirective::None), None);
     }

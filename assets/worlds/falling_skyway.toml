@@ -74,10 +74,12 @@
 #
 # ── Act 1's three objectives, and how each one resolves ──────────────────────
 #
-#   obj-a1-survey    posts when the tether slips and resolves only after the
-#                    skyhook and both depots have been scanned and the crew file
-#                    the result with Control. Work done before the post is
-#                    remembered in the flag store and resolves it immediately.
+#   obj-a1-survey    remains the mandatory aggregate. When the tether slips it
+#                    gives Helm a non-looping Depot B → Depot A → head patrol,
+#                    while three optional visible Scan steps tell Sensors exactly
+#                    what to read. Once all three readings exist, a Hail(Control)
+#                    report step posts. Filing that response completes the report
+#                    and aggregate. Work done before a post remains remembered.
 #   obj-a1-corridor  resolves when the lead hauler clears `corridor_gate` — the
 #                    lane proving itself, through #1028's route machinery.
 #   obj-a1-triage    resolves when the head drops out of lift tolerance, through
@@ -965,6 +967,21 @@ template_path = "assets/entities/alliance_destroyer.toml"
 id = "player-ship"
 transform = { position = [300.0, 0.0, 420.0] }
 spawn_on = "game_start"
+# Mission objectives deliberately carry only the cross-hull directive, not one
+# hull's travel tuning. The Helm planner resolves that tuning by objective id
+# from the selected hull's doctrine. This world therefore restates the
+# destroyer's two standing rows and adds one zero-score configuration row for
+# the survey route: it never competes as doctrine, but gives Backfill an authored
+# cruise fraction for the long, one-shot tour. Impulse is explicitly off: at
+# this route's bends a 108 u/s impulse pass overshoots the first berth instead of
+# flying the survey. Both fields tune AI execution only; a human Helm keeps the
+# same ship, scan ranges and clock.
+[entity.overrides.behaviour]
+doctrine = [
+  { id = "destroy-hostiles", text = "entity.alliance_destroyer.behaviour.doctrine.destroy_hostiles.text", directive_kind = "Destroy", base_priority = 45.0, target_speed = 0.9, maintain_range = 24.0 },
+  { id = "hold-station", text = "entity.alliance_destroyer.behaviour.doctrine.hold_station.text", base_priority = 20.0, target_speed = 0.0 },
+  { id = "obj-a1-survey", directive_kind = "Patrol", directive_anchors = ["depot_b_berth", "depot_a_berth", "station_keeping"], directive_loop = false, base_priority = 0.0, target_speed = 0.7, use_impulse = false },
+]
 
 # Falling Skyway's transfer run-up gives the destroyer a scenario-local load to
 # pump into the receiving manifold below. The fleet hull deliberately carries no
@@ -2022,8 +2039,74 @@ fn post_survey_objective(ctx) {
         mandatory: true,
         source: "mission",
         base_priority: 45,
-        directive_kind: "Reach",
-        directive_anchor: "station_keeping",
+        directive_kind: "Patrol",
+        directive_anchors: ["depot_b_berth", "depot_a_berth", "station_keeping"],
+        directive_loop: false,
+    }, "skyway_survey_reported");
+}
+
+// AI-addressable by construction (issue #1139): Helm flies one authored tour,
+// while each Sensors step names its own subject and is independently visible to
+// the crew. B/A/head priorities descend in the same order as the travel route,
+// so Backfill retries the next useful reading as the hull reaches it. A scan
+// taken before the tether slip is authoritative memory, so its step is skipped
+// rather than posted already green.
+fn post_survey_scan_objective(ctx, id, text, target, scan_flag, priority) {
+    if ctx.flags[scan_flag] > 0 { return; }
+    ctx.effects.add_objective(#{
+        id: id,
+        text: text,
+        mandatory: false,
+        source: "mission",
+        base_priority: priority,
+        directive_kind: "Scan",
+        target: target,
+        targets: [target],
+    });
+}
+
+fn post_survey_scan_objectives(ctx) {
+    post_survey_scan_objective(
+        ctx,
+        "obj-a1-survey-scan-depot-b",
+        "world.falling_skyway.objective.survey_scan_depot_b.text",
+        "world.falling_skyway.entity.depot_ladder_b.name",
+        "scan.depot_ladder_b.taken",
+        52
+    );
+    post_survey_scan_objective(
+        ctx,
+        "obj-a1-survey-scan-depot-a",
+        "world.falling_skyway.objective.survey_scan_depot_a.text",
+        "world.falling_skyway.entity.depot_ladder_a.name",
+        "scan.depot_ladder_a.taken",
+        51
+    );
+    post_survey_scan_objective(
+        ctx,
+        "obj-a1-survey-scan-head",
+        "world.falling_skyway.objective.survey_scan_head.text",
+        "world.falling_skyway.entity.skyhook.name",
+        "scan.skyhook.taken",
+        50
+    );
+}
+
+// The report is not a generic Comms instinct. It becomes an explicit,
+// high-priority Hail(Control) job only when all three authoritative scan flags
+// exist, and the response pickup below remains the only thing that files it.
+fn post_survey_report_objective(ctx) {
+    if ctx.flags.skyway_survey_report_objective_posted > 0 { return; }
+    ctx.flags.skyway_survey_report_objective_posted = 1;
+    post_remembered_objective(ctx, #{
+        id: "obj-a1-survey-report",
+        text: "world.falling_skyway.objective.survey_report.text",
+        mandatory: false,
+        source: "mission",
+        base_priority: 80,
+        directive_kind: "Hail",
+        target: "world.falling_skyway.entity.skyway_control.name",
+        targets: ["world.falling_skyway.entity.skyway_control.name"],
     }, "skyway_survey_reported");
 }
 
@@ -2088,6 +2171,7 @@ fn on_tether_slip(ctx) {
     ctx.effects.damage_infrastructure("world.falling_skyway.entity.skyhook.name", 6);
     ctx.flags.increment("tether_slipped", 1);
     post_survey_objective(ctx);
+    post_survey_scan_objectives(ctx);
     post_strike_objectives(ctx);
     open_strike_channels(ctx);
 }
@@ -2144,6 +2228,18 @@ fn any_survey_scan(ctx) {
 // scenario flag whenever any constituent arrives; `survey_ready` remains the
 // authoritative predicate and the report pickup defensively re-reads it.
 fn on_survey_scan(ctx) {
+    // Resolve any visible scan steps that have posted. Before the tether slip
+    // these calls are harmless; posting later sees the same flags and skips the
+    // already-done steps, preserving #1132's pre-emption contract.
+    if ctx.flags["scan.depot_ladder_b.taken"] > 0 {
+        ctx.effects.complete_objective("obj-a1-survey-scan-depot-b");
+    }
+    if ctx.flags["scan.depot_ladder_a.taken"] > 0 {
+        ctx.effects.complete_objective("obj-a1-survey-scan-depot-a");
+    }
+    if ctx.flags["scan.skyhook.taken"] > 0 {
+        ctx.effects.complete_objective("obj-a1-survey-scan-head");
+    }
     // The first valid structure scan is the only proof the crew may cite to
     // stop Lark. If it arrives after either check-in, refresh that already-open
     // thread at its current wording and priority so the newly valid response is
@@ -2170,6 +2266,7 @@ fn on_survey_scan(ctx) {
     }
     if survey_ready(ctx) {
         ctx.flags.skyway_survey_scans_complete = 1;
+        post_survey_report_objective(ctx);
     }
 }
 
@@ -2290,6 +2387,7 @@ fn on_file_survey(ctx) {
     // or hand-built response may file a partial survey either.
     if !survey_ready(ctx) { return control_survey(ctx); }
     ctx.flags.skyway_survey_reported = 1;
+    ctx.effects.complete_objective("obj-a1-survey-report");
     ctx.effects.complete_objective("obj-a1-survey");
     control_survey(ctx)
 }
@@ -2307,13 +2405,17 @@ fn on_survey_due(ctx) {
         ctx.flags.skyway_survey_missing_report = 1;
         if ctx.flags["scan.skyhook.taken"] == 0 {
             ctx.flags.skyway_survey_missing_skyhook = 1;
+            ctx.effects.fail_objective("obj-a1-survey-scan-head");
         }
         if ctx.flags["scan.depot_ladder_a.taken"] == 0 {
             ctx.flags.skyway_survey_missing_depot_a = 1;
+            ctx.effects.fail_objective("obj-a1-survey-scan-depot-a");
         }
         if ctx.flags["scan.depot_ladder_b.taken"] == 0 {
             ctx.flags.skyway_survey_missing_depot_b = 1;
+            ctx.effects.fail_objective("obj-a1-survey-scan-depot-b");
         }
+        ctx.effects.fail_objective("obj-a1-survey-report");
         ctx.effects.fail_objective("obj-a1-survey");
         ctx.effects.open_comms(#{
             from: "world.falling_skyway.entity.skyway_control.name",
@@ -2689,11 +2791,10 @@ fn havelock_offer(ctx, body) {
     // [ai] The real fix is the console-complexity ladder's human-seeking comms —
     // a system that WANTS a person and says so, instead of a scenario ordering
     // its buttons around a backfill policy. Until then this order is the
-    // scenario's own safety catch, and it is the scenario's to hold: a world
-    // CANNOT switch that policy off per-mission, because
-    // `spawn_game_start_entities` takes the player hull's config from the lobby
-    // selection wholesale and an `[entity.overrides.comms_console.ai]` on the
-    // player-ship row is validated and then discarded.
+    // scenario's own safety catch, and it is the scenario's to hold. Player-ship
+    // overrides now compose onto the lobby-selected hull, but switching Comms
+    // Backfill off here would also strand every other opening thread on an empty
+    // bridge; response order is the narrow per-decision guard this scene needs.
     responses.push(#{
         text: "world.falling_skyway.comms.refuse_force",
         on_pick: "on_refuse_force",
@@ -5480,7 +5581,9 @@ fn book_berth(ctx, taken_flag) {
 // Twenty-six seconds after the shutters come down, because #1042 gives a climber
 // twenty-four to reach the top and a lift booked on the last tick of the window
 // has not landed or stood down yet. Reading the manifest before that would score
-// the mission on a climber still on the ribbon.
+// the mission on a climber still on the ribbon. Finalisation then leaves ten
+// seconds for retained dialogue choices to receive their guarded closed
+// acknowledgements before the authoritative terminal victory stops all input.
 fn on_the_window_shuts_for_good(ctx) {
     ctx.schedule.after(26, |ctx| { the_mission_closes(ctx); });
 }
@@ -5509,9 +5612,14 @@ fn the_mission_closes(ctx) {
     ctx.flags.act3_resolved = 1;
     ctx.flags.increment("a3_endings_written", 1);
     // A completed campaign episode must leave an authoritative terminal
-    // outcome, not only a family of handoff counters. Partial and costly roads
-    // are still mission completion; collision/ship-loss remain defeat paths.
-    ctx.effects.game_over("world.falling_skyway.game_over.mission_complete", "victory");
+    // outcome, not only a family of handoff counters. #1136 deliberately keeps
+    // a narrow acknowledgement seam after the frozen record: retained choices
+    // can receive their guarded closed reply, but cannot change any ending fact.
+    // Partial and costly roads are still mission completion; collision/ship-loss
+    // remain defeat paths throughout this final ten-second grace.
+    ctx.schedule.after(10, |ctx| {
+        ctx.effects.game_over("world.falling_skyway.game_over.mission_complete", "victory");
+    });
 }
 
 // Whether a claimant actually got off the rock — by lift or by berth. The

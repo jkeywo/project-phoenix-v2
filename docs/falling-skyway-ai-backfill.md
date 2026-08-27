@@ -45,8 +45,9 @@ authored state as it stands, and flags every unratified number it leans on.
 > only the closed acknowledgement. Confrontation does not file it; mission
 > finalisation closes both stale-response authorities and the explicit
 > `skyway_evidence_filing_open` state before commitments, campaign facts and
-> debrief copy freeze, then fails any active unfiled objective. A stale response
-> after either closure receives only the closed acknowledgement. The thread is
+> debrief copy freeze, then fails any active unfiled objective. A fixed
+> ten-second grace lets a stale response receive only the guarded closed
+> acknowledgement before terminal victory stops input. The thread is
 > sticky across travel and range changes, while ordinary `ClearComms` remains a
 > deliberate dismissal of the inbox and does not auto-reopen this optional route.
 
@@ -61,6 +62,22 @@ authored state as it stands, and flags every unratified number it leans on.
 > The later beneficiary allocation is a distinct protected decision and is not
 > chosen by Backfill. Findings 1–4 and the old command-surface/gap tables remain
 > historical evidence, not a description of the current runtime.
+
+> **Current survey note (#1139).** `AiDirective::Scan { target }` is now a
+> Sensors-only mission/doctrine verb. The existing `operate_sensors_ai` host
+> resolves its first positive Scan objective and emits the ordinary admitted
+> `ScanTarget`; it does not pre-check range or write a reading, so the shared
+> `science::server::tick_scans` applier remains the sole authority and refusals
+> retry deterministically. Falling Skyway exposes separate Depot B, Depot A and
+> Skyway Head scan steps along a non-looping survey tour, then posts a
+> high-priority Hail(Control) report step. A scenario-local zero-score doctrine
+> row supplies only the destroyer's authored Helm execution tuning for the
+> mandatory aggregate; the row is hidden and cannot compete. The full-Backfill
+> integration proof completes all three real scans, files the report before
+> t=360, and stops Lark before the unchanged t=380 collision deadline. The
+> silence regression explicitly
+> human-holds Sensors and Comms, because an actually backfilled bridge should no
+> longer be silent.
 
 ## Method
 
@@ -463,12 +480,12 @@ urgent Control message and exact missing-work flags.
 
 ### The AI surface (the verb batch, scoped separately)
 
-- **Current `AiDirective` kinds carry the delivered verbs**: `Tow`, `Stabilise`,
-  `Transfer`, `FieldRepair`, and `Order`, mirroring the existing `Hail`/`Dock`
-  precedent. Station-specific emitters consume the shared scored-objective pool:
-  Tractor, Dock, Umbilical, Repair and Navigation each issue their ordinary
-  admitted control. A `Transfer` is a two-seat chain rather than a generic
-  `Operate` command. `Scan` remains the dedicated Sensors slice (#1139).
+- **Current `AiDirective` kinds carry the delivered verbs**: `Scan`, `Tow`,
+  `Stabilise`, `Transfer`, `FieldRepair`, and `Order`, mirroring the existing
+  `Hail`/`Dock` precedent. Station-specific emitters consume the shared
+  scored-objective pool: Sensors, Tractor, Dock, Umbilical, Repair and
+  Navigation each issue their ordinary admitted control. A `Transfer` is a
+  two-seat chain rather than a generic `Operate` command.
 - **(Q14) Objectives-driven emitters**: each actionable objective carries enough
   authored info (verb and target, plus route where required) for the AI to emit
   its verb. Not

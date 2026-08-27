@@ -1435,6 +1435,57 @@ route            = "storm_shelter_run"
     );
 }
 
+#[test]
+fn add_objective_reads_scan_and_requires_its_shared_target() {
+    let parsed = actions(
+        r#"
+[[action]]
+type           = "add_objective"
+id             = "obj-scan-rung"
+text           = "world.objective.scan_rung"
+directive_kind = "Scan"
+target         = "Ladder Depot B"
+"#,
+    )
+    .expect("a Scan objective with a target must parse");
+    match &parsed[0] {
+        TriggerAction::AddObjective { directive, .. } => assert_eq!(
+            directive,
+            &crate::core::messages::AiDirective::Scan {
+                target: "Ladder Depot B".into()
+            }
+        ),
+        other => panic!("expected AddObjective, got {other:?}"),
+    }
+
+    let err = actions(
+        r#"
+[[action]]
+type           = "add_objective"
+id             = "obj-scan-rung"
+text           = "world.objective.scan_rung"
+directive_kind = "Scan"
+"#,
+    )
+    .expect_err("Scan without its shared target must fail");
+    assert!(err.contains("Scan") && err.contains("target"), "{err}");
+
+    for blank in ["", "   "] {
+        let err = actions(&format!(
+            r#"
+[[action]]
+type           = "add_objective"
+id             = "obj-scan-rung"
+text           = "world.objective.scan_rung"
+directive_kind = "Scan"
+target         = "{blank}"
+"#
+        ))
+        .expect_err("Scan with a blank shared target must fail");
+        assert!(err.contains("Scan") && err.contains("target"), "{err}");
+    }
+}
+
 // ── add_objective: a field belonging to another directive kind ─────────
 
 /// The Requiem Courier bug, authored on the mission side: `Reach` reads the

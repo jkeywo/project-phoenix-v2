@@ -802,6 +802,40 @@ fn insert_viewscreen_objective(app: &mut App, target_name: &str, score: f32) {
     );
 }
 
+fn insert_viewscreen_scan_objective(app: &mut App, target_name: &str, score: f32) {
+    let viewscreen = crate::core::messages::ViewscreenBlackboard {
+        scored_objectives: vec![crate::core::messages::ScoredObjective {
+            id: format!("obj-scan-{target_name}"),
+            score,
+            directive: crate::core::messages::AiDirective::Scan {
+                target: target_name.into(),
+            },
+            source: crate::core::messages::ObjectiveSource::Mission,
+            relevance: vec![crate::core::messages::SystemAffinity::Sensors],
+            snapshot: crate::core::messages::ObjectiveSnapshot {
+                id: format!("obj-scan-{target_name}"),
+                text: "world.objective.scan".into(),
+                text_params: Default::default(),
+                mandatory: false,
+                status: crate::core::messages::ObjectiveStatus::Active,
+                targets: vec![target_name.into()],
+                source: crate::core::messages::ObjectiveSource::Mission,
+            },
+        }],
+        ..Default::default()
+    };
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&mut crate::server_app::ShipSystemBlackboards, With<crate::server_app::Ship>>();
+    let mut bbs = q
+        .single_mut(app.world_mut())
+        .expect("the Sensors test ship");
+    bbs.0.insert(
+        crate::ship::system_registry::viewscreen_system_id(),
+        crate::core::messages::SystemBlackboard::Viewscreen(viewscreen),
+    );
+}
+
 /// Issue #891 stage 2, per-host both-directions proof for the Sensors
 /// target selector: an authored eligibility gated on a world flag selects
 /// nothing while the flag is clear and mirrors the combat lock once it is
@@ -871,6 +905,14 @@ fn operate_sensors_ai_flag_guard_reads_the_world_in_both_directions() {
 fn spawn_target_at(app: &mut App, uuid: &str, x: f32, z: f32) {
     app.world_mut().spawn((
         crate::entities::spawner::EntityUuid(uuid.to_string()),
+        Transform::from_xyz(x, 0.0, z),
+    ));
+}
+
+fn spawn_named_target_at(app: &mut App, uuid: &str, name: &str, x: f32, z: f32) {
+    app.world_mut().spawn((
+        crate::entities::spawner::EntityUuid(uuid.to_string()),
+        crate::entities::spawner::EntityName(name.to_string()),
         Transform::from_xyz(x, 0.0, z),
     ));
 }
@@ -1107,6 +1149,93 @@ fn ai_sensors_does_not_select_objective_when_weapons_target_is_some_but_entity_g
 }
 
 // ── Issue #828 tests: decide-and-emit through Admission ─────────────────
+
+/// Issue #1139: Scan uses the same AI emit/admission seam as a human Sensors
+/// command, resolves both EntityName and raw-UUID targets, and deliberately
+/// retries while the objective remains active. The target is far outside the
+/// normal Sensors horizon: the emitter must not steal range authority from the
+/// sole science scan applier.
+#[test]
+fn ai_sensors_emits_admitted_scan_and_retries_without_a_range_precheck() {
+    let mut app = sensors_ai_test_app();
+    let named_uuid = "cc000000-0000-0000-0000-0000001139aa";
+    let raw_uuid = "cc000000-0000-0000-0000-0000001139bb";
+    spawn_named_target_at(&mut app, named_uuid, "Ladder Depot B", 50_000.0, 0.0);
+    spawn_target_at(&mut app, raw_uuid, 60_000.0, 0.0);
+    insert_viewscreen_scan_objective(&mut app, "Ladder Depot B", 52.0);
+
+    tick_sensors_ai(&mut app);
+    assert_eq!(
+        admitted_sensors_payloads(&mut app),
+        vec![SystemControlPayload::ScanTarget {
+            uuid: named_uuid.into()
+        }],
+        "EntityName fallback must resolve and admission must retain the exact human ScanTarget"
+    );
+    assert_eq!(
+        get_sensors_target(&mut app),
+        None,
+        "emitting a scan must not mutate the separate Sensors target state"
+    );
+
+    // No success/refusal latch belongs to the emitter. With the objective still
+    // active, the next snapshot asks the authoritative applier again.
+    tick_sensors_ai(&mut app);
+    assert_eq!(
+        admitted_sensors_payloads(&mut app).len(),
+        2,
+        "an unresolved/refused scan objective must be retried"
+    );
+
+    // Replace the projected objective with a raw UUID. No name-table entry and
+    // no EntityName exists for this target, so only the UUID fallback can emit.
+    insert_viewscreen_scan_objective(&mut app, raw_uuid, 52.0);
+    tick_sensors_ai(&mut app);
+    assert_eq!(
+        admitted_sensors_payloads(&mut app).last(),
+        Some(&SystemControlPayload::ScanTarget {
+            uuid: raw_uuid.into()
+        })
+    );
+}
+
+#[test]
+fn scan_directive_stands_down_for_human_held_or_undeclared_sensors() {
+    let target = "cc000000-0000-0000-0000-0000001139cc";
+
+    let mut human = sensors_ai_test_app();
+    spawn_target_at(&mut human, target, 20.0, 0.0);
+    insert_viewscreen_scan_objective(&mut human, target, 52.0);
+    {
+        let mut q = human
+            .world_mut()
+            .query_filtered::<&mut crate::ship_plugin::ShipSystemControlSources, With<crate::server_app::Ship>>();
+        q.single_mut(human.world_mut()).unwrap().0.set(
+            crate::ship::system_registry::sensors_system_id(),
+            ControlSource::Human,
+        );
+    }
+    tick_sensors_ai(&mut human);
+    assert!(admitted_sensors_payloads(&mut human).is_empty());
+
+    let mut undeclared = sensors_ai_test_app();
+    spawn_target_at(&mut undeclared, target, 20.0, 0.0);
+    insert_viewscreen_scan_objective(&mut undeclared, target, 52.0);
+    let ship = undeclared
+        .world_mut()
+        .query_filtered::<Entity, With<crate::server_app::Ship>>()
+        .single(undeclared.world())
+        .unwrap();
+    undeclared
+        .world_mut()
+        .entity_mut(ship)
+        .remove::<SensorsTargetSelector>();
+    tick_sensors_ai(&mut undeclared);
+    assert!(
+        admitted_sensors_payloads(&mut undeclared).is_empty(),
+        "a hull without the authored Sensors selector capability must not synthesize scan AI"
+    );
+}
 
 /// The AI decision must land as an admitted `SetScienceTarget` in the
 /// ship's own `AdmittedCommands` (not a direct `SensorRadarSelection` write),

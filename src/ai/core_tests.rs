@@ -1288,6 +1288,21 @@ fn helm_destroy_holding_station_does_not_fall_through_to_patrol() {
 // ── score_doctrine_pool ───────────────────────────────────────────────
 
 #[test]
+fn doctrine_scan_parses_its_dedicated_target_field() {
+    let objective = crate::entities::config::DoctrineObjective {
+        directive_kind: Some("Scan".into()),
+        directive_scan_target: Some("Ladder Depot B".into()),
+        ..Default::default()
+    };
+    assert_eq!(
+        parse_doctrine_directive(&objective),
+        crate::core::messages::AiDirective::Scan {
+            target: "Ladder Depot B".into()
+        }
+    );
+}
+
+#[test]
 fn score_doctrine_pool_patrol_always_scores() {
     use crate::entities::config::DoctrineObjective;
     use crate::objectives::WorldConditions;

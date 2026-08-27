@@ -7798,6 +7798,32 @@ fn objective_status_opt(
         .map(|o| o.status)
 }
 
+/// Model a seated-but-silent science/comms crew in fixtures whose subject is
+/// deliberate inaction. Headless boots every empty station as Backfill, so
+/// leaving these sources untouched would let #1139's ordinary operate hosts do
+/// the work the fixture is specifically meant to withhold.
+fn hold_skyway_sensors_and_comms(app: &mut bevy::prelude::App) {
+    let ship = app
+        .world_mut()
+        .query_filtered::<bevy::prelude::Entity, With<LocalShip>>()
+        .iter(app.world())
+        .next()
+        .expect("the crew's hull");
+    let mut sources = app
+        .world_mut()
+        .get_mut::<project_phoenix::ship_plugin::ShipSystemControlSources>(ship)
+        .expect("the local ship has authoritative control sources");
+    for system_id in [
+        project_phoenix::ship::system_registry::sensors_system_id(),
+        project_phoenix::ship::system_registry::comms_system_id(),
+    ] {
+        sources.0.set(
+            system_id,
+            project_phoenix::ship::control_source::ControlSource::Human,
+        );
+    }
+}
+
 /// Every named ship's `(x, z)` this tick, keyed by its authored `EntityName`.
 fn ship_positions(app: &mut bevy::prelude::App) -> std::collections::BTreeMap<String, (f32, f32)> {
     app.world_mut()
@@ -7850,6 +7876,8 @@ fn falling_skyway_silent_act_one_fails_the_unfiled_survey_loudly() {
         ..test_args()
     };
     let mut app = build_headless_app(&args).expect("the scenario world must load and build");
+    run(&mut app, 10);
+    hold_skyway_sensors_and_comms(&mut app);
 
     // AC1 precondition: the file-backed act clock sized the run before the app
     // was constructed, with ten seconds left for the boundary's effects.
@@ -7871,7 +7899,7 @@ fn falling_skyway_silent_act_one_fails_the_unfiled_survey_loudly() {
     let mut lift_capable_seen = false;
     let mut skyhook_condition_at_close: Option<f32> = None;
 
-    for tick in 0..args.max_ticks {
+    for tick in 10..args.max_ticks {
         run(&mut app, 1);
         let sim_t = (tick + 1) as f64 * dt;
 
@@ -8899,12 +8927,23 @@ fn seat_skyway_comms(app: &mut bevy::prelude::App, ship: bevy::prelude::Entity) 
         .remove::<project_phoenix::console::comms::server::CommsResponseAiPolicy>();
 }
 
+/// Seat a human Sensors officer while leaving the ordinary admitted command
+/// path live for the fixture. Removing the selector restores the manual-test
+/// contract that existed before #1139: no Backfill scan can race a scan the
+/// fixture deliberately sends itself.
+fn seat_skyway_sensors(app: &mut bevy::prelude::App, ship: bevy::prelude::Entity) {
+    app.world_mut()
+        .entity_mut(ship)
+        .remove::<project_phoenix::ship::sensors::SensorsTargetSelector>();
+}
+
 /// Build Falling Skyway with a seated Comms officer and stand the destroyer off
 /// the ladder. This is the flexible base for pre-emption, normal-order and
 /// hardened fixtures which intentionally substitute for Helm travel.
 fn skyway_strike_app(seed: u64) -> (bevy::prelude::App, bevy::prelude::Entity) {
     let (mut app, ship) = skyway_strike_app_at_authored_start(seed);
     seat_skyway_comms(&mut app, ship);
+    seat_skyway_sensors(&mut app, ship);
     skyway_move(&mut app, ship, CHOICE_LADDER);
     run(&mut app, 2);
     (app, ship)
@@ -8948,6 +8987,7 @@ fn skyway_at_act_two() -> (bevy::prelude::App, bevy::prelude::Entity) {
     let run_budget = survey_due + 10.0;
     let (mut app, ship) = skyway_strike_app_at_authored_start(42);
     seat_skyway_comms(&mut app, ship);
+    seat_skyway_sensors(&mut app, ship);
     let authored_start = {
         let physics = app
             .world()
@@ -9076,9 +9116,10 @@ fn skyway_scan_for_survey(app: &mut bevy::prelude::App, ship: bevy::prelude::Ent
     run(app, 4);
 }
 
-/// Start a deterministic Falling Skyway survey run with a seated Comms officer.
-/// Removing only the response policy leaves admission authoritative while
-/// preventing Backfill from choosing the report response ahead of the test.
+/// Start a deterministic Falling Skyway survey run with seated Comms and
+/// Sensors officers. Removing the response policy and the authored Sensors
+/// selector leaves admission authoritative while preventing Backfill from
+/// choosing either a scan or report response ahead of this manual fixture.
 fn skyway_survey_app(seed: u64) -> (bevy::prelude::App, bevy::prelude::Entity) {
     let survey_due = skyway_authored_deadline_secs("skyway_survey_due") as f64;
     let args = HeadlessArgs {
@@ -9101,6 +9142,7 @@ fn skyway_survey_app(seed: u64) -> (bevy::prelude::App, bevy::prelude::Entity) {
     app.world_mut()
         .entity_mut(ship)
         .remove::<project_phoenix::console::comms::server::CommsResponseAiPolicy>();
+    seat_skyway_sensors(&mut app, ship);
     (app, ship)
 }
 
@@ -9429,10 +9471,11 @@ fn falling_skyway_posted_survey_completes_on_the_admitted_control_pickup() {
     );
 }
 
-/// **Issue #1138 — the unattended opening is terminal through world state.**
-/// No scan or response is fabricated. The authored t=380 deadline commits the
-/// collision, removes both physical participants, and declares defeat without
-/// reading an objective status.
+/// **Issue #1138 — a seated but idle opening is terminal through world state.**
+/// #1139 makes an unstaffed bridge genuinely backfilled, so this silence fixture
+/// explicitly puts Sensors and Comms under Human control and sends nothing. The
+/// authored t=380 deadline commits the collision, removes both physical
+/// participants, and declares defeat without reading an objective status.
 #[test]
 fn idle_crew_fails_every_era_headless_checks() {
     let collision_due = skyway_authored_deadline_secs("lark_collision_due") as f64;
@@ -9446,7 +9489,9 @@ fn idle_crew_fails_every_era_headless_checks() {
         ..test_args()
     };
     let mut app = build_headless_app(&args).expect("the scenario world must load and build");
-    run(&mut app, args.max_ticks);
+    run(&mut app, 10);
+    hold_skyway_sensors_and_comms(&mut app);
+    run(&mut app, args.max_ticks.saturating_sub(10));
 
     assert_eq!(skyway_flag(&app, "lark_corridor_cancelled"), 0);
     assert_eq!(skyway_flag(&app, "lark_corridor_collision_committed"), 1);
@@ -9463,6 +9508,156 @@ fn idle_crew_fails_every_era_headless_checks() {
     ));
     let report = build_report(&mut app, &args, collision_due);
     assert_eq!(report.outcome_report.outcome, RunOutcome::Defeat);
+}
+
+/// **Issue #1139, full-Backfill proof.** Nobody connects and no scan, hail or
+/// response is fabricated by the fixture. Helm flies the authored survey tour;
+/// Sensors emits the three ScanTarget commands through Admission; the sole scan
+/// applier raises the real flags; and Comms hails Control and files the report.
+/// The same scan-backed response also stops Lark, leaving the scenario alive.
+#[test]
+fn falling_skyway_full_backfill_scans_and_files_the_opening_survey() {
+    use project_phoenix::core::messages::{
+        ObjectiveSource, ObjectiveStatus, SystemAffinity, SystemBlackboard,
+    };
+
+    let survey_due = skyway_authored_deadline_secs("skyway_survey_due") as f64;
+    let args = HeadlessArgs {
+        world_path: SKYWAY_WORLD.into(),
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        dt: SKYWAY_DT,
+        max_ticks: ticks_for_sim_seconds(survey_due + 6.0, SKYWAY_DT),
+        deterministic: true,
+        seed: Some(1139),
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("the scenario world must load and build");
+    app.finish();
+    app.cleanup();
+    let mut report_tick = None;
+    let mut execution_profile_checked = false;
+    for tick in 1..=args.max_ticks {
+        app.update();
+
+        // The zero-priority doctrine twin is configuration for Helm, not a
+        // second player task. Pin all three parts of that seam while the
+        // mission objective is live: hidden, gated out of operation, and
+        // paired with exactly one positive mission objective of the same id.
+        if !execution_profile_checked && skyway_flag(&app, "tether_slipped") > 0 {
+            let scored = {
+                let mut ships = app.world_mut().query_filtered::<
+                    &project_phoenix::server_app::ShipSystemBlackboards,
+                    With<LocalShip>,
+                >();
+                let blackboards = ships
+                    .single(app.world())
+                    .expect("the survey ship must publish blackboards");
+                match blackboards
+                    .0
+                    .get(&project_phoenix::ship::system_registry::viewscreen_system_id())
+                    .expect("the survey ship must publish a viewscreen blackboard")
+                {
+                    SystemBlackboard::Viewscreen(view) => view.scored_objectives.clone(),
+                    other => panic!("expected viewscreen blackboard, got {other:?}"),
+                }
+            };
+            let survey_entries: Vec<_> = scored
+                .iter()
+                .filter(|objective| objective.id == "obj-a1-survey")
+                .collect();
+            assert_eq!(
+                survey_entries.len(),
+                2,
+                "one mission objective and one execution-only doctrine profile must share the id"
+            );
+            let mission = survey_entries
+                .iter()
+                .find(|objective| objective.source == ObjectiveSource::Mission)
+                .expect("the visible mandatory survey objective");
+            let profile = survey_entries
+                .iter()
+                .find(|objective| objective.source == ObjectiveSource::Doctrine)
+                .expect("the hidden Helm execution profile");
+            assert!(mission.score > 0.0);
+            assert!(mission.relevance.contains(&SystemAffinity::Helm));
+            assert_eq!(profile.score, 0.0, "the profile must never compete");
+            assert!(
+                !project_phoenix::objectives::is_visible_objective(profile),
+                "the execution profile must not become a second player-facing objective"
+            );
+            execution_profile_checked = true;
+        }
+
+        if report_tick.is_none() && skyway_flag(&app, "skyway_survey_reported") > 0 {
+            report_tick = Some(tick);
+        }
+        if app.world().resource::<State<GamePhase>>().get() == &GamePhase::GameOver {
+            break;
+        }
+    }
+    assert!(execution_profile_checked, "the t=160 survey post must land");
+    let report_secs = report_tick
+        .map(|tick| tick as f64 * SKYWAY_DT)
+        .expect("Backfill must file the survey before its deadline");
+    assert!(
+        report_secs < survey_due,
+        "Backfill filed at t={report_secs:.2}, after the t={survey_due:.2} deadline"
+    );
+
+    let survey_ship_state = {
+        let mut ships = app.world_mut().query_filtered::<(
+            &ShipPhysics,
+            Option<&project_phoenix::ai::server::ObjectiveCursors>,
+        ), With<LocalShip>>();
+        let (physics, cursors) = ships
+            .single(app.world())
+            .expect("the survey ship must remain in the world");
+        format!(
+            "report_t={report_secs:.2}, deadline_margin={:.2}s, \
+             position=({:.1}, {:.1}), speed={:.1}, cursors={:?}",
+            survey_due - report_secs,
+            physics.x,
+            physics.z,
+            physics.forward_speed,
+            cursors.map(|entries| &entries.0)
+        )
+    };
+
+    for flag in [
+        "scan.depot_ladder_b.taken",
+        "scan.depot_ladder_a.taken",
+        "scan.skyhook.taken",
+        "skyway_survey_scans_complete",
+        "skyway_survey_reported",
+    ] {
+        assert_eq!(
+            skyway_flag(&app, flag),
+            1,
+            "the fully backfilled bridge must raise '{flag}' through ordinary commands; \
+             {survey_ship_state}"
+        );
+    }
+    for objective in [
+        "obj-a1-survey-scan-depot-b",
+        "obj-a1-survey-scan-depot-a",
+        "obj-a1-survey-scan-head",
+        "obj-a1-survey-report",
+        "obj-a1-survey",
+    ] {
+        assert_eq!(
+            objective_status(&app, objective),
+            ObjectiveStatus::Completed,
+            "Backfill must visibly finish {objective}"
+        );
+    }
+    assert_eq!(skyway_flag(&app, "skyway_survey_unfiled"), 0);
+    assert_eq!(skyway_flag(&app, "lark_corridor_cancelled"), 1);
+    assert_eq!(skyway_flag(&app, "lark_corridor_collision_committed"), 0);
+    assert_ne!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::GameOver,
+        "the admitted scan-backed stop must keep Falling Skyway playable"
+    );
 }
 
 /// A first scan taken after the routine check-in refreshes that live thread;
@@ -16033,7 +16228,9 @@ fn parley_run_to(
 }
 
 /// Run past the window's close and the twenty-six seconds the endings wait for
-/// the last climber to land or stand down, then assert they were written.
+/// the last climber to land or stand down, then assert they were written. This
+/// stops about six seconds into the authored ten-second acknowledgement grace,
+/// before the authoritative terminal outcome lands.
 fn run_to_the_endings(
     app: &mut bevy::prelude::App,
     ship: bevy::prelude::Entity,
@@ -16046,6 +16243,11 @@ fn run_to_the_endings(
         1,
         "the mission has to resolve itself exactly once, and after the last lift has \
          landed or stood down"
+    );
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::InProgress,
+        "the short post-finalisation acknowledgement grace must still be live"
     );
 }
 
@@ -17105,6 +17307,7 @@ fn the_early_collapse_leaves_one_berth_and_control_asks_for_a_name() {
 fn the_next_mission_opens_on_what_this_one_left_behind() {
     use project_phoenix::campaign::{project, seed_flags, CAMPAIGN_FACTS_VERSION};
     use project_phoenix::content_ledger;
+    use project_phoenix::core::balance::Outcome;
     use project_phoenix::snapshot::{capture, run_for, versions};
 
     let (mut app, ship) = skyway_at_act_two();
@@ -17127,6 +17330,49 @@ fn the_next_mission_opens_on_what_this_one_left_behind() {
     run(&mut app, 8);
     run_to_the_endings(&mut app, ship, WINDOW_STATION);
     assert_the_campaign_record_is_complete(&app);
+
+    // Finalisation deliberately precedes GameOver so retained dialogue choices
+    // can receive their guarded closed acknowledgements. The frozen handoff must
+    // survive that ten-second seam byte-for-byte, then the ordinary episode
+    // completion becomes authoritative victory inside the 1850-second sweep.
+    let frozen_campaign = app
+        .world()
+        .resource::<project_phoenix::world::server::WorldContentRuntime>()
+        .flags
+        .iter()
+        .filter(|(name, _)| name.starts_with("campaign."))
+        .map(|(name, value)| (name.to_string(), value))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    run(&mut app, ticks_for_sim_seconds(8.0, SKYWAY_DT));
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::GameOver,
+        "the fixed acknowledgement grace must end in authoritative GameOver"
+    );
+    assert_eq!(
+        app.world()
+            .resource::<project_phoenix::server_app::GameOverReason>()
+            .1,
+        Some(Outcome::Victory),
+        "an ordinarily resolved Falling Skyway episode declares victory"
+    );
+    assert_eq!(
+        skyway_flag(&app, "a3_endings_written"),
+        1,
+        "the terminal callback must not write the ending a second time"
+    );
+    let campaign_after_grace = app
+        .world()
+        .resource::<project_phoenix::world::server::WorldContentRuntime>()
+        .flags
+        .iter()
+        .filter(|(name, _)| name.starts_with("campaign."))
+        .map(|(name, value)| (name.to_string(), value))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    assert_eq!(
+        campaign_after_grace, frozen_campaign,
+        "the acknowledgement grace and terminal callback cannot mutate the frozen handoff"
+    );
 
     // The save a host would have taken at the debrief, through the ordinary
     // capture — not a hand-built payload.
@@ -17207,7 +17453,11 @@ fn the_next_mission_opens_on_what_this_one_left_behind() {
         1,
         "the storm's deterministic traffic loss survives projection"
     );
-    assert_eq!(facts.tally("campaign.skyway.traffic.pell"), 1);
+    assert_eq!(
+        facts.tally("campaign.skyway.traffic.lark"),
+        1,
+        "the Scan-enabled deterministic road loses Lark and must retain that exact named fact"
+    );
     assert_eq!(facts.tally("campaign.skyway.traffic.none"), 0);
 
     // The road-specific facts this variant exists for, and the ones a follow-on

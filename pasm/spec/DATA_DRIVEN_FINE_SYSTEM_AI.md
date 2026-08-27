@@ -371,7 +371,7 @@ systems, including:
 - phaser banks, blaster banks, torpedo tubes, Tactical targeting, Tactical
   radar, and torpedo magazines;
 - Shields arc focus;
-- Sensors target designation and frequency advice;
+- Sensors target designation, survey scanning, and frequency advice;
 - data-defined Power group allocations;
 - Captain Red Alert and objective priority;
 - Navigation waypoint selection;
@@ -382,6 +382,16 @@ Accepted verbs produce the same typed system inputs used by a human operator.
 The policy runtime cannot mutate simulation components directly. Human and AI
 inputs converge before downstream simulation logic, availability checks, and
 damage gating.
+
+Issue #1139 applies that rule to mission/doctrine `Scan { target }` directives.
+The existing `operate_sensors_ai` host selects the first positive
+Sensors-affined Scan after its ordinary AI-control and authored-selector gates,
+resolves the world name deterministically, and emits `ScanTarget` through shared
+admission. It neither checks range nor writes/latches scan state: the ordinary
+`science::server::tick_scans` applier owns the authored suite, power,
+interference and range verdict, and a refused objective is retried on the next
+snapshot. Target designation remains a separate output and may occur in the
+same tick.
 
 ## 9. Scheduling and evaluation
 

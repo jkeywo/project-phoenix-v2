@@ -41,7 +41,9 @@ pub struct DoctrineObjective {
     /// Whether this objective blocks mission completion when active (usually `false` for doctrine).
     #[serde(default)]
     pub mandatory: bool,
-    /// Directive kind: `"Patrol"`, `"Destroy"`, `"Reach"`, `"Hail"`, or absent for `None`.
+    /// Directive kind: `"Patrol"`, `"Destroy"`, `"Reach"`, `"Retreat"`,
+    /// `"Hail"`, `"Scan"`, `"Dock"`, `"Tow"`, `"Stabilise"`, `"Escort"`,
+    /// `"Transfer"`, `"FieldRepair"`, `"Order"`, or absent for `None`.
     #[serde(default)]
     pub directive_kind: Option<String>,
     /// Anchor names for `Patrol` directives.
@@ -67,6 +69,11 @@ pub struct DoctrineObjective {
     /// Named target for `Hail` directives.
     #[serde(default)]
     pub directive_hail_target: Option<String>,
+    /// Named target for `Scan` directives (issue #1139). Kept distinct from the
+    /// Destroy and Hail fields so doctrine field-ownership mistakes fail at
+    /// load rather than silently resolving to no scan subject.
+    #[serde(default)]
+    pub directive_scan_target: Option<String>,
     /// Named target for the issue-#1162 operate verbs — `Tow`, `Stabilise`,
     /// `Escort`, `Transfer` and `FieldRepair`. One shared field for all five,
     /// the way `Reach`/`Retreat` share `directive_anchor`: each verb names a
@@ -123,6 +130,7 @@ const DIRECTIVE_FIELD_OWNERS: &[(&str, &str)] = &[
     ("directive_target", "Destroy"),
     ("directive_anchor", "Reach / Retreat"),
     ("directive_hail_target", "Hail"),
+    ("directive_scan_target", "Scan"),
     ("directive_dock_target", "Dock"),
     (
         "directive_operate_target",
@@ -171,6 +179,9 @@ pub fn validate_doctrine_directives(doctrine: &[DoctrineObjective]) -> Result<()
             // `Reach`/`Retreat` mission objective with no `directive_anchor`.
             Some("Reach") | Some("Retreat") => (&["directive_anchor"], &["directive_anchor"]),
             Some("Hail") => (&["directive_hail_target"], &[]),
+            // A Scan without a target can never produce an admitted ScanTarget;
+            // reject it at authoring time rather than running an inert objective.
+            Some("Scan") => (&["directive_scan_target"], &["directive_scan_target"]),
             // Issue #1028. Required for the same reason `Reach` requires its
             // anchor: a Dock with nothing to dock at resolves to no destination
             // and the hull silently never goes anywhere.
@@ -188,7 +199,7 @@ pub fn validate_doctrine_directives(doctrine: &[DoctrineObjective]) -> Result<()
             Some(other) => {
                 return Err(format!(
                     "doctrine '{}': unknown directive_kind '{other}'; \
-                     valid: Patrol, Destroy, Reach, Retreat, Hail, Dock, \
+                     valid: Patrol, Destroy, Reach, Retreat, Hail, Scan, Dock, \
                      Tow, Stabilise, Escort, Transfer, FieldRepair, Order",
                     d.id
                 ))
@@ -207,6 +218,10 @@ pub fn validate_doctrine_directives(doctrine: &[DoctrineObjective]) -> Result<()
             d.directive_hail_target
                 .is_some()
                 .then_some("directive_hail_target"),
+            d.directive_scan_target
+                .as_deref()
+                .is_some_and(|t| !t.trim().is_empty())
+                .then_some("directive_scan_target"),
             d.directive_dock_target
                 .as_deref()
                 .is_some_and(|t| !t.is_empty())

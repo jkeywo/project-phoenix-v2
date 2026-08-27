@@ -3923,6 +3923,47 @@ directive_target = "wrong-field"
     );
 }
 
+#[test]
+fn scan_directive_requires_its_dedicated_target_field() {
+    let missing = doctrine_toml(
+        r#"
+id = "scan-rung"
+directive_kind = "Scan"
+"#,
+    )
+    .unwrap_err();
+    assert!(
+        missing.contains("directive_scan_target") && missing.contains("Scan"),
+        "the missing Scan field must be named: {missing}"
+    );
+
+    let blank = doctrine_toml(
+        r#"
+id = "scan-rung"
+directive_kind = "Scan"
+directive_scan_target = "   "
+"#,
+    )
+    .unwrap_err();
+    assert!(
+        blank.contains("directive_scan_target") && blank.contains("Scan"),
+        "a whitespace-only Scan target is still missing: {blank}"
+    );
+
+    let misplaced = doctrine_toml(
+        r#"
+id = "scan-rung"
+directive_kind = "Scan"
+directive_hail_target = "Ladder Depot B"
+"#,
+    )
+    .unwrap_err();
+    assert!(
+        misplaced.contains("directive_hail_target") && misplaced.contains("Scan"),
+        "a Hail field on Scan must fail field ownership: {misplaced}"
+    );
+}
+
 /// The shapes every shipped hull and world override actually authors.
 #[test]
 fn well_formed_directives_of_every_kind_are_accepted() {
@@ -3935,6 +3976,7 @@ fn well_formed_directives_of_every_kind_are_accepted() {
             "id = \"retreat\"\ndirective_kind = \"Retreat\"\ndirective_anchor = \"haven\"",
             "id = \"hail\"\ndirective_kind = \"Hail\"\ndirective_hail_target = \"Axiom Station\"",
             "id = \"order\"\ndirective_kind = \"Order\"\ndirective_order_target = \"Meridian Freight\"\ndirective_order_route = \"storm_shelter_run\"",
+            "id = \"scan\"\ndirective_kind = \"Scan\"\ndirective_scan_target = \"Ladder Depot B\"",
         ] {
             assert!(
                 doctrine_toml(body).is_ok(),

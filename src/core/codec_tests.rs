@@ -1029,6 +1029,7 @@ fn system_affinity_comms_variant_round_trips() {
         SystemAffinity::Captain,
         SystemAffinity::Comms,
         SystemAffinity::Navigation,
+        SystemAffinity::Sensors,
         // The issue-#1162 operate affinities.
         SystemAffinity::Engineering,
         SystemAffinity::Repair,
@@ -1039,6 +1040,10 @@ fn system_affinity_comms_variant_round_trips() {
     assert!(
         encoded.contains("Comms"),
         "the Comms affinity variant must serialize by name"
+    );
+    assert!(
+        encoded.contains("Sensors"),
+        "the Sensors affinity variant must serialize by name"
     );
     assert!(
         encoded.contains("Engineering") && encoded.contains("Repair"),
@@ -1065,6 +1070,9 @@ fn ai_directive_operate_variants_round_trip() {
         },
         AiDirective::Dock {
             target: "berth".into(),
+        },
+        AiDirective::Scan {
+            target: "survey-rung".into(),
         },
         AiDirective::Tow {
             target: "hulk".into(),
@@ -1097,6 +1105,7 @@ fn ai_directive_operate_variants_round_trip() {
         "FieldRepair",
         "Dock",
         "Order",
+        "Scan",
     ] {
         assert!(
             encoded.contains(name),

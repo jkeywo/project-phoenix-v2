@@ -4,7 +4,9 @@ entities:
       status: implemented
       confidence: confirmed
       title: Objective Directive Contract
-      summary: Typed objective directives that express Patrol, Destroy, Reach, Retreat, Hail, or no AI action and declare their relevant system affinities.
+      summary: Typed objective directives that express travel, combat, Comms, Navigation traffic orders, Sensors scans, docking and engineering/repair operations (or no AI action) and declare their relevant system affinities.
+      rationale:
+        - "Issue #1139 adds Scan { target } with Sensors-only affinity. Mission actions use their existing shared target field; doctrine uses a dedicated directive_scan_target so a misplaced Destroy/Hail/Scan field is rejected at load rather than silently ignored. Both front-ends parse to the same AiDirective, codec/decision-trace projections retain its target, and the Sensors host consumes only a positive Sensors-affined entry."
     architecture:
       kind: domain-model
       authority: authoritative
@@ -113,7 +115,7 @@ entities:
       title: World Objective Authoring Actions
       summary: World triggers and comms responses add, complete, or fail named mission objectives, with optional AI directives and utility configuration.
       rationale:
-        - "Mission objectives can author every first-class directive: Patrol, Destroy, Reach, Retreat (requires a directive_anchor, same shape as Reach), and Hail. Retreat had been authorable only from hull doctrine until the post-#801 loose-ends fix added it to mission-objective parsing."
+        - "Mission objectives can author every first-class directive, including Scan through the shared target field. Doctrine reaches the same typed Scan through its dedicated directive_scan_target field. Issue #1139 pins both parse paths, missing/misplaced-field lints, the script-to-declarative parity path, and the wire round trip."
     architecture:
       kind: configuration-action
       authority: authoritative

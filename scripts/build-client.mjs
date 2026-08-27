@@ -14,11 +14,12 @@
 //   dist/client/assets/ship-cards/  (lobby ship-picker art — see ship-cards.mjs)
 //   dist/client/logo.png
 
-import { cp, mkdir, copyFile, rm } from 'node:fs/promises';
+import { cp, mkdir, copyFile, rm, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { emitShipCards } from './ship-cards.mjs';
 import { assertDebugSurfaceModuleCurrent } from './generate-debug-surfaces.mjs';
+import { clientStampField } from './client-stamp.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(root, 'dist', 'client');
@@ -27,6 +28,9 @@ const out = path.join(root, 'dist', 'client');
 // `rel="copy-dir"` links that used to live in client.html.
 const ASSET_DIRS = [
   'strings',
+  // Authored join-code format data (issue #1111) — the phone fetches it to
+  // canonicalise typed suffixes and to know its own project/version GUIDs.
+  'join',
   'phone_border',
   'fonts',
   'shaders',
@@ -47,8 +51,21 @@ async function main() {
   await rm(out, { recursive: true, force: true });
   await mkdir(path.join(out, 'assets'), { recursive: true });
 
-  // index.html ← client.html
-  await copyFile(path.join(root, 'client.html'), path.join(out, 'index.html'));
+  // index.html ← client.html, with this build's delivery stamp written into
+  // the placeholder meta tag (issue #1111). The client page has no WASM to
+  // bake a version into, so the same trick the `phoenix-build-demo` flag uses
+  // carries protocol + content identity to it: the host reads it back over the
+  // join handshake and refuses a bundle built for other content.
+  const html = await readFile(path.join(root, 'client.html'), 'utf8');
+  const stamp = await clientStampField(root);
+  await writeFile(
+    path.join(out, 'index.html'),
+    html.replace(
+      /(<meta\s+name="phoenix-client-stamp"\s+content=")([^"]*)(")/,
+      `$1${stamp}$3`,
+    ),
+    'utf8',
+  );
 
   // gui/ (JS modules + console HTML + borders)
   await cp(path.join(root, 'gui'), path.join(out, 'gui'), { recursive: true });
@@ -72,7 +89,9 @@ async function main() {
   await copyFile(path.join(root, 'assets', 'logo.png'), path.join(out, 'logo.png'));
   await copyFile(path.join(root, 'assets', 'favicon.ico'), path.join(out, 'favicon.ico'));
 
-  console.log(`client page built → dist/client/ (pure JS, no WASM; ${cards} ship cards)`);
+  console.log(
+    `client page built → dist/client/ (pure JS, no WASM; ${cards} ship cards; stamp ${stamp || 'unstamped'})`,
+  );
 }
 
 main().catch((err) => {

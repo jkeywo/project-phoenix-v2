@@ -292,6 +292,30 @@ pub fn encode_delivery_stamp(stamp: &crate::delivery::stamp::DeliveryStamp) -> S
     stamp_json(stamp).to_string()
 }
 
+/// Encode the browser host's join-handshake verdict (issue #1111).
+///
+/// The same `StampMismatch::code()` the native host answers
+/// `/host/manifest.json` with, shaped for the host page's JS rather than for
+/// HTTP: `{"ok":true,…}` or `{"ok":false,"code":…,"detail":…}`, always carrying
+/// the host's own stamp so a refused client can see what it should have been.
+/// `detail` is operator prose, not player-visible text — see
+/// [`crate::delivery::stamp::StampMismatch::detail`].
+pub fn encode_join_verdict(
+    verdict: &Result<(), crate::delivery::stamp::StampMismatch>,
+    host: &crate::delivery::stamp::DeliveryStamp,
+) -> String {
+    match verdict {
+        Ok(()) => serde_json::json!({ "ok": true, "host": stamp_json(host) }).to_string(),
+        Err(mismatch) => serde_json::json!({
+            "ok": false,
+            "code": mismatch.code(),
+            "detail": mismatch.detail(),
+            "host": stamp_json(host),
+        })
+        .to_string(),
+    }
+}
+
 /// Encode the content manifest + catalogue a host publishes.
 pub fn encode_delivery_manifest(manifest: &crate::delivery::DeliveryManifest) -> String {
     serde_json::json!({

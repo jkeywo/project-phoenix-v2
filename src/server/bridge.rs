@@ -2443,6 +2443,28 @@ pub fn wasm_delivery_stamp() -> String {
     ))
 }
 
+/// Judge a joining client's version stamp against this host's (issue #1111).
+///
+/// The host half of the Phoenix join handshake. `server.html` hands over the
+/// `<protocol>/<content_id>/<content_epoch>` field a joiner declared over its
+/// DataChannel and gets back `{"ok":true,…}` or `{"ok":false,"code":…,…}`; an
+/// empty string means the client declared nothing, which is admitted — see
+/// [`crate::delivery::check_join_stamp`] for why.
+///
+/// This export is the reason the verdict is not re-implemented in JavaScript.
+/// The rendezvous service's version advice is discovery help; the authority
+/// stays `delivery::stamp::check_client_stamp`, the same pin the native host
+/// enforces over HTTP.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_check_client_stamp(client_stamp: String) -> String {
+    let manifest_toml =
+        crate::entities::config_cache::get_scenario_manifest_toml().unwrap_or_default();
+    let host = crate::delivery::stamp::DeliveryStamp::for_manifest(&manifest_toml);
+    let verdict = crate::delivery::check_join_stamp(&host, Some(client_stamp.as_str()));
+    crate::core::codec::encode_join_verdict(&verdict, &host)
+}
+
 /// Return the Rhai host-fn signature registry for the scenario script editor
 /// (issue #983, Rhai M5).
 ///

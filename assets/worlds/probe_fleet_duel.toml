@@ -7,8 +7,9 @@
 #     ship and treats the second row as an ordinary NPC, exactly as every other
 #     world does — the roster decides how many of them are crewed hulls. A fleet
 #     of two crews one each, in slot order.
-#   * A hostile third party, spawned from script, so both fleet ships have
-#     something to shoot at. Combat is what makes the cross-host digest
+#   * A hostile third party, spawned from script CLOSE ENOUGH TO ENGAGE, so
+#     both fleet ships have something to shoot at within a probe-length run.
+#     Combat is what makes the cross-host digest
 #     comparison worth making: it draws from `SimRng`'s beam/torpedo/jitter
 #     streams and mints projectile ids mid-run, so a peer that ordered one
 #     tick's input differently diverges within a few ticks rather than silently
@@ -63,7 +64,7 @@ fn on_spawn(ctx) {
     ctx.effects.spawn_entity(#{
         template_path: "assets/entities/alliance_cruiser.toml",
         name: "fleet_probe_hostile",
-        position: [30, 0, 220],
+        position: [30, 0, 55],
         overrides: #{ faction: "cccccccc-3333-4333-8333-cccccccccccc" }
     });
 }

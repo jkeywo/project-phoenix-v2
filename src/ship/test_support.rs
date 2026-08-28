@@ -154,6 +154,20 @@ pub fn test_app() -> App {
         .spawn((
             Ship,
             LocalShip,
+            // What `world_setup::insert_player_core_bundle` gives every ship in
+            // the fleet (issue #1116). These used to arrive as `LocalShip`'s
+            // `#[require]`s; they are now explicit on the player bundle, because
+            // making their PRESENCE follow the marker would give two hosts of
+            // one mission different component sets on the same hull. A fixture
+            // that wants the human-seeking and detail-floor resolvers to run —
+            // they are scoped to ships a host in the fleet flies — has to look
+            // like one.
+            (
+                crate::lockstep::FleetSlotOf(crate::command_admission::HostSlot::SOLO),
+                crate::ship_plugin::HumanSeekingHosts::default(),
+                crate::ship_plugin::VisitingStationHosts::default(),
+                crate::ship_plugin::ScenarioDetailFloor::default(),
+            ),
             Transform::default(),
             ShipPhysics::default(),
             ShipConfigComponent::default(),
@@ -719,6 +733,20 @@ pub fn test_app_with_engine_hull() -> App {
         .spawn((
             Ship,
             LocalShip,
+            // What `world_setup::insert_player_core_bundle` gives every ship in
+            // the fleet (issue #1116). These used to arrive as `LocalShip`'s
+            // `#[require]`s; they are now explicit on the player bundle, because
+            // making their PRESENCE follow the marker would give two hosts of
+            // one mission different component sets on the same hull. A fixture
+            // that wants the human-seeking and detail-floor resolvers to run —
+            // they are scoped to ships a host in the fleet flies — has to look
+            // like one.
+            (
+                crate::lockstep::FleetSlotOf(crate::command_admission::HostSlot::SOLO),
+                crate::ship_plugin::HumanSeekingHosts::default(),
+                crate::ship_plugin::VisitingStationHosts::default(),
+                crate::ship_plugin::ScenarioDetailFloor::default(),
+            ),
             Transform::default(),
             ShipPhysics::default(),
             ShipConfigComponent::default(),

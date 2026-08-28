@@ -64,7 +64,7 @@ const WORLD: &str = "assets/worlds/probe_fleet_duel.toml";
 /// Long enough that both fleet ships have acquired the hostile, manoeuvred and
 /// traded fire, so the comparison covers per-victim RNG draws and mid-run
 /// projectile mints rather than two hulls coasting.
-const TICKS: u64 = 600;
+const TICKS: u64 = 1200;
 
 const SEED: u64 = 1_116_026;
 

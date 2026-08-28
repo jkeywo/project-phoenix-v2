@@ -780,6 +780,16 @@ mod tests {
         let mut app = integrator_only_app();
         let local = spawn_integrator_ship(&mut app, ControlSource::Human, true, 0.0, 1.0, 0.0);
         let remote = spawn_integrator_ship(&mut app, ControlSource::Human, false, 0.0, 1.0, 0.0);
+        // `BankConfigResource::default()` authors `max_bank_deg = 0.0` — a hull
+        // that does not lean — so both ships would hold roll at exactly zero and
+        // the comparison below would be two zeroes agreeing. Give both the same
+        // banking hull, which is what the precondition then checks.
+        for entity in [local, remote] {
+            app.world_mut().entity_mut(entity).insert(BankConfigResource {
+                max_bank_deg: 30.0,
+                ..BankConfigResource::default()
+            });
+        }
 
         for _ in 0..5 {
             tick(&mut app);

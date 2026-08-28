@@ -211,19 +211,34 @@ fn publish_helm_blackboard(
         // Live helm radar range: base config range scaled by the dedicated
         // `HelmRadarRange` modifier, which `apply_radar_damage_modifiers`
         // keeps in sync with the `helm-radar` system's damage tier each tick
-        // — for every ship, not just the player. The base range is the
-        // player-only client config for the LocalShip (unchanged) and the
-        // ship's own authored `[helm_console.radar] range` for an NPC.
+        // — for every ship, not just the player.
+        //
+        // The base range is the ship's OWN authored `[helm_console.radar]
+        // range`, whoever is looking at it (issue #1116). It used to be the
+        // player-only client config for the `LocalShip` and the section for
+        // everything else — which is the same number spelled twice, since
+        // `lobby::server` builds that resource's `helm_radar_range` from the
+        // very same `hc.effective_radar_range()`. The two spellings stopped
+        // being interchangeable the moment there was a second host: each tags a
+        // DIFFERENT ship `LocalShip`, so each would hand its own hull the
+        // client-config number and the peer's hull the section number — and the
+        // helm AI reads this field (`ship::helm_ai::helm_ai_radar_range`), so
+        // the two hosts ran one ship's AI on two different sensor horizons.
+        //
+        // The client config stays as the fallback for a `LocalShip` whose hull
+        // authors no `[helm_console.radar]` at all, which is the bare-fixture
+        // shape and the only case where the two ever disagreed.
         let radar_mult = modifiers
             .map(|m| m.get(&ModifierSlot::HelmRadarRange))
             .unwrap_or(1.0);
-        let base_radar_range = if is_local {
-            ship_client_config.0.helm_radar_range
-        } else {
-            helm_section
-                .map(|hc| hc.0.effective_radar_range())
-                .unwrap_or(0.0)
-        };
+        let base_radar_range = helm_section
+            .map(|hc| hc.0.effective_radar_range())
+            .filter(|range| *range > 0.0)
+            .unwrap_or(if is_local {
+                ship_client_config.0.helm_radar_range
+            } else {
+                0.0
+            });
         let radar_range = base_radar_range * radar_mult;
 
         // ── Hostile weapon arcs (issue #874) ────────────────────────────────

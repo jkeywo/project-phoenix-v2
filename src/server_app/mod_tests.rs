@@ -581,6 +581,16 @@ fn test_app() -> App {
         .id();
     // Insert per-entity components (Bundle limit).
     app.world_mut().entity_mut(ship).insert((
+        // What `world_setup::insert_player_core_bundle` gives every ship in the
+        // fleet (issue #1116). The three resolver inputs used to arrive as
+        // `LocalShip`'s `#[require]`s; the slot is what scopes the fleet-wide
+        // publishers to a crewed hull rather than to every NPC.
+        (
+            crate::lockstep::FleetSlotOf(crate::command_admission::HostSlot::SOLO),
+            crate::ship_plugin::HumanSeekingHosts::default(),
+            crate::ship_plugin::VisitingStationHosts::default(),
+            crate::ship_plugin::ScenarioDetailFloor::default(),
+        ),
         ShipImpulse::default(),
         ShipBoost::default(),
         crate::modifiers::ShipModifiers::new(),
@@ -6315,6 +6325,10 @@ fn the_local_ship_doctrine_pool_reopens_its_raid_after_the_attacked_window() {
         .world_mut()
         .spawn((
             LocalShip,
+            // The publisher is scoped to ships a host in the FLEET flies since
+            // issue #1116 — a solo host's own hull is a fleet of one, and an
+            // NPC is not in the fleet at all.
+            crate::lockstep::FleetSlotOf(crate::command_admission::HostSlot::SOLO),
             BehaviourSection(behaviour),
             crate::entities::spawner::EntitySystemHull(
                 crate::ship::damage::SystemHull::from_config(&[(

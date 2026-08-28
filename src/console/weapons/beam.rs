@@ -1967,11 +1967,25 @@ pub(crate) fn tick_beams_apply_damage(
                         base_damage as f32,
                         state.shield_pierce,
                     );
-                    let bearing = if target_is_local {
-                        // Player shield uses bearing-based routing to the
-                        // appropriate facing. Fall back to the shooter's
-                        // own position when the target has no Transform
-                        // (bearing = 0.0 in that degenerate case).
+                    // Which facing takes the hit, from the shooter's bearing on
+                    // the target — for EVERY target, whoever is looking at it
+                    // (issue #1116).
+                    //
+                    // This used to be `if target_is_local`, with an `else 0.0`
+                    // justified as "an NPC shield defaults to num_facings=1, so
+                    // bearing doesn't matter". True of an NPC and false of a
+                    // FLEET: a peer's player hull has four facings and is not
+                    // `LocalShip` here, so the host that does not project it
+                    // routed every hit to one arc while the host that does
+                    // routed it by bearing. The two then leaked different
+                    // amounts through to hull, and the fleet diverged over a
+                    // single point of damage.
+                    //
+                    // Computing it unconditionally costs one bearing per hit
+                    // and changes nothing for a single-facing shield, where
+                    // every bearing selects the same arc. It falls back to 0.0
+                    // when the target has no Transform, as it always did.
+                    let bearing = {
                         let target_yaw = target_physics_opt.map(|p| p.yaw).unwrap_or(0.0);
                         match target_tf {
                             Some(tf) => crate::weapons::shield::attacker_bearing_relative(
@@ -1983,10 +1997,6 @@ pub(crate) fn tick_beams_apply_damage(
                             ),
                             None => 0.0,
                         }
-                    } else {
-                        // NPC shield defaults to num_facings=1 — bearing
-                        // doesn't matter for a single facing.
-                        0.0
                     };
                     let leak = shields.0.apply_damage(absorbed.round() as i32, bearing);
                     let shielded = (absorbed - leak as f32).max(0.0);

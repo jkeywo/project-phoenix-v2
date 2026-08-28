@@ -357,16 +357,21 @@ pub fn resolve_human_seeking_hosts(
                     .map(|(id, _)| format!("fleet:{}:{}", slot.0.slot_id(), id.0))
             }
         };
-        let seat_is_available = |station: &crate::core::messages::StationId| -> bool {
+        // Whether `candidate` can host the VISITING station `visiting`. Two
+        // stations, deliberately: eligibility is a fact about the person and the
+        // station they would be visiting, not about the seat they are sitting in.
+        let seat_is_available = |candidate: &crate::core::messages::StationId,
+                                 visiting: &crate::core::messages::StationId|
+         -> bool {
             if local_crew {
-                sessions.0.holder_for_station(station).is_some_and(|tok| {
-                    !sessions.0.is_afk(tok) && sessions.0.is_eligible(tok, station)
+                sessions.0.holder_for_station(candidate).is_some_and(|tok| {
+                    !sessions.0.is_afk(tok) && sessions.0.is_eligible(tok, visiting)
                 })
             } else {
                 // AFK and eligibility are live local facts about a live local
                 // player. A peer's seat is exactly as crewed as the roster
                 // froze it; anything finer is #1119's tick-stamped event.
-                frozen_crew.iter().any(|(id, _)| id == station)
+                frozen_crew.iter().any(|(id, _)| id == candidate)
             }
         };
         let config = &ship_config.0;
@@ -427,7 +432,7 @@ pub fn resolve_human_seeking_hosts(
                 // Pure per-tick recompute, so an AFK holder is dropped as a host
                 // deterministically the moment they step away and re-included the
                 // tick after they return (AC3/AC4).
-                |candidate| seat_is_available(candidate),
+                |candidate| seat_is_available(candidate, &station.id),
                 &scenario_floor.0,
             );
             if assignment.host.as_ref() == Some(&station.id) {

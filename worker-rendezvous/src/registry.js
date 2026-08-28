@@ -21,13 +21,14 @@
  * host → service           service → host              service → client
  *   host-open                hosted                      resolved
  *   host-admission           peer-joined                 joined
- *   signal                   peer-left                   signal
- *   host-close               signal                      closed
- *   relay                    error                       error
- *                            relay-peer                  relay-ready
- * client → service           relay-peer-left             relay-closed
- *   resolve | join |         relay                       relay
- *   signal | leave |                                     relay-degraded
+ *   rotate                   peer-left                   signal
+ *   signal                   signal                      closed
+ *   host-close               error                       error
+ *   relay                    relay-peer                  relay-ready
+ *                            relay-peer-left             relay-closed
+ * client → service           relay                       relay
+ *   resolve | join |                                     relay-degraded
+ *   signal | leave |
  *   relay-open | relay |
  *   relay-close
  *
@@ -35,7 +36,8 @@
  * than a second route: they carry OPAQUE game payloads over the same socket
  * when a joiner's direct WebRTC ladder is exhausted. Everything about how they
  * are bounded, and the load-bearing rule that this service may never learn what
- * is inside a payload, lives in src/relay.js.
+ * is inside a payload, lives in src/relay.js. `rotate` is issue #1115's, sitting
+ * in the host column with the reclaim `resume` on `host-open` (both below).
  *
  * `resolve` and `join` carry an optional `namespace` naming which typed field
  * the code was entered into — the crew field on a phone, the fleet field on a
@@ -44,24 +46,57 @@
  * other kind of code" answerable now that BOTH namespaces are joinable: a fleet
  * code is a perfectly good record, just not one a phone may attach to.
  *
+ * `host-open` carries an optional `resume: { suffix, secret }` (issue #1115):
+ * a host asking for the SAME suffix it held before its signalling socket died,
+ * proven with the one-time secret its own earlier `hosted` frame carried. See
+ * "code lifecycle" below. `rotate` is the operator's explicit lever — mint this
+ * LIVE record's host a brand-new suffix in place, dropping the old one for
+ * good immediately (issue #1115 AC2/AC3). Neither needs a `v` bump: an older
+ * host simply never sends them, and the registry answers exactly as it always
+ * has when it does not see them.
+ *
  * Failures are always an `error` frame naming the request and one stable
  * machine `reason`; the phone maps that reason to a strings.csv id through
  * gui/join-code.js's `reasonStringId`, so the service never ships prose.
  *
+ * ── Code lifecycle (issue #1115) ────────────────────────────────────────────
+ *
+ * A record no longer dies the instant its host's SOCKET does. `hostOpen`
+ * mints every record a one-time reclaim `secret` (32 lowercase hex
+ * characters, the session-token shape — never sent to a joiner, never stored
+ * anywhere but this record and the host's own transport-plane memory). An
+ * EXPLICIT `host-close` still drops the record for real and immediately, the
+ * same as always — a deliberate teardown has nothing to reclaim. A socket
+ * merely dying — `disconnect()`, with no `host-close` frame ever seen — instead
+ * holds the record in GRACE (`enterGrace`) for the authored
+ * `reclaim_grace_seconds`: no live host to relay signalling to (a `join`
+ * against it answers the retryable `unreachable`, same as any other transient
+ * link failure), but the suffix, its secret, its admission state and its
+ * presence all survive untouched. `hostOpen`'s `resume` handling is the only
+ * way back in before the deadline; a secret that does not match burns the
+ * grace-held record outright (denying further guesses) and falls through to
+ * an ordinary fresh mint, exactly as if `resume` had never been sent.
+ *
+ * This is still bounded by the Durable Object's own lifetime, and deliberately
+ * so: the secret lives in the SAME in-memory record as everything else, so an
+ * instance eviction (rather than an ordinary socket drop) loses it along with
+ * the record — there is no persistent store backing this, and #1115 does not
+ * add one.
+ *
  * ── What v1 deliberately does NOT do ────────────────────────────────────────
  *
  * All state here is IN MEMORY, in one Durable Object instance: records die
- * with the instance, and nothing is written to storage. That is the whole of
- * #1111's scope. A code therefore cannot outlive its host socket, survive a
- * worker redeploy, or be rebound to a replacement host — code rotation and
- * stable-code-across-a-drop are #1115 and #1120, and they are what would add
- * persistence. The `record_ttl_seconds` sweep below is not persistence: it is
- * an idle timeout measured from `lastSeen`, refreshed by every inbound frame
- * from the record's own host, not from when the record was created — so a
- * host that has been live for days is never swept merely for being old. It
- * catches the case a `close` event never arrived for (an evicted instance, a
- * half-open socket): the host has gone quiet, and once nothing has been heard
- * from it for that long, the code cannot be held forever.
+ * with the instance, and nothing is written to storage. A code therefore
+ * cannot survive a worker redeploy or a Durable Object eviction, and it cannot
+ * be rebound to a REPLACEMENT host — only reclaimed by the one that minted it,
+ * within the grace window above. The `record_ttl_seconds` sweep below is a
+ * SEPARATE, much longer backstop: an idle timeout measured from `lastSeen`,
+ * refreshed by every inbound frame from the record's own host, not from when
+ * the record was created — so a host that has been live for days is never
+ * swept merely for being old. It catches the case where the socket dies AND
+ * the host never comes back to reclaim within its grace window either — the
+ * record is still held (now un-hostable) until this sweep finally gives up on
+ * it.
  *
  * The bounds in the authored `[limits]` table are the other half of that
  * posture. This is an unauthenticated public endpoint whose codes are private
@@ -131,6 +166,31 @@ function defaultRandomInt(n) {
 }
 
 /**
+ * A fresh reclaim secret for one record (issue #1115): 32 lowercase hex
+ * characters, the same shape AGENTS.md rule 2 uses for a session token.
+ * Deliberately NOT drawn through the injectable `randomInt` the suffix mint
+ * uses — that seam exists so tests can SCRIPT an exact, often deliberately
+ * weak or repeating, sequence of suffix draws (`rendezvous-registry.test.js`
+ * scripts collisions, denied words, exhaustion), and a security-sensitive
+ * secret sharing it would either inherit that weakness or silently shift
+ * every scripted suffix sequence by 32 draws the moment this function starts
+ * being called. `crypto` directly, exactly like {@link defaultRandomInt}'s
+ * own fallback, keeps the two fully independent.
+ *
+ * Transport-plane only, same doctrine as the join code itself: never touches
+ * simulation state or a snapshot, never sent to a joiner, handed to the
+ * record's own host exactly once — in the `hosted` frame that mints or
+ * revives it — and never repeated on a later `hosted` (an admission ACK's
+ * reuse of {@link codeOf}, for instance) because the host is expected to
+ * remember it from that first frame.
+ */
+function mintSecret() {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
  * Build a rendezvous registry.
  *
  * @param {object} opts
@@ -162,6 +222,9 @@ export function createRegistry({
   const maxLookups = limits.max_lookups_per_connection || 60;
   const maxPeers = limits.max_peers_per_record || 32;
   const maxCodeLength = limits.max_code_length || 160;
+  // issue #1115: how long a record survives its host's SOCKET dying before
+  // it is dropped for good — see "code lifecycle" above.
+  const reclaimGraceMs = (limits.reclaim_grace_seconds || 120) * 1000;
 
   /**
    * The WebSocket game relay (issue #1113), in its own module because its
@@ -284,8 +347,17 @@ export function createRegistry({
    */
   function expireStale() {
     const cutoff = now() - ttlMs;
+    const graceCutoff = now();
     let frames = [];
     for (const record of [...records.values()]) {
+      // A grace-held record (issue #1115) has its own, much shorter deadline —
+      // checked first and independently of `lastSeen`, which stopped advancing
+      // the moment the host's socket died and would otherwise leave it looking
+      // fresh for the whole idle TTL below.
+      if (record.graceUntil !== null && record.graceUntil <= graceCutoff) {
+        frames = frames.concat(dropRecord(record, 'host-gone'));
+        continue;
+      }
       if (record.lastSeen > cutoff) continue;
       frames = frames.concat(dropRecord(record, 'host-gone'));
     }
@@ -308,6 +380,41 @@ export function createRegistry({
     const version = frame.version === undefined ? versionGuid(data) : frame.version;
     if (!RELEASE_GUID.test(String(version))) {
       return [fail(connId, 'host-open', 'malformed')];
+    }
+
+    // ── Reclaim (issue #1115) ──────────────────────────────────────────────
+    // A `resume` descriptor is this host asking for the SAME suffix it held
+    // before its signalling socket died — see the module doc's "code
+    // lifecycle" section. Anything about it that does not check out (wrong
+    // shape, no matching record, the record is not — or no longer — grace-
+    // held) falls straight through to an ordinary fresh mint below, exactly
+    // as if `resume` had never been sent. A secret that DOES fail to match a
+    // genuinely grace-held record is the one case that does not merely fall
+    // through: that record is burned outright, so a wrong guess cannot be
+    // retried against the same suffix, and this same host presenting the
+    // same wrong secret again gets a fresh code exactly as a first-time host
+    // would.
+    const resume = frame.resume;
+    if (resume && typeof resume === 'object'
+        && typeof resume.suffix === 'string' && typeof resume.secret === 'string') {
+      const held = records.get(recordKey(project, version, resume.suffix));
+      if (held && held.namespace === namespace
+          && held.graceUntil !== null && held.graceUntil > now()) {
+        if (held.secret === resume.secret) {
+          held.host = connId;
+          held.graceUntil = null;
+          held.lastSeen = now();
+          conn.key = held.key;
+          return [
+            out(connId, {
+              type: 'hosted',
+              code: { ...codeOf(held), secret: held.secret },
+              admission: held.admission,
+            }),
+          ];
+        }
+        records.delete(held.key);
+      }
     }
 
     const minted = mintSuffix(
@@ -344,6 +451,9 @@ export function createRegistry({
       // stays alive for as long as its host keeps talking, however long that
       // is, and only a host that has genuinely gone quiet gets swept.
       lastSeen: now(),
+      // issue #1115 — see the module doc's "code lifecycle" section.
+      secret: mintSecret(),
+      graceUntil: null,
     };
     records.set(key, record);
     conn.key = key;
@@ -351,13 +461,7 @@ export function createRegistry({
     return [
       out(connId, {
         type: 'hosted',
-        code: {
-          full: composeJoinCode({ project, version, suffix: minted.suffix }),
-          suffix: minted.suffix,
-          project,
-          version,
-          namespace,
-        },
+        code: { ...codeOf(record), secret: record.secret },
         admission: record.admission,
       }),
     ];
@@ -384,7 +488,74 @@ export function createRegistry({
   function hostClose(connId) {
     const record = recordFor(connId);
     if (!record || record.host !== connId) return [];
+    // A DELIBERATE close, unlike a socket merely dying (see `enterGrace`) —
+    // there is nothing here to reclaim, so this drops the record for real and
+    // immediately, exactly as it always has.
     return dropRecord(record, 'host-gone');
+  }
+
+  /**
+   * Explicit rotation (issue #1115 AC2/AC3): mint this record's host a BRAND
+   * NEW suffix, in place. The old record dies for good, immediately — a
+   * stale lookup on the old suffix answers `unknown` from the very next
+   * frame, not after some grace window — and the same connId keeps hosting,
+   * under the new suffix, with a fresh secret (the old one dies with the old
+   * suffix, same as everything else about it).
+   *
+   * The registry has no notion of "a mission is running" — GamePhase never
+   * reaches this module — so the operator-facing "only between missions"
+   * rule (AC2) is enforced by the CALLER before this frame is ever sent (see
+   * server.html's `codesRotatable`), not here. What this function enforces is
+   * the one fact the registry actually owns: only a record's own LIVE host
+   * may rotate it — the same guard `hostAdmission` applies, and for the same
+   * reason `admitHost`'s duplicate-`hello` note gives on the fleet side: a
+   * grace-held record has no live connId that could ever satisfy it.
+   */
+  function hostRotate(connId) {
+    const record = recordFor(connId);
+    if (!record || record.host !== connId) return [fail(connId, 'rotate', 'not-hosting')];
+    const minted = mintSuffix(
+      data,
+      (s) => records.has(recordKey(record.project, record.version, s)),
+      randomInt,
+    );
+    if (!minted.ok) return [fail(connId, 'rotate', minted.reason)];
+
+    // The peers of the OLD code are told it is gone — the same 'host-gone'
+    // story a genuine drop tells them. The rotating host's OWN
+    // `error`/`unreachable` notification (dropRecord's ordinary "your record
+    // is gone" telling) is filtered out: this host asked for this, and
+    // reporting its own rotation as a service fault would trip whatever else
+    // that host's `onError` reacts to.
+    const dropped = dropRecord(record, 'host-gone').filter((f) => f.to !== connId);
+
+    const key = recordKey(record.project, record.version, minted.suffix);
+    const fresh = {
+      key,
+      project: record.project,
+      version: record.version,
+      suffix: minted.suffix,
+      namespace: record.namespace,
+      host: connId,
+      admission: 'open',
+      peers: new Set(),
+      createdAt: now(),
+      lastSeen: now(),
+      secret: mintSecret(),
+      graceUntil: null,
+    };
+    records.set(key, fresh);
+    const conn = conns.get(connId);
+    if (conn) conn.key = key;
+
+    return [
+      ...dropped,
+      out(connId, {
+        type: 'hosted',
+        code: { ...codeOf(fresh), secret: fresh.secret },
+        admission: fresh.admission,
+      }),
+    ];
   }
 
   function dropRecord(record, reason) {
@@ -406,17 +577,67 @@ export function createRegistry({
     relay.detach(record.host);
     record.peers.clear();
     records.delete(record.key);
-    const hostConn = conns.get(record.host);
-    if (hostConn) hostConn.key = null;
-    // Tell the host too, not just its joiners — an idle-past-TTL sweep drops
-    // a record the host never asked to close, and until now the host's own
-    // viewscreen kept showing a code the service had already forgotten.
-    // 'error'/'unreachable' rather than 'closed': it is the frame
-    // createRendezvousHost's host-side `handle()` already turns into "the
-    // record is gone" teardown (gui/rendezvous-transport.js), the same
-    // reason its own socket.onerror/onclose report, so a stale code clears
-    // on its own instead of surviving the record that backed it.
-    frames.push(out(record.host, { type: 'error', reason: 'unreachable' }));
+    // Grace-held (issue #1115): no live host connId to tell — the host that
+    // is going to hear about this is whichever one reclaims (or fails to)
+    // next, not a connection that already left.
+    if (record.host) {
+      const hostConn = conns.get(record.host);
+      if (hostConn) hostConn.key = null;
+      // Tell the host too, not just its joiners — an idle-past-TTL sweep drops
+      // a record the host never asked to close, and until now the host's own
+      // viewscreen kept showing a code the service had already forgotten.
+      // 'error'/'unreachable' rather than 'closed': it is the frame
+      // createRendezvousHost's host-side `handle()` already turns into "the
+      // record is gone" teardown (gui/rendezvous-transport.js), the same
+      // reason its own socket.onerror/onclose report, so a stale code clears
+      // on its own instead of surviving the record that backed it.
+      frames.push(out(record.host, { type: 'error', reason: 'unreachable' }));
+    }
+    return frames;
+  }
+
+  /**
+   * This record's host socket died WITHOUT an explicit `host-close` — a
+   * transient signalling loss (issue #1115): a dropped WS, a Durable Object
+   * hiccup, a phone radio killing a backgrounded tab's connection. The record
+   * SURVIVES — suffix, secret, admission state and presence untouched — held
+   * for `reclaimGraceMs` with no live host to relay signalling to. A `join`
+   * against it during that window answers the retryable `unreachable` (see
+   * `clientJoin`) rather than the suffix going cold outright, and a joiner
+   * already mid-reconnect keeps retrying through exactly that on its own
+   * backoff. `hostOpen`'s `resume` handling is the only way back in before
+   * the deadline; nobody presenting it in time means `expireStale()`
+   * eventually drops this record for good, the same as any other whose host
+   * never comes back.
+   */
+  function enterGrace(record) {
+    record.host = null;
+    record.graceUntil = now() + reclaimGraceMs;
+    return [];
+  }
+
+  /**
+   * A host socket dying holds its record in grace (issue #1115), but a RELAYED
+   * game link cannot outlive that socket the way a direct DataChannel can (issue
+   * #1113): the worker has no host socket left to forward relayed frames to. So
+   * every peer relaying through this record is told the relay is gone
+   * (`relay-closed`, which its transport turns into an ordinary link failure so
+   * it reconnects and retries the — now `unreachable`, retryable — code) and
+   * detached, along with the host's own relay mailbox. The record itself
+   * survives; the direct-WebRTC peers are left untouched, their P2P channels
+   * outliving the signalling socket, which is the whole point of grace. This
+   * mirrors `dropRecord`'s relay teardown without dropping the record or
+   * closing its direct peers.
+   */
+  function detachGraceRelays(record) {
+    const frames = [];
+    for (const peer of record.peers) {
+      if (relay.keyFor(peer) === record.key) {
+        frames.push(out(peer, { type: 'relay-closed', reason: 'host-gone' }));
+        relay.detach(peer);
+      }
+    }
+    relay.detach(record.host);
     return frames;
   }
 
@@ -456,6 +677,13 @@ export function createRegistry({
     const found = resolveRequest(frame.code, askedNamespace(frame));
     if (!found.ok) return [fail(connId, 'join', found.reason)];
     const record = found.record;
+    // A record grace-held after its host's socket died (issue #1115) is still
+    // a perfectly good record — its admission state says so — but there is
+    // nobody to relay signalling to right now. `unreachable` is retryable
+    // (gui/rendezvous-transport.js's `isRetryableReason`), so a joiner already
+    // mid-reconnect just keeps retrying on its own backoff until either the
+    // original host reclaims it or the grace window runs out for good.
+    if (!record.host) return [fail(connId, 'join', 'unreachable')];
     if (record.admission !== 'open') return [fail(connId, 'join', 'admission-closed')];
     // A full crew list reads to the guest exactly like a closed one, and it is
     // the same sentence on their phone. The cap is not a party size — it is
@@ -492,11 +720,21 @@ export function createRegistry({
     if (conn) conn.key = null;
     if (!record) {
       // A relay attachment with no record left is bookkeeping from a record
-      // that has already gone; drop it rather than leaking a mailbox.
+      // that has already gone (issue #1113); drop it rather than leaking a
+      // mailbox.
       relay.detach(connId);
       return [];
     }
-    if (record.host === connId) return dropRecord(record, 'host-gone');
+    // The host's socket merely dying — this is `disconnect()`'s only route
+    // into `leave()`, never the explicit `host-close` frame (`hostClose`
+    // above handles that one directly) — holds the record in grace rather
+    // than dropping it for good. See `enterGrace` and the module doc's "code
+    // lifecycle" section (issue #1115). A relayed game link (issue #1113)
+    // cannot outlive that dead host socket the way a direct DataChannel can,
+    // so `detachGraceRelays` first tells this record's relay peers the relay
+    // is gone and detaches them; the record itself is what survives for
+    // reclaim.
+    if (record.host === connId) return [...detachGraceRelays(record), ...enterGrace(record)];
     const relayed = detachRelay(connId, 'peer-left');
     if (!record.peers.delete(connId)) return relayed;
     return [...relayed, out(record.host, { type: 'peer-left', peer: connId })];
@@ -752,6 +990,7 @@ export function createRegistry({
         switch (frame.type) {
           case 'host-open': return hostOpen(connId, frame);
           case 'host-admission': return hostAdmission(connId, frame);
+          case 'rotate': return hostRotate(connId);
           case 'host-close': return hostClose(connId);
           case 'resolve': return clientResolve(connId, frame);
           case 'join': return clientJoin(connId, frame);

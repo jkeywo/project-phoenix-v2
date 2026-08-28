@@ -559,15 +559,62 @@ describe('signalling relay', () => {
 });
 
 describe('code lifecycle', () => {
-  it('tells joiners the host is gone and frees the code when the host socket drops', () => {
+  it('holds the record in grace rather than freeing it when the host socket merely dies (issue #1115)', () => {
+    // The PeerJS-less "the record is really gone" story now only applies once
+    // the reclaim grace window has actually run out (see the next test) or the
+    // host deliberately says `host-close` (the test after that). A socket
+    // that simply dies — a Durable Object hiccup, a phone radio killing a
+    // backgrounded viewscreen tab's WS — holds the record instead.
     const h = harness();
     const code = openHost(h);
     h.connect('phone', ROLE_CLIENT);
     h.send('phone', { type: 'join', code: code.suffix });
+    const seenBefore = h.frames('phone').length;
+
     h.disconnect('host-1');
+    // Nothing is said to an already-admitted joiner at the moment of loss —
+    // its DataChannel is a direct link the registry knows nothing about, and
+    // a signalling blip is not the record actually dying.
+    expect(h.frames('phone')).toHaveLength(seenBefore);
+    expect(h.reg.snapshot()).toHaveLength(1);
+
+    // The suffix is still a perfectly good, findable record…
+    h.send('phone', { type: 'resolve', code: code.suffix });
+    expect(h.last('phone', 'resolved')).toMatchObject({ admission: 'open' });
+    // …but nobody can actually JOIN it: there is no live host to admit
+    // anyone, and `unreachable` is the same retryable answer a genuine
+    // service blip already gives a joiner's own backoff loop.
+    h.connect('late', ROLE_CLIENT);
+    h.send('late', { type: 'join', code: code.suffix });
+    expect(h.last('late', 'error')).toMatchObject({ request: 'join', reason: 'unreachable' });
+  });
+
+  it('drops the record for good once the grace window runs out with nobody reclaiming it', () => {
+    let clock = 1_000_000;
+    const h = harness({ now: () => clock });
+    const code = openHost(h);
+    h.connect('phone', ROLE_CLIENT);
+    h.send('phone', { type: 'join', code: code.suffix });
+    h.disconnect('host-1');
+
+    clock += DATA.limits.reclaim_grace_seconds * 1000 + 1;
+    h.send('phone', { type: 'resolve', code: code.suffix });
+    expect(h.last('phone', 'closed')).toMatchObject({ reason: 'host-gone' });
+    expect(h.last('phone', 'error')).toMatchObject({ reason: 'unknown' });
+    expect(h.reg.snapshot()).toHaveLength(0);
+  });
+
+  it('still drops the record for real and immediately on an EXPLICIT host-close', () => {
+    // A deliberate teardown has nothing to reclaim — only a socket that
+    // merely dies gets the grace hold above.
+    const h = harness();
+    const code = openHost(h);
+    h.connect('phone', ROLE_CLIENT);
+    h.send('phone', { type: 'join', code: code.suffix });
+
+    h.send('host-1', { type: 'host-close' });
     expect(h.last('phone', 'closed')).toMatchObject({ reason: 'host-gone' });
     expect(h.reg.snapshot()).toHaveLength(0);
-    // and the freed suffix is unknown again rather than half-alive
     h.send('phone', { type: 'resolve', code: code.suffix });
     expect(h.last('phone', 'error')).toMatchObject({ reason: 'unknown' });
   });
@@ -601,5 +648,233 @@ describe('code lifecycle', () => {
     // The suffix IS the private client code. A view that carries it is a
     // diagnostics endpoint one route away from handing out every live session.
     expect(JSON.stringify(h.reg.snapshot())).not.toContain(code.suffix);
+  });
+});
+
+describe('code reclaim (issue #1115)', () => {
+  it('hands the reclaim secret to the host that minted the record, and to nobody else', () => {
+    const h = harness();
+    const code = openHost(h);
+    expect(code.secret).toMatch(/^[0-9a-f]{32}$/);
+    h.connect('phone', ROLE_CLIENT);
+    h.send('phone', { type: 'join', code: code.suffix });
+    // Never leaks to a joiner, on either the join or the presence frame the
+    // host receives about it.
+    expect(h.last('phone', 'joined')).not.toHaveProperty('secret');
+    expect(h.last('host-1', 'peer-joined')).not.toHaveProperty('secret');
+    // Not repeated on a later `hosted` that is only an admission ACK, either
+    // — the host is expected to remember it from the first frame.
+    h.send('host-1', { type: 'host-admission', state: 'closed' });
+    expect(h.last('host-1', 'hosted')).not.toHaveProperty('code.secret');
+  });
+
+  it('revives the exact same record when the original host presents the secret in time', () => {
+    const h = harness();
+    const code = openHost(h);
+    h.connect('phone', ROLE_CLIENT);
+    h.send('phone', { type: 'join', code: code.suffix });
+    // Admission state is this fleet/host's own, and must survive the round
+    // trip untouched — a reclaim is not a re-registration from scratch.
+    h.send('host-1', { type: 'host-admission', state: 'closed' });
+    h.disconnect('host-1');
+
+    h.connect('host-1b', ROLE_HOST);
+    h.send('host-1b', {
+      type: 'host-open',
+      namespace: NAMESPACE_CLIENT,
+      resume: { suffix: code.suffix, secret: code.secret },
+    });
+    const revived = h.last('host-1b', 'hosted');
+    expect(revived).toMatchObject({
+      code: { suffix: code.suffix, full: code.full },
+      admission: 'closed',
+    });
+    // The secret itself survives a reclaim unchanged — only an explicit
+    // rotation mints a new one.
+    expect(revived.code.secret).toBe(code.secret);
+
+    // And the record really is live again: a join now succeeds (admission
+    // has to be reopened first — it was closed above, same as any ordinary
+    // operator lever) and reaches the reviving connection as host.
+    h.send('host-1b', { type: 'host-admission', state: 'open' });
+    h.send('phone', { type: 'join', code: code.suffix });
+    expect(h.last('host-1b', 'peer-joined')).toMatchObject({ peer: 'phone' });
+  });
+
+  it('burns the grace-held record on a wrong secret, and mints the presenter a fresh one', () => {
+    const h = harness();
+    const code = openHost(h);
+    h.disconnect('host-1');
+
+    h.connect('host-1b', ROLE_HOST);
+    h.send('host-1b', {
+      type: 'host-open',
+      namespace: NAMESPACE_CLIENT,
+      resume: { suffix: code.suffix, secret: 'not-the-right-secret-at-all-00' },
+    });
+    const fresh = h.last('host-1b', 'hosted');
+    expect(fresh.code.suffix).not.toBe(code.suffix);
+
+    // The old suffix is unknown immediately — burned, not merely still
+    // waiting out its grace window.
+    h.connect('phone', ROLE_CLIENT);
+    h.send('phone', { type: 'resolve', code: code.suffix });
+    expect(h.last('phone', 'error')).toMatchObject({ reason: 'unknown' });
+
+    // And presenting the SAME wrong secret again is a second first-time host,
+    // not a second bite at the same guess.
+    h.connect('host-1c', ROLE_HOST);
+    h.send('host-1c', {
+      type: 'host-open',
+      namespace: NAMESPACE_CLIENT,
+      resume: { suffix: code.suffix, secret: 'not-the-right-secret-at-all-00' },
+    });
+    expect(h.last('host-1c', 'hosted').code.suffix).not.toBe(code.suffix);
+    expect(h.last('host-1c', 'hosted').code.suffix).not.toBe(fresh.code.suffix);
+  });
+
+  it('falls through to an ordinary fresh mint rather than stealing a still-LIVE record', () => {
+    // The secret only means something once its record has nobody hosting it.
+    // A live record's own host would never need to resume in the first
+    // place; this proves a stray/forged resume cannot hijack one out from
+    // under a connection that is still there.
+    const h = harness();
+    const code = openHost(h);
+
+    h.connect('impostor', ROLE_HOST);
+    h.send('impostor', {
+      type: 'host-open',
+      namespace: NAMESPACE_CLIENT,
+      resume: { suffix: code.suffix, secret: code.secret },
+    });
+    const minted = h.last('impostor', 'hosted');
+    expect(minted.code.suffix).not.toBe(code.suffix);
+    // The original record is completely undisturbed: still there, still
+    // owned by its real host.
+    expect(h.reg.snapshot()).toHaveLength(2);
+    h.connect('phone', ROLE_CLIENT);
+    h.send('phone', { type: 'resolve', code: code.suffix });
+    expect(h.last('phone', 'resolved')).toMatchObject({ admission: 'open' });
+  });
+
+  it('ignores a resume naming a suffix nobody ever minted, and mints normally', () => {
+    const h = harness();
+    h.connect('host-1', ROLE_HOST);
+    h.send('host-1', {
+      type: 'host-open',
+      namespace: NAMESPACE_CLIENT,
+      resume: { suffix: 'ZZZZZ', secret: 'whatever-was-guessed-here-000000' },
+    });
+    const minted = h.last('host-1', 'hosted');
+    expect(minted.code.suffix).toMatch(new RegExp(`^[${DATA.suffix.alphabet}]{5}$`));
+  });
+
+  it('keeps a reclaim secret to its own namespace — a crew record cannot revive under the fleet one', () => {
+    const h = harness();
+    const crew = openHost(h, 'crew-host', NAMESPACE_CLIENT);
+    h.disconnect('crew-host');
+
+    h.connect('fleet-host', ROLE_HOST);
+    h.send('fleet-host', {
+      type: 'host-open',
+      namespace: NAMESPACE_SERVER,
+      resume: { suffix: crew.suffix, secret: crew.secret },
+    });
+    const minted = h.last('fleet-host', 'hosted');
+    expect(minted.code.namespace).toBe(NAMESPACE_SERVER);
+    expect(minted.code.suffix).not.toBe(crew.suffix);
+  });
+});
+
+describe('explicit rotation (issue #1115 AC2/AC3)', () => {
+  it('mints this record\'s live host a brand-new code, invalidating the old one immediately', () => {
+    const h = harness();
+    const code = openHost(h);
+    h.send('host-1', { type: 'rotate' });
+    const rotated = h.last('host-1', 'hosted');
+    expect(rotated.code.suffix).not.toBe(code.suffix);
+    expect(rotated.code.secret).not.toBe(code.secret);
+    expect(rotated.admission).toBe('open');
+
+    // The OLD suffix is unknown from the very next frame — not a grace hold,
+    // a real drop.
+    h.connect('phone', ROLE_CLIENT);
+    h.send('phone', { type: 'resolve', code: code.suffix });
+    expect(h.last('phone', 'error')).toMatchObject({ reason: 'unknown' });
+    // …and the NEW one is live and joinable, on the same connection.
+    h.send('phone', { type: 'join', code: rotated.code.suffix });
+    expect(h.last('host-1', 'peer-joined')).toMatchObject({ peer: 'phone' });
+  });
+
+  it('tells a peer still mid-signal on the old code that it is gone, without a spurious fault to the rotating host itself', () => {
+    const h = harness();
+    const code = openHost(h);
+    h.connect('waiting', ROLE_CLIENT);
+    h.send('waiting', { type: 'join', code: code.suffix });
+
+    h.send('host-1', { type: 'rotate' });
+    expect(h.last('waiting', 'closed')).toMatchObject({ reason: 'host-gone' });
+    // The rotating host itself does NOT get dropRecord's ordinary
+    // "your record is gone" — it asked for this, and that frame is what
+    // createRendezvousHost's own onError treats as a service fault.
+    expect(h.frames('host-1').filter((f) => f.type === 'error')).toHaveLength(0);
+  });
+
+  it('refuses to rotate a record this connection is not the live host of', () => {
+    const h = harness();
+    openHost(h);
+    h.connect('impostor', ROLE_CLIENT);
+    h.send('impostor', { type: 'rotate' });
+    expect(h.last('impostor', 'error')).toMatchObject({ request: 'rotate', reason: 'not-hosting' });
+
+    // Nor while merely grace-held — the disconnected original host has no
+    // live connId left to ask with, and nobody else may ask on its behalf.
+    h.disconnect('host-1');
+    h.connect('bystander', ROLE_CLIENT);
+    h.send('bystander', { type: 'rotate' });
+    expect(h.last('bystander', 'error')).toMatchObject({ reason: 'not-hosting' });
+  });
+
+  it('touches nothing about another record — not another host\'s code, not another namespace (AC4)', () => {
+    const h = harness();
+    const crew = openHost(h, 'crew-host', NAMESPACE_CLIENT);
+    const fleet = openHost(h, 'fleet-host', NAMESPACE_SERVER);
+    const otherCrew = openHost(h, 'other-crew-host', NAMESPACE_CLIENT, { version: OTHER_RELEASE });
+    h.send('fleet-host', { type: 'host-admission', state: 'closed' });
+
+    h.send('crew-host', { type: 'rotate' });
+    const rotated = h.last('crew-host', 'hosted');
+    expect(rotated.code.suffix).not.toBe(crew.suffix);
+
+    // The fleet record and the other release's crew record are completely
+    // undisturbed by rotating a THIRD, unrelated one — same suffix, same
+    // admission state, still exactly as resolvable as before.
+    h.connect('checker', ROLE_CLIENT);
+    h.send('checker', { type: 'resolve', code: fleet.suffix, namespace: NAMESPACE_SERVER });
+    expect(h.last('checker', 'resolved')).toMatchObject({ admission: 'closed' });
+    h.send('checker', {
+      type: 'resolve',
+      code: composeJoinCode({ project: CLIENT_PROJECT, version: OTHER_RELEASE, suffix: otherCrew.suffix }),
+    });
+    expect(h.last('checker', 'resolved')).toMatchObject({ admission: 'open' });
+    expect(h.reg.snapshot()).toHaveLength(3);
+  });
+
+  it('mints a fresh secret, so the OLD one can no longer reclaim anything', () => {
+    const h = harness();
+    const code = openHost(h);
+    h.send('host-1', { type: 'rotate' });
+    h.disconnect('host-1');
+
+    h.connect('host-1b', ROLE_HOST);
+    h.send('host-1b', {
+      type: 'host-open',
+      namespace: NAMESPACE_CLIENT,
+      resume: { suffix: code.suffix, secret: code.secret },
+    });
+    // The pre-rotation suffix was dropped for real by `rotate` itself, so
+    // there is nothing grace-held left for the old secret to revive — this
+    // is an ordinary fresh mint, same as resuming any other unknown suffix.
+    expect(h.last('host-1b', 'hosted').code.suffix).not.toBe(code.suffix);
   });
 });

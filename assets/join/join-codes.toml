@@ -96,6 +96,18 @@ max_slot_ship_path_length = 160
 # compatibility handshake is in-band, host to phone, and the service stores
 # nothing about either build.)
 max_code_length = 160
+# How long a record survives its host's SIGNALLING SOCKET dying before the
+# service drops it for good (issue #1115). A record normally dies with an
+# EXPLICIT host-close; this is the window an ORDINARY transient loss — a
+# Durable Object hiccup, a phone radio killing a backgrounded tab's socket, a
+# brief network blip — has to reclaim the SAME code (by presenting the
+# resume secret its own `hosted` frame carried) before it goes cold. Distinct
+# from and much shorter than `record_ttl_seconds` above, which is the idle
+# sweep for a record whose close event never arrived at all. 120s comfortably
+# outlasts several rounds of the host's own reconnect backoff
+# (gui/connection-manager.js's nextBackoffDelay: 1s, 2s, 4s, 8s, 16s, 30s,
+# 30s, …) without holding a dead code open indefinitely.
+reclaim_grace_seconds = 120
 
 # ── The WebSocket game relay (issue #1113) ───────────────────────────────────
 # When a joiner's direct WebRTC ladder is exhausted, the SAME rendezvous socket

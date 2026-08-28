@@ -652,22 +652,27 @@ export function createRegistry({
    * A host socket dying holds its record in grace (issue #1115), but a RELAYED
    * game link cannot outlive that socket the way a direct DataChannel can (issue
    * #1113): the worker has no host socket left to forward relayed frames to. So
-   * every peer relaying through this record is told the relay is gone
-   * (`relay-closed`, which its transport turns into an ordinary link failure so
-   * it reconnects and retries the — now `unreachable`, retryable — code) and
-   * detached, along with the host's own relay mailbox. The record itself
-   * survives; the direct-WebRTC peers are left untouched, their P2P channels
-   * outliving the signalling socket, which is the whole point of grace. This
-   * mirrors `dropRecord`'s relay teardown without dropping the record or
-   * closing its direct peers.
+   * a peer relaying through this record does NOT survive into grace — from its
+   * side the record IS gone (there is no held P2P channel to keep, and even on
+   * reclaim it must re-join and re-open its relay from scratch). It is told the
+   * relay is gone (`relay-closed`, which its transport turns into an ordinary
+   * link failure) AND that the record is gone (`closed`), exactly as `dropRecord`
+   * tells it, then detached and dropped from presence. Only the direct-WebRTC
+   * peers are held: their P2P channels outlive the signalling socket, which is
+   * the whole point of grace. The host's own relay mailbox is detached too. This
+   * is `dropRecord`'s per-relay-peer teardown, applied WITHOUT dropping the
+   * record or touching its direct peers.
    */
   function detachGraceRelays(record) {
     const frames = [];
-    for (const peer of record.peers) {
-      if (relay.keyFor(peer) === record.key) {
-        frames.push(out(peer, { type: 'relay-closed', reason: 'host-gone' }));
-        relay.detach(peer);
-      }
+    for (const peer of [...record.peers]) {
+      if (relay.keyFor(peer) !== record.key) continue;
+      frames.push(out(peer, { type: 'relay-closed', reason: 'host-gone' }));
+      frames.push(out(peer, { type: 'closed', reason: 'host-gone' }));
+      relay.detach(peer);
+      record.peers.delete(peer);
+      const c = conns.get(peer);
+      if (c) c.key = null;
     }
     relay.detach(record.host);
     return frames;

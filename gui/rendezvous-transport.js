@@ -150,10 +150,15 @@ export const SNAPSHOT_CHANNEL = 'snapshot';
  * or the BUILD, and re-asking gets the same answer while the guest stares at a
  * spinner. Those go back to the entry field with their own sentence.
  *
- * `host-gone` belongs here on purpose: the record died with its host, and the
- * replacement host was issued a different code, so the honest thing is to say
- * so rather than to retry a name that no longer exists (code rebinding across
- * a host drop is #1115's).
+ * `host-gone` belongs here on purpose: it is only ever sent once a record is
+ * genuinely, finally gone — the reclaim grace window ran out unclaimed, the
+ * host closed deliberately, or the operator rotated the code (issue #1115;
+ * see worker-rendezvous/src/registry.js's `dropRecord`) — so the honest thing
+ * is to say so rather than to retry a name that no longer exists. A record
+ * merely grace-held after a transient socket loss answers a `join` with the
+ * RETRYABLE `unreachable` instead (not in this set), which is what lets a
+ * joiner's own reconnect loop ride out an ordinary blip without ever seeing
+ * this terminal answer.
  */
 const TERMINAL_REASONS = new Set([
   'empty', 'length', 'charset', 'denied', 'malformed',
@@ -499,6 +504,16 @@ export function createRendezvousHost(opts) {
   let closed = false;
   let retryTimer = null;
   let retryAttempt = 0;
+  /**
+   * This host's reclaim secret (issue #1115) — the suffix + secret pair its
+   * own earlier `hosted` frame carried, held across `lostService()` so the
+   * NEXT registration can ask for the SAME code back. Deliberately NOT
+   * cleared alongside `code` in `lostService()`: `code` is what the page
+   * paints (blank while there is genuinely nothing to show), `resumeToken`
+   * is what the wire presents on the way back in, and the two have to
+   * survive independently for reclaim to work at all.
+   */
+  let resumeToken = null;
 
   function signal(to, payload) {
     if (socket && socket.readyState === 1) socket.send(frame('signal', { to, payload }));
@@ -790,14 +805,30 @@ export function createRendezvousHost(opts) {
   function handle(msg) {
     switch (msg.type) {
       case 'ready':
-        // A browser host answers on both rungs; declaring it explicitly is what
-        // lets a host that CANNOT (the native one, which has no WebRTC at all)
-        // declare the truth in the same field rather than by omission.
-        socket.send(frame('host-open', { namespace, transports: ['webrtc', 'ws-relay'] }));
+        socket.send(frame('host-open', {
+          namespace,
+          // A browser host answers on both rungs; declaring it explicitly is
+          // what lets a host that CANNOT (the native one, which has no WebRTC
+          // at all) declare the truth in the same field rather than by
+          // omission (issue #1113).
+          transports: ['webrtc', 'ws-relay'],
+          // issue #1115: present the reclaim secret from a PRIOR registration,
+          // if this host is holding one, so the registry can hand back the
+          // SAME code instead of minting a new one. Absent on this page's
+          // very first registration — there is nothing yet to resume — and
+          // harmless to send on every reconnect after that: a registry that
+          // cannot honour it (grace expired, wrong secret, or simply does not
+          // recognise the field) falls through to an ordinary fresh mint.
+          ...(resumeToken ? { resume: resumeToken } : {}),
+        }));
         break;
       case 'hosted':
         code = msg.code;
         retryAttempt = 0;
+        // Only a registration/reclaim response carries `secret` — an
+        // admission-state ACK reuses the same `hosted` type without one, and
+        // must not clobber the held token with `undefined`.
+        if (msg.code.secret) resumeToken = { suffix: msg.code.suffix, secret: msg.code.secret };
         onLog(`[rendezvous] issued ${code.namespace} code ${code.suffix}`);
         onCode(code);
         break;
@@ -889,7 +920,8 @@ export function createRendezvousHost(opts) {
   }
 
   /**
-   * The record is gone: the socket died, or the service swept it. There is no
+   * The signalling socket died: a network blip, a Durable Object hiccup, or the
+   * service swept the record (the two look identical from here). There is no
    * second transport to fall back to any more, so a host that simply stopped
    * here would be unjoinable until someone reloaded the viewscreen — which is
    * why this re-registers instead of only reporting.
@@ -901,12 +933,17 @@ export function createRendezvousHost(opts) {
    * channel closing (or `close()` below) may ever reach the page as a
    * disconnect. What re-registration buys is a way in for NEW joiners.
    *
-   * The replacement registration mints a DIFFERENT code, because the old record
-   * really is gone and the letters on screen resolve to nothing. Keeping the
-   * SAME code across a host drop needs persistence in the service and is
-   * #1115's (rotation/rebinding); minting a fresh one and repainting the panel
-   * is not that, and it is the difference between a recoverable blip and a
-   * dead mission.
+   * The replacement registration presents `resumeToken`, if this host is
+   * holding one, and asks the registry for the SAME code back (issue #1115).
+   * The record survives a socket loss for the authored
+   * `[limits] reclaim_grace_seconds`, held un-hostable but otherwise intact —
+   * see worker-rendezvous/src/registry.js's "code lifecycle" doc — so an
+   * ordinary blip reconnects onto the letters already on screen and QR'd
+   * across the room, rather than repainting new ones under everybody. Only
+   * once that window has genuinely run out (or the DO instance itself was
+   * evicted, taking the secret with it) does the registry mint a fresh
+   * suffix instead, and `onCode` repaints exactly the same way either time —
+   * the panel does not need to know which one happened.
    */
   function lostService(reason) {
     if (closed) return;
@@ -946,9 +983,29 @@ export function createRendezvousHost(opts) {
 
   return {
     get code() { return code; },
+    /**
+     * True once this host is holding a reclaim token from a prior
+     * registration — i.e. a re-registration will ASK for the same code back
+     * rather than minting a fresh one outright. Read by server.html's
+     * connection diagnostics to word the "service dropped, reconnecting"
+     * line honestly (issue #1115): "reconnecting your code" when a reclaim
+     * is actually in flight, the older "a new code is coming" only for a
+     * first-ever registration that never got one to hold.
+     */
+    get resuming() { return !!resumeToken; },
     /** Open or close new-joiner admission without dropping the code. */
     setAdmission(state) {
       if (socket && socket.readyState === 1) socket.send(frame('host-admission', { state }));
+    },
+    /**
+     * Explicit rotation (issue #1115 AC2/AC3): mint a BRAND NEW code for this
+     * live record, in place. A no-op while there is no live socket to ask —
+     * the caller (server.html) is expected to gate this on GamePhase before
+     * ever calling it, since the registry has no notion of "a mission is
+     * running" and cannot enforce that rule itself.
+     */
+    rotate() {
+      if (socket && socket.readyState === 1) socket.send(frame('rotate', {}));
     },
     close() {
       closed = true;

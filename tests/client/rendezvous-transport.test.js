@@ -1203,9 +1203,12 @@ describe('signalling loss never reaches an established link', () => {
       hostSockets[0].onerror();
       await vi.advanceTimersByTimeAsync(2_000);
 
-      // A FRESH code, for joiners who have not got in yet…
+      // The SAME code comes back — reclaimed with the secret this host's own
+      // earlier `hosted` frame carried (issue #1115), well within the
+      // authored grace window, so a guest who has not got in yet can still
+      // read the letters off the viewscreen and have them work…
       expect(codes.length).toBeGreaterThan(1);
-      expect(codes[1].suffix).not.toBe(codes[0].suffix);
+      expect(codes[1].suffix).toBe(codes[0].suffix);
       // …and nobody aboard was disconnected.
       expect(severed).toEqual([]);
       expect(announced[0].open).toBe(true);
@@ -1394,12 +1397,14 @@ describe('peer-left is a per-peer signalling relay, not an eviction', () => {
   });
 });
 
-describe('a host that loses its record', () => {
-  it('re-registers and is issued a fresh code rather than sitting unjoinable', async () => {
+describe('a host that loses its record (issue #1115)', () => {
+  it('re-registers and reclaims the SAME code rather than sitting unjoinable', async () => {
     // There is no PeerJS underneath any more: a host whose socket blipped and
     // simply reported it would be unreachable until someone reloaded the
-    // viewscreen. The replacement code is a DIFFERENT one — the old record
-    // really is gone — which is why the panel repaints instead of holding.
+    // viewscreen. The replacement registration presents the resume secret
+    // this host's own earlier `hosted` frame carried, well within the
+    // authored grace window — so it is issued the letters already on screen
+    // and QR'd across the room, not a fresh set nobody in the room has read.
     vi.useFakeTimers();
     try {
       const world = makeWorld();
@@ -1414,7 +1419,7 @@ describe('a host that loses its record', () => {
       };
       const codes = [];
       const errors = [];
-      createRendezvousHost({
+      const host = createRendezvousHost({
         base: 'https://rendezvous.test',
         factories,
         onCode: (c) => codes.push(c.suffix),
@@ -1422,13 +1427,21 @@ describe('a host that loses its record', () => {
       });
       await vi.advanceTimersByTimeAsync(0);
       expect(codes).toHaveLength(1);
+      // A resume token is held from the very first successful registration
+      // onward — there is now something worth reclaiming if the socket dies.
+      expect(host.resuming).toBe(true);
 
       hostSockets[0].onerror();
       await vi.advanceTimersByTimeAsync(0);
       expect(errors).toEqual(['unreachable']);
+      // Still held across the loss, so the diagnostics line server.html
+      // renders can honestly say "reconnecting your code" rather than "a new
+      // code is coming" while this reconnect is in flight.
+      expect(host.resuming).toBe(true);
 
       await vi.advanceTimersByTimeAsync(2_000);
       expect(codes).toHaveLength(2);
+      expect(codes[1]).toBe(codes[0]);
       expect(hostSockets).toHaveLength(2);
     } finally {
       vi.useRealTimers();

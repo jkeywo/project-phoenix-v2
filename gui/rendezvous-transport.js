@@ -1050,14 +1050,6 @@ export function createRendezvousJoiner(opts) {
     if (closed || gen !== generation || gen === failedGeneration) return;
     failedGeneration = gen;
     teardown();
-    // A retryable failure is retried whether or not the host has accepted this
-    // build yet. An ICE timeout, a dropped signalling socket and an unreachable
-    // service are the same transient thing on a first join as on a reconnect,
-    // and only by advancing `attemptIndex` here does `connectTimeoutMs`'s
-    // 8/16/30 s ladder become reachable by the cellular guest it exists for.
-    // Before acceptance the loop is BOUNDED (see JOIN_ATTEMPTS_BEFORE_ENTRY):
-    // a guest who has never got in may be reading the wrong five letters, and
-    // a silent backoff would never say so. After acceptance it is unbounded.
     // The direct ladder is spent and there is one rung left: let the service
     // carry the game itself (issue #1113). This runs BEFORE the ordinary retry
     // branch below, and it runs whether or not the host has accepted this build
@@ -1079,6 +1071,15 @@ export function createRendezvousJoiner(opts) {
       scheduleRetry({ restart: true });
       return;
     }
+    // A retryable failure is retried whether or not the host has accepted this
+    // build yet. An ICE timeout, a dropped signalling socket and an unreachable
+    // service are the same transient thing on a first join as on a reconnect,
+    // and only by advancing `attemptIndex` here does `connectTimeoutMs`'s
+    // 8/16/30 s ladder become reachable by the cellular guest it exists for.
+    // Before acceptance the loop is BOUNDED (see JOIN_ATTEMPTS_BEFORE_ENTRY):
+    // a guest who has never got in may be reading the wrong five letters, and
+    // a silent backoff would never say so. After acceptance it is unbounded —
+    // on whichever rung the escalation above left this joiner on.
     if (isRetryableReason(reason)
         && (established || attemptIndex + 1 < JOIN_ATTEMPTS_BEFORE_ENTRY)) {
       onLog(`[rendezvous] link lost (${reason}) — retrying`);

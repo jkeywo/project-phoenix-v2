@@ -138,6 +138,14 @@ fn the_relay_limit_fields_are_named_the_same_in_both_languages() {
     }
 }
 
+/// The one case here that needs the socket, and so the `host` feature.
+///
+/// Everything else in this file reads text and runs in the ordinary `cargo
+/// test` CI job, which is where a drifting vocabulary has to be caught. This
+/// one calls into `relay_socket`, which is the only part of the native crew
+/// path behind the feature — so it is gated rather than dragging the whole file
+/// out of the default test run with it.
+#[cfg(feature = "host")]
 #[test]
 fn the_service_endpoint_a_native_host_dials_is_the_one_the_worker_serves() {
     let index = read("worker-rendezvous/src/index.js");

@@ -266,7 +266,9 @@ cargo build --release --features host --bin phoenix-host
 npx serve dist -p 3000
 ```
 
-The native host prints `crew join code XXXXX` at startup. Open
+The native host prints `phoenix-host: crew join code XXXXX (full: …)` at
+startup — it has no viewscreen panel to paint them on, so the terminal is where
+the five letters live. Open
 `http://localhost:3000/client/?rendezvous=http://localhost:8788` and type those
 five letters. (`?rendezvous=` is honoured for loopback origins only, which is
 what makes it safe to ship.) The phone should reach a console **without waiting

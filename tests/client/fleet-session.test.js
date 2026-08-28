@@ -238,6 +238,69 @@ describe('opening a fleet', () => {
   });
 });
 
+describe('rotating the fleet code (issue #1115)', () => {
+  it('is a pure passthrough onto the underlying host\'s rotate()', async () => {
+    const { world, lead } = await fleetOf();
+    const before = lead.code.suffix;
+    lead.fleet.rotate();
+    await settle();
+    expect(lead.code.suffix).not.toBe(before);
+    // The old suffix is gone from the registry; the new one is live.
+    expect(world.registry.snapshot().map((r) => r.admission)).toEqual([ADMISSION_OPEN]);
+  });
+
+  it('lets a second ship host join on the fleet code that rotation actually produced', async () => {
+    const { world, factories, lead } = await fleetOf();
+    lead.fleet.rotate();
+    await settle();
+    const two = await memberOn(world, factories, lead.code.suffix.toLowerCase());
+    expect(two.member.slot).toBeTruthy();
+    expect(lastRoster(two).slots).toHaveLength(2);
+  });
+
+  it('does not evict a ship host already admitted on the code that just rotated', async () => {
+    const { world, factories, lead } = await fleetOf();
+    const two = await memberOn(world, factories, lead.code.suffix.toLowerCase());
+    expect(two.member.slot).toBeTruthy();
+
+    lead.fleet.rotate();
+    await settle();
+
+    // The member's own direct link never touched the rendezvous service to
+    // begin with (issue #1112's two-planes property, shared by the fleet
+    // link) — its slot and roster are untouched by a code change it never
+    // has to hear about.
+    expect(two.refusals).toEqual([]);
+    expect(two.member.slot).toBeTruthy();
+    expect(lastRoster(lead).slots).toHaveLength(2);
+  });
+
+  it('does not touch the fleet\'s roster, freeze or admission state — only the letters', async () => {
+    const { lead } = await fleetOf();
+    lead.fleet.setAdmission(ADMISSION_CLOSED);
+    lead.fleet.rotate();
+    await settle();
+    const roster = lastRoster(lead);
+    expect(roster.admission).toBe(ADMISSION_CLOSED);
+    expect(roster.frozen).toBe(false);
+    expect(roster.slots).toHaveLength(1);
+  });
+
+  it('rotates even while the fleet is frozen — the roster stays locked, only the code moves', async () => {
+    // AC2's mission-phase gate (Lobby/GameOver rotatable, InProgress refused)
+    // is the CALLER's (server.html's codesRotatable), never fleet.frozen: the
+    // freeze latch never resets once a mission has started, even back in
+    // GameOver, and #1115 explicitly wants GameOver rotatable.
+    const { lead } = await fleetOf();
+    lead.fleet.freeze();
+    const before = lead.code.suffix;
+    lead.fleet.rotate();
+    await settle();
+    expect(lead.code.suffix).not.toBe(before);
+    expect(lastRoster(lead).frozen).toBe(true);
+  });
+});
+
 describe('admitting a second ship host', () => {
   it('gives it its own slot, and both hosts see the same fleet', async () => {
     const { factories, world, lead } = await fleetOf();

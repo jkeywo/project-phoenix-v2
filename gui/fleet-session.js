@@ -294,6 +294,23 @@ export function createFleetOwner(opts) {
       publish();
     },
 
+    /**
+     * Explicit rotation of the fleet's OWN join code (issue #1115 AC2/AC3) —
+     * a pure passthrough onto the underlying host's `rotate()`. Deliberately
+     * NOT gated on `fleet.frozen` here: `frozen` governs whether the SLOT
+     * ROSTER may change, which has nothing to do with which letters admit a
+     * new ship host to it, and the freeze latch never resets even once the
+     * mission reaches GameOver (#1116 is what would make it). The
+     * mission-phase gate this AC actually wants — rotatable in Lobby/GameOver,
+     * refused in Loading/InProgress — is the CALLER's (server.html's
+     * `hostCanRotateCodes`, built on gui/phase-toggle.js's `codesRotatable`),
+     * for the same reason `host.rotate()` itself carries no such gate: the
+     * registry, and everything under it, has no notion of GamePhase at all.
+     */
+    rotate() {
+      host.rotate();
+    },
+
     /** The owner's own ship/readiness, which follow the same freeze. */
     update(patch) {
       const result = updateSlot(fleet, fleet.owner, patch);

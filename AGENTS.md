@@ -54,7 +54,10 @@ deadline the design model does not claim is an error by design.
 cargo fmt -- --check                           # CI: test job, step 1
 # NOT --all-features: it now implies an SDK download via the `ultralight`
 # feature (issue #1122). This is the same explicit list ci.yml's clippy step
-# uses — every feature Cargo.toml declares except that one.
+# uses — every feature Cargo.toml declares that GATES CODE except that one.
+# `falling-skyway-sim-tests` is left out too and costs nothing: its only use is
+# `#[cfg_attr(not(feature = …), ignore)]`, so it flips 55 tests between run and
+# ignored and compiles not one extra line.
 cargo clippy --workspace --all-targets \
   --features server,viewer,debug,headless,perf,host,capture -- -D warnings   # CI: test job, step 2
 cargo test --workspace --features headless     # CI: test job, step 3

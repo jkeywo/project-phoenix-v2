@@ -330,11 +330,15 @@ a proprietary ~100 MB SDK archive at build time.
 Keeping that true takes an arrangement, not just a default-off feature.
 `--all-features` enables it regardless, and the `test` job's clippy step asked
 for exactly that until issue #1122's review caught it. That step now names its
-features — every one `Cargo.toml` declares except `ultralight` — and
-`AGENTS.md`'s local gate command mirrors the same list. **A new cargo feature
-belongs in both**, or it is a feature nothing lints. Vellum does the same thing
-a different way: its engine job selects the workspace with `--exclude
-vellum-ultralight`, and type-checks the SDK half in a manual, non-required job.
+features — every one `Cargo.toml` declares that **gates code**, except
+`ultralight` — and `AGENTS.md`'s local gate command mirrors the same list.
+`falling-skyway-sim-tests` is left out of both and costs nothing: its only use
+is `#[cfg_attr(not(feature = …), ignore)]` in `tests/headless_runner.rs`, so it
+flips 55 tests between run and ignored and compiles not one extra line. **A new
+cargo feature that gates code belongs in both lists**, or it is a feature
+nothing lints. Vellum does the same thing a different way: its engine job
+selects the workspace with `--exclude vellum-ultralight`, and type-checks the
+SDK half in a manual, non-required job.
 
 ```
 node scripts/build-client.mjs            # a pane loads the BUILT bundle's page

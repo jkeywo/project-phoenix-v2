@@ -132,8 +132,11 @@ entities:
       # second command below concurrently with the rest of the workflow. It did
       # not always, and the reason it exists is worth keeping — for a whole
       # release nothing ran that command except a developer typing it, because
-      # `cargo test` and the test job's `--all-features` clippy only COMPILE the
-      # viewer's tests. The billboard-preview test in src/viewer/lod.rs went
+      # `cargo test` and the `test` job's clippy step only COMPILE the viewer's
+      # tests — that step type-checks them because its explicit feature list
+      # includes `viewer` (it stopped being `--all-features` in issue #1122,
+      # which would otherwise pull in the Ultralight SDK download).
+      # The billboard-preview test in src/viewer/lod.rs went
       # stale rather than red in exactly that gap: it asserted a far level was a
       # procedural sphere long after the imposter atlases replaced it.
       tests: [cargo test, cargo test --features viewer, npx playwright test viewscreen.render.spec.js]

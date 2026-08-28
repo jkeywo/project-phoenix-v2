@@ -77,14 +77,22 @@ jobs:
       # said no CI job enabled the feature. They were wrong; this is what makes
       # them right.
       #
-      # The list is every feature `Cargo.toml` declares EXCEPT `ultralight`:
-      # server, viewer, debug, headless, perf, host, capture. `--features`
-      # applies only to the selected packages that declare each one, exactly as
-      # `--features headless` does in the test step below.
+      # The list is every feature `Cargo.toml` declares that GATES CODE, except
+      # `ultralight`: server, viewer, debug, headless, perf, host, capture.
+      # `--features` applies only to the selected packages that declare each
+      # one, exactly as `--features headless` does in the test step below.
       #
-      # KEEP IT IN SYNC. A new feature added to Cargo.toml and not added here is
-      # a feature nothing lints — which is the same failure `--all-features` was
-      # there to prevent, so the trade is real and this comment is the mitigation.
+      # `falling-skyway-sim-tests` is the one deliberate omission that costs
+      # nothing. It gates no compiled code at all — its only use is
+      # `#[cfg_attr(not(feature = "falling-skyway-sim-tests"), ignore = …)]` in
+      # tests/headless_runner.rs, so it flips 55 tests between run and ignored
+      # and nothing else. Both spellings compile the same source, so naming it
+      # here would lint not one extra line.
+      #
+      # KEEP IT IN SYNC. A new feature added to Cargo.toml that gates code, and
+      # not added here, is a feature nothing lints — which is the same failure
+      # `--all-features` was there to prevent, so the trade is real and this
+      # comment is the mitigation.
       # `ultralight`'s own module (`native_host::panes::ultralight`) is therefore
       # linted by a human on a Windows machine, and everything else about a pane
       # compiles and is tested with the feature off on purpose.

@@ -386,3 +386,236 @@ pub fn encode_delivery_refusal(refusal: &crate::delivery::DeliveryRefusal) -> St
 #[cfg(test)]
 #[path = "codec_tests.rs"]
 mod tests;
+
+// ── The host mesh's running-mission frames (issue #1116) ──────────────────────
+//
+// The lockstep vocabulary crosses the same wire `gui/host-mesh.js` owns, in the
+// same versioned envelope `{ m, t, tick, d }`. It is encoded HERE rather than
+// beside the types for the reason every other JSON encoding in this project is:
+// AGENTS.md constraint 1 keeps `serde_json` in this module. The types themselves
+// (`lockstep::frame`) stay pure and Bevy-free, and are also serialised as RON in
+// the replay/diagnostic path — one shape, two encodings, neither of which knows
+// about the other.
+//
+// The JS half never builds or reads these bodies; it refuses an unknown `t`,
+// recognises these two as the simulation's, and ferries them. Rust minting them
+// is what keeps "a command on this wire is one an authority gate accepted" true:
+// JavaScript that could construct a `tick` frame could construct a command no
+// host admitted.
+
+/// The envelope key for the vocabulary revision, matching `gui/host-mesh.js`.
+const MESH_ENVELOPE_PROTOCOL: &str = "m";
+/// The envelope key for the frame type.
+const MESH_ENVELOPE_TYPE: &str = "t";
+/// The envelope key for the tick a frame applies at.
+const MESH_ENVELOPE_TICK: &str = "tick";
+/// The envelope key for the body.
+const MESH_ENVELOPE_BODY: &str = "d";
+
+/// Encode one host-mesh simulation frame for the wire.
+///
+/// The `digest` field crosses as a **hex string**, not a number, and that is
+/// load-bearing rather than stylistic: a digest is a `u64` and JavaScript's
+/// number type loses integers above 2^53, so a JSON number would silently round
+/// the very value two hosts are comparing — the fleet would then report a
+/// divergence it does not have, or miss one it does. Ticks and sequences stay
+/// numbers; neither can reach 2^53 in any run a human will sit through.
+pub fn encode_mesh_frame(frame: &crate::lockstep::MeshFrame) -> Result<String, serde_json::Error> {
+    use crate::lockstep::MeshFrame;
+    let (tick, body) = match frame {
+        MeshFrame::Tick(f) => (
+            f.tick,
+            serde_json::json!({
+                "from": f.from.0,
+                "tick": f.tick,
+                "ready_through": f.ready_through,
+                "commands": f
+                    .commands
+                    .iter()
+                    .map(|c| {
+                        Ok(serde_json::json!({
+                            "tick": c.tick,
+                            "origin": c.order.origin.0,
+                            "seq": c.order.seq,
+                            "ship": c.ship.0,
+                            "target": c.target.0,
+                            "payload": serde_json::to_value(&c.payload)?,
+                        }))
+                    })
+                    .collect::<Result<Vec<_>, serde_json::Error>>()?,
+            }),
+        ),
+        MeshFrame::Digest(f) => (
+            f.tick,
+            serde_json::json!({
+                "from": f.from.0,
+                "tick": f.tick,
+                "digest": format!("{:016x}", f.digest),
+            }),
+        ),
+    };
+    Ok(serde_json::json!({
+        MESH_ENVELOPE_PROTOCOL: crate::lockstep::HOST_MESH_PROTOCOL,
+        MESH_ENVELOPE_TYPE: frame.type_name(),
+        MESH_ENVELOPE_TICK: tick,
+        MESH_ENVELOPE_BODY: body,
+    })
+    .to_string())
+}
+
+/// Decode one host-mesh simulation frame, or `None`.
+///
+/// `None` covers every "this is not a simulation frame of a revision I speak"
+/// case together — unparseable text, a lobby frame, a crew message, a future
+/// revision, a body missing a field. The caller's answer to all of them is to
+/// drop it, exactly as `gui/host-mesh.js`'s `decodeHostFrame` answers `null`
+/// for the same reasons: distinguishing them would invite a receiver to act on
+/// a frame it does not understand.
+pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
+    use crate::command_admission::{CommandOrder, HostSlot, ShipKey};
+    use crate::core::messages::SystemId;
+    use crate::lockstep::{DigestFrame, MeshCommand, MeshFrame, TickFrame};
+
+    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
+    if value.get(MESH_ENVELOPE_PROTOCOL)?.as_u64()? != u64::from(crate::lockstep::HOST_MESH_PROTOCOL)
+    {
+        return None;
+    }
+    let body = value.get(MESH_ENVELOPE_BODY)?;
+    let from = HostSlot(u32::try_from(body.get("from")?.as_u64()?).ok()?);
+    let tick = body.get("tick")?.as_u64()?;
+    match value.get(MESH_ENVELOPE_TYPE)?.as_str()? {
+        crate::lockstep::frame::TYPE_TICK => {
+            let mut commands = Vec::new();
+            for entry in body.get("commands")?.as_array()? {
+                commands.push(MeshCommand {
+                    tick: entry.get("tick")?.as_u64()?,
+                    order: CommandOrder::new(
+                        HostSlot(u32::try_from(entry.get("origin")?.as_u64()?).ok()?),
+                        entry.get("seq")?.as_u64()?,
+                    ),
+                    ship: ShipKey(entry.get("ship")?.as_str()?.to_string()),
+                    target: SystemId(entry.get("target")?.as_str()?.to_string()),
+                    payload: serde_json::from_value(entry.get("payload")?.clone()).ok()?,
+                });
+            }
+            Some(MeshFrame::Tick(TickFrame {
+                from,
+                tick,
+                ready_through: body.get("ready_through")?.as_u64()?,
+                commands,
+            }))
+        }
+        crate::lockstep::frame::TYPE_DIGEST => Some(MeshFrame::Digest(DigestFrame {
+            from,
+            tick,
+            digest: u64::from_str_radix(body.get("digest")?.as_str()?, 16).ok()?,
+        })),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod mesh_frame_tests {
+    use crate::command_admission::{CommandOrder, HostSlot, ShipKey};
+    use crate::core::messages::{SystemControlPayload, SystemId};
+    use crate::lockstep::{DigestFrame, MeshCommand, MeshFrame, TickFrame};
+
+    fn tick_frame() -> MeshFrame {
+        MeshFrame::Tick(TickFrame {
+            from: HostSlot(2),
+            tick: 412,
+            ready_through: 418,
+            commands: vec![
+                MeshCommand {
+                    tick: 418,
+                    order: CommandOrder::new(HostSlot(2), 7),
+                    ship: ShipKey("00000000-0000-8000-8000-000000000001".into()),
+                    target: SystemId("helm-steering".into()),
+                    payload: SystemControlPayload::SetSteering { value: -0.4 },
+                },
+                MeshCommand {
+                    tick: 418,
+                    order: CommandOrder::new(HostSlot(2), 8),
+                    ship: ShipKey("00000000-0000-8000-8000-000000000001".into()),
+                    target: SystemId("red-alert".into()),
+                    payload: SystemControlPayload::SetRedAlert { active: true },
+                },
+            ],
+        })
+    }
+
+    /// The wire shape is the envelope `gui/host-mesh.js` owns, and a frame
+    /// survives it unchanged.
+    #[test]
+    fn a_tick_frame_round_trips_through_the_shared_envelope() {
+        let frame = tick_frame();
+        let text = super::encode_mesh_frame(&frame).expect("encodes");
+        assert!(text.contains("\"m\":2"), "the revision travels: {text}");
+        assert!(text.contains("\"t\":\"tick\""), "{text}");
+        assert!(
+            text.contains("\"tick\":412"),
+            "the envelope's own tick stamp — the field #1114 added for exactly \
+             this — must carry the tick the frame applies at: {text}"
+        );
+        assert_eq!(super::decode_mesh_frame(&text), Some(frame));
+    }
+
+    /// A digest crosses as a hex STRING.
+    ///
+    /// The load-bearing half of this vocabulary's encoding: a digest is a `u64`
+    /// and JavaScript's number type loses integers above 2^53, so a JSON number
+    /// would silently round the very value two hosts compare — reporting a
+    /// divergence the fleet does not have, or missing one it does.
+    #[test]
+    fn a_digest_crosses_as_a_string_because_json_numbers_lose_it() {
+        let digest = 0xdead_beef_dead_beef_u64;
+        assert!(
+            digest > (1_u64 << 53),
+            "precondition: the sample must be big enough for a JSON number to \
+             round it, or this test proves nothing"
+        );
+        let frame = MeshFrame::Digest(DigestFrame {
+            from: HostSlot(1),
+            tick: 300,
+            digest,
+        });
+        let text = super::encode_mesh_frame(&frame).expect("encodes");
+        assert!(
+            text.contains("\"digest\":\"deadbeefdeadbeef\""),
+            "the digest must be a hex string: {text}"
+        );
+        assert_eq!(super::decode_mesh_frame(&text), Some(frame));
+    }
+
+    /// Everything that is not a simulation frame of a revision this build
+    /// speaks answers `None`, together — the same discipline
+    /// `decodeHostFrame` keeps on the other side of the wire.
+    #[test]
+    fn anything_that_is_not_a_frame_of_this_revision_is_refused() {
+        for raw in [
+            "not json at all",
+            r#"{"type":"Identify","token":"abc"}"#,
+            r#"{"m":1,"t":"tick","tick":1,"d":{"from":1,"tick":1,"ready_through":1,"commands":[]}}"#,
+            r#"{"m":2,"t":"hello","tick":null,"d":{}}"#,
+            r#"{"m":2,"t":"tick","tick":1,"d":{"from":1,"tick":1}}"#,
+            r#"{"m":2,"t":"digest","tick":1,"d":{"from":1,"tick":1,"digest":12345}}"#,
+        ] {
+            assert_eq!(
+                super::decode_mesh_frame(raw),
+                None,
+                "must be refused rather than half understood: {raw}"
+            );
+        }
+    }
+
+    /// No session token can reach this wire, because the type it projects from
+    /// carries none. Asserted at the encoding site because this is the moment
+    /// the frame becomes bytes on a socket.
+    #[test]
+    fn the_wire_carries_no_session_token() {
+        let text = super::encode_mesh_frame(&tick_frame()).expect("encodes");
+        assert!(!text.contains("response_token"), "{text}");
+        assert!(!text.contains("token"), "{text}");
+    }
+}

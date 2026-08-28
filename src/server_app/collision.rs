@@ -91,6 +91,9 @@ pub(crate) struct CollisionBodies<'w, 's> {
             Option<&'static EntityUuid>,
             Option<&'static ColliderSection>,
             Has<LocalShip>,
+            // Whether this hull is one some host in the FLEET flies — a fact
+            // every host in it agrees about, unlike `LocalShip` (issue #1116).
+            Has<crate::lockstep::FleetSlotOf>,
             Option<&'static mut ShipImpulse>,
             Option<&'static mut crate::entities::spawner::EntityShipArcHull>,
         ),
@@ -193,6 +196,7 @@ pub(crate) fn handle_collisions(
             ship_uuid,
             ship_collider,
             is_local,
+            is_fleet_ship,
             mut impulse_opt,
             mut arc_hull_opt,
         )) = ship_query.get_mut(ship_entity)
@@ -452,19 +456,29 @@ pub(crate) fn handle_collisions(
             });
         }
 
-        // DamageTaken / ShipDestroyed / GameOver are player-facing UI events.
-        // Only emit for the LocalShip. NPCs use the AiEntityDestroyed +
-        // EntityDespawned path (same as beam-kill).
-        if is_local {
-            outbox.push_reliable((
-                Target::All,
-                ServerMessage::DamageTaken {
-                    hull: hull_applied,
-                    shield: shield_amount,
-                },
-            ));
+        // A crewed hull's loss ends the run; an NPC's uses the
+        // AiEntityDestroyed + EntityDespawned path (same as beam-kill).
+        //
+        // Keyed on FLEET membership rather than on `LocalShip` (issue #1116):
+        // `GamePhase` is folded into the authoritative digest, so keying the end
+        // of the mission on which hull a host happens to project would have one
+        // host end the run and the other play on. Solo it is the same ship and
+        // the same answer. The two WIRE messages stay `LocalShip`'s — they are
+        // this host's crew being told about their own ship.
+        if is_fleet_ship {
+            if is_local {
+                outbox.push_reliable((
+                    Target::All,
+                    ServerMessage::DamageTaken {
+                        hull: hull_applied,
+                        shield: shield_amount,
+                    },
+                ));
+            }
             if ship_destroyed {
-                outbox.push_reliable((Target::All, ServerMessage::ShipDestroyed));
+                if is_local {
+                    outbox.push_reliable((Target::All, ServerMessage::ShipDestroyed));
+                }
                 if game_over_reason.0.is_none() {
                     // Player-visible via the game-over overlays, so a
                     // `strings.csv` id, not English (issue #977); the HUD and

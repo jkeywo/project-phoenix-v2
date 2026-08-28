@@ -1149,6 +1149,9 @@ pub(crate) fn tick_torpedo_lifecycle(
         Option<&mut crate::entities::spawner::EntityShipArcHull>,
         Option<&crate::entities::spawner::ColliderSection>,
         bevy::ecs::query::Has<crate::server_app::LocalShip>,
+        // Whether this hull is one some host in the FLEET flies — a fact every
+        // host in it agrees about, unlike `LocalShip` (issue #1116).
+        bevy::ecs::query::Has<crate::lockstep::FleetSlotOf>,
         // Where the victim is and which way it is pointing — shield arcs are
         // authored in the victim's own frame, so routing the hit to an arc
         // needs both. `Option` because asteroids and bare-`App` test fixtures
@@ -1357,7 +1360,12 @@ pub(crate) fn tick_torpedo_lifecycle(
             mut shield_comp,
             mut target_arc_hull,
             collider_opt,
-            target_is_local,
+            // The torpedo path's destruction handling is entirely about whether
+            // a hull is CREWED, which is a fleet fact rather than a projection
+            // one (issue #1116). Kept in the tuple so the query shape still
+            // reads as "who is looking at this, and who flies it".
+            _target_is_local,
+            target_is_fleet_ship,
             target_tf,
             target_physics,
         ) in hull_query.iter_mut()
@@ -1588,15 +1596,21 @@ pub(crate) fn tick_torpedo_lifecycle(
             }
 
             if hull_comp.0.is_destroyed() {
-                // The player's ship is never despawned on death — the run ends
+                // A crewed hull is never despawned on death — the run ends
                 // instead, and the report still needs the wreck to read from.
                 // Same rule the beam and blaster kill sites follow.
-                if !target_is_local {
+                //
+                // Keyed on FLEET membership rather than on `LocalShip` (issue
+                // #1116): whether an entity still EXISTS is authoritative, and
+                // two hosts tag a different ship, so the old predicate had one
+                // host despawn a peer's dead hull while the other kept it. Solo
+                // it is the same ship and the same answer.
+                if !target_is_fleet_ship {
                     commands.entity(entity).try_despawn();
                 }
                 if is_asteroid {
                     asteroid_destroyed = true;
-                } else if target_is_local {
+                } else if target_is_fleet_ship {
                     local_ship_destroyed = true;
                 } else {
                     non_local_ship_destroyed = true;

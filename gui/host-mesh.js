@@ -45,9 +45,27 @@
  *   owner → all      roster  full roster sync (admission + freeze + slots)
  *                    admission  admission opened or closed
  *
- * Six frames, and no more: #1116 grows this vocabulary with the lockstep
- * command/tick traffic, and a frame invented here that nothing sends would be
- * surface that work would have to keep.
+ * ## What revision 2 adds (issue #1116)
+ *
+ * The running-mission half. Where revision 1 assembles a fleet and freezes it,
+ * these are what the frozen fleet says to itself while it plays:
+ *
+ *   host → all       tick    one host's commands for its own crew, plus the
+ *                            watermark saying it will never issue anything for
+ *                            those ticks again
+ *                    digest  a sampled authoritative fold, for agreement
+ *
+ * Neither is built or read here — both are OPAQUE to this module, and that is
+ * deliberate. Their bodies are minted and consumed by the Rust simulation
+ * (`src/lockstep/frame.rs`, encoded in `core::codec`), because what is inside a
+ * `tick` frame is a command the authority gate already accepted and a tick the
+ * fixed clock already stamped. JavaScript that could construct one could
+ * construct a command no host admitted. So this module knows the two frame
+ * types exist, refuses anything else, and ferries them — the same relationship
+ * `gui/connection-manager.js` has with `ClientMessage`.
+ *
+ * Eight frames, and no more: a frame invented here that nothing sends would be
+ * surface #1117–#1120 would have to keep.
  *
  * ## What is pure, and why it matters
  *
@@ -61,8 +79,14 @@
 /**
  * Vocabulary revision. Bump only for an incompatible change — a receiver
  * refuses any other value rather than reading fields that may have moved.
+ *
+ * **Declared twice on purpose.** `lockstep::frame::HOST_MESH_PROTOCOL` carries
+ * the same number in Rust, and each half has a test pinning it. A host whose JS
+ * speaks 1 and whose Rust speaks 2 would assemble a fleet and then silently
+ * fail to agree a tick; refusing an unrecognised `m` is what makes that fail
+ * loudly instead, and the pair of pins is what catches a one-sided bump.
  */
-export const HOST_MESH_PROTOCOL = 1;
+export const HOST_MESH_PROTOCOL = 2;
 
 /** Frame types this revision speaks. */
 export const HOST_FRAME_HELLO = 'hello';
@@ -71,8 +95,12 @@ export const HOST_FRAME_REFUSED = 'refused';
 export const HOST_FRAME_SLOT = 'slot';
 export const HOST_FRAME_ROSTER = 'roster';
 export const HOST_FRAME_ADMISSION = 'admission';
+/** Revision 2 (issue #1116): one host's input for a tick, and its watermark. */
+export const HOST_FRAME_TICK = 'tick';
+/** Revision 2 (issue #1116): a sampled authoritative fold, for agreement. */
+export const HOST_FRAME_DIGEST = 'digest';
 
-/** Every type a v1 receiver will accept. Read by the coverage tests. */
+/** Every type a receiver will accept. Read by the coverage tests. */
 export const HOST_FRAME_TYPES = [
   HOST_FRAME_HELLO,
   HOST_FRAME_WELCOME,
@@ -80,7 +108,27 @@ export const HOST_FRAME_TYPES = [
   HOST_FRAME_SLOT,
   HOST_FRAME_ROSTER,
   HOST_FRAME_ADMISSION,
+  HOST_FRAME_TICK,
+  HOST_FRAME_DIGEST,
 ];
+
+/**
+ * The frames the SIMULATION owns — minted and read by Rust, ferried by this
+ * module and never inspected by it (issue #1116).
+ *
+ * The split matters at exactly one place: {@link isSimulationFrame} is what
+ * `gui/fleet-session.js` uses to decide whether a decoded frame goes to the
+ * fleet model here or straight across the wasm boundary. A lobby frame that
+ * reached the simulation would be a roster edit nobody admitted; a tick frame
+ * that reached the fleet model would be silently dropped and the fleet would
+ * stall on the peer that sent it.
+ */
+export const HOST_SIMULATION_FRAME_TYPES = [HOST_FRAME_TICK, HOST_FRAME_DIGEST];
+
+/** True when this frame belongs to the running simulation rather than the lobby. */
+export function isSimulationFrame(frame) {
+  return !!frame && HOST_SIMULATION_FRAME_TYPES.indexOf(frame.t) >= 0;
+}
 
 /** Admission states a fleet record can be in — the registry's own two words. */
 export const ADMISSION_OPEN = 'open';
@@ -466,6 +514,25 @@ export const rosterFrame = (fleet) => hostFrame(HOST_FRAME_ROSTER, { roster: ros
 
 export const admissionFrame = (state) => hostFrame(HOST_FRAME_ADMISSION, { state });
 
+/**
+ * Wrap an already-encoded simulation frame body from the Rust side.
+ *
+ * There is deliberately no builder for a `tick` or `digest` BODY here. The
+ * simulation mints both (`core::codec::encode_mesh_frame`), and JavaScript that
+ * could construct a tick frame could construct a command no authority gate ever
+ * accepted — a fleet's own hosts are trusted for exactly what they admitted and
+ * nothing more. What this module owns is the envelope, which is why the two
+ * pass through it rather than round it.
+ *
+ * @param {string} type {@link HOST_FRAME_TICK} or {@link HOST_FRAME_DIGEST}
+ * @param {object} body the body Rust encoded
+ * @param {number|null} tick the tick this frame applies at — the field #1114
+ *   put in the envelope for exactly this, finally set
+ */
+export function simulationFrame(type, body, tick = null) {
+  return hostFrame(type, body, { tick });
+}
+
 // ── View model ──────────────────────────────────────────────────────────────
 
 /**
@@ -521,6 +588,11 @@ if (typeof window !== 'undefined') {
   window.hostMesh = {
     HOST_MESH_PROTOCOL,
     HOST_FRAME_TYPES,
+    HOST_SIMULATION_FRAME_TYPES,
+    HOST_FRAME_TICK,
+    HOST_FRAME_DIGEST,
+    isSimulationFrame,
+    simulationFrame,
     ADMISSION_OPEN,
     ADMISSION_CLOSED,
     REASON_ADMISSION_CLOSED,

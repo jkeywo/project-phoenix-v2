@@ -20,8 +20,8 @@ entities:
       rationale:
         - "stamp_accepted_command records and enqueues atomically so log order and apply order cannot drift; a mesh-side reordering step must live at or before that call, not after it."
         - "Session tokens are stripped before logging (a bearer credential never enters the record), which is already the right property for a log that crosses the wire to other hosts."
-    game_design:
-      must_not_be: [ordered across peers by local arrival index, a second command queue beside PendingCommands]
+        - "[ai] DELIVERED by issue #1116, and both halves of what this decision asked for are met without forking the queue. The tiebreak inside PendingCommands widened from a local arrival counter to CommandOrder — (origin fleet slot, that slot's own run-scoped sequence) — which is a TOTAL order computable from the key alone, so every host sorts one tick's merged traffic identically without asking anybody. A lone host mints every order from HostSlot::SOLO with a run-wide sequence, so (tick, order) sorts exactly as (tick, arrival) did and no single-player behaviour moved. CommandDelay is set non-zero for a fleet from the mission's authored [global] command_delay_ticks, by lockstep::join_fleet and nothing else."
+        - "[ai] One thing this decision did not anticipate: the RECORDING point had to move. #898 wrote the log at acceptance, which was the same moment as the apply while the delay was zero. Under a fleet delay they are different moments and acceptance is the wrong one — each host accepts its own crew's commands as its clock reaches them and a peer's whenever the frame arrives, so two hosts applying an identical tick identically would still have written two different logs, and a host running a tick behind would record a later stamp before an earlier one, which ticks_are_monotonic correctly calls unreplayable. The log is now written by PendingCommands::drain_due as each command lands. Draining and recording are one act, exactly as queueing and recording were, and the result is stronger than the property #898 was protecting: two hosts of one mission write BYTE-IDENTICAL logs."
 
   - decision: p2p-delta-ai-output-is-not-logged
     core:
@@ -56,6 +56,8 @@ entities:
       rationale:
         - "Asteroid ids remain derived from cell coordinates and key as (0, 0) with a string tiebreak, so the procedural field is exempt from the mint discipline and stays comparable across peers."
         - "LocalShip #[require]s HumanSeekingHosts specifically to avoid a mid-run archetype move that measurably perturbed the authoritative digest — evidence that digest equality is sensitive to structural events, not only to gameplay values."
+        - "[ai] AMENDED by issue #1116. The #[require]s moved off LocalShip and onto the player-ship bundle, where every ship in the FLEET gets them in the same spawn burst. #984's actual property is unchanged — no mid-run archetype move, no Commands in the resolver — but requiring them on the marker would have made their PRESENCE follow which ship a host projects, and two hosts of one mission tag a different ship. Their component sets would then have differed from tick zero, which is a worse version of the same hazard."
+        - "[ai] The identity discipline this decision states is satisfied by the FROZEN ROSTER rather than by a runtime spawn command: every host spawns one player ship per fleet slot, in slot order, from the world's game_start ship rows, at the agreed mission start — so WorldIdMint gives each hull the same (namespace, tick, seq) everywhere. tests/lockstep_mesh.rs asserts the two hosts agree on every fleet ship's uuid, which is the observable form of \"a spawn a peer performs locally produces an id no other peer has\"."
     game_design:
       must_not_be: [minted independently per peer for shared entities, compared as rendered strings]
 

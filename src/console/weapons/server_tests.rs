@@ -264,6 +264,10 @@ fn test_app() -> App {
         .spawn((
             crate::server_app::Ship,
             crate::server_app::LocalShip,
+            // The player ship is a fleet of one; the destruction and
+            // shield-routing paths key on that rather than on which hull a host
+            // projects (issue #1116).
+            crate::lockstep::FleetSlotOf(crate::command_admission::HostSlot::SOLO),
             test_ship_config(),
             ShipSystemControlSources::default(),
             crate::ship_plugin::ActiveStationRatings::default(),
@@ -15738,6 +15742,7 @@ fn spawn_player_hull_firing_all_banks_at(
         .spawn((
             crate::server_app::Ship,
             crate::server_app::LocalShip,
+            crate::lockstep::FleetSlotOf(crate::command_admission::HostSlot::SOLO),
             EntityUuid(ship_uuid.to_string()),
             crate::ship_plugin::ShipSystemControlSources(sources),
             crate::server_app::ShipSystemBlackboards::default(),

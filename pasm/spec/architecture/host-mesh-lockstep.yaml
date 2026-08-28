@@ -1,0 +1,186 @@
+entities:
+  - component: fleet-lockstep-session
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Fleet Lockstep Session
+      summary: >-
+        The frozen fleet as one authoritative host sees it while a mission runs: its own slot,
+        the peers it waits for, the agreed input delay, and each peer's watermark. Decides
+        whether the next fixed tick may run at all, and names the peer holding it up when it
+        may not.
+      rationale:
+        - "A host may simulate tick T only once every peer is ready through T. Every host declares itself ready through SimTick + CommandDelay each tick — it will never issue anything for a tick at or below that again — so the first delay+1 ticks run unblocked and thereafter a peer may fall delay ticks behind before anybody waits."
+        - "[ai] The order is PEER-INDEPENDENT rather than owner-sequenced, and the fleet lead was considered and rejected. An owner-assigned order costs every non-owner a second network hop before its own command is ordered, which doubles the delay the fleet must agree — and the delay is the entire latency budget. It also makes the lead a single point of failure for ORDERING, which #1119's host loss and #1120's slot recovery would then have to arbitrate before doing anything else. CommandOrder needs neither: (origin slot, that slot's own sequence) is a total order computable from the key alone. The lead is still what makes it work, because it minted the slot ids (p2p-delta-identity-is-minted), it simply is not on the critical path of every command."
+        - "[ai] A stall PAUSES Time<Virtual>, which starves the fixed accumulator so the withheld tick never begins. p2p-delta-tick-is-fixedupdate rules out both a second accumulator beside Time<Fixed> and a stall that skips systems inside a tick; this is neither, and it reuses the seam SimulationPaused already uses rather than inventing a second pausing mechanism."
+        - "[ai] Watermarks only move forward, so a reordered or duplicated frame is inert rather than a step backwards. That is cheaper to build in here than to bolt onto #1119, which needs reordered and repeated disconnect observations to converge."
+        - "[ai] Peers start ready through `delay`, which is not optimism: a host that has run no ticks has by definition already issued everything it ever will for ticks 0..=delay. Seeding anything lower deadlocks the fleet on tick zero, because no host can send a frame before it has stepped."
+        - "[ai] A fleet of one is a real state — the operator opened a fleet and nobody joined — and it behaves exactly as an unfleeted host does: no barrier, no delay, no frames. Otherwise the solo path acquires a stall it can never clear."
+    architecture:
+      kind: pure-module
+      authority: authoritative
+      owns: [fleet-lockstep-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/lockstep/session.rs, src/lockstep/mod.rs]
+      symbols:
+        - LockstepSession
+        - FleetLockstep
+        - Stall
+        - gate_lockstep_ticks
+        - join_fleet
+      tests: [cargo test, tests/lockstep_mesh.rs]
+
+  - state: fleet-lockstep-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Fleet Lockstep State
+      summary: >-
+        This host's slot, its peers' input watermarks, the agreed CommandDelay, and the frozen
+        roster of which host flies which hull and who is crewing it.
+      rationale:
+        - "[ai] The roster's crewing is FROZEN and carries the Station Rating as well as the seat. Sessions describes only the local crew, so a host seeding a peer's ship from its own sessions would boot that hull fully AI-backfilled here and human-crewed on the machine its crew is sitting at — two hosts running different AI on one ship from tick zero. The Rating travels with the seat because it decides which systems the station automates."
+        - "[ai] Not folded into the authoritative digest and not snapshotted. It is a fact about the SESSION rather than about the world: who is connected where, on which machine. What crosses into the simulation from it is the ships it spawns and the ratings it seeds, and those are folded like anything else."
+    architecture:
+      classification: authoritative
+      owner: fleet-lockstep-session
+      writers: [fleet-lockstep-session]
+    implementation:
+      status: declared
+      paths: [src/lockstep/mod.rs]
+      symbols: [FleetRoster, FleetShip, FleetSlotOf]
+      tests: [cargo test]
+
+  - message: lockstep-tick-frame
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Lockstep Tick and Digest Frames
+      summary: >-
+        Host-mesh revision 2's running-mission half: a `tick` frame carrying one host's commands
+        for its own crew plus the watermark that says there is no more input for those ticks, and
+        a `digest` frame carrying a sampled authoritative fold for agreement checking.
+      rationale:
+        - "A tick frame is emitted EVERY tick even with nothing to say, because \"no input\" is an answer a peer has to receive. A fleet whose hosts only spoke when they had something to say would stall until somebody pressed a key."
+        - "[ai] A receiver does not re-run the sending host's authority check and cannot: the check is against that host's Sessions, and a session token is a bearer credential that never leaves the host holding it. The contract is the one a replay already keeps — a command on this wire is one an authority check already accepted — narrowed by the single rule a receiver CAN enforce, that a host may only speak for the ship its own slot flies."
+        - "[ai] No AI emission crosses this wire. Every host derives every NPC from the same ticks, the same seeded streams and the same authored policies (AGENTS.md rule 6, p2p-delta-ai-output-is-not-logged); shipping AI output would double-apply it against the replay contract."
+        - "[ai] The protocol revision is declared in BOTH halves — HOST_MESH_PROTOCOL in Rust and in gui/host-mesh.js — with a test pinning the number on each side. A host whose Rust half speaks 2 and whose JS half speaks 1 would assemble a fleet and then silently fail to agree a tick, and #1114's decoder refuses an unknown `m` precisely so that fails loudly instead."
+    architecture:
+      authority: request
+      producer: [fleet-lockstep-session]
+      consumer: [fleet-lockstep-session]
+      validator: [fleet-lockstep-session]
+      trust_boundary: client-to-host
+      payload: MeshFrame
+    implementation:
+      status: declared
+      paths: [src/lockstep/frame.rs, gui/host-mesh.js]
+      symbols: [MeshFrame, TickFrame, DigestFrame, MeshCommand, HOST_MESH_PROTOCOL]
+      tests: [cargo test, tests/lockstep_mesh.rs, tests/client/host-mesh.test.js]
+
+  - component: peer-independent-command-order
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Peer-Independent Command Order
+      summary: >-
+        The total order commands from different hosts apply in: (origin fleet slot, that slot's
+        own run-scoped sequence), as the tiebreak inside the existing PendingCommands queue and
+        as a field on every LoggedCommand.
+      rationale:
+        - "p2p-delta-command-log-shape's must_not_be is explicit: not ordered across peers by local arrival index, and not a second queue beside PendingCommands. The key widened and the queue did not fork."
+        - "[ai] A lone host mints every order from HostSlot::SOLO with a run-wide sequence, so (tick, order) sorts exactly as the pre-#1116 (tick, arrival) did and no single-player behaviour moved. SOLO is 0 and fleet slots are numbered from 1, so a solo entry can never collide with a fleet member's."
+        - "[ai] The log is written when a command APPLIES, not when it is accepted. Under a fleet delay those are different moments and acceptance is the wrong one: each host accepts its own crew's commands as its clock reaches them and a peer's whenever the frame arrives, so two hosts applying an identical tick identically would still have written two different logs — and a host a tick behind would record a later stamp before an earlier one, which ticks_are_monotonic correctly calls unreplayable. Draining and recording are one act, as queueing and recording were."
+        - "[ai] Because of that, two hosts of one mission write BYTE-IDENTICAL command logs. That is the first diagnostic to reach for on a divergence: identical logs rule input out and point at the simulation, different logs name the command."
+        - "[ai] A due command is applied to the ship its ShipKey names, resolved at the instant it lands rather than at the instant it was accepted. That closes the routing gap headless::replay recorded in so many words, and is what lets a peer's command — which this host never routed, and whose ship may not have existed when the frame arrived — reach the right hull."
+    architecture:
+      kind: pure-module
+      authority: authoritative
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/command_admission/log.rs, src/command_admission/mod.rs]
+      symbols:
+        - CommandOrder
+        - HostSlot
+        - PendingCommands
+        - stamp_accepted_command
+        - admit_system_commands
+      tests: [cargo test, tests/lockstep_mesh.rs]
+
+  - component: local-ship-projection-boundary
+    core:
+      status: implemented
+      confidence: confirmed
+      title: LocalShip Is a Projection Marker, Not a Simulation One
+      summary: >-
+        LocalShip marks the ship whose crew is on THIS machine, so with two hosts running one
+        mission it is a different ship on each of them. Nothing it gates may reach the
+        authoritative digest, and tests/local_ship_neutrality.rs is the standing guard.
+      rationale:
+        - "The rule is checkable rather than aspirational: the guard runs the same seeded world twice, moving the marker to a different fleet ship, and compares the fold on every tick of a mission with combat in it."
+        - "[ai] Four sites failed it when it was written, and all four were fixed rather than blessed. Visual banking lerped ShipPhysics.roll for the LocalShip alone and the digest folds all eight physics fields. The scenario's objective pool reached only the LocalShip, so each host's mission steered a different hull. A beam hit routed to a shield facing by bearing for the LocalShip and to arc zero for everything else, justified as \"an NPC has one facing\" — a peer's player hull has four. And the helm blackboard's radar range came from the player-only client config for the LocalShip and from the ship's own authored section otherwise: the same number spelled twice, until two hosts spelled it differently for one hull."
+        - "[ai] The #[require]s #984 put on LocalShip moved onto the player-ship bundle, where every FLEET ship gets them in the same spawn burst. Requiring them on the marker would have made their PRESENCE follow which ship a host projects, which is the cross-host asymmetry this rule forbids; putting them on the bundle keeps #984's actual property — no mid-run archetype move, no Commands in the resolver."
+        - "[ai] The marker still shapes archetypes, and that is allowed: #1052's guard says the digest is independent of archetype-creation order, proved under a stronger perturbation than this one. What #1116 found is that three AI target scans still broke an exact distance tie by position in the list, which two hosts order differently — a fleet in formation with a contact on the centreline is the ordinary case. They now sort on the contact's own id first, which is #1052's pattern applied to a decision rather than a draw."
+    architecture:
+      kind: invariant
+      authority: authoritative
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/server_app/components.rs
+        - src/server_app/world_setup.rs
+        - src/ship/physics_systems.rs
+        - src/ship/coordination_systems.rs
+        - src/server_app/broadcast_publish.rs
+        - src/console/weapons/beam.rs
+      symbols: [LocalShip, FleetSlotOf, insert_player_core_bundle]
+      tests: [tests/local_ship_neutrality.rs, tests/lockstep_mesh.rs, tests/archetype_order_determinism.rs]
+
+  - component: fleet-digest-exchange
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Fleet Digest Exchange
+      summary: >-
+        Each host periodically folds its authoritative state and publishes the sample; a peer's
+        sample for a tick this host also sampled is compared, and a mismatch is reported with its
+        tick and the slot that disagreed. Detection only — recovery is #1118's.
+      rationale:
+        - "The comparator is not re-invented: DigestLedger already pairs samples BY TICK and already answers \"they agreed at tick 240 and disagreed by 250\", which is what #1118's affected-tick report needs. This holds one ledger per peer and lets that code answer."
+        - "[ai] sim_digest::digest_stages was added alongside it: the running accumulator after each named scope of the fold. \"Two hosts disagree at tick 240\" is where an investigation starts and not where it can usefully stop; comparing the two lists says which SCOPE they disagree in, which is the difference between a bisection and a look. It is not a second digest — the last stage is always world_digest's own answer, pinned by a test."
+        - "[ai] The exchange cadence is a diagnostic interval and moves nothing in the simulation, so it is a constant rather than authored content. 300 ticks is five seconds at the default rate: short enough that a crew hears about a split in the engagement it happened in, long enough to be invisible beside the per-tick input traffic."
+        - "[ai] The fold is taken in `Last` — the end of a frame, after every fixed step it was going to run has committed. sim_digest's fold-point rule is about simulation state, and render interpolation writes Transform, which the fold does not read."
+    architecture:
+      authority: authoritative
+      owns: [fleet-agreement-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/lockstep/mod.rs, src/sim_digest.rs]
+      symbols:
+        - MeshAgreement
+        - MeshDisagreement
+        - sample_and_publish_digest
+        - digest_stages
+        - first_divergent_scope
+      tests: [cargo test, tests/lockstep_mesh.rs]
+
+  - state: fleet-agreement-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Fleet Agreement State
+      summary: This host's sampled digest ledger, one ledger per peer, and every tick the fleet is known to have disagreed on.
+    architecture:
+      classification: derived
+      owner: fleet-digest-exchange
+      writers: [fleet-digest-exchange]
+    implementation:
+      status: declared
+      paths: [src/lockstep/mod.rs]
+      symbols: [MeshAgreement]
+      tests: [cargo test]

@@ -1776,6 +1776,10 @@ pub(crate) fn tick_beams_apply_damage(
         Option<&mut crate::server_app::ShipAttackedThisTick>,
         Option<&mut LastShipAttacker>,
         bevy::ecs::query::Has<crate::server_app::LocalShip>,
+        // Whether the target is a CREWED hull in the fleet, which every host in
+        // that fleet agrees about — unlike `LocalShip`, which is a different
+        // ship on each of them (issue #1116).
+        bevy::ecs::query::Has<crate::lockstep::FleetSlotOf>,
         Option<&mut crate::entities::spawner::EntityShipArcHull>,
         Option<&crate::entities::spawner::ColliderSection>,
     )>,
@@ -1846,7 +1850,7 @@ pub(crate) fn tick_beams_apply_damage(
             let target_entity =
                 hull_q
                     .iter()
-                    .find_map(|(e, ast_uuid, ent_uuid, _, _, _, _, _, _, _, _, _)| {
+                    .find_map(|(e, ast_uuid, ent_uuid, _, _, _, _, _, _, _, _, _, _)| {
                         let asteroid_match = ast_uuid.map(|u| u.0.as_str())
                             == Some(state.effective_target_uuid.as_str());
                         let entity_match = ent_uuid.map(|u| u.0.as_str())
@@ -1859,7 +1863,7 @@ pub(crate) fn tick_beams_apply_damage(
                     });
             if let Some((te, is_asteroid)) = target_entity {
                 if !is_asteroid {
-                    if let Ok((_, _, _, _, _, _, _, attacked_opt, last_attacker_opt, _, _, _)) =
+                    if let Ok((_, _, _, _, _, _, _, attacked_opt, last_attacker_opt, _, _, _, _)) =
                         hull_q.get_mut(te)
                     {
                         if let Some(mut atk) = attacked_opt {
@@ -1904,6 +1908,7 @@ pub(crate) fn tick_beams_apply_damage(
             _attacked_opt,
             _last_attacker_opt,
             target_is_local,
+            target_is_fleet_ship,
             mut target_arc_hull,
             collider_opt,
         ) in hull_q.iter_mut()
@@ -1967,25 +1972,32 @@ pub(crate) fn tick_beams_apply_damage(
                         base_damage as f32,
                         state.shield_pierce,
                     );
-                    // Which facing takes the hit, from the shooter's bearing on
-                    // the target — for EVERY target, whoever is looking at it
-                    // (issue #1116).
+                    // Which facing takes the hit.
                     //
-                    // This used to be `if target_is_local`, with an `else 0.0`
-                    // justified as "an NPC shield defaults to num_facings=1, so
-                    // bearing doesn't matter". True of an NPC and false of a
-                    // FLEET: a peer's player hull has four facings and is not
-                    // `LocalShip` here, so the host that does not project it
-                    // routed every hit to one arc while the host that does
-                    // routed it by bearing. The two then leaked different
-                    // amounts through to hull, and the fleet diverged over a
-                    // single point of damage.
+                    // A CREWED hull routes by the shooter's bearing to the
+                    // appropriate facing; anything else takes it on arc zero,
+                    // which is what a shield with one facing means anyway.
                     //
-                    // Computing it unconditionally costs one bearing per hit
-                    // and changes nothing for a single-facing shield, where
-                    // every bearing selects the same arc. It falls back to 0.0
-                    // when the target has no Transform, as it always did.
-                    let bearing = {
+                    // The predicate used to be `target_is_local` and is now
+                    // `target_is_fleet_ship` (issue #1116). That is a spelling
+                    // fix rather than a rule change: the rule was always "a
+                    // player hull routes by bearing", and `LocalShip` spelled it
+                    // as "the hull THIS host projects". With two hosts running
+                    // one mission that is a different ship on each, so a peer's
+                    // four-facing player hull took every hit on one arc here and
+                    // on the bearing arc there — the two leaked different
+                    // amounts through to hull and the fleet split over a single
+                    // point of damage. `FleetSlotOf` says "a hull some host in
+                    // this fleet flies", which every host agrees about.
+                    //
+                    // Solo it is the same ship and the same answer, so no
+                    // engagement moved; NPC durability is untouched, which
+                    // `the_composed_player_cruiser_rings_its_target_and_breaks_
+                    // off_to_bear_its_tubes` is sensitive enough to have caught.
+                    //
+                    // Falls back to 0.0 when the target has no Transform, as it
+                    // always did.
+                    let bearing = if target_is_fleet_ship {
                         let target_yaw = target_physics_opt.map(|p| p.yaw).unwrap_or(0.0);
                         match target_tf {
                             Some(tf) => crate::weapons::shield::attacker_bearing_relative(
@@ -1997,6 +2009,8 @@ pub(crate) fn tick_beams_apply_damage(
                             ),
                             None => 0.0,
                         }
+                    } else {
+                        0.0
                     };
                     let leak = shields.0.apply_damage(absorbed.round() as i32, bearing);
                     let shielded = (absorbed - leak as f32).max(0.0);
@@ -2027,21 +2041,34 @@ pub(crate) fn tick_beams_apply_damage(
                     },
                 );
                 hull_applied_total = hull_applied;
-                // LocalShip: emit DamageTaken every hit; ShipDestroyed +
-                // GameOver on kill. Never despawn the LocalShip entity.
-                if target_is_local {
-                    if let Some(ref mut ob) = outbox {
-                        ob.push_reliable((
-                            Target::All,
-                            ServerMessage::DamageTaken {
-                                hull: hull_applied,
-                                shield: shield_amount,
-                            },
-                        ));
+                // A crewed hull: GameOver on kill, and never despawned — the
+                // run ends instead and the report reads from the wreck.
+                //
+                // Keyed on FLEET membership rather than on `LocalShip` (issue
+                // #1116). Losing a player ship ends the mission, and `GamePhase`
+                // is folded into the authoritative digest, so keying it on which
+                // hull a host happens to project would have one host end the run
+                // and the other play on. Solo it is the same ship and the same
+                // answer. The two WIRE messages inside stay `LocalShip`'s: they
+                // are this host's own crew being told what happened to their own
+                // ship, which is projection and belongs to exactly one host.
+                if target_is_fleet_ship {
+                    if target_is_local {
+                        if let Some(ref mut ob) = outbox {
+                            ob.push_reliable((
+                                Target::All,
+                                ServerMessage::DamageTaken {
+                                    hull: hull_applied,
+                                    shield: shield_amount,
+                                },
+                            ));
+                        }
                     }
                     if destroyed {
-                        if let Some(ref mut ob) = outbox {
-                            ob.push_reliable((Target::All, ServerMessage::ShipDestroyed));
+                        if target_is_local {
+                            if let Some(ref mut ob) = outbox {
+                                ob.push_reliable((Target::All, ServerMessage::ShipDestroyed));
+                            }
                         }
                         if let Some(ref mut gs) = next_state {
                             gs.set(GamePhase::GameOver);
@@ -2179,10 +2206,19 @@ pub(crate) fn tick_beams_apply_damage(
                 if is_asteroid {
                     commands.entity(target_entity).try_despawn();
                     target_asteroid_destroyed = true;
-                } else if !target_is_local {
-                    // NPC / station / other non-player target — despawn and
-                    // emit destroy events. LocalShip is handled above
-                    // (never despawned — GameOver takes over).
+                } else if !target_is_fleet_ship {
+                    // NPC / station / other non-crewed target — despawn and
+                    // emit destroy events. A ship some host in the fleet flies
+                    // is handled above and is never despawned: the run ends and
+                    // the report still reads from the wreck.
+                    //
+                    // Keyed on fleet membership rather than on `LocalShip`
+                    // (issue #1116) because whether an entity still EXISTS is
+                    // authoritative. Two hosts tag a different ship, so the old
+                    // predicate had one host despawn a peer's dead hull while
+                    // the other kept it — about as large a divergence as a
+                    // fleet can have. Solo it is the same ship and the same
+                    // answer.
                     commands.entity(target_entity).try_despawn();
                     target_ship_destroyed_non_local = true;
                     destroyed_ship_radius = collider_opt

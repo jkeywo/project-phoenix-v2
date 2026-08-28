@@ -29,6 +29,38 @@ vellum-replay = { git = "https://github.com/jkeywo/vellum", rev = "a08dca9ca4903
 vellum-digest = { git = "https://github.com/jkeywo/vellum", rev = "a08dca9ca49033307bb6d5e85cb068205c1164b6" }
 vellum-save = { git = "https://github.com/jkeywo/vellum", rev = "a08dca9ca49033307bb6d5e85cb068205c1164b6", features = ["run"] }
 vellum-script = { git = "https://github.com/jkeywo/vellum", rev = "a08dca9ca49033307bb6d5e85cb068205c1164b6" }
+# ┌──────────────────────────────────────────────────────────────────────────┐
+# │  PRE-MERGE LOCAL DEPENDENCY — THIS LINE MUST BE REPOINTED BEFORE MERGE.  │
+# ├──────────────────────────────────────────────────────────────────────────┤
+# │  Issue #1122 extracted the shared Ultralight plumbing into a NEW vellum   │
+# │  crate on the `phoenix-ultralight` branch, which is NOT PUSHED YET. Until │
+# │  it is, this points at a local clone on one Windows machine, so:          │
+# │                                                                          │
+# │    * every OTHER pin above is a rev on the GitHub URL, deliberately       │
+# │      (issue #1184: one vellum rev for the whole repo, pinned once), and   │
+# │    * this line breaks that rule ON PURPOSE and TEMPORARILY, and           │
+# │    * **CI CANNOT RESOLVE IT.** Cargo fetches every git dependency during  │
+# │      resolution, optional or not, feature-gated or not — so an            │
+# │      `ubuntu-latest` runner fails at `cargo metadata`, before it compiles │
+# │      a line. That is expected on this branch and is not a code fault.     │
+# │                                                                          │
+# │  THE FIX, once John has pushed the vellum branch:                        │
+# │                                                                          │
+# │    vellum-ultralight = { git = "https://github.com/jkeywo/vellum",        │
+# │                          rev = "<the merged rev>" }                       │
+# │                                                                          │
+# │  and bump the six revs above to the SAME rev in the same diff, so the     │
+# │  repo carries one vellum revision as #1184 requires. This is a checklist  │
+# │  item in docs/delivery-checklist.md as well as a comment here, because a  │
+# │  comment is not a gate.                                                   │
+# └──────────────────────────────────────────────────────────────────────────┘
+#
+# NOT optional, and its SDK-linking feature is NOT on here. The crate's pure
+# half — the JS-bridge escaping and record splitting `native_host::panes` uses
+# to assemble a pane document — has no dependencies at all and compiles
+# everywhere, including wasm. Only `vellum-ultralight/ultralight` pulls
+# `ul-next`, and only this repo's own `ultralight` feature turns that on.
+vellum-ultralight = { git = "file:///C:/Coding/vellum", branch = "phoenix-ultralight" }
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -186,6 +218,25 @@ host = ["server"]
 # the `image` crate for PNG encoding; kept out of the default/wasm builds because
 # it renders offscreen with a native GPU adapter.
 capture = ["server", "dep:image", "dep:crossbeam-channel"]
+# Ultralight feature: local Station panes in the native host (issue #1122).
+#
+# It turns on ONE thing — `vellum-ultralight`'s own `ultralight` feature, which
+# links the Ultralight SDK — and with it `native_host::panes::ultralight`, the
+# only module in this repository that names an Ultralight type. Everything else
+# about a pane (identity, the registry, audience routing, the per-frame loop,
+# the document assembly) compiles and is tested with this feature OFF, which is
+# how every job in ci.yml builds.
+#
+# It must stay that way. `ul-next-sys`'s build script DOWNLOADS a proprietary
+# ~100 MB SDK archive at build time. Every CI job here is `ubuntu-latest`, the
+# wasm build has no use for any of it, and a plain `cargo test` must not pay a
+# download to run four thousand unit tests. Nothing in `default`, `server`,
+# `host`, `headless`, `capture` or `viewer` may ever imply this feature.
+#
+# `host` is implied the other way round: a pane is only meaningful in the
+# process that serves the client bundle it loads and runs the simulation it
+# talks to.
+ultralight = ["host", "vellum-ultralight/ultralight"]
 
 [dependencies]
 # The deterministic-math foundation (issue #1184), extracted into its own
@@ -367,6 +418,17 @@ vellum-save = { workspace = true }
 # ActionCmd boundary, the sugared `flags` type, the loader, and cross-reference
 # validation) stays here (`world/script/`), per vellum's charter.
 vellum-script = { workspace = true }
+# Off-screen Ultralight HTML panes (issue #1122) — the shared plumbing behind
+# `native_host::panes`. Extracted rather than copied: void-and-thunder had the
+# same SDK staging, the same surface→RGBA copy and the same `evaluate_script`
+# push/poll bridge, and two independent arrivals at one mechanism is the fleet's
+# own test for a shared crate (see vellum's `docs/handbook/dependencies.md`).
+#
+# Unconditional, because its pure half is: with `vellum-ultralight/ultralight`
+# off the crate has NO dependencies, so the wasm build and every SDK-free CI job
+# carry three small pure modules and nothing else. See the workspace pin above
+# for the pre-merge warning on where it currently points.
+vellum-ultralight = { workspace = true }
 # The Rhai engine itself, named directly because `world::script` constructs the
 # host-fn vocabulary on the engines vellum-script hands back and must fix the
 # global hashing seed before any engine is built (M0 spike:

@@ -220,6 +220,64 @@ fn main() {
         cfg.log.entity_filter = project_phoenix::logging::parse_log_entities(&sim.log_entity);
     }
 
+    // Local Station panes (issue #1122). Opened AFTER the bind, because a pane's
+    // document is published at this listener's own address and a `:0` bind does
+    // not know its port until it has bound — then published into the delivery
+    // server's own in-memory documents, so a pane loads the client bundle this
+    // process is already serving, same origin, at the client directory's own
+    // depth.
+    if !sim.panes.is_empty() {
+        if !cfg!(feature = "ultralight") {
+            eprintln!(
+                "phoenix-host: --pane needs a build with --features ultralight (this one has \
+                 none), because a local Station pane is an embedded browser view. Rebuild \
+                 with `cargo build --release --features ultralight --bin phoenix-host`."
+            );
+            std::process::exit(2);
+        }
+        let panes = native_host::panes::LocalPanes::open(&sim.panes, server.local_addr());
+        let index = match &args.client {
+            ClientSource::Bundled { dir } => {
+                std::path::Path::new(dir).join("client").join("index.html")
+            }
+            ClientSource::Hosted => unreachable!("--pane requires --client-dir; parse_args gates"),
+        };
+        let html = match std::fs::read_to_string(&index) {
+            Ok(html) => html,
+            Err(e) => {
+                eprintln!(
+                    "phoenix-host: cannot read {} for a pane: {e}",
+                    index.display()
+                );
+                std::process::exit(1);
+            }
+        };
+        if let Err(e) = panes.publish(&html, &server.hosted_documents()) {
+            eprintln!(
+                "phoenix-host: {} cannot become a pane document: {e}",
+                index.display()
+            );
+            std::process::exit(1);
+        }
+        for (pane, url) in panes.opened.iter().zip(panes.urls()) {
+            eprintln!(
+                "phoenix-host: {} is {} on token {}… at {url}",
+                pane.id,
+                pane.identity.name(),
+                &pane.identity.token()[..8],
+            );
+        }
+        #[cfg(feature = "ultralight")]
+        match native_host::panes::ultralight::stage_sdk() {
+            Ok(summary) => eprintln!("phoenix-host: {summary}"),
+            Err(e) => {
+                eprintln!("phoenix-host: {e}");
+                std::process::exit(1);
+            }
+        }
+        cfg.panes = Some(panes);
+    }
+
     let app = match native_host::build_native_host_app(&cfg, &preload) {
         Ok(app) => app,
         Err(e) => {

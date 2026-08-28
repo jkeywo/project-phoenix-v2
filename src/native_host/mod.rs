@@ -15,6 +15,11 @@
 //! * [`transport`] — the seam a transport plugs into: two systems over the
 //!   three `lobby::server` messages, plus the reserved-token gate the browser
 //!   applies at its own ingress.
+//! * [`panes`] — issue #1122's local Stations: one isolated Ultralight view per
+//!   pane, each an ordinary logical client entering through that same seam with
+//!   its own minted session token. Everything about *what a pane may say and
+//!   hear* compiles and is tested with the SDK feature off; only the drawing and
+//!   the input translation are behind `--features ultralight`.
 //! * `phoenix-host` (`src/bin/phoenix_host.rs`) — the process. Issue #1121
 //!   **evolves** that binary rather than adding a parallel one, so PRD #855's
 //!   bundle serving, catalogue restriction and startup version pin are shared
@@ -27,6 +32,7 @@
 //! they must be made to agree — see [`pin_content_root`].
 
 pub mod app;
+pub mod panes;
 pub mod transport;
 
 pub use app::{

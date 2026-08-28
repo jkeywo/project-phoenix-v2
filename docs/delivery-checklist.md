@@ -306,13 +306,77 @@ cargo build --release --features host --bin phoenix-host
 
 State this in any release notes, because the gap is not obvious from the name:
 
-- It serves assets, the content manifest, the catalogue and the version pin. It
-  does **not** run the simulation — the authoritative sim is still the browser
-  host (`server.html`) or `phoenix-headless`.
-- It does **not** do rendezvous signalling. Clients still reach the host through
-  the rendezvous Worker (§3a) exactly as they do in a pure browser session; the
-  native host is a delivery server, not a signalling one.
-- It has no snapshot, save, or session surface.
+- With no `--world` it serves assets, the content manifest, the catalogue and
+  the version pin, and nothing else — the authoritative sim is then still the
+  browser host (`server.html`) or `phoenix-headless`. With `--world` (issue
+  #1121) it *is* the authoritative host and draws the viewscreen itself.
+- It does **not** do rendezvous signalling, and **browser clients cannot join a
+  native host yet**: the rendezvous Worker (§3a) carries a browser host to its
+  browser clients, and the native host is a delivery server, not a signalling
+  one. A `--world` host is therefore crewed by `--solo` (all Backfill) or by
+  local Ultralight panes (below), not by phones.
+- Snapshot save/restore works (`tests/native_host_snapshot.rs`); there is no
+  operator-facing session surface for it yet.
+
+---
+
+## 4a. Ultralight local Station panes (issue #1122)
+
+`--pane <NAME>` opens a local bridge station in an embedded browser view inside
+the host process. It needs a build with the `ultralight` cargo feature, which
+**no CI job sets and none may ever set**: `ul-next-sys`'s build script downloads
+a proprietary ~100 MB SDK archive at build time.
+
+```
+node scripts/build-client.mjs            # a pane loads the BUILT bundle's page
+cargo build --release --features ultralight --bin phoenix-host
+./target/release/phoenix-host --client-dir dist \
+    --world assets/worlds/combat_test.toml --pane Ada --pane Grace
+```
+
+- [ ] **REPOINT THE `vellum-ultralight` DEPENDENCY BEFORE THIS BATCH MERGES.**
+      `Cargo.toml`'s `[workspace.dependencies]` currently reads
+      `vellum-ultralight = { git = "file:///C:/Coding/vellum", branch =
+      "phoenix-ultralight" }` — a **local clone on one Windows machine**, because
+      the vellum branch that carries the crate is not pushed yet. **CI cannot
+      resolve that line**: cargo fetches every git dependency during resolution,
+      optional or not, feature-gated or not, so an `ubuntu-latest` runner fails
+      at `cargo metadata` before it compiles anything. Expected on the issue
+      branch; a merge blocker.
+      The fix, once the vellum branch is pushed: change it to
+      `{ git = "https://github.com/jkeywo/vellum", rev = "<merged rev>" }` **and
+      bump the other six vellum revs to that same rev in the same diff**, because
+      issue #1184's rule is one vellum revision for the whole repository. A
+      comment in `Cargo.toml` says the same thing; this line exists because a
+      comment is not a gate.
+- [ ] **Decide whether a packaged release ships the Ultralight build at all.**
+      Today `deploy-demo.yml`'s `package-native-demo` builds
+      `--features host`, which has no Ultralight in it, so the published archive
+      is unaffected by any of this. Shipping panes means adding the SDK
+      download to that job and the redistributables to the archive — a
+      decision with a licence question attached (below), not a flag.
+- [ ] **Ultralight licence and redistributables.** The SDK is proprietary. The
+      download is a public, unauthenticated URL (`ul-next-sys`'s build script);
+      **no credential exists and none is checked in**, and nothing about the SDK
+      is vendored into this repository or into vellum. The terms are the
+      **Ultralight Free License Agreement V1**, shipped inside the download at
+      `<ul-sdk>/license/LICENSE.txt`, alongside `EULA.txt` and `NOTICES.md`;
+      `vellum_ultralight::staging::licence_files` prints their paths from a
+      checkout, and `phoenix-host` logs them at startup. Read them before
+      putting `Ultralight.dll`, `UltralightCore.dll`, `WebCore.dll` or
+      `AppCore.dll` in a distributed archive.
+- [ ] **Runtime staging is automatic but local.** Cargo links the SDK and stages
+      nothing, so `panes::ultralight::stage_sdk` copies the four libraries
+      beside the executable and the SDK's `resources/` (CA bundle, ICU table)
+      into the working directory at startup, from
+      `target/<profile>/build/ul-next-sys-*/out/ul-sdk`. **That path only exists
+      in a build tree.** A packaged archive has to carry them itself — decide
+      that with the packaging decision above. On Windows a missing DLL is a
+      process that exits with an OS error code and *no message at all*, so the
+      operator log names each one.
+- [ ] **`--pane` needs `--client-dir`.** A pane loads the client bundle this same
+      process serves, from this process's own address; the argument parser
+      refuses the combination at the prompt rather than opening a blank view.
 
 ---
 

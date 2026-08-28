@@ -191,6 +191,56 @@ fn flush_native_outbound(
     }
 }
 
+// ── Two transports on one host ──────────────────────────────────────────────
+
+/// Two [`NativeTransport`]s driven as one (issue #1122).
+///
+/// A native host with local Station panes *and* remote participants has two
+/// transports and one seam. This is that composition, and it is deliberately
+/// dumb: poll `first` then `second`, dispatch to both, and let each decide for
+/// itself whether the `Target` names anyone it knows. Neither sees the other's
+/// traffic, because neither is asked about it — the pane bus routes by token
+/// through `panes::routing`, and a network transport routes by its own
+/// connection table, exactly as `server.html`'s does.
+///
+/// Issue #1112 is the intended production user: it brings the network half, and
+/// what it needs from #1122 is that installing it alongside the panes is an
+/// `insert_resource`, not a re-plumb. It nests, so a third transport is
+/// `PairedTransport::new(PairedTransport::new(a, b), c)`.
+pub struct PairedTransport<A: NativeTransport, B: NativeTransport> {
+    first: A,
+    second: B,
+}
+
+impl<A: NativeTransport, B: NativeTransport> PairedTransport<A, B> {
+    /// Drive `first` and `second` as one transport. Polled in that order, so a
+    /// frame's events are ordered by transport and then by arrival within it.
+    pub fn new(first: A, second: B) -> Self {
+        Self { first, second }
+    }
+}
+
+impl<A: NativeTransport, B: NativeTransport> NativeTransport for PairedTransport<A, B> {
+    fn poll(&mut self) -> Vec<TransportEvent> {
+        let mut events = self.first.poll();
+        events.extend(self.second.poll());
+        events
+    }
+
+    fn dispatch(&mut self, dispatch: TransportDispatch<'_>) {
+        self.first.dispatch(TransportDispatch {
+            target: dispatch.target,
+            msg: dispatch.msg,
+            delivery: dispatch.delivery,
+        });
+        self.second.dispatch(dispatch);
+    }
+
+    fn name(&self) -> &'static str {
+        "paired"
+    }
+}
+
 // ── Loopback ────────────────────────────────────────────────────────────────
 
 /// An in-process [`NativeTransport`] backed by two queues.

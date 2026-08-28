@@ -197,3 +197,98 @@ entities:
         ]
       symbols: [accepts_mod_pack_uploads, offersModPackUpload, wasm_add_mod_pack]
       tests: [cargo test, npx vitest run, tests/native_host.rs]
+
+  - component: native-station-pane
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Native Station Pane
+      summary: A local bridge Station operated from inside the native host process — one isolated Ultralight view showing the ordinary HTML/CSS/JS console surface, with its own document, its own minted session token, its own input queue and its own lifecycle. It joins, claims a Station, readies and plays through exactly the contracts a phone uses; in-process delivery skips network serialisation and nothing else.
+      rationale:
+        - "[ai] A pane must NOT use console_bridge::LOCAL_CONSOLE_TOKEN, even though that token exists, is reserved, and names a native host in its own doc comment. It takes the second branch of is_command_authorized — policy.accept_human_input with no station-tenure check at all — and carries ReturnToLobbyAuthority::Host, which can abort a running mission. It stays the host operator's own bypass; a pane mints an ordinary UUIDv4 and is a phone."
+        - "[ai] Three gates keep that true, and they are not redundant: PaneIdentity::adopt refuses a reserved token so a pane cannot be CONFIGURED with host authority; PaneBus::submit refuses an Identify whose BODY token is not the pane's own, which is the only gate covering impersonation of another participant's perfectly ordinary token (handle_identify uses the body token, not the envelope's); and the issue #1121 seam refuses reserved tokens at ingress as server.html does at its PeerJS one."
+        - "[ai] Audience projection needed no new mechanism. Every Audience variant resolves through SessionManager::holder_for_station into a Target before an OutboundMessage exists, so routing::pane_receives is a four-line token comparison. The failure it rules out is real and tempting: an in-process transport that broadcast every dispatch to every pane, on the reasoning that they share a process, would hand every Station's private projection to every pane and would do it silently."
+        - "[ai] The pane loads the BUILT bundle's own client/index.html with three lines injected, published in memory by this process's delivery server at the client directory's own depth. The three rejected alternatives: a native reimplementation of the shell is a second client forever behind the first; an include_str! document has no base URL, so every relative script, iframe and fetch in it fails (fetch silently), and a base tag fixes URL resolution but not the unique security origin; and the unmodified page offers no way to replace a PeerJS transport that cannot run natively. Serving at the client's own depth is what makes every relative URL resolve exactly as it does for a phone, same origin, nothing rewritten."
+        - "[ai] The outbound queue is capped per delivery class rather than as a ring buffer. Snapshot messages are superseded by the next one and may be dropped; Welcome, StationAssigned and GameStarted are one-shot transitions, and a pane that missed its Welcome sits in the lobby forever with a completely clean log. A pane whose page stops draining and overflows its RELIABLE budget is closed, which hands the lobby the same disconnect a dropped phone produces."
+        - "[ai] Everything about what a pane may say and hear compiles and is tested with the SDK feature OFF, which is how every CI job builds. That is where the acceptance criteria live, and a claim checkable only on a Windows machine with a GPU is a claim nobody checks. Only the drawing and the input translation are behind --features ultralight."
+        - "[ai] Deferred, and the deferral is issue #1121's own: a real BROWSER participant beside a pane needs the Phoenix transport (#1112), so the concurrency claim is proved against a LoopbackTransport participant — literally the seam that transport plugs into. Display profiles are #1123's and independent input routing is #1124's; panes are currently tiled evenly across one window with one pointer and one focused view."
+    architecture:
+      kind: service
+      authority: non-authoritative
+      coordinates: [native-delivery-host, system-command-admission-policy]
+      runs_in: [native-host-runtime]
+    implementation:
+      status: declared
+      paths:
+        [
+          src/native_host/panes/mod.rs,
+          src/native_host/panes/identity.rs,
+          src/native_host/panes/registry.rs,
+          src/native_host/panes/routing.rs,
+          src/native_host/panes/transport.rs,
+          src/native_host/panes/surface.rs,
+          src/native_host/panes/document.rs,
+          src/native_host/panes/ultralight.rs,
+          src/native_host/panes/pane_boot.js,
+          src/native_host/panes/pane_link.js,
+          src/delivery/serve.rs,
+          src/delivery/args.rs,
+          src/bin/phoenix_host.rs,
+        ]
+      symbols:
+        [
+          PaneIdentity,
+          IdentityRefusal,
+          PaneRegistry,
+          PaneLifecycle,
+          OutboundVerdict,
+          pane_receives,
+          PaneBus,
+          PaneTransport,
+          PaneInputRefusal,
+          PairedTransport,
+          PaneSurface,
+          pump_pane,
+          build_pane_document,
+          pane_document_path,
+          pane_url,
+          LocalPanes,
+          HostedDocuments,
+          PaneDisplayPlugin,
+          stage_sdk,
+        ]
+      tests:
+        [
+          cargo test,
+          tests/native_host_panes.rs,
+          tests/native_host_pane_ultralight.rs,
+        ]
+
+  - component: ultralight-sdk-handling
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Ultralight SDK, Licence and Redistributables
+      summary: How the proprietary Ultralight SDK is obtained, linked, staged at runtime and kept out of every build that does not want it. Acquired by ul-next-sys's build script from a public unauthenticated URL into its own OUT_DIR, never vendored into any repository, and reachable only through the default-off ultralight cargo feature.
+      rationale:
+        - "[ai] The feature gate is the load-bearing part. ul-next-sys DOWNLOADS a ~100 MB proprietary archive at build time; every job in ci.yml is ubuntu-latest, the wasm build has no use for any of it, and a plain cargo test must not pay a download to run four thousand unit tests. Nothing in default, server, host, headless, capture or viewer may ever imply ultralight."
+        - "[ai] No credential exists and none is checked in — the download URL is public and unauthenticated — so 'reproducible in development without private credentials' is satisfied by construction rather than by a secret-management story."
+        - "[ai] Cargo LINKS the SDK and stages nothing, which is a runtime failure with no message: on Windows a missing DLL is a process that exits with an OS error code and nothing on screen. stage_sdk therefore runs at startup, finds the extracted SDK under the cargo build tree, copies the four shared libraries beside the executable and the SDK's resources directory (CA bundle, ICU table) into the working directory, and names them and the licence files in the operator log. That path only exists in a BUILD TREE — a packaged archive must carry them itself, which is an open decision in docs/delivery-checklist.md."
+        - "[ai] The licence is the Ultralight Free License Agreement V1, shipped inside the download under the SDK's own license directory. It governs redistributing the libraries with a packaged build and nothing in either repository can answer it for a shipper, so the crate NAMES the files rather than summarising the terms."
+        - "[ai] The shared plumbing was extracted to vellum's new vellum-ultralight crate rather than copied: void-and-thunder had already built the same SDK staging, the same surface-to-RGBA copy and the same evaluate_script push/poll bridge, and two independent arrivals at one mechanism is the fleet's test for a shared crate. ul-next is consequently no longer a per-game exception in vellum's dependency handbook. Pane registries, input policy, session identity and the payload schema stayed in phoenix, because void-and-thunder has no version of any of them."
+    architecture:
+      kind: policy
+      authority: non-authoritative
+      coordinates: [native-station-pane]
+      runs_in: [native-host-runtime]
+    implementation:
+      status: declared
+      paths:
+        [
+          Cargo.toml,
+          src/native_host/panes/ultralight.rs,
+          docs/delivery-checklist.md,
+          .gitignore,
+        ]
+      symbols: [stage_sdk]
+      tests: [cargo test, tests/native_host_pane_ultralight.rs]

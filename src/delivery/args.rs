@@ -68,6 +68,19 @@ pub struct SimArgs {
     pub log_entity: String,
     /// Start the mission with nobody connected, every station on `Backfill`.
     pub solo: bool,
+    /// Local Station panes to open, one per `--pane <NAME>`, in the order given
+    /// (issue #1122).
+    ///
+    /// The value is the **participant's name**, not a station: a pane joins the
+    /// lobby exactly as a phone does and claims a Station from inside its own
+    /// console, because "which seat" is a lobby decision and giving a native
+    /// participant a way to skip it would be the first bypass.
+    ///
+    /// A name rather than a generated label because a participant name is
+    /// player-visible text, and this repository keeps player-visible text in
+    /// `assets/strings/strings.csv` rather than in Rust. A crew member's own
+    /// name is neither — it is operator input.
+    pub panes: Vec<String>,
 }
 
 /// What `parse_args` decided.
@@ -106,6 +119,15 @@ SIMULATION
                           a running mission.
     --log <SPEC>          Log filter, e.g. info,ai=debug,admit=trace
     --log-entity <NAMES>  Restrict logging to these entity names
+
+LOCAL STATIONS (requires a build with --features ultralight)
+    --pane <NAME>         Open a local Station pane for a participant of this
+                          name, in an embedded browser view showing the ordinary
+                          console surface. Repeatable; panes are tiled left to
+                          right. Each one joins, claims a Station and readies
+                          through exactly the contracts a phone does, with its
+                          own minted session token. Needs --client-dir: a pane
+                          loads the client bundle this host serves.
 
 CLIENT
     --client-dir <PATH>   Serve a built client bundle from this directory
@@ -155,6 +177,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
     let mut log_spec = String::new();
     let mut log_entity = String::new();
     let mut solo = false;
+    let mut panes: Vec<String> = Vec::new();
 
     let mut it = args.into_iter();
     while let Some(arg) = it.next() {
@@ -177,6 +200,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
             "--log" => log_spec = value_for(&arg, &mut it)?,
             "--log-entity" => log_entity = value_for(&arg, &mut it)?,
             "--solo" => solo = true,
+            "--pane" => panes.push(value_for(&arg, &mut it)?),
             other => return Err(format!("unknown argument {other:?}")),
         }
     }
@@ -184,6 +208,18 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
     // The simulation flags are meaningless without a world, and silently
     // ignoring them would be the worst answer: an operator who wrote `--solo`
     // and no `--world` asked for a mission and would get a file server.
+    // A pane loads the client bundle this very process serves, from this
+    // process's own address. Without a bundle there is nothing for it to show,
+    // and the failure would otherwise be a blank embedded browser rather than a
+    // sentence at the prompt.
+    if !panes.is_empty() && client_dir.is_none() {
+        return Err(
+            "--pane needs --client-dir: a local Station pane loads the client bundle this \
+             host serves, from this host's own address"
+                .to_string(),
+        );
+    }
+
     let sim = match world {
         Some(world) => Some(SimArgs {
             world,
@@ -192,6 +228,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
             log_spec,
             log_entity,
             solo,
+            panes,
         }),
         None => {
             for (flag, given) in [
@@ -200,6 +237,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
                 ("--log", !log_spec.is_empty()),
                 ("--log-entity", !log_entity.is_empty()),
                 ("--solo", solo),
+                ("--pane", !panes.is_empty()),
             ] {
                 if given {
                     return Err(format!("{flag} needs --world — it configures the simulation, and without a world this host serves delivery only"));
@@ -307,6 +345,35 @@ mod tests {
     }
 
     #[test]
+    fn local_station_panes_are_named_participants_in_the_order_they_were_given() {
+        // The value is a participant NAME, not a station: a pane joins the
+        // lobby and claims a seat from inside its own console, exactly as a
+        // phone does. Giving a native participant a way to skip that would be
+        // the first bypass.
+        let a = run(&[
+            "--world",
+            "assets/worlds/combat_test.toml",
+            "--client-dir",
+            "dist",
+            "--pane",
+            "Ada",
+            "--pane",
+            "Grace",
+        ]);
+        let sim = a.sim.expect("a simulation");
+        assert_eq!(sim.panes, vec!["Ada".to_string(), "Grace".to_string()]);
+    }
+
+    #[test]
+    fn a_pane_without_a_client_bundle_is_refused_at_the_prompt() {
+        // A pane loads the client bundle this process serves. Without one the
+        // failure is a blank embedded browser rather than a sentence.
+        let err = parse(&["--world", "w.toml", "--pane", "Ada"]).unwrap_err();
+        assert!(err.contains("--pane"), "{err}");
+        assert!(err.contains("--client-dir"), "{err}");
+    }
+
+    #[test]
     fn a_simulation_flag_without_a_world_is_refused_rather_than_ignored() {
         // Silently serving files to an operator who asked for a mission is the
         // worst available answer.
@@ -314,6 +381,9 @@ mod tests {
         assert!(err.contains("--solo"), "{err}");
         assert!(err.contains("--world"), "{err}");
         assert!(parse(&["--seed", "1"]).unwrap_err().contains("--world"));
+        assert!(parse(&["--client-dir", "dist", "--pane", "Ada"])
+            .unwrap_err()
+            .contains("--world"));
     }
 
     #[test]

@@ -140,6 +140,15 @@ pub struct NativeHostConfig {
     /// digest comparison, where an unpinned executor makes the claim a race
     /// rather than a measurement (see `tests/native_headless_digest.rs`).
     pub deterministic: bool,
+    /// Local Station panes, already opened and published (issue #1122).
+    ///
+    /// Opened by the caller rather than here, because a pane's document is
+    /// published at the delivery listener's own address and a `:0` bind does not
+    /// know its port until it has bound. What this builder does with them is
+    /// install the transport — a pane is a participant, so its traffic enters
+    /// through the same `NativeTransportPlugin` seam issue #1121 built and is
+    /// subject to the same reserved-token refusal.
+    pub panes: Option<crate::native_host::panes::LocalPanes>,
 }
 
 impl NativeHostConfig {
@@ -157,6 +166,7 @@ impl NativeHostConfig {
             solo: false,
             curated_ships: Vec::new(),
             deterministic: false,
+            panes: None,
         }
     }
 }
@@ -403,6 +413,32 @@ pub fn build_native_host_app(
     // before the transport is.
     app.add_plugins(NativeTransportPlugin);
 
+    // Local Station panes (issue #1122). They are participants, so the transport
+    // they get is the ORDINARY seam above — not a side door. Everything a pane
+    // says enters through `Messages<InboundMessage>` and past the reserved-token
+    // refusal; everything it hears is a `Target` the broadcaster resolved
+    // through `SessionManager::holder_for_station`.
+    //
+    // A pane host with panes is therefore also a host that HAS a transport,
+    // which is why the `--solo` warning below asks whether one is installed
+    // rather than assuming nobody can ever connect.
+    if let Some(panes) = &cfg.panes {
+        app.insert_resource(crate::native_host::transport::NativeTransportLink::new(
+            panes.bus.transport(),
+        ));
+        app.insert_resource(crate::native_host::panes::PaneBusResource(
+            panes.bus.clone(),
+        ));
+        #[cfg(feature = "ultralight")]
+        {
+            app.insert_resource(crate::native_host::panes::ultralight::PaneDisplayConfig {
+                host_addr: panes.host_addr.clone(),
+                panes: panes.ids(),
+            });
+            app.add_plugins(crate::native_host::panes::ultralight::PaneDisplayPlugin);
+        }
+    }
+
     // An unfocused bridge machine must keep simulating: the browser host
     // inserts exactly this, and a native window's default is to throttle when
     // it loses focus.
@@ -418,22 +454,28 @@ pub fn build_native_host_app(
             FixedUpdate,
             solo_auto_start.before(crate::sim_sets::SimSet::Input),
         );
-    } else {
-        // The mode is correct and the flag is not refused — but today it opens a
-        // window onto a lobby nothing can start. Every route to `InProgress`
-        // needs a session: collective `SetReady` auto-start, or the host page's
-        // force-start (`drain_force_start_input`, wasm-only). With the transport
-        // deferred to issue #1112 no session can exist, and there is no native
-        // force-start, so say so at the top of the log rather than leaving an
-        // operator watching a lobby that will never move.
+    } else if cfg.panes.as_ref().is_none_or(|p| p.opened.is_empty()) {
+        // The mode is correct and the flag is not refused — but with nothing
+        // able to connect it opens a window onto a lobby nothing can start.
+        // Every route to `InProgress` needs a session: collective `SetReady`
+        // auto-start, or the host page's force-start
+        // (`drain_force_start_input`, wasm-only). Browser participants are
+        // still deferred to issue #1112, and there is no native force-start, so
+        // say so at the top of the log rather than leaving an operator watching
+        // a lobby that will never move.
+        //
+        // A host with local Station panes (issue #1122) does NOT take this arm:
+        // its panes are participants, they ready up like any other, and the
+        // mission starts when they do.
         crate::pwarn!(
             cfg.log,
             crate::logging::LogCat::Lobby,
-            "no --solo: this host is waiting in the lobby for participants, but \
-             browser clients cannot join a native host yet (issue #1112 — PeerJS \
-             is browser JavaScript). Nothing can ready up and there is no native \
-             force-start, so the mission will not start. Re-run with --solo to \
-             fly it on Backfill."
+            "no --solo and no --pane: this host is waiting in the lobby for \
+             participants, but browser clients cannot join a native host yet \
+             (issue #1112 — PeerJS is browser JavaScript). Nothing can ready up \
+             and there is no native force-start, so the mission will not start. \
+             Re-run with --solo to fly it on Backfill, or --pane <NAME> to crew \
+             it locally."
         );
     }
 

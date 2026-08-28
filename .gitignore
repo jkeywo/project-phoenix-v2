@@ -64,3 +64,15 @@ __pycache__/
 # wrangler local dev state + local-only worker secrets
 worker/.wrangler/
 worker/.dev.vars
+
+# Ultralight runtime debris, from a `--features ultralight` build's local
+# Station panes (issue #1122). None of it is source and none of it may land:
+#   resources/  the SDK's own CA bundle and ICU table, staged into the working
+#               directory at startup by vellum_ultralight::staging. Ultralight
+#               is proprietary and is never vendored into this repository.
+#   default/    Ultralight's own per-origin session storage (cookies,
+#               localStorage) for whatever port a pane was served on
+#   ultralight.log  the SDK's own log, written beside the process
+/resources/
+/default/
+ultralight.log

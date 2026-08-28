@@ -126,11 +126,24 @@ cargo build --release --features host --bin phoenix-host
 #   --ship <PATH>   the player's hull [default: the world's first available_ships]
 #   --seed <N>      overrides the world's [global] seed
 #   --solo          start with nobody connected, every station on Backfill.
-#                   CURRENTLY THE ONLY MODE THAT REACHES A RUNNING MISSION:
-#                   without it the host waits in a lobby nothing can enter
-#                   (see the #1112 note below), and it says so loudly in the
-#                   log at boot rather than refusing — the mode is correct, it
-#                   is the transport that is missing.
+#                   WITH NEITHER IT NOR --pane, NOTHING REACHES A RUNNING
+#                   MISSION: the host waits in a lobby nothing can enter (see
+#                   the #1112 note below), and it says so loudly in the log at
+#                   boot rather than refusing — the mode is correct, it is the
+#                   transport that is missing.
+#   --pane <NAME>   open a local Station pane for a participant of this name —
+#                   an embedded Ultralight view showing the ordinary console
+#                   surface (issue #1122). Repeatable. NEEDS a build with
+#                   --features ultralight and a --client-dir: a pane loads the
+#                   client bundle this same process serves, over HTTP, from a
+#                   document the host publishes in memory at the client
+#                   directory's own depth (so every relative URL in the page
+#                   resolves as it does for a phone; gui/ is untouched).
+#                   Each pane is an ordinary logical client with its own minted
+#                   UUIDv4 session token. It must NOT use LOCAL_CONSOLE_TOKEN,
+#                   which skips the station-tenure branch of
+#                   is_command_authorized entirely and carries mission-abort
+#                   authority — three separate gates enforce that.
 #   --log / --log-entity  same grammar as phoenix-headless
 #   --manifest also narrows what this process FLIES, not only what it publishes:
 #     with a curating manifest in force the default hull is drawn from that
@@ -576,6 +589,17 @@ host = ["server"]
               # plugins. Without that dependency `--no-default-features
               # --features host` compiles a `main` naming a module that is not
               # there — a combination CI never builds, so nothing would catch it.
+ultralight = ["host", "vellum-ultralight/ultralight"]
+              # local Station panes in the native host (issue #1122). Gates ONE
+              # module — `native_host::panes::ultralight` — and links the
+              # Ultralight SDK through vellum-ultralight. NOTHING ELSE MAY EVER
+              # IMPLY IT: `ul-next-sys`'s build script DOWNLOADS a proprietary
+              # ~100 MB archive at build time, every ci.yml job is
+              # ubuntu-latest, and a plain `cargo test` must not pay a download
+              # to run four thousand unit tests. Everything about what a pane
+              # may say and hear (identity, registry, routing, the frame loop,
+              # the document) compiles and is tested with the feature OFF,
+              # because that is where the acceptance criteria live.
 # The client page (client.html) is pure JS (gui/*.js) — there is no
 # `client` cargo feature and no client-side WASM (removed in #463).
 

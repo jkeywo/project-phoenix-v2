@@ -373,6 +373,9 @@ fn publish_helm_blackboard(
 }
 
 #[cfg(test)]
+// Fixture ids only (issue #907): these tests need distinct opaque targets, not
+// reproducible production identity. Production ids are minted by `world_id`.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use crate::core::messages::{
@@ -624,25 +627,26 @@ mod tests {
             range: 318.0,
         }];
 
-        let mut ship_entity = app.world_mut().entity_mut(ship);
-        let mut control_sources = ship_entity
-            .get_mut::<ShipSystemControlSources>()
-            .expect("test ship carries control sources");
-        control_sources
-            .0
-            .set_offline(crate::ship::system_registry::helm_thrust_system_id(), true);
-        assert!(
+        {
+            let mut ship_entity = app.world_mut().entity_mut(ship);
+            let mut control_sources = ship_entity
+                .get_mut::<ShipSystemControlSources>()
+                .expect("test ship carries control sources");
             control_sources
                 .0
-                .policy_for(&helm_steering_system_id())
-                .operate_ai,
-            "steering remains AI-operated"
-        );
-        assert!(
-            !crate::ship_plugin::helm_axes_operate_ai(&control_sources),
-            "offline thrust makes the old composite receiver gate false"
-        );
-        drop(control_sources);
+                .set_offline(crate::ship::system_registry::helm_thrust_system_id(), true);
+            assert!(
+                control_sources
+                    .0
+                    .policy_for(&helm_steering_system_id())
+                    .operate_ai,
+                "steering remains AI-operated"
+            );
+            assert!(
+                !crate::ship_plugin::helm_axes_operate_ai(&control_sources),
+                "offline thrust makes the old composite receiver gate false"
+            );
+        }
 
         deliver_to_helm(
             &mut app,

@@ -7,11 +7,11 @@ pub(crate) use crate::ship::components::load_ship_config_from_disk;
 pub(crate) use crate::ship::components::OrderedCoordinationPopup;
 pub use crate::ship::components::{
     ActiveStationRatings, BankConfigResource, BoostConfigResource, CoordinationDelivery,
-    CoordinationEnqueue, CoordinationQueue, DeliveredCoordination, DockingMotionIntent,
-    HelmWaypointClearance, HumanSeekingHosts, ImpulseConfigResource, LastHelmInput,
-    LastSystemTiers, PendingArcBearingRequest, PendingShipConfig, PendingTacticalFrequencyHint,
-    RepairHumanAlerted, ScenarioDetailFloor, ShipConfigComponent, ShipPhysicsConfigResource,
-    ShipSystemControlSources, VisitingStationHosts, BANK_LERP_RATE,
+    CoordinationEnqueue, CoordinationEnqueueCursor, CoordinationQueue, DeliveredCoordination,
+    DockingMotionIntent, HelmWaypointClearance, HumanSeekingHosts, ImpulseConfigResource,
+    LastHelmInput, LastSystemTiers, PendingArcBearingRequest, PendingShipConfig,
+    PendingTacticalFrequencyHint, RepairHumanAlerted, ScenarioDetailFloor, ShipConfigComponent,
+    ShipPhysicsConfigResource, ShipSystemControlSources, VisitingStationHosts, BANK_LERP_RATE,
 };
 pub(crate) use crate::ship::coordination_systems::flush_coordination_popups;
 pub(crate) use crate::ship::coordination_systems::process_coordination_lag;
@@ -51,6 +51,7 @@ impl Plugin for ShipPlugin {
         crate::console::helm::dispatch::register_helm_dispatch(app);
         app.init_resource::<BankConfigResource>()
             .add_message::<CoordinationEnqueue>()
+            .init_resource::<CoordinationEnqueueCursor>()
             .add_message::<DeliveredCoordination>()
             .add_message::<OrderedCoordinationPopup>()
             .add_message::<AiChatterEvent>();
@@ -61,15 +62,20 @@ impl Plugin for ShipPlugin {
         // it gates before it is re-armed for the next step.
         crate::ai::cadence::register_ai_cadence(app);
         // Authoritative-state exclusion declarations (issue #1221, Track 3 step
-        // C9). These three ship components are DERIVED — recomputed every tick as
-        // pure functions of ShipConfig + sessions + control sources (all
-        // digest-free), and spawn-required on LocalShip so they never cause a
-        // mid-run archetype move. Declared here at their owning site, replacing the
-        // `EXCLUSIONS` const in `tests/authoritative_state_enumeration.rs`; inert
-        // to the digest.
+        // C9). The coordination cursor is continuation-authoritative (snapshot
+        // format 14 projects its unread suffix); the three ship components are
+        // DERIVED — recomputed every tick as pure functions of ShipConfig +
+        // sessions + control sources (all digest-free), and spawn-required on
+        // LocalShip so they never cause a mid-run archetype move. Declared here
+        // at their owning site, replacing the `EXCLUSIONS` const in
+        // `tests/authoritative_state_enumeration.rs`; inert to the digest.
         {
             use crate::authoritative::{DeclareState, StateClass};
-            app.declare_state::<HumanSeekingHosts>(
+            app.declare_state::<CoordinationEnqueueCursor>(
+                StateClass::DeferredFold,
+                "coordination-enqueue-staging-state",
+            )
+            .declare_state::<HumanSeekingHosts>(
                 StateClass::Derived,
                 "visiting-station-placement-state",
             )

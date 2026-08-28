@@ -203,8 +203,8 @@ entities:
       writers: [system-control-source-resolver]
     implementation:
       status: declared
-      paths: [src/ship/control_source.rs, src/server_app/broadcast.rs, src/core/messages.rs, gui/sim-state.js]
-      symbols: [ControlSourceResolver, SimSnapshot, build_control_source_snapshots]
+      paths: [src/ship/control_source.rs, src/ship/components.rs, src/snapshot.rs, src/server_app/broadcast.rs, src/core/messages.rs, gui/sim-state.js]
+      symbols: [ControlSourceResolver, ShipSystemControlSources, EntityState, SimSnapshot, build_control_source_snapshots]
 
   - component: station-rating-controller
     core:

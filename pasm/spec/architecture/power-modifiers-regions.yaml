@@ -8,7 +8,7 @@ entities:
     architecture:
       kind: subsystem
       authority: authoritative
-      owns: [ship-power-state]
+      owns: [ship-power-state, power-brownout-coordination-state]
       reads: [ship-station-system-topology-state, system-control-source-state, inter-system-message-state]
       runs_in: [host-browser-runtime]
     implementation:
@@ -32,6 +32,22 @@ entities:
       status: declared
       paths: [src/ship/power.rs, src/core/messages.rs]
       symbols: [PowerBlackboard]
+
+  - state: power-brownout-coordination-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Power Brownout Coordination State
+      summary: Per-ship set of already-notified brownout groups plus the same-tick reactor-lock edge awaiting the advisory emitter. Snapshot format 14 sorts the group set and replaces the whole state, including a present default component.
+    architecture:
+      classification: authoritative
+      owner: ship-power-controller
+      writers: [ship-power-controller]
+      derived_from: [ship-power-state]
+    implementation:
+      status: observed
+      paths: [src/ship/power.rs, src/snapshot.rs, src/server_app/registration.rs, tests/snapshot_resume.rs]
+      symbols: [PowerBrownoutState, PowerBrownoutContinuationState, tick_power_brownout_advisory]
 
   - component: ship-modifier-cache
     core:

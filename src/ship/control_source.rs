@@ -84,6 +84,21 @@ impl ControlSourceResolver {
         self.offline_systems.contains(system_id)
     }
 
+    /// Replace the complete damage-offline set.
+    ///
+    /// Snapshot restore uses this instead of replaying damage transitions: the
+    /// resolver is read by command admission before the next damage-sync pass,
+    /// so inheriting even one bootstrap entry (or omitting one captured entry)
+    /// changes which commands are accepted on the first continuation tick.
+    pub fn replace_offline_systems(&mut self, system_ids: impl IntoIterator<Item = SystemId>) {
+        self.offline_systems.clear();
+        self.offline_systems.extend(system_ids);
+    }
+
+    pub fn offline_entries(&self) -> impl Iterator<Item = &SystemId> {
+        self.offline_systems.iter()
+    }
+
     /// Return the effective `ControlTickPolicy` for `system_id`.
     ///
     /// If the system is in `offline_systems` (damage-driven), the offline policy
@@ -228,5 +243,19 @@ mod tests {
                 coordinate: true,
             }
         );
+    }
+
+    #[test]
+    fn replacing_offline_systems_clears_bootstrap_entries() {
+        let mut resolver = ControlSourceResolver::new();
+        let bootstrap = SystemId("bootstrap".into());
+        let captured = SystemId("captured".into());
+        resolver.set_offline(bootstrap.clone(), true);
+
+        resolver.replace_offline_systems([captured.clone()]);
+
+        assert!(!resolver.is_offline(&bootstrap));
+        assert!(resolver.is_offline(&captured));
+        assert_eq!(resolver.offline_entries().count(), 1);
     }
 }

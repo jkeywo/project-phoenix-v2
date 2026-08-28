@@ -794,6 +794,25 @@ fn queue_starts_empty() {
 }
 
 #[test]
+fn authored_coordination_lag_converts_to_the_expected_whole_ticks() {
+    assert_eq!(coordination_lag_ticks(0.0, 60.0), 0, "zero is same-tick");
+    assert_eq!(
+        coordination_lag_ticks(0.001, 60.0),
+        1,
+        "a positive sub-tick delay waits one tick"
+    );
+    assert_eq!(coordination_lag_ticks(0.6, 30.0), 18);
+    assert_eq!(coordination_lag_ticks(0.6, 60.0), 36);
+    assert_eq!(coordination_lag_ticks(2.0, 30.0), 60);
+    assert_eq!(coordination_lag_ticks(2.0, 60.0), 120);
+    assert_eq!(
+        coordination_lag_ticks(0.61, 60.0),
+        37,
+        "a non-integral delay rounds up to the first observable tick"
+    );
+}
+
+#[test]
 fn enqueue_adds_message() {
     let mut queue = CoordinationLagQueue::new();
     queue.enqueue(QueuedCoordination {
@@ -804,7 +823,7 @@ fn enqueue_adds_message() {
         },
         presentation: test_presentation(),
         sender_label: String::new(),
-        due_time: 10.0,
+        due_tick: 10,
     });
     assert_eq!(queue.len(), 1);
     assert!(!queue.is_empty());
@@ -821,9 +840,9 @@ fn due_messages_returns_nothing_before_deadline() {
         },
         presentation: test_presentation(),
         sender_label: String::new(),
-        due_time: 10.0,
+        due_tick: 10,
     });
-    let due = queue.due_messages(5.0);
+    let due = queue.due_messages(5);
     assert!(due.is_empty());
     assert_eq!(queue.len(), 1);
 }
@@ -839,9 +858,9 @@ fn due_messages_returns_ready_at_deadline() {
         },
         presentation: test_presentation(),
         sender_label: String::new(),
-        due_time: 10.0,
+        due_tick: 10,
     });
-    let due = queue.due_messages(10.0);
+    let due = queue.due_messages(10);
     assert_eq!(due.len(), 1);
     assert!(queue.is_empty());
 }
@@ -857,9 +876,9 @@ fn due_messages_returns_ready_after_deadline() {
         },
         presentation: test_presentation(),
         sender_label: String::new(),
-        due_time: 10.0,
+        due_tick: 10,
     });
-    let due = queue.due_messages(15.0);
+    let due = queue.due_messages(15);
     assert_eq!(due.len(), 1);
     assert!(queue.is_empty());
 }
@@ -875,7 +894,7 @@ fn due_messages_respects_per_message_deadlines() {
         },
         presentation: test_presentation(),
         sender_label: String::new(),
-        due_time: 1.0,
+        due_tick: 1,
     });
     queue.enqueue(QueuedCoordination {
         sender_origin: ControlSource::Ai,
@@ -885,7 +904,7 @@ fn due_messages_respects_per_message_deadlines() {
         },
         presentation: test_presentation(),
         sender_label: String::new(),
-        due_time: 5.0,
+        due_tick: 5,
     });
     queue.enqueue(QueuedCoordination {
         sender_origin: ControlSource::Ai,
@@ -895,10 +914,10 @@ fn due_messages_respects_per_message_deadlines() {
         },
         presentation: test_presentation(),
         sender_label: String::new(),
-        due_time: 15.0,
+        due_tick: 15,
     });
 
-    let due = queue.due_messages(10.0);
+    let due = queue.due_messages(10);
     assert_eq!(due.len(), 2);
     assert_eq!(
         due[0].payload,
@@ -922,6 +941,34 @@ fn due_messages_respects_per_message_deadlines() {
 }
 
 #[test]
+fn equal_tick_messages_are_delivered_in_enqueue_order() {
+    let mut queue = CoordinationLagQueue::new();
+    for message in ["first", "second"] {
+        queue.enqueue(QueuedCoordination {
+            sender_origin: ControlSource::Ai,
+            address: station_address("helm"),
+            payload: CoordinationPayload::Advisory {
+                message: message.into(),
+            },
+            presentation: test_presentation(),
+            sender_label: String::new(),
+            due_tick: 5,
+        });
+    }
+
+    let due = queue.due_messages(5);
+    assert_eq!(
+        due.iter()
+            .map(|message| match &message.payload {
+                CoordinationPayload::Advisory { message } => message.as_str(),
+                _ => unreachable!("fixture queues Advisory payloads"),
+            })
+            .collect::<Vec<_>>(),
+        ["first", "second"]
+    );
+}
+
+#[test]
 fn sender_origin_is_captured_at_enqueue_time() {
     let mut queue = CoordinationLagQueue::new();
     queue.enqueue(QueuedCoordination {
@@ -933,9 +980,9 @@ fn sender_origin_is_captured_at_enqueue_time() {
         },
         presentation: test_presentation(),
         sender_label: "AI Tactical".into(),
-        due_time: 5.0,
+        due_tick: 5,
     });
-    let due = queue.due_messages(10.0);
+    let due = queue.due_messages(10);
     assert_eq!(due.len(), 1);
     assert_eq!(due[0].sender_origin, ControlSource::Ai);
     assert_eq!(due[0].sender_label, "AI Tactical");
@@ -954,9 +1001,9 @@ fn explicit_address_survives_the_delay_unchanged() {
         },
         presentation: test_presentation(),
         sender_label: String::new(),
-        due_time: 1.0,
+        due_tick: 1,
     });
-    let due = queue.due_messages(2.0);
+    let due = queue.due_messages(2);
     assert_eq!(due[0].address, address);
 }
 

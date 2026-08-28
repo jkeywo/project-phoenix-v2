@@ -61,6 +61,31 @@ pub const AI_RULE_TORPEDO_AUTO_FIRE: &str = "torpedo_auto_fire";
 #[derive(Component, Default, Clone, Debug)]
 pub struct ShipFrequencyHintState(pub crate::console_ai::FrequencyHintState);
 
+impl ShipFrequencyHintState {
+    /// Read the authoritative delayed-hint memory for continuation projection.
+    pub(crate) fn continuation(&self) -> (Option<&str>, f32, bool) {
+        (
+            self.0.current_target.as_deref(),
+            self.0.elapsed_secs,
+            self.0.hint_sent,
+        )
+    }
+
+    /// Replace bootstrap memory with a restored continuation.
+    pub(crate) fn replace_continuation(
+        &mut self,
+        current_target: Option<String>,
+        elapsed_secs: f32,
+        hint_sent: bool,
+    ) {
+        self.0 = crate::console_ai::FrequencyHintState {
+            current_target,
+            elapsed_secs,
+            hint_sent,
+        };
+    }
+}
+
 /// Console AI orchestrator plugin.
 pub struct ConsoleAiPlugin;
 
@@ -165,6 +190,24 @@ impl Plugin for ConsoleAiPlugin {
 // it was one of seven byte-identical copies, all now routed through the shared
 // `command_admission::ai_emit::emit_ai_command` seam (issue #738).
 
+/// Convert an authored seconds window to a whole number of logical sim ticks.
+///
+/// Multiplication intentionally stays in `f32`: both values are authored and
+/// stored as `f32`, and widening `0.6_f32` before multiplying by 60 turns its
+/// intended 36 ticks into `36.000001...` and therefore 37 after `ceil`.
+/// Validation keeps production inputs finite and non-negative; the guards keep
+/// the helper deterministic in focused unit tests too.
+fn shield_window_ticks(window_secs: f32, sim_tick_hz: f32) -> u64 {
+    if !window_secs.is_finite()
+        || window_secs <= 0.0
+        || !sim_tick_hz.is_finite()
+        || sim_tick_hz <= 0.0
+    {
+        return 0;
+    }
+    (window_secs * sim_tick_hz).ceil() as u64
+}
+
 /// AI shield-focus decision system (issue #692).
 ///
 /// Replaces the old fused `ship::shields::operate_shields_ai`: reads each
@@ -212,7 +255,8 @@ impl Plugin for ConsoleAiPlugin {
 /// remains the unpopulated placeholder `build_world_snapshot` always writes
 /// (`None`) — not used here, since the live component is fresher anyway.
 pub(crate) fn ai_shield_focus(
-    time: Res<Time>,
+    sim_tick: Res<crate::sim_tick::SimTick>,
+    world_config: Res<crate::world::config::WorldConfig>,
     world_snapshot: Res<crate::ai::server::WorldSnapshot>,
     // The read-only AI-host world context — flag chain, sessions (consulted by
     // the admission emitter), and origin stamps — behind one bare-`Res` system
@@ -238,7 +282,8 @@ pub(crate) fn ai_shield_focus(
         ),
     >,
 ) {
-    let current_time = time.elapsed_secs();
+    let current_tick = sim_tick.0;
+    let sim_tick_hz = world_config.global.sim_tick_hz;
 
     // The AI side of the typed input path (issue #1211, which deleted the
     // per-operator `console_ai::shields_emit` shim): the emitter binds the
@@ -357,6 +402,12 @@ pub(crate) fn ai_shield_focus(
             .get(crate::entities::config::SHIELD_FOCUS_MIN_DAMAGE_WINDOW_PARAM)
             .map(|v| v as f32)
             .unwrap_or(cfg_default.min_damage_window_secs);
+        // Convert the two authored second-valued knobs once at the host
+        // boundary. The product deliberately stays in f32 (the authored type)
+        // and rounds up so a partial logical tick never shortens the window.
+        let damage_window_ticks = shield_window_ticks(damage_window_secs, sim_tick_hz);
+        let min_damage_window_ticks = shield_window_ticks(min_damage_window_secs, sim_tick_hz);
+        let effective_window_ticks = damage_window_ticks.max(min_damage_window_ticks);
         let damage_pct_threshold = policy
             .params
             .get(crate::entities::config::SHIELD_FOCUS_DAMAGE_PCT_PARAM)
@@ -400,14 +451,14 @@ pub(crate) fn ai_shield_focus(
                 let decay_only = !facing.is_focused && facing.hp >= facing.max_hp;
                 if !decay_only {
                     let delta = prev_hp - facing.hp;
-                    damage_history.record_damage(idx, current_time, delta);
+                    damage_history.record_damage(idx, current_tick, delta);
                 }
             }
             damage_history.observe_hp(idx, facing.hp);
         }
 
         // Prune records outside the damage window.
-        damage_history.prune_old(current_time, damage_window_secs);
+        damage_history.prune_old(current_tick, effective_window_ticks);
 
         // ── Build AI input ──────────────────────────────────────────────────
         let facings_snapshot: Vec<_> = facings.iter().map(|f| f.snapshot()).collect();
@@ -421,9 +472,9 @@ pub(crate) fn ai_shield_focus(
         let facts = crate::console_ai::seed_shields_focus_facts(
             &facings_snapshot,
             &damage_history.arcs,
-            damage_window_secs,
-            min_damage_window_secs,
-            current_time,
+            damage_window_ticks,
+            min_damage_window_ticks,
+            current_tick,
         );
         // The scenario flag chain, anchored at the layer that spawned this
         // ship (issue #891 stage 2).
@@ -453,11 +504,11 @@ pub(crate) fn ai_shield_focus(
             facings: facings_snapshot,
             shields_is_low,
             damage_history: damage_history.arcs.clone(),
-            damage_window_secs,
-            min_damage_window_secs,
+            damage_window_ticks,
+            min_damage_window_ticks,
             damage_pct_threshold,
             health_ratio_threshold,
-            current_time_secs: current_time,
+            current_tick,
         };
 
         let decision = crate::console_ai::tick_shield_focus_ai(&input);

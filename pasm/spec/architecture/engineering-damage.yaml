@@ -209,6 +209,7 @@ entities:
       authority: authoritative
       owns:
         - authoritative-damage-state
+        - system-damage-tier-memory-state
       runs_in:
         - host-browser-runtime
     implementation:
@@ -249,6 +250,22 @@ entities:
       symbols:
         - SystemHull
         - RepairBlackboard
+
+  - state: system-damage-tier-memory-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: System Damage Tier Crossing Memory
+      summary: Per-ship exact previous DamageTier and HP maps used to detect one-shot tier and fresh-damage crossings. Snapshot format 14 stores each map independently in System-id order and replaces bootstrap memory, including a present empty component.
+    architecture:
+      classification: authoritative
+      owner: host-damage-state
+      writers: [host-damage-state]
+      derived_from: [authoritative-damage-state]
+    implementation:
+      status: observed
+      paths: [src/ship/components.rs, src/ship/damage_sync.rs, src/snapshot.rs, src/server_app/registration.rs, tests/snapshot_resume.rs]
+      symbols: [LastSystemTiers, LastSystemTiersState, detect_damage_tier_crossings]
 
   - component: host-command-admission
     core:

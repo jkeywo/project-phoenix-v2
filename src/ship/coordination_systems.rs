@@ -5,14 +5,15 @@ use crate::core::messages::{ClientMessage, CoordinationAddress, CoordinationPayl
 use crate::lobby::{InboundMessage, Sessions};
 use crate::server_app::LocalShip;
 use crate::ship::components::{
-    ActiveStationRatings, CoordinationDelivery, CoordinationEnqueue, CoordinationQueue,
-    DeliveredCoordination, HumanSeekingHosts, OrderedCoordinationPopup, ScenarioDetailFloor,
-    ShipConfigComponent, ShipSystemControlSources, VisitingStationHosts,
+    ActiveStationRatings, CoordinationDelivery, CoordinationEnqueue, CoordinationEnqueueCursor,
+    CoordinationQueue, DeliveredCoordination, HumanSeekingHosts, OrderedCoordinationPopup,
+    ScenarioDetailFloor, ShipConfigComponent, ShipSystemControlSources, VisitingStationHosts,
 };
 use crate::ship::control_source::ControlSource;
 use crate::ship::coordination;
 use crate::ship::coordination::QueuedCoordination;
 use crate::ship::helm_ai::helm_axes_operate_ai;
+use crate::sim_tick::SimTick;
 
 pub fn handle_coordination_enqueue(
     mut ship_components: Query<
@@ -20,13 +21,19 @@ pub fn handle_coordination_enqueue(
         With<crate::server_app::Ship>,
     >,
     local_ship_q: Query<Entity, With<LocalShip>>,
-    mut events: MessageReader<CoordinationEnqueue>,
+    events: Res<Messages<CoordinationEnqueue>>,
+    mut event_cursor: ResMut<CoordinationEnqueueCursor>,
     mut inbound: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    time: Res<Time>,
+    tick: Res<SimTick>,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
+    fixed_time: Res<Time<Fixed>>,
 ) {
-    let now = time.elapsed_secs();
-    let coord_events: Vec<_> = events.read().cloned().collect();
+    let sim_tick_hz = world_config.as_ref().map_or_else(
+        || 1.0 / fixed_time.timestep().as_secs_f32(),
+        |config| config.global.sim_tick_hz,
+    );
+    let coord_events: Vec<_> = event_cursor.0.read(&events).cloned().collect();
     let inbound_msgs: Vec<_> = inbound.read().cloned().collect();
 
     // Route typed CoordinationEnqueue events to their source ship's queue.
@@ -36,6 +43,7 @@ pub fn handle_coordination_enqueue(
             continue;
         };
         let lag = ship_config.0.coordination_lag_secs;
+        let lag_ticks = coordination::coordination_lag_ticks(lag, sim_tick_hz);
         // Channel-3 addresses crew by STATION, not by the fine system that
         // spoke (Task 2). Resolve the emitting system to its owning station's
         // display id here, where the SOURCE ship's config is in scope; an empty
@@ -52,7 +60,7 @@ pub fn handle_coordination_enqueue(
             payload: ev.payload.clone(),
             presentation: ev.presentation.clone(),
             sender_label,
-            due_time: now + lag,
+            due_tick: tick.0.saturating_add(lag_ticks),
         });
     }
 
@@ -66,6 +74,7 @@ pub fn handle_coordination_enqueue(
         return;
     };
     let lag = ship_config.0.coordination_lag_secs;
+    let lag_ticks = coordination::coordination_lag_ticks(lag, sim_tick_hz);
     for msg in &inbound_msgs {
         let ClientMessage::SendCoordination {
             address,
@@ -98,7 +107,7 @@ pub fn handle_coordination_enqueue(
             payload: payload.clone(),
             presentation: presentation.clone(),
             sender_label: player.name.clone(),
-            due_time: now + lag,
+            due_tick: tick.0.saturating_add(lag_ticks),
         });
     }
 }
@@ -451,7 +460,7 @@ fn station_delivery_policy(
 }
 
 pub(crate) fn process_coordination_lag(
-    time: Res<Time>,
+    tick: Res<SimTick>,
     mut ship_components: Query<
         (
             Entity,
@@ -470,7 +479,6 @@ pub(crate) fn process_coordination_lag(
     mut popup_writer: MessageWriter<OrderedCoordinationPopup>,
 ) {
     let repair_id = crate::ship::system_registry::repair_system_id();
-    let now = time.elapsed_secs();
     let mut popup_order = 0_u64;
     for (
         ship_entity,
@@ -491,7 +499,7 @@ pub(crate) fn process_coordination_lag(
             )
         });
 
-        for msg in queue.0.due_messages(now) {
+        for msg in queue.0.due_messages(tick.0) {
             let to_label = coordination::coordination_addressee_label(&msg.address);
             // Whole-ship delivery is selected by its address, never by looking
             // for a particular payload variant. The authored Station order is

@@ -3,7 +3,7 @@ title: World Data
 type: entity
 tags: [world, scenario, transform, ambient_light, snapshot, includes]
 sources: [src/world/config.rs, src/world/server.rs, src/world/server_tests.rs, src/world/layers.rs, src/world/validate.rs, src/world/deadlines.rs, src/world/script/load.rs, src/world/script/schedule.rs, src/comms/scripted.rs, src/entities/config_cache.rs, src/snapshot.rs, src/server/bridge.rs, server.html, src/server/renderer.rs, src/entities/config.rs, src/entities/entity_override.rs, src/entities/include_resolve.rs, src/objectives/directive.rs, tests/snapshot_resume.rs, assets/worlds/default.toml]
-updated: 2026-08-27
+updated: 2026-08-28
 ---
 
 # World Data
@@ -93,6 +93,54 @@ missing dynamic layers in captured activation order, treats a desired failed
 sentinel as terminal rather than retrying, and only then restores callbacks,
 deadlines and Comms state. That preserves index-aligned handlers and prevents
 bootstrap duplicate arming.
+
+Snapshot format 14 also preserves the live Sensors→Shields continuation seam.
+Each entity row carries Shields' recent per-arc damage with each record's exact
+authoritative `recorded_tick`, its previous-HP baseline and any one-shot pending
+threat bearing. It also carries Sensors' last warned threat identity, bearing,
+label and distance: without that producer-side debounce memory, a freshly
+restored Sensors system would enqueue the already-seen hostile again and change
+Shields focus only after the Coordination delay. In-flight Coordination entries
+travel in enqueue order with the number of future logical ticks until each
+becomes due; restore rebuilds those due ticks from the captured `SimTick` and
+replaces the bootstrap queue wholesale. A
+world-visible `CoordinationEnqueueCursor` also defines the exact unread suffix
+ahead of those attached queues. Format 14 projects that suffix in message order,
+including an entry retained in Bevy's older message buffer, maps its source ship
+through `EntityUuid`, and replaces bootstrap staging so the Input handler reads
+each restored entry exactly once. The AI cadence latches are re-derived from the
+restored `SimTick` before continuation.
+
+The same format boundary replaces the producer memories that would otherwise
+turn restored state into a fresh edge later: intent narration's station-sorted
+decision frontier and generation counter, recent combat timestamps as
+fixed-clock ages plus previous hull, high-fidelity Sensors' frequency-hint
+timer, the NPC Tactical auto-match timer map (with process-local Entity keys
+projected through `EntityUuid`), each ship's current phaser frequency, Tactical's
+one-tick pending frequency-hint inbox, exact previous system tiers and HP,
+Power's brownout notification set and lock edge, and Shields' per-facing
+down/restore notification latches. Component and resource presence is explicit:
+even a default memory or empty NPC timer map is stored as `Some(default)` and
+replaces the bootstrap value rather than being treated as absent.
+
+Format 14 also makes each ship's AI fidelity an explicit lifecycle state. A
+row records High or Low for every `Ship`, plus the presence and fixed-clock age
+of its `LodTransitionTimer`. Restore reconciles the complete canonical
+`AiHighFidelityComponents` bundle before writing any member's continuation: a
+High capture repairs a Low or partial bootstrap bundle, while a Low capture
+removes every High-only component. Impulse phase/progress and Boost
+active/battery travel separately because those drive machines remain attached
+at both fidelity levels. The ship's sorted damage-offline system ids likewise
+replace the mutable command-admission gate before the next damage-sync pass.
+
+At world scope, the payload preserves `Time<Fixed>`'s exact integer-nanosecond
+overstep and the sorted `TrackedEntities` reported-id registry with its seeded
+latch. Those values decide respectively whether the next update crosses a
+logical-tick boundary and whether the first reconnect projection rewrites
+`WorldResource`. Navigation's waypoint generation, clearance issuer frontier
+and Helm clearance latch are exact replacement state. Weapons' global phaser
+mode and each ship's arc-request debounce/pending request also preserve present
+defaults, so restore clears bootstrap-only requests rather than merging them.
 
 ## TransformConfig (`src/world/config.rs`)
 

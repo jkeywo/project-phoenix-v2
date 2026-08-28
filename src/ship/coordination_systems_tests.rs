@@ -255,7 +255,7 @@ fn destroyed_alert_shows_popup_for_human_captain() {
     // Tick 1: detect_damage_tier_crossings writes CoordinationEnqueue
     //         into the message send buffer.
     // Tick 2: buffer-swap → handle_coordination_enqueue reads and enqueues
-    //         to CoordinationQueue with due_time = now + 0.
+    //         to CoordinationQueue with due_tick = SimTick + 0.
     //         process_coordination_lag reads due messages and dispatches
     //         a CoordinationPopup to the LobbyOutbox.
     // Tick 3: consumes the popup and/or allows the broadcast to flush.
@@ -334,7 +334,7 @@ fn station_control_is_resolved_live_after_enqueue_not_frozen_in_the_queue() {
             },
             presentation: test_coordination_presentation(),
             sender_label: "station.sensors.name".into(),
-            due_time: 0.0,
+            due_tick: 0,
         });
 
     // Ownership changes after enqueue but before the due delivery is routed.

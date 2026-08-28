@@ -234,6 +234,28 @@ pub fn ai_high_fidelity_components() -> AiHighFidelityComponents {
     )
 }
 
+/// Whether an entity carries every member of [`AiHighFidelityComponents`].
+///
+/// Kept beside the canonical tuple and constructor so lifecycle consumers do
+/// not retype bundle membership independently. Snapshot restore uses this to
+/// distinguish a complete High bootstrap (safe to overwrite in place) from a
+/// partial one that must be reset through [`ai_high_fidelity_components`].
+pub fn has_ai_high_fidelity_components(entity: &EntityWorldMut<'_>) -> bool {
+    entity.contains::<AiHighFidelity>()
+        && entity.contains::<crate::console_ai::server::ShipFrequencyHintState>()
+        && entity.contains::<crate::ship::helm::ThrustInput>()
+        && entity.contains::<crate::ship::helm::SteeringInput>()
+        && entity.contains::<crate::ship::helm::LateralThrustInput>()
+        && entity.contains::<crate::ship::helm::VerticalThrustInput>()
+        && entity.contains::<crate::ship::helm::ImpulseCommand>()
+        && entity.contains::<crate::ship::helm::BoostCommand>()
+        && entity.contains::<crate::ship::helm_ai::HelmBoostAiPolicyState>()
+        && entity.contains::<crate::ship::helm_ai::HelmEnginesAiPolicyState>()
+        && entity.contains::<crate::ship::helm_ai::HelmSteeringAiPolicyState>()
+        && entity.contains::<crate::ship::helm_ai::HelmPassSurface>()
+        && entity.contains::<crate::ship::helm_ai::HelmRecoveryHistory>()
+}
+
 /// AI personality and capability profile for NPC entities.
 #[derive(Component, Clone, Debug)]
 pub struct AiProfile {

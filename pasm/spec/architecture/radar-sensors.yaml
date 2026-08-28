@@ -71,6 +71,42 @@ entities:
       paths: [src/ship/sensors.rs, src/core/messages.rs]
       symbols: [SensorRadarSelection]
 
+  - component: sensors-threat-warning-producer
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Sensors Threat Warning Producer
+      summary: Detects the nearest in-range hostile per ship and emits a Shields threat-bearing advisory only when the threat identity or bearing has materially changed.
+      rationale:
+        - "Snapshot format 14 carries the producer's four-field debounce memory. Restoring a default SensorsThreatState would classify the already-observed hostile as new and enqueue a duplicate bearing whose authored Coordination delay changes Shields focus later in the resumed run."
+    architecture:
+      kind: coordination-producer
+      authority: authoritative
+      owns: [sensors-threat-debounce-state]
+      writes: [sensors-threat-debounce-state]
+      sends: [inter-system-message-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/sensors.rs, src/snapshot.rs, src/server_app/registration.rs]
+      symbols: [tick_sensors_threat_warning, SensorsThreatState, SensorsThreatMemoryState]
+      tests: [cargo test]
+
+  - state: sensors-threat-debounce-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Sensors Threat Warning Debounce State
+      summary: Per-ship identity, relative bearing, label and distance of the last threat warning Sensors emitted; snapshot format 14 carries the scalar projection so resume does not emit an already-delivered warning again.
+    architecture:
+      classification: authoritative
+      owner: sensors-threat-warning-producer
+      writers: [sensors-threat-warning-producer]
+    implementation:
+      status: declared
+      paths: [src/ship/sensors.rs, src/snapshot.rs, src/server_app/registration.rs, tests/snapshot_resume.rs]
+      symbols: [SensorsThreatState, SensorsThreatMemoryState]
+
   - state: tactical-radar-blackboard-state
     core:
       status: implemented
@@ -157,6 +193,7 @@ entities:
     architecture:
       kind: coordination-producer
       authority: authoritative
+      owns: [sensors-frequency-hint-state]
       reads: [weapons-target-state, shield-arc-state]
       sends: [inter-system-message-state]
       runs_in: [host-browser-runtime]
@@ -165,6 +202,21 @@ entities:
       paths: [src/console_ai/server.rs, src/console_ai/core.rs]
       symbols: [tick_frequency_hint_high_fidelity, tick_frequency_hint, ShipFrequencyHintState]
       tests: [cargo test]
+
+  - state: sensors-frequency-hint-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: High-Fidelity Sensors Frequency Hint State
+      summary: Per-high-fidelity-ship target identity, accumulated authored reaction delay and already-sent latch for the delayed frequency advisory. Snapshot format 14 replaces the full scalar state, including a present default component.
+    architecture:
+      classification: authoritative
+      owner: sensors-frequency-advisor-ai-delayed
+      writers: [sensors-frequency-advisor-ai-delayed]
+    implementation:
+      status: observed
+      paths: [src/console_ai/core.rs, src/console_ai/server.rs, src/snapshot.rs, src/server_app/registration.rs, tests/snapshot_resume.rs]
+      symbols: [FrequencyHintState, ShipFrequencyHintState, FrequencyHintContinuationState]
 
   - component: sensors-radar-publisher
     core:

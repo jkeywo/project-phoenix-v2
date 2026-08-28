@@ -122,17 +122,18 @@ entities:
         - "Repair presentation names only the coarse authored Station/Core label and never carries its protected exact deficit, regardless of recipient entitlement. Destroyed-System presentation uses the hull entry's authored display name with String Table title/body ids; no Rust-composed English remains. The strict String Table gate scans literal Rust CoordinationPresentation constructors and text-valued presentation parameters so moving ids out of JavaScript cannot make missing rows invisible."
         - "Issue #1257 extends the same seam with an explicit CoordinationDelivery outcome. RepairRequest deliveries resolved to AI retain their exact host-internal deficit and Repair's receive_repair_coordination merges them into RepairRequestQueue. Deliveries resolved to a human carry the already-resolved session token, sender label, recipient-projected payload, and same-tick popup order; Repair applies its first sub-Disabled report / always-report Disabled-or-Destroyed latch before emitting an OrderedCoordinationPopup. The shared flush sorts approved Repair outcomes together with generic Station and deterministic Ship fan-out popups by the lag router's original enqueue sequence. The lag router retains delay, recipient selection, and HullVisibility projection but no longer queries or mutates RepairRequestQueue or RepairHumanAlerted."
         - "Issue #1258 moves ThreatBearing behind the same seam: receive_shields_coordination verifies the authored shield-arc Station and live authored Shields focus capability before latching PendingShieldsThreatBearing for the following Shields AI decision. The generic lag router no longer knows Shields' private pending-state representation; Human and Offline outcomes remain the generic popup and consume/drop paths."
+        - "Issue #1258's continuation repair makes both halves of the lag seam explicit in snapshot format 14. CoordinationLagQueue is tick-native: enqueue converts the finite non-negative authored lag once as ceil(lag_secs * sim_tick_hz) in f32, stores an absolute due_tick, and delivery drains due_tick <= SimTick with equal-tick FIFO order. EntityState::coordination_queue projects attached entries in enqueue order with the number of future fixed steps until each becomes due; restore rebuilds due_tick from the captured SimTick and replaces the bootstrap queue wholesale, including with an empty capture. Widening the authored f32 before multiplication or rebasing an f32 remaining delay is deliberately rejected because either can move an entry by one fixed step. The pre-queue CoordinationEnqueue staging channel now has one world-visible CoordinationEnqueueCursor as its sole production reader: capture clones that exact cursor and projects only its ordered unread suffix (including entries retained in Bevy's older buffer), while restore clears the bootstrap Messages, aligns the authoritative cursor to the retained monotonic message count, then writes the restored suffix so the handler consumes it exactly once. Source Entity handles travel as EntityUuid and resolve after entity restore. Merging either half would retain a threat warning the fresh bootstrap emitted before Sensors' captured debounce memory was applied and would change Shields focus after the lag."
     architecture:
       kind: coordination-service
       authority: authoritative
-      owns: [coordination-lag-queue-state]
+      owns: [coordination-lag-queue-state, coordination-enqueue-staging-state]
       reads: [system-control-source-state, session-station-ownership-state]
       produces: [coordination-delivery-state]
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [src/ship/coordination.rs, src/ship/coordination_systems.rs, src/ship/components.rs, src/ship/shields.rs, src/ship_plugin.rs, src/core/messages.rs, src/core/codec.rs, src/console_bridge.rs, src/console/helm/server.rs, src/console/weapons/server.rs, src/console/repair/server.rs, gui/client-router.js, gui/sim-state.js, gui/coordination-popup.js, client.html, server.html, scripts/check-strings.mjs, scripts/strings-rust.mjs]
-      symbols: [CoordinationAddress, CoordinationPresentation, CoordinationParam, CoordinationDelivery, address_for_system, address_for_system_kind, CoordinationLagQueue, CoordinationPayload, DeliveredCoordination, OrderedCoordinationPopup, PendingArcBearingRequest, HelmWaypointClearance, receive_helm_coordination, PendingTacticalFrequencyHint, receive_tactical_coordination, receive_repair_coordination, PendingShieldsThreatBearing, receive_shields_coordination, flush_coordination_popups, apply_tactical_frequency_hint, broadcast_to_ship, seat_control_source, ShipSeat, normalizeCoordinationPresentation, renderCoordinationPopup, buildCoordinationChatterBubble, coordinationPresentationIds]
+      paths: [src/ship/coordination.rs, src/ship/coordination_systems.rs, src/ship/components.rs, src/ship/shields.rs, src/ship_plugin.rs, src/snapshot.rs, src/core/messages.rs, src/core/codec.rs, src/console_bridge.rs, src/console/helm/server.rs, src/console/weapons/server.rs, src/console/repair/server.rs, gui/client-router.js, gui/sim-state.js, gui/coordination-popup.js, client.html, server.html, scripts/check-strings.mjs, scripts/strings-rust.mjs]
+      symbols: [CoordinationAddress, CoordinationPresentation, CoordinationParam, CoordinationDelivery, address_for_system, address_for_system_kind, CoordinationLagQueue, CoordinationPayload, CoordinationEnqueueCursor, CoordinationEnqueueState, DeliveredCoordination, OrderedCoordinationPopup, PendingArcBearingRequest, HelmWaypointClearance, receive_helm_coordination, PendingTacticalFrequencyHint, receive_tactical_coordination, receive_repair_coordination, PendingShieldsThreatBearing, receive_shields_coordination, flush_coordination_popups, apply_tactical_frequency_hint, broadcast_to_ship, seat_control_source, ShipSeat, normalizeCoordinationPresentation, renderCoordinationPopup, buildCoordinationChatterBubble, coordinationPresentationIds]
       messages: [SendCoordination, CoordinationPopup, DeliveredCoordination, OrderedCoordinationPopup, AiChatterEvent]
       tests: [cargo test, tests/client/client-router.test.js, tests/client/sim-state.test.js, tests/client/coordination-popup.test.js]
 
@@ -141,15 +142,30 @@ entities:
       status: implemented
       confidence: confirmed
       title: Coordination Lag Queue State
-      summary: Authoritative per-ship queue of pending advisory messages carrying an explicit Station or Ship address, typed semantic payload, required producer-owned presentation envelope, and configured delivery delay.
+      summary: Authoritative per-ship attached queue of pending advisory messages carrying an explicit Station or Ship address, typed semantic payload, required producer-owned presentation envelope, tick-native due boundary, and enqueue order. Authored seconds convert once at the configured simulation rate; snapshot format 14 stores ordered entries with their exact first-due fixed-step offset and replaces the bootstrap queue on restore. The separately classified enqueue-staging state covers messages not attached yet.
     architecture:
       classification: authoritative
       owner: coordination-lag-router
       writers: [coordination-lag-router]
     implementation:
       status: declared
-      paths: [src/ship/coordination.rs, src/ship_plugin.rs]
-      symbols: [CoordinationLagQueue, CoordinationQueue]
+      paths: [src/ship/coordination.rs, src/ship_plugin.rs, src/snapshot.rs, tests/snapshot_resume.rs]
+      symbols: [CoordinationLagQueue, CoordinationQueue, CoordinationQueueState, QueuedCoordinationState]
+
+  - state: coordination-enqueue-staging-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Coordination Enqueue Staging State
+      summary: Ordered CoordinationEnqueue suffix not yet consumed by the Input handler. A world-visible cursor distinguishes unread messages from already-consumed entries retained in Bevy's two buffers; snapshot format 14 projects source Entity handles through EntityUuid and restores the suffix exactly once after replacing bootstrap staging.
+    architecture:
+      classification: authoritative
+      owner: coordination-lag-router
+      writers: [coordination-lag-router]
+    implementation:
+      status: declared
+      paths: [src/ship/components.rs, src/ship/coordination_systems.rs, src/ship_plugin.rs, src/snapshot.rs, tests/snapshot_resume.rs]
+      symbols: [CoordinationEnqueue, CoordinationEnqueueCursor, CoordinationEnqueueState, capture_coordination_staging, restore_coordination_staging]
 
   - state: coordination-delivery-state
     core:
@@ -203,11 +219,12 @@ entities:
       rationale:
         - "[ai] The counter is a COUNTER, never a clock reading: two lockstep peers advancing the same simulation must stamp the same advisory with the same generation, and elapsed time differs on every host. Same rule NavigationWaypoint::generation follows."
         - "Attached at BOTH ship spawn sites (entities::spawner::spawn_entity and server_app::spawn_game_start_entities); a source scan re-derives the attachment, because a ship without it narrates nothing and nothing warns. The player ship is the one bridge with human seats to narrate to."
+        - "Snapshot format 14 replaces the bootstrap's whole ShipIntentNarration frontier: ship-wide generation plus every station's complete IntentSnapshot, projected in station-id order. Omitting one snapshot axis can manufacture a later change that never happened; restarting the counter can reuse generations already present in the restored lag queue. A present default component is therefore Some(default), not omission."
     architecture:
       classification: authoritative
       owner: intent-narration-coalescer
       writers: [intent-narration-coalescer]
     implementation:
       status: declared
-      paths: [src/ship/intent_narration_systems.rs, src/entities/spawner.rs, src/server_app/world_setup.rs]
-      symbols: [ShipIntentNarration, INTENT_NARRATION_SPAWN_SITES]
+      paths: [src/ship/intent_narration_systems.rs, src/entities/spawner.rs, src/server_app/world_setup.rs, src/snapshot.rs, src/server_app/registration.rs, tests/snapshot_resume.rs]
+      symbols: [ShipIntentNarration, INTENT_NARRATION_SPAWN_SITES, IntentNarrationState, IntentSnapshotState]

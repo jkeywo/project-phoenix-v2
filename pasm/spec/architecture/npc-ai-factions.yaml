@@ -45,7 +45,7 @@ entities:
     architecture:
       kind: lifecycle-service
       authority: authoritative
-      owns: [npc-ai-controller-state]
+      owns: [npc-ai-controller-state, npc-ai-fidelity-state]
       writes: [system-control-source-state]
       reads: [spawned-entity-state, entity-template-state]
       runs_in: [host-browser-runtime]
@@ -174,7 +174,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Recent Combat Activity State
-      summary: Authoritative per-ship recent attack and damage timestamps consumed by combat-aware AI and viewscreen aggregation.
+      summary: Authoritative per-ship recent attack and damage timestamps plus previous-hull baseline consumed by combat-aware AI and viewscreen aggregation. Snapshot format 14 stores timestamps as fixed-clock ages and rebases them on restore, including a present default component.
     architecture:
       classification: authoritative
       owner: ai-combat-memory
@@ -182,5 +182,5 @@ entities:
       replicas: [ship-system-blackboards-state]
     implementation:
       status: declared
-      paths: [src/ship/combat_activity.rs]
-      symbols: [RecentCombatActivity]
+      paths: [src/ship/combat_activity.rs, src/snapshot.rs, src/server_app/registration.rs, tests/snapshot_resume.rs]
+      symbols: [RecentCombatActivity, RecentCombatActivityState]

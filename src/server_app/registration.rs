@@ -484,6 +484,14 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 StateClass::DeferredFold,
                 "world-snapshot-state",
             )
+            .declare_state::<crate::ai::server::AiHighFidelity>(
+                StateClass::DeferredFold,
+                "npc-ai-fidelity-state",
+            )
+            .declare_state::<crate::ai::server::LodTransitionTimer>(
+                StateClass::DeferredFold,
+                "npc-ai-fidelity-state",
+            )
             .declare_state::<crate::asteroids::lifecycle::AsteroidEntityMap>(
                 StateClass::DeferredFold,
                 "asteroid-window-state",
@@ -516,9 +524,21 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 StateClass::DeferredFold,
                 "navigation-waypoint-state",
             )
+            .declare_state::<crate::console::navigation::NavClearanceIssueState>(
+                StateClass::DeferredFold,
+                "navigation-clearance-issue-state",
+            )
+            .declare_state::<crate::ship::components::HelmWaypointClearance>(
+                StateClass::DeferredFold,
+                "helm-waypoint-clearance-state",
+            )
             .declare_state::<crate::console::weapons::WeaponsDoctrineAiPolicy>(
                 StateClass::DeferredFold,
                 "weapon-family-arc-bearing-coordination",
+            )
+            .declare_state::<crate::console::weapons::NpcFrequencyMatchStates>(
+                StateClass::DeferredFold,
+                "npc-frequency-match-state",
             )
             .declare_state::<crate::console::weapons::beam::ActiveBeam>(
                 StateClass::DeferredFold,
@@ -579,6 +599,14 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             )
             .declare_state::<ShipBoost>(StateClass::DeferredFold, "boost-drive-state")
             .declare_state::<ShipImpulse>(StateClass::DeferredFold, "impulse-drive-state")
+            .declare_state::<TrackedEntities>(
+                StateClass::DeferredFold,
+                "runtime-entity-projection-state",
+            )
+            .declare_state::<crate::ship_plugin::ShipSystemControlSources>(
+                StateClass::DeferredFold,
+                "system-control-source-state",
+            )
             .declare_state::<crate::modifiers::cache::ShipModifiers>(
                 StateClass::DeferredFold,
                 "ship-modifier-state",
@@ -616,9 +644,17 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             StateClass::DeferredFold,
             "last-helm-input-state",
         )
+        .declare_state::<crate::ship::components::LastSystemTiers>(
+            StateClass::DeferredFold,
+            "system-damage-tier-memory-state",
+        )
         .declare_state::<crate::ship::components::PendingArcBearingRequest>(
             StateClass::DeferredFold,
             "pending-arc-bearing-request-state",
+        )
+        .declare_state::<crate::ship::components::PendingTacticalFrequencyHint>(
+            StateClass::DeferredFold,
+            "tactical-frequency-hint-inbox-state",
         )
         .declare_state::<crate::ship::helm::BoostCommand>(
             StateClass::DeferredFold,
@@ -648,13 +684,37 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             StateClass::DeferredFold,
             "intent-narration-state",
         )
+        .declare_state::<crate::ship::power::PowerBrownoutState>(
+            StateClass::DeferredFold,
+            "power-brownout-coordination-state",
+        )
+        .declare_state::<crate::ship::state::ShipPhaserFrequency>(
+            StateClass::DeferredFold,
+            "ship-phaser-frequency-state",
+        )
+        .declare_state::<crate::console_ai::server::ShipFrequencyHintState>(
+            StateClass::DeferredFold,
+            "sensors-frequency-hint-state",
+        )
         .declare_state::<crate::ship::sensors::SensorRadarSelection>(
             StateClass::DeferredFold,
             "sensors-target-state",
         )
+        .declare_state::<crate::ship::sensors::SensorsThreatState>(
+            StateClass::DeferredFold,
+            "sensors-threat-debounce-state",
+        )
         .declare_state::<crate::ship::shields::ShieldsDamageHistory>(
             StateClass::DeferredFold,
             "shields-damage-history-state",
+        )
+        .declare_state::<crate::ship::shields::PendingShieldsThreatBearing>(
+            StateClass::DeferredFold,
+            "shields-threat-bearing-inbox-state",
+        )
+        .declare_state::<crate::ship::shields::ShieldsCoordinationState>(
+            StateClass::DeferredFold,
+            "shields-coordination-debounce-state",
         )
         .declare_state::<crate::world::config::WorldConfig>(
             StateClass::DeferredFold,

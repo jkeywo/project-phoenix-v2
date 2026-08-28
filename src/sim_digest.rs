@@ -122,15 +122,28 @@
 //! `EntitySnapshot` geometry fields (`shape`, `radius`, `inner_radius`,
 //! `half_extents`, `tags`) are authored-static and are also not folded today.
 //!
-//! Also deferred, honestly: per-*arc* shield hull (`ShipArcHull`), weapons
-//! state machines, power allocation, modifier caches and the per-system
-//! blackboards — **and the `WorldResource` projection narrowing itself**: the
-//! record's reviewer table lists `WorldResource` as IN unqualified, and this
-//! module is what actually narrows that to the seven-field projection above
-//! rather than the resource wholesale, so the narrowing belongs on this list
-//! too rather than only in the paragraph above it. None of these is *excluded*
-//! by the record; they are simply not folded yet (or, for the projection,
-//! folded less than the record's own IN line reads). `tests/
+//! Also deferred, honestly: per-*arc* shield hull (`ShipArcHull`), the
+//! continuation-authoritative `ShieldsDamageHistory`,
+//! `PendingShieldsThreatBearing`, `SensorsThreatState`, `CoordinationQueue`,
+//! `ShipIntentNarration`, `RecentCombatActivity`, `ShipFrequencyHintState`,
+//! `ShipPhaserFrequency`, `PendingTacticalFrequencyHint`, `LastSystemTiers`,
+//! `PowerBrownoutState`, `ShieldsCoordinationState`, `AiHighFidelity`,
+//! `LodTransitionTimer`, `ShipBoost`, `ShipImpulse`, `ShipSystemControlSources`,
+//! `NavigationWaypoint`, `NavClearanceIssueState` and
+//! `HelmWaypointClearance` components plus the `CoordinationEnqueueCursor`,
+//! `NpcFrequencyMatchStates`, `CurrentPhaserMode` and `TrackedEntities`
+//! resources. Snapshot format 14 carries their stable projections (including
+//! process-local Entity keys projected through `EntityUuid`) together with the
+//! exact `Time<Fixed>` overstep. Weapons state machines, power allocation,
+//! modifier caches and the per-system blackboards are likewise deferred —
+//! **and the
+//! `WorldResource` projection narrowing itself**: the record's reviewer table
+//! lists `WorldResource` as IN unqualified, and this module is what actually
+//! narrows that to the seven-field projection above rather than the resource
+//! wholesale, so the narrowing belongs on this list too rather than only in
+//! the paragraph above it. None of these is *excluded* by the record; they are
+//! simply not folded yet (or, for the projection, folded less than the record's
+//! own IN line reads). `tests/
 //! authoritative_state_enumeration.rs` is the census ratchet that keeps their
 //! classification honest, and this list is what a reviewer should read to know
 //! the difference between "the record says no" and "this slice has not got to

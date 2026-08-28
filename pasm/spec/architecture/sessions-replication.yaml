@@ -121,6 +121,7 @@ entities:
     architecture:
       kind: replication-service
       authority: authoritative
+      owns: [runtime-entity-projection-state]
       produces: [lobby-session-replica, simulation-state-replica]
       reads: [session-identity-state, session-station-ownership-state]
       depends_on: [replication-lifecycle-registry]

@@ -304,6 +304,31 @@ pub struct FrequencyMatchState {
     pub match_sent: bool,
 }
 
+impl FrequencyMatchState {
+    /// Read the exact delayed-match continuation for snapshot projection.
+    pub(crate) fn continuation(&self) -> (Option<&str>, f32, bool) {
+        (
+            self.current_target.as_deref(),
+            self.elapsed_secs,
+            self.match_sent,
+        )
+    }
+
+    /// Rebuild the delayed-match continuation after the snapshot layer has
+    /// resolved its target identity and validated its scalar fields.
+    pub(crate) fn from_continuation(
+        current_target: Option<String>,
+        elapsed_secs: f32,
+        match_sent: bool,
+    ) -> Self {
+        Self {
+            current_target,
+            elapsed_secs,
+            match_sent,
+        }
+    }
+}
+
 /// All inputs required by `tick_auto_match_frequency`.
 #[derive(Clone, Debug)]
 pub struct FrequencyMatchInput {
@@ -394,20 +419,20 @@ pub struct ShieldFocusAiInput {
     /// When false, no AI action is taken.
     pub shields_is_low: bool,
     /// Per-arc damage history, indexed by facing index.
-    /// Records older than `damage_window_secs` should be pruned by the caller.
+    /// Records outside the effective tick window should be pruned by the caller.
     pub damage_history: Vec<Vec<DamageRecord>>,
-    /// Maximum time window (seconds) for damage tracking.
-    pub damage_window_secs: f32,
-    /// Minimum time window (seconds) before the AI reacts to damage concentration.
-    pub min_damage_window_secs: f32,
+    /// Authored damage-history window converted to whole simulation ticks.
+    pub damage_window_ticks: u64,
+    /// Authored minimum reaction window converted to whole simulation ticks.
+    pub min_damage_window_ticks: u64,
     /// Percentage threshold (0.0–100.0): if an arc receives this fraction of
     /// total damage in the active window, focus it.
     pub damage_pct_threshold: f32,
     /// Percentage threshold (0.0–100.0): if the lowest-arc normalized health
     /// is below this fraction of the second-lowest, focus the weakest arc.
     pub health_ratio_threshold: f32,
-    /// Current absolute time in seconds (used to compute the active window).
-    pub current_time_secs: f32,
+    /// Current authoritative logical simulation tick.
+    pub current_tick: u64,
 }
 
 /// Outcome of a single `tick_shield_focus_ai` call.
@@ -427,11 +452,10 @@ pub enum ShieldFocusAiOutput {
 /// 1. If `shields_is_low` is false or there are fewer than 2 facings, return
 ///    `None` (no AI involvement; single-arc ships have nothing to focus).
 /// 2. Damage concentration check — sum recorded damage per arc over the
-///    authored recent-damage window `[current_time - window, current_time]`,
-///    where `window = max(damage_window_secs, min_damage_window_secs)` (the
-///    authored `damage_window_secs`, floored at `min_damage_window_secs` so a
-///    misconfigured window can never shrink below the reaction minimum). The
-///    caller prunes records older than `damage_window_secs` first. If any arc
+///    authored recent-damage window, where a record is recent iff
+///    `current_tick - recorded_tick < window_ticks` and `window_ticks` is
+///    `max(damage_window_ticks, min_damage_window_ticks)`. The caller prunes
+///    using that identical strict boundary. If any arc
 ///    accounts for `damage_pct_threshold` % or more of total window damage,
 ///    focus it.
 /// 3. Health imbalance check — if no arc met the damage threshold, compare
@@ -446,15 +470,14 @@ pub fn tick_shield_focus_ai(input: &ShieldFocusAiInput) -> ShieldFocusAiOutput {
     let n = input.facings.len();
 
     // ── 1. Damage concentration check ────────────────────────────────────────
-    // Prune is done by the caller (operate_shields_ai prunes before building input).
+    // Prune is done by the caller (ai_shield_focus prunes before building input).
     // Concentration is measured over the AUTHORED recent-damage window
-    // (`damage_window_secs`), floored at `min_damage_window_secs` so a
+    // (`damage_window_ticks`), floored at `min_damage_window_ticks` so a
     // misconfigured window can never fall below the reaction minimum. The
-    // authored window — not a fixed last-`min_damage_window_secs` slice — is
+    // authored window — not a fixed last-`min_damage_window_ticks` slice — is
     // what "recent concentrated damage over authored windows" (issue #747)
     // means.
-    let window = input.damage_window_secs.max(input.min_damage_window_secs);
-    let effective_start = input.current_time_secs - window;
+    let window_ticks = input.damage_window_ticks.max(input.min_damage_window_ticks);
 
     let mut damage_per_arc: Vec<i32> = vec![0; n];
     let mut total_window_damage: i32 = 0;
@@ -464,7 +487,11 @@ pub fn tick_shield_focus_ai(input: &ShieldFocusAiInput) -> ShieldFocusAiOutput {
             break;
         }
         for record in records {
-            if record.timestamp >= effective_start && record.timestamp <= input.current_time_secs {
+            if crate::ship::shields::damage_record_is_recent(
+                record.recorded_tick,
+                input.current_tick,
+                window_ticks,
+            ) {
                 damage_per_arc[idx] += record.amount;
                 total_window_damage += record.amount;
             }
@@ -535,11 +562,11 @@ pub fn tick_shield_focus_ai(input: &ShieldFocusAiInput) -> ShieldFocusAiOutput {
 /// This is THE piece that exposes BOUNDED RECENT INCOMING-DAMAGE facts by shield
 /// arc (AC1) and closes the #779 empty-facts sharp edge for the Shields policy:
 /// without seeding, a `fact(...)` guard validates but never fires. Every reading
-/// is computed from the ALREADY-PRUNED window the caller built (records older
-/// than `damage_window_secs` are gone before this runs) — "bounded" means we read
+/// is computed from the ALREADY-PRUNED window the caller built (records whose
+/// tick age reaches the effective window are gone before this runs) — "bounded" means we read
 /// only that window and add NO new unbounded accumulator. The window matches the
-/// kernel's concentration window exactly (`max(damage_window_secs,
-/// min_damage_window_secs)`), so the facts describe the same slice the retained
+/// kernel's concentration window exactly (`max(damage_window_ticks,
+/// min_damage_window_ticks)`), so the facts describe the same slice the retained
 /// argmax ranks over.
 ///
 /// Facts emitted:
@@ -558,16 +585,15 @@ pub fn tick_shield_focus_ai(input: &ShieldFocusAiInput) -> ShieldFocusAiOutput {
 pub fn seed_shields_focus_facts(
     facings: &[crate::weapons::shield::ShieldFacingSnapshot],
     damage_history: &[Vec<DamageRecord>],
-    damage_window_secs: f32,
-    min_damage_window_secs: f32,
-    current_time_secs: f32,
+    damage_window_ticks: u64,
+    min_damage_window_ticks: u64,
+    current_tick: u64,
 ) -> crate::world::flags::AiFacts {
     use crate::entities::ai_flag_hosts as fid;
     let mut facts = crate::world::flags::AiFacts::new();
 
     // Same window the kernel measures concentration over.
-    let window = damage_window_secs.max(min_damage_window_secs);
-    let effective_start = current_time_secs - window;
+    let window_ticks = damage_window_ticks.max(min_damage_window_ticks);
 
     let mut total: i32 = 0;
     let mut max_arc: i32 = 0;
@@ -577,7 +603,13 @@ pub fn seed_shields_focus_facts(
             .map(|records| {
                 records
                     .iter()
-                    .filter(|r| r.timestamp >= effective_start && r.timestamp <= current_time_secs)
+                    .filter(|record| {
+                        crate::ship::shields::damage_record_is_recent(
+                            record.recorded_tick,
+                            current_tick,
+                            window_ticks,
+                        )
+                    })
                     .map(|r| r.amount)
                     .sum()
             })
@@ -1108,17 +1140,17 @@ mod tests {
         facings: Vec<ShieldFacingSnapshot>,
         shields_is_low: bool,
         damage_history: Vec<Vec<DamageRecord>>,
-        current_time_secs: f32,
+        current_tick: u64,
     ) -> ShieldFocusAiInput {
         ShieldFocusAiInput {
             facings,
             shields_is_low,
             damage_history,
-            damage_window_secs: 4.0,
-            min_damage_window_secs: 1.0,
+            damage_window_ticks: 4,
+            min_damage_window_ticks: 1,
             damage_pct_threshold: 50.0,
             health_ratio_threshold: 50.0,
-            current_time_secs,
+            current_tick,
         }
     }
 
@@ -1128,7 +1160,7 @@ mod tests {
             vec![make_snap("Fore", 50, 100, false)],
             false,
             empty_history(1),
-            0.0,
+            0,
         );
         assert_eq!(tick_shield_focus_ai(&input), ShieldFocusAiOutput::None);
     }
@@ -1139,7 +1171,7 @@ mod tests {
             vec![make_snap("All", 50, 100, false)],
             true,
             empty_history(1),
-            0.0,
+            0,
         );
         assert_eq!(tick_shield_focus_ai(&input), ShieldFocusAiOutput::None);
     }
@@ -1148,26 +1180,25 @@ mod tests {
     fn shield_ai_damage_concentration_focuses_arc() {
         // Arc at index 1 (Port) takes 80% of damage over the AUTHORED window
         // → should be focused even though every arc's health is equal.
-        // Concentration is measured over [current_time - window, current_time]
-        // where window = max(damage_window_secs, min_damage_window_secs) = 4.0,
-        // i.e. [0.0, 4.0]. The damage sits at t=1.0 — inside the authored 4s
-        // window but OUTSIDE the old last-`min_damage_window_secs` slice
-        // ([3.0, 4.0]) that the pre-#747 code measured. With balanced health
+        // Concentration is measured over records whose age is strictly less
+        // than max(damage_window_ticks, min_damage_window_ticks) = 4. The
+        // damage sits at tick 1 when current_tick=4 (age 3) — inside the
+        // authored window but OUTSIDE the old last-minimum-window slice. With balanced health
         // (all arcs 90/100) the health-imbalance fallback cannot fire, so a
         // Focus here proves the authored window governs concentration.
         let mut history = empty_history(4);
-        // Damage to Port at t=1.0s (inside the authored 4s window).
+        // Damage to Port at tick 1 (inside the authored four-tick window).
         history[1].push(DamageRecord {
-            timestamp: 1.0,
+            recorded_tick: 1,
             amount: 80,
         });
         // Scattered damage to other arcs at the same time.
         history[0].push(DamageRecord {
-            timestamp: 1.0,
+            recorded_tick: 1,
             amount: 10,
         });
         history[2].push(DamageRecord {
-            timestamp: 1.0,
+            recorded_tick: 1,
             amount: 10,
         });
         let facings = vec![
@@ -1176,7 +1207,7 @@ mod tests {
             make_snap("Aft", 90, 100, false),
             make_snap("Starboard", 90, 100, false),
         ];
-        let input = make_input(facings, true, history, 4.0);
+        let input = make_input(facings, true, history, 4);
         assert_eq!(
             tick_shield_focus_ai(&input),
             ShieldFocusAiOutput::Focus { facing_index: 1 }
@@ -1190,7 +1221,7 @@ mod tests {
         // Each arc gets 25 damage → no arc has ≥ 50% of total (100)
         for arc in &mut history {
             arc.push(DamageRecord {
-                timestamp: 3.5,
+                recorded_tick: 3,
                 amount: 25,
             });
         }
@@ -1200,7 +1231,7 @@ mod tests {
             make_snap("Aft", 75, 100, false),
             make_snap("Starboard", 75, 100, false),
         ];
-        let input = make_input(facings, true, history, 4.0);
+        let input = make_input(facings, true, history, 4);
         // Falls through to health check: worst normalized = 0.75,
         // second_worst = 0.75, ratio = 1.0, not < 0.5 → ClearFocus
         assert_eq!(
@@ -1220,7 +1251,7 @@ mod tests {
             make_snap("Aft", 80, 100, false),
             make_snap("Starboard", 80, 100, false),
         ];
-        let input = make_input(facings, true, empty_history(4), 5.0);
+        let input = make_input(facings, true, empty_history(4), 5);
         assert_eq!(
             tick_shield_focus_ai(&input),
             ShieldFocusAiOutput::Focus { facing_index: 1 }
@@ -1236,7 +1267,7 @@ mod tests {
             make_snap("Aft", 80, 100, false),
             make_snap("Starboard", 80, 100, false),
         ];
-        let input = make_input(facings, true, empty_history(4), 5.0);
+        let input = make_input(facings, true, empty_history(4), 5);
         assert_eq!(tick_shield_focus_ai(&input), ShieldFocusAiOutput::None);
     }
 
@@ -1249,7 +1280,7 @@ mod tests {
             make_snap("Aft", 100, 100, false),
             make_snap("Starboard", 100, 100, false),
         ];
-        let input = make_input(facings, true, empty_history(4), 5.0);
+        let input = make_input(facings, true, empty_history(4), 5);
         assert_eq!(
             tick_shield_focus_ai(&input),
             ShieldFocusAiOutput::ClearFocus
@@ -1258,16 +1289,15 @@ mod tests {
 
     #[test]
     fn shield_ai_damage_outside_active_window_ignored() {
-        // Damage on Port (idx 1) at t=1.0s is older than the authored window
-        // when current_time=6.0: window = max(4.0, 1.0) = 4.0, so the active
-        // window is [2.0, 6.0] and t=1.0 falls outside it → the concentration
-        // branch sees nothing and the decision must fall through to health.
+        // Damage on Port (idx 1) at tick 2 is exactly the authored window old
+        // when current_tick=6: window = max(4, 1) = 4, so strict `age < window`
+        // excludes age 4 and the decision must fall through to health.
         // Port is kept healthy (90/100) and Aft (idx 2) is the weak arc, so if
         // the expired hit were (wrongly) counted the result would be Focus{1};
         // because it is ignored, health imbalance focuses Aft instead.
         let mut history = empty_history(4);
         history[1].push(DamageRecord {
-            timestamp: 1.0, // older than the 2.0s window start
+            recorded_tick: 2, // exact end boundary: age 4 is expired
             amount: 80,
         });
         let facings = vec![
@@ -1276,7 +1306,7 @@ mod tests {
             make_snap("Aft", 20, 100, false),
             make_snap("Starboard", 90, 100, false),
         ];
-        let input = make_input(facings, true, history, 6.0);
+        let input = make_input(facings, true, history, 6);
         // No damage in active window → health check.
         // worst normalized = 0.2 (Aft), second = 0.9, 0.5*0.9=0.45, 0.2<0.45 → focus Aft
         assert_eq!(
@@ -1287,13 +1317,13 @@ mod tests {
 
     #[test]
     fn shield_ai_damage_in_future_window_ignored() {
-        // Damage on Port (idx 1) at t=5.0s is in the future relative to
-        // current_time=4.0 (active window [0.0, 4.0]) and must be ignored.
+        // Damage on Port (idx 1) at tick 5 is in the future relative to
+        // current_tick=4 and must be ignored.
         // Port is kept healthy and Aft (idx 2) is the weak arc, so the ignored
         // future hit cannot mask the health-imbalance fallback focusing Aft.
         let mut history = empty_history(4);
         history[1].push(DamageRecord {
-            timestamp: 5.0,
+            recorded_tick: 5,
             amount: 80,
         });
         let facings = vec![
@@ -1302,7 +1332,7 @@ mod tests {
             make_snap("Aft", 20, 100, false),
             make_snap("Starboard", 90, 100, false),
         ];
-        let input = make_input(facings, true, history, 4.0);
+        let input = make_input(facings, true, history, 4);
         // Future damage ignored → health check: worst=0.2 (Aft), second=0.9 → focus Aft
         assert_eq!(
             tick_shield_focus_ai(&input),
@@ -1312,24 +1342,22 @@ mod tests {
 
     #[test]
     fn shield_ai_concentration_window_floored_at_min_damage_window() {
-        // A misconfigured authored window (damage_window_secs=0.5) below the
-        // reaction minimum (min_damage_window_secs=2.0) must NOT shrink the
-        // concentration window below the floor. window = max(0.5, 2.0) = 2.0,
-        // so the active window is [2.0, 4.0] and Port's hit at t=2.5 is
-        // counted → Focus{1}. Without the floor (window=0.5 → [3.5, 4.0]) the
-        // hit would be excluded and, with balanced health, the decision would
-        // clear instead.
+        // A misconfigured one-tick authored window below the two-tick reaction
+        // minimum must NOT shrink the concentration window below the floor.
+        // Port's tick-3 hit has age 1 at current_tick=4, so the two-tick floor
+        // includes it. Without the floor, strict age < 1 would exclude it and,
+        // with balanced health, the decision would clear instead.
         let mut history = empty_history(4);
         history[1].push(DamageRecord {
-            timestamp: 2.5,
+            recorded_tick: 3,
             amount: 80,
         });
         history[0].push(DamageRecord {
-            timestamp: 2.5,
+            recorded_tick: 3,
             amount: 10,
         });
         history[2].push(DamageRecord {
-            timestamp: 2.5,
+            recorded_tick: 3,
             amount: 10,
         });
         let facings = vec![
@@ -1342,11 +1370,11 @@ mod tests {
             facings,
             shields_is_low: true,
             damage_history: history,
-            damage_window_secs: 0.5,
-            min_damage_window_secs: 2.0,
+            damage_window_ticks: 1,
+            min_damage_window_ticks: 2,
             damage_pct_threshold: 50.0,
             health_ratio_threshold: 50.0,
-            current_time_secs: 4.0,
+            current_tick: 4,
         };
         assert_eq!(
             tick_shield_focus_ai(&input),
@@ -1404,11 +1432,11 @@ mod tests {
 
         let mut history = empty_history(4);
         history[1].push(DamageRecord {
-            timestamp: 1.0,
+            recorded_tick: 1,
             amount: 80,
         });
         history[0].push(DamageRecord {
-            timestamp: 1.0,
+            recorded_tick: 1,
             amount: 10,
         });
         let facings = vec![
@@ -1422,15 +1450,17 @@ mod tests {
             facings: facings.clone(),
             shields_is_low: true,
             damage_history: history.clone(),
-            damage_window_secs: p(crate::entities::config::SHIELD_FOCUS_DAMAGE_WINDOW_PARAM),
-            min_damage_window_secs: p(
+            damage_window_ticks: p(crate::entities::config::SHIELD_FOCUS_DAMAGE_WINDOW_PARAM).ceil()
+                as u64,
+            min_damage_window_ticks: p(
                 crate::entities::config::SHIELD_FOCUS_MIN_DAMAGE_WINDOW_PARAM,
-            ),
+            )
+            .ceil() as u64,
             damage_pct_threshold: p(crate::entities::config::SHIELD_FOCUS_DAMAGE_PCT_PARAM),
             health_ratio_threshold: p(crate::entities::config::SHIELD_FOCUS_HEALTH_RATIO_PARAM),
-            current_time_secs: 4.0,
+            current_tick: 4,
         };
-        let typed_input = make_input(facings, true, history, 4.0);
+        let typed_input = make_input(facings, true, history, 4);
 
         assert_eq!(
             tick_shield_focus_ai(&params_input),
@@ -1446,19 +1476,19 @@ mod tests {
     fn seed_shields_focus_facts_exposes_bounded_per_arc_damage() {
         // AC1: per-arc recent-damage facts computed from the pruned window only.
         // Port (idx 1) took a concentrated hit inside the window; a stale hit on
-        // Fore at t=0.0 falls OUTSIDE [current-window, current] and must NOT
-        // count (bounded — no unbounded accumulation).
+        // Fore at tick 1 has age 4 at current_tick=5 and must NOT count: the
+        // end boundary is strict (bounded — no unbounded accumulation).
         let mut history = empty_history(4);
         history[1].push(DamageRecord {
-            timestamp: 3.0,
+            recorded_tick: 3,
             amount: 60,
         });
         history[0].push(DamageRecord {
-            timestamp: 3.0,
+            recorded_tick: 3,
             amount: 20,
         });
         history[0].push(DamageRecord {
-            timestamp: 0.0, // stale: outside the [1.0, 5.0] window
+            recorded_tick: 1, // exact end boundary: age 4 is expired
             amount: 999,
         });
         let facings = vec![
@@ -1467,14 +1497,14 @@ mod tests {
             make_snap("Aft", 100, 100, false),
             make_snap("Starboard", 100, 100, false),
         ];
-        // window = max(4.0, 1.0) = 4.0 → [1.0, 5.0].
-        let facts = seed_shields_focus_facts(&facings, &history, 4.0, 1.0, 5.0);
+        // window = max(4, 1) = 4 ticks; only ages 0 through 3 are recent.
+        let facts = seed_shields_focus_facts(&facings, &history, 4, 1, 5);
 
         assert_eq!(facts.get("recent_damage_port"), Some(60.0));
         assert_eq!(
             facts.get("recent_damage_fore"),
             Some(20.0),
-            "the stale t=0.0 hit on Fore must be excluded from the bounded window"
+            "the age-equals-window hit on Fore must be excluded from the bounded window"
         );
         assert_eq!(facts.get("recent_damage_aft"), Some(0.0));
         assert_eq!(facts.get("recent_damage_total"), Some(80.0));

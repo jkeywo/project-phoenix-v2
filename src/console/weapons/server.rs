@@ -67,6 +67,25 @@ pub struct NpcFrequencyMatchStates(
     pub std::collections::HashMap<Entity, crate::console_ai::FrequencyMatchState>,
 );
 
+impl NpcFrequencyMatchStates {
+    /// Read the per-entity delayed-match continuations. Entity handles remain
+    /// deliberately opaque here; the snapshot layer owns UUID projection.
+    pub(crate) fn continuation(
+        &self,
+    ) -> &std::collections::HashMap<Entity, crate::console_ai::FrequencyMatchState> {
+        &self.0
+    }
+
+    /// Replace the complete continuation map after the snapshot layer has
+    /// resolved stable identities back to this world's Entity handles.
+    pub(crate) fn replace_continuation(
+        &mut self,
+        states: std::collections::HashMap<Entity, crate::console_ai::FrequencyMatchState>,
+    ) {
+        self.0 = states;
+    }
+}
+
 pub struct WeaponsPlugin;
 
 impl Plugin for WeaponsPlugin {

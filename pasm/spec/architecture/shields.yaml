@@ -13,7 +13,7 @@ entities:
     architecture:
       kind: defense-system
       authority: authoritative
-      owns: [shield-arc-state]
+      owns: [shield-arc-state, shields-coordination-debounce-state]
       reads: [ship-station-system-topology-state, system-control-source-state]
       produces: [shield-status-blackboard-state]
       runs_in: [host-browser-runtime]
@@ -38,6 +38,22 @@ entities:
       status: declared
       paths: [src/weapons/shield.rs, src/core/messages.rs]
       symbols: [ShieldSystem]
+
+  - state: shields-coordination-debounce-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Shields Coordination Debounce State
+      summary: Per-facing down and restored notification latches that prevent repeated shield-cycle advisories. Snapshot format 14 replaces both vectors exactly, including a present default component.
+    architecture:
+      classification: authoritative
+      owner: shield-arc-system
+      writers: [shield-arc-system]
+      derived_from: [shield-arc-state]
+    implementation:
+      status: observed
+      paths: [src/ship/shields.rs, src/snapshot.rs, src/server_app/registration.rs, tests/snapshot_resume.rs]
+      symbols: [ShieldsCoordinationState, ShieldsCoordinationContinuationState]
 
   - component: shield-focus-controller
     core:
@@ -126,6 +142,7 @@ entities:
         - "Issue #885 (8555e336) deleted that synthesiser. default_shields_focus_ai_config is gone along with every call site, strict AI-declaration mode is the default in EntityConfig::from_toml, and a hull that declares no [shields_console.ai_policy] fails the entity load rather than having a policy invented for it — so on any hull that loads, the focus policy is authored content. The authored blocks were proved byte-equivalent to what the synthesiser produced, through the real spawner on every shipped hull."
         - "Issue #1211 deleted the single-owner console_ai::shields_emit::emit_shields_ai_command shim the #747 bullet describes (superseding that bullet's 'observed per-entity code edge' claim). ai_shield_focus now emits both SetShieldArcFocus decisions through the AI host spine's AiHostEnv::emitter() (ai-policy-host-spine, issue #1205) — the same command_admission::ai_emit::emit_ai_command seam, unchanged payloads/token/admission gate/same-tick guarantee — so depends_on swaps host-command-admission → ai-policy-host-spine. OBSERVABILITY NOTE: the admission edge is now carried unambiguously by the spine's single-owner src/ai/host.rs, but this operator's only single-owner file WAS that shim; its remaining files (console_ai/server.rs, ship/shields.rs, …) are co-owned, so PASM can no longer attribute a per-entity edge and reports depends_on ai-policy-host-spine as missing-observed — the same shape helm-ai-operator/impulse/boost and the sensors AI hosts already carry. The edge itself is observed at the spine; the per-host attribution is the co-ownership limit PASM's observed-edge rule (validation.py) imposes, not a lost dependency."
         - "Issue #1258 moves the post-lag ThreatBearing consequence into Shields. process_coordination_lag emits generic DeliveredCoordination only after resolving an AI Station; receive_shields_coordination validates the authored shield-arc Station and live authored Shields focus capability, then writes PendingShieldsThreatBearing. ai_shield_focus consumes that inbox on its following decision and preserves the existing closest-authored-facing override. Human remains the generic popup path and Offline remains consume/drop; the lag router no longer knows the Shields pending-state representation."
+        - "Issue #1258's continuation repair persists BOTH pieces of authoritative Shields AI state through EntityState::shield_ai: ShieldsDamageHistory's per-arc records and last_hp baseline plus PendingShieldsThreatBearing's one-shot value. The serializable ShieldAiState is a scalar projection rather than serde on runtime components. Each damage record carries its exact authoritative recorded_tick, so the strict integer pruning boundary is unchanged after restore. EntityState::sensors_threat additionally carries Sensors' producer-side debounce memory; otherwise a fresh restore re-emits the already-seen hostile and changes Shields focus after the Coordination delay. EntityState::coordination_queue replaces the bootstrap's already-enqueued duplicate with the capture's enqueue-ordered messages and their exact first-due fixed-step offsets; PhoenixSnapshot::coordination_staging does the same for the cursor-defined unread suffix before the queue. SNAPSHOT_FORMAT moved 13 → 14 because a same-content older save cannot distinguish genuinely empty AI state from state its payload never knew how to carry. Restore also re-derives AiTickReady/AiSnapshotReady/AiBaseInterval from restored SimTick before the first continuation frame."
     architecture:
       kind: ai-operator
       authority: authoritative
@@ -150,28 +167,28 @@ entities:
       status: implemented
       confidence: confirmed
       title: Shields Damage History State
-      summary: Per-ship, per-arc timestamped damage data used by Shields AI over authored time windows, with a per-arc previous-health snapshot (last_hp) that supplies the damage-detection baseline each tick. Since #783 the same already-pruned window also feeds the Shields focus policy's bounded per-arc recent-damage facts (seed_shields_focus_facts) — no new accumulator is added; the facts read only this window.
+      summary: Per-ship, per-arc tick-stamped damage data used by Shields AI over authored time windows, with a per-arc previous-health snapshot (last_hp) that supplies the damage-detection baseline each tick. Since #783 the same already-pruned window also feeds the Shields focus policy's bounded per-arc recent-damage facts (seed_shields_focus_facts) — no new accumulator is added; the facts read only this window. Snapshot format 14 carries each record's exact recorded_tick plus last_hp, preserving the strict integer expiry boundary.
     architecture:
       classification: authoritative
       owner: shields-recent-damage-ai
       writers: [shields-recent-damage-ai]
     implementation:
       status: observed
-      paths: [src/ship/shields.rs]
-      symbols: [ShieldsDamageHistory, DamageRecord]
+      paths: [src/ship/shields.rs, src/snapshot.rs, src/server_app/registration.rs, tests/snapshot_resume.rs]
+      symbols: [ShieldsDamageHistory, DamageRecord, ShieldsAiState]
 
   - state: shields-threat-bearing-inbox-state
     core:
       status: implemented
       confidence: confirmed
       title: Shields Threat Bearing Inbox State
-      summary: Per-ship one-shot Sensors bearing accepted by the Shields-owned Coordination receiver after the shared lag and consumed by the next Shields AI decision.
+      summary: Per-ship one-shot Sensors bearing accepted by the Shields-owned Coordination receiver after the shared lag and consumed by the next Shields AI decision. Snapshot format 14 carries the scalar bearing so a resume reaches the same next decision.
     architecture:
       classification: authoritative
       owner: shields-recent-damage-ai
       writers: [shields-recent-damage-ai]
       derived_from: [coordination-delivery-state]
     implementation:
-      status: declared
-      paths: [src/ship/shields.rs, src/console_ai/server.rs]
+      status: observed
+      paths: [src/ship/shields.rs, src/console_ai/server.rs, src/snapshot.rs, src/server_app/registration.rs, tests/snapshot_resume.rs]
       symbols: [PendingShieldsThreatBearing, receive_shields_coordination, ai_shield_focus]

@@ -72,6 +72,21 @@ pub struct ShipIntentNarration {
 }
 
 impl ShipIntentNarration {
+    /// Read the authoritative coalescer memory for continuation projection.
+    pub(crate) fn continuation(&self) -> (&HashMap<StationId, IntentSnapshot>, u64) {
+        (&self.last, self.generation)
+    }
+
+    /// Replace bootstrap memory with a restored continuation.
+    pub(crate) fn replace_continuation(
+        &mut self,
+        last: HashMap<StationId, IntentSnapshot>,
+        generation: u64,
+    ) {
+        self.last = last;
+        self.generation = generation;
+    }
+
     /// The next advisory's generation. A counter step, never a clock read.
     fn next_generation(&mut self) -> u64 {
         self.generation += 1;

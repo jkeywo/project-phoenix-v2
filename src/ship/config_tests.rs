@@ -98,6 +98,23 @@ fn parse_ok(toml: &str) -> ShipConfig {
 }
 
 #[test]
+fn coordination_lag_requires_a_finite_non_negative_duration() {
+    for authored in ["-0.1", "nan", "inf"] {
+        let toml = format!("coordination_lag_secs = {authored}\n{}", valid_toml());
+        assert!(
+            matches!(
+                parse_and_validate(&toml, KINDS),
+                Err(ShipConfigError::InvalidCoordinationLagSecs { .. })
+            ),
+            "coordination_lag_secs = {authored} must be rejected"
+        );
+    }
+
+    let zero = format!("coordination_lag_secs = 0.0\n{}", valid_toml());
+    assert_eq!(parse_ok(&zero).coordination_lag_secs, 0.0);
+}
+
+#[test]
 fn new_ship_toml_parses_into_typed_model() {
     let config = parse_ok(valid_toml());
 

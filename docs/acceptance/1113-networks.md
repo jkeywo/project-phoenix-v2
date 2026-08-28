@@ -53,13 +53,19 @@ paste both into the issue thread** ([#1113]).
 * On a **phone**, it is in the bottom-right corner of the join screen.
 
 The dump is plain text and carries no join code, no session token and no full
-peer id, so it is safe to paste in public. It looks like this:
+peer id, so it is safe to paste in public.
+
+**Write the network in your own words on the line above the block** — what it
+was ("hotel wifi, 2.4GHz", "EE 4G hotspot, two bars"). Neither page has a field
+for it and nothing can invent it, so it is the one piece of context a
+relayed-versus-direct dump most needs and the only one you have to supply.
+
+The block itself looks like this:
 
 ```
 phoenix connection diagnostics
   page         client
   when         2026-08-28T09:14:02.881Z
-  network      hotel wifi, 2.4GHz
   transport    ws-relay
   why          direct-exhausted
   relay src    worker
@@ -100,6 +106,16 @@ neither dump says `transport ws-relay`.
 **Fails as.** If a phone lands on `ws-relay` here, the LAN is doing client
 isolation (common on guest and hotel networks) — note that in the thread,
 because it changes what scenario 4 is testing.
+
+**Shortcut, to make the claim strict.** `?transport=direct` on both ends (the
+host URL and the phone's) withholds the TURN server list entirely, so there is
+nothing to allocate from and any pair ICE forms is genuinely direct. It is the
+mirror image of scenario 3's `?forceRelay=1`, and it turns "we expect a
+host → host pair" into "nothing else was available". Both readouts say
+"Transport pinned to direct by this link"; if that line is missing the lever did
+not take. A failure under this pin means the LAN really is isolating clients —
+which is the answer worth having, and it comes in seconds rather than after the
+ninety-second ladder.
 
 ---
 

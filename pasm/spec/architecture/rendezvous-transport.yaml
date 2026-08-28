@@ -54,6 +54,8 @@ entities:
         - "[ai] The service is unauthenticated and its codes are private over a 25^5 space, so the bounds are authored data in join-codes.toml's [limits]: a per-connection lookup cap that cuts the socket off, a record TTL swept lazily, a per-record peer cap, and length/shape validation on anything stored. Cross-socket rate limiting stays Cloudflare's edge to apply."
         - "[ai] Both upgrade endpoints REQUIRE a present, allow-listed Origin; only /v1/health keeps the no-Origin exemption, because the deploy verification recipe is a bare curl. Every legitimate browser upgrade is cross-origin here, so exempting requests without an Origin would exempt only the scripted caller the refusal exists to stop."
         - "[ai] The diagnostics snapshot carries no suffix. The suffix IS the private client code; a view that includes it is one route away from publishing every live session."
+        - "[ai] Since #1113 it also carries the GAME, for a joiner whose direct ladder is spent and for a native host that has no WebRTC at all — worker-rendezvous/src/relay.js, a bounded mailbox hub with its own authored [limits]. That is a genuinely different resource profile from signalling (a signalling peer exchanges two SDP blobs and then costs nothing; a relayed crew member costs every command and every snapshot for the mission), which is why it is a separate module with bounds of its own rather than more verbs on the registry."
+        - "[ai] A Durable Object's WebSocket exposes no bufferedAmount, so the hub's queue depths only bite while a target socket is unwritable and the backpressure half that meets a real backlog belongs to the SENDERS (the browser's and tungstenite's, which do report one). relay.js's header says so rather than implying a bound it cannot enforce."
     architecture:
       kind: signalling-service
       authority: non-authoritative
@@ -66,11 +68,15 @@ entities:
       status: declared
       paths:
         - worker-rendezvous/src/registry.js
+        - worker-rendezvous/src/relay.js
         - worker-rendezvous/src/index.js
         - worker-rendezvous/wrangler.toml
         - worker-rendezvous/wrangler.demo.toml
-      symbols: [createRegistry, RendezvousRegistry]
-      tests: [tests/client/rendezvous-registry.test.js, tests/client/rendezvous-worker.test.js]
+      symbols: [createRegistry, RendezvousRegistry, createRelayHub]
+      tests:
+        - tests/client/rendezvous-registry.test.js
+        - tests/client/rendezvous-worker.test.js
+        - tests/client/rendezvous-relay.test.js
 
   - state: join-code-registry-state
     core:
@@ -102,27 +108,40 @@ entities:
       title: Rendezvous Signalling Frame
       summary: >-
         The versioned JSON vocabulary between a host or client page and the rendezvous service —
-        host-open, host-admission, host-close, resolve, join, signal, leave inbound; hosted,
-        resolved, joined, peer-joined, peer-left, signal, closed, error outbound. Every frame
-        carries its protocol revision and a frame from another revision is refused rather than
-        guessed at.
+        host-open, host-admission, host-close, resolve, join, signal, leave, relay-open, relay,
+        relay-close inbound; hosted, resolved, joined, peer-joined, peer-left, signal, closed,
+        error, relay-ready, relay-peer, relay, relay-peer-left, relay-closed, relay-degraded
+        outbound. Every frame carries its protocol revision and a frame from another revision is
+        refused rather than guessed at.
       rationale:
         - Deliberately NOT a ClientMessage/ServerMessage variant — p2p-delta-transport-is-a-star-today forbids layering transport concerns onto the crew protocol, which is unchanged by this work.
         - Failures are a stable machine reason, never prose, so the service ships no player-visible text and the phone resolves the wording through strings.csv.
-        - "[ai] The revision literal is declared once, in gui/rendezvous-protocol.js, which both halves import. Every frame is hard-refused on a mismatch, so two copies held together by a comment would put a total join outage one careless edit away — and #1114/#1115 are both edits to this vocabulary."
+        - "[ai] Issue #1113 added the relay verbs listed in the summary, plus a `transports` field on host-open and joined. They carry the GAME's own frames when no direct link can be built, and the load-bearing property is what they do NOT do: `payload` is an opaque string holding exactly the bytes a DataChannel would have carried, and nothing in the service may ever grow an opinion about what is inside it. That is what \"the WebSocket fallback does not fork the game protocol\" means concretely — same ClientMessage/ServerMessage JSON, same in-band compatibility handshake, same Identify gate, same localiseTree ingress."
+        - "[ai] The delivery CLASS survives the fallback, because it is a transport property rather than a protocol one: a relay frame declares reliable or snapshot, the service's mailbox sheds the second at its authored depth and never the first, and a reliable queue that fills ends that pair's session with a stated reason rather than becoming quietly lossy. Mailboxes are keyed by (owner, sender) rather than by destination, so a bound bites the pair that reached it instead of every crew member sharing the host's queue."
+        - "[ai] `error` is a per-REQUEST refusal, not a link event, and reading it as one was a crew-wide outage. registry.js's fail() answers relay/no-peer whenever a host addresses a peer whose attachment has just gone, which is every ordinary departure. Only a handful of reasons (unreachable, not-connected, unsupported-protocol) may end a session; the frame names the request and never the peer, so there is no subject to drop even for no-peer. `relay-peer-left` is the frame that DOES name one."
+        - "[ai] REVISED by #1113; the bullet this replaces said the revision literal is declared once in gui/rendezvous-protocol.js and both halves import it. There is now a THIRD speaker — a native Rust host, src/core/rendezvous.rs — which cannot import a JS module and MIRRORS the constant instead. Two copies held together by a comment is exactly the outage that bullet warned about, so the pairing is pinned by tests/native_relay_protocol.rs, which reads the JS module's own text. Every frame is still hard-refused on a mismatch, and #1114/#1115 are both edits to this vocabulary."
         - "[ai] No frame carries a delivery stamp in either direction. The host's compatibility check is in-band on the DataChannel, and relayed copies (resolved.host_stamp, joined.host_stamp, peer-joined.stamp) were read by nobody — dead surface the next extension would have had to keep."
         - "[ai] The `resolve` verb stays as the lookup primitive even though the shipped phone goes straight to `join`: it is the side-effect-free question a launcher or a fleet flow asks, and it is role-gated exactly like `join`."
     architecture:
       authority: request
-      producer: [rendezvous-transport-bridge]
+      producer: [rendezvous-transport-bridge, native-relay-transport]
       consumer: [rendezvous-service]
       validator: [rendezvous-service]
       trust_boundary: client-to-host
       payload: RendezvousFrame
     implementation:
       status: declared
-      paths: [worker-rendezvous/src/registry.js, gui/rendezvous-transport.js]
-      tests: [tests/client/rendezvous-registry.test.js, tests/client/rendezvous-transport.test.js]
+      paths:
+        - worker-rendezvous/src/registry.js
+        - worker-rendezvous/src/relay.js
+        - gui/rendezvous-transport.js
+        - gui/rendezvous-relay.js
+        - src/core/rendezvous.rs
+      tests:
+        - tests/client/rendezvous-registry.test.js
+        - tests/client/rendezvous-transport.test.js
+        - tests/client/rendezvous-relay.test.js
+        - tests/native_relay_protocol.rs
 
   - component: rendezvous-transport-bridge
     core:
@@ -184,6 +203,51 @@ entities:
         - tests/smoke/snapshot-channel.spec.js
         - tests/smoke/reconnect-midgame-sever.spec.js
         - tests/smoke/transport-shim.spec.js
+
+  - component: native-relay-transport
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Native Host Relay Transport
+      origin: ai
+      summary: >-
+        The native host's crew path: a NativeTransport implementation whose wire is the rendezvous
+        service's WebSocket game relay. One outbound wss: connection registers as a host declaring
+        transports ["ws-relay"], is issued a five-letter code the operator reads out, and carries
+        every crew member's traffic — the same frame vocabulary, the same opaque payloads, the same
+        in-band compatibility handshake answered from delivery::check_join_stamp, the same Identify
+        gate and reserved-token refusal. A phone cannot tell it is talking to a native host.
+      rationale:
+        - "[ai] It is a USER of the browser's fallback rather than a second transport, which is the whole point: the alternative was a join protocol for native processes, and two join protocols is what #1111 and #1112 spent themselves removing. It answers what #1121 deferred — src/native_host/transport.rs was a seam with nothing plugged into it, because WebRTC does not run in a Rust process and a native host is simply the case where a direct link can NEVER be built."
+        - "[ai] It declares its transports honestly rather than by omission. Without the claim a joiner would spend the entire 8/16/30 s ladder, four times over, discovering that a host with no WebRTC has no WebRTC; with it, the joiner skips the direct rungs on the strength of the `joined` frame."
+        - "[ai] The socket is tungstenite, the synchronous client, not one of its async wrappers: this crate has no async runtime and every native I/O surface it owns is a blocking std thread, so a runtime would be a new architectural dependency bought for one socket. Native-only behind the host feature; the browser build cannot reach any of it."
+        - "[ai] The socket REDIALS on a backoff, mirroring the browser host's lostService(). A Durable Object eviction, a worker redeploy or a Wi-Fi blip would otherwise leave a process running an authoritative mission with no route in for the rest of it — and a native host has no viewscreen to reload. Losing the link clears the issued code AND the registered flag, so the reconnected socket re-registers on the service's next `ready` and the operator log prints the fresh five letters. The old code is genuinely dead; keeping the same letters across a host drop needs persistence in the service and is #1115's, exactly as on the browser side."
+        - "[ai] Identity guards are the browser's, in Rust: a reserved token (__local_console__, the ai: prefix) is refused AT the transport with an in-band JoinRefused rather than dropped downstream — a peer left attached under one still sits in audience() and receives that token's private projection — and a duplicate token severs the prior peer without reporting a disconnect, because on a native host EVERY crew member is relayed, so re-Identify on a fresh peer id is the ordinary reconnect rather than an exotic case."
+        - "[ai] It cannot log for itself: plog! takes a Bevy system parameter and this is a resource Bevy calls. So it queues RelayNotice values on a shared handle and the host binary's report_relay_notices drains them onto its operator log, beside the join code it prints."
+    architecture:
+      kind: transport-adapter
+      authority: non-authoritative
+      sends: [rendezvous-signalling-frame]
+      runs_in: [native-host-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/native_host/relay_transport.rs
+        - src/native_host/relay_socket.rs
+        - src/core/rendezvous.rs
+        - src/bin/phoenix_host.rs
+      symbols:
+        - RelayTransport
+        - RelaySocket
+        - WsRelaySocket
+        - RelayHostConfig
+        - RelayNotice
+        - RendezvousFrame
+        - HandshakeFrame
+      tests:
+        - src/native_host/relay_transport_tests.rs
+        - tests/native_relay_protocol.rs
+        - tests/native_relay_live.rs
 
   - component: join-compatibility-gate
     core:

@@ -177,6 +177,12 @@ cargo build --release --features host --bin phoenix-host
 #     flags nobody can join and the host says so at boot — that is `--solo`.
 #     src/native_host/transport.rs is the seam; relay_transport.rs is what
 #     plugs into it and relay_socket.rs is the tungstenite half.
+#     The socket REDIALS on a backoff if it dies, the way the browser host's
+#     lostService() does — a native host has no viewscreen to reload, so a
+#     dropped socket would otherwise end every route into a running mission.
+#     A redial mints a NEW code: the old record died with the socket, so the
+#     letters already read out resolve to nothing (same-code survival needs
+#     persistence in the service and is #1115's, on both hosts).
 ./target/release/phoenix-host --help
 #   --manifest assets/scenarios.demo.toml  IS the catalogue restriction — the
 #     same lever `?manifest=` pulls in the browser (issue #917).

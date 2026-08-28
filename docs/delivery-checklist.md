@@ -357,6 +357,14 @@ State this in any release notes, because the gap is not obvious from the name:
   than only introducing them. That is a real cost difference from a browser
   host, and the reason the relay's bounds are authored in
   `assets/join/join-codes.toml` rather than assumed.
+- Its rendezvous socket **redials** if it dies (a Durable Object eviction, a
+  worker redeploy, a Wi-Fi blip), on the same backoff the browser host uses.
+  Expect a **new five-letter code** on the operator log when it comes back: the
+  old record died with the socket, so the letters already read out across the
+  room resolve to nothing. Anyone still connected is reported disconnected and
+  their stations flip to Backfill until they re-join with the new code. Keeping
+  the same code across a host drop needs persistence in the service and is
+  issue #1115's, on the browser side and this one alike.
 - Snapshot save/restore works (`tests/native_host_snapshot.rs`); there is no
   operator-facing session surface for it yet.
 

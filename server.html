@@ -210,6 +210,59 @@
       letter-spacing: var(--tracking-widest); color: var(--gold-bright);
       -webkit-user-select: all; user-select: all;
     }
+    /* The fleet panel (issue #1114). Below the crew QR, deliberately quieter
+       than it: the code above admits PLAYERS and is read across a room, this
+       one admits other ship hosts and is read by one operator standing at a
+       second machine. Hidden until a fleet exists — most sessions are one
+       ship, and an empty roster on every viewscreen would be clutter. */
+    #fleet-panel {
+      display: none; margin-top: 10px; padding: 8px 10px;
+      border: 1px solid var(--line-faint, #334); border-radius: 4px;
+      background: rgba(0, 0, 0, 0.35);
+      font-family: var(--font-mono); font-size: var(--text-sm);
+      min-width: 232px; max-width: 320px;
+    }
+    #fleet-panel.open { display: block; }
+    #fleet-title {
+      font-size: var(--text-xs); letter-spacing: var(--tracking-wide);
+      text-transform: uppercase; color: var(--ink-faint); text-align: center;
+    }
+    #fleet-code-row {
+      display: flex; flex-direction: column; align-items: center; gap: 2px;
+      margin-top: 4px;
+    }
+    #fleet-code-caption {
+      font-size: var(--text-xs); letter-spacing: var(--tracking-wide);
+      text-transform: uppercase; color: var(--ink-faint);
+    }
+    #fleet-code {
+      font-family: var(--font-mono); font-size: var(--text-lg);
+      letter-spacing: var(--tracking-widest); color: var(--cyan-bright);
+      -webkit-user-select: all; user-select: all;
+    }
+    #fleet-link {
+      display: none; line-height: 0; padding: 6px; border-radius: 4px;
+      background: rgb(var(--rgb-white));
+    }
+    #fleet-link.shown { display: block; }
+    #fleet-url {
+      font-family: var(--font-mono); font-size: var(--text-xs);
+      color: var(--cyan-bright); word-break: break-all; text-align: center;
+      -webkit-user-select: all; user-select: all;
+    }
+    #fleet-slots { list-style: none; margin: 6px 0 0; padding: 0; }
+    #fleet-slots li {
+      display: flex; justify-content: space-between; gap: 8px;
+      padding: 2px 0; color: var(--ink-dim, #99a);
+    }
+    #fleet-slots li.mine { color: var(--gold-bright); }
+    #fleet-slots li.gone { opacity: 0.55; }
+    #fleet-slots .fleet-ship { color: var(--ink-faint); text-align: right; }
+    #fleet-status, #fleet-error {
+      margin-top: 4px; text-align: center; font-size: var(--text-xs);
+      color: var(--ink-faint);
+    }
+    #fleet-error { color: #fa4; }
     #top-bar {
       position: absolute; top: 0.75rem; right: 0.75rem; z-index: 20;
       display: flex; flex-direction: column; align-items: flex-end; gap: 0.35rem; font-family: monospace;
@@ -1066,6 +1119,15 @@
       opacity: 0.35; cursor: not-allowed;
       background: #10171f; border-color: #223246; color: #55697f;
     }
+    /* The one text field in this panel: the fleet code an operator types off
+       another viewscreen (issue #1114). Monospaced and letter-spaced because
+       what goes in it is five letters read aloud across a room. */
+    .server-settings-input {
+      padding: 6px 9px; width: 8ch;
+      background: #10171f; border: 1px solid #223246; color: #dbe8f7;
+      font-family: var(--font-mono, monospace); font-size: 11px;
+      letter-spacing: 0.15em; text-transform: uppercase;
+    }
     .server-settings-slider { flex: 1; min-width: 140px; }
     .server-settings-readout {
       min-width: 4ch; text-align: right;
@@ -1461,6 +1523,27 @@
             <span id="join-code"></span>
           </div>
         </div>
+        <!-- The fleet, when this session has one (issue #1114). Its code is
+             the PRIVILEGED server code another ship host types — a different
+             namespace from the crew code above, so the two can never be
+             confused for one another even when the letters look alike. Hidden
+             until an operator opens or joins a fleet. -->
+        <div id="fleet-panel">
+          <div id="fleet-title" data-i18n="server.fleet.title">Fleet</div>
+          <div id="fleet-code-row" style="display:none">
+            <span id="fleet-code-caption" data-i18n="server.fleet.code_caption">fleet code</span>
+            <span id="fleet-code"></span>
+            <!-- The same code by the same two routes the crew code offers: read
+                 aloud, or opened by a camera. The link is selectable text as
+                 well as an href, because the machine being invited here is
+                 usually a laptop with a keyboard rather than a phone. -->
+            <a id="fleet-link" target="_blank"><canvas id="fleet-qr"></canvas></a>
+            <span id="fleet-url"></span>
+          </div>
+          <ul id="fleet-slots"></ul>
+          <div id="fleet-status"></div>
+          <div id="fleet-error"></div>
+        </div>
         <!-- Relay-degraded warning + inbound-connection ICE stage. Populated by
              initHostTransport(); empty (and invisible) in the normal healthy
              case. -->
@@ -1677,6 +1760,14 @@
        on every load. -->
   <script type="module" src="gui/join-code.js"></script>
   <script type="module" src="gui/rendezvous-transport.js"></script>
+
+  <!-- The fleet lobby (issue #1114). gui/host-mesh.js is the host-to-host
+       vocabulary and the pure fleet model; gui/fleet-session.js wires its two
+       ends onto the transport above. Both publish onto window for the classic
+       script below. A fleet is opened on demand, so nothing here registers
+       anything at load: a single-ship session never mints a server code. -->
+  <script type="module" src="gui/host-mesh.js"></script>
+  <script type="module" src="gui/fleet-session.js"></script>
 
   <!-- ICE/TURN config bridge (issue #1226): gui/connection-manager.js is the
        single source of truth for the STUN pair, the OpenRelay TURN fallback
@@ -1954,6 +2045,11 @@
       stopMenuMusic();
     }
     _lobbyPrevPhase = s.phase;
+
+    // Mission start freezes the fleet's slot roster and every selected
+    // loadout (issue #1114). Driven from the phase this page already learns
+    // authoritatively, rather than a second notion of "we have launched".
+    freezeFleetOnMissionStart(s.phase);
 
     // ── Show/hide panel + canvas based on phase ───────────────────────
     const panel = document.getElementById('lobby-panel');
@@ -2324,6 +2420,273 @@
       rendezvousCodeShown = false;
     }
 
+    // ── The fleet (issue #1114) ────────────────────────────────────────────
+    //
+    // A multi-ship session has ONE privileged server code. This host either
+    // mints it (the fleet lead) or types somebody else's; either way the fleet
+    // is a SECOND rendezvous registration in a different namespace, entirely
+    // beside the crew code above. Nothing here touches `peerTokens`,
+    // `tokenConns` or `wasm_receive_message`: a ship host is not a console, and
+    // each crew star stays on its own host because the fleet link is a
+    // different socket carrying a different protocol.
+    //
+    // The panel is painted from gui/host-mesh.js's pure `fleetPanelViewModel`,
+    // the same host-view-model discipline `__updateLobby` follows.
+
+    /** The fleet handle from gui/fleet-session.js, or null when there is none. */
+    let fleetHandle = null;
+    /** The most recent roster body — the owner's own, or the lead's sync. */
+    let fleetRoster = null;
+    /** The five letters on screen: this host's own code, or the one it typed. */
+    let fleetSuffix = null;
+    /** A machine reason for why there is no fleet, already localisable. */
+    let fleetFault = null;
+    /** ICE servers, latched by initHostTransport so a fleet can reuse them. */
+    let fleetIceServers = [];
+
+    /**
+     * This host's own delivery stamp, in the field form the handshake reads.
+     * Null when the export is unreachable — which the fleet treats as a refusal
+     * rather than as consent, unlike the crew path.
+     */
+    function hostStampField() {
+      const bindings = window.wasmBindings;
+      if (!bindings || typeof bindings.wasm_delivery_stamp_field !== 'function') return null;
+      try {
+        return bindings.wasm_delivery_stamp_field();
+      } catch (e) {
+        console.warn('[fleet] could not read this host\'s stamp', e);
+        return null;
+      }
+    }
+
+    /**
+     * The authoritative host-to-host compatibility verdict, answered by Rust's
+     * `delivery::check_host_stamp`.
+     *
+     * The crew path admits when it cannot reach its export, because a host that
+     * cannot ask cannot refuse and locking out every phone is worse. A fleet
+     * REFUSES: seating a second authoritative simulation whose build was never
+     * checked is precisely the failure that check exists to prevent, and it
+     * does not fail loudly — it desynchronises quietly, later.
+     */
+    function checkHostStamp(peerStamp) {
+      const bindings = window.wasmBindings;
+      if (!bindings || typeof bindings.wasm_check_host_stamp !== 'function') {
+        return { ok: false, code: 'client-stamp-missing', detail: 'host cannot check builds' };
+      }
+      try {
+        const verdict = JSON.parse(bindings.wasm_check_host_stamp(peerStamp || ''));
+        return verdict.ok
+          ? { ok: true }
+          : { ok: false, code: verdict.code, detail: verdict.detail };
+      } catch (e) {
+        return { ok: false, code: 'client-stamp-missing', detail: String(e && e.message) };
+      }
+    }
+
+    /** The hull this host has selected, as the fleet describes a ship. */
+    function fleetShip() {
+      const path = _preSelection && _preSelection.template_path;
+      return path ? { template_path: path } : null;
+    }
+
+    /**
+     * The link a fleet code's QR encodes: THIS page, with the full structured
+     * code in the fragment — the host-page mirror of `joinUrlForCode`, which
+     * points at `client/index.html` because a crew code invites a phone. The
+     * query string is deliberately dropped: the machine being invited picks its
+     * own scenario and its own hull, and inheriting this one's `?scenario`
+     * would quietly make that choice for it.
+     */
+    function fleetJoinUrl(fullCode) {
+      return `${location.href.replace(/[?#].*$/, '')}#${fullCode}`;
+    }
+
+    /**
+     * Join a fleet whose code arrived in this page's URL fragment — the QR/paste
+     * route, exactly as `client/index.html#<code>` is for a phone.
+     *
+     * Deferred until the simulation is up, because a joining ship host must
+     * present its own delivery stamp and `wasm_delivery_stamp_field` does not
+     * exist until then. A crew join has no such wait: the PHONE presents the
+     * stamp there, and this host only judges it.
+     */
+    function joinFleetFromFragment() {
+      const fragment = String(location.hash || '').replace(/^#/, '').trim();
+      if (!fragment || !window.joinCode) return;
+      const parsed = window.joinCode.parseJoinCode(
+        fragment, window.joinCode.NAMESPACE_SERVER,
+      );
+      // Anything that is not a fleet code is not for us: a crew code pasted
+      // here names a phone's ship, and a stale peer-id bookmark from the PeerJS
+      // era is not a code at all. Both are left alone rather than reported —
+      // this page has no entry field they came out of.
+      if (!parsed.ok || parsed.namespace !== window.joinCode.NAMESPACE_SERVER) return;
+      const go = () => window.__hostFleetJoin(parsed.full);
+      if (hostStampField()) go();
+      else window.addEventListener('PhoenixReady', go, { once: true });
+    }
+
+    /** Paint the fleet panel from the pure view model. */
+    function paintFleetPanel() {
+      const panel = document.getElementById('fleet-panel');
+      // Boot race, the same one __updateLobby guards: this can run before the
+      // module islands have evaluated, and the next paint re-renders.
+      if (!panel || !window.hostMesh || !window.joinCode) return;
+      const vm = window.hostMesh.fleetPanelViewModel(fleetRoster, {
+        suffix: fleetSuffix,
+        mine: fleetHandle ? fleetHandle.slot : null,
+      });
+      panel.classList.toggle('open', vm.visible || !!fleetFault);
+
+      const codeRow = document.getElementById('fleet-code-row');
+      const codeEl = document.getElementById('fleet-code');
+      if (codeRow) codeRow.style.display = vm.code ? '' : 'none';
+      if (codeEl) codeEl.textContent = vm.code || '';
+
+      // The QR and the link exist only on the host that ISSUED the code: it is
+      // an invitation, and a member repainting one would be handing out a code
+      // it does not own.
+      const url = (fleetHandle && fleetHandle.isOwner && fleetHandle.code)
+        ? fleetJoinUrl(fleetHandle.code.full)
+        : null;
+      const link = document.getElementById('fleet-link');
+      const urlEl = document.getElementById('fleet-url');
+      if (link) {
+        link.classList.toggle('shown', !!url);
+        if (url) link.href = url; else link.removeAttribute('href');
+      }
+      if (urlEl) urlEl.textContent = url || '';
+      const qr = document.getElementById('fleet-qr');
+      if (qr && url && typeof QRCode !== 'undefined') {
+        QRCode.toCanvas(qr, url, { width: 120 });
+      }
+
+      const list = document.getElementById('fleet-slots');
+      if (list) {
+        list.innerHTML = '';
+        for (const row of vm.rows) {
+          const li = document.createElement('li');
+          li.className = `${row.mine ? 'mine' : ''} ${row.connected ? '' : 'gone'}`.trim();
+          const label = document.createElement('span');
+          label.textContent = t(row.label.id, row.label.params);
+          const ship = document.createElement('span');
+          ship.className = 'fleet-ship';
+          ship.textContent = row.connected
+            ? (row.ship || t('server.fleet.no_ship'))
+            : t('server.fleet.disconnected');
+          li.appendChild(label);
+          li.appendChild(ship);
+          list.appendChild(li);
+        }
+      }
+
+      const status = document.getElementById('fleet-status');
+      if (status) status.textContent = vm.status ? t(vm.status.id, vm.status.params) : '';
+      const error = document.getElementById('fleet-error');
+      if (error) {
+        error.textContent = fleetFault
+          ? t('server.fleet.error_joining', { reason: t(window.joinCode.reasonStringId(fleetFault)) })
+          : '';
+      }
+    }
+
+    /** Tear down whatever fleet this host is in, and blank the panel. */
+    function leaveFleet() {
+      if (fleetHandle) {
+        try { fleetHandle.close(); } catch (e) { console.warn('[fleet] close failed', e); }
+      }
+      fleetHandle = null;
+      fleetRoster = null;
+      fleetSuffix = null;
+      fleetFault = null;
+      paintFleetPanel();
+    }
+
+    /** Shared wiring for both halves: roster paints, refusals surface. */
+    function adoptFleet(handle) {
+      fleetHandle = handle;
+      paintFleetPanel();
+      return handle;
+    }
+
+    /** Open a fleet on this host and become its lead. */
+    window.__hostFleetOpen = function() {
+      if (fleetHandle || !window.fleetSession || !rendezvousBase) return false;
+      const data = window.joinCode.getJoinCodeData();
+      if (!data) return false;
+      fleetFault = null;
+      return !!adoptFleet(window.fleetSession.createFleetOwner({
+        base: rendezvousBase,
+        iceServers: fleetIceServers,
+        maxSlots: data.limits.max_fleet_hosts,
+        checkStamp: checkHostStamp,
+        ship: fleetShip(),
+        onCode: (code) => { fleetSuffix = code.suffix; paintFleetPanel(); },
+        onRoster: (roster) => { fleetRoster = roster; paintFleetPanel(); },
+        onError: (reason) => console.warn(`[fleet] ${reason}`),
+        onLog: (msg) => console.log(msg),
+      }));
+    };
+
+    /** Join the fleet behind a typed (or scanned) server code. */
+    window.__hostFleetJoin = function(code) {
+      if (fleetHandle || !window.fleetSession || !rendezvousBase) return false;
+      const data = window.joinCode.getJoinCodeData();
+      if (!data) return false;
+      fleetFault = null;
+      const member = window.fleetSession.createFleetMember({
+        base: rendezvousBase,
+        data,
+        code,
+        stamp: hostStampField(),
+        iceServers: fleetIceServers,
+        ship: fleetShip(),
+        onWelcome: () => { fleetFault = null; paintFleetPanel(); },
+        onRoster: (roster) => { fleetRoster = roster; paintFleetPanel(); },
+        onError: (reason) => { fleetFault = reason; paintFleetPanel(); },
+        onLog: (msg) => console.log(msg),
+      });
+      adoptFleet(member);
+      fleetSuffix = member.code ? member.code.suffix : null;
+      paintFleetPanel();
+      return true;
+    };
+
+    /** The operator's admission lever. Lead only; inert once frozen. */
+    window.__hostFleetSetAdmission = function(state) {
+      if (!fleetHandle || !fleetHandle.isOwner) return;
+      fleetHandle.setAdmission(state);
+    };
+
+    window.__hostFleetLeave = leaveFleet;
+
+    /** What the settings cog paints its Fleet section from. */
+    window.__hostFleetState = function() {
+      return {
+        open: !!fleetHandle,
+        owner: !!(fleetHandle && fleetHandle.isOwner),
+        admission: fleetRoster ? fleetRoster.admission : null,
+        frozen: !!(fleetRoster && fleetRoster.frozen),
+        suffix: fleetSuffix,
+        reason: fleetFault,
+      };
+    };
+
+    /**
+     * Mission start freezes the slot roster (issue #1114 AC5).
+     *
+     * Driven from the lobby phase rather than from a fleet-only event, because
+     * "the mission started" is already a fact this page learns exactly once,
+     * authoritatively, from Rust. Idempotent, and only the lead may freeze —
+     * a member's roster is frozen by the sync that follows.
+     */
+    function freezeFleetOnMissionStart(phase) {
+      if (!fleetHandle || !fleetHandle.isOwner || phase === 'Lobby') return;
+      fleetHandle.freeze();
+    }
+
     // ── ICE config latch (issue #1226) ─────────────────────────────────────
     // gui/connection-manager.js's fetchIceServers() is now the single source
     // of truth for the STUN/TURN server list and the worker→OpenRelay
@@ -2350,6 +2713,9 @@
       console.log('[host] fetching ICE servers…');
       const { servers: iceServers, relayAvailable, relaySource } = await getIceServers();
       console.log('[host] ICE config:', iceServers.map(s => s.urls));
+      // Latched so a fleet opened later from the settings cog dials on the same
+      // STUN/TURN list this host's crew does, rather than fetching a second one.
+      fleetIceServers = iceServers;
 
       // Safe to ask now: the ICE latch above only resolves once a module has
       // run, so every deferred module island — including the join-code and
@@ -2653,6 +3019,11 @@
         },
         onLog: (msg) => console.log(msg),
       });
+
+      // A fleet code in this page's fragment is an invitation to join somebody
+      // else's fleet. Only now: it needs `rendezvousBase`, which is resolved
+      // above and nowhere else (issue #1114).
+      joinFleetFromFragment();
     }
 
     // ── QR-first scenario + ship selection (issue #755) ───────────────────

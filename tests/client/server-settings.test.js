@@ -396,6 +396,147 @@ describe('the Gameplay tab', () => {
   });
 });
 
+// ── Fleet (issue #1114) ─────────────────────────────────────────────────────
+
+describe('the Fleet section', () => {
+  /** Bindings carrying a mutable fleet state the module reads back. */
+  function fleetBindings(initial = { open: false }) {
+    let fleet = { open: false, owner: false, admission: null, frozen: false, ...initial };
+    const bindings = makeBindings({
+      __hostFleetState: () => fleet,
+      __hostFleetOpen: () => {
+        bindings.calls.push(['__hostFleetOpen']);
+        fleet = { open: true, owner: true, admission: 'open', frozen: false };
+        return true;
+      },
+      __hostFleetJoin: (code) => {
+        bindings.calls.push(['__hostFleetJoin', code]);
+        fleet = { open: true, owner: false, admission: 'open', frozen: false };
+        return true;
+      },
+      __hostFleetSetAdmission: (state) => {
+        bindings.calls.push(['__hostFleetSetAdmission', state]);
+        fleet = { ...fleet, admission: state };
+      },
+      __hostFleetLeave: () => {
+        bindings.calls.push(['__hostFleetLeave']);
+        fleet = { open: false, owner: false, admission: null, frozen: false };
+      },
+      /** For the tests that need to arrive already frozen. */
+      __setFleet: (next) => { fleet = { ...fleet, ...next }; },
+    });
+    return bindings;
+  }
+
+  function openFleetTab(bindings) {
+    ({ menu: mounted } = mount({ bindings }));
+    mounted.open();
+    mounted.selectTab('gameplay');
+  }
+
+  const visible = (id) => !!control(id) && control(id).style.display !== 'none';
+
+  it('lives on Gameplay, so the public demo build keeps it', () => {
+    ({ menu: mounted } = mount({ bindings: fleetBindings(), isDemo: () => true }));
+    mounted.open();
+    mounted.selectTab('gameplay');
+    expect(control('fleet-open')).toBeTruthy();
+  });
+
+  it('offers opening or joining while this host is in no fleet', () => {
+    openFleetTab(fleetBindings());
+    expect(visible('fleet-open')).toBe(true);
+    expect(visible('fleet-code')).toBe(true);
+    expect(visible('fleet-join')).toBe(true);
+    expect(visible('fleet-leave')).toBe(false);
+    expect(visible('fleet-admission')).toBe(false);
+  });
+
+  it('opening a fleet swaps to the lead\'s controls', () => {
+    const bindings = fleetBindings();
+    openFleetTab(bindings);
+    control('fleet-open').click();
+
+    expect(bindings.calls.map((c) => c[0])).toContain('__hostFleetOpen');
+    expect(visible('fleet-open')).toBe(false);
+    expect(visible('fleet-admission')).toBe(true);
+    expect(visible('fleet-leave')).toBe(true);
+    expect(control('fleet-admission').textContent).toBe(t('settings.fleet.close'));
+  });
+
+  it('the admission lever closes, renames itself and reopens', () => {
+    const bindings = fleetBindings();
+    openFleetTab(bindings);
+    control('fleet-open').click();
+
+    control('fleet-admission').click();
+    expect(bindings.calls).toContainEqual(['__hostFleetSetAdmission', 'closed']);
+    expect(control('fleet-admission').textContent).toBe(t('settings.fleet.reopen'));
+
+    control('fleet-admission').click();
+    expect(bindings.calls).toContainEqual(['__hostFleetSetAdmission', 'open']);
+    expect(control('fleet-admission').textContent).toBe(t('settings.fleet.close'));
+  });
+
+  it('disables the lever once the mission froze the roster, rather than hiding it', () => {
+    // The operator went looking for this control. A disabled one says "not any
+    // more"; one that has vanished says "this menu is broken".
+    const bindings = fleetBindings();
+    openFleetTab(bindings);
+    control('fleet-open').click();
+    bindings.__setFleet({ frozen: true, admission: 'closed' });
+    mounted.refresh();
+
+    expect(visible('fleet-admission')).toBe(true);
+    expect(control('fleet-admission').disabled).toBe(true);
+  });
+
+  it('joins with the letters typed into the field, and not with an empty one', () => {
+    const bindings = fleetBindings();
+    openFleetTab(bindings);
+
+    control('fleet-join').click();
+    expect(bindings.calls.map((c) => c[0])).not.toContain('__hostFleetJoin');
+
+    control('fleet-code').value = ' quark ';
+    control('fleet-join').click();
+    expect(bindings.calls).toContainEqual(['__hostFleetJoin', 'quark']);
+    // A member gets no admission lever — it is not this host's fleet to close.
+    expect(visible('fleet-admission')).toBe(false);
+    expect(visible('fleet-leave')).toBe(true);
+  });
+
+  it('leaving puts the open/join pair back', () => {
+    const bindings = fleetBindings();
+    openFleetTab(bindings);
+    control('fleet-open').click();
+    control('fleet-leave').click();
+    expect(bindings.calls.map((c) => c[0])).toContain('__hostFleetLeave');
+    expect(visible('fleet-open')).toBe(true);
+    expect(visible('fleet-leave')).toBe(false);
+  });
+
+  it('degrades to no fleet at all when the host page publishes no bindings', () => {
+    // Every other control on this tab survives a missing binding; this one has
+    // to as well, or a page mid-boot renders a broken menu.
+    ({ menu: mounted } = mount());
+    mounted.open();
+    mounted.selectTab('gameplay');
+    expect(visible('fleet-open')).toBe(true);
+    expect(visible('fleet-admission')).toBe(false);
+    expect(() => mounted.refresh()).not.toThrow();
+  });
+
+  it('is wired to bindings server.html actually publishes', () => {
+    for (const name of [
+      '__hostFleetState', '__hostFleetOpen', '__hostFleetJoin',
+      '__hostFleetSetAdmission', '__hostFleetLeave',
+    ]) {
+      expect(SRC, name).toContain(`window.${name}`);
+    }
+  });
+});
+
 // ── Demo gate (AC5) ──────────────────────────────────────────────────────
 
 describe('the demo build gate', () => {

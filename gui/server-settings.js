@@ -252,7 +252,7 @@ export function mountServerSettings(opts = {}) {
   let rafHandle = null;
   const controls = {
     toggles: {}, commands: {}, outputs: {}, pause: null, qr: null,
-    volumeReadout: null,
+    volumeReadout: null, fleet: {},
   };
 
   // ── Elements ───────────────────────────────────────────────────────────────
@@ -496,6 +496,101 @@ export function mountServerSettings(opts = {}) {
     );
     sessionSection.appendChild(sessionRow);
     body.appendChild(sessionSection);
+
+    buildFleetSection(body);
+  }
+
+  /**
+   * The fleet controls (issue #1114) — this session's multi-ship lever.
+   *
+   * On the GAMEPLAY tab, not Debug: flying alongside another ship host is a way
+   * to play, and the demo build must keep it. So nothing here may reach for
+   * debug-only plumbing, and every binding it calls is one `server.html`
+   * publishes unconditionally.
+   *
+   * Every control is built once and shown or hidden in `refresh()` rather than
+   * rebuilt per state, so opening a fleet does not steal focus from under the
+   * operator mid-click.
+   */
+  function buildFleetSection(body) {
+    const el = section('settings.fleet');
+    el.appendChild(hint('settings.fleet.hint'));
+
+    const openRow = rowHost();
+    controls.fleet.open = control('fleet-open', 'settings.fleet.open', () => {
+      invoke('__hostFleetOpen');
+      refresh();
+    });
+    openRow.appendChild(controls.fleet.open);
+
+    // The typed route. A ship host reads five letters off another viewscreen
+    // exactly as a phone does; the QR on that panel is the same code by camera.
+    const input = doc.createElement('input');
+    input.type = 'text';
+    input.className = 'server-settings-input';
+    input.setAttribute('data-control', 'fleet-code');
+    input.maxLength = 32;
+    input.placeholder = t('settings.fleet.code_placeholder');
+    input.setAttribute('aria-label', t('settings.fleet.code_label'));
+    controls.fleet.input = input;
+    openRow.appendChild(input);
+
+    controls.fleet.join = control('fleet-join', 'settings.fleet.join', () => {
+      const typed = String(input.value || '').trim();
+      if (!typed) return;
+      invoke('__hostFleetJoin', typed);
+      refresh();
+    });
+    openRow.appendChild(controls.fleet.join);
+
+    controls.fleet.admission = control('fleet-admission', 'settings.fleet.close', () => {
+      const state = fleetState();
+      invoke('__hostFleetSetAdmission', state && state.admission === 'closed' ? 'open' : 'closed');
+      refresh();
+    });
+    openRow.appendChild(controls.fleet.admission);
+
+    controls.fleet.leave = control('fleet-leave', 'settings.fleet.leave', () => {
+      invoke('__hostFleetLeave');
+      refresh();
+    });
+    openRow.appendChild(controls.fleet.leave);
+
+    el.appendChild(openRow);
+    body.appendChild(el);
+  }
+
+  /** What `server.html` says about this host's fleet, or null before one. */
+  function fleetState() {
+    const raw = invoke('__hostFleetState');
+    return raw && typeof raw === 'object' ? raw : null;
+  }
+
+  /**
+   * Show the controls this host's fleet state actually offers.
+   *
+   * The admission lever disables rather than vanishes once the roster is
+   * frozen: the operator went looking for it, and a control that has gone
+   * reads as a broken menu where a disabled one reads as "not any more".
+   */
+  function paintFleet() {
+    const state = fleetState();
+    const has = !!(state && state.open);
+    const show = (el, on) => { if (el) el.style.display = on ? '' : 'none'; };
+    show(controls.fleet.open, !has);
+    show(controls.fleet.input, !has);
+    show(controls.fleet.join, !has);
+    show(controls.fleet.leave, has);
+    show(controls.fleet.admission, has && !!state.owner);
+    if (controls.fleet.admission && has && state.owner) {
+      const closed = state.admission === 'closed';
+      controls.fleet.admission.textContent = t(
+        closed ? 'settings.fleet.reopen' : 'settings.fleet.close',
+      );
+      controls.fleet.admission.setAttribute('aria-pressed', closed ? 'true' : 'false');
+      controls.fleet.admission.disabled = !!state.frozen;
+      controls.fleet.admission.classList.toggle('disabled', !!state.frozen);
+    }
   }
 
   // ── Panel ──────────────────────────────────────────────────────────────────
@@ -514,6 +609,7 @@ export function mountServerSettings(opts = {}) {
     controls.pause = null;
     controls.qr = null;
     controls.volumeReadout = null;
+    controls.fleet = {};
 
     overlay.innerHTML = '';
 
@@ -581,6 +677,7 @@ export function mountServerSettings(opts = {}) {
       controls.qr.classList.toggle('active', visible);
       controls.qr.setAttribute('aria-pressed', visible ? 'true' : 'false');
     }
+    if (controls.fleet.open) paintFleet();
     // The output panel keeps streaming while it is open, panel or no panel.
     if (outputs.viewing) paintOutput();
   }

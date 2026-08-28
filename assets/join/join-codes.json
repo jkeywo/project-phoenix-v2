@@ -33,7 +33,11 @@
     "max_fleet_hosts": 4,
     "max_slot_name_length": 48,
     "max_slot_ship_path_length": 160,
-    "max_code_length": 160
+    "max_code_length": 160,
+    "max_relay_peers_per_record": 8,
+    "max_relay_frame_bytes": 65536,
+    "max_relay_queue_reliable": 256,
+    "max_relay_queue_snapshot": 32
   },
   "deny": [
     {

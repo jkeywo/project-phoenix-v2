@@ -23,9 +23,19 @@
  *   host-admission           peer-joined                 joined
  *   signal                   peer-left                   signal
  *   host-close               signal                      closed
- *                            error                       error
- * client → service
- *   resolve | join | signal | leave
+ *   relay                    error                       error
+ *                            relay-peer                  relay-ready
+ * client → service           relay-peer-left             relay-closed
+ *   resolve | join |         relay                       relay
+ *   signal | leave |                                     relay-degraded
+ *   relay-open | relay |
+ *   relay-close
+ *
+ * The four `relay*` verbs are issue #1113's, and they are a fallback rather
+ * than a second route: they carry OPAQUE game payloads over the same socket
+ * when a joiner's direct WebRTC ladder is exhausted. Everything about how they
+ * are bounded, and the load-bearing rule that this service may never learn what
+ * is inside a payload, lives in src/relay.js.
  *
  * `resolve` and `join` carry an optional `namespace` naming which typed field
  * the code was entered into — the crew field on a phone, the fleet field on a
@@ -74,6 +84,7 @@ import {
   checkJoinCodeFormat,
 } from '../../gui/join-code.js';
 import { RENDEZVOUS_PROTOCOL } from '../../gui/rendezvous-protocol.js';
+import { createRelayHub, isRelayClass } from './relay.js';
 
 /**
  * Frame-vocabulary revision, from the one module both ends of the join path
@@ -136,6 +147,14 @@ export function createRegistry({
   const maxLookups = limits.max_lookups_per_connection || 60;
   const maxPeers = limits.max_peers_per_record || 32;
   const maxCodeLength = limits.max_code_length || 160;
+
+  /**
+   * The WebSocket game relay (issue #1113), in its own module because its
+   * bounds and its resource profile are nothing like the join protocol's. A
+   * record only ever grows one of these lazily — nothing is allocated for a
+   * mission whose crew all got a direct link.
+   */
+  const relay = createRelayHub({ limits });
 
   /** @type {Map<string, object>} recordKey → host record */
   const records = new Map();
@@ -349,10 +368,20 @@ export function createRegistry({
   function dropRecord(record, reason) {
     const frames = [];
     for (const peer of record.peers) {
+      // A relayed peer's game link IS this record — unlike a DataChannel, which
+      // outlives the record that introduced it — so it is told the relay is
+      // gone as well as the record. `relay-closed` is the frame its transport
+      // turns into an ordinary link failure, so it reconnects rather than
+      // sitting on a socket that will never carry another game frame.
+      if (relay.keyFor(peer) === record.key) {
+        frames.push(out(peer, { type: 'relay-closed', reason }));
+        relay.detach(peer);
+      }
       frames.push(out(peer, { type: 'closed', reason }));
       const c = conns.get(peer);
       if (c) c.key = null;
     }
+    relay.detach(record.host);
     record.peers.clear();
     records.delete(record.key);
     const hostConn = conns.get(record.host);
@@ -435,10 +464,16 @@ export function createRegistry({
     const record = recordFor(connId);
     const conn = conns.get(connId);
     if (conn) conn.key = null;
-    if (!record) return [];
+    if (!record) {
+      // A relay attachment with no record left is bookkeeping from a record
+      // that has already gone; drop it rather than leaking a mailbox.
+      relay.detach(connId);
+      return [];
+    }
     if (record.host === connId) return dropRecord(record, 'host-gone');
-    if (!record.peers.delete(connId)) return [];
-    return [out(record.host, { type: 'peer-left', peer: connId })];
+    const relayed = detachRelay(connId, 'peer-left');
+    if (!record.peers.delete(connId)) return relayed;
+    return [...relayed, out(record.host, { type: 'peer-left', peer: connId })];
   }
 
   // ── Signalling relay ─────────────────────────────────────────────────────
@@ -454,10 +489,143 @@ export function createRegistry({
     return [out(target, { type: 'signal', from: connId, payload: frame.payload })];
   }
 
+  // ── The WebSocket game relay (issue #1113) ───────────────────────────────
+  //
+  // Everything below moves OPAQUE payloads between an already-joined client and
+  // its record's host, over the sockets they are already holding. The bounds,
+  // the class split and the reason a reliable overflow is fatal while a
+  // snapshot overflow is not all live in src/relay.js; these functions are the
+  // registry's half — who is allowed to ask, and who the frame goes to.
+
+  /** Push a peer's mailbox onto the wire, plus whatever the drain implies. */
+  function flushRelay(peer) {
+    const frames = relay.drain(peer).map((f) => out(peer, f));
+    if (!relay.hasOverflowed(peer)) return frames;
+    // A reliable queue that filled is a session that can no longer keep the
+    // promise its delivery class makes. Say so and end it, rather than becoming
+    // a quietly lossy reliable channel.
+    frames.push(out(peer, { type: 'relay-closed', reason: 'relay-overflow' }));
+    frames.push(...detachRelay(peer, 'relay-overflow'));
+    return frames;
+  }
+
+  /**
+   * Detach one relay peer and tell its host. Safe to call for a connection that
+   * was never relaying, so every teardown path can call it unconditionally.
+   */
+  function detachRelay(peer, reason) {
+    const key = relay.keyFor(peer);
+    if (!key) return [];
+    relay.detach(peer);
+    const record = records.get(key);
+    if (!record || record.host === peer) return [];
+    return [out(record.host, { type: 'relay-peer-left', peer, reason: reason || 'closed' })];
+  }
+
+  /**
+   * Attach a joined client to its record's relay.
+   *
+   * Deliberately gated on having JOINED first: the relay is the fallback for a
+   * direct link that could not be built, not a way to reach a host without ever
+   * resolving its code. Everything the join path decided — the typed lookup,
+   * the admission state, the peer cap — therefore already applies, and this
+   * verb adds only the relay's own bound on top.
+   */
+  function relayOpen(connId) {
+    const conn = conns.get(connId);
+    const record = recordFor(connId);
+    if (!conn || conn.role !== ROLE_CLIENT) return [fail(connId, 'relay-open', 'forbidden-role')];
+    if (!record || !record.peers.has(connId)) return [fail(connId, 'relay-open', 'not-joined')];
+    if (record.admission !== 'open') return [fail(connId, 'relay-open', 'admission-closed')];
+
+    const attached = relay.attach(connId, record.key);
+    if (!attached.ok) return [fail(connId, 'relay-open', attached.reason)];
+    // The host takes a mailbox of its own the first time anyone relays to it:
+    // many phones to one host is the direction a burst actually arrives from,
+    // and it needs the same bound. Uncounted, so it never costs a crew slot.
+    relay.attach(record.host, record.key, { counted: false });
+
+    return [
+      out(connId, {
+        type: 'relay-ready',
+        peer: connId,
+        limits: {
+          max_frame_bytes: relay.limits.maxFrameBytes,
+          max_queue_reliable: relay.limits.maxReliable,
+          max_queue_snapshot: relay.limits.maxSnapshot,
+        },
+      }),
+      out(record.host, { type: 'relay-peer', peer: connId }),
+    ];
+  }
+
+  /**
+   * Carry one game frame. A client's frames go to its host; a host's go to the
+   * `to` peer it names, and only to one that is actually relaying — a host may
+   * not use this verb to reach a peer that has a perfectly good DataChannel.
+   */
+  function relayFrame(connId, frame) {
+    const conn = conns.get(connId);
+    const record = recordFor(connId);
+    if (!conn || !record) return [fail(connId, 'relay', 'not-joined')];
+    const isHost = record.host === connId;
+    if (!isHost && relay.keyFor(connId) !== record.key) {
+      return [fail(connId, 'relay', 'not-relaying')];
+    }
+    const target = isHost ? frame.to : record.host;
+    if (!target) return [fail(connId, 'relay', 'no-peer')];
+    if (isHost && relay.keyFor(target) !== record.key) {
+      return [fail(connId, 'relay', 'no-peer')];
+    }
+    if (!isRelayClass(frame.class)) return [fail(connId, 'relay', 'malformed')];
+
+    const queued = relay.enqueue(target, frame.class, {
+      type: 'relay',
+      from: connId,
+      class: frame.class,
+      payload: frame.payload,
+    }, frame.payload);
+    if (!queued.ok) return [fail(connId, 'relay', queued.reason)];
+
+    const frames = flushRelay(target);
+    // Tell the SENDER what its own traffic cost, not the receiver: the sender
+    // is the one that can slow down, and on the host side it is the one whose
+    // operator is looking at a diagnostics readout.
+    if (queued.dropped > 0) {
+      frames.push(out(connId, {
+        type: 'relay-degraded',
+        peer: target,
+        class: frame.class,
+        dropped: queued.dropped,
+      }));
+    }
+    return frames;
+  }
+
+  /** A client stepping off the relay (it got a direct link, or it is leaving). */
+  function relayClose(connId) {
+    return detachRelay(connId, 'closed');
+  }
+
   // ── Public surface ───────────────────────────────────────────────────────
 
   return {
     protocol: RENDEZVOUS_PROTOCOL,
+
+    /**
+     * The adapter reporting whether it can currently put bytes on `connId`'s
+     * socket — the only backpressure signal a Durable Object has, since
+     * Cloudflare's WebSocket exposes no `bufferedAmount` (see src/relay.js).
+     *
+     * While a relay peer is unwritable its mailbox holds, shedding snapshot
+     * frames at the authored depth and never shedding reliable ones. Reporting
+     * it writable again drains whatever survived, which is why this returns
+     * frames rather than nothing.
+     */
+    setWritable(connId, writable) {
+      relay.setWritable(connId, writable);
+      return writable ? flushRelay(connId) : [];
+    },
 
     /** Register a socket. `role` comes from the endpoint the adapter served. */
     connect(connId, role) {
@@ -498,6 +666,9 @@ export function createRegistry({
           case 'resolve': return clientResolve(connId, frame);
           case 'join': return clientJoin(connId, frame);
           case 'signal': return relaySignal(connId, frame);
+          case 'relay-open': return relayOpen(connId);
+          case 'relay': return relayFrame(connId, frame);
+          case 'relay-close': return relayClose(connId);
           case 'leave': return leave(connId);
           default: return [fail(connId, String(frame.type || 'unknown'), 'malformed')];
         }
@@ -528,6 +699,10 @@ export function createRegistry({
         version: r.version,
         admission: r.admission,
         peers: r.peers.size,
+        // How many of those peers gave up on a direct link and are being
+        // carried by the service itself. A count, like `peers` — no id, for the
+        // same reason the suffix is absent.
+        relayPeers: relay.peersFor(r.key).length,
       }));
     },
   };

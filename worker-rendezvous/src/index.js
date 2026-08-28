@@ -107,7 +107,21 @@ export class RendezvousRegistry {
   dispatch(frames) {
     for (const { to, frame, close } of frames) {
       const ws = this.sockets.get(to);
-      if (!ws) continue;
+      // A socket this object no longer holds, or one already closing, cannot
+      // take bytes. Say so, or a relay mailbox drains into nothing on every
+      // turn and the authored queue depths never apply to the one case they
+      // exist for. See src/relay.js: this is the ONLY backpressure signal a
+      // Durable Object has, because Cloudflare's WebSocket exposes no
+      // `bufferedAmount`.
+      //
+      // Deliberately one-way. Both triggers are terminal — `drop()` below
+      // deletes the socket, and a CLOSING socket never reopens — so there is
+      // no re-arming path and none is wanted; the peer's own close event
+      // detaches its mailbox a moment later.
+      if (!ws || (ws.readyState !== undefined && ws.readyState !== 1)) {
+        this.registry.setWritable(to, false);
+        continue;
+      }
       try {
         ws.send(JSON.stringify(frame));
       } catch {

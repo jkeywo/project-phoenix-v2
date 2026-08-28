@@ -593,6 +593,10 @@ describe('code lifecycle', () => {
       version: VERSION,
       admission: 'open',
       peers: 1,
+      // Issue #1113's WebSocket game relay: how many of those peers the
+      // service is carrying itself. A count, exactly like `peers`, and for the
+      // same reason it carries no id.
+      relayPeers: 0,
     });
     // The suffix IS the private client code. A view that carries it is a
     // diagnostics endpoint one route away from handing out every live session.

@@ -97,6 +97,33 @@ max_slot_ship_path_length = 160
 # nothing about either build.)
 max_code_length = 160
 
+# ── The WebSocket game relay (issue #1113) ───────────────────────────────────
+# When a joiner's direct WebRTC ladder is exhausted, the SAME rendezvous socket
+# carries the game's own frames instead. That turns a signalling socket into a
+# data path, so it needs bounds of its own: a signalling socket exchanges a
+# handful of SDP blobs and then goes quiet, while a relay session carries every
+# command and every snapshot for as long as the mission lasts.
+#
+# Joiners one record may carry over the relay at once, counted separately from
+# `max_peers_per_record`. Deliberately much smaller: a relayed crew member
+# costs the Durable Object real bandwidth every tick, where a peer that only
+# ever signalled costs it two SDP blobs and then nothing.
+max_relay_peers_per_record = 8
+# Largest single relayed game frame, in bytes. Comfortably above the biggest
+# payload class that crosses this wire (WorldData — see the max-message-size
+# note in gui/rendezvous-transport.js) and far below anything that would let
+# one socket park megabytes inside the object.
+max_relay_frame_bytes = 65536
+# Bounded queue depth per relay peer, per delivery class. This is the
+# lossy/reliable split made structural: the snapshot queue DROPS its oldest
+# entries once full, because a late snapshot is worthless and the next tick
+# supersedes it, while the reliable queue may not drop anything at all — a
+# silently dropped command would fork the guarantee the game protocol makes
+# about its own reliable class. A reliable queue that fills is therefore a dead
+# session, closed and said so, rather than a quietly lossy one.
+max_relay_queue_reliable = 256
+max_relay_queue_snapshot = 32
+
 # ── Deny-list ────────────────────────────────────────────────────────────────
 # Words never minted and never accepted, in ordinary spelling: gui/join-code.js
 # canonicalises each entry before comparing, so one row refuses every

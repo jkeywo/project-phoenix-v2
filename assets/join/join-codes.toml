@@ -73,6 +73,13 @@ record_ttl_seconds = 43200
 max_lookups_per_connection = 60
 # Joiners one host record may hold at once.
 max_peers_per_record = 32
+# How many player-ship slots one fleet may hold, the owner's own included
+# (issue #1114). This is a DESIGN number — how big a fleet the game is meant to
+# field — and it is deliberately smaller than `max_peers_per_record`, which is
+# the service's memory bound on any record and knows nothing about ships. The
+# fleet owner refuses a further host with `fleet-full` before the record's own
+# cap is ever reached.
+max_fleet_hosts = 4
 # Longest accepted code string on a resolve/join frame — comfortably longer
 # than PROJECT_GUID_VERSION_GUID_SUFFIX, short enough that parsing is cheap.
 # (There is no stamp bound here: no frame carries a delivery stamp. The

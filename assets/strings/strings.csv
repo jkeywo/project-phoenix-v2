@@ -797,6 +797,15 @@ settings.gameplay.pause,Server settings menu — button that pauses the simulati
 settings.gameplay.resume,Server settings menu — button that resumes a paused simulation clock,Resume
 settings.gameplay.session,"Server settings menu — Gameplay tab, heading over the exit control",Session
 settings.gameplay.exit_to_lobby,Server settings menu — ends the current mission and returns everyone to the lobby,[Exit to Lobby]
+settings.fleet,"Server settings menu — Gameplay tab, heading over the multi-ship fleet controls (issue #1114)",[Fleet]
+settings.fleet.hint,Server settings menu — explains what opening a fleet does: this host mints one privileged fleet code that other SHIP HOSTS type. Crew still join their own ship with its own code,[Open a fleet to fly alongside other ship hosts. Crew still join their own ship with the code on the viewscreen.]
+settings.fleet.open,Server settings menu — button that mints this session's one privileged fleet code and makes this host the fleet lead,[Open Fleet]
+settings.fleet.close,Server settings menu — button that stops new ship hosts joining. Hosts already in the fleet are not disconnected,[Close Admission]
+settings.fleet.reopen,Server settings menu — button that lets new ship hosts join again after admission was closed,[Reopen Admission]
+settings.fleet.leave,Server settings menu — button that leaves the fleet: closes this host's fleet code or its link to the fleet lead,[Leave Fleet]
+settings.fleet.join,Server settings menu — button that joins the fleet whose code has been typed into the field beside it,[Join Fleet]
+settings.fleet.code_label,Server settings menu — accessible label for the field a ship host types another host's five-letter fleet code into,[Fleet code]
+settings.fleet.code_placeholder,Server settings menu — greyed-out hint inside the fleet-code field,[FLEET]
 settings.tab.accessibility,Phone client settings menu — name of the Accessibility tab,Accessibility
 settings.accessibility.presentation,Phone client Accessibility tab — heading over the presentation (display) settings,Presentation
 settings.accessibility.intro_hint,Phone client Accessibility tab — explains the settings change how YOUR console presents information; effect-named and never asks for or infers a reason or condition,[Adjust how your console looks and moves. Turn on whatever helps you play.]
@@ -967,6 +976,19 @@ server.spectator_waiting,Host lobby pill for a connected player holding no stati
 server.no_relay_warning,Host lobby warning under the QR when no TURN relay credentials could be fetched,[⚠ No relay server — players on mobile networks may fail to connect]
 server.relay_fallback_notice,Host lobby notice under the QR when the credential worker is down and the free shared OpenRelay TURN is in use,[Using free fallback relay — connections may be slower than usual]
 server.client_ice_state,"Host lobby line for an inbound client stuck mid-connection. {id} is the client short id, {state} the ICE state",[client {id}…: connection {state}]
+server.fleet.title,Host viewscreen fleet panel (issue #1114) — heading over the list of ship hosts in this multi-ship session,[Fleet]
+server.fleet.code_caption,Host viewscreen fleet panel — caption above the five-letter SERVER code another ship host types to join this fleet. Distinct from the crew code above it,[fleet code — for another ship host]
+server.fleet.slot_owner,Host viewscreen fleet panel — label for the ship slot belonging to the host that opened the fleet. {n} is the slot number,[Ship {n} · fleet lead]
+server.fleet.slot_member,Host viewscreen fleet panel — label for a ship slot belonging to an admitted host. {n} is the slot number,[Ship {n}]
+server.fleet.no_ship,Host viewscreen fleet panel — shown in a slot whose host has not chosen a hull yet,[no ship chosen yet]
+server.fleet.disconnected,Host viewscreen fleet panel — shown on a frozen slot whose host has dropped and has not yet been recovered,[disconnected]
+server.fleet.open,"Host viewscreen fleet panel — status while new ship hosts may still join. {n} is the number of slots taken, {max} the fleet capacity",[Admitting ships — {n} of {max}]
+server.fleet.closed,Host viewscreen fleet panel — status when the operator has closed admission. Ships already in the fleet are unaffected,[Admission closed — ships already here stay]
+server.fleet.frozen,Host viewscreen fleet panel — status once the mission has started and the slot roster can no longer change,[Fleet locked — mission under way]
+server.fleet.joined,Host viewscreen fleet panel — status on a host that joined somebody else's fleet. {code} is the five-letter fleet code it typed,[In fleet {code}]
+server.fleet.error_full,Host page — the fleet refused this host because every ship slot is taken,[That fleet is full.]
+server.fleet.error_frozen,Host page — the fleet refused this host because its mission has already started and the ship roster is frozen,[That fleet has already launched — no new ship can join it.]
+server.fleet.error_joining,Host page — this host could not reach the fleet it was asked to join. {reason} is the already-localised sentence for the underlying refusal,[Could not join that fleet. {reason}]
 client.status_connected,Connection status once the WebRTC link is up,Connected
 client.status_transport_unavailable,"Connection status when this page's own transport module never loaded, so there is no way to reach any host at all. The remedy is a reload of this page — scanning the QR would only load the same page again",[This page did not finish loading. Reload it to join.]
 client.status_waiting_server,Connection status while waiting for the signalling server,[Waiting for server]

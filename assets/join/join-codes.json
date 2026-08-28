@@ -30,6 +30,7 @@
     "record_ttl_seconds": 43200,
     "max_lookups_per_connection": 60,
     "max_peers_per_record": 32,
+    "max_fleet_hosts": 4,
     "max_code_length": 160
   },
   "deny": [

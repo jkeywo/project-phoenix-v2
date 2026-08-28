@@ -339,6 +339,13 @@ const REASON_STRING_IDS = {
   'not-joinable': 'client.join.error_wrong_type',
   'admission-closed': 'client.join.error_closed',
   'host-gone': 'client.join.error_host_gone',
+  // ── The fleet owner's own answers (gui/host-mesh.js, issue #1114) ─────────
+  // Host-to-host refusals, never seen by a phone — but they are machine
+  // reasons on the same wire vocabulary and the host page renders them through
+  // this same map, so a fleet refusal cannot be the one failure in the project
+  // that arrives as raw English.
+  'fleet-full': 'server.fleet.error_full',
+  'recovery-only': 'server.fleet.error_frozen',
   exhausted: 'client.join.error_exhausted',
   unreachable: 'client.join.error_unreachable',
   'too-many-attempts': 'client.join.error_too_many',

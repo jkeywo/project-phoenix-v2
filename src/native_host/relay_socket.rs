@@ -142,7 +142,9 @@ impl WsRelaySocket {
             .spawn(move || {
                 pump(socket, inbound_tx, outbound_rx, pump_open, pump_queued);
             })
-            .map_err(|e| RelayConnectError::Handshake(format!("cannot start the relay thread: {e}")))?;
+            .map_err(|e| {
+                RelayConnectError::Handshake(format!("cannot start the relay thread: {e}"))
+            })?;
 
         Ok(Self {
             inbound: std::sync::Mutex::new(inbound_rx),
@@ -183,7 +185,10 @@ fn pump(
             match outbound.try_recv() {
                 Ok(text) => {
                     let len = text.len();
-                    if socket.send(tungstenite::Message::Text(text.into())).is_err() {
+                    if socket
+                        .send(tungstenite::Message::Text(text.into()))
+                        .is_err()
+                    {
                         open.store(false, Ordering::Relaxed);
                         return;
                     }
@@ -292,7 +297,13 @@ mod tests {
     fn it_refuses_something_that_is_not_a_service_url() {
         // A typo'd `--rendezvous` must fail at parse with a stated reason, not
         // as a connection attempt to a hostname made of the whole argument.
-        for bad in ["", "   ", "phoenix-rendezvous.workers.dev", "ftp://x", "https://"] {
+        for bad in [
+            "",
+            "   ",
+            "phoenix-rendezvous.workers.dev",
+            "ftp://x",
+            "https://",
+        ] {
             assert!(
                 host_socket_url(bad).is_err(),
                 "{bad:?} is not a rendezvous base"

@@ -21,8 +21,8 @@
 use std::path::{Path, PathBuf};
 
 use project_phoenix::core::rendezvous::{
-    CLASS_RELIABLE, CLASS_SNAPSHOT, JOIN_ACCEPTED, JOIN_HANDSHAKE, JOIN_REFUSED, RENDEZVOUS_PROTOCOL,
-    TRANSPORT_WEBRTC, TRANSPORT_WS_RELAY,
+    CLASS_RELIABLE, CLASS_SNAPSHOT, JOIN_ACCEPTED, JOIN_HANDSHAKE, JOIN_REFUSED,
+    RENDEZVOUS_PROTOCOL, TRANSPORT_WEBRTC, TRANSPORT_WS_RELAY,
 };
 
 fn repo_root() -> PathBuf {
@@ -56,7 +56,13 @@ fn every_verb_a_native_host_sends_is_one_the_service_handles() {
     // `case` for is answered `malformed`, which from a native host reads as an
     // unexplained refusal to register.
     let registry = read("worker-rendezvous/src/registry.js");
-    for verb in ["host-open", "relay", "relay-open", "relay-close", "host-close"] {
+    for verb in [
+        "host-open",
+        "relay",
+        "relay-open",
+        "relay-close",
+        "host-close",
+    ] {
         assert!(
             registry.contains(&format!("case '{verb}':")),
             "worker-rendezvous/src/registry.js has no case for {verb:?}"
@@ -99,8 +105,12 @@ fn the_delivery_classes_are_spelled_the_same_in_both_languages() {
     // The service refuses a class it cannot read rather than guessing one, so a
     // spelling difference here is every snapshot frame refused.
     let relay = read("worker-rendezvous/src/relay.js");
-    assert!(relay.contains(&format!("export const RELAY_RELIABLE = '{CLASS_RELIABLE}';")));
-    assert!(relay.contains(&format!("export const RELAY_SNAPSHOT = '{CLASS_SNAPSHOT}';")));
+    assert!(relay.contains(&format!(
+        "export const RELAY_RELIABLE = '{CLASS_RELIABLE}';"
+    )));
+    assert!(relay.contains(&format!(
+        "export const RELAY_SNAPSHOT = '{CLASS_SNAPSHOT}';"
+    )));
 }
 
 #[test]

@@ -399,7 +399,9 @@ fn main() {
 /// a native host has no viewscreen panel to paint them on.
 #[cfg(not(target_arch = "wasm32"))]
 fn report_relay_notices(
-    notices: Option<bevy::prelude::Res<project_phoenix::native_host::relay_transport::RelayNotices>>,
+    notices: Option<
+        bevy::prelude::Res<project_phoenix::native_host::relay_transport::RelayNotices>,
+    >,
 ) {
     use project_phoenix::native_host::relay_transport::RelayNotice;
     let Some(notices) = notices else {
@@ -415,9 +417,9 @@ fn report_relay_notices(
                 eprintln!("phoenix-host: refused {peer}: {code}")
             }
             RelayNotice::Fault { reason } => eprintln!("phoenix-host: rendezvous: {reason}"),
-            RelayNotice::Shedding { total, .. } => eprintln!(
-                "phoenix-host: relay is behind — {total} snapshot frames shed so far"
-            ),
+            RelayNotice::Shedding { total, .. } => {
+                eprintln!("phoenix-host: relay is behind — {total} snapshot frames shed so far")
+            }
         }
     }
 }

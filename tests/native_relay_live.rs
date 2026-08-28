@@ -74,9 +74,7 @@ use project_phoenix::core::rendezvous::{
 use project_phoenix::delivery::stamp::DeliveryStamp;
 use project_phoenix::lobby::handler::Target;
 use project_phoenix::native_host::relay_socket::WsRelaySocket;
-use project_phoenix::native_host::relay_transport::{
-    RelayHostConfig, RelayNotice, RelayTransport,
-};
+use project_phoenix::native_host::relay_transport::{RelayHostConfig, RelayNotice, RelayTransport};
 use project_phoenix::native_host::transport::{NativeTransport, TransportDispatch, TransportEvent};
 
 fn base() -> String {

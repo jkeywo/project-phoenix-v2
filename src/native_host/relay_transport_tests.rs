@@ -138,7 +138,12 @@ fn peer_joined(peer: &str) -> RendezvousFrame {
 
 /// Drive a peer all the way to an identified crew member, as the real sequence
 /// does: the service announces it, it presents a stamp, it identifies.
-fn admit(t: &mut RelayTransport, socket: &FakeSocket, peer: &str, token: &str) -> Vec<TransportEvent> {
+fn admit(
+    t: &mut RelayTransport,
+    socket: &FakeSocket,
+    peer: &str,
+    token: &str,
+) -> Vec<TransportEvent> {
     socket.arrive(&peer_joined(peer));
     let handshake = encode_handshake_frame(&HandshakeFrame {
         kind: JOIN_HANDSHAKE.to_string(),
@@ -193,11 +198,13 @@ fn a_second_ready_does_not_mint_a_second_code() {
 fn the_issued_code_reaches_the_operator() {
     let (mut t, socket) = transport();
     socket.arrive(&RendezvousFrame {
-        code: Some(crate::core::rendezvous::CodeField::Issued(Box::new(JoinCode {
-            full: "proj_ver_QUARK".to_string(),
-            suffix: "QUARK".to_string(),
-            ..Default::default()
-        }))),
+        code: Some(crate::core::rendezvous::CodeField::Issued(Box::new(
+            JoinCode {
+                full: "proj_ver_QUARK".to_string(),
+                suffix: "QUARK".to_string(),
+                ..Default::default()
+            },
+        ))),
         ..frame("hosted")
     });
     t.poll();
@@ -447,7 +454,10 @@ fn the_delivery_class_survives_the_crossing() {
         .skip(before)
         .filter_map(|f| f.class)
         .collect();
-    assert_eq!(classes, vec!["snapshot".to_string(), "reliable".to_string()]);
+    assert_eq!(
+        classes,
+        vec!["snapshot".to_string(), "reliable".to_string()]
+    );
 }
 
 #[test]

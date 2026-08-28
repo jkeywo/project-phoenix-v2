@@ -383,7 +383,10 @@ mod tests {
             sim.rendezvous.as_deref(),
             Some("https://phoenix-rendezvous.project-phoenix.workers.dev")
         );
-        assert_eq!(sim.origin.as_deref(), Some("https://pp-dev.kiwigamedesign.co.uk"));
+        assert_eq!(
+            sim.origin.as_deref(),
+            Some("https://pp-dev.kiwigamedesign.co.uk")
+        );
     }
 
     #[test]
@@ -402,8 +405,13 @@ mod tests {
     fn the_crew_flags_need_a_world_like_every_other_simulation_flag() {
         // Delivery-only hosts serve files; there is no mission for a crew to
         // join, and silently ignoring the flags would be the worst answer.
-        let err = parse(&["--rendezvous", "https://x.test", "--origin", "https://y.test"])
-            .unwrap_err();
+        let err = parse(&[
+            "--rendezvous",
+            "https://x.test",
+            "--origin",
+            "https://y.test",
+        ])
+        .unwrap_err();
         assert!(err.contains("--world"), "{err}");
     }
 

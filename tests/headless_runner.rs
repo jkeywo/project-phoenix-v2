@@ -783,7 +783,7 @@ fn destroying_the_tactical_radar_stops_the_ship_firing_instead_of_shooting_its_m
     use project_phoenix::entities::spawner::EntitySystemHull;
     use project_phoenix::server_app::Ship;
     use project_phoenix::ship::damage::DamageTier;
-    use project_phoenix::ship::system_registry::tactical_radar_system_id;
+    use project_phoenix::ship::system_registry::{phaser_fore_system_id, tactical_radar_system_id};
 
     let dt = 1.0 / 30.0;
     let args = HeadlessArgs {
@@ -797,61 +797,10 @@ fn destroying_the_tactical_radar_stops_the_ship_firing_instead_of_shooting_its_m
         ship_path: "assets/entities/alliance_battleship.toml".into(),
         dt,
         max_ticks: 0, // driven by hand below
-        // Re-blessed twice. First for issue #907's review (was seed 12,
-        // swept 1..15 on a 60 s window): moving the game-start
-        // `NextState<GamePhase>` writers into `FixedUpdate` shifted this
-        // combat-chaotic duel's RNG draws by one tick and seed 12's fight
-        // resolved into a full kill before the radar specifically died; seed
-        // 1 replaced it. Then again when the power fixes (5672b09a seeding
-        // the AI power decider's thrust fact from the real throttle, and
-        // c8a13b9a's brownout-advisory timing) re-timed the duel once more:
-        // on THAT timing seed 1's hostile dies whole at tick 961 — radar
-        // never reaching Destroyed on its own — which is again the
-        // "different bug" this test deliberately does not chase. Re-swept
-        // over seeds 1..40 on the same 90 s window (recorded below); seed 2
-        // destroys the hostile's tactical radar at tick 868 (~29 s) with
-        // both ships alive, the same shape both previous picks gave.
-        //
-        // Sweep table (seed: outcome@tick; "hostile-gone" = the whole ship
-        // died before its radar specifically reached Destroyed, which
-        // disqualifies the seed):
-        //   1:hostile-gone@961   2:destroyed@868   3:destroyed@868
-        //   4:destroyed@868      5:hostile-gone@930 6:destroyed@868
-        //   7:destroyed@868      8:destroyed@837   9:hostile-gone@930
-        //   10:destroyed@868    11:destroyed@930  12:destroyed@868
-        //   13:destroyed@868    14:destroyed@868  15:hostile-gone@930
-        //   16:destroyed@868    17:hostile-gone@961 18:hostile-gone@930
-        //   19..24:destroyed@868 25:hostile-gone@930 26:destroyed@868
-        //   27..29:hostile-gone@930 30..32:destroyed@868 33/34:hostile-gone@930
-        //   35:destroyed@930    36:destroyed@868  37:destroyed@930
-        //   38:hostile-gone@930 39:destroyed@930  40:destroyed@868
-        // Seed 2 chosen as the simplest surviving candidate, not because it
-        // is otherwise special. The sweep harness is
-        // `scratch_seed_sweep_probe_radar_kill` below.
-        //
-        // RE-BLESSED A THIRD TIME at issue #1053, seed 2 -> seed 5. The
-        // over-cap bleed stopped a helm power shed deleting an over-cap
-        // velocity in one tick, so hulls hold speed through a shed and are
-        // harder to hit — this whole duel resolves LATER. Seed 2's radar no
-        // longer reaches Destroyed at all inside the 90 s window (it did at
-        // 868), which trips the same "never reached Destroyed" panic the two
-        // earlier re-blesses were about. Nothing about the decision under test
-        // moved; the fight it is observed in did.
-        //
-        // Re-swept 1..40 on the same 90 s window and the same battleship. The
-        // whole distribution slid ~300 ticks later — the earliest destroy is
-        // now 1174 against the old 837:
-        //   1:1188      2:none      3:1188      4:none      5:1174
-        //   6:1174      7:1174      8:1795      9:1188      10:1188
-        //   11:1188     12:none     13:none     14:1174     15:1174
-        //   16:1174     17:1807     18:1188     19:1315     20:1188
-        //   21:1188     22:none     23:none     24:none     25:1174
-        //   26:none     27:none     28:none     29:1174     30:1174
-        //   31:1295     32:1174     33:none     34:1315     35:1188
-        //   36:1315     37:1315     38:none     39:1174     40:1188
-        // ("none" = the radar never reached Destroyed inside the window.)
-        // Seed 5 is the earliest clean destroy, at tick 1174 (~39 s), leaving
-        // the full 25 s settle + 15 s check window inside the run.
+        // Seeded only to keep the live-fire precondition deterministic. The
+        // test drives the radar's damage transition explicitly below, so
+        // balance changes cannot require another seed sweep merely to reach
+        // the behavior this test owns.
         seed: Some(5),
         deterministic: true,
         ..test_args()
@@ -861,6 +810,7 @@ fn destroying_the_tactical_radar_stops_the_ship_firing_instead_of_shooting_its_m
     app.cleanup();
 
     let radar_id = tactical_radar_system_id();
+    let live_weapon_id = phaser_fore_system_id();
 
     // The one ship that is not the player — the world spawns exactly one NPC.
     fn hostile_hull_tier(
@@ -874,6 +824,15 @@ fn destroying_the_tactical_radar_stops_the_ship_firing_instead_of_shooting_its_m
             .expect("exactly one hostile ship in this duel")
             .0
             .tier_for(radar_id)
+    }
+    fn hostile_lock(app: &mut App) -> Option<String> {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&TacticalRadarSelection, (With<Ship>, Without<LocalShip>)>();
+        q.single(app.world())
+            .expect("the hostile carries a target lock")
+            .0
+            .clone()
     }
     fn player_hull_total(app: &mut App) -> f32 {
         let mut q = app
@@ -910,55 +869,111 @@ fn destroying_the_tactical_radar_stops_the_ship_firing_instead_of_shooting_its_m
             .map(|l| l.damage_taken)
             .unwrap_or(0.0)
     }
+    fn hostile_combat_totals(app: &mut App, args: &HeadlessArgs) -> (u64, f32) {
+        let hostile_uuid = {
+            let mut q = app.world_mut().query_filtered::<
+                &project_phoenix::entities::spawner::EntityUuid,
+                (With<Ship>, Without<LocalShip>),
+            >();
+            q.single(app.world()).expect("hostile uuid").0.clone()
+        };
+        let report = build_report(app, args, 0.0);
+        report
+            .damage_by_ship
+            .get(&hostile_uuid)
+            .map(|ledger| {
+                (
+                    ledger.shots_fired.values().copied().sum(),
+                    ledger.damage_dealt,
+                )
+            })
+            .unwrap_or((0, 0.0))
+    }
 
-    // Run until the hostile's tactical radar reaches Destroyed. The fixture's
-    // hull authors real HP on it (see the world's header), so organic combat
-    // — the player returning fire, exactly as `probe_duel.toml` already
-    // proves it does — destroys it inside a generous 90 s window.
+    // First prove this is a live combat path rather than a ship that never
+    // acquired a target or fired. Then drive the radar's HP to zero through
+    // `SystemHull`'s public test seam and let the production tier-crossing
+    // system observe that state on the next tick. The old organic-destruction
+    // loop had already needed three seed re-blesses: unrelated movement,
+    // power, or Shields balance changes could prevent random hull allocation
+    // from selecting this one system without changing the behavior under test.
     let ticks_per_check = ticks_for_sim_seconds(1.0, dt).max(1);
-    let max_ticks = ticks_for_sim_seconds(90.0, dt);
-    let mut destroyed_at_tick: Option<u64> = None;
-    let mut player_hull_at_destroy: Option<f32> = None;
+    let live_fire_window_ticks = ticks_for_sim_seconds(60.0, dt);
+    let mut live_fire_at_tick: Option<u64> = None;
     let mut tick = 0u64;
-    while tick < max_ticks {
-        for _ in 0..ticks_per_check.min(max_ticks - tick) {
+    while tick < live_fire_window_ticks {
+        for _ in 0..ticks_per_check.min(live_fire_window_ticks - tick) {
             app.update();
             tick += 1;
             if app.world().resource::<State<GamePhase>>().get() == &GamePhase::GameOver {
                 break;
             }
         }
-        if hostile_hull_tier(&mut app, &radar_id) == DamageTier::Destroyed {
-            destroyed_at_tick = Some(tick);
-            player_hull_at_destroy = Some(player_hull_total(&mut app));
+        let (hostile_shots, hostile_damage_dealt) = hostile_combat_totals(&mut app, &args);
+        if hostile_lock(&mut app).is_some()
+            && hostile_shots > 0
+            && hostile_damage_dealt > 0.0
+            && player_damage_taken(&mut app, &args) > 0.0
+        {
+            live_fire_at_tick = Some(tick);
             break;
         }
         if app.world().resource::<State<GamePhase>>().get() == &GamePhase::GameOver {
             break;
         }
     }
-
-    let destroyed_at_tick = destroyed_at_tick.unwrap_or_else(|| {
+    let live_fire_at_tick = live_fire_at_tick.unwrap_or_else(|| {
         panic!(
-            "the hostile's tactical radar never reached Destroyed inside the {max_ticks}-tick \
-             probe window — the fixture may need a re-bless of `[global] seed` in \
-             probe_radar_kill.toml (see probe_duel.toml's own seed-sweep note for the pattern)"
+            "the hostile never held a tactical lock while dealing damage inside the \
+             {live_fire_window_ticks}-tick live-fire window"
         )
     });
-    let player_hull_at_destroy = player_hull_at_destroy.expect("set alongside destroyed_at_tick");
+    {
+        // Keep the precondition true for the whole observation window. A
+        // repaired radar is correctly allowed to acquire a new lock and fire
+        // again; this test owns the behavior while the radar is Destroyed, not
+        // the Repair console's recovery timing.
+        let mut entities = app
+            .world_mut()
+            .query_filtered::<Entity, (With<Ship>, Without<LocalShip>)>();
+        let hostile = entities
+            .single(app.world())
+            .expect("exactly one hostile ship in this duel");
+        app.world_mut()
+            .entity_mut(hostile)
+            .remove::<project_phoenix::console::repair::server::ShipRepairTeams>();
 
-    // AC1 — the SAME transition clears the standing lock.
-    let hostile_lock = {
         let mut q = app
             .world_mut()
-            .query_filtered::<&TacticalRadarSelection, (With<Ship>, Without<LocalShip>)>();
-        q.single(app.world())
-            .expect("the hostile carries a target lock")
+            .query_filtered::<&mut EntitySystemHull, (With<Ship>, Without<LocalShip>)>();
+        q.single_mut(app.world_mut())
+            .expect("exactly one hostile ship in this duel")
             .0
-            .clone()
-    };
+            .set_hp(&radar_id, 0.0);
+    }
+    app.update();
+    tick += 1;
+    let destroyed_at_tick = tick;
     assert_eq!(
-        hostile_lock, None,
+        hostile_hull_tier(&mut app, &radar_id),
+        DamageTier::Destroyed,
+        "the driven tactical-radar transition must reach Destroyed after live fire at tick \
+         {live_fire_at_tick}"
+    );
+    assert!(
+        matches!(
+            hostile_hull_tier(&mut app, &live_weapon_id),
+            DamageTier::Operational | DamageTier::Damaged
+        ),
+        "the hostile's fore phaser must still be able to fire when its radar is destroyed"
+    );
+    let player_hull_at_destroy = player_hull_total(&mut app);
+    let (hostile_shots_at_destroy, _) = hostile_combat_totals(&mut app, &args);
+
+    // AC1 — the SAME transition clears the standing lock.
+    assert_eq!(
+        hostile_lock(&mut app),
+        None,
         "the hostile's standing lock must be cleared the moment its tactical radar \
          reaches Destroyed (tick {destroyed_at_tick})"
     );
@@ -983,20 +998,50 @@ fn destroying_the_tactical_radar_stops_the_ship_firing_instead_of_shooting_its_m
     let check_secs = 15.0;
     for _ in 0..ticks_for_sim_seconds(settle_secs, dt) {
         app.update();
-        if app.world().resource::<State<GamePhase>>().get() == &GamePhase::GameOver {
-            break;
-        }
+        assert_ne!(
+            app.world().resource::<State<GamePhase>>().get(),
+            &GamePhase::GameOver,
+            "the duel ended during the {settle_secs}s ordnance-settle window, so it cannot \
+             prove the destroyed-radar behavior"
+        );
     }
     let player_hull_after_settle = player_hull_total(&mut app);
     let player_damage_taken_after_settle = player_damage_taken(&mut app, &args);
+    let (hostile_shots_after_settle, _) = hostile_combat_totals(&mut app, &args);
+    assert_eq!(
+        hostile_shots_after_settle,
+        hostile_shots_at_destroy,
+        "the hostile fired {} new shots during the {settle_secs}s ordnance-settle window; \
+         existing shots may land here, but a destroyed radar must not launch replacements",
+        hostile_shots_after_settle - hostile_shots_at_destroy
+    );
     for _ in 0..ticks_for_sim_seconds(check_secs, dt) {
         app.update();
-        if app.world().resource::<State<GamePhase>>().get() == &GamePhase::GameOver {
-            break;
-        }
+        assert_ne!(
+            app.world().resource::<State<GamePhase>>().get(),
+            &GamePhase::GameOver,
+            "the duel ended during the {check_secs}s quiet-check window, so a frozen ledger \
+             cannot prove the destroyed-radar behavior"
+        );
     }
     let player_hull_final = player_hull_total(&mut app);
     let player_damage_taken_final = player_damage_taken(&mut app, &args);
+    let (hostile_shots_final, _) = hostile_combat_totals(&mut app, &args);
+    assert_eq!(
+        hostile_shots_final,
+        hostile_shots_at_destroy,
+        "the hostile fired {} further shots after its radar was destroyed, including the \
+         {check_secs}s quiet-check window \
+         (radar destroyed at tick {destroyed_at_tick})",
+        hostile_shots_final - hostile_shots_at_destroy
+    );
+    assert!(
+        matches!(
+            hostile_hull_tier(&mut app, &live_weapon_id),
+            DamageTier::Operational | DamageTier::Damaged
+        ),
+        "the hostile's fore phaser must remain able to fire throughout the observation window"
+    );
     assert_eq!(
         player_damage_taken_final,
         player_damage_taken_after_settle,

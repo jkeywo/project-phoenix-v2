@@ -495,6 +495,16 @@ export function createRendezvousHost(opts) {
         onLog,
       });
       entry.adapter = adapter;
+      // The reliable channel's own close is the one true end of this peer:
+      // reap the entry and its RTCPeerConnection right there, so a joiner
+      // whose SIGNALLING died first (peer-left arrived, entry deliberately
+      // retained) cannot leak a live ICE/DTLS agent until the host itself
+      // loses its registration. The page's own close handler is identity-
+      // guarded, so a later sweep emitting again is harmless.
+      adapter.on('close', () => {
+        try { pc.close(); } catch { /* already gone */ }
+        peers.delete(id);
+      });
       pairSnapshot();
       channel.onmessage = (ev) => {
         if (entry.refused) return;
@@ -578,9 +588,11 @@ export function createRendezvousHost(opts) {
    * can never arrive for one whose record is gone.
    *
    * That last sentence used to be strictly true; since the `peer-left` handler
-   * below stopped tearing down a live admitted link itself, THIS is where such
-   * an entry finally gets reaped — once its own channel has actually closed
-   * and `isLiveAdmittedLink()` says so.
+   * below stopped tearing down a live admitted link itself, the ORDINARY reap
+   * for such an entry is the reliable channel's own close handler (registered
+   * in `pc.ondatachannel`), which closes the RTCPeerConnection and deletes the
+   * map entry the moment the link genuinely ends. This sweep is the backstop
+   * for entries that never reached that point.
    */
   function dropUnadmittedPeers() {
     for (const [id, entry] of [...peers]) {
@@ -614,10 +626,11 @@ export function createRendezvousHost(opts) {
         // socket; a signalling event may not touch it here either, or a
         // healthy mid-mission player gets evicted (wasm_player_disconnected
         // + pc.close) while the joiner still thinks it's connected. Leave the
-        // entry in the map — `isLiveAdmittedLink()` will say false the moment
-        // the reliable channel actually closes, and `dropUnadmittedPeers()`
-        // reaps it then; the channel's own `onclose` is what reaches the page
-        // as a disconnect, exactly as if this frame had never arrived.
+        // entry in the map — the reliable channel's own close handler
+        // (registered in `pc.ondatachannel`) reaps it, closing the pc and
+        // deleting the entry the moment the link genuinely ends, and that
+        // same `onclose` is what reaches the page as a disconnect, exactly
+        // as if this frame had never arrived.
         const entry = peers.get(msg.peer);
         if (entry && !isLiveAdmittedLink(entry)) {
           if (entry.adapter) entry.adapter.emit('close');

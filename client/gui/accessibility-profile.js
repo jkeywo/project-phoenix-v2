@@ -2,7 +2,7 @@
  * gui/accessibility-profile.js — the private, per-player Accessibility profile
  * (issue #1102).
  *
- * A2 (design: accessibility-private-effect-profile) owns ONE shared
+ * T1 (design: accessibility-private-effect-profile) owns ONE shared
  * Accessibility settings surface and a private per-player profile whose
  * settings name FUNCTIONAL EFFECTS — text scale, contrast, motion — and never
  * a diagnosis or an inferred reason. OS preferences supply the DEFAULT layer
@@ -25,13 +25,13 @@
  *      console root font-size multiplies by it (gui/console.css), so every
  *      rem-based string on every console scales at once (AC3).
  *
- *   2. A per-function ASSISTANCE schema (`ASSISTANCE_FUNCTIONS`) — DECLARED but
- *      INERT in A2 (AC4). It can carry a requested-assistance state per station
- *      function so a LATER band (#1103+) can evaluate it locally into an
- *      anonymous eligibility result. It is separate from Station Rating (which
- *      is server-side: src/ship/rating.rs) — assistance is a per-function
- *      override layered SEPARATELY from the station rating
- *      (design: accessibility-station-eligibility-contract). No AI runs here.
+ *   2. A per-function ASSISTANCE schema (`ASSISTANCE_FUNCTIONS`) — declared but
+ *      assistance-inert in T1 (AC4): storing a request does not run AI. Issue
+ *      #1103 evaluates those requests locally into an anonymous eligibility
+ *      result. The schema stays separate from Station Rating (server-side:
+ *      src/ship/rating.rs) because assistance is a per-function override layered
+ *      SEPARATELY from the rating (design:
+ *      accessibility-station-eligibility-contract).
  *
  * DOM-free apart from `applyEffectsToRoot`/`applyAccessibilityProfile`, which
  * only write CSS vars/attributes. The ONE import-time side effect is hydrating
@@ -79,11 +79,12 @@ const TRI_STATES = new Set([FOLLOW_OS, EXPLICIT_ON, EXPLICIT_OFF]);
 export const PRESENTATION_EFFECTS = Object.freeze(['textScale', 'contrast', 'reducedMotion']);
 const TRI_EFFECTS = new Set(['contrast', 'reducedMotion']);
 
-// ── Assistance schema (AC4 — declared but inert) ────────────────────────────
+// ── Assistance schema (AC4 — declared, with no AI side effect) ──────────────
 
 /** Inert-by-default assistance state for one station function. `off` is the
  *  default (no assistance); `request` is the "please assist this function"
- *  state a later band will evaluate. Nothing in A2 acts on either. */
+ *  state #1103 evaluates for anonymous eligibility. Neither state itself runs
+ *  an AI behaviour. */
 export const ASSIST_OFF = 'off';
 export const ASSIST_REQUEST = 'request';
 const ASSIST_STATES = new Set([ASSIST_OFF, ASSIST_REQUEST]);
@@ -92,7 +93,7 @@ const ASSIST_STATES = new Set([ASSIST_OFF, ASSIST_REQUEST]);
  * The station functions a per-function assistance override may key onto. These
  * are machine identifiers (never display text), scoped `station.function`.
  * They exist so the profile can REPRESENT later AI assistance without any of it
- * being implemented in A2 — #1103 evaluates this schema locally, on the client,
+ * being implemented in T1 — #1103 evaluates this schema locally, on the client,
  * into an anonymous eligible/ineligible result. Kept here, separate from the
  * server-side Station Rating, because assistance is layered separately from the
  * rating (design: accessibility-station-eligibility-contract).
@@ -178,7 +179,8 @@ export function profileWithPresentation(profile, effect, value) {
 /**
  * Profile with the assistance override for `funcId` set to `value`. `off`
  * removes the override entirely. Returns the SAME input when nothing changes.
- * Declared-but-inert: nothing in A2 reads the result.
+ * Declared-but-assistance-inert: eligibility reads the result, but changing it
+ * does not itself run AI.
  */
 export function profileWithAssistance(profile, funcId, value) {
   if (!ASSISTANCE_FUNCTIONS.includes(funcId)) return profile;
@@ -476,7 +478,7 @@ if (typeof window !== 'undefined') {
   };
 
   /**
-   * Update one per-function assistance override, persisted privately. In A2 the
+   * Update one per-function assistance override, persisted privately. In T1 the
    * assistance itself is inert (no AI), but the CHANGE re-derives eligibility:
    * after persisting, fire the optional `onAccessibilityAssistanceChanged` hook
    * so the client re-reports its anonymous ineligible set (issue #1103 §4).

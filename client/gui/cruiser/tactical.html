@@ -58,7 +58,7 @@
     // `var t = getElementById('torpedo-controls')` shadowed the String Table
     // `t()` and threw on an unnamed lock — the shared footer uses the real `t`.
     import { renderStation } from './tactical.console.js';
-    initConsole({ name: 'tactical', family: 'tactical', render: renderStation });
+    initConsole({ name: 'tactical', render: renderStation });
   </script>
 </body>
 </html>

@@ -25,7 +25,7 @@
  *   the shared core reads camera/red-alert/objectives fields from. A
  *   flat-family hull (battleship, cruiser) omits this — the core defaults to
  *   `s` itself; a system-id-keyed hull (destroyer, courier) returns
- *   `systemView(s, 'captain', 'viewscreen', 'red-alert')`.
+ *   `familyView(s, 'captain')`.
  * @property {object} ids                     element ids present in this hull's markup
  * @property {string} [ids.camera]            `ph-camera-select` id
  * @property {string} [ids.redAlert]          `ph-red-alert` id
@@ -72,7 +72,7 @@ export function makeCaptainRender(variant) {
     if (!doc || !s) return;
 
     // The captain view the panels read from — `s` itself for a flat-family
-    // hull, a `systemView(...)` slice for a keyed one.
+    // hull, a metadata-selected family slice for a keyed one.
     const view = variant.captainView ? variant.captainView(s) : s;
 
     // ── Camera / viewscreen ─────────────────────────────────────────────

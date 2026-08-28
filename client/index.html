@@ -40,8 +40,8 @@
   <script type="module" src="gui/console-resolver.js"></script>
   <!-- Extracted shell modules (issue #827): mount plan (station id → DOM ids
        + iframe URLs), section switching, the lobby roster fold, the pure
-       per-message router, the lobby view model, and the coordination-popup
-       payload normaliser. -->
+       per-message router, the lobby view model, and the generic Coordination
+       presentation renderer. -->
   <script type="module" src="gui/mount-plan.js"></script>
   <script type="module" src="gui/content-switcher.js"></script>
   <script type="module" src="gui/console-mount.js"></script>
@@ -71,9 +71,9 @@
        chrome. Relays them to the active console (see gui/key-relay.js). -->
   <script type="module" src="gui/key-relay.js"></script>
   <script type="module" src="gui/console-state.js"></script>
-  <!-- Declarative message → dirty-console table (issue #823): handleMessage()
-       fans iframe pushes out through window.dirtyConsolesFor instead of
-       per-console push wrappers. -->
+  <!-- Semantic dirty-console routing (issues #823 / #1260): handleMessage()
+       merges reducer results, then fans iframe pushes out through
+       window.dirtyConsolesFor instead of per-message console wrappers. -->
   <script type="module" src="gui/dirty-consoles.js"></script>
   <!-- Console input-to-feedback measurement (issue #1169, PRD #1144): this
        phone's own round-trip clock. Publishes window.ConsoleLatencyMeter for
@@ -84,8 +84,8 @@
   <script type="module" src="gui/action-map.js"></script>
   <!-- Pure JS client-state modules (issue #460). Each exposes a singleton
        (window.lobbyState / simState / commsState) with an apply(serverMessage)
-       method; handleMessage() feeds every inbound message through them,
-       replacing the deleted Bevy message drain. -->
+       method returning a fresh semantic result; handleMessage() feeds every
+       inbound message through them, replacing the deleted Bevy message drain. -->
   <script type="module" src="gui/lobby-state.js"></script>
   <script type="module" src="gui/sim-state.js"></script>
   <!-- Contextual tutorials (issue #916): trigger evaluation + client-local
@@ -2141,14 +2141,6 @@
     // fired by gui/accessibility-profile.js after it persists the change).
     window.onAccessibilityAssistanceChanged = computeAndSendEligibility;
 
-    /** Re-report on the messages that change a published required rating or the
-     *  projection: Welcome (projection + ratings arrive) and RatingChanged. */
-    function maybeReportEligibility(msg) {
-      if (msg && (msg.type === 'Welcome' || msg.type === 'RatingChanged')) {
-        computeAndSendEligibility();
-      }
-    }
-
     function renderLobby(s) {
       renderActiveMods();
       const list = document.getElementById('station-list');
@@ -2571,21 +2563,32 @@
       });
     }
 
-    // -- Message-driven console refresh (issue #823) --------------------------
+    // -- Semantic-change console refresh (issues #823 / #1260) ----------------
     // The per-console build*/push*ConsoleState wrapper pairs that used to live
-    // here were deleted: handleMessage() now computes which consoles a message
-    // dirties via the declarative table in gui/dirty-consoles.js and pushes
-    // each through the generic pushConsoleStateFor above. Pushes are gated on
-    // the console being active, except the names in DIRTY_ALWAYS_PUSH
+    // here were deleted: reducers now report semantic changes and
+    // gui/dirty-consoles.js resolves those through authoritative topology,
+    // then pushes each through the generic pushConsoleStateFor above. Pushes
+    // are gated on
+    // the console being active, except Stations projected from the
+    // unconditional Console Families in dirty-consoles.js
     // (captain — its push was always unconditional).
-    function pushDirtyConsoles(msg) {
+    function pushDirtyConsoles(changes) {
       // Boot race: the module scripts may not have executed yet — drop the
       // fan-out; pushes are idempotent snapshots and the next message repeats
       // them (same tolerance as _pushIframe / pushConsoleStateFor).
       if (typeof window.dirtyConsolesFor !== 'function') return;
       const stationSystems = window.simState ? window.simState.stationSystems : null;
-      const alwaysPush = window.DIRTY_ALWAYS_PUSH || new Set();
-      for (const name of window.dirtyConsolesFor(msg, stationSystems)) {
+      const systemConsoleFamilies = window.simState ? window.simState.systemConsoleFamilies : null;
+      const blackboardConsoleFamilies = window.simState ? window.simState.blackboardConsoleFamilies : null;
+      const alwaysPush = window.alwaysPushConsoles
+        ? window.alwaysPushConsoles(stationSystems, systemConsoleFamilies)
+        : new Set();
+      for (const name of window.dirtyConsolesFor(
+        changes,
+        stationSystems,
+        systemConsoleFamilies,
+        blackboardConsoleFamilies,
+      )) {
         // The one acknowledging push (issue #1169): this fan-out runs only for
         // consoles an INBOUND host message dirtied, which is exactly the
         // causality `send_to_ack` claims.
@@ -2671,27 +2674,15 @@
 
     // -- Coordination popup (issue #494) ---------------------------------------
     let coordinationPopupTimer = null;
-      function showCoordinationPopup(payload, sender_label, target_label) {
+    function showCoordinationPopup(presentation, sender_label, target_label) {
       const el = document.getElementById('coordination-popup');
       if (!el) return;
-      const fromEl = document.getElementById('popup-from');
-      const arrowEl = document.getElementById('popup-arrow');
-      const toEl = document.getElementById('popup-to');
-      const colonEl = document.getElementById('popup-colon');
-      const titleEl = document.getElementById('popup-title');
-      const bodyEl = document.getElementById('popup-body');
-      if (!fromEl || !arrowEl || !toEl || !colonEl || !titleEl || !bodyEl) return;
-      // Payload → { sender, title, body } normalisation is pure and lives in
-      // gui/coordination-popup.js (issue #827); only the DOM writes and the
-      // auto-dismiss timer stay here.
-      if (typeof window.normalizeCoordinationPayload !== 'function') return;
-        const norm = window.normalizeCoordinationPayload(payload, sender_label, target_label);
-      fromEl.textContent = `[${norm.from}]`;
-      arrowEl.textContent = norm.to ? ' → ' : '';
-      toEl.textContent = norm.to ? `[${norm.to}]` : '';
-      colonEl.textContent = ':';
-      titleEl.textContent = norm.title;
-      bodyEl.textContent = norm.body;
+      // Producers own the words; this shared renderer knows only the generic
+      // route and the phone's route/title/body layout (issue #1255).
+      if (typeof window.renderCoordinationPopup !== 'function') return;
+      if (!window.renderCoordinationPopup(
+        document, presentation, sender_label, target_label,
+      )) return;
       el.style.display = 'block';
       if (coordinationPopupTimer) clearTimeout(coordinationPopupTimer);
       coordinationPopupTimer = setTimeout(dismissCoordinationPopup, 8000);
@@ -2827,57 +2818,48 @@
       // to the pure state modules first. window.simState is the ONLY sim
       // store (issue #819): the console builders read it directly. Guards
       // cover the brief window before the module scripts have executed.
-      if (window.lobbyState)      window.lobbyState.apply(msg);
-      if (window.simState)        window.simState.apply(msg);
-      if (window.commsState)      window.commsState.apply(msg);
-      // The QR-first ScenarioCatalog message (issue #755) is not part of the
-      // client-router case table, so force a render to (re)draw the picker.
-      if (msg && msg.type === 'ScenarioCatalog') { settleScenarioPick(); scheduleRender(); }
-      // The host's debug/session read-back (issue #940) only arrives on change,
-      // and it is the one push that can change what an OPEN settings panel
-      // shows — so repaint here rather than from the render loop, which would
-      // rebuild the volume slider out from under a dragging finger.
-      if (msg && msg.type === 'DebugState' && settingsPanel) settingsPanel.rebuildContent();
-      // Declarative iframe fan-out (#823): gui/dirty-consoles.js maps the
-      // message to the console names to re-push. Runs after the state applies
-      // above so every push carries fresh data. On Welcome the consoles are
+      const reducerResults = [];
+      if (window.lobbyState) reducerResults.push(window.lobbyState.apply(msg));
+      if (window.simState) reducerResults.push(window.simState.apply(msg));
+      if (window.commsState) reducerResults.push(window.commsState.apply(msg));
+      const changes = typeof window.mergeReducerResults === 'function'
+        ? window.mergeReducerResults(...reducerResults)
+        : reducerResults.find(Boolean);
+      // Semantic iframe fan-out (#1260): gui/dirty-consoles.js maps the merged
+      // reducer result to console names without receiving the wire message.
+      // Runs after state applies so every push carries fresh data. On Welcome
+      // the consoles are
       // (re)mounted AFTER this fan-out — that is fine: each iframe's load
       // listener re-pushes its snapshot once it actually loads.
-      pushDirtyConsoles(msg);
-      // Per-case routing is pure and lives in gui/client-router.js (issue
-      // #827): it applies the uiState mutations and hands back a side-effect
-      // plan for the DOM glue below. Boot race: modules run before
-      // DOMContentLoaded and the connection waits for it, so routeMessage is
-      // present for every real message; drop otherwise (next message repeats).
-      if (typeof window.routeMessage !== 'function') return;
-      const result = window.routeMessage(msg, {
+      pushDirtyConsoles(changes);
+      // Reducer-result routing (#1261) happens only after dirty iframe
+      // publication. The router receives no wire message: reducers already own
+      // its meaning and report ordered lifecycle/presentation effects. Boot
+      // race: modules run before DOMContentLoaded and the connection waits for
+      // it, so the router is present for every real message.
+      if (typeof window.routeReducerResult !== 'function') return;
+      const result = window.routeReducerResult(changes, {
         uiState,
         myToken,
         pendingMidGameClaim,
         bezelAlertOn,
         lobbyState: window.lobbyState || null,
-        redAlert: !!(window.simState && window.simState.redAlert),
       });
       pendingMidGameClaim = result.pendingMidGameClaim;
       bezelAlertOn = result.bezelAlertOn;
       if (result.myName !== undefined) myName = result.myName;
       for (const fx of result.sideEffects) applySideEffect(fx);
-      if (result.rebuildStations) rebuildStations();
-      // Re-derive and report anonymous eligibility AFTER the roster/projection/
-      // ratings have folded in (issue #1103): only the ineligible station-id set
-      // — no reason, no setting — goes back to the host.
-      maybeReportEligibility(msg);
       // Console input-to-feedback latency (issue #1169), on the same "report a
-      // locally-derived minimum" footing as the eligibility report above: only
+      // locally-derived minimum" footing as the eligibility effect: only
       // durations this device measured for itself leave the phone, batched.
       // Driven off inbound traffic rather than a timer so a disconnected phone
       // stops reporting by itself.
       maybeReportConsoleLatency();
-      if (result.shouldRender) scheduleRender();
     }
 
-    // DOM side effects named by the router (see gui/client-router.js for the
-    // catalogue). Everything here is a plain element write.
+    // Presentation effects named by the reducers and admitted by the pure
+    // router. This is execution only: no ServerMessage variant is interpreted
+    // in the HTML shell.
     function applySideEffect(fx) {
       switch (fx.effect) {
         case 'mount-consoles':
@@ -2924,7 +2906,29 @@
           if (navigator.vibrate) navigator.vibrate(fx.duration);
           break;
         case 'coordination-popup':
-            showCoordinationPopup(fx.payload, fx.senderLabel, fx.targetLabel);
+          showCoordinationPopup(fx.presentation, fx.senderLabel, fx.targetLabel);
+          break;
+        case 'settle-scenario-pick':
+          settleScenarioPick();
+          break;
+        case 'refresh-settings':
+          // Authoritative debug/session read-back only repaints an OPEN panel;
+          // the normal render loop deliberately leaves its controls alone.
+          if (settingsPanel) settingsPanel.rebuildContent();
+          break;
+        case 'rebuild-stations':
+          rebuildStations();
+          break;
+        case 'report-eligibility':
+          // Re-derive and report anonymous eligibility AFTER the authoritative
+          // roster/projection/ratings fold (issue #1103). Only the ineligible
+          // station-id set — no reason, no setting — goes back to the host.
+          computeAndSendEligibility();
+          break;
+        case 'request-render':
+          scheduleRender();
+          break;
+        default:
           break;
       }
     }

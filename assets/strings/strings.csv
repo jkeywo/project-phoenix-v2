@@ -1002,7 +1002,8 @@ chatter.sender.navigation,Coordination chatter/popup — sender label for the Na
 chatter.sender.power,Coordination chatter/popup — sender label for the Power system,Power
 chatter.sender.shields,Coordination chatter/popup — sender label for the Shields system,Shields
 chatter.sender.ai,Coordination chatter/popup — generic sender label when the origin system is unnamed,AI
-chatter.addressee.core,Coordination chatter/popup — sender/target label for a system the ship's Core owns (belongs to no station),Core
+chatter.addressee.core,Coordination chatter — sender label for a system the ship's Core owns (belongs to no station),Core
+chatter.addressee.ship,Coordination chatter/popup — undecorated destination label for a ship-wide advisory; the route layout supplies brackets,Ship
 coordination.advisory.fallback_title,Coordination popup — title for a bare advisory that carries no sender label,Advisory
 coordination.alert.fallback_title,Coordination popup — title for an alert that carries no title of its own,Alert
 coordination.frequency_hint.title,"Coordination popup/chatter — Sensors-to-Tactical shield-frequency hint, title",Frequency Hint
@@ -1021,7 +1022,9 @@ coordination.power_brownout.title,Coordination popup/chatter — a power group i
 coordination.power_brownout.body,Coordination popup/chatter — power-brownout body. {level} is the allocated power level,Allocation: {level}
 coordination.navigate.title,Coordination popup/chatter — Navigation clears Helm toward a waypoint. {x} and {z} are the waypoint coordinates,"Navigation: steer toward waypoint ({x}, {z})"
 coordination.repair.title,Coordination popup/chatter — a system needs repair. {label} is the station or system name,Repair requested: {label}
-coordination.threat_bearing.title,"Coordination popup/chatter — Sensors warns Shields of a threat. {deg} is the bearing in degrees, {label} the threat name",Sensors: threat bearing {deg}° — {label}
+coordination.system_destroyed.title,Coordination popup/chatter — a System reached Destroyed. {label} is its authored display name,System Destroyed: {label}
+coordination.system_destroyed.body,Coordination popup/chatter — destroyed-System alert body. {label} is its authored display name,{label} destroyed.
+coordination.threat_bearing.title,"Coordination popup/chatter — Sensors warns Shields of a threat. {deg} is the bearing in degrees and {distance} is range in metres","Sensors: threat bearing {deg}° — Hostile closing, range {distance}m, bearing {deg}°"
 coordination.intent.target_acquired,Coordination popup — an AI seat took a target. Intent-advisory title,Target acquired
 coordination.intent.target_switched,Coordination popup — an AI seat switched targets. Intent-advisory title,Switching target
 coordination.intent.combat_posture_entered,Coordination popup — an AI seat entered combat posture. Intent-advisory title,Combat posture
@@ -1249,6 +1252,10 @@ world.falling_skyway.deadline.skyway_survey_due.label,assets/worlds/falling_skyw
 world.falling_skyway.deadline.lark_final_hail_due.label,Hidden authored safety beat for Hauler Lark's Critical second check-in,[Lark final safety check]
 world.falling_skyway.deadline.lark_collision_due.label,Hidden authored terminal beat for Hauler Lark's corridor collision,[Lark corridor entry]
 world.falling_skyway.objective.survey.text,Objective text — the Act 1 condition read in Falling Skyway,"[Scan Skyhook Verrow and both ladder depots. File the completed survey with Skyway Control.]"
+world.falling_skyway.objective.survey_scan_depot_b.text,Objective step — Falling Skyway survey reading at Ladder Depot B,[Scan Ladder Depot B.]
+world.falling_skyway.objective.survey_scan_depot_a.text,Objective step — Falling Skyway survey reading at Ladder Depot A,[Scan Ladder Depot A.]
+world.falling_skyway.objective.survey_scan_head.text,Objective step — Falling Skyway survey reading at Skyhook Verrow,[Scan Skyhook Verrow.]
+world.falling_skyway.objective.survey_report.text,Objective step — file the completed Falling Skyway survey with Control,[Hail Skyway Control and file the completed survey.]
 world.falling_skyway.objective.corridor.text,Objective text — the Act 1 corridor watch in Falling Skyway,"[Keep the corridor moving. See the lead hauler through the gate.]"
 world.falling_skyway.objective.triage.text,Objective text — the Act 1 triage call in Falling Skyway,[Name the structure that takes the first repair team.]
 world.falling_skyway.comms.survey_incomplete,Dialogue body — Control refuses a partial Falling Skyway survey,"[Control. We cannot accept a corridor survey without readings from the head and both depots. Complete the three scans and call again.]"
@@ -1262,6 +1269,7 @@ world.falling_skyway.comms.lark_unsafe_response,Response text — the crew use a
 world.falling_skyway.comms.lark_holding,Dialogue body — Hauler Lark acknowledges the scan-backed stop order,"[Destroyer, Lark. Scan evidence received. Holding clear of the corridor. Transit cancelled.]"
 world.falling_skyway.comms.lark_collision_report,Dialogue body — Hauler Lark announces entry immediately before the committed corridor collision,"[Destroyer, Lark. No scan-backed stop received. We are entering the corridor now—stand by—]"
 world.falling_skyway.game_over.lark_collision,Defeat reason — uncontrolled Hauler Lark physically destroys the Falling Skyway,"[Hauler Lark struck Skyway Meridian in the uncontrolled corridor. The structure is lost.]"
+world.falling_skyway.game_over.mission_complete,Victory reason — the Falling Skyway episode reaches its authored resolution,"[The transfer window has closed and the Falling Skyway record is complete.]"
 world.probe_evidence.entity.skyway_hook.name,"assets/worlds/probe_evidence.toml -> [[entity]] name","[Skyway Hook]"
 world.probe_evidence.entity.line_foreman.name,"assets/worlds/probe_evidence.toml -> [[entity]] name","[Line Foreman]"
 world.probe_evidence.capacity.berths.label,"Crew-facing label for the berths capacity in the #1031 probe world","[Berths]"
@@ -1287,11 +1295,11 @@ world.probe_strike.entity.rig_struck.name,assets/worlds/probe_strike.toml -> [[e
 world.probe_strike.entity.sister_clear.name,assets/worlds/probe_strike.toml -> [[entity]] name,[Clear-side Sister]
 world.probe_strike.entity.rig_clear.name,assets/worlds/probe_strike.toml -> [[entity]] name,[Unworked Rig]
 world.falling_skyway.objective.line.text,Objective text — the dispute era in Falling Skyway,[Get the line at Ladder Depot B working again.]
-world.falling_skyway.objective.corroborate.text,Objective text — the optional dispute-era corroboration route in Falling Skyway,[Get a worker on the record about the Ladder B maintenance file.]
+world.falling_skyway.objective.corroborate.text,Objective text — the optional evidence-filing route in Falling Skyway,[Put the Ladder B scan discrepancy and the worker's account on Control's record.]
 world.falling_skyway.commitment.safe_passage.terms,"Commitment terms — the captain's promise to the strike committee, Falling Skyway","[The corridor stays clear for the workers' craft through the final transfer window.]"
 world.falling_skyway.commitment.safe_passage.resolves,Commitment resolution condition — the safe-passage promise in Falling Skyway,[Settled when the transfer window closes.]
-world.falling_skyway.commitment.surface_records.terms,"Commitment terms — the captain's promise to surface the maintenance file, Falling Skyway","[The Ladder B maintenance file goes to Skyway Control, unedited.]"
-world.falling_skyway.commitment.surface_records.resolves,Commitment resolution condition — the maintenance-file promise in Falling Skyway,[Settled when the survey report reaches Control.]
+world.falling_skyway.commitment.surface_records.terms,"Commitment terms — the captain's promise to file the scan discrepancy and corroboration, Falling Skyway","[The Ladder B scan discrepancy and the rigger's corroboration go to Skyway Control, unedited.]"
+world.falling_skyway.commitment.surface_records.resolves,Commitment resolution condition — the evidence-bundle promise in Falling Skyway,[Settled at mission close if Control accepted the scan discrepancy and rigger's account; broken immediately if force closes that unfiled route first.]
 world.falling_skyway.evidence.ladder_b_maintenance_file,"Evidence text — the operator's own maintenance file on Ladder B, Falling Skyway","[Operator's file on Ladder B: every inspection signed off, none of them by anyone who was on the rung that day.]"
 world.falling_skyway.evidence.picket_cleared_hurt,"Evidence text — what clearing the picket by force cost, Falling Skyway","[The Ladder B picket was cleared by Havelock security on our authorisation. There were casualties.]"
 world.falling_skyway.comms.committee_hails,Dialogue body — the strike committee open the negotiation in Falling Skyway,"[Destroyer, this is the committee at Ladder B. Before you ask: nobody is going back up that rung until somebody fixes what is wrong down here.]"
@@ -1303,7 +1311,7 @@ world.falling_skyway.comms.committee_terms,Dialogue body — the strike committe
 world.falling_skyway.comms.committee_terms_hardened,Dialogue body — the hardened strike committee's three-part settlement threshold in Falling Skyway,"[The floor has heard promises before. This time we need both undertakings and the Ladder B file in our hands before anyone votes.]"
 world.falling_skyway.comms.committee_ready,Dialogue body — the strike committee have enough to take to the floor in Falling Skyway,[That is more than anyone has offered us in six weeks. Say the word and I will put it to the floor.]
 world.falling_skyway.comms.promise_passage,Response text — promising the workers safe passage in the transfer window in Falling Skyway,[You have my word. The corridor is clear when the transfer runs.]
-world.falling_skyway.comms.promise_records,Response text — promising to surface the maintenance file in Falling Skyway,[I will put the file in front of Control myself.]
+world.falling_skyway.comms.promise_records,Response text — promising to file the scan discrepancy and corroboration in Falling Skyway,"[I will put the scan discrepancy and the rigger's corroboration in front of Control, unedited.]"
 world.falling_skyway.comms.show_file,Response text — showing the committee the crew have already read the file in Falling Skyway,[I have read the file. It does not say what they told you it says.]
 world.falling_skyway.comms.call_the_vote,Response text — asking the strike committee to put the offer to their floor in Falling Skyway,[Then put it to the floor.]
 world.falling_skyway.comms.stall,Response text — keeping the committee's channel open without answering in Falling Skyway,[Give me a minute.]
@@ -1318,6 +1326,7 @@ world.falling_skyway.comms.force_now,Response text — authorising the force-ope
 world.falling_skyway.comms.refuse_force,Response text — refusing Havelock the authorisation in Falling Skyway,[Nobody goes near that picket. I will deal with it.]
 world.falling_skyway.comms.havelock_stands_off,Dialogue body — Havelock standing off in Falling Skyway,[Your call. We will be here when it stops being your call.]
 world.falling_skyway.comms.havelock_acknowledges,Dialogue body — Havelock acknowledging the authorisation in Falling Skyway,[Copy that. Boarding party away.]
+world.falling_skyway.comms.force_route_closed,Dialogue body — Havelock rejects a stale force order after the route closes in Falling Skyway,"[Negative, Destroyer. That clearance order is closed. We will not act on it.]"
 world.falling_skyway.comms.force_report_clean,Dialogue body — the force-open outcome with nobody hurt in Falling Skyway,"[Rung is clear. They stood off when they saw us coming — nobody hurt, gear mostly still on it.]"
 world.falling_skyway.comms.force_report_one,Dialogue body — the force-open outcome with one casualty in Falling Skyway,[Rung is clear. One of theirs went over the rail and came up wrong. He is breathing. Transfers can run.]
 world.falling_skyway.comms.force_report_hurt,Dialogue body — the force-open outcome with several casualties in Falling Skyway,[Rung is clear. Three of theirs are in our sick bay and one of ours with them. You will want that off the log.]
@@ -1357,6 +1366,7 @@ world.falling_skyway.comms.traffic_lost_lark,Urgent Skyway Control report when H
 world.falling_skyway.comms.traffic_lost_pell,Urgent Skyway Control report when Hauler Pell is destroyed,[Control to destroyer. Hauler Pell is gone. We have logged the loss.]
 world.falling_skyway.comms.traffic_lost_wick,Urgent Skyway Control report when Shuttle Wick is destroyed,[Control to destroyer. Shuttle Wick is gone. We have logged the loss.]
 world.falling_skyway.objective.approach.text,Objective text — the Act 2 approach to the stricken craft in Falling Skyway,"[Lyra Ascending is adrift in the lane with no drive. Close on her before the front does.]"
+world.falling_skyway.objective.rescue_scan.text,Objective step — assess Lyra Ascending through the shared Sensors scan path,[Scan Lyra Ascending and assess her drive.]
 world.falling_skyway.objective.rescue.text,Objective text — the Act 2 tow rescue in Falling Skyway,"[Get a line on Lyra Ascending and pull her clear before the second band.]"
 world.falling_skyway.objective.storm.text,Objective text — the Act 2 storm watch in Falling Skyway,[See the sweep through. The corridor is yours again when the last band passes.]
 world.falling_skyway.objective.lee.text,Objective text — the Act 2 withdrawal to the storm lee in Falling Skyway,[Take the ship west into the lee and ride the rest of it out.]
@@ -1375,7 +1385,7 @@ world.falling_skyway.entity.rigger_tacket.name,assets/worlds/falling_skyway.toml
 world.falling_skyway.evidence.ladder_b_worker_account,"Evidence text — the rigger's account of the Ladder B inspections, Falling Skyway","[Tacket, who rigs the Ladder B transfer arm: nobody came up to look at it, and the re-rating was signed in an office.]"
 world.falling_skyway.objective.confront.text,Objective text — the Act 3 confrontation the corroboration unlocks in Falling Skyway,"[You have the record and a witness to it. Put both to Havelock when the transfer window opens.]"
 world.falling_skyway.commitment.protect_witness.terms,"Commitment terms — the captain's promise to keep the rigger's name back, Falling Skyway","[Rigger Tacket's name stays out of anything that reaches Havelock until she puts it there herself.]"
-world.falling_skyway.commitment.protect_witness.resolves,Commitment resolution condition — the witness-protection promise in Falling Skyway,[Settled when the Ladder B file reaches Control.]
+world.falling_skyway.commitment.protect_witness.resolves,Commitment resolution condition — the witness-protection promise in Falling Skyway,[Settled at mission close against whether the crew named Rigger Tacket to Havelock.]
 world.falling_skyway.comms.rigger_hails,Dialogue body — the rigger opens the corroboration channel in Falling Skyway,"[Destroyer — Tacket. I rig the transfer arm at B, or I did until six weeks ago. Committee say you have the operator's file on it. I was up there the week it says it was inspected.]"
 world.falling_skyway.comms.rigger_ask,Response text — asking the rigger what actually happened in Falling Skyway,[Then tell me what actually happened up there.]
 world.falling_skyway.comms.rigger_later,Response text — putting the rigger's channel down without answering in Falling Skyway,[Stand by. I will come back to you.]
@@ -1385,6 +1395,10 @@ world.falling_skyway.comms.rigger_protect,Response text — promising to keep th
 world.falling_skyway.comms.rigger_no_promise,Response text — refusing the rigger cover in Falling Skyway,[I am not going to promise you that. It goes in the report as it stands.]
 world.falling_skyway.comms.rigger_thanks,Dialogue body — the rigger signing off with the promise given in Falling Skyway,[Then you will have it in writing before the window opens. Mind how you go up there.]
 world.falling_skyway.comms.rigger_accepts_risk,Dialogue body — the rigger signing off without cover in Falling Skyway,[Fair enough. I would rather you were honest with me than careful with me.]
+world.falling_skyway.comms.evidence_ready,Dialogue body — Control opening the scan-and-corroboration filing thread in Falling Skyway,[Skyway Control. I have the Ladder B discrepancy and the worker's account in the queue. Confirm that both go onto the corridor record unedited.]
+world.falling_skyway.comms.file_evidence,Response text — filing the scan discrepancy and worker account with Control in Falling Skyway,"[File the scan comparison and the worker's account with Control, unedited.]"
+world.falling_skyway.comms.evidence_filed,Dialogue body — Control acknowledging the evidence filing in Falling Skyway,[Logged. Ladder B's scan comparison and the worker's account are now on the Control record.]
+world.falling_skyway.comms.evidence_route_closed,Dialogue body — Control refusing a stale evidence filing after its route closed in Falling Skyway,[Skyway Control. I cannot accept that filing: the negotiated evidence route is closed.]
 world.probe_corroborate.entity.rung_both.name,assets/worlds/probe_corroborate.toml -> [[entity]] name,[Both-Halves Rung]
 world.probe_corroborate.entity.rung_late.name,assets/worlds/probe_corroborate.toml -> [[entity]] name,[Late-Record Rung]
 world.probe_corroborate.entity.rung_forced.name,assets/worlds/probe_corroborate.toml -> [[entity]] name,[Forced-Open Rung]
@@ -1423,6 +1437,8 @@ world.falling_skyway.objective.tether_three.text,Objective text — the Act 3 fi
 world.falling_skyway.objective.head_report.text,Objective text — the Act 3 collapse report to Control in Falling Skyway,[Report the loss of Skyhook Verrow to Skyway Control.]
 world.falling_skyway.objective.muster.text,Objective text — the Act 3 epilogue approach to the debris in Falling Skyway,[Get the ship into the debris field where the head used to be.]
 world.falling_skyway.objective.survivors.text,Objective text — the Act 3 survivor-rescue epilogue in Falling Skyway,"[Two craft came off Verrow before it went. Get a line on both of them and pull them out of the debris.]"
+world.falling_skyway.objective.lighter.text,Objective text — the Act 3 survivor lighter tow in Falling Skyway,[Get a line on the Verrow crew lighter and pull it out of the debris.]
+world.falling_skyway.objective.pod.text,Objective text — the Act 3 survivor pod tow in Falling Skyway,[Get a line on the Verrow work pod and pull it out of the debris.]
 world.falling_skyway.comms.head_reports_load,"Dialogue body — the gang on the skyhook head check in as Act 3 opens, Falling Skyway","[Destroyer, Verrow head, gang boss speaking. Storm is off us and Control has put the corridor back on our berths, so we are carrying the lot on a ribbon that has been slipping since breakfast. Thought you should know there are people up here.]"
 world.falling_skyway.comms.head_warns_one,"Dialogue body — the skyhook head's first warning, Falling Skyway","[Destroyer, Verrow head. We are past our load limit and Control will not stop sending traffic at us. Trim is going. We can hold it a while, and a while is not all night.]"
 world.falling_skyway.comms.head_warns_two,"Dialogue body — the skyhook head's second warning, Falling Skyway","[Verrow head. Tension control has gone on the ribbon and the whole structure is swinging with it — you can feel it through the plates. I have a full shift up here and one lift.]"
@@ -1455,7 +1471,8 @@ world.falling_skyway.capacity.window_shortfall.label,assets/worlds/falling_skywa
 world.falling_skyway.capacity.window_committed.label,assets/worlds/falling_skyway.toml -> [[entity.overrides.infrastructure.capacity]] label,[Lift committed and standing]
 world.falling_skyway.deadline.transfer_window.label,assets/worlds/falling_skyway.toml -> [[deadline]] label,[Transfer window opens]
 world.falling_skyway.deadline.window_closes.label,assets/worlds/falling_skyway.toml -> [[deadline]] label,[Transfer window closes]
-world.falling_skyway.objective.window_ready.text,Objective text — the Act 3 run-up to the transfer window in Falling Skyway,"[The transfer window opens on the clock. Whatever the chain can lift by then is all there is, so mend what you can and get back on station.]"
+world.falling_skyway.objective.window_ready.text,Objective text — the Act 3 run-up to the transfer window in Falling Skyway,"[Prime the window transfer manifold: dock with it and send reserve fuel through the umbilical before the window opens.]"
+world.falling_skyway.entity.window_transfer_manifold.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Window Transfer Manifold]
 world.falling_skyway.objective.window.text,Objective text — the Act 3 transfer window itself in Falling Skyway,"[The window is open and the lift will not cover all three claims. Read Control's manifest and decide who goes.]"
 world.falling_skyway.comms.window_opens_short,"Dialogue body — Control opening a transfer window that has lift in it but not enough in Falling Skyway. {available} is the lift the chain can deliver this window, {claimed} what the three claimants have asked for between them, {shortfall} the difference","[Skyway Control to destroyer: transfer window is open. The head is certified and the ladder is pumping what it can pump. That comes to {available} between them, against {claimed} asked for by the three of them, and you do not need me to tell you which of those is the larger. You are short by {shortfall}. You have lift for two of them and not for three, and nothing anybody does in the next hour changes that. Nobody down here is going to make the call for you.]"
 world.falling_skyway.comms.window_opens_dead,Dialogue body — Control opening a transfer window with no lift available at all in Falling Skyway,"[Skyway Control to destroyer: transfer window is open on paper and on paper only. The head is not certified to run a climber and the ladder has nothing to put in one, so the lift available on our manifest reads nothing at all against three standing claims. Every one of them is short by the whole of it. If you want anybody off this rock before we shut, somebody has to make the chain work first.]"
@@ -1491,8 +1508,6 @@ world.falling_skyway.comms.deny_havelock,Response text — refusing Havelock a l
 world.falling_skyway.comms.havelock_lifting,Dialogue body — Havelock hearing they are carried in Falling Skyway,"[Noted, and logged. You will find us reasonable the next time you come through this corridor.]"
 world.falling_skyway.comms.havelock_denied,Dialogue body — Havelock hearing they are not carried in Falling Skyway,[That is your decision to make. I will make quite sure it is recorded as yours.]
 world.falling_skyway.comms.havelock_waits,Dialogue body — Havelock standing by for a decision in Falling Skyway,"[We will wait. We are good at waiting, Destroyer, and better at remembering.]"
-world.falling_skyway.comms.put_the_file,Response text — reading the Ladder B file onto the open corridor channel in Falling Skyway,"[Open channel, everyone on the corridor net. This is Havelock's own maintenance file on Ladder B. Control, log it as received.]"
-world.falling_skyway.comms.havelock_file_put,Dialogue body — Havelock reacting to their file going out on the open channel in Falling Skyway,[You have just put an internal document onto an open corridor net. I hope you read all of it. Everybody else is about to.]
 world.falling_skyway.comms.confront_unnamed,Response text — confronting Havelock with the record while protecting the witness in Falling Skyway,[Your file says that arm was inspected. I have somebody who was standing on it that week. You do not get their name.]
 world.falling_skyway.comms.confront_named,Response text — confronting Havelock with the record and naming the witness in Falling Skyway,[Your file says that arm was inspected. Rigger Tacket was standing on it that week and says nobody came up.]
 world.falling_skyway.comms.havelock_confronted,Dialogue body — Havelock answering a confrontation with no name attached in Falling Skyway,[Then produce them. No? Then it is an allegation from a hull that has been on station four hours. This channel is closed to you.]
@@ -1532,14 +1547,13 @@ world.falling_skyway.comms.debrief_one,Dialogue body — Control closing the win
 world.falling_skyway.comms.debrief_none,Dialogue body — Control closing the window with nothing carried in Falling Skyway,"[Skyway Control, closing the window. Manifest reads nothing carried. There was lift in this window and it went up the ribbon empty. The corridor is shut and all three claims stand unmet.]"
 world.falling_skyway.comms.debrief_berth,Dialogue body — Control closing a window with no lift after a berth was allocated in Falling Skyway,"[Skyway Control, closing the window. No lift ran in this corridor tonight. One mooring on Ladder A was allocated, two claims were not, and the rest of it is weather and paperwork. Log it and go.]"
 world.falling_skyway.comms.debrief_berth_none,Dialogue body — Control closing a window with no lift and no berth allocated in Falling Skyway,"[Skyway Control, closing the window. No lift, no mooring allocated, three claims standing. Nothing left this rock tonight and nothing on this corridor is better than it was when you arrived. The window is shut. Go home.]"
-world.falling_skyway.evidence.record_on_the_open_channel,"Evidence text — the Ladder B file read onto the open corridor channel, Falling Skyway",[The Ladder B maintenance file was read onto the open corridor channel with Skyway Control receiving.]
 world.falling_skyway.evidence.havelock_confronted,"Evidence text — Havelock put to their own maintenance record, Falling Skyway",[Havelock Operations were put to their own maintenance record on the open channel during the transfer window.]
 world.falling_skyway.evidence.committee_rode_it_out,"Evidence text — the strike committee left in the corridor for the storm, Falling Skyway",[The strike committee were not carried in the transfer window and sheltered on the Ladder B rung. There were casualties.]
 world.falling_skyway.evidence.havelock_rode_it_out,"Evidence text — Havelock staff left in the corridor for the storm, Falling Skyway",[Havelock Operations staff were not carried in the transfer window and sheltered aboard their own hulls. There were casualties.]
 world.falling_skyway.evidence.convoy_rode_it_out,"Evidence text — the convoy left in the corridor for the storm, Falling Skyway",[Convoy Meridian were not carried in the transfer window and rode the corridor out in the open. There were casualties.]
-world.falling_skyway.evidence.record_named_witness,"Evidence text — the record surfaced with the witness named, Falling Skyway",[The Ladder B record was surfaced to Control with the name of the worker who contradicted it attached to it.]
-world.falling_skyway.evidence.record_filed,"Evidence text — the record surfaced with the witness protected, Falling Skyway","[The Ladder B record was surfaced to Control unedited, and the worker who contradicted it was not named.]"
-world.falling_skyway.evidence.record_buried,"Evidence text — the record found and never surfaced, Falling Skyway",[The Ladder B record discrepancy was established by this crew and never put to Control or to the operator.]
+world.falling_skyway.evidence.record_named_witness,"Evidence text — the filed evidence bundle followed by naming the witness to Havelock, Falling Skyway","[The Ladder B scan discrepancy and Rigger Tacket's corroboration were filed with Control unedited. The crew later named Tacket to Havelock.]"
+world.falling_skyway.evidence.record_filed,"Evidence text — the filed evidence bundle with the witness protected from Havelock, Falling Skyway","[The Ladder B scan discrepancy and Rigger Tacket's corroboration were filed with Control unedited. The crew did not name Tacket to Havelock.]"
+world.falling_skyway.evidence.record_buried,"Evidence text — the discrepancy established but its evidence bundle not filed, Falling Skyway","[The crew established Ladder B's scan discrepancy but did not file the discrepancy and worker account with Control.]"
 world.falling_skyway.evidence.record_never_found,"Evidence text — no discrepancy established at all, Falling Skyway",[No discrepancy was established between Ladder B's condition and the operator's file on it. The claim stands unexamined.]
 world.falling_skyway.evidence.word_kept,"Evidence text — every commitment kept, Falling Skyway",[Every commitment this captain gave in the Skyway corridor was kept.]
 world.falling_skyway.evidence.word_broken,"Evidence text — at least one commitment broken, Falling Skyway",[At least one commitment this captain gave in the Skyway corridor was broken.]

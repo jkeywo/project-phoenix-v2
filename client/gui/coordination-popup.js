@@ -1,162 +1,122 @@
 /**
- * gui/coordination-popup.js — Pure payload normaliser for the AI-to-human
- * coordination popup (issues #494, #827) AND the viewscreen chatter bubble
- * (issue #975).
+ * gui/coordination-popup.js — Shared Coordination presentation renderer.
  *
- * Maps every CoordinationPayload variant onto { sender, title, body }. This is
- * the ONE place a coordination payload becomes a sentence: both the phone popup
- * (client.html `showCoordinationPopup`) and the host viewscreen chatter widget
- * (server.html `__updateChatter`) resolve through it, so the same event renders
- * identical text on both surfaces (issue #975). The host previously composed a
- * parallel English sentence in Rust (`format_coordination_chatter`); that is
- * gone — Rust now emits the typed payload and the ids, and the words live only
- * in `assets/strings/strings.csv`, resolved here through `t()`.
- *
- * The DOM show/dismiss (element writes, auto-dismiss timer) stays inline in the
- * host pages.
+ * Producers now send a required {title, title_params, body, body_params}
+ * envelope beside the typed semantic fact. This module resolves only
+ * that envelope plus the generic sender/destination route. It deliberately
+ * knows no payload variants: adding a Coordination fact can never require a
+ * client-side sentence switch (issue #1255).
  */
 
-import { t } from './strings.js';
+import { has, t, wireText } from './strings.js';
 
-/**
- * Weapon-family display name (issue #767). Literal `t(...)` calls, one per
- * family, so scripts/check-strings.mjs can verify each id has a CSV row.
- * @param {string|undefined} family serialised WeaponFamily variant
- */
-function weaponFamilyLabel(family) {
-  if (family === 'Blasters') return t('coordination.weapon_family.blasters');
-  if (family === 'Torpedoes') return t('coordination.weapon_family.torpedoes');
-  // Phasers by default, including pre-#767 payloads that omit the field.
-  return t('coordination.weapon_family.phasers');
+/** Resolve a parameter table whether or not localiseTree already ran. */
+function resolveParams(params) {
+  if (!params || typeof params !== 'object' || Array.isArray(params)) return {};
+  return Object.fromEntries(Object.entries(params).map(([key, value]) => [
+    key,
+    typeof value === 'string' ? wireText(value) : value,
+  ]));
 }
 
 /**
- * IntentAdvisory headline (issue #879). A `switch` of literal `t(...)` calls
- * rather than a map, so check-strings validates every id; an unknown kind
- * renders its own token, matching the host's closed IntentKind set drifting
- * ahead of the client.
- * @param {string|undefined} kind serialised IntentKind variant
+ * Resolve a String Table id or literal authored string with deterministic
+ * interpolation. `localiseTree` normally resolves this at ingress; doing the
+ * same here keeps the pure public renderer correct for direct/local callers.
  */
-function intentTitle(kind) {
-  switch (kind) {
-    case 'TargetAcquired': return t('coordination.intent.target_acquired');
-    case 'TargetSwitched': return t('coordination.intent.target_switched');
-    case 'CombatPostureEntered': return t('coordination.intent.combat_posture_entered');
-    case 'CombatPostureLeft': return t('coordination.intent.combat_posture_left');
-    case 'BreakingOff': return t('coordination.intent.breaking_off');
-    case 'ShieldArcFocused': return t('coordination.intent.shield_arc_focused');
-    case 'PowerBrownout': return t('coordination.intent.power_brownout');
-    case 'ManoeuvreBegun': return t('coordination.intent.manoeuvre_begun');
-    default: return kind || t('coordination.advisory.fallback_title');
-  }
-}
-
-function stationLabel(id) {
-  switch (id) {
-    case 'captain': return t('station.captain.name');
-    case 'helm': return t('station.helm.name');
-    case 'tactical': return t('station.tactical.name');
-    case 'repair': return t('station.repair.name');
-    case 'navigation': return t('station.navigation.name');
-    case 'comms': return t('station.comms.name');
-    case 'engineering': return t('station.engineering.name');
-    case 'science': return t('station.science.name');
-    default: return id || '';
-  }
+function resolvePresentationText(value, params) {
+  if (value === null || value === undefined) return '';
+  const text = String(value);
+  const resolved = resolveParams(params);
+  if (has(text)) return t(text, resolved);
+  return text.replace(/\{(\w+)\}/g, (match, key) =>
+    Object.prototype.hasOwnProperty.call(resolved, key) ? String(resolved[key]) : match,
+  );
 }
 
 /**
- * Normalise a CoordinationPopup payload to display strings.
+ * Resolve one producer-owned envelope to the fields shared by both layouts.
  *
- * `senderLabel` and any id-bearing field in `payload` are already resolved by
- * `localiseTree` at the wire boundary (issue #949) before this runs, so the
- * only ids this function resolves are the sentence templates it introduces.
- *
- * @param {{ type?: string, target?: string, data?: object }} payload
- * @param {string|null|undefined} senderLabel  the localised origin label
- * @param {string|null|undefined} targetLabel  the localised destination station
- * @returns {{ sender: string, from: string, to: string, title: string, body: string }}
+ * @param {{title?: string, title_params?: object, body?: string, body_params?: object}} presentation
+ * @param {string|null|undefined} senderLabel localised id or literal sender
+ * @param {string|null|undefined} targetLabel localised id or literal destination
+ * @returns {{sender: string, from: string, to: string, title: string, body: string}}
  */
-export function normalizeCoordinationPayload(payload, senderLabel, targetLabel) {
-  const label = senderLabel || t('chatter.sender.ai');
-  const destination = stationLabel(targetLabel);
-  const sender = destination ? (label + ' → ' + destination) : label;
-  const data = payload.data || {};
+export function normalizeCoordinationPresentation(presentation, senderLabel, targetLabel) {
+  const from = wireText(senderLabel || 'chatter.sender.ai');
+  const to = targetLabel ? wireText(targetLabel) : '';
+  const envelope = presentation || {};
+  return {
+    sender: to ? `${from} → ${to}` : from,
+    from,
+    to,
+    title: resolvePresentationText(envelope.title, envelope.title_params),
+    body: resolvePresentationText(envelope.body, envelope.body_params),
+  };
+}
 
-  let title;
-  let body = '';
-  const type = payload.type;
+/**
+ * Paint the phone's existing route/title/body (two-content-line) layout.
+ * Route labels are undecorated display text; this layout owns the brackets.
+ */
+export function renderCoordinationPopup(doc, presentation, senderLabel, targetLabel) {
+  const fromEl = doc.getElementById('popup-from');
+  const arrowEl = doc.getElementById('popup-arrow');
+  const toEl = doc.getElementById('popup-to');
+  const colonEl = doc.getElementById('popup-colon');
+  const titleEl = doc.getElementById('popup-title');
+  const bodyEl = doc.getElementById('popup-body');
+  if (!fromEl || !arrowEl || !toEl || !colonEl || !titleEl || !bodyEl) return null;
 
-  if (type === 'Advisory') {
-    title = label || t('coordination.advisory.fallback_title');
-    body = data.message ?? payload.message ?? '';
-  } else if (type === 'Alert') {
-    title = data.title ?? payload.title ?? t('coordination.alert.fallback_title');
-    body = data.body ?? payload.body ?? '';
-  } else if (type === 'FrequencyHint') {
-    title = t('coordination.frequency_hint.title');
-    body = t('coordination.frequency_hint.body', {
-      frequency: data.frequency ?? payload.frequency ?? '?',
-    });
-  } else if (type === 'ShieldFacingDown') {
-    title = t('coordination.shield_offline.title', {
-      label: data.label || payload.label || t('coordination.shield.fallback_label'),
-    });
-  } else if (type === 'ShieldFacingRestored') {
-    title = t('coordination.shield_restored.title', {
-      label: data.label || payload.label || t('coordination.shield.fallback_label'),
-    });
-  } else if (type === 'TargetDesignation') {
-    title = t('coordination.target_designation.title', {
-      label: data.label || payload.label || '?',
-    });
-  } else if (type === 'ArcBearingRequest') {
-    title = t('coordination.arc_bearing.title', {
-      weapon: weaponFamilyLabel(data.family || payload.family),
-    });
-    body = data.label || payload.label || '';
-  } else if (type === 'ArcBearingWithdraw') {
-    title = t('coordination.arc_withdraw.title', {
-      weapon: weaponFamilyLabel(data.family || payload.family),
-    });
-  } else if (type === 'PowerBrownout') {
-    title = t('coordination.power_brownout.title', {
-      label: data.label || payload.label || t('coordination.system.fallback_label'),
-    });
-    body = t('coordination.power_brownout.body', {
-      level: data.allocated_level ?? payload.allocated_level ?? '?',
-    });
-  } else if (type === 'IntentAdvisory') {
-    title = intentTitle(data.kind || payload.kind);
-    body = data.subject ?? payload.subject ?? '';
-  } else if (type === 'NavigateTo') {
-    // Coords carried on the payload (issue #977); Rust no longer composes the
-    // "waypoint (x, z)" label. Round to whole units, matching the old label.
-    const nx = data.x ?? payload.x ?? 0;
-    const nz = data.z ?? payload.z ?? 0;
-    title = t('coordination.navigate.title', {
-      x: Math.round(nx),
-      z: Math.round(nz),
-    });
-  } else if (type === 'RepairRequest') {
-    title = t('coordination.repair.title', {
-      label: data.station_label || payload.station_label || '?',
-    });
-  } else if (type === 'ThreatBearing') {
-    const rad = data.bearing_rad ?? payload.bearing_rad ?? 0;
-    const deg = Math.round((((rad * 180) / Math.PI) % 360 + 360) % 360);
-    title = t('coordination.threat_bearing.title', {
-      deg,
-      label: data.label || payload.label || '?',
-    });
-  } else {
-    title = payload.type || t('coordination.advisory.fallback_title');
+  const norm = normalizeCoordinationPresentation(presentation, senderLabel, targetLabel);
+  fromEl.textContent = `[${norm.from}]`;
+  arrowEl.textContent = norm.to ? ' → ' : '';
+  toEl.textContent = norm.to ? `[${norm.to}]` : '';
+  colonEl.textContent = ':';
+  titleEl.textContent = norm.title;
+  bodyEl.textContent = norm.body;
+  return norm;
+}
+
+/**
+ * Build the Viewscreen's existing single-line chatter bubble safely.
+ * Route labels are undecorated display text; this layout owns the brackets.
+ */
+export function buildCoordinationChatterBubble(doc, presentation, senderLabel, targetLabel) {
+  const norm = normalizeCoordinationPresentation(presentation, senderLabel, targetLabel);
+  const bubble = doc.createElement('div');
+  bubble.className = 'chatter-bubble';
+
+  const from = doc.createElement('span');
+  from.className = 'chatter-from';
+  from.textContent = `[${norm.from}]`;
+  bubble.appendChild(from);
+
+  if (norm.to) {
+    const arrow = doc.createElement('span');
+    arrow.className = 'chatter-arrow';
+    arrow.textContent = ' → ';
+    bubble.appendChild(arrow);
+
+    const to = doc.createElement('span');
+    to.className = 'chatter-to';
+    to.textContent = `[${norm.to}]`;
+    bubble.appendChild(to);
   }
 
-  return { sender, from: label, to: destination, title, body };
+  const parts = [];
+  if (norm.title && norm.title !== norm.from) parts.push(norm.title);
+  if (norm.body) parts.push(norm.body);
+  const text = doc.createElement('span');
+  text.className = 'chatter-text';
+  text.textContent = `: ${parts.join(' — ') || norm.title}`;
+  bubble.appendChild(text);
+  return bubble;
 }
 
 // Expose for the non-module inline scripts in client.html and server.html.
 if (typeof window !== 'undefined') {
-  window.normalizeCoordinationPayload = normalizeCoordinationPayload;
+  window.normalizeCoordinationPresentation = normalizeCoordinationPresentation;
+  window.renderCoordinationPopup = renderCoordinationPopup;
+  window.buildCoordinationChatterBubble = buildCoordinationChatterBubble;
 }

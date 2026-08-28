@@ -1078,7 +1078,7 @@
       }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-6422a40f67bddda2.js" crossorigin="anonymous" integrity="sha384-/3eDQDpueUADPE9arwae6plzO4ypOpyOxir25P3+whp45wQYphL3FgLQB+rN6nwL"><link rel="preload" href="./project-phoenix-6422a40f67bddda2_bg.wasm" crossorigin="anonymous" integrity="sha384-tPdUTW57MnE+JPjyPhZOStDP7J4+B/Z6MVKH+NagmHsD+874QqmrGB0t0HtPJNzX" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-98b6512faa324316.js" crossorigin="anonymous" integrity="sha384-fz7GsBUvz/Plq37rZZoJFx73QRnnGUQyYrKURUsWH4SmSkcHg2nWurkgMAd9Ho8a"><link rel="preload" href="./project-phoenix-98b6512faa324316_bg.wasm" crossorigin="anonymous" integrity="sha384-ORscJsutdf17F4Fk/FNFu1+813ZnQOSySvyHzHOzp9zDC+j+EJNnQun2xC9apvXV" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
@@ -1479,8 +1479,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-6422a40f67bddda2.js';
-const wasm = await init({ module_or_path: './project-phoenix-6422a40f67bddda2_bg.wasm' });
+import init, * as bindings from './project-phoenix-98b6512faa324316.js';
+const wasm = await init({ module_or_path: './project-phoenix-98b6512faa324316_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -1500,9 +1500,9 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // is classic-script, so publish the strings API on window and substitute
     // the static data-i18n markup once the table loads.
     import './gui/strings-boot.js';
-    // The viewscreen chatter renders coordination payloads through the same
-    // normaliser the phone popup uses (issue #975); importing it publishes
-    // window.normalizeCoordinationPayload for the classic script below.
+    // The viewscreen and phone render the same producer-owned Coordination
+    // presentation envelope (issue #1255); importing publishes the shared DOM
+    // builders for the classic scripts below.
     import './gui/coordination-popup.js';
     import { t, has, applyToDom, localiseTree } from './gui/strings.js';
     window.phStrings = { t, has, applyToDom, localiseTree };
@@ -1671,6 +1671,12 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
   </script>
 
   <script>
+    // Start loading Rust's generated Debug Surface symbols before any async
+    // world/ship selection can reach startServer(). That function awaits this
+    // exact promise before applying the ?debug_regions route, so the classic
+    // script cannot race the module island or fall back to a literal wire name.
+    const _debugSurfacesReady = import('./gui/debug-surfaces.generated.js');
+
     // ── Host Channel latch (issue #1224) ────────────────────────────────────
     // window.__hostChannel exists here, first thing this script parses, so
     // set_host_channel_callback (below, once WASM has loaded) always hands
@@ -2119,32 +2125,15 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
   window.__updateChatter = function(json) {
     let ev;
     try { ev = JSON.parse(json); } catch (e) { return; }
-    const { from_label, to_label, payload } = ev;
-    if (!payload) return;
-    // The words come from the shared coordination-popup normaliser (issue
-    // #975), so the viewscreen and the phone read identically for one event.
-    // `from_label` and any id-bearing payload field are already resolved by
-    // localiseHostPayload; the normaliser only fills the sentence template.
-    if (typeof window.normalizeCoordinationPayload !== 'function') return;
-    const norm = window.normalizeCoordinationPayload(payload, from_label, to_label);
+    const { from_label, to_label, presentation } = ev;
+    if (!presentation) return;
+    if (typeof window.buildCoordinationChatterBubble !== 'function') return;
 
     const container = document.getElementById('chatter-container');
     if (!container) return;
-
-    // The bubble already shows sender → target as its own spans, so the text
-    // span carries the sentence. Advisory sets its title to the sender label,
-    // which the from-span already shows — drop a title that merely repeats it.
-    const parts = [];
-    if (norm.title && norm.title !== from_label) parts.push(norm.title);
-    if (norm.body) parts.push(norm.body);
-    const text = parts.join(' — ') || norm.title;
-
-    // Create bubble element
-    const bubble = document.createElement('div');
-    bubble.className = 'chatter-bubble';
-    bubble.innerHTML = '<span class="chatter-from">[' + escapeHtml(norm.from)
-      + ']</span><span class="chatter-arrow"> → </span><span class="chatter-to">[' + escapeHtml(norm.to)
-      + ']</span><span class="chatter-text">: ' + escapeHtml(text) + '</span>';
+    const bubble = window.buildCoordinationChatterBubble(
+      document, presentation, from_label, to_label,
+    );
 
     container.appendChild(bubble);
 
@@ -2326,8 +2315,64 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         };
         attachIceDiag();
 
+        // The phone creates its snapshot DataChannel before sending Identify.
+        // Those events travel on different SCTP streams, so either the channel
+        // opening or the token arriving may win. Retain the channel candidate
+        // and promote it idempotently whenever both facts are available.
+        let snapshotCandidate = null;
+        const promoteSnapshot = () => {
+          const token = peerTokens.get(conn.peer);
+          if (!token || !snapshotCandidate || snapshotCandidate.readyState !== 'open') return;
+          if (tokenSnapshotConns.get(token) === snapshotCandidate) return;
+          tokenSnapshotConns.set(token, snapshotCandidate);
+          console.log(`[PeerJS] snapshot channel open — ${shortId}…`);
+        };
+        const clearSnapshot = (chan) => {
+          const token = peerTokens.get(conn.peer);
+          if (token && tokenSnapshotConns.get(token) === chan) tokenSnapshotConns.delete(token);
+          if (snapshotCandidate === chan) snapshotCandidate = null;
+        };
+        let snapshotAttachTries = 0;
+        let snapshotListenerAttached = false;
+        const attachSnapshotListener = () => {
+          if (snapshotListenerAttached) return;
+          const pc = conn.peerConnection;
+          if (!pc) {
+            if (++snapshotAttachTries < 50) setTimeout(attachSnapshotListener, 100);
+            return;
+          }
+          snapshotListenerAttached = true;
+          // PeerJS owns the first `datachannel` event on an inbound
+          // RTCPeerConnection: its handler turns the library's reliable
+          // RTCDataChannel into this DataConnection. We install before that
+          // event so we cannot miss an early snapshot channel, therefore we
+          // must preserve the library handler and delegate every non-snapshot
+          // channel to it. `addEventListener` is not suitable here because it
+          // would let PeerJS consume the snapshot channel as a replacement
+          // reliable channel too.
+          const peerJsDataChannelHandler = pc.ondatachannel;
+          pc.ondatachannel = (event) => {
+            const chan = event.channel;
+            if (chan.label !== 'snapshot') {
+              if (typeof peerJsDataChannelHandler === 'function') {
+                peerJsDataChannelHandler.call(pc, event);
+              }
+              return;
+            }
+            snapshotCandidate = chan;
+            chan.onopen = promoteSnapshot;
+            chan.onclose = () => clearSnapshot(chan);
+            chan.onerror = () => clearSnapshot(chan);
+            // A browser may surface an already-open channel. Do not rely on a
+            // future open event that will never fire.
+            promoteSnapshot();
+          };
+        };
+        attachSnapshotListener();
+
         conn.on('open', () => {
           console.log(`[PeerJS] DataChannel open — ${shortId}…`);
+          attachSnapshotListener();
           const pc = conn.peerConnection;
           if (pc) {
             // Log the winning ICE candidate type (host = direct, srflx = STUN, relay = TURN)
@@ -2343,25 +2388,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
               }).catch(() => {});
             }, 1500);
 
-            // Listen for snapshot sub-channels created by the client on this PC
-            pc.ondatachannel = (event) => {
-              const chan = event.channel;
-              if (chan.label === 'snapshot') {
-                chan.onopen = () => {
-                  console.log(`[PeerJS] snapshot channel open — ${shortId}…`);
-                  const token = peerTokens.get(conn.peer);
-                  if (token) tokenSnapshotConns.set(token, chan);
-                };
-                chan.onclose = () => {
-                  const token = peerTokens.get(conn.peer);
-                  if (token && tokenSnapshotConns.get(token) === chan) tokenSnapshotConns.delete(token);
-                };
-                chan.onerror = () => {
-                  const token = peerTokens.get(conn.peer);
-                  if (token && tokenSnapshotConns.get(token) === chan) tokenSnapshotConns.delete(token);
-                };
-              }
-            };
           }
         });
 
@@ -2407,6 +2433,13 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
                 const prior = tokenConns.get(token);
                 peerTokens.set(conn.peer, token);
                 tokenConns.set(token, conn);
+                // A duplicate-token takeover changes ownership of both
+                // transports. Remove the prior snapshot route before promoting
+                // the replacement so a not-yet-open replacement falls back to
+                // its reliable connection rather than retaining a closed raw
+                // channel entry owned by the old DataConnection.
+                if (prior && prior !== conn) tokenSnapshotConns.delete(token);
+                promoteSnapshot();
                 if (prior && prior !== conn && prior.open) {
                   console.warn(
                     `[PeerJS] DUPLICATE TOKEN ${token.slice(0, 8)}… — a second device ` +
@@ -3298,8 +3331,6 @@ function finishInit() {
   window.wasm_receive_message = wasmBindings.wasm_receive_message;
   window.set_message_callback = wasmBindings.set_message_callback;
   window.wasm_validate_stations = wasmBindings.wasm_validate_stations;
-  window.wasm_set_debug_regions = wasmBindings.wasm_set_debug_regions;
-  window.wasm_is_debug_regions_enabled = wasmBindings.wasm_is_debug_regions_enabled;
   // Reduced motion (issue #1173): the viewscreen forwards the host's
   // `prefers-reduced-motion` preference to the renderer so hull-damage screen
   // shake and the shield-hit white flash honour it. The getter lets the
@@ -3337,8 +3368,10 @@ function finishInit() {
   window.wasm_export_file_name = wasmBindings.wasm_export_file_name;
   window.wasm_peek_import = wasmBindings.wasm_peek_import;
   window.wasm_prepare_import = wasmBindings.wasm_prepare_import;
-  window.wasm_toggle_debug_regions = wasmBindings.wasm_toggle_debug_regions;
-  window.wasm_toggle_debug_overlay = wasmBindings.wasm_toggle_debug_overlay;
+  // One canonical diagnostic mutation route (issue #1267). The export is
+  // absent from demo WASM; assigning its missing binding is harmless because
+  // that build never renders the Debug/Cheat tab. Readback remains available.
+  window.wasm_set_debug_surface = wasmBindings.wasm_set_debug_surface;
   // Pause is a GAMEPLAY control, not a debug one (issue #939): it sits on the
   // settings cog's un-gated Gameplay tab, so it has to keep working in a
   // demo build where the Debug/Cheat tab is gone. Hence the un-prefixed
@@ -3346,47 +3379,35 @@ function finishInit() {
   window.wasm_toggle_pause = wasmBindings.wasm_toggle_pause;
   window.wasm_is_paused = wasmBindings.wasm_is_paused;
   window.wasm_get_debug_state = wasmBindings.wasm_get_debug_state;
-  window.wasm_toggle_debug_damage = wasmBindings.wasm_toggle_debug_damage;
   window.wasm_get_damage_log = wasmBindings.wasm_get_damage_log;
-  window.wasm_toggle_debug_entities = wasmBindings.wasm_toggle_debug_entities;
   window.wasm_get_entity_debug_state = wasmBindings.wasm_get_entity_debug_state;
-  window.wasm_toggle_entity_inspector = wasmBindings.wasm_toggle_entity_inspector;
   window.wasm_get_entity_inspector = wasmBindings.wasm_get_entity_inspector;
   // Station activity (issue #1145): the first structured-JSON debug surface. The
   // getter returns a StationActivityPayload as JSON, which the settings cog's
   // station-activity output parses and charts (gui/station-activity-chart.js)
-  // rather than printing. The toggle flips the flag that gates the JSON publish;
-  // the counters behind it are always-on.
-  window.wasm_toggle_station_activity = wasmBindings.wasm_toggle_station_activity;
+  // rather than printing. The counters behind it are always-on.
   window.wasm_get_station_activity = wasmBindings.wasm_get_station_activity;
   // AI doctrine pool (issue #1149): the second structured-JSON debug surface. The
   // getter returns an AiStatePayload as JSON, which the settings cog's AI-doctrine
   // output parses and draws as a per-ship candidate table (gui/ai-doctrine-panel.js)
-  // rather than printing. The toggle flips the flag that gates the JSON publish;
-  // the pool it projects is authoritative state.
-  window.wasm_toggle_ai_doctrine = wasmBindings.wasm_toggle_ai_doctrine;
+  // rather than printing; the pool it projects is authoritative state.
   window.wasm_get_ai_doctrine = wasmBindings.wasm_get_ai_doctrine;
   // Scenario trigger/deadline state (issue #1045): publish the existing WASM
   // debug pair on the same window seam the settings cog resolves by name.
   // Keeping this observable is also what lets the browser smoke prove a failed
   // sibling script activates neither half of its layer atomically.
-  window.wasm_toggle_scenario_state = wasmBindings.wasm_toggle_scenario_state;
   window.wasm_get_scenario_state = wasmBindings.wasm_get_scenario_state;
   // Console input-to-feedback latency (issue #1169). The getter returns a
   // ConsoleLatencyPayload as JSON, which the cog's console-latency output draws
   // as a per-action table (gui/console-latency-panel.js).
   //
-  // Two differences from every neighbour above, both from the #1169 review. It
-  // is an absolute SET, not a toggle: a connected phone can flip the same flag,
-  // and a relative toggle raced against that lands on the opposite value —
-  // silently leaving the simulation measuring nothing while the cog reads "on".
-  // And the flag gates MEASUREMENT rather than only the publish, so enabling
+  // Like every neighbour after #1267 it uses the generic absolute SET. The flag
+  // gates MEASUREMENT rather than only the publish, so enabling
   // clears the previous window and the payload starts empty.
   //
   // `wasm_get_debug_flags` is the read-back the cog paints from, mirrored by the
   // one system that already computes that set for the wire — so this page and a
   // connected phone can never be shown different answers.
-  window.wasm_set_console_latency = wasmBindings.wasm_set_console_latency;
   window.wasm_get_console_latency = wasmBindings.wasm_get_console_latency;
   window.wasm_get_debug_flags = wasmBindings.wasm_get_debug_flags;
   window.wasm_toggle_god_mode = wasmBindings.wasm_toggle_god_mode;
@@ -3622,14 +3643,20 @@ function showFatalError(message) {
   console.error('[Phoenix] Fatal:', message);
 }
 
-function startServer() {
+async function startServer() {
   const spinner = document.getElementById('wasm-spinner');
   if (spinner) spinner.style.display = 'none';
 
-  // Read ?debug_regions=1 URL parameter before WASM init
+  // `?debug_regions=1` uses the same catalogue route as the settings cog. The
+  // export is absent from demo WASM, so the URL cannot become a hidden second
+  // diagnostic mutation route in that build.
   const urlParams = new URLSearchParams(location.search);
-  if (urlParams.get('debug_regions') === '1') {
-    wasm_set_debug_regions(true);
+  if (
+    urlParams.get('debug_regions') === '1' &&
+    typeof window.wasm_set_debug_surface === 'function'
+  ) {
+    await _debugSurfacesReady;
+    window.wasm_set_debug_surface(window.phDebugSurfaces.DebugSurface.Regions, true);
   }
 
   // Reduced motion (issue #1173): the viewscreen is a television in a room, so

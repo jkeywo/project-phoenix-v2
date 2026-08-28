@@ -29,19 +29,9 @@
  *  - BroadcastChannel listener on 'phoenix-console-state', filtering by
  *    `name` — for same-origin separate-tab mode (ADR-0001 §3 target 4).
  *
- * @param {{ name: string, family?: string, render: function(state: object): void }} opts
+ * @param {{ name: string, render: function(state: object): void }} opts
  *   name   — lowercase station id (e.g. 'repair', 'helm'). Pre-issue #618
  *            these were PascalCase Console enum variant names.
- *   family — this console's console-family name (e.g. 'power', 'captain' —
- *            see gui/console-state.js `consoleForSystemId`), when this
- *            console's payload is the FLAT plain-builder shape. Every
- *            inbound push is run through `normalizeConsolePayload` (issue
- *            #1233): a flat payload gets `family`'s fields mirrored under
- *            `systems[family]` so `render` can read the keyed shape
- *            uniformly, regardless of whether the wire payload arrived flat
- *            or already system-id-keyed. Omit for a console with no single-
- *            family concept (e.g. the Command console) or one that already
- *            reads a genuinely keyed `SystemStationConsolePayload`.
  *   render — Called with the parsed (and shape-normalised) state object on
  *            every inbound push.
  *
@@ -78,7 +68,7 @@ import { normalizeConsolePayload } from './console-payload.js';
 // happened". See `__input_ms` in `sendAction` below.
 import { nowMs } from './console-latency.js';
 
-export function initConsole({ name, family, render }) {
+export function initConsole({ name, render }) {
   // Resolve the global object: `window` in browsers, `globalThis` in Node/tests.
   // Evaluated at call-time so tests can set global.window before calling initConsole.
   var _root = (typeof window !== 'undefined') ? window : globalThis;
@@ -153,7 +143,7 @@ export function initConsole({ name, family, render }) {
       console.warn('[' + name + '] bad state json', e);
       return;
     }
-    s = normalizeConsolePayload(s, family);
+    s = normalizeConsolePayload(s);
     render(s);
     _updateTutorialOverlay(s);
   };
@@ -240,4 +230,3 @@ export function initConsole({ name, family, render }) {
 if (typeof window !== 'undefined') {
   window.initConsole = initConsole;
 }
-

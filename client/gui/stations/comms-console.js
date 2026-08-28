@@ -3,8 +3,7 @@
  * #1235, T4.C3 chunk 3 — final chunk of the console-seam programme).
  *
  * Only the battleship and cruiser mount a dedicated Comms Station (the
- * destroyer and courier have none — see gui/console-payload.js's
- * `FAMILY_SYSTEM_IDS` and the per-hull ship TOMLs). The two shipped their
+ * destroyer and courier have none — see the per-hull ship TOMLs). The two shipped their
  * own inline `render(s)` in `comms.html`. The shared core is the contact
  * list, hail list, current-message thread and station-damage bar — every
  * hull mounts those four with the same ids. The cruiser's Comms seat also
@@ -22,7 +21,7 @@
  *   Given the (already shape-normalised) console payload, return the "view"
  *   the shared core reads contacts/messages fields from. The battleship
  *   omits this (flat `comms` family payload — the core defaults to `s`
- *   itself); the cruiser returns `systemView(s, 'comms')`.
+ *   itself); the cruiser returns `familyView(s, 'comms')`.
  * @property {object} ids                     element ids present in this hull's markup
  * @property {string} [ids.contactList]       `ph-comms-contact-list` id
  * @property {string} [ids.hailList]          `ph-comms-hail-list` id
@@ -63,7 +62,7 @@ export function makeCommsRender(variant) {
     if (!doc || !s) return;
 
     // The comms view the panels read from — `s` itself for the battleship's
-    // flat `comms` family, a `systemView(...)` slice for the cruiser.
+    // flat `comms` family, a metadata-selected family slice for the cruiser.
     const view = variant.commsView ? variant.commsView(s) : s;
 
     // ── Contact list ─────────────────────────────────────────────────────

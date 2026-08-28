@@ -2,18 +2,18 @@
  * gui/destroyer/captain.console.js — the alliance destroyer's Captain seat
  * (issue #1235).
  *
- * A system-id-keyed hull: the Captain view comes from `systemView(s,
- * 'captain', 'red-alert', 'viewscreen')`. The destroyer's Captain seat also
+ * A system-id-keyed hull: the Captain view comes from the projected Captain
+ * Console Family. The destroyer's Captain seat also
  * absorbs Sensors — there is no separate Sensors Station on this hull — so
  * the sensor radar, scan readout, deadline list and a locked-target-name
  * footer (reading the sensors view, not a contact count) are this hull's
  * bespoke tail. The AUTO badge conjuncts three views' own auto flags.
  */
 import { makeCaptainRender } from '../stations/captain-console.js';
-import { systemView } from '../console-payload.js';
+import { familyView } from '../console-payload.js';
 
 export const renderStation = makeCaptainRender({
-  captainView: (s) => systemView(s, 'captain', 'red-alert', 'viewscreen'),
+  captainView: (s) => familyView(s, 'captain'),
   ids: {
     camera: 'camera-select',
     redAlert: 'red-alert',
@@ -25,9 +25,9 @@ export const renderStation = makeCaptainRender({
   // is Backfill-rated". The per-system equivalent is every owned system
   // AI-run — the conjunction of the resolved views' *_auto flags
   // (controlSources can lag a rating change by one tick).
-  autoState: (s, view) => !!(view.red_alert_auto && view.viewscreen_auto && systemView(s, 'sensors', 'sensor-radar').sensors_auto),
+  autoState: (s, view) => !!(view.red_alert_auto && view.viewscreen_auto && familyView(s, 'sensors').sensors_auto),
   tail: (s, view, doc, t) => {
-    const sensors = systemView(s, 'sensors', 'sensor-radar');
+    const sensors = familyView(s, 'sensors');
 
     const sensorRadarEl = doc.getElementById('sensor-radar');
     if (sensorRadarEl) sensorRadarEl.state = sensors;

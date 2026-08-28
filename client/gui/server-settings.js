@@ -29,6 +29,8 @@
 
 import { t } from './strings.js';
 import { isDemoBuild } from './build-flags.js';
+import { DEBUG_SURFACE } from './debug-surfaces.generated.js';
+import { projectDebugSurfaceAdapters } from './debug-surface-adapters.js';
 import { renderStationActivityChart } from './station-activity-chart.js';
 import { renderAiDoctrinePanel } from './ai-doctrine-panel.js';
 import { renderScenarioStatePanel } from './scenario-state-panel.js';
@@ -58,30 +60,41 @@ import {
 
 /**
  * Debug outputs shown in the output panel. `read` is polled while that output
- * is the visible one; `toggle` flips the matching Bevy resource. Every output
+ * is the visible one; `flag` is the catalogue-owned wire identity passed to
+ * the one `wasm_set_debug_surface` export. Every output
  * now carries a `render` function that parses a structured-JSON payload and
  * builds DOM: the first four were migrated off pre-formatted TEXT onto the
  * observability pipeline by issue #1150 (PRD #1144), joining station activity
  * (issue #1145), the AI doctrine pool (issue #1149) and scenario state (issue
  * #1148) so the dock speaks one language — "one debug system, not two".
  */
-export const DEBUG_OUTPUTS = [
-  { id: 'modifiers', labelId: 'settings.debug.modifiers', toggle: 'wasm_toggle_debug_overlay', read: 'wasm_get_debug_state', render: renderModifierDebug },
-  { id: 'damage', labelId: 'settings.debug.damage', toggle: 'wasm_toggle_debug_damage', read: 'wasm_get_damage_log', render: renderDamageDebug },
-  { id: 'entities', labelId: 'settings.debug.entities', toggle: 'wasm_toggle_debug_entities', read: 'wasm_get_entity_debug_state', render: renderEntityBehaviorDebug },
-  { id: 'inspector', labelId: 'settings.debug.inspector', toggle: 'wasm_toggle_entity_inspector', read: 'wasm_get_entity_inspector', render: renderEntityInspectorDebug },
-  { id: 'station-activity', labelId: 'settings.debug.station_activity', toggle: 'wasm_toggle_station_activity', read: 'wasm_get_station_activity', render: renderStationActivityChart },
+export const HOST_DEBUG_SURFACE_ADAPTERS = projectDebugSurfaceAdapters([
+  [DEBUG_SURFACE.Regions, { kind: 'toggle', id: 'wireframes', labelId: 'settings.debug.wireframes' }],
+  [DEBUG_SURFACE.Modifiers, { kind: 'output', id: 'modifiers', labelId: 'settings.debug.modifiers', read: 'wasm_get_debug_state', render: renderModifierDebug }],
+  [DEBUG_SURFACE.Damage, { kind: 'output', id: 'damage', labelId: 'settings.debug.damage', read: 'wasm_get_damage_log', render: renderDamageDebug }],
+  [DEBUG_SURFACE.Entities, { kind: 'output', id: 'entities', labelId: 'settings.debug.entities', read: 'wasm_get_entity_debug_state', render: renderEntityBehaviorDebug }],
+  [DEBUG_SURFACE.Inspector, { kind: 'output', id: 'inspector', labelId: 'settings.debug.inspector', read: 'wasm_get_entity_inspector', render: renderEntityInspectorDebug }],
+  [DEBUG_SURFACE.StationActivity, { kind: 'output', id: 'station-activity', labelId: 'settings.debug.station_activity', read: 'wasm_get_station_activity', render: renderStationActivityChart }],
   // AI doctrine pool (issue #1149): the second structured-JSON surface, drawn as
   // a per-ship candidate table rather than printed as text.
-  { id: 'ai-doctrine', labelId: 'settings.debug.ai_doctrine', toggle: 'wasm_toggle_ai_doctrine', read: 'wasm_get_ai_doctrine', render: renderAiDoctrinePanel },
-  { id: 'scenario-state', labelId: 'settings.debug.scenario', toggle: 'wasm_toggle_scenario_state', read: 'wasm_get_scenario_state', render: renderScenarioStatePanel },
-  // Console input-to-feedback latency (issue #1169). The one output carrying
-  // `set` + `flag` instead of `toggle`: it starts and stops MEASUREMENT rather
-  // than only rendering, so a stale button is not cosmetic — it would show a
-  // live surface over a simulation that had stopped measuring and was silently
-  // dropping every batch a phone sent. See `clickOutput` and `reconcileOutputs`.
-  { id: 'console-latency', labelId: 'settings.debug.console_latency', set: 'wasm_set_console_latency', flag: 'ConsoleLatency', read: 'wasm_get_console_latency', render: renderConsoleLatencyPanel },
-];
+  [DEBUG_SURFACE.AiDoctrine, { kind: 'output', id: 'ai-doctrine', labelId: 'settings.debug.ai_doctrine', read: 'wasm_get_ai_doctrine', render: renderAiDoctrinePanel }],
+  [DEBUG_SURFACE.ScenarioState, { kind: 'output', id: 'scenario-state', labelId: 'settings.debug.scenario', read: 'wasm_get_scenario_state', render: renderScenarioStatePanel }],
+  // Console latency starts and stops MEASUREMENT rather than only rendering;
+  // the generic absolute setter preserves its no-stale-toggle guarantee for
+  // every surface now, rather than special-casing this one.
+  [DEBUG_SURFACE.ConsoleLatency, { kind: 'output', id: 'console-latency', labelId: 'settings.debug.console_latency', read: 'wasm_get_console_latency', render: renderConsoleLatencyPanel }],
+], 'server-settings');
+
+function withoutSurfaceKind({ kind: _kind, ...adapter }) {
+  return Object.freeze(adapter);
+}
+
+/** Output adapters, in the catalogue's stable relative order. */
+export const DEBUG_OUTPUTS = Object.freeze(
+  HOST_DEBUG_SURFACE_ADAPTERS
+    .filter((adapter) => adapter.kind === 'output')
+    .map(withoutSurfaceKind),
+);
 
 /**
  * Reconcile this module's own idea of which outputs are enabled with the flags
@@ -94,8 +107,7 @@ export const DEBUG_OUTPUTS = [
  * latency, which gates measurement, it was a cog reading "on" over a simulation
  * measuring nothing.
  *
- * Only entries that declare a `flag` are reconciled — the rest have no read-back
- * to reconcile against and keep their previous behaviour exactly. A null
+ * Every output declares a catalogue `flag` and is reconciled. A null
  * `reported` (the simulation has not reported yet, or the export is absent)
  * leaves everything alone rather than guessing OFF.
  *
@@ -126,12 +138,14 @@ export function reconcileOutputs(state, reported, outputs = DEBUG_OUTPUTS) {
   return { enabled, viewing };
 }
 
-/** Cheats and world-drawing toggles, each with an authoritative read-back. */
-export const DEBUG_TOGGLES = [
-  { id: 'wireframes', labelId: 'settings.debug.wireframes', toggle: 'wasm_toggle_debug_regions', state: 'wasm_is_debug_regions_enabled' },
+/** Catalogue drawing toggles followed by cheats with authoritative read-back. */
+export const DEBUG_TOGGLES = Object.freeze([
+  ...HOST_DEBUG_SURFACE_ADAPTERS
+    .filter((adapter) => adapter.kind === 'toggle')
+    .map(withoutSurfaceKind),
   { id: 'godmode', labelId: 'settings.debug.godmode', toggle: 'wasm_toggle_god_mode', state: 'wasm_get_god_mode' },
   { id: 'instagib', labelId: 'settings.debug.instagib', toggle: 'wasm_toggle_instagib', state: 'wasm_get_instagib' },
-];
+]);
 
 /**
  * One-shot debug commands. `save-snapshot` / `resume-snapshot` go through host
@@ -231,8 +245,8 @@ export function mountServerSettings(opts = {}) {
     }
   };
 
-  // Debug output state — module-owned because the four resources have no
-  // read-back exports; this module is their only caller.
+  // Local panel selection state. Enabled state is reconciled continuously
+  // from the catalogue readback, so this never becomes a second authority.
   let outputs = { enabled: [], viewing: null };
   let activeTab = null;
   let rafHandle = null;
@@ -348,16 +362,10 @@ export function mountServerSettings(opts = {}) {
     // Exactly one resource flips per click — the per-toggle behaviour that
     // replaced the old "opening the dock enables all four" bundle.
     const entry = DEBUG_OUTPUTS.find((o) => o.id === next.flipped);
-    if (entry && entry.set) {
-      // An ABSOLUTE set (issue #1169 review, C2). A relative toggle raced
-      // against a phone flipping the same flag lands on the opposite value from
-      // the one the operator asked for — silently, and for console latency that
-      // means the simulation stops measuring while this button reads "on". So
-      // this route sends the value it wants, computed from the read-back above.
-      invoke(entry.set, !wasOn);
-    } else if (entry) {
-      invoke(entry.toggle);
-    }
+    // One absolute catalogue route for every diagnostic. A relative host toggle
+    // raced against the phone route could land on the opposite value; the
+    // desired value here is computed from the authoritative readback above.
+    if (entry) invoke('wasm_set_debug_surface', entry.flag, !wasOn);
     outputs = { enabled: next.enabled, viewing: next.viewing };
     paintOutput();
   }
@@ -380,7 +388,13 @@ export function mountServerSettings(opts = {}) {
     const cheatRow = rowHost();
     for (const entry of DEBUG_TOGGLES) {
       const el = control(entry.id, entry.labelId, () => {
-        invoke(entry.toggle);
+        if (entry.flag) {
+          const reported = reportedFlags();
+          const on = !!(reported && reported[entry.flag]);
+          invoke('wasm_set_debug_surface', entry.flag, !on);
+        } else {
+          invoke(entry.toggle);
+        }
         // God mode crosses command admission and lands a tick later, so every
         // toggle's active class is painted from the read-back in refresh()
         // rather than assumed here (issue #900).
@@ -540,7 +554,10 @@ export function mountServerSettings(opts = {}) {
     for (const entry of DEBUG_TOGGLES) {
       const el = controls.toggles[entry.id];
       if (!el) continue;
-      const on = !!invoke(entry.state);
+      const reported = entry.flag ? reportedFlags() : null;
+      const on = entry.flag
+        ? !!(reported && reported[entry.flag])
+        : !!invoke(entry.state);
       el.classList.toggle('active', on);
       el.setAttribute('aria-pressed', on ? 'true' : 'false');
     }

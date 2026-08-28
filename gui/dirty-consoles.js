@@ -1,19 +1,18 @@
 /**
- * gui/dirty-consoles.js — declarative message → dirty-console mapping (#823).
+ * gui/dirty-consoles.js — semantic change → dirty-console routing (#823).
  *
  * Replaces the hand-maintained fan-out in client.html handleMessage(): given
- * an inbound ServerMessage, `dirtyConsolesFor` returns the set of console
- * (station) names whose iframes should be re-pushed. The mapping is data:
+ * merged reducer results, `dirtyConsolesFor` returns the set of console
+ * (station) names whose iframes should be re-pushed.
  *
- *  - STATIC_MESSAGE_CONSOLES covers every non-blackboard message type with a
- *    fixed console list (the exact fan-out handleMessage used to hardcode).
- *  - BlackboardUpdate dirtiness is derived from the server-supplied
- *    station→systems ownership (simState.stationSystems): an update for
- *    system X dirties the console of whichever station owns X. Fine system
- *    ids resolve through consoleForSystemId (the same single-source-of-truth
- *    matcher buildSystemStationConsoleState uses); a coarse blackboard id
- *    that directly names a console family ('helm', 'tactical', …) dirties
- *    that family's owning station too.
+ *  - Reducers report semantic domains at the point where they interpret and
+ *    mutate state. This module maps those stable domains to their established
+ *    presentation consumers; it never enumerates ServerMessage variants.
+ *  - BlackboardUpdate dirtiness is derived from reducer-reported changed keys,
+ *    the server-supplied station→systems ownership, authoritative System-id →
+ *    Console Family projection, and the separate reserved-blackboard-key
+ *    projection. The router never re-reads the wire payload. No id spelling
+ *    participates in routing, and reserved keys never masquerade as Systems.
  *
  * On the battleship (identity stations) this reproduces the old hardcoded
  * routing exactly. On composite stations (courier 'pilot', destroyer
@@ -30,97 +29,59 @@
  * tests/client/dirty-consoles.test.js.
  */
 
-import { consoleForSystemId } from './console-state.js';
+import { CHANGE_DOMAINS } from './reducer-result.js';
 
-/**
- * Non-blackboard message type → console names dirtied. Exact port of the old
- * per-case push*ConsoleState calls in handleMessage.
- */
-export const STATIC_MESSAGE_CONSOLES = Object.freeze({
-  // Push the pre-seeded repair teams so the Repair console renders its rows
-  // immediately on (re)connect, before the first RepairState broadcast.
-  Welcome: Object.freeze(['repair']),
-  // Every radar-bearing console refreshes each 10 Hz tick: radar blips are
-  // built client-side from ship_x/z/yaw + the entity array, so consoles that
-  // only refreshed on their sparse own-event cadence would crawl at ~1 Hz.
-  SimState: Object.freeze(['tactical', 'repair', 'sensors', 'navigation']),
-  WorldSetup: Object.freeze(['tactical', 'helm', 'sensors', 'navigation']),
-  EntitySpawned: Object.freeze(['tactical', 'helm', 'sensors', 'navigation']),
-  AsteroidSpawned: Object.freeze(['tactical', 'helm', 'sensors', 'navigation']),
-  TargetLock: Object.freeze(['tactical']),
-  WeaponsUpdate: Object.freeze(['tactical']),
-  // BeamStarted/BeamEnded entries removed in #825: sim-state no longer
-  // mutates on those messages (the weaponsFiring flag they fed is gone),
-  // so a push would rebuild an unchanged payload.
-  SystemHullUpdate: Object.freeze(['repair']),
-  RepairState: Object.freeze(['repair']),
-  PowerState: Object.freeze(['power']),
-  ShieldStatus: Object.freeze(['shields']),
-  AsteroidDestroyed: Object.freeze(['tactical', 'helm', 'sensors']),
-  EntityDespawned: Object.freeze(['tactical', 'helm', 'sensors']),
-  CommsState: Object.freeze(['comms']),
-  // Rejection feedback (#761 AC3): re-push the comms console so the attempted
-  // response button flashes red.
-  CommsResponseRejected: Object.freeze(['comms']),
-  // stationRatings is already fresh when this fires (sim-state applied the
-  // message first); controlSources lags until the next SimState tick, so the
-  // captain badge is pushed immediately from here.
-  RatingChanged: Object.freeze(['captain']),
+const DOMAIN_FAMILIES = Object.freeze({
+  // Push pre-seeded repair teams immediately on (re)connect, before the first
+  // RepairState broadcast. Other Welcome consumers mount after this fan-out.
+  [CHANGE_DOMAINS.WELCOME]: Object.freeze(['repair']),
+  // Radar blips are derived client-side from the 10 Hz simulation snapshot.
+  [CHANGE_DOMAINS.SIMULATION_SNAPSHOT]: Object.freeze([
+    'tactical', 'repair', 'sensors', 'navigation',
+  ]),
+  [CHANGE_DOMAINS.WORLD_ENTITY_ADDED]: Object.freeze([
+    'tactical', 'helm', 'sensors', 'navigation',
+  ]),
+  [CHANGE_DOMAINS.WORLD_ENTITY_REMOVED]: Object.freeze([
+    'tactical', 'helm', 'sensors',
+  ]),
+  [CHANGE_DOMAINS.WEAPONS]: Object.freeze(['tactical']),
+  [CHANGE_DOMAINS.REPAIR]: Object.freeze(['repair']),
+  [CHANGE_DOMAINS.POWER]: Object.freeze(['power']),
+  [CHANGE_DOMAINS.SHIELDS]: Object.freeze(['shields']),
+  [CHANGE_DOMAINS.COMMS]: Object.freeze(['comms']),
+  // stationRatings is already fresh; controlSources follows on the next
+  // SimState tick, so the Captain-family badge retains its immediate push.
+  [CHANGE_DOMAINS.STATION_RATINGS]: Object.freeze(['captain']),
 });
 
 /**
- * Console names whose pushes are NOT gated on being the active console.
+ * Console Families whose owning Stations are NOT gated on being active.
  * The captain push was always unconditional (BlackboardUpdate + RatingChanged
  * pushed it regardless of which console is on screen) — keep that as data
  * rather than an inline special case in the driver.
  */
-export const ALWAYS_PUSH = Object.freeze(new Set(['captain']));
-
-/**
- * Coarse blackboard ids that directly name a console family. Today's server
- * blackboard ids are coarse (helm / captain / viewscreen / tactical / power /
- * shields / repair / comms / sensors / navigation); the ones not already
- * resolved by consoleForSystemId land here via identity.
- */
-const CONSOLE_FAMILIES = Object.freeze(new Set([
-  'captain', 'helm', 'tactical', 'sensors', 'navigation',
-  'comms', 'shields', 'power', 'repair',
-]));
-
-/**
- * Reserved blackboard CHANNEL keys — ids no `[[system]]` block declares and no
- * station owns — mapped to the console family that renders them.
- *
- * `scan` (issue #1032) is the sensor suite's last reading. It is not a system
- * id (the commandable, damageable thing is `sensors`), so neither the fine
- * matcher nor the coarse family set below resolves it, and without this entry a
- * fresh reading would only reach a console that happened to be pushed for some
- * other reason.
- */
-const CHANNEL_FAMILIES = Object.freeze({
-  scan: 'sensors',
-});
+export const ALWAYS_PUSH_FAMILIES = Object.freeze(new Set(['captain']));
 
 /**
  * The console family a blackboard system id belongs to, or null.
- * Fine ids resolve through the shared matcher; reserved channel keys resolve
- * through the table above; coarse ids that equal a console family name resolve
- * by identity.
+ * Actual System ids and non-System blackboard keys deliberately use separate
+ * authoritative projections.
  */
-function familyForBlackboardId(id) {
+function familyForBlackboardId(id, systemConsoleFamilies, blackboardConsoleFamilies) {
   if (typeof id !== 'string') return null;
-  const fine = consoleForSystemId(id);
-  if (fine) return fine;
-  if (CHANNEL_FAMILIES[id]) return CHANNEL_FAMILIES[id];
-  return CONSOLE_FAMILIES.has(id) ? id : null;
+  const reserved = blackboardConsoleFamilies && blackboardConsoleFamilies[id];
+  if (typeof reserved === 'string' && reserved !== '') return reserved;
+  const system = systemConsoleFamilies && systemConsoleFamilies[id];
+  return typeof system === 'string' && system !== '' ? system : null;
 }
 
 /**
  * Console families a single blackboard update fans out to: its own family,
  * plus — for captain/viewscreen updates — the currentView cascade.
  */
-function familiesForBlackboardId(id) {
-  const family = familyForBlackboardId(id);
+function familiesForBlackboardId(id, systemConsoleFamilies, blackboardConsoleFamilies) {
+  const family = familyForBlackboardId(id, systemConsoleFamilies, blackboardConsoleFamilies);
   if (!family) return [];
   if (family === 'captain') {
     // Helm/Sensors/Comms/Navigation each derive their own "on screen" button
@@ -136,43 +97,41 @@ function familiesForBlackboardId(id) {
 /**
  * Resolve a console family to the console (station) names that render it,
  * from the server-supplied stationSystems (station id → owned fine system
- * ids; station id == console name). Falls back to the family name itself
- * when ownership is unknown (boot race before Welcome) or no station owns
- * the family — pushes to unmounted consoles are harmless no-ops.
+ * ids); station id and Console Family are independent namespaces. Before
+ * Welcome there is no topology to route through, so the result is empty.
  */
-function owningConsoles(family, stationSystems) {
+function owningConsoles(family, stationSystems, systemConsoleFamilies) {
   const owners = [];
   if (stationSystems) {
-    for (const [stationId, systemIds] of Object.entries(stationSystems)) {
-      if ((systemIds || []).some(id => consoleForSystemId(id) === family)) {
+    for (const stationId of Object.keys(stationSystems).sort()) {
+      const systemIds = stationSystems[stationId];
+      if ((systemIds || []).some(id => systemConsoleFamilies?.[id] === family)) {
         owners.push(stationId);
       }
     }
   }
-  return owners.length > 0 ? owners : [family];
+  return owners;
 }
 
 /**
- * True when a blackboard update entry belongs to a human-seeking system —
- * recognised by the presence of the `host_station` KEY, `null` included (issue
- * #984). The server writes that key unconditionally on a seeking system's
- * blackboard for exactly this test; see `NavigationBlackboard::host_station`.
- *
- * The entry is `[systemId, { kind, data }]` — an adjacently-tagged
- * `SystemBlackboard`, the same envelope gui/sim-state.js unwraps — so the
- * field sits inside `data` rather than on the entry itself.
- *
- * @param {[string, object]|string} entry
+ * Resolve the unconditional Console Families to actual owning Station ids.
+ * The driver uses this after Welcome so an arbitrarily named Station owning
+ * Captain Systems keeps the same immediate refresh behavior as `captain`.
  */
-function isSeekingBlackboard(entry) {
-  if (!Array.isArray(entry)) return false;
-  const tagged = entry[1];
-  const data = tagged && typeof tagged === 'object' ? tagged.data : null;
-  return !!data && typeof data === 'object' && 'host_station' in data;
+export function alwaysPushConsoles(stationSystems, systemConsoleFamilies) {
+  const consoles = new Set();
+  for (const family of ALWAYS_PUSH_FAMILIES) {
+    for (const name of owningConsoles(family, stationSystems, systemConsoleFamilies)) {
+      consoles.add(name);
+    }
+  }
+  return consoles;
 }
 
 /**
- * Console names dirtied by an inbound ServerMessage.
+ * Console names dirtied by a merged reducer result. Routing consumes only
+ * semantic domains, changed System ids, and changed blackboard keys; the
+ * original ServerMessage is never accepted by this interface.
  *
  * A seeking system's blackboard dirties EVERY station, not just the station
  * that authors it (issue #984). This is the one deliberate cross-read edge the
@@ -184,34 +143,59 @@ function isSeekingBlackboard(entry) {
  * console, so the fan-out is at most one extra push of the console the player
  * is actually looking at — which is the console that has to be right.
  *
- * @param {{ type?: string, data?: object }} msg  decoded ServerMessage
+ * @param {{ changedDomains?: Set<string>, changedSystems?: Set<string>,
+ *           changedBlackboards?: Set<string> }} changes merged reducer result
  * @param {Object<string, string[]>|null|undefined} stationSystems
  *   simState.stationSystems (station id → owned fine system ids); may be
  *   missing before Welcome.
+ * @param {Object<string, string>|null|undefined} systemConsoleFamilies
+ *   authoritative System id → Console Family projection.
+ * @param {Object<string, string>|null|undefined} blackboardConsoleFamilies
+ *   authoritative reserved/aggregate blackboard key → Console Family
+ *   projection; these keys are not Systems.
  * @returns {Set<string>} console names to push via pushConsoleStateFor
  */
-export function dirtyConsolesFor(msg, stationSystems) {
-  if (!msg || !msg.type) return new Set();
-  if (msg.type === 'BlackboardUpdate') {
-    const dirty = new Set();
-    const updates = (msg.data && msg.data.updates) || [];
-    for (const entry of updates) {
-      const id = Array.isArray(entry) ? entry[0] : entry;
-      for (const family of familiesForBlackboardId(id)) {
-        for (const name of owningConsoles(family, stationSystems)) dirty.add(name);
-      }
-      if (isSeekingBlackboard(entry)) {
-        for (const name of Object.keys(stationSystems || {})) dirty.add(name);
+export function dirtyConsolesFor(
+  changes,
+  stationSystems,
+  systemConsoleFamilies,
+  blackboardConsoleFamilies,
+) {
+  const dirty = new Set();
+  for (const id of changes?.changedSystems || []) {
+    const family = systemConsoleFamilies?.[id];
+    if (typeof family !== 'string' || family === '') continue;
+    for (const name of owningConsoles(family, stationSystems, systemConsoleFamilies)) {
+      dirty.add(name);
+    }
+  }
+  for (const id of changes?.changedBlackboards || []) {
+    for (const family of familiesForBlackboardId(
+      id,
+      systemConsoleFamilies,
+      blackboardConsoleFamilies,
+    )) {
+      for (const name of owningConsoles(family, stationSystems, systemConsoleFamilies)) {
+        dirty.add(name);
       }
     }
-    return dirty;
   }
-  return new Set(STATIC_MESSAGE_CONSOLES[msg.type] || []);
+  if (changes?.changedDomains?.has(CHANGE_DOMAINS.STATION_HOSTING)) {
+    for (const name of Object.keys(stationSystems || {}).sort()) dirty.add(name);
+  }
+  for (const domain of changes?.changedDomains || []) {
+    for (const family of DOMAIN_FAMILIES[domain] || []) {
+      for (const name of owningConsoles(family, stationSystems, systemConsoleFamilies)) {
+        dirty.add(name);
+      }
+    }
+  }
+  return dirty;
 }
 
 // Expose for the non-module inline script in client.html (same pattern as
 // gui/console-state.js / gui/mount-plan.js).
 if (typeof window !== 'undefined') {
   window.dirtyConsolesFor = dirtyConsolesFor;
-  window.DIRTY_ALWAYS_PUSH = ALWAYS_PUSH;
+  window.alwaysPushConsoles = alwaysPushConsoles;
 }

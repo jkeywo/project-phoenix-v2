@@ -10,7 +10,7 @@
  *
  * Science is a system-id-KEYED `SystemStationConsolePayload` — `initConsole`
  * is called with no `family` — so `renderStation` reads through
- * `systemView` rather than off `s` directly, exactly like
+ * `familyView` rather than off `s` directly, exactly like
  * `gui/stations/engineering-console.js`.
  *
  * @typedef {object} ScienceVariant
@@ -32,7 +32,7 @@
 
 import { t } from '../strings.js';
 import { setAutoState } from '../console-ui.js';
-import { systemView } from '../console-payload.js';
+import { familyView } from '../console-payload.js';
 
 /**
  * Build a Science `renderStation(s, doc)` for one hull from its `variant`.
@@ -47,8 +47,8 @@ export function makeScienceRender(variant) {
     doc = doc || (typeof document !== 'undefined' ? document : null);
     if (!doc || !s) return;
 
-    const sensors = systemView(s, 'sensors', 'sensor-radar');
-    const shields = systemView(s, 'shields-system');
+    const sensors = familyView(s, 'sensors');
+    const shields = familyView(s, 'shields');
 
     // ── Sensors ──────────────────────────────────────────────────────────
     if (ids.sensorRadar) { const el = doc.getElementById(ids.sensorRadar); if (el) el.state = sensors; }

@@ -10,8 +10,8 @@
  * slots in without a second inline `render`.
  *
  * Navigation is a FLAT single-family payload — `initConsole` is called with
- * `family: 'navigation'` — so `renderStation` reads `s`'s fields directly,
- * never through `systemView`.
+ * as an authoritative flat Navigation-family payload — so `renderStation`
+ * reads `s`'s fields directly.
  *
  * @typedef {object} NavigationVariant
  * @property {object} ids                     element ids present in this hull's markup

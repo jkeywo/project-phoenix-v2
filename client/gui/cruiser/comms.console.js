@@ -4,17 +4,17 @@
  * The cruiser's Comms Station absorbs Navigation (issue #825's
  * SystemStationConsolePayload composes both under `s.systems`) — its own
  * seat elsewhere on the battleship. `commsView`/`navView` are both
- * `systemView(...)` slices; the footer reads the Nav waypoint (not the hail,
+ * metadata-selected family slices; the footer reads the Nav waypoint (not the hail,
  * unlike the battleship), and a message-count readout sits in `footer-right`.
  * The Nav map + its overlay clone, and the AUTO-badge conjunction of both
  * families' own auto flags (issue #825's controlSources composition), are
  * this hull's bespoke tail.
  */
 import { makeCommsRender } from '../stations/comms-console.js';
-import { systemView } from '../console-payload.js';
+import { familyView } from '../console-payload.js';
 
 export const renderStation = makeCommsRender({
-  commsView: (s) => systemView(s, 'comms'),
+  commsView: (s) => familyView(s, 'comms'),
   ids: {
     contactList: 'comms-contact-list',
     hailList: 'comms-hail-list',
@@ -28,9 +28,9 @@ export const renderStation = makeCommsRender({
   // flags come from controlSources on the generic composed path
   // (navigation_auto included, issue #825), which can lag a rating
   // change by one tick.
-  autoState: (s, view) => !!(view.comms_auto && systemView(s, 'navigation').navigation_auto),
+  autoState: (s, view) => !!(view.comms_auto && familyView(s, 'navigation').navigation_auto),
   tail: (s, view, doc, t) => {
-    const nav = systemView(s, 'navigation');
+    const nav = familyView(s, 'navigation');
     const navState = {
       blips: nav.blips || [], regions: nav.regions || [], range: nav.radar_range || 5000,
       ship_pos: { x: nav.ship_x || 0, z: nav.ship_z || 0 }, ship_heading: nav.ship_heading || 0,

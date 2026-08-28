@@ -13,10 +13,10 @@
  * no AUTO badge, so `variant.footer`/`ids.autoBadge` stay unset.
  */
 import { makeCaptainRender } from '../stations/captain-console.js';
-import { systemView } from '../console-payload.js';
+import { familyView } from '../console-payload.js';
 
 export const renderStation = makeCaptainRender({
-  captainView: (s) => systemView(s, 'captain', 'viewscreen', 'red-alert'),
+  captainView: (s) => familyView(s, 'captain'),
   ids: {
     camera: 'camera',
     redAlert: 'red-alert',
@@ -27,11 +27,11 @@ export const renderStation = makeCaptainRender({
   // authored Cinematic view, even if the model carries extra markers.
   filterCameraViews: (views) => views.filter((view) => view === 'camera_fore' || view === 'cinematic'),
   tail: (s, view, doc) => {
-    const shields = systemView(s, 'shields-system', 'shield-arc-fore', 'shield-arc-aft');
-    const power = systemView(s, 'power-reactor', 'power-battery');
-    const repair = systemView(s, 'repair');
-    const nav = systemView(s, 'navigation');
-    const comms = systemView(s, 'comms');
+    const shields = familyView(s, 'shields');
+    const power = familyView(s, 'power');
+    const repair = familyView(s, 'repair');
+    const nav = familyView(s, 'navigation');
+    const comms = familyView(s, 'comms');
 
     const shieldsEl = doc.getElementById('shields');
     if (shieldsEl) shieldsEl.state = { facings: shields.facings || [], focused_facing: shields.focused_facing || null, auto: !!shields.shields_auto };

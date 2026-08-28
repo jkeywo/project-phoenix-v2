@@ -45,6 +45,8 @@
 
 import { t, wireText } from './strings.js';
 import { isDemoBuild } from './build-flags.js';
+import { DEBUG_SURFACE } from './debug-surfaces.generated.js';
+import { projectDebugSurfaceAdapters } from './debug-surface-adapters.js';
 import { visibleClientTabs, resolveClientActiveTab } from './settings-tabs.js';
 import { controlSystemEnvelope } from './command-gateway.js';
 import { renderStationHelp } from './help-panel.js';
@@ -70,44 +72,44 @@ const STORAGE_KEY = 'phoenix-settings-volume';
 /**
  * The Debug/Cheat tab's overlay toggles.
  *
- * `flag` is the `DebugFlag` variant name sent in
- * `ClientMessage::ToggleDebugFlag` — the spelling is the Rust enum's, pinned by
- * `codec::client_settings_menu_wire_shapes_are_pinned`. Labels are reused from
- * the host cog so both pages name the same control the same way.
+ * `flag` is the canonical `DebugSurface` wire name sent in
+ * `ClientMessage::ToggleDebugFlag` — the spelling is the Rust catalogue's,
+ * pinned by `codec::client_settings_menu_wire_shapes_are_pinned`. Labels are
+ * reused from the host cog so both pages name the same control the same way.
  *
  * Every entry is diagnostic-only, and that is now true by construction rather
- * than by convention: pause used to be a `DebugFlag` and is a message of its
+ * than by convention: pause is not a `DebugSurface` and is a message of its
  * own since #940, which is what lets the whole `ToggleDebugFlag` route be
  * compiled out of a demo build instead of narrowed flag by flag.
  */
-export const CLIENT_DEBUG_FLAGS = [
-  { id: 'wireframes', labelId: 'settings.debug.wireframes', flag: 'Regions' },
-  { id: 'modifiers', labelId: 'settings.debug.modifiers', flag: 'Modifiers' },
-  { id: 'damage', labelId: 'settings.debug.damage', flag: 'Damage' },
-  { id: 'entities', labelId: 'settings.debug.entities', flag: 'Entities' },
-  { id: 'inspector', labelId: 'settings.debug.inspector', flag: 'Inspector' },
+export const CLIENT_DEBUG_FLAGS = projectDebugSurfaceAdapters([
+  [DEBUG_SURFACE.Regions, { id: 'wireframes', labelId: 'settings.debug.wireframes' }],
+  [DEBUG_SURFACE.Modifiers, { id: 'modifiers', labelId: 'settings.debug.modifiers' }],
+  [DEBUG_SURFACE.Damage, { id: 'damage', labelId: 'settings.debug.damage' }],
+  [DEBUG_SURFACE.Entities, { id: 'entities', labelId: 'settings.debug.entities' }],
+  [DEBUG_SURFACE.Inspector, { id: 'inspector', labelId: 'settings.debug.inspector' }],
   // Station activity (issue #1145) renders only on the host viewscreen, but the
   // phone still toggles the flag — the client keeps its toggle-only role even
   // where it cannot draw the surface (PRD #1144).
-  { id: 'station-activity', labelId: 'settings.debug.station_activity', flag: 'StationActivity' },
+  [DEBUG_SURFACE.StationActivity, { id: 'station-activity', labelId: 'settings.debug.station_activity' }],
   // AI doctrine pool (issue #1149) renders only on the host viewscreen, but the
   // phone still toggles the flag — the client keeps its toggle-only role.
-  { id: 'ai-doctrine', labelId: 'settings.debug.ai_doctrine', flag: 'AiDoctrine' },
+  [DEBUG_SURFACE.AiDoctrine, { id: 'ai-doctrine', labelId: 'settings.debug.ai_doctrine' }],
   // Scenario state (issue #1148) is the same: host-viewscreen panel, phone
   // toggle only.
-  { id: 'scenario-state', labelId: 'settings.debug.scenario', flag: 'ScenarioState' },
+  [DEBUG_SURFACE.ScenarioState, { id: 'scenario-state', labelId: 'settings.debug.scenario' }],
   // Console latency (issue #1169) is the one entry a phone does more than
   // toggle: the host's read-back of this flag is what makes THIS device start
   // measuring its own console round trips and reporting the durations
   // (`ClientMessage::ReportConsoleLatency`). The table itself still draws only
   // on the host viewscreen, like every other output here.
-  { id: 'console-latency', labelId: 'settings.debug.console_latency', flag: 'ConsoleLatency' },
-];
+  [DEBUG_SURFACE.ConsoleLatency, { id: 'console-latency', labelId: 'settings.debug.console_latency' }],
+], 'settings-panel');
 
 /**
  * The Gameplay tab's pause control, as a `data-control` id.
  *
- * There is no `PAUSE_FLAG` any more: pause is not a `DebugFlag`, it is
+ * There is no `PAUSE_FLAG`: pause is not a `DebugSurface`, it is
  * `ClientMessage::TogglePause`, a message of its own so that it can be compiled
  * out of a demo build independently of the debug overlays.
  */
@@ -128,7 +130,8 @@ export const GOD_MODE_SYSTEM_ID = 'god-mode';
  * A top-level client message rather than a `ControlSystem` payload: these are
  * session controls, not ship-system commands. See the Rust variant's doc.
  *
- * @param {string} flag — a `DebugFlag` variant name, e.g. `'Regions'`.
+ * @param {string} flag — a generated `DebugSurface` wire name, e.g.
+ *   `DEBUG_SURFACE.Regions`.
  * @returns {{type: string, data: {flag: string}}}
  */
 export function debugFlagMessage(flag) {
@@ -141,7 +144,7 @@ export function debugFlagMessage(flag) {
 /**
  * The `ClientMessage::TogglePause` envelope.
  *
- * A message of its own rather than a `DebugFlag`, because it needs its own
+ * A message of its own rather than a `DebugSurface`, because it needs its own
  * build gate: the Rust variant carries `#[cfg(not(phoenix_demo_build))]`, so a
  * demo binary does not understand this frame at all. Sending it from a demo
  * client would not pause anything — which is why the control that sends it is

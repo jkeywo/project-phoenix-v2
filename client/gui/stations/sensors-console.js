@@ -9,8 +9,7 @@
  * dedicated Sensors console slots in without a second inline `render`.
  *
  * Sensors is a FLAT single-family payload — `initConsole` is called with
- * `family: 'sensors'` — so `renderStation` reads `s`'s fields directly,
- * never through `systemView`.
+ * flat Sensors-family payload — so `renderStation` reads `s`'s fields directly.
  *
  * @typedef {object} SensorsVariant
  * @property {object} ids                       element ids present in this hull's markup

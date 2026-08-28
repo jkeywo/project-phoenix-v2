@@ -78,9 +78,9 @@ max_bank_deg = 8.0
 
 [ai_profile]
 aggression = 0.2
-# Wide enough that the tug reaches its ordered tow target's lock across the whole
-# of the tractor's own reach (the `objective-operate` candidate is range-gated on
-# this horizon).
+# Wide enough to keep the tug high-fidelity across the whole of the tractor's
+# own reach. The `objective-operate` candidate itself is bounded by the installed
+# tractor's authored executable reach, not this LOD horizon.
 sensor_range = 800.0
 
 # ── High-fidelity bubble ──────────────────────────────────────────────────────

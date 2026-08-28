@@ -8,18 +8,18 @@
  * tail drives the sensors and helm panels, each reading its own system view.
  */
 import { makeTacticalRender } from '../stations/tactical-console.js';
-import { systemView } from '../console-payload.js';
+import { familyView } from '../console-payload.js';
 
 export const renderStation = makeTacticalRender({
-  weaponsView: (s) => systemView(s, 'tactical-radar', 'blaster-fore'),
+  weaponsView: (s) => familyView(s, 'tactical'),
   ids: {
     radar: 'tactical-radar',
     blasters: 'blasters',
     stationDamage: 'damage',
   },
   tail: (s, w, doc) => {
-    const sensors = systemView(s, 'sensors', 'sensor-radar');
-    const helm = systemView(s, 'helm-thrust', 'helm-joystick', 'helm-steering');
+    const sensors = familyView(s, 'sensors');
+    const helm = familyView(s, 'helm');
 
     const sensorRadar = doc.getElementById('sensor-radar');
     if (sensorRadar) sensorRadar.state = sensors;

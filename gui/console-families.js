@@ -15,7 +15,7 @@
  * pass). `gui/console-core.js` now normalises every inbound payload to the
  * keyed shape before a console's `render` ever sees it (issue #1233,
  * `normalizeConsolePayload` in gui/console-payload.js) — a console reading
- * through `systemView`/`system(s, …)` gets the right data whether the wire
+ * through `familyView` gets the right data whether the wire
  * payload arrived flat or already keyed, so the shape half of this map is
  * gone; only family coverage is still worth tracking here.
  *

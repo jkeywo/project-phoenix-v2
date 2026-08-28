@@ -12,8 +12,8 @@
  * contextual Dock control and under-tow-load banner).
  *
  * Helm is a FLAT single-family payload — every hull calls `initConsole`
- * with `family: 'helm'` — so `renderStation` reads `s`'s fields directly,
- * never through `systemView`.
+ * as an authoritative flat Helm-family payload — so `renderStation` reads
+ * `s`'s fields directly.
  *
  * A hull supplies a `variant` object (below) and gets back a
  * `renderStation(s, doc = document)` it hands straight to `initConsole`'s

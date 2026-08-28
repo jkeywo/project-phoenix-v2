@@ -14,6 +14,12 @@
  * DOM-free; exposed on `window` as `window.simState` (singleton).
  */
 
+import {
+  CHANGE_DOMAINS,
+  REDUCER_EFFECTS,
+  emptyReducerResult,
+} from './reducer-result.js';
+
 // ── Radar-range constants (mirror src/radar.rs) ─────────────────────────────
 
 export const HELM_RADAR_RANGE = 250.0;
@@ -132,6 +138,14 @@ export class ClientSimState {
     /** Station → system id list, populated from Welcome ship_config.station_systems.
      *  Used by aggregateStationHull to compute per-station damage from consoleHull. */
     this.stationSystems = {};
+    /** Authoritative System id → Console Family projection, populated from
+     *  Welcome ship_config.system_console_families. Every owned System has an
+     *  entry; the client never infers presentation from its id spelling. */
+    this.systemConsoleFamilies = {};
+    /** Authoritative reserved/aggregate blackboard key → Console Family
+     *  projection. Kept separate because these keys are not Systems and convey
+     *  no ownership or command authority. */
+    this.blackboardConsoleFamilies = {};
     /** Anonymous eligibility projection (issue #1103): station → rating →
      *  assist-function ids that station forces manual. From Welcome
      *  ship_config.station_assist_gaps. Hull-derived config, never a profile. */
@@ -157,10 +171,13 @@ export class ClientSimState {
     this.stationImportance = stationImportance;
     /** Per-system control source ("Human" or "Ai"), populated from SimSnapshot. */
     this.controlSources = controlSources;
-    /** Per-system blackboard mirror, keyed by SystemId string.
-     *  Each value is the inner `data` object of the `SystemBlackboard` variant
-     *  (e.g. `this.blackboards['helm']` is a `HelmBlackboard`). */
+    /** Per-system/reserved-channel blackboard mirror, keyed by wire id.
+     *  Each value is the inner `data` object of the `SystemBlackboard` variant. */
     this.blackboards = {};
+    /** Tagged-enum variant for each blackboard key. Retained beside the
+     *  unwrapped payload so builders select semantic surfaces by kind even
+     *  when the authored instance id is arbitrary. */
+    this.blackboardKinds = {};
     this.currentTargetName = null;
     /** Shared waypoint set by the Navigation console, or null when clear. */
     this.navigationWaypoint = null;
@@ -267,10 +284,14 @@ export class ClientSimState {
 
   /**
    * Apply a single inbound ServerMessage `{ type, data }`.
-   * Mirrors `ClientSimState::apply`.
+   * Mirrors `ClientSimState::apply` and returns the semantic keys/domains this
+   * reducer changed plus the ordered lifecycle/presentation effects it owns.
+   * Presentation routing consumes that result after the fold; it does not
+   * decode the ServerMessage payload a second time.
    */
   apply(msg) {
-    if (!msg || !msg.type) return;
+    const changes = emptyReducerResult();
+    if (!msg || !msg.type) return changes;
     const d = msg.data || {};
     switch (msg.type) {
       case 'SystemHullUpdate':
@@ -291,6 +312,8 @@ export class ClientSimState {
         if (typeof d.destroyed_fraction === 'number') {
           this.hullDestroyed = d.destroyed_fraction;
         }
+        changes.changedDomains.add(CHANGE_DOMAINS.REPAIR);
+        changes.effects.push({ effect: REDUCER_EFFECTS.REQUEST_RENDER });
         break;
       case 'SimState': {
         const snap = d.snapshot || {};
@@ -336,10 +359,13 @@ export class ClientSimState {
           if (st.shields != null) entity.shields = st.shields;
           if (st.shield_freq != null) entity.shield_freq = st.shield_freq;
         }
+        changes.changedDomains.add(CHANGE_DOMAINS.SIMULATION_SNAPSHOT);
+        changes.effects.push({ effect: REDUCER_EFFECTS.REQUEST_RENDER });
         break;
       }
       case 'WorldSetup':
         this.world = d.world || defaultWorld();
+        changes.changedDomains.add(CHANGE_DOMAINS.WORLD_ENTITY_ADDED);
         break;
       case 'ReturnedToLobby':
       case 'GameStarted':
@@ -349,6 +375,7 @@ export class ClientSimState {
         this.stationHealth = {};
         this.stationImportance = {};
         this.controlSources = {};
+        changes.changedDomains.add(CHANGE_DOMAINS.ROUND);
         break;
       case 'Welcome': {
         const world = (d.state && d.state.world) || null;
@@ -375,6 +402,8 @@ export class ClientSimState {
         this.stationTutorials  = sc.station_tutorials   || {};
         this.stationRatings = d.station_ratings || {};
         this.stationSystems = sc.station_systems || {};
+        this.systemConsoleFamilies = sc.system_console_families || {};
+        this.blackboardConsoleFamilies = sc.blackboard_console_families || {};
         // Anonymous eligibility projection (issue #1103): per station → per
         // rating → the assist-functions that station forces manual. Hull-derived
         // config, never anyone's profile; the lobby glue runs the SAME rule as
@@ -389,13 +418,31 @@ export class ClientSimState {
           const count = (sc.repair_team_count) || 0;
           if (count > 0) this.repairTeams = new Array(count).fill('Idle');
         }
+        changes.changedDomains.add(CHANGE_DOMAINS.WELCOME);
+        // A lobby/new-game Welcome establishes a known non-alert baseline.
+        // An InProgress Welcome is instead a reconnect handshake: retain the
+        // shell's last bezel value until the separately delivered authoritative
+        // Captain projection arrives, rather than inventing a transient false.
+        if (d.state?.phase !== 'InProgress') {
+          changes.effects.push({ effect: REDUCER_EFFECTS.BEZEL_ALERT, on: false });
+        }
+        changes.effects.push({ effect: REDUCER_EFFECTS.REPORT_ELIGIBILITY });
         break;
       }
       case 'RepairState':
         this.repairTeams = d.teams || [];
+        changes.changedDomains.add(CHANGE_DOMAINS.REPAIR);
+        changes.effects.push({ effect: REDUCER_EFFECTS.REQUEST_RENDER });
+        break;
+      case 'PowerState':
+        // Power presentation is blackboard-backed; this legacy state push is
+        // still the established signal to publish the freshly reduced payload.
+        changes.changedDomains.add(CHANGE_DOMAINS.POWER);
+        changes.effects.push({ effect: REDUCER_EFFECTS.REQUEST_RENDER });
         break;
       case 'PhaserFired':
         this.lastPhaserTarget = d.target_uuid != null ? d.target_uuid : null;
+        changes.changedDomains.add(CHANGE_DOMAINS.PHASER_ACTIVITY);
         break;
       case 'WeaponsUpdate': {
         const previousTargetUuid = this.currentTargetUuid;
@@ -410,6 +457,8 @@ export class ClientSimState {
         if (typeof d.phaser_frequency === 'number') this.phaserFrequency = d.phaser_frequency;
         if (d.blasters != null) this.blasterBanks = d.blasters;
         if (Array.isArray(d.blips)) this.weaponsBlips = d.blips;
+        changes.changedDomains.add(CHANGE_DOMAINS.WEAPONS);
+        changes.effects.push({ effect: REDUCER_EFFECTS.REQUEST_RENDER });
         break;
       }
       case 'TargetLock':
@@ -420,11 +469,15 @@ export class ClientSimState {
           this.currentTargetUuid = null;
           this.currentTargetName = null;
         }
+        changes.changedDomains.add(CHANGE_DOMAINS.WEAPONS);
+        changes.effects.push({ effect: REDUCER_EFFECTS.REQUEST_RENDER });
         break;
       case 'ShieldStatus': {
         this.shieldFacings = d.facings || [];
         const focused = this.shieldFacings.find(f => f.is_focused);
         this.shieldFocusedFacing = focused ? focused.label : null;
+        changes.changedDomains.add(CHANGE_DOMAINS.SHIELDS);
+        changes.effects.push({ effect: REDUCER_EFFECTS.REQUEST_RENDER });
         break;
       }
       case 'TorpedoLaunched':
@@ -434,26 +487,33 @@ export class ClientSimState {
         this.torpedoesInFlight.push({
           uuid: d.uuid, x: d.x, y: d.y != null ? d.y : 0, z: d.z, heading: d.heading, tube: d.tube,
         });
+        changes.changedDomains.add(CHANGE_DOMAINS.TORPEDO_ACTIVITY);
         break;
       case 'TorpedoDestroyed':
         this.torpedoesInFlight = this.torpedoesInFlight.filter(t => t.uuid !== d.uuid);
+        changes.changedDomains.add(CHANGE_DOMAINS.TORPEDO_ACTIVITY);
         break;
       case 'ModifierAdded':
         this.modifiers.set(modifierKey(d.source, d.slot), d.bonus);
+        changes.changedDomains.add(CHANGE_DOMAINS.MODIFIERS);
         break;
       case 'ModifierRemoved':
         this.modifiers.delete(modifierKey(d.source, d.slot));
+        changes.changedDomains.add(CHANGE_DOMAINS.MODIFIERS);
         break;
       case 'EntitySpawned': {
         const snap = d.snapshot;
         if (snap && !this.world.entities.some(e => e.uuid === snap.uuid)) {
           this.world.entities.push(snap);
+          changes.changedDomains.add(CHANGE_DOMAINS.WORLD_ENTITY_ADDED);
         }
         break;
       }
       case 'EntityDespawned':
         this.removeEntity(d.uuid);
         this._clearTargetsFor(d.uuid);
+        changes.changedDomains.add(CHANGE_DOMAINS.WORLD_ENTITY_REMOVED);
+        changes.effects.push({ effect: REDUCER_EFFECTS.REQUEST_RENDER });
         break;
       case 'AsteroidSpawned':
         if (!this.world.entities.some(e => e.uuid === d.uuid)) {
@@ -464,24 +524,45 @@ export class ClientSimState {
             radius: d.radius,
             radar_icon: 'asteroid',
           });
+          changes.changedDomains.add(CHANGE_DOMAINS.WORLD_ENTITY_ADDED);
         }
         break;
       case 'AsteroidDestroyed':
         this.removeEntity(d.uuid);
         this._clearTargetsFor(d.uuid);
+        changes.changedDomains.add(CHANGE_DOMAINS.WORLD_ENTITY_REMOVED);
+        changes.effects.push({ effect: REDUCER_EFFECTS.REQUEST_RENDER });
         break;
       case 'CoordinationPopup':
-        this.coordinationPopup = { target: d.target, payload: d.payload, senderLabel: d.sender_label, ts: Date.now() };
+        this.coordinationPopup = {
+          address: d.address,
+          payload: d.payload,
+          presentation: d.presentation,
+          senderLabel: d.sender_label,
+          toLabel: d.to_label,
+          ts: Date.now(),
+        };
         // Populate frequencyHint from FrequencyHint coordination payloads.
         if (d.payload && d.payload.type === 'FrequencyHint' && d.payload.data && typeof d.payload.data.frequency === 'number') {
           this.frequencyHint = d.payload.data.frequency;
         }
+        changes.changedDomains.add(CHANGE_DOMAINS.COORDINATION);
+        changes.effects.push({
+          effect: REDUCER_EFFECTS.COORDINATION_POPUP,
+          address: d.address,
+          presentation: d.presentation,
+          senderLabel: d.sender_label,
+          targetLabel: d.to_label,
+        });
         break;
       case 'ObjectiveSummary':
         this.objectives = d.objectives || [];
+        changes.changedDomains.add(CHANGE_DOMAINS.OBJECTIVES);
+        changes.effects.push({ effect: REDUCER_EFFECTS.REQUEST_RENDER });
         break;
       case 'CommsState':
         this.objectives = d.objectives || [];
+        changes.changedDomains.add(CHANGE_DOMAINS.OBJECTIVES);
         break;
       case 'CommsResponseRejected':
         // Transient feedback (#761 AC3): the submitting comms holder's attempt
@@ -492,10 +573,16 @@ export class ClientSimState {
           response_index: d.response_index,
           ts: Date.now(),
         };
+        changes.changedDomains.add(CHANGE_DOMAINS.COMMS);
         break;
       case 'RatingChanged':
         if (d.station_id != null) {
           this.stationRatings[d.station_id] = d.rating_name || '';
+          changes.changedDomains.add(CHANGE_DOMAINS.STATION_RATINGS);
+          changes.effects.push(
+            { effect: REDUCER_EFFECTS.REPORT_ELIGIBILITY },
+            { effect: REDUCER_EFFECTS.REQUEST_RENDER },
+          );
         }
         break;
       case 'ShipManual':
@@ -503,10 +590,11 @@ export class ClientSimState {
         // The manual panel renders from it; nothing here mutates it or emits
         // any command in response.
         this.shipManual = d.manual || null;
+        changes.changedDomains.add(CHANGE_DOMAINS.SHIP_MANUAL);
         break;
       case 'DebugState':
         // Authoritative read-back of the host's debug/session flags (#940).
-        // `flags` is a list of `[DebugFlag, bool]` pairs in a fixed order,
+        // `flags` is a list of `[DebugSurface, bool]` pairs in catalogue order,
         // folded into a plain object because every consumer asks about one
         // named flag. Replaced wholesale rather than merged: the host sends the
         // complete set every time, so merging could only preserve staleness.
@@ -521,29 +609,73 @@ export class ClientSimState {
           ),
           // Separate wire fields, not entries in `flags`: pause and god mode are
           // authoritative simulation state reached by their own routes, and
-          // neither is a `DebugFlag` any more. Reported in every build even
+          // neither is a `DebugSurface`. Reported in every build even
           // though a demo phone can drive neither — a read-back is not a route.
           paused: !!d.paused,
           godMode: !!d.god_mode,
         };
+        changes.changedDomains.add(CHANGE_DOMAINS.DEBUG_STATE);
+        changes.effects.push({ effect: REDUCER_EFFECTS.REFRESH_SETTINGS });
         break;
-      case 'BlackboardUpdate':
+      case 'BlackboardUpdate': {
+        let captainChanged = false;
+        let accepted = false;
         for (const [systemId, bb] of (d.updates || [])) {
           // bb is { kind: "Helm", data: { yaw, forward_speed, ... } }
           if (bb && bb.kind && bb.data) {
+            accepted = true;
             this.blackboards[systemId] = bb.data;
+            this.blackboardKinds[systemId] = bb.kind;
+            changes.changedBlackboards.add(systemId);
+            if (bb.kind === 'Captain') captainChanged = true;
+            // Human-seeking hosting is a ship-wide semantic change. Report it
+            // here, where the tagged Blackboard payload is understood, rather
+            // than making dirty-console routing inspect that payload again.
+            if (Object.prototype.hasOwnProperty.call(bb.data, 'host_station')) {
+              changes.changedDomains.add(CHANGE_DOMAINS.STATION_HOSTING);
+            }
             // The navigation blackboard is the freshest source for the shared
             // waypoint (SimState only carries it at 10 Hz) — mirror it, as
             // client.html's deleted BlackboardUpdate handler used to (#819).
-            if (systemId === 'navigation') {
+            if (bb.kind === 'Navigation') {
               this.navigationWaypoint = bb.data.navigation_waypoint || null;
             }
           }
         }
+        if (captainChanged) {
+          changes.effects.push({ effect: REDUCER_EFFECTS.BEZEL_ALERT, on: this.redAlert });
+        }
+        if (accepted) changes.effects.push({ effect: REDUCER_EFFECTS.REQUEST_RENDER });
+        break;
+      }
+      case 'BeamStarted':
+      case 'BeamEnded':
+        // These messages do not mutate the retained simulation replica, but
+        // historically requested a shell paint. Keep that lifecycle behavior
+        // local to the reducer instead of reviving a shell message census.
+        changes.effects.push({ effect: REDUCER_EFFECTS.REQUEST_RENDER });
+        break;
+      case 'DamageTaken': {
+        const hull = Number(d.hull) || 0;
+        if (hull > 0) {
+          const clamped = Math.min(hull, 30);
+          changes.effects.push({
+            effect: REDUCER_EFFECTS.VIBRATE,
+            duration: Math.round(50 + (clamped / 30) * 250),
+          });
+        }
+        break;
+      }
+      case 'ShipDestroyed':
+        changes.effects.push(
+          { effect: REDUCER_EFFECTS.SHIP_DESTROYED },
+          { effect: REDUCER_EFFECTS.REQUEST_RENDER },
+        );
         break;
       default:
         break;
     }
+    return changes;
   }
 
   /**
@@ -585,16 +717,26 @@ export class ClientSimState {
   /** The live entity array (the builders' historical `state.asteroids`). */
   get asteroids() { return this.world.entities; }
 
+  /** First blackboard matching an authoritative wire discriminant. Reserved
+   * aggregate channels and arbitrarily-named System instances share this
+   * lookup; lexical ordering keeps an accidental multi-match deterministic. */
+  blackboardOfKind(kind) {
+    const id = Object.keys(this.blackboardKinds)
+      .filter(key => this.blackboardKinds[key] === kind)
+      .sort()[0];
+    return id == null ? undefined : this.blackboards[id];
+  }
+
   /** Ship world X from the helm blackboard (0 until the first update). */
-  get shipX() { return this.blackboards['helm']?.x ?? 0; }
+  get shipX() { return this.blackboardOfKind('Helm')?.x ?? 0; }
   /** Ship world Z from the helm blackboard. */
-  get shipZ() { return this.blackboards['helm']?.z ?? 0; }
+  get shipZ() { return this.blackboardOfKind('Helm')?.z ?? 0; }
   /** Ship yaw (radians) from the helm blackboard. */
-  get shipYaw() { return this.blackboards['helm']?.yaw ?? 0; }
+  get shipYaw() { return this.blackboardOfKind('Helm')?.yaw ?? 0; }
   /** Forward speed from the helm blackboard. */
-  get forwardSpeed() { return this.blackboards['helm']?.forward_speed ?? 0; }
+  get forwardSpeed() { return this.blackboardOfKind('Helm')?.forward_speed ?? 0; }
   /** Impulse charge progress (0..1) from the helm blackboard. */
-  get impulseChargeProgress() { return this.blackboards['helm']?.impulse_charge ?? 0; }
+  get impulseChargeProgress() { return this.blackboardOfKind('Helm')?.impulse_charge ?? 0; }
 
   /**
    * Current viewscreen view derived from the captain blackboard's view_mode
@@ -603,14 +745,14 @@ export class ClientSimState {
    * the same default the deleted client.html mirror initialised with.
    */
   get currentView() {
-    const vm = this.blackboards['captain']?.view_mode;
+    const vm = this.blackboardOfKind('Captain')?.view_mode;
     const vd = vm && vm.kind === 'Camera' ? vm.data : null;
     const kind = vm && vm.kind === 'Cinematic' ? 'cinematic' : (vm && vm.kind);
     return vd || kind || 'Fore';
   }
 
   /** Red-alert flag from the captain blackboard. */
-  get redAlert() { return !!this.blackboards['captain']?.red_alert; }
+  get redAlert() { return !!this.blackboardOfKind('Captain')?.red_alert; }
 
   /** Tactical target uuid alias. The setter exists so the action-map's
    *  optimistic `mutate({ weaponsTarget })` patch lands on the one store. */

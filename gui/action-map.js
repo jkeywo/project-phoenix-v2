@@ -52,18 +52,21 @@ export const ACTION_MAP = Object.freeze({
   },
 
   /** Dock with the nearest hull in range (issue #1159). The server mates the
-   * nearest viable dock-marker pair; the command carries no target. */
-  dock: (_a, send) => {
+   * nearest viable dock-marker pair; `target` is the authored Dock SystemId
+   * resolved into the Helm view by the #1251 metadata tracer. */
+  dock: (a, send) => {
+    if (!a.target) return;
     send('ControlSystem', {
-      target: 'dock',
+      target: a.target,
       payload: { type: 'Dock' },
     });
   },
 
   /** Undock, backing the ship clear and returning ordinary flight (issue #1159). */
-  undock: (_a, send) => {
+  undock: (a, send) => {
+    if (!a.target) return;
     send('ControlSystem', {
-      target: 'dock',
+      target: a.target,
       payload: { type: 'Undock' },
     });
   },

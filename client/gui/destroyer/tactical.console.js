@@ -3,19 +3,17 @@
  * (issue #1234).
  *
  * A system-id-keyed hull: the weapons panels read whichever weapons system the
- * seat actually owns, via `systemView`. Ship pose comes from that SAME weapons
+ * seat actually owns, via projected Console Family metadata. Ship pose comes from that SAME weapons
  * view (like every other hull) — never from a navigation view. Adds a bespoke
  * tail for the Intel dossier (issue #1030) and the non-binding Command-intent
  * advice (issue #1108); the Intel overlay's own toggle wiring stays in the
  * `.html` via `initConsoleOverlays`.
  */
 import { makeTacticalRender } from '../stations/tactical-console.js';
-import { systemView } from '../console-payload.js';
+import { familyView } from '../console-payload.js';
 
 export const renderStation = makeTacticalRender({
-  weaponsView: (s) => systemView(
-    s, 'tactical-radar', 'phaser-control', 'phaser-omni', 'blaster-port', 'blaster-starboard',
-  ),
+  weaponsView: (s) => familyView(s, 'tactical'),
   ids: {
     radar: 'tactical-radar',
     phasers: 'phasers-controls',

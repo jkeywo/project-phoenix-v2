@@ -108,6 +108,8 @@ const REFUSE_UNCHECKED = () => ({
  * @param {string} opts.base rendezvous service base URL
  * @param {number} opts.maxSlots authored fleet capacity (`[limits]
  *   max_fleet_hosts` in assets/join/join-codes.toml)
+ * @param {number} [opts.maxNameLength] `[limits] max_slot_name_length`
+ * @param {number} [opts.maxShipPathLength] `[limits] max_slot_ship_path_length`
  * @param {object[]} [opts.iceServers]
  * @param {(stamp:string|null)=>{ok:boolean,code?:string,detail?:string}} [opts.checkStamp]
  *   the authoritative host-to-host verdict — `wasm_check_host_stamp`.
@@ -123,6 +125,8 @@ export function createFleetOwner(opts) {
   const {
     base,
     maxSlots,
+    maxNameLength,
+    maxShipPathLength,
     iceServers = [],
     checkStamp = REFUSE_UNCHECKED,
     ship = null,
@@ -134,7 +138,7 @@ export function createFleetOwner(opts) {
     factories,
   } = opts;
 
-  let fleet = openFleet({ ship, name, maxSlots });
+  let fleet = openFleet({ ship, name, maxSlots, maxNameLength, maxShipPathLength });
   /** rendezvous peer id → the admitted connection adapter. */
   const links = new Map();
   let code = null;
@@ -154,7 +158,7 @@ export function createFleetOwner(opts) {
     });
     if (!verdict.ok) {
       onLog(`[fleet] refusing ${String(conn.peer).slice(0, 8)}…: ${verdict.reason}`);
-      conn.send(encodeHostFrame(refusedFrame(verdict.reason)));
+      conn.send(encodeHostFrame(refusedFrame(verdict.reason, { of: HOST_FRAME_HELLO })));
       // Told, then severed. A host left holding an open channel it may never
       // use again would sit rendering an empty fleet panel with no idea why —
       // the same reasoning behind the crew path's refuse-then-close.
@@ -173,7 +177,12 @@ export function createFleetOwner(opts) {
     const result = updateSlot(fleet, slot.id, body);
     if (!result.ok) {
       // The freeze, answered to a member that had not heard about it yet.
-      conn.send(encodeHostFrame(refusedFrame(result.reason)));
+      //
+      // Subject `slot`, and that is the whole point of the field: this host is
+      // in the fleet and stays in it. An unqualified refusal would reach the
+      // member's terminal `onError` and tear down a link that is doing nothing
+      // wrong — the answer is about the PATCH, not about the membership.
+      conn.send(encodeHostFrame(refusedFrame(result.reason, { of: HOST_FRAME_SLOT })));
       return;
     }
     fleet = result.fleet;
@@ -202,9 +211,20 @@ export function createFleetOwner(opts) {
       onLog(`[fleet] issued fleet code ${issued.suffix}`);
       onCode(issued);
       // A replacement registration starts in the service's default state, so
-      // a fleet whose operator had closed admission before the drop must say
-      // so again or it silently reopens.
-      if (fleet.admission === ADMISSION_CLOSED) host.setAdmission(ADMISSION_CLOSED);
+      // whatever this fleet last told the SERVICE has to be said again.
+      //
+      // Which is not the model's `admission`. `freezeFleet` sets that to
+      // `closed` — the roster can create no more slots — while `freeze()`
+      // deliberately tells the service `open`, because `p2p-fixed-host-slot-
+      // recovery` makes the server code a recovery capability that must stay
+      // RESOLVABLE across mission start so a later claim can reach this host to
+      // be judged. Replaying the model flag here would re-close the door the
+      // freeze opened on purpose, and a reconnect after mission start would
+      // silently become the permanent lockout the freeze exists to prevent.
+      // There is one rule for what state the service record should be in, and
+      // this is it, stated the same way in both places.
+      if (fleet.frozen) host.setAdmission(ADMISSION_OPEN);
+      else if (fleet.admission === ADMISSION_CLOSED) host.setAdmission(ADMISSION_CLOSED);
     },
     onConnection: (conn) => {
       conn.on('data', (raw) => {
@@ -305,8 +325,12 @@ export function createFleetOwner(opts) {
  * @param {string} [opts.name]
  * @param {(roster:object)=>void} [opts.onRoster]
  * @param {(slotId:string, roster:object)=>void} [opts.onWelcome]
- * @param {(reason:string, detail?:string)=>void} [opts.onError] a refusal from
- *   the fleet owner or from the service, as a machine reason.
+ * @param {(reason:string, detail?:string)=>void} [opts.onError] a TERMINAL
+ *   refusal — of this host's admission, or from the service — as a machine
+ *   reason. The link is over by the time this fires.
+ * @param {(reason:string, detail?:string)=>void} [opts.onRefusedSlot] the fleet
+ *   declined a change this host asked for about its OWN slot. Not terminal:
+ *   this host is still in the fleet, and the roster that follows is the truth.
  * @param {(status:string)=>void} [opts.onStatus]
  * @param {(msg:string)=>void} [opts.onLog]
  */
@@ -322,6 +346,7 @@ export function createFleetMember(opts) {
     onRoster = () => {},
     onWelcome = () => {},
     onError = () => {},
+    onRefusedSlot = () => {},
     onStatus = () => {},
     onLog = () => {},
     factories,
@@ -348,8 +373,11 @@ export function createFleetMember(opts) {
     // resolve in a vocabulary that carries none.
     localise: false,
     onAccepted: () => {
+      // No stamp travels in the `hello`: the build check already happened on
+      // the transport plane, over this very channel, and a second copy of it
+      // in the fleet vocabulary would be an unvalidated peer claim sitting
+      // where a future reader looks first.
       joiner.sendFrame(encodeHostFrame(helloFrame({
-        stamp,
         ship: announced.ship,
         name: announced.name,
       })));
@@ -381,8 +409,24 @@ export function createFleetMember(opts) {
         return;
       }
       if (decoded.t === HOST_FRAME_REFUSED) {
-        onLog(`[fleet] the fleet refused this host: ${decoded.d.code}`);
-        onError(decoded.d.code, decoded.d.detail || '');
+        const code = decoded.d.code;
+        const detail = decoded.d.detail || '';
+        // WHICH request was refused decides whether this link is over.
+        //
+        // A refusal of the `slot` patch this host sent about ITSELF says
+        // nothing about its membership — the commonest case is a loadout
+        // change that raced the freeze — so it is reported and the roster the
+        // owner sends next is the truth. Only a refusal of the admission
+        // itself is terminal, and a refusal that arrives before this host was
+        // ever seated is one of those whatever it claims to answer.
+        const aboutTheSlot = decoded.d.of === HOST_FRAME_SLOT && !!mine;
+        if (aboutTheSlot) {
+          onLog(`[fleet] the fleet refused that change: ${code}`);
+          onRefusedSlot(code, detail);
+          return;
+        }
+        onLog(`[fleet] the fleet refused this host: ${code}`);
+        onError(code, detail);
       }
     },
     onStatus,

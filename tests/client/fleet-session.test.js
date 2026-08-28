@@ -7,7 +7,7 @@
 // typed fleet code, service lookup, offer, compatibility handshake, host-mesh
 // hello — with no sockets, no WebRTC and no worker.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,7 +23,7 @@ import {
   versionGuid,
   composeJoinCode,
 } from '../../gui/join-code.js';
-import { createRendezvousHost } from '../../gui/rendezvous-transport.js';
+import { createRendezvousHost, createRendezvousJoiner } from '../../gui/rendezvous-transport.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const DATA = JSON.parse(readFileSync(path.join(root, 'assets/join/join-codes.json'), 'utf8'));
@@ -171,6 +171,7 @@ async function leadOn(world, factories, opts = {}) {
 async function memberOn(world, factories, code, opts = {}) {
   const rosters = [];
   const refusals = [];
+  const notices = [];
   const statuses = [];
   const member = createFleetMember({
     base: 'https://rendezvous.test',
@@ -181,11 +182,12 @@ async function memberOn(world, factories, code, opts = {}) {
     name: 'Two',
     onRoster: (r) => rosters.push(r),
     onError: (reason, detail) => refusals.push({ reason, detail }),
+    onRefusedSlot: (reason, detail) => notices.push({ reason, detail }),
     onStatus: (s) => statuses.push(s),
     ...opts,
   });
   await settle();
-  return { member, rosters, refusals, statuses };
+  return { member, rosters, refusals, notices, statuses };
 }
 
 /** One world, one shared peer factory — both ends must see the same links. */
@@ -304,7 +306,8 @@ describe('admitting a second ship host', () => {
 });
 
 describe('typed-code refusal', () => {
-  it('refuses a crew code entered into the fleet field', async () => {
+  /** A world holding one crew record and one fleet record, and both codes. */
+  async function bothNamespaces() {
     const world = makeWorld();
     const factories = { socket: world.socket, peer: makePeerFactory() };
     let crewCode = null;
@@ -313,11 +316,62 @@ describe('typed-code refusal', () => {
       factories,
       onCode: (c) => { crewCode = c; },
     });
-    await settle();
+    const lead = await leadOn(world, factories);
+    return { world, factories, lead, get crew() { return crewCode; } };
+  }
 
-    const two = await memberOn(world, factories, crewCode.suffix);
+  it('refuses a crew code entered into the fleet field', async () => {
+    const { world, factories, crew } = await bothNamespaces();
+    const two = await memberOn(world, factories, crew.suffix);
     expect(two.member.slot).toBeNull();
     expect(two.refusals.map((r) => r.reason)).toContain('wrong-type');
+  });
+
+  it('refuses a WHOLE crew code pasted into the fleet field', async () => {
+    // The five-letter case above was never the dangerous one: a bare suffix is
+    // composed under the field's own namespace, so it resolves the wrong
+    // record or none. A FULL code carries its own project GUID, so the joiner
+    // used to report the code's namespace instead of the field's — the asker
+    // echoing the record back at the service, which then always agreed. The
+    // one defence the branch rests on could not fire for the very form the
+    // fleet panel hands the operator to paste.
+    const { world, factories, crew } = await bothNamespaces();
+    const two = await memberOn(world, factories, crew.full);
+    expect(two.member.slot).toBeNull();
+    expect(two.refusals.map((r) => r.reason)).toEqual(['wrong-type']);
+    // Refused before anything was attached: the crew record has no peers.
+    expect(world.registry.snapshot().map((r) => r.peers)).toEqual([0, 0]);
+  });
+
+  it('refuses a WHOLE fleet code pasted into a phone\'s crew field', async () => {
+    // The same bug, in the direction that reaches a player: a phone pasting the
+    // operator's full fleet code was attached to the FLEET record, admitted by
+    // the lead's build check, and then hung — its Identify dropped by a decoder
+    // that speaks another vocabulary, with no welcome and no error.
+    const { world, factories, lead } = await bothNamespaces();
+    const refusals = [];
+    createRendezvousJoiner({
+      base: 'https://rendezvous.test',
+      data: DATA,
+      code: lead.code.full,
+      // client.html passes no namespace at all, which is this default.
+      namespace: NAMESPACE_CLIENT,
+      stamp: STAMP,
+      factories,
+      onError: (reason) => refusals.push(reason),
+    });
+    await settle();
+    expect(refusals).toEqual(['wrong-type']);
+    expect(world.registry.snapshot().map((r) => r.peers)).toEqual([0, 0]);
+  });
+
+  it('still admits a whole code pasted into the field it belongs to', async () => {
+    // The portable form has to keep working, or the refusal above is just a
+    // ban on pasting.
+    const { world, factories, lead } = await bothNamespaces();
+    const two = await memberOn(world, factories, lead.code.full);
+    expect(two.member.slot).toBe('slot-2');
+    expect(two.refusals).toEqual([]);
   });
 
   it('refuses a code belonging to no Phoenix namespace before dialling anything', async () => {
@@ -382,7 +436,7 @@ describe('mission start freezes the fleet', () => {
     expect(three.refusals.map((r) => r.reason)).toContain('recovery-only');
   });
 
-  it('refuses a loadout change from a host already in the fleet', async () => {
+  it('refuses a loadout change from a host already in the fleet, without evicting it', async () => {
     const { factories, world, lead } = await fleetOf();
     const two = await memberOn(world, factories, lead.code.suffix, {
       ship: { template_path: 'cruiser.toml' },
@@ -393,7 +447,15 @@ describe('mission start freezes the fleet', () => {
     two.member.update({ ship: { template_path: 'destroyer.toml' } });
     await settle();
     expect(lastRoster(lead).slots[1].ship).toEqual({ template_path: 'cruiser.toml' });
-    expect(two.refusals.map((r) => r.reason)).toContain('recovery-only');
+    // The refusal answers the PATCH, and says so. A member cannot be thrown
+    // out of a fleet it belongs to for touching its own loadout: the terminal
+    // callback — the one server.html answers with leaveFleet — never fires,
+    // the slot is still held, and the link is still up.
+    expect(two.notices.map((r) => r.reason)).toContain('recovery-only');
+    expect(two.refusals).toEqual([]);
+    expect(two.member.slot).toBe('slot-2');
+    expect(lastRoster(lead).slots).toHaveLength(2);
+    expect(lastRoster(lead).slots[1].connected).toBe(true);
   });
 
   it('refuses the lead\'s own loadout change too', async () => {
@@ -423,6 +485,84 @@ describe('mission start freezes the fleet', () => {
     // It reaches the host, and the host — not the service — is what refuses it.
     const claim = await memberOn(world, factories, lead.code.suffix);
     expect(claim.refusals.map((r) => r.reason)).toEqual(['recovery-only']);
+  });
+
+  it('keeps that door open across a lost and regained registration', async () => {
+    // The reconnect that used to undo the freeze's own rule. A replacement
+    // registration starts in the service's default state, so whatever this
+    // fleet last told the SERVICE has to be said again — and that is not the
+    // model's `admission`, which the freeze sets to `closed` while deliberately
+    // telling the service `open`. Replaying the model flag re-closed the
+    // recovery door, which is exactly the permanent lockout of the replacement
+    // machine that p2p-fixed-host-slot-recovery exists to prevent.
+    vi.useFakeTimers();
+    try {
+      const world = makeWorld();
+      const hostSockets = [];
+      const factories = {
+        socket: (url) => {
+          const s = world.socket(url);
+          if (String(url).endsWith('/v1/host')) hostSockets.push(s);
+          return s;
+        },
+        peer: makePeerFactory(),
+      };
+      const fleet = createFleetOwner({
+        base: 'https://rendezvous.test',
+        factories,
+        maxSlots: MAX_SLOTS,
+        checkStamp: () => ({ ok: true }),
+      });
+      await vi.advanceTimersByTimeAsync(0);
+
+      // The operator closed admission before the mission; then it started.
+      fleet.setAdmission(ADMISSION_CLOSED);
+      fleet.freeze();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(world.registry.snapshot()[0].admission).toBe(ADMISSION_OPEN);
+
+      hostSockets[0].onerror();
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(hostSockets).toHaveLength(2);
+      expect(world.registry.snapshot()).toHaveLength(1);
+      expect(world.registry.snapshot()[0].admission).toBe(ADMISSION_OPEN);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still re-asserts a pre-start closure across a lost registration', async () => {
+    // The other half of the same rule: before the freeze, the model's closure
+    // IS what the service was told, and a replacement record that silently
+    // reopened would admit hosts the operator had shut out.
+    vi.useFakeTimers();
+    try {
+      const world = makeWorld();
+      const hostSockets = [];
+      const factories = {
+        socket: (url) => {
+          const s = world.socket(url);
+          if (String(url).endsWith('/v1/host')) hostSockets.push(s);
+          return s;
+        },
+        peer: makePeerFactory(),
+      };
+      const fleet = createFleetOwner({
+        base: 'https://rendezvous.test',
+        factories,
+        maxSlots: MAX_SLOTS,
+        checkStamp: () => ({ ok: true }),
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      fleet.setAdmission(ADMISSION_CLOSED);
+      await vi.advanceTimersByTimeAsync(0);
+
+      hostSockets[0].onerror();
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(world.registry.snapshot()[0].admission).toBe(ADMISSION_CLOSED);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('cannot be thawed by reopening admission', async () => {

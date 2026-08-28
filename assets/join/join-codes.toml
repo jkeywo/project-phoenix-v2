@@ -80,6 +80,16 @@ max_peers_per_record = 32
 # fleet owner refuses a further host with `fleet-full` before the record's own
 # cap is ever reached.
 max_fleet_hosts = 4
+# What one ship host may say about ITSELF in a fleet roster (issue #1114). The
+# display name and the hull's template path are the only two fields a member
+# writes, and the fleet lead re-broadcasts the whole roster to every admitted
+# host on every change — so these are the bounds that stop one member amplifying
+# an arbitrary payload across the fleet. Protocol hygiene, not a design number:
+# gui/host-mesh.js carries a parse-time default for each so an older table still
+# loads. Anything longer is truncated, never refused; a hull path that is not a
+# non-empty string reads as "no ship chosen yet".
+max_slot_name_length = 48
+max_slot_ship_path_length = 160
 # Longest accepted code string on a resolve/join frame — comfortably longer
 # than PROJECT_GUID_VERSION_GUID_SUFFIX, short enough that parsing is cheap.
 # (There is no stamp bound here: no frame carries a delivery stamp. The

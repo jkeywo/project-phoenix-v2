@@ -38,10 +38,10 @@
  *
  * ## What v1 carries
  *
- *   member → owner   hello   present a build stamp and a proposed ship
+ *   member → owner   hello   present a proposed ship and name
  *                    slot    announce/update THIS member's own slot
  *   owner → member   welcome the handshake verdict, plus the roster
- *                    refused the handshake verdict, with a machine reason
+ *                    refused a machine reason, and WHICH frame it answers
  *   owner → all      roster  full roster sync (admission + freeze + slots)
  *                    admission  admission opened or closed
  *
@@ -171,6 +171,46 @@ export const REASON_RECOVERY_ONLY = 'recovery-only';
 const slotId = (seq) => `slot-${seq}`;
 
 /**
+ * Fallback bounds on what a member may say about itself.
+ *
+ * Authored in `assets/join/join-codes.toml` `[limits]` alongside the registry's
+ * own bounds and `max_fleet_hosts`; these are the parse-time defaults an older
+ * table still loads under (AGENTS.md rule 11a), NOT a second answer. They are
+ * protocol hygiene rather than a gameplay number: a name and a hull path are
+ * the only two fields one host may write into every other host's roster, and
+ * `publish()` re-encodes that roster to the whole fleet on every change.
+ */
+const DEFAULT_MAX_NAME_LENGTH = 48;
+const DEFAULT_MAX_SHIP_PATH_LENGTH = 160;
+
+/** A bounded, plain string, or '' for anything that is not one. */
+function boundedText(value, limit) {
+  if (typeof value !== 'string') return '';
+  return value.slice(0, limit);
+}
+
+/**
+ * A member's proposed ship, reduced to the two fields a roster carries.
+ *
+ * Anything else — a nested object, an array, a megabyte of text, extra keys —
+ * is dropped rather than stored, because whatever enters here is re-broadcast
+ * to every admitted host on every roster change. The same discipline the
+ * rendezvous registry applies to the one host-supplied value it indexes on
+ * (`RELEASE_GUID`, worker-rendezvous/src/registry.js): a peer-supplied field
+ * that reaches other peers gets a shape, not a cast.
+ *
+ * `null` is a real answer — "this host has not chosen a hull yet" — and is kept
+ * as one; a ship with no usable `template_path` collapses to it.
+ */
+function boundedShip(value, fleet) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const templatePath = boundedText(value.template_path, fleet.maxShipPathLength);
+  if (!templatePath) return null;
+  const name = boundedText(value.name, fleet.maxNameLength);
+  return name ? { template_path: templatePath, name } : { template_path: templatePath };
+}
+
+/**
  * Open a fleet, with this host as its owner.
  *
  * The owner is the host that minted the server code — there is no election and
@@ -187,26 +227,39 @@ const slotId = (seq) => `slot-${seq}`;
  *   `assets/join/join-codes.toml` `[limits] max_fleet_hosts`. Required rather
  *   than defaulted: a capacity invented here would be a gameplay number in
  *   code (AGENTS.md rule 11).
+ * @param {number} [opts.maxNameLength] `[limits] max_slot_name_length`
+ * @param {number} [opts.maxShipPathLength] `[limits] max_slot_ship_path_length`
  */
-export function openFleet({ ship = null, name = '', maxSlots }) {
-  return {
+export function openFleet({
+  ship = null,
+  name = '',
+  maxSlots,
+  maxNameLength = DEFAULT_MAX_NAME_LENGTH,
+  maxShipPathLength = DEFAULT_MAX_SHIP_PATH_LENGTH,
+}) {
+  const fleet = {
     owner: slotId(1),
     nextSeq: 2,
     maxSlots,
+    maxNameLength,
+    maxShipPathLength,
     admission: ADMISSION_OPEN,
     frozen: false,
-    slots: [
-      {
-        id: slotId(1),
-        peer: null,
-        owner: true,
-        connected: true,
-        ready: false,
-        name,
-        ship,
-      },
-    ],
+    slots: [],
   };
+  fleet.slots.push({
+    id: slotId(1),
+    peer: null,
+    owner: true,
+    connected: true,
+    ready: false,
+    // The owner's own fields go through the same bound as a member's. It is
+    // this host's own page filling them in, so nothing hostile is expected —
+    // but one rule for what a slot may hold is easier to keep true than two.
+    name: boundedText(name, maxNameLength),
+    ship: boundedShip(ship, fleet),
+  });
+  return fleet;
 }
 
 /** The slot a rendezvous peer id holds, or null. */
@@ -250,8 +303,11 @@ export function admitHost(fleet, { peer, ship = null, name = '' }) {
     owner: false,
     connected: true,
     ready: false,
-    name,
-    ship,
+    // Bounded and shape-checked at the door. `name` and `ship` are the only
+    // two fields a member writes about itself, and they land in every other
+    // host's roster on the next publish.
+    name: boundedText(name, fleet.maxNameLength),
+    ship: boundedShip(ship, fleet),
   };
   return {
     ok: true,
@@ -289,9 +345,10 @@ export function freezeFleet(fleet) {
 /**
  * Apply a member's own `slot` announcement.
  *
- * Refused once frozen — that IS the freeze, on the loadout half. `ready` and
- * `ship` are the only fields a member may write about itself; identity
- * (`id`, `peer`, `owner`) belongs to the owner that minted the slot.
+ * Refused once frozen — that IS the freeze, on the loadout half. `ready`,
+ * `ship` and `name` are the only fields a member may write about itself;
+ * identity (`id`, `peer`, `owner`) belongs to the owner that minted the slot,
+ * and what it may write is bounded and shape-checked on the way in.
  *
  * @returns {{ok: true, fleet: object}|{ok: false, reason: string}}
  */
@@ -300,9 +357,13 @@ export function updateSlot(fleet, id, patch = {}) {
   if (!slot) return { ok: false, reason: 'unknown' };
   if (fleet.frozen) return { ok: false, reason: REASON_RECOVERY_ONLY };
   const next = { ...slot };
-  if (Object.prototype.hasOwnProperty.call(patch, 'ship')) next.ship = patch.ship;
+  if (Object.prototype.hasOwnProperty.call(patch, 'ship')) {
+    next.ship = boundedShip(patch.ship, fleet);
+  }
   if (Object.prototype.hasOwnProperty.call(patch, 'ready')) next.ready = !!patch.ready;
-  if (Object.prototype.hasOwnProperty.call(patch, 'name')) next.name = String(patch.name || '');
+  if (Object.prototype.hasOwnProperty.call(patch, 'name')) {
+    next.name = boundedText(patch.name, fleet.maxNameLength);
+  }
   return {
     ok: true,
     fleet: { ...fleet, slots: fleet.slots.map((s) => (s.id === id ? next : s)) },
@@ -367,14 +428,37 @@ export function rosterOf(fleet) {
 // One builder per frame so a sender never spells a type string by hand, and so
 // the body shape of each frame is written down exactly once.
 
-export const helloFrame = ({ stamp, ship = null, name = '' }) =>
-  hostFrame(HOST_FRAME_HELLO, { stamp, ship, name });
+/**
+ * A member introducing itself.
+ *
+ * It carries NO delivery stamp. The build check is the transport plane's, made
+ * by `delivery::check_host_stamp` over the in-band `JoinHandshake` before a
+ * `hello` is ever read, and a copy of an authoritative fact — peer-supplied,
+ * unvalidated, sitting in the frame a future reader reaches for first — is
+ * precisely how a second, weaker check gets written by accident.
+ */
+export const helloFrame = ({ ship = null, name = '' }) =>
+  hostFrame(HOST_FRAME_HELLO, { ship, name });
 
 export const welcomeFrame = (slotIdent, roster) =>
   hostFrame(HOST_FRAME_WELCOME, { slot: slotIdent, roster });
 
-export const refusedFrame = (code, detail = '') =>
-  hostFrame(HOST_FRAME_REFUSED, { code, detail });
+/**
+ * A refusal, and WHICH frame it answers.
+ *
+ * `of` is load-bearing rather than diagnostic. The owner refuses from two very
+ * different places — a `hello` from a host it will not seat, and a `slot` patch
+ * from a host that is already seated — and a member that cannot tell them apart
+ * has to treat both as terminal. That would throw a legitimate member out of
+ * its own fleet for touching its loadout after the freeze. The subject is what
+ * makes "your join was refused" and "that change was refused" two answers.
+ *
+ * @param {string} code machine reason
+ * @param {{of?: string, detail?: string}} [opts] `of` is the frame type being
+ *   answered — {@link HOST_FRAME_HELLO} or {@link HOST_FRAME_SLOT}.
+ */
+export const refusedFrame = (code, { of = HOST_FRAME_HELLO, detail = '' } = {}) =>
+  hostFrame(HOST_FRAME_REFUSED, { code, of, detail });
 
 export const slotFrame = (patch) => hostFrame(HOST_FRAME_SLOT, patch);
 

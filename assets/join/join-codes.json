@@ -31,6 +31,8 @@
     "max_lookups_per_connection": 60,
     "max_peers_per_record": 32,
     "max_fleet_hosts": 4,
+    "max_slot_name_length": 48,
+    "max_slot_ship_path_length": 160,
     "max_code_length": 160
   },
   "deny": [

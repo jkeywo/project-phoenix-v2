@@ -38,21 +38,38 @@ const DATA = JSON.parse(readFileSync(path.join(root, 'assets/join/join-codes.jso
 setJoinCodeData(DATA);
 
 const settle = async () => {
-  for (let i = 0; i < 30; i += 1) await Promise.resolve();
+  // Generous, because a queued world (see makeWorld) spends one microtask per
+  // frame hop rather than running a whole round trip inside one dispatch.
+  for (let i = 0; i < 200; i += 1) await Promise.resolve();
 };
 
 // ── Fakes ───────────────────────────────────────────────────────────────────
 
-/** A WebSocket-shaped pipe into one shared rendezvous registry. */
-function makeWorld() {
+/**
+ * A WebSocket-shaped pipe into one shared rendezvous registry.
+ *
+ * `queued: true` delivers each frame in its OWN task rather than inline, which
+ * is what a real ordered WebSocket does and what the default synchronous
+ * dispatch cannot reproduce. Inline delivery is re-entrant: handing the joiner
+ * its `joined` frame runs the joiner's whole next round trip — `relay-open` in,
+ * `relay-peer` out — before the outer loop has delivered the `peer-joined` that
+ * was queued ahead of it. That inversion is invisible in a fixture and
+ * impossible on a socket, so the relay specs that care about frame ORDER ask
+ * for a queued world. Microtasks are FIFO, so order is preserved exactly.
+ */
+function makeWorld({ queued = false } = {}) {
   const registry = createRegistry({ data: DATA });
   const sockets = new Map();
   let n = 0;
 
+  const deliver = ({ to, frame }) => {
+    const ws = sockets.get(to);
+    if (ws && ws.onmessage) ws.onmessage({ data: JSON.stringify(frame) });
+  };
   const dispatch = (frames) => {
-    for (const { to, frame } of frames) {
-      const ws = sockets.get(to);
-      if (ws && ws.onmessage) ws.onmessage({ data: JSON.stringify(frame) });
+    for (const f of frames) {
+      if (queued) queueMicrotask(() => deliver(f));
+      else deliver(f);
     }
   };
 
@@ -1471,6 +1488,36 @@ function unlinkableFactories(world, sink = []) {
   };
 }
 
+/**
+ * The same world, with every frame the HOST socket receives recorded by type.
+ *
+ * The relay's whole failure mode was an ordering one, so a spec that claims to
+ * exercise the production order has to be able to prove it did rather than
+ * assert it in a comment.
+ */
+function watchHostFrames(world) {
+  const types = [];
+  return {
+    types,
+    world: {
+      registry: world.registry,
+      socket: (url) => {
+        const s = world.socket(url);
+        if (!String(url).endsWith('/v1/host')) return s;
+        let sink = null;
+        Object.defineProperty(s, 'onmessage', {
+          configurable: true,
+          get: () => (sink
+            ? (e) => { types.push(JSON.parse(e.data).type); sink(e); }
+            : null),
+          set: (fn) => { sink = fn; },
+        });
+        return s;
+      },
+    },
+  };
+}
+
 describe('the WebSocket game relay', () => {
   it('gets a joiner all the way in when no direct link is possible', async () => {
     const world = makeWorld();
@@ -1502,6 +1549,43 @@ describe('the WebSocket game relay', () => {
     expect(diag).toContainEqual(
       expect.objectContaining({ event: 'transport', transport: 'ws-relay' }),
     );
+    joiner.close();
+  });
+
+  it('builds the relay pair when peer-joined lands FIRST, as a real socket delivers it', async () => {
+    // The order the deployed service produces, and the one the in-process
+    // fixture cannot: `clientJoin` emits `peer-joined` to the host one hop
+    // after `join`, while `relay-peer` needs a further round trip (the joiner
+    // has to receive `joined`, send `relay-open`, and be answered). So the host
+    // always holds a placeholder WebRTC entry for this peer BEFORE it is asked
+    // to carry it, and a `relay-peer` handler that returned that entry built no
+    // channel pair, ran no admission gate, and dropped every `relay` frame
+    // after it — the fallback rung dead in the field and green in vitest.
+    const watched = watchHostFrames(makeWorld({ queued: true }));
+    const { code, inbound, announced } = await hostOn(watched.world);
+    const joiner = createRendezvousJoiner({
+      base: 'https://rendezvous.test',
+      data: DATA,
+      code: code.suffix,
+      factories: unlinkableFactories(watched.world),
+      levers: transportLeversFromLocation('?transport=ws-relay'),
+      getIdent: () => ({ token: 'tok-order', name: 'Ada' }),
+    });
+    await settle();
+
+    // The spec's own premise, asserted rather than assumed.
+    expect(watched.types.indexOf('peer-joined')).toBeGreaterThanOrEqual(0);
+    expect(watched.types.indexOf('relay-peer'))
+      .toBeGreaterThan(watched.types.indexOf('peer-joined'));
+
+    // And the join completes anyway: the placeholder was upgraded, so the
+    // compatibility handshake ran and the page was handed a connection.
+    expect(announced).toHaveLength(1);
+    expect(inbound).toContainEqual({
+      type: 'Identify',
+      data: { token: 'tok-order', name: 'Ada' },
+    });
+    expect(joiner.connected).toBe(true);
     joiner.close();
   });
 

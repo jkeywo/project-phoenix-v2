@@ -612,13 +612,35 @@ export function createRendezvousHost(opts) {
    * snapshot routing. The only difference is what the channels are made of, and
    * `attachReliableChannel` above cannot tell.
    *
-   * A peer that already has a WebRTC entry keeps it: a joiner does not ask for
-   * the relay while a DataChannel is working, and two live paths to one crew
-   * member would be a duplicate-delivery bug.
+   * A peer with a LIVE path keeps it — an admitted, open DataChannel, or a
+   * relay pair already built — because a joiner does not ask for the relay
+   * while a DataChannel is working and two live paths to one crew member would
+   * be a duplicate-delivery bug.
+   *
+   * Anything else is UPGRADED rather than returned, and that distinction is the
+   * whole of this function. `peer-joined` creates an entry for every joiner the
+   * moment it joins (see `handle()` below), and over a real ordered socket that
+   * frame ALWAYS lands before `relay-peer`: the registry emits `peer-joined`
+   * from `clientJoin`, one hop after `join`, while `relay-peer` needs a further
+   * round trip (the joiner must receive `joined`, send `relay-open`, and be
+   * answered). So by the time the service asks this host to carry a peer, that
+   * peer already has a placeholder entry holding an RTCPeerConnection nothing
+   * will ever negotiate. Returning it built no relay pair, ran no
+   * `attachReliableChannel`, and left every subsequent `relay` frame to be
+   * dropped by the `entry.relay` guard — the fallback rung was dead on the
+   * deployed service while passing in a fixture whose dispatch is synchronous
+   * and re-entrant enough to invert the two frames.
    */
   function relayPeerState(id, limits) {
     const existing = peers.get(id);
-    if (existing) return existing;
+    if (existing && (existing.relay || isLiveAdmittedLink(existing))) return existing;
+    if (existing) {
+      // A placeholder from `peer-joined`, or a half-built WebRTC attempt this
+      // joiner has given up on. Discard the unused peer connection rather than
+      // leaving a live ICE/DTLS agent behind the relay entry that replaces it.
+      try { existing.pc.close(); } catch { /* already gone */ }
+      peers.delete(id);
+    }
 
     const pair = createRelayChannelPair({
       send: (body) => {

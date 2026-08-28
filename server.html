@@ -1555,6 +1555,11 @@
              initHostTransport(); empty (and invisible) in the normal healthy
              case. -->
         <div id="conn-diag" style="margin-top:8px;font-family:monospace;color:#fa4;font-size:13px;text-align:center;white-space:pre-line;"></div>
+        <!-- Copies the readout above, plus everything behind it, for pasting
+             into an issue thread (issue #1113,
+             docs/acceptance/1113-networks.md). Hidden until the script
+             confirms the browser has a clipboard to write to. -->
+        <button id="conn-diag-copy" type="button" style="display:none;margin-top:6px;font-family:monospace;font-size:12px;background:transparent;color:#fa4;border:1px solid #fa4;border-radius:3px;padding:2px 8px;"></button>
         <div id="loading-progress-text" style="display:none;margin-top:24px;font-family:monospace;color:#8af;font-size:16px;text-align:center;">
           <span data-i18n="client.preparing_scenario">Preparing scenario&hellip;</span> <span id="loading-progress-pct">0</span>%
         </div>
@@ -1775,6 +1780,12 @@
        anything at load: a single-ship session never mints a server code. -->
   <script type="module" src="gui/host-mesh.js"></script>
   <script type="module" src="gui/fleet-session.js"></script>
+
+  <!-- Which transport rung(s) this host may use, and what the #conn-diag
+       readout says about the ones its crew ended up on (issue #1113). Both
+       publish onto window for the classic script below. -->
+  <script type="module" src="gui/transport-levers.js"></script>
+  <script type="module" src="gui/connection-diagnostics.js"></script>
 
   <!-- ICE/TURN config bridge (issue #1226): gui/connection-manager.js is the
        single source of truth for the STUN pair, the OpenRelay TURN fallback
@@ -2356,6 +2367,11 @@
     // closure; a no-op before that, so the paint helpers below can call it
     // unconditionally rather than guarding every site.
     let renderConnDiag = () => {};
+    // Which transport rung(s) this host may use (issue #1113), read once so the
+    // transport and the diagnostics readout cannot disagree about it. Filled in
+    // by initHostTransport, because gui/transport-levers.js is a deferred
+    // module like every other gui/ one; the default is the whole ladder.
+    let transportLevers = { mode: 'auto', iceTransportPolicy: 'all', wsRelay: 'auto', pinned: false };
 
     /** Paint the join panel for a URL: the QR, the click-through and the text. */
     function paintJoinPanel(url) {
@@ -2972,6 +2988,9 @@
       rendezvousBase = transport
         ? transport.rendezvousBaseFromLocation(location.search)
         : null;
+      if (window.transportLevers) {
+        transportLevers = window.transportLevers.transportLeversFromLocation(location.search);
+      }
 
       // Lobby diagnostics under the QR: relay-degraded warning, the reason a
       // code is missing, plus the ICE stage of any inbound client that is
@@ -2992,28 +3011,47 @@
       // than firing a queueable side effect, so a no-op fallback (not the
       // queue) is the guard here.
       const writeDiagLines = _pageChrome ? _pageChrome.mountConnDiag('conn-diag') : () => {};
-      const clientIceStages = new Map(); // shortId → troubled ICE state
+      const clientIceStages = new Map(); // shortId → troubled or relayed state
+      // The line-building itself is gui/connection-diagnostics.js since #1113 —
+      // it grew a transport rung, a relay-shedding count and a second reader
+      // (the copy-pasteable dump below, which must not be able to disagree with
+      // what is on screen), and an inline closure in this file is not testable.
+      // What stays here is the state this host knows about itself; the getters
+      // keep the three `rendezvous*` variables the single source of truth
+      // rather than copying them into a second object that could go stale.
+      const diagnostics = window.connectionDiagnostics;
+      const hostDiag = {
+        relayAvailable,
+        relaySource,
+        probe: null,
+        lever: transportLevers,
+        get fault() { return rendezvousFault; },
+        get retrying() { return rendezvousRetrying; },
+        reregister: RENDEZVOUS_REREGISTER,
+        get peers() { return [...clientIceStages]; },
+      };
       renderConnDiag = function renderConnDiagImpl() {
-        const lines = [];
-        if (!relayAvailable) lines.push(t('server.no_relay_warning'));
-        else if (relaySource === 'openrelay') lines.push(t('server.relay_fallback_notice'));
-        // Why there is no five-letter code on screen. A console.warn is not a
-        // diagnostics surface: the operator is looking at the viewscreen, and
-        // an empty join panel explains nothing by itself. Two sentences,
-        // because the operator's next move differs: a lost service is being
-        // re-registered and a new code is on its way, while anything else
-        // means nobody joins until the service comes back.
-        if (rendezvousFault) {
-          lines.push(t(rendezvousRetrying && RENDEZVOUS_REREGISTER
-            ? 'server.join.rendezvous_reregistering'
-            : 'server.join.rendezvous_lost'));
-        }
-        for (const [id, state] of clientIceStages) {
-          lines.push(t('server.client_ice_state', { id, state }));
-        }
-        writeDiagLines(lines);
+        writeDiagLines(diagnostics.hostDiagnosticsLines(hostDiag, t));
       };
       renderConnDiag();
+
+      // The copy control the acceptance kit asks the operator to use
+      // (docs/acceptance/1113-networks.md). Hidden when the browser has no
+      // clipboard to write to — an inert button is worse than no button.
+      const diagCopyBtn = document.getElementById('conn-diag-copy');
+      if (diagCopyBtn && navigator.clipboard && navigator.clipboard.writeText) {
+        diagCopyBtn.style.display = '';
+        diagCopyBtn.textContent = t('server.diag_copy');
+        diagCopyBtn.onclick = () => {
+          navigator.clipboard.writeText(diagnostics.diagnosticsDump(hostDiag, {
+            page: 'host',
+            service: rendezvousBase,
+          })).then(() => {
+            diagCopyBtn.textContent = t('server.diag_copied');
+            setTimeout(() => { diagCopyBtn.textContent = t('server.diag_copy'); }, 2000);
+          }).catch(() => {});
+        };
+      }
 
       if (!transport) {
         // The transport module is the only way in since #1112. Say so loudly:
@@ -3196,6 +3234,10 @@
         base: rendezvousBase,
         iceServers,
         reregister: RENDEZVOUS_REREGISTER,
+        // Which transport rung(s) this host will answer on (issue #1113).
+        // Forcing it here as well as on the phone matters: ICE only negotiates
+        // a relay pair when BOTH ends offer relay candidates.
+        levers: transportLevers,
         // The authoritative protocol/content verdict, answered by Rust's own
         // delivery::check_join_stamp — never re-decided in JavaScript, and
         // never delegated to the rendezvous service's version advice. Since
@@ -3226,7 +3268,10 @@
         onPeerIce: (peer, state) => {
           const shortId = String(peer).slice(0, 8);
           console.log(`[ICE] ${shortId}… → ${state}`);
-          // Surface trouble in the lobby; clear the row once healthy.
+          // Surface trouble in the lobby; clear the row once healthy. A
+          // 'ws-relay' state is not trouble but it is not healthy either — that
+          // crew member is connected THROUGH the service because their network
+          // refused a direct link — so it stays on the readout deliberately.
           if (state === 'connected' || state === 'completed' || state === 'closed') {
             clientIceStages.delete(shortId);
           } else {

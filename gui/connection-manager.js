@@ -166,6 +166,56 @@ export function candidateType(candidate) {
   return m ? m[1] : null;
 }
 
+/**
+ * Read the candidate pair ICE actually chose out of an `RTCPeerConnection`.
+ *
+ * This is the one question the existing readout could not answer and the field
+ * kit most needs: "candidates: host, srflx, relay" says what was OFFERED, not
+ * what carried the traffic — and on a hotspot the difference between a
+ * server-reflexive pair and a relayed one is the difference between a working
+ * network and a working TURN worker. `url` on the local candidate names WHICH
+ * relay, which is how a tester tells the dedicated credential worker from the
+ * free shared fallback without trusting a config field.
+ *
+ * Async, tolerant of everything: `getStats` is absent in the smoke suite's fake
+ * peer connection and may reject on a connection that has already closed, and a
+ * diagnostics line is never worth a thrown error.
+ *
+ * @returns {Promise<{local:string,remote:string,protocol:string,url:string}|null>}
+ */
+export async function readSelectedPair(pc) {
+  if (!pc || typeof pc.getStats !== 'function') return null;
+  let stats;
+  try {
+    stats = await pc.getStats();
+  } catch {
+    return null;
+  }
+  if (!stats || typeof stats.forEach !== 'function') return null;
+
+  const byId = new Map();
+  let pair = null;
+  stats.forEach((report) => {
+    if (!report || !report.id) return;
+    byId.set(report.id, report);
+    if (report.type !== 'candidate-pair') return;
+    // `selected` is Firefox's spelling; `nominated` + state 'succeeded' is
+    // everyone else's. Take whichever the browser offers rather than insisting
+    // on one and reporting nothing on the other.
+    if (report.selected || (report.nominated && report.state === 'succeeded')) pair = report;
+  });
+  if (!pair) return null;
+
+  const local = byId.get(pair.localCandidateId) || {};
+  const remote = byId.get(pair.remoteCandidateId) || {};
+  return {
+    local: local.candidateType || '',
+    remote: remote.candidateType || '',
+    protocol: local.relayProtocol || local.protocol || '',
+    url: local.url || '',
+  };
+}
+
 // Published for the classic-script halves of both pages, which cannot import.
 // There is no `window.connectionManager` any more: the live link a page speaks
 // through is the Phoenix joiner, and client.html publishes that one as

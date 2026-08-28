@@ -111,6 +111,7 @@ import {
   nextBackoffDelay,
   connectTimeoutMs,
   candidateType,
+  readSelectedPair,
 } from './connection-manager.js';
 import {
   createRelayChannelPair,
@@ -1130,6 +1131,17 @@ export function createRendezvousJoiner(opts) {
       if (gen !== generation) return;
       if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
       onDiag({ event: 'open' });
+      // Which candidate pair ICE actually chose, and over which relay if one
+      // carried it (issue #1113). "candidates: host, srflx, relay" says what
+      // was OFFERED; on a hotspot the difference between a server-reflexive
+      // pair and a relayed one is the difference between a working network and
+      // a working TURN worker, and only the selected pair answers that.
+      // Skipped on the relayed path, which negotiated no ICE at all.
+      if (pc) {
+        readSelectedPair(pc).then((pair) => {
+          if (pair && gen === generation) onDiag({ event: 'selected-pair', pair });
+        });
+      }
       // The host's compatibility handshake goes first; Identify follows only
       // once the host has accepted this build.
       channel.send(JSON.stringify({

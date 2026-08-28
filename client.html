@@ -117,6 +117,11 @@
        whether the code was typed, pasted or opened from a QR link. -->
   <script type="module" src="gui/join-code.js"></script>
   <script type="module" src="gui/rendezvous-transport.js"></script>
+  <!-- Which transport rung(s) this load may use, and what the #conn-diag
+       readout says about the one it ended up on (issue #1113). Both publish
+       onto window for the classic script below. -->
+  <script type="module" src="gui/transport-levers.js"></script>
+  <script type="module" src="gui/connection-diagnostics.js"></script>
   <!-- Settings panel: client controls plus Station Help and Ship Manual. -->
   <script type="module" src="gui/settings-panel.js"></script>
   <!-- Private per-player Accessibility profile (issue #1102): presentation
@@ -149,6 +154,11 @@
        why a connection is stuck without opening devtools. */
     #conn-diag { position: fixed; bottom: 1.6rem; left: 0.75rem; color: var(--edge-strong);
       font-size: var(--text-xs); z-index: 25; white-space: pre-line; max-width: 85vw; }
+    /* The copy control, tucked into the opposite corner of the same row so it
+       never overlaps a readout that has grown to several lines. */
+    #conn-diag-copy { position: fixed; bottom: 1.6rem; right: 0.75rem; z-index: 26;
+      font-size: var(--text-xs); color: var(--edge-strong); background: transparent;
+      border: 1px solid var(--edge-strong); border-radius: 3px; padding: 0.1rem 0.4rem; }
     /* Typed join entry (issue #1111). Shown only when this page was opened
        with no host in its fragment — the case that until now was a dead end
        reading "no host id in URL". The field takes either the five letters
@@ -1185,6 +1195,10 @@
 
   <div id="status" data-i18n="client.connecting">Connecting…</div>
   <div id="conn-diag"></div>
+  <!-- Copies the readout above, plus everything behind it, for pasting into an
+       issue thread (issue #1113, docs/acceptance/1113-networks.md). Hidden
+       until the script confirms the browser has a clipboard to write to. -->
+  <button id="conn-diag-copy" type="button" style="display:none"></button>
 
   <!-- Typed join entry (issue #1111). Hidden while a join from the fragment is
        in flight; shown when there is nothing to join with, or when an attempt
@@ -3025,6 +3039,15 @@
         ? window.rendezvousTransport.joinRouteFromLocation(location.search, location.hash)
         : { route: 'none' });
 
+      // Which transport path(s) this load may use (issue #1113). Read once,
+      // here, and handed to the joiner and the diagnostics readout from the
+      // same value, so a pinned link cannot restrict the transport without the
+      // readout saying it did. `auto` — the whole ladder — is the default and
+      // what an ordinary QR scan gets.
+      const transportLevers = window.transportLevers
+        ? window.transportLevers.transportLeversFromLocation(location.search)
+        : { mode: 'auto', iceTransportPolicy: 'all', wsRelay: 'auto', pinned: false };
+
       if (joinRoute.route === 'none') {
         // Not "no host id in the URL" — there are no host ids any more, and
         // the QR would only reload this same page. The one thing that can help
@@ -3120,27 +3143,44 @@
       // rather than firing a queueable side effect, so a no-op fallback
       // (not the queue) is the guard here.
       const writeDiagLines = _pageChrome ? _pageChrome.mountConnDiag('conn-diag') : () => {};
-      const diag = { attempt: 0, ice: '', types: [], probe: null, relayAvailable, relaySource };
+      // The line-building logic itself moved to gui/connection-diagnostics.js
+      // in #1113: it grew enough to be worth testing (which rung of the
+      // transport ladder, which relay actually carried the traffic, whether
+      // the link is shedding snapshots), and it now has a second reader — the
+      // copy-pasteable dump below, which must not be able to disagree with
+      // what is on screen. What stays here is the wiring.
+      const diagnostics = window.connectionDiagnostics;
+      const diag = diagnostics.createClientDiagnostics({
+        relayAvailable,
+        relaySource,
+        lever: transportLevers,
+      });
       function renderDiag() {
-        const lines = [];
-        if (!diag.relayAvailable) lines.push(t('client.diag_no_relay'));
-        else if (diag.probe === 'unreachable') lines.push(t('client.diag_relay_fail'));
-        else if (diag.relaySource === 'openrelay') {
-          lines.push(diag.probe === 'reachable'
-            ? t('client.diag_relay_fallback_ok')
-            : t('client.diag_relay_fallback'));
-        }
-        else if (diag.probe === 'reachable') lines.push(t('client.diag_relay_ok'));
-        if (diag.attempt > 0) {
-          lines.push(t('client.diag_stage', {
-            attempt: diag.attempt,
-            ice: diag.ice || '—',
-            types: diag.types.length ? diag.types.join(', ') : t('client.diag_none'),
-          }));
-        }
-        writeDiagLines(lines);
+        writeDiagLines(diagnostics.clientDiagnosticsLines(diag, t));
       }
       renderDiag();
+
+      // The copy control the acceptance kit asks a tester to use
+      // (docs/acceptance/1113-networks.md): one tap puts the whole state in
+      // the clipboard for pasting into the issue thread. Hidden when the
+      // browser has no clipboard to write to — an inert button that silently
+      // does nothing is worse than no button.
+      const diagCopyBtn = document.getElementById('conn-diag-copy');
+      if (diagCopyBtn && navigator.clipboard && navigator.clipboard.writeText) {
+        diagCopyBtn.style.display = '';
+        diagCopyBtn.textContent = t('client.diag_copy');
+        diagCopyBtn.onclick = () => {
+          const stamp = document.querySelector('meta[name="phoenix-client-stamp"]');
+          navigator.clipboard.writeText(diagnostics.diagnosticsDump(diag, {
+            page: 'client',
+            service: joinRoute.base,
+            build: stamp ? stamp.getAttribute('content') : null,
+          })).then(() => {
+            diagCopyBtn.textContent = t('client.diag_copied');
+            setTimeout(() => { diagCopyBtn.textContent = t('client.diag_copy'); }, 2000);
+          }).catch(() => {});
+        };
+      }
       if (relayAvailable && typeof window.probeTurnRelay === 'function') {
         window.probeTurnRelay(iceServers).then(verdict => {
           console.log('[ICE] relay probe:', verdict);
@@ -3157,6 +3197,9 @@
       // sentence rather than on a status line the guest cannot act on.
       const connectOptions = {
         iceServers,
+        // Which rung(s) of the transport ladder this load may use. `auto` — the
+        // whole ladder — unless the URL pinned one (gui/transport-levers.js).
+        levers: transportLevers,
         getIdent: () => ({ token: myToken, name: myName }),
         onData: handleMessage,
         onStatus: (state) => {
@@ -3182,11 +3225,7 @@
         },
         onLog: (msg) => console.log(msg),
         onDiag: (e) => {
-          if (e.event === 'attempt') { diag.attempt = e.attempt; diag.ice = ''; diag.types = []; }
-          else if (e.event === 'ice-state') diag.ice = e.state;
-          else if (e.event === 'candidates') diag.types = e.types;
-          else if (e.event === 'timeout') diag.ice = 'timeout';
-          else if (e.event === 'open') diag.ice = 'connected';
+          diagnostics.applyClientDiagEvent(diag, e);
           renderDiag();
         },
       };

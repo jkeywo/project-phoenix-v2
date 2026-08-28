@@ -1771,6 +1771,42 @@ describe('the WebSocket game relay', () => {
     joiner.close();
   });
 
+  it('tells a relayed phone it has been detached when the host cannot fit a reliable frame', async () => {
+    // The one frame that will never fit (gui/rendezvous-relay.js's header)
+    // fails the LINK rather than silently dropping a command. That failure
+    // is local to this host's half of the pair — without asking the service
+    // to detach the peer too, the phone would keep sitting on a status line
+    // reading "connected" and the service would keep the mailbox open, the
+    // exact one-sided eviction the explicit-close case above already covers.
+    const world = makeWorld({ queued: true });
+    const { code, announced } = await hostOn(world);
+    const joiner = createRendezvousJoiner({
+      base: 'https://rendezvous.test',
+      data: DATA,
+      code: code.suffix,
+      factories: unlinkableFactories(world),
+      levers: transportLeversFromLocation('?transport=ws-relay'),
+      getIdent: () => ({ token: 'tok-oversized', name: 'Ada' }),
+    });
+    await settle();
+    expect(joiner.connected).toBe(true);
+    expect(announced).toHaveLength(1);
+
+    const over = JSON.stringify({
+      type: 'Welcome',
+      data: { pad: 'x'.repeat(DATA.limits.max_relay_frame_bytes + 1) },
+    });
+    announced[0].send(over);
+    await settle();
+
+    // The phone learns, exactly as the explicit host-close case does.
+    expect(joiner.connected).toBe(false);
+    // …and the service has stopped carrying it, so its relay slot — the
+    // phone's mailbox — is freed rather than leaked.
+    expect(world.registry.snapshot()[0].relayPeers).toBe(0);
+    joiner.close();
+  });
+
   it('tells the host a relayed crew member is being carried by the service', async () => {
     const world = makeWorld();
     const iceStates = [];

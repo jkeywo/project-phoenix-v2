@@ -425,7 +425,6 @@ describe('carrying game frames', () => {
     expect(h.last('host-1', 'relay-peer-left')).toMatchObject({ reason: 'relay-overflow' });
     expect(h.reg.snapshot()[0].relayPeers).toBe(0);
   });
-});
 
   it('ends only the offending phone’s session when the host’s mailbox overflows', () => {
     // Every relaying joiner sends to the same host. Scoped to the host's

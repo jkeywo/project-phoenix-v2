@@ -161,9 +161,12 @@ pub struct RendezvousFrame {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     /// Which request an `error` frame is refusing — `registry.js`'s `fail()`
-    /// stamps it. Load-bearing for telling a per-REQUEST refusal (one frame the
-    /// service would not carry) from a link event, which is the difference
-    /// between one lost frame and a whole crew reported gone.
+    /// stamps it. Named in the operator-facing fault message, but it is
+    /// `reason` that is load-bearing for telling a per-REQUEST refusal (one
+    /// frame the service would not carry) from a link event — see
+    /// `RelayTransport::is_terminal_error`, which switches on `reason` alone
+    /// and never looks at this field. The difference between one lost frame
+    /// and a whole crew reported gone is decided without it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -204,6 +207,19 @@ impl RendezvousFrame {
             class: Some(class.to_string()),
             payload: Some(payload),
             ..Self::new("relay")
+        }
+    }
+
+    /// Ask the service to detach `peer` from this record — the same in-band
+    /// frame the browser host's `onSever`/`onFailure` send
+    /// (`gui/rendezvous-transport.js`). Without it a link this host gives up
+    /// on locally is one-sided: the host walks away but the service keeps the
+    /// peer's mailbox open and the phone sits on a status line that still
+    /// reads "connected".
+    pub fn relay_close(peer: &str) -> Self {
+        Self {
+            to: Some(peer.to_string()),
+            ..Self::new("relay-close")
         }
     }
 }

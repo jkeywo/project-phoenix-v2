@@ -647,6 +647,16 @@ impl NativeTransport for RelayTransport {
                     self.notices.push(RelayNotice::Fault {
                         reason: format!("{over}: ending the relayed links it was for"),
                     });
+                    // Tell the service to detach each peer before this host
+                    // drops it locally. Left one-sided, the service would keep
+                    // the peer's mailbox open and the phone would sit on a
+                    // status line still reading "connected" while this host
+                    // had already walked away — mirrors `refuse_peer`'s
+                    // in-band notice above, and `gui/rendezvous-transport.js`'s
+                    // `onFailure`.
+                    for peer in &targets {
+                        self.send_frame(&RendezvousFrame::relay_close(peer));
+                    }
                     self.pending_drops.extend(targets);
                 }
             }

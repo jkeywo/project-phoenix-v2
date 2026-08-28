@@ -447,12 +447,19 @@ function connectionAdapter(peerId, channel, pc, hooks = {}) {
  * @param {(peer:string, state:string)=>void} [opts.onPeerIce] one joiner's ICE
  *   connection state. When ICE never completes no channel ever opens, so this
  *   is the only way the host operator learns a phone is trying and failing.
- * @param {(peer:string, dropped:number)=>void} [opts.onPeerShedding] how many
- *   snapshot frames this relayed joiner's link has shed, cumulative. Its OWN
- *   callback rather than another `onPeerIce` state: those two facts are both
- *   true at once, and folding the count into the ICE-state map replaced the
- *   "carried by the join service" row with a raw `relay-shedding-3` token in an
- *   operator-facing line.
+ * @param {(peer:string, dropped:number, source:'local'|'service')=>void} [opts.onPeerShedding]
+ *   how many snapshot frames this relayed joiner's link has shed, cumulative.
+ *   Its OWN callback rather than another `onPeerIce` state: those two facts
+ *   are both true at once, and folding the count into the ICE-state map
+ *   replaced the "carried by the join service" row with a raw
+ *   `relay-shedding-3` token in an operator-facing line. `source` names WHICH
+ *   queue shed: `'local'` is this host's own pair, shed against its send
+ *   buffer before a frame ever reaches the service; `'service'` is the
+ *   service shedding this host's own outbound frames at the (host,peer)
+ *   mailbox before they reach the peer. Both are this host's own downlink to
+ *   THAT peer, measured at two different hops — a caller that folds them with
+ *   `Math.max` instead of keeping them apart and adding is undercounting
+ *   exactly the way `gui/connection-diagnostics.js`'s `relayDroppedBy` used to.
  * @param {(msg:string)=>void} [opts.onLog]
  * @param {boolean} [opts.reregister] retry registration after service loss
  */
@@ -673,11 +680,19 @@ export function createRendezvousHost(opts) {
       to: id,
       bufferedAmount: () => (socket && socket.bufferedAmount) || 0,
       limits: relayLimitsFromFrame(limits),
-      onDegraded: ({ dropped }) => onPeerShedding(id, dropped),
+      onDegraded: ({ dropped }) => onPeerShedding(id, dropped, 'local'),
       onFailure: ({ reason }) => {
         // A reliable frame the relay cannot carry is a broken guarantee, not a
-        // dropped frame. The pair has already closed itself, which reaches the
-        // page through the adapter's ordinary `close`; this only names it.
+        // dropped frame. The pair closes itself locally, which reaches the
+        // page through the adapter's ordinary `close` — but that is only THIS
+        // host's half. Left there, the phone's mailbox at the service stays
+        // open and the phone sits on a status line reading "connected" while
+        // the host has already walked away — the same one-sided eviction
+        // `onSever` above exists to prevent. Ask the service to detach it too,
+        // before the local close reaches the page.
+        if (socket && socket.readyState === 1) {
+          socket.send(frame('relay-close', { to: id }));
+        }
         onLog(`[rendezvous] relayed link to ${id} failed: ${reason}`);
       },
       onLog,
@@ -841,11 +856,13 @@ export function createRendezvousHost(opts) {
         break;
       }
       case 'relay-degraded':
-        // The service shedding snapshot frames it could not hand to one of our
-        // relayed crew. The host operator is the one who can act on this
-        // direction of it, and until #1113's review nothing here read the
-        // frame at all. `dropped` is the pair's running total.
-        onPeerShedding(msg.peer, msg.dropped || 0);
+        // The service shedding this host's own outbound frames at the
+        // (host,peer) mailbox before they reached that crew member. The host
+        // operator is the one who can act on this direction of it, and until
+        // #1113's review nothing here read the frame at all. `dropped` is the
+        // mailbox's running total — a separate queue from `onDegraded` above,
+        // so it is reported under its own `source` rather than folded in.
+        onPeerShedding(msg.peer, msg.dropped || 0, 'service');
         break;
       case 'relay-closed':
         // The service closing OUR OWN relay mailbox — the reliable-queue

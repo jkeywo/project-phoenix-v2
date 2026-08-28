@@ -21,6 +21,14 @@ const PATROL_TOML = fs.readFileSync(path.join(__dirname, '../../assets/worlds/pa
 const SHIM = fs.readFileSync(path.join(__dirname, 'rendezvous-shim.js'), 'utf-8');
 const REGISTRY_JS = fs.readFileSync(
   path.join(__dirname, '..', '..', 'worker-rendezvous', 'src', 'registry.js'), 'utf-8');
+// The registry's own `import './relay.js'` resolves against the path it is
+// served at (`/__rendezvous-registry.js` below), which puts it at `/relay.js`
+// at the site root — a URL dist/ has no file for. Unrouted, that import 404s,
+// the registry promise never resolves, and every host socket call silently
+// drops with nothing in the logs connecting it back to a missing sibling
+// module (see fixtures.js's RENDEZVOUS_RELAY_JS note).
+const RELAY_JS = fs.readFileSync(
+  path.join(__dirname, '..', '..', 'worker-rendezvous', 'src', 'relay.js'), 'utf-8');
 const STUB_QRCODE = `'use strict'; window.QRCode = { toCanvas: function () { return Promise.resolve(); } };`;
 const CLIENT_STAMP = (() => {
   const html = fs.readFileSync(path.join(__dirname, '../../dist/client/index.html'), 'utf-8');
@@ -43,6 +51,8 @@ async function main() {
   await ctx.addInitScript({ content: STUB_QRCODE });
   await ctx.route('**/__rendezvous-registry.js', r =>
     r.fulfill({ contentType: 'application/javascript', body: REGISTRY_JS }));
+  await ctx.route('**/relay.js', r =>
+    r.fulfill({ contentType: 'application/javascript', body: RELAY_JS }));
   await ctx.route('**/qrcode*.js', r => r.fulfill({ contentType: 'application/javascript', body: STUB_QRCODE }));
   await ctx.route('**/assets/worlds/default.toml', r => r.fulfill({ contentType: 'text/plain', body: PATROL_TOML }));
 

@@ -3032,7 +3032,18 @@
       // Kept apart from clientIceStages deliberately: a relayed peer that is
       // shedding is two facts at once, and writing the count into the ICE map
       // replaced the "carried by the join service" row with a raw token.
-      const clientRelayShed = new Map(); // shortId → cumulative frames shed
+      //
+      // Per short id this holds TWO cumulative counters, one per queue —
+      // `local` is this host's own pair, shed against its send buffer before a
+      // frame reaches the service; `service` is the service shedding this
+      // host's own outbound frames at the (host,peer) mailbox before they
+      // reach the peer. Both are this host's downlink to THAT peer, measured
+      // at two different hops, exactly the shape
+      // gui/connection-diagnostics.js's `relayDroppedBy` keeps for the
+      // client's own two reporters — so they are held apart and added, not
+      // folded together with `Math.max`, which under-reported whichever queue
+      // happened to have the smaller running total.
+      const clientRelayShed = new Map(); // shortId → { local, service }
       const hostDiag = {
         relayAvailable,
         relaySource,
@@ -3042,7 +3053,9 @@
         get retrying() { return rendezvousRetrying; },
         reregister: RENDEZVOUS_REREGISTER,
         get peers() { return [...clientIceStages]; },
-        get shedding() { return [...clientRelayShed]; },
+        get shedding() {
+          return [...clientRelayShed].map(([id, s]) => [id, (s.local || 0) + (s.service || 0)]);
+        },
       };
       renderConnDiag = diagnostics
         ? function renderConnDiagImpl() {
@@ -3302,10 +3315,14 @@
         // How many snapshot frames this relayed crew member's link has shed,
         // from either end of it (issue #1113). Its own callback rather than
         // another onPeerIce state, so the transport row and the shed row are
-        // both on screen instead of one replacing the other.
-        onPeerShedding: (peer, dropped) => {
+        // both on screen instead of one replacing the other. `source` tells
+        // WHICH queue shed — see clientRelayShed's own comment above: the two
+        // are different hops of the same downlink, held apart and added.
+        onPeerShedding: (peer, dropped, source) => {
           const shortId = String(peer).slice(0, 8);
-          clientRelayShed.set(shortId, Math.max(clientRelayShed.get(shortId) || 0, dropped || 0));
+          const prev = clientRelayShed.get(shortId) || { local: 0, service: 0 };
+          const key = source === 'service' ? 'service' : 'local';
+          clientRelayShed.set(shortId, { ...prev, [key]: Math.max(prev[key] || 0, dropped || 0) });
           renderConnDiag();
         },
         onError: (reason, detail) => {

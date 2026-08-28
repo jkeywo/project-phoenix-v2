@@ -50,7 +50,7 @@ paste both into the issue thread** ([#1113]).
 
 * On the **host** (viewscreen), the dump button sits under the join code —
   labelled "Copy diagnostics".
-* On a **phone**, it is in the bottom-right corner of the join screen.
+* On a **phone**, it is bottom-left, beside the diagnostics readout.
 
 The dump is plain text and carries no join code, no session token and no full
 peer id, so it is safe to paste in public.
@@ -112,7 +112,7 @@ host URL and the phone's) withholds the TURN server list entirely, so there is
 nothing to allocate from and any pair ICE forms is genuinely direct. It is the
 mirror image of scenario 3's `?forceRelay=1`, and it turns "we expect a
 host → host pair" into "nothing else was available". Both readouts say
-"Transport pinned to direct by this link"; if that line is missing the lever did
+"Transport pinned to direct on this host"; if that line is missing the lever did
 not take. A failure under this pin means the LAN really is isolating clients —
 which is the answer worth having, and it comes in seconds rather than after the
 ninety-second ladder.
@@ -170,7 +170,7 @@ the other side would still win, and the session would pass while testing the
 ordinary path.
 
 **The diagnostics must show.**
-* Both ends: "Transport pinned to turn by this link". If that line is absent,
+* Both ends: "Transport pinned to turn on this host". If that line is absent,
   the lever did not take and the run is invalid — check the URL.
 * Phone: `route:` naming **relay** on at least the local side, and a `via`
   naming a `turn:`/`turns:` address. **Record which address** — that is how you

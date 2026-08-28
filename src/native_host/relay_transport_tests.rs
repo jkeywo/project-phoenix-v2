@@ -843,6 +843,16 @@ fn an_oversized_reliable_message_fails_the_link_rather_than_vanishing() {
         socket.sent_of("relay").is_empty(),
         "an unsendable frame must not be put on the wire"
     );
+    // The service must be asked to detach the phone too, before this host
+    // drops it locally — a link this host gives up on is otherwise one-sided:
+    // the service keeps the phone's mailbox open and the phone sits on a
+    // status line still reading "connected" (mirrors `refuse_peer`'s in-band
+    // `JoinRefused`, and `gui/rendezvous-transport.js`'s `onFailure`).
+    assert_eq!(
+        socket.sent_of("relay-close"),
+        vec![RendezvousFrame::relay_close("peer-1")],
+        "the phone must be told, not just dropped locally"
+    );
     assert_eq!(
         t.poll(),
         vec![TransportEvent::Disconnected {

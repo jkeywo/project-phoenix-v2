@@ -129,8 +129,9 @@ fn every_shipped_frame_fits_the_authored_relay_ceiling() {
         let budget = budget_for(world);
         assert!(
             budget.reliable.0 > 0,
-            "{world} emitted no reliable traffic at all — the run never reached the mission, \
-             so this test measured nothing"
+            "{world} emitted no reliable traffic at all — lobby-phase outbound is reliable \
+             too, so this is not simply a run that never reached the mission: nothing left \
+             the bus at all, on either class, and this test measured nothing"
         );
         assert!(
             budget.reliable.0 <= ceiling,
@@ -140,6 +141,12 @@ fn every_shipped_frame_fits_the_authored_relay_ceiling() {
              at all on a restrictive network.",
             budget.reliable.0,
             budget.reliable.1,
+        );
+        assert!(
+            budget.snapshot.0 > 0,
+            "{world} emitted no snapshot traffic at all — 600 ticks should be well into the \
+             per-tick snapshot cadence, so a zero here means this test measured nothing for \
+             that class rather than that the class stayed comfortably under budget"
         );
         assert!(
             budget.snapshot.0 <= ceiling,

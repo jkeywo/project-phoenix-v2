@@ -90,6 +90,40 @@ fn every_frame_a_native_host_acts_on_is_one_the_service_sends() {
 }
 
 #[test]
+fn the_terminal_relay_reasons_are_ones_the_service_actually_sends() {
+    // `RelayTransport::is_terminal_error` (src/native_host/relay_transport.rs)
+    // treats these three `error.reason` values as "the LINK is gone" rather
+    // than a per-request refusal — everything else (`no-peer`, `not-relaying`,
+    // `relay-too-large`, `malformed`, `relay-full`, `forbidden-role`) stays a
+    // notice about one frame. A reason renamed on the service without a
+    // matching rename here would silently reclassify a whole-crew outage as
+    // one dropped frame, or the reverse.
+    let registry = read("worker-rendezvous/src/registry.js");
+    for reason in ["unreachable", "not-connected", "unsupported-protocol"] {
+        assert!(
+            registry.contains(&format!("'{reason}'")),
+            "worker-rendezvous/src/registry.js no longer sends reason {reason:?}, but \
+             src/native_host/relay_transport.rs still treats it as terminal"
+        );
+    }
+}
+
+#[test]
+fn the_error_frames_request_field_is_named_the_same_in_both_languages() {
+    // `RendezvousFrame::request` names which request an `error` frame is
+    // refusing, in the operator-facing fault message this transport builds —
+    // it is `reason`, not `request`, that decides link-versus-per-request (see
+    // the pin above), but a renamed `request` field would still silently blank
+    // half of every native fault message.
+    let registry = read("worker-rendezvous/src/registry.js");
+    assert!(
+        registry.contains("type: 'error', request, reason"),
+        "worker-rendezvous/src/registry.js's fail() no longer names a request field \
+         the same way src/core/rendezvous.rs's RendezvousFrame does"
+    );
+}
+
+#[test]
 fn the_transport_names_are_the_ones_the_service_will_relay() {
     // A host's claim is sanitised against this list; a name the service does
     // not know is DROPPED rather than relayed, so a native host claiming an

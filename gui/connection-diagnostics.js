@@ -74,14 +74,22 @@ export function createClientDiagnostics(initial = {}) {
     /**
      * Snapshot frames the relay has shed, per REPORTER.
      *
-     * The two ends measure different queues — `client` is what this device shed
-     * against its own send buffer on the way up, `service` is what the service
-     * shed on the way down — so they are held apart and added, not folded with
-     * `Math.max`. Both numbers are now cumulative; the fold used to take the
-     * larger on the stated assumption that both were, which was true of the
-     * client's and false of the service's (a per-enqueue delta, 1 essentially
-     * always), so the readout sat at "Dropping display updates (1)" however
-     * many hundreds were being lost.
+     * The two ends measure different queues, and BOTH are this device's own
+     * uplink, just at different hops — `client` is what this device shed
+     * against its own send buffer before a frame ever left it, `service` is
+     * what the SERVICE shed of this device's outbound frames at the
+     * (host,phone) mailbox before they reached the host. `relay-degraded` is
+     * always answered to the SENDER (the one that can slow down), never the
+     * recipient, so a phone only ever sees the `service` reporter fire for its
+     * OWN traffic — never for the host's snapshots coming down. That is why
+     * they are held apart and added rather than folded with `Math.max`: two
+     * measurements of the same direction at two hops, not a downlink and an
+     * uplink that would double-count one loss. Both numbers are now
+     * cumulative; the fold used to take the larger on the stated assumption
+     * that both were, which was true of the client's and false of the
+     * service's (a per-enqueue delta, 1 essentially always), so the readout
+     * sat at "Dropping display updates (1)" however many hundreds were being
+     * lost.
      */
     relayDroppedBy: { client: 0, service: 0 },
     /** The rendered total: the sum of the two above. */
@@ -138,10 +146,13 @@ export function applyClientDiagEvent(state, event) {
       state.selectedPair = e.pair || null;
       break;
     case 'relay-degraded': {
-      // Two reporters, two different queues, both cumulative — so keep them
-      // apart and add. `from` is 'client' (this device's own send buffer) or
-      // 'service' (the service's mailbox on the way down); an event with
-      // neither is this device's, which is where the counter started.
+      // Two reporters, two different queues, both cumulative and both this
+      // device's own uplink — so keep them apart and add. `from` is 'client'
+      // (this device's own send buffer) or 'service' (the service shedding
+      // this device's own outbound frames at the (host,phone) mailbox —
+      // `relay-degraded` always answers the SENDER, so this is never the
+      // host's snapshots on their way down); an event with neither is this
+      // device's, which is where the counter started.
       const source = e.from === 'service' ? 'service' : 'client';
       if (!state.relayDroppedBy) state.relayDroppedBy = { client: 0, service: 0 };
       state.relayDroppedBy[source] = Math.max(

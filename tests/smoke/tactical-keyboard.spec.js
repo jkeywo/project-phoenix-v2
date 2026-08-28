@@ -23,6 +23,8 @@ const CONSOLE_URL = '/gui/destroyer/tactical.html';
 // Everything the panels read comes from the first present fine-system object;
 // `tactical-radar` is that object for the Destroyer.
 const STATE = {
+  system_ids: ['tactical-radar'],
+  system_families: { 'tactical-radar': 'tactical' },
   systems: {
     'tactical-radar': {
       blips: [

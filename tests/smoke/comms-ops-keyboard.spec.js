@@ -97,6 +97,8 @@ test('Captain console: an objective is boosted and a scan taken from the keyboar
   await instrument(page);
 
   await page.evaluate(() => window.__updateConsole('captain', JSON.stringify({
+    system_ids: ['captain', 'sensors'],
+    system_families: { captain: 'captain', sensors: 'sensors' },
     systems: {
       captain: {
         objectives: [

@@ -21,6 +21,8 @@ import { test, expect } from './fixtures';
 
 // The Destroyer's tactical.html reads its panels out of systems['tactical-radar'].
 const TACTICAL_STATE = {
+  system_ids: ['tactical-radar'],
+  system_families: { 'tactical-radar': 'tactical' },
   systems: {
     'tactical-radar': {
       blips: [
@@ -38,6 +40,12 @@ const TACTICAL_STATE = {
 // fine system ids (see its render()).
 const ENGINEERING_STATE = {
   own_hull: null,
+  system_ids: ['shields-system', 'power-reactor', 'repair'],
+  system_families: {
+    'shields-system': 'shields',
+    'power-reactor': 'power',
+    repair: 'repair',
+  },
   systems: {
     'shields-system': {
       facings: [

@@ -619,6 +619,72 @@ describe('code lifecycle', () => {
     expect(h.last('phone', 'error')).toMatchObject({ reason: 'unknown' });
   });
 
+  it('drops the record immediately on a deliberate leave frame from its own host — NOT into grace (issue #1115)', () => {
+    // The DoS the split guards against: were a host `leave` to grace-hold, one
+    // socket could loop host-open → leave → host-open → leave and park
+    // unbounded un-hostable records. A deliberate departure has nothing to
+    // reclaim, so it drops on the spot, exactly like host-close.
+    const h = harness();
+    const code = openHost(h);
+    h.connect('phone', ROLE_CLIENT);
+    h.send('phone', { type: 'join', code: code.suffix });
+
+    h.send('host-1', { type: 'leave' });
+    expect(h.last('phone', 'closed')).toMatchObject({ reason: 'host-gone' });
+    expect(h.reg.snapshot()).toHaveLength(0);
+    // The next lookup on the old suffix is unknown — a real drop, not a hold.
+    h.send('phone', { type: 'resolve', code: code.suffix });
+    expect(h.last('phone', 'error')).toMatchObject({ reason: 'unknown' });
+  });
+
+  it('still enters grace when the host SOCKET dies rather than leaving deliberately (issue #1115)', () => {
+    // The other half of the split: socket death is the ONE route to grace, so
+    // an ordinary transient loss still reconnects onto the same code.
+    const h = harness();
+    const code = openHost(h);
+    h.disconnect('host-1');
+    expect(h.reg.snapshot()).toHaveLength(1);
+    h.connect('phone', ROLE_CLIENT);
+    h.send('phone', { type: 'resolve', code: code.suffix });
+    expect(h.last('phone', 'resolved')).toMatchObject({ admission: 'open' });
+  });
+
+  it('parks no grace records at all when a socket loops host-open → leave (issue #1115)', () => {
+    // With the leave-frame drop, each record is gone before the next host-open,
+    // so the loop accumulates nothing — and `expireStale` has nothing to walk.
+    const h = harness();
+    h.connect('looper', ROLE_HOST);
+    for (let i = 0; i < 50; i += 1) {
+      h.send('looper', { type: 'host-open', namespace: NAMESPACE_CLIENT });
+      h.send('looper', { type: 'leave' });
+    }
+    expect(h.reg.snapshot()).toHaveLength(0);
+  });
+
+  it('caps the total grace-held records one instance will park (issue #1115 defence in depth)', () => {
+    // Even with the leave-frame drop, a flood of SEPARATE dying sockets could
+    // each park a grace record; the authored cap bounds how many an instance
+    // holds at once, dropping further losses outright.
+    const data = { ...DATA, limits: { ...DATA.limits, max_grace_records: 2 } };
+    const h = harness({ data });
+    const codes = [];
+    for (let i = 0; i < 3; i += 1) {
+      const id = `host-${i}`;
+      h.connect(id, ROLE_HOST);
+      h.send(id, { type: 'host-open', namespace: NAMESPACE_CLIENT });
+      codes.push(h.last(id, 'hosted').code);
+      h.disconnect(id);
+    }
+    // Two records held in grace; the third was over the cap and dropped.
+    expect(h.reg.snapshot()).toHaveLength(2);
+    h.connect('probe', ROLE_CLIENT);
+    h.send('probe', { type: 'resolve', code: codes[2].suffix });
+    expect(h.last('probe', 'error')).toMatchObject({ reason: 'unknown' });
+    // …while the first two stay resolvable — grace-held, not dropped.
+    h.send('probe', { type: 'resolve', code: codes[0].suffix });
+    expect(h.last('probe', 'resolved')).toMatchObject({ admission: 'open' });
+  });
+
   it('reports a departing joiner to its host and keeps the code alive', () => {
     const h = harness();
     const code = openHost(h);
@@ -769,6 +835,45 @@ describe('code reclaim (issue #1115)', () => {
     expect(minted.code.suffix).toMatch(new RegExp(`^[${DATA.suffix.alphabet}]{5}$`));
   });
 
+  it('charges each resume attempt, so repeated wrong-secret probes are capped (issue #1115)', () => {
+    // A resume is a lookup that, on a miss against a grace-held record, BURNS
+    // it — so it must be metered like resolve/join. One socket looping
+    // host-open(resume, wrong) → host-close to probe/burn records is cut once
+    // it passes the per-connection lookup cap, rather than walking freely.
+    const data = { ...DATA, limits: { ...DATA.limits, max_lookups_per_connection: 3 } };
+    const h = harness({ data });
+    h.connect('attacker', ROLE_HOST);
+    const wrong = { suffix: 'MMMMM', secret: '0'.repeat(32) };
+    // Each attempt charges one lookup; host-close frees the key for the next.
+    for (let i = 0; i < 3; i += 1) {
+      h.send('attacker', { type: 'host-open', namespace: NAMESPACE_CLIENT, resume: wrong });
+      h.send('attacker', { type: 'host-close' });
+    }
+    // The 4th resume is past the cap: cut with too-many-attempts, no mint.
+    h.send('attacker', { type: 'host-open', namespace: NAMESPACE_CLIENT, resume: wrong });
+    expect(h.last('attacker', 'error'))
+      .toMatchObject({ request: 'host-open', reason: 'too-many-attempts' });
+  });
+
+  it('does not charge a wrong secret against a still-LIVE record with a burn — it cannot burn it at all', () => {
+    // The verified-good property survives metering: a resume whose suffix names
+    // a LIVE record never reaches the delete, so a stray/forged secret cannot
+    // burn it, charged or not.
+    const h = harness();
+    const code = openHost(h);
+    h.connect('impostor', ROLE_HOST);
+    h.send('impostor', {
+      type: 'host-open',
+      namespace: NAMESPACE_CLIENT,
+      resume: { suffix: code.suffix, secret: code.secret },
+    });
+    // The live record is untouched: both it and the impostor's fresh mint stand.
+    expect(h.reg.snapshot()).toHaveLength(2);
+    h.connect('phone', ROLE_CLIENT);
+    h.send('phone', { type: 'resolve', code: code.suffix });
+    expect(h.last('phone', 'resolved')).toMatchObject({ admission: 'open' });
+  });
+
   it('keeps a reclaim secret to its own namespace — a crew record cannot revive under the fleet one', () => {
     const h = harness();
     const crew = openHost(h, 'crew-host', NAMESPACE_CLIENT);
@@ -833,6 +938,22 @@ describe('explicit rotation (issue #1115 AC2/AC3)', () => {
     h.connect('bystander', ROLE_CLIENT);
     h.send('bystander', { type: 'rotate' });
     expect(h.last('bystander', 'error')).toMatchObject({ reason: 'not-hosting' });
+
+    // The case the two above cannot catch: a JOINED client DOES resolve to a
+    // record (recordFor returns the one it joined), it simply is not that
+    // record's host. A guard weakened to "you have a record" rather than "you
+    // are its LIVE host" would let this peer rotate the code out from under the
+    // real host — so this is the assertion that keeps the guard honest.
+    const h2 = harness();
+    const code = openHost(h2, 'real-host');
+    h2.connect('member', ROLE_CLIENT);
+    h2.send('member', { type: 'join', code: code.suffix });
+    h2.send('member', { type: 'rotate' });
+    expect(h2.last('member', 'error')).toMatchObject({ request: 'rotate', reason: 'not-hosting' });
+    // …and the host's code is untouched: still the same suffix, still resolvable.
+    h2.connect('checker', ROLE_CLIENT);
+    h2.send('checker', { type: 'resolve', code: code.suffix });
+    expect(h2.last('checker', 'resolved')).toMatchObject({ admission: 'open' });
   });
 
   it('touches nothing about another record — not another host\'s code, not another namespace (AC4)', () => {

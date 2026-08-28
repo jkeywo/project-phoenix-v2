@@ -1448,6 +1448,49 @@ describe('a host that loses its record (issue #1115)', () => {
     }
   });
 
+  it('stops claiming a reclaim once the loss outlasts the grace window (issue #1115)', async () => {
+    // `resuming` words server.html's diagnostics line: "reconnecting your code"
+    // vs "a new code is coming". Once a loss streak passes the authored
+    // reclaim_grace_seconds the registry has dropped the held record, so the
+    // pending reconnect will be issued a FRESH suffix — the line must stop
+    // promising the old one back. `reregister: false` holds the loss open so
+    // the clock can cross the window without a reconnect racing the assertion.
+    vi.useFakeTimers();
+    try {
+      const world = makeWorld();
+      const hostSockets = [];
+      const factories = {
+        socket: (url) => {
+          const s = world.socket(url);
+          if (String(url).endsWith('/v1/host')) hostSockets.push(s);
+          return s;
+        },
+        peer: makePeerFactory(),
+      };
+      const host = createRendezvousHost({
+        base: 'https://rendezvous.test',
+        factories,
+        reregister: false,
+        onCode: () => {},
+        onError: () => {},
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      // A token is held from the first registration — reclaimable, so far.
+      expect(host.resuming).toBe(true);
+
+      hostSockets[0].onerror();
+      await vi.advanceTimersByTimeAsync(0);
+      // Still within the window: the same code can genuinely come back.
+      expect(host.resuming).toBe(true);
+
+      // Past it: the held record is gone, a fresh suffix is what's coming.
+      await vi.advanceTimersByTimeAsync(DATA.limits.reclaim_grace_seconds * 1000 + 1);
+      expect(host.resuming).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('stays put when asked not to re-register', async () => {
     const world = makeWorld();
     const hostSockets = [];

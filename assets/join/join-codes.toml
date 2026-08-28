@@ -108,6 +108,13 @@ max_code_length = 160
 # (gui/connection-manager.js's nextBackoffDelay: 1s, 2s, 4s, 8s, 16s, 30s,
 # 30s, …) without holding a dead code open indefinitely.
 reclaim_grace_seconds = 120
+# The most grace-held records ONE Durable Object instance will carry at once
+# (issue #1115). A deliberate leave/host-close drops a host's record on the
+# spot, so only a socket that genuinely DIES enters grace — this bounds a flood
+# of separate dying sockets, not one looping socket, and over the cap a further
+# loss drops its record for good rather than parking it un-hostable for the
+# whole window. Defence in depth alongside the per-connection bounds above.
+max_grace_records = 256
 
 # ── The WebSocket game relay (issue #1113) ───────────────────────────────────
 # When a joiner's direct WebRTC ladder is exhausted, the SAME rendezvous socket

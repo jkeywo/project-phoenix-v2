@@ -105,6 +105,7 @@ import {
   NAMESPACE_CLIENT,
   parseJoinCode,
   reasonStringId,
+  getJoinCodeData,
 } from './join-code.js';
 import { RENDEZVOUS_PROTOCOL } from './rendezvous-protocol.js';
 import {
@@ -514,6 +515,28 @@ export function createRendezvousHost(opts) {
    * survive independently for reclaim to work at all.
    */
   let resumeToken = null;
+  /**
+   * When the CURRENT run of service loss began (issue #1115) — set on the first
+   * `lostService` of a loss streak, held across its failed retries, cleared the
+   * moment a `hosted` frame re-registers this host. It exists so `resuming`
+   * (below) can tell an in-flight reclaim from one that has already lost: past
+   * the authored `reclaim_grace_seconds` the registry has dropped the held
+   * record for good, so the next `hosted` will carry a FRESH suffix, and the
+   * "reconnecting your code" line must stop claiming otherwise.
+   */
+  let serviceLostAt = null;
+
+  /**
+   * The authored grace window in ms, read live from the loaded join-code table
+   * (its `[limits] reclaim_grace_seconds`). Defaults to the registry's own
+   * fallback when the table is absent or predates the field, so the two ends
+   * agree on the same number without this module hardcoding it.
+   */
+  function graceWindowMs() {
+    const data = getJoinCodeData();
+    const secs = data && data.limits && data.limits.reclaim_grace_seconds;
+    return (typeof secs === 'number' && secs > 0 ? secs : 120) * 1000;
+  }
 
   function signal(to, payload) {
     if (socket && socket.readyState === 1) socket.send(frame('signal', { to, payload }));
@@ -825,6 +848,9 @@ export function createRendezvousHost(opts) {
       case 'hosted':
         code = msg.code;
         retryAttempt = 0;
+        // Re-registered — whether this is the reclaimed code or a fresh mint,
+        // the loss streak is over, so the grace clock resets (issue #1115).
+        serviceLostAt = null;
         // Only a registration/reclaim response carries `secret` — an
         // admission-state ACK reuses the same `hosted` type without one, and
         // must not clobber the held token with `undefined`.
@@ -947,6 +973,10 @@ export function createRendezvousHost(opts) {
    */
   function lostService(reason) {
     if (closed) return;
+    // Stamp the START of this loss streak, not each failed retry within it —
+    // the registry's grace clock runs from the ORIGINAL socket death, so
+    // `resuming` measures elapsed time the same way (issue #1115).
+    if (serviceLostAt === null) serviceLostAt = Date.now();
     // Detached and silenced BEFORE anything else: closing a socket fires its
     // own `close`, and a handler that could still see itself as the current
     // one would re-enter here and report the same loss twice.
@@ -991,8 +1021,21 @@ export function createRendezvousHost(opts) {
      * line honestly (issue #1115): "reconnecting your code" when a reclaim
      * is actually in flight, the older "a new code is coming" only for a
      * first-ever registration that never got one to hold.
+     *
+     * Gated on the grace window: once a loss streak has outlasted
+     * `reclaim_grace_seconds`, the registry has already dropped the held record
+     * (its `expireStale`), so the pending reconnect will be issued a FRESH
+     * suffix — no longer a reclaim, so this stops reporting one. A held token
+     * with no active loss (an ordinary live host, or one mid-reconnect inside
+     * the window) still reads `true`.
      */
-    get resuming() { return !!resumeToken; },
+    get resuming() {
+      if (!resumeToken) return false;
+      if (serviceLostAt !== null && Date.now() - serviceLostAt >= graceWindowMs()) {
+        return false;
+      }
+      return true;
+    },
     /** Open or close new-joiner admission without dropping the code. */
     setAdmission(state) {
       if (socket && socket.readyState === 1) socket.send(frame('host-admission', { state }));

@@ -65,9 +65,10 @@
  * mints every record a one-time reclaim `secret` (32 lowercase hex
  * characters, the session-token shape — never sent to a joiner, never stored
  * anywhere but this record and the host's own transport-plane memory). An
- * EXPLICIT `host-close` still drops the record for real and immediately, the
- * same as always — a deliberate teardown has nothing to reclaim. A socket
- * merely dying — `disconnect()`, with no `host-close` frame ever seen — instead
+ * EXPLICIT teardown — a `host-close` frame, or a `leave` frame from the
+ * record's own host — still drops the record for real and immediately, the
+ * same as always: a deliberate departure has nothing to reclaim. ONLY a socket
+ * merely dying — `disconnect()`, with no such frame ever seen — instead
  * holds the record in GRACE (`enterGrace`) for the authored
  * `reclaim_grace_seconds`: no live host to relay signalling to (a `join`
  * against it answers the retryable `unreachable`, same as any other transient
@@ -90,13 +91,15 @@
  * cannot survive a worker redeploy or a Durable Object eviction, and it cannot
  * be rebound to a REPLACEMENT host — only reclaimed by the one that minted it,
  * within the grace window above. The `record_ttl_seconds` sweep below is a
- * SEPARATE, much longer backstop: an idle timeout measured from `lastSeen`,
- * refreshed by every inbound frame from the record's own host, not from when
- * the record was created — so a host that has been live for days is never
- * swept merely for being old. It catches the case where the socket dies AND
- * the host never comes back to reclaim within its grace window either — the
- * record is still held (now un-hostable) until this sweep finally gives up on
- * it.
+ * SEPARATE, much longer backstop for a DIFFERENT case: an idle timeout measured
+ * from `lastSeen`, refreshed by every inbound frame from the record's own host,
+ * not from when the record was created — so a host that has been live for days
+ * is never swept merely for being old. It backstops the record whose host is
+ * still nominally LIVE but has gone quiet — a half-open socket whose `close`
+ * event never fired, so `disconnect()` never ran and the record never entered
+ * grace at all. A record that DID enter grace is NOT this sweep's to reap:
+ * `expireStale` drops a grace-held record at its own much shorter grace
+ * deadline, never holding it on to the TTL.
  *
  * The bounds in the authored `[limits]` table are the other half of that
  * posture. This is an unauthenticated public endpoint whose codes are private
@@ -225,6 +228,14 @@ export function createRegistry({
   // issue #1115: how long a record survives its host's SOCKET dying before
   // it is dropped for good — see "code lifecycle" above.
   const reclaimGraceMs = (limits.reclaim_grace_seconds || 120) * 1000;
+  // issue #1115 defence in depth: the most grace-held records ONE instance
+  // will carry at once. A deliberate `leave` already drops a host's record on
+  // the spot (only socket DEATH reaches grace), so this is not what stops a
+  // single looping socket — it bounds a flood of SEPARATE dying sockets from
+  // filling the object with un-hostable records for the whole window. Over the
+  // cap, a further loss drops its record outright instead of holding it. Same
+  // discipline as max_lookups_per_connection / max_peers_per_record.
+  const maxGraceRecords = limits.max_grace_records || 256;
 
   /**
    * The WebSocket game relay (issue #1113), in its own module because its
@@ -397,6 +408,15 @@ export function createRegistry({
     const resume = frame.resume;
     if (resume && typeof resume === 'object'
         && typeof resume.suffix === 'string' && typeof resume.secret === 'string') {
+      // A resume IS a lookup against the private suffix space, and a wrong
+      // secret against a grace-held record BURNS it (the `records.delete`
+      // below). Charge it to the connection exactly like resolve/join so a
+      // socket cannot loop host-open(resume, wrong) → leave → … as a free
+      // destructive probe (issue #1115). A wrong secret against a still-LIVE
+      // record still cannot burn it — that never reaches the delete, it falls
+      // through to a fresh mint — so metering leaves that property intact.
+      const capped = chargeLookup(conn, connId, 'host-open');
+      if (capped) return capped;
       const held = records.get(recordKey(project, version, resume.suffix));
       if (held && held.namespace === namespace
           && held.graceUntil !== null && held.graceUntil > now()) {
@@ -611,6 +631,18 @@ export function createRegistry({
    * never comes back.
    */
   function enterGrace(record) {
+    // Defence in depth (issue #1115): cap the TOTAL grace-held records this
+    // instance carries. A deliberate `leave` dropping a host record on the
+    // spot already stops ONE socket parking many; this stops a flood of
+    // separate dying sockets from filling the object with un-hostable records
+    // for the whole window. At the cap, drop this record for good rather than
+    // hold it (counting existing grace records is cheap — enterGrace runs only
+    // on a socket death, never on every inbound frame the way expireStale does).
+    let held = 0;
+    for (const r of records.values()) {
+      if (r.graceUntil !== null) held += 1;
+    }
+    if (held >= maxGraceRecords) return dropRecord(record, 'host-gone');
     record.host = null;
     record.graceUntil = now() + reclaimGraceMs;
     return [];
@@ -714,7 +746,25 @@ export function createRegistry({
     ];
   }
 
-  function leave(connId) {
+  /**
+   * A socket departs a record. Two callers, and the difference between them is
+   * load-bearing (issue #1115):
+   *
+   *   - `disconnect()` — a socket DEATH — passes `viaDisconnect: true`. A host
+   *     that merely lost its socket (a Durable Object hiccup, a phone radio
+   *     killing a backgrounded tab's WS) holds its record in GRACE, so the same
+   *     host can reclaim the same suffix within the window.
+   *   - a deliberate `leave` FRAME passes nothing. From a record's own host it
+   *     is a teardown with nothing to reclaim — exactly like `host-close`, and
+   *     it drops the record for good and immediately, NOT into grace.
+   *
+   * Reserving grace strictly for socket death is what keeps "one socket holds
+   * at most one record" true: were a `leave` frame to grace-hold instead, a
+   * single socket could loop host-open → leave → host-open → leave … and park
+   * an unbounded pile of un-hostable grace records for the whole window — each
+   * one more that `expireStale()` must then walk on every inbound frame.
+   */
+  function leave(connId, { viaDisconnect = false } = {}) {
     const record = recordFor(connId);
     const conn = conns.get(connId);
     if (conn) conn.key = null;
@@ -725,18 +775,26 @@ export function createRegistry({
       relay.detach(connId);
       return [];
     }
-    // The host's socket merely dying — this is `disconnect()`'s only route
-    // into `leave()`, never the explicit `host-close` frame (`hostClose`
-    // above handles that one directly) — holds the record in grace rather
-    // than dropping it for good. See `enterGrace` and the module doc's "code
-    // lifecycle" section (issue #1115). A relayed game link (issue #1113)
-    // cannot outlive that dead host socket the way a direct DataChannel can,
-    // so `detachGraceRelays` first tells this record's relay peers the relay
-    // is gone and detaches them; the record itself is what survives for
-    // reclaim.
-    if (record.host === connId) return [...detachGraceRelays(record), ...enterGrace(record)];
+    if (record.host === connId) {
+      // issue #1115: a socket DEATH (`viaDisconnect`) holds the record in
+      // grace, so the same host can reclaim the same suffix within the window;
+      // a deliberate `leave` FRAME drops it for good and immediately, exactly
+      // like `host-close`. issue #1113: `dropRecord` already tears the relay
+      // down on the drop path, but the GRACE path must ALSO detach this
+      // record's relay peers first — a relayed game link cannot outlive the
+      // dead host socket the way a direct DataChannel can — before the record
+      // is held. `detachGraceRelays` tells each relay peer the relay is gone
+      // and detaches it; the record itself survives for reclaim.
+      return viaDisconnect
+        ? [...detachGraceRelays(record), ...enterGrace(record)]
+        : dropRecord(record, 'host-gone');
+    }
     const relayed = detachRelay(connId, 'peer-left');
     if (!record.peers.delete(connId)) return relayed;
+    // Once the host is grace-held (issue #1115) there is no live connId to
+    // address a `peer-left` to — mirror dropRecord's own host guard rather
+    // than emit a frame bound for `null`.
+    if (!record.host) return relayed;
     return [...relayed, out(record.host, { type: 'peer-left', peer: connId })];
   }
 
@@ -1005,9 +1063,13 @@ export function createRegistry({
       return [...expired, ...handled];
     },
 
-    /** Socket closed. Drops presence and, for a host, its whole record. */
+    /**
+     * Socket closed. Drops presence and, for a host, holds its record in
+     * GRACE (socket death is the one route to grace — a deliberate `leave`
+     * frame drops the record instead; see `leave`).
+     */
     disconnect(connId) {
-      const frames = leave(connId);
+      const frames = leave(connId, { viaDisconnect: true });
       conns.delete(connId);
       return frames;
     },

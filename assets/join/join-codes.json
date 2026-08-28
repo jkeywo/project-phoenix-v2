@@ -35,6 +35,7 @@
     "max_slot_ship_path_length": 160,
     "max_code_length": 160,
     "reclaim_grace_seconds": 120,
+    "max_grace_records": 256,
     "max_relay_peers_per_record": 8,
     "max_relay_frame_bytes": 262144,
     "max_relay_queue_reliable": 256,

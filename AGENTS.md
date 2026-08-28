@@ -337,6 +337,12 @@ PHOENIX_DEMO_BUILD=true cargo test --lib -- \
 # Smoke tests (Playwright, Chromium) — requires dist/ built first
 cd tests/smoke && npm install && npx playwright install chromium
 npx playwright test                            # from tests/smoke/
+#   PHOENIX_SMOKE_PORT=3100 npx playwright test  — serve dist/ on another port
+#   AND refuse to adopt an existing server. `reuseExistingServer` otherwise
+#   silently picks up a stale `npx serve` on 3000 (another worktree's dist/, or
+#   one built hours ago), and the whole suite then times out against a bundle
+#   with nothing to do with the change under test. If a local run reports every
+#   spec failing, check that FIRST: it looks identical to a broken build.
 
 # ── Performance measurement (issue #868, gating decided in #905) ─────────────
 # Captures are compared against committed baselines in perf/baselines/*.ron.

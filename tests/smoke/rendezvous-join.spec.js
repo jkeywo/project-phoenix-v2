@@ -131,3 +131,34 @@ test('too few letters is its own message too', async ({ context }) => {
 
   await expect(client.locator('#join-entry-error')).toHaveText(ts('client.join.error_length'));
 });
+
+// ── Reclaim across a transient signalling loss (issue #1115) ────────────────
+
+test('a host that loses its socket reclaims the SAME code, and a phone still joins on it', async ({ context }) => {
+  const host = await bootHost(context);
+  const before = await joinCodeOn(host);
+
+  // The whole page goes offline — every socket and channel it holds dies at
+  // once, without either end calling close() — the closest a browser test can
+  // get to the transient losses issue #1115 is written for: a Durable Object
+  // hiccup, a phone radio killing a backgrounded tab's WS. The join panel
+  // blanks while the host is out of reach…
+  await host.evaluate(() => window.__transportShim.sever());
+  await expect(host.locator('#join-code-row')).toBeHidden();
+  await host.evaluate(() => window.__transportShim.revive());
+
+  // …and comes back with the SAME letters, reclaimed with the secret the
+  // host's own earlier registration was issued — not a fresh set nobody in
+  // the room has read yet.
+  await host.waitForFunction(
+    (expected) => document.getElementById('join-code')?.textContent === expected,
+    before,
+    { timeout: 30_000 },
+  );
+
+  const client = await openClient(context);
+  await client.fill('#join-code-input', before.toLowerCase());
+  await client.click('#join-submit-btn');
+  await waitForConnected(client);
+  await expect(client.locator('#join-entry')).toBeHidden();
+});

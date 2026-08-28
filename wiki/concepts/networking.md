@@ -142,16 +142,45 @@ link is carrying the game. Only the DataChannel's own close drives the reconnect
 loop.
 
 The host has a matching loop, and the same separation: a lost record
-re-registers on a backoff and is issued a **fresh** code, because the old record
-really is gone and the letters on screen resolve to nothing — while **every
-admitted crew connection stays up**. Only the peers still mid-signalling on the
-dead socket are discarded; an established `RTCPeerConnection` needs no service,
-and only its own channel closing reaches `wasm_player_disconnected`. The same
-rule holds per peer, not just for a dead host socket: `peer-left` — sent when
-ONE joiner's own rendezvous WebSocket dies (registry.js's `leave()`) — never
-closes that joiner's admitted, still-open link either; only that joiner's own
-DataChannel closing does. Keeping the *same* code across a host drop needs
-persistence in the service and is issue #1115's.
+re-registers on a backoff — while **every admitted crew connection stays up**.
+Only the peers still mid-signalling on the dead socket are discarded; an
+established `RTCPeerConnection` needs no service, and only its own channel
+closing reaches `wasm_player_disconnected`. The same rule holds per peer, not
+just for a dead host socket: `peer-left` — sent when ONE joiner's own
+rendezvous WebSocket dies (registry.js's `leave()`) — never closes that
+joiner's admitted, still-open link either; only that joiner's own DataChannel
+closing does.
+
+**Code reclaim across a transient loss (issue #1115).** A host's socket merely
+dying no longer frees its record on the spot. `hostOpen` mints every record a
+one-time reclaim secret (never sent to a joiner); a socket that dies WITHOUT an
+explicit `host-close` frame holds the record in *grace* for the authored
+`[limits] reclaim_grace_seconds` (120s) instead of dropping it — un-hostable in
+the meantime (a `join` against it answers the retryable `unreachable`, which a
+mid-reconnect joiner's own backoff already treats as transient) but otherwise
+untouched: same suffix, same secret, same admission state, same presence. The
+re-registration above presents that secret, and gets the SAME code back —
+`createRendezvousHost` holds it across `lostService()` in `resumeToken`,
+independent of the `code` field the panel paints from. A wrong secret burns the
+grace-held record outright (denying further guesses) rather than merely
+falling through; nobody reclaiming it before the deadline, or a genuine Durable
+Object eviction (which loses the secret along with everything else — there is
+still no persistent store backing this), is what finally mints a fresh suffix.
+An EXPLICIT `host-close` still drops a record for real and immediately, same
+as always — a deliberate teardown has nothing to reclaim.
+
+**Explicit rotation (issue #1115 AC2/AC3)** is a separate lever: a `rotate`
+frame from a record's own LIVE host mints it a brand-new suffix in place,
+dropping the old one for good immediately (stale lookups answer `unknown` from
+the very next frame) with a fresh secret. The registry has no notion of
+GamePhase, so "only between missions" (`gui/phase-toggle.js`'s
+`codesRotatable`: Lobby/GameOver rotatable, Loading/InProgress refused) is
+enforced by server.html before the frame is ever sent, not by the registry or
+the transport. The lever lives on the settings cog beside each code's readout
+— `gui/server-settings.js`'s Join Code section for the crew code,
+`__hostFleetRotate` for the fleet lead's own — and is a pure passthrough onto
+`createRendezvousHost`'s `rotate()`/`createFleetOwner`'s `rotate()`, which
+carries no GamePhase awareness of its own either.
 
 `connectionAdapter.close()` — the host's only eviction mechanism, used by the
 reserved-token refusal and the duplicate-token dance — closes **both** channels

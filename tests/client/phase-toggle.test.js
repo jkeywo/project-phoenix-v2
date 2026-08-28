@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { sectionVisibility, isInGame, IN_GAME_PHASES } from '../../gui/phase-toggle.js';
+import {
+  sectionVisibility, isInGame, IN_GAME_PHASES,
+  codesRotatable, NON_ROTATABLE_PHASES,
+} from '../../gui/phase-toggle.js';
 
 describe('isInGame', () => {
   it('returns false for Lobby phase', () => {
@@ -68,5 +71,29 @@ describe('sectionVisibility', () => {
       game: false,
       bezel: false,
     });
+  });
+});
+
+describe('codesRotatable (issue #1115 AC2)', () => {
+  it('is rotatable in Lobby and GameOver', () => {
+    expect(codesRotatable('Lobby')).toBe(true);
+    expect(codesRotatable('GameOver')).toBe(true);
+  });
+
+  it('refuses while Loading or InProgress', () => {
+    expect(codesRotatable('Loading')).toBe(false);
+    expect(codesRotatable('InProgress')).toBe(false);
+  });
+
+  it('fails open on an unrecognised or absent phase, same as sectionVisibility', () => {
+    expect(codesRotatable('SomeFuturePhase')).toBe(true);
+    expect(codesRotatable('')).toBe(true);
+    expect(codesRotatable(undefined)).toBe(true);
+    expect(codesRotatable(null)).toBe(true);
+  });
+
+  it('lists exactly the two non-rotatable phases, frozen', () => {
+    expect(NON_ROTATABLE_PHASES).toEqual(['Loading', 'InProgress']);
+    expect(Object.isFrozen(NON_ROTATABLE_PHASES)).toBe(true);
   });
 });

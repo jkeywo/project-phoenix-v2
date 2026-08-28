@@ -19,6 +19,28 @@ export function isInGame(phase) {
   return IN_GAME_PHASES.includes(phase);
 }
 
+/**
+ * Phases in which an operator may NOT explicitly regenerate a join code
+ * (issue #1115 AC2). `Loading` is grouped with `InProgress` rather than
+ * treated as "not yet a mission": assets are already committed to a specific
+ * run by then, and rotating the code out from under it is the same hazard as
+ * doing so mid-mission. Server-side, `rendezvous-transport.js`'s `rotate()`
+ * has no notion of GamePhase at all — this predicate is the gate a caller
+ * (server.html) checks BEFORE ever sending that frame.
+ */
+export const NON_ROTATABLE_PHASES = Object.freeze(['Loading', 'InProgress']);
+
+/**
+ * True while the operator may rotate a join code: `Lobby`, `GameOver`, or the
+ * empty/unknown phase before the first `LobbyStatePayload` push has arrived.
+ * Fail-open on an unrecognised phase for the same reason `sectionVisibility`
+ * defaults to the lobby view — a future GamePhase variant should not silently
+ * lock the rotate lever rather than merely not knowing about it yet.
+ */
+export function codesRotatable(phase) {
+  return !NON_ROTATABLE_PHASES.includes(phase);
+}
+
 export function sectionVisibility(phase) {
   const inGame = isInGame(phase);
   return {
@@ -33,4 +55,6 @@ if (typeof window !== 'undefined') {
   window.sectionVisibility = sectionVisibility;
   window.isInGame = isInGame;
   window.IN_GAME_PHASES = IN_GAME_PHASES;
+  window.codesRotatable = codesRotatable;
+  window.NON_ROTATABLE_PHASES = NON_ROTATABLE_PHASES;
 }

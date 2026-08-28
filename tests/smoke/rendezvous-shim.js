@@ -310,9 +310,22 @@
           }
           // Both ends are wired the moment the answerer has seen the offer;
           // the answer still travels, exactly as it would over a real relay.
-          setTimeout(() => openChannels(link), 0);
+          //
+          // A MICROTASK, not setTimeout(0), and the difference is a real bug
+          // this fake used to have. The answerer's channels have to be open
+          // before anything can arrive on them — in real WebRTC that is
+          // guaranteed, because a channel that has fired `ondatachannel` and is
+          // carrying data is open by definition. On a timer it was not: the
+          // answer leaves this page, crosses the bus, the offerer opens and
+          // sends its first frame, and that frame comes back as a TASK which
+          // can be scheduled ahead of a pending timer on a busy page. The
+          // receiving `onmessage` then ran against a channel this fake still
+          // called 'connecting', and the reply `send` was silently dropped by
+          // its own readyState guard — a handshake that simply never completed,
+          // on two WASM host pages heavy enough to delay a timer.
+          queueMicrotask(() => openChannels(link));
         } else if (d.type === 'answer' && link) {
-          setTimeout(() => openChannels(link), 0);
+          queueMicrotask(() => openChannels(link));
         }
       },
       async addIceCandidate() {},

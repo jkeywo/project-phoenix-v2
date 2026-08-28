@@ -95,11 +95,16 @@ const waitForFleetError = (page) =>
     { timeout: 30_000 },
   );
 
-test('a second ship host joins the fleet and appears as its own slot', async ({ context }) => {
-  // Two WASM host pages plus a fleet handshake. The suite's 60s default is a
-  // budget for ONE host booting; these specs boot two and then talk between
-  // them, and the whole file runs after ~40 other specs on one worker.
-  test.setTimeout(180_000);
+// Every test here boots at least two WASM host pages and then talks between
+// them. The suite's 60s default is a budget for ONE host booting, and this file
+// runs after ~40 other specs on a single worker — so each test buys its own
+// budget rather than relying on the default. Assertions that belong to one
+// scenario are kept in ONE test for the same reason: a second test that has to
+// stand up the same fleet again is two more WASM boots for one more assertion.
+const FLEET_TIMEOUT = 240_000;
+
+test('two ship hosts assemble a fleet, and each crew star stays on its own host', async ({ context }) => {
+  test.setTimeout(FLEET_TIMEOUT);
   const lead = await bootHost(context);
   const fleet = await openFleet(lead);
   expect(fleet.suffix).toMatch(/^[A-Z]{5}$/);
@@ -134,20 +139,9 @@ test('a second ship host joins the fleet and appears as its own slot', async ({ 
   expect(onSecond.url).toBe('');
   expect(onLead.url).toBe(fleet.url);
   expect(onLead.error).toBe('');
-});
 
-test('each crew star stays attached to its own host', async ({ context }) => {
-  // Two WASM host pages plus a fleet handshake. The suite's 60s default is a
-  // budget for ONE host booting; these specs boot two and then talk between
-  // them, and the whole file runs after ~40 other specs on one worker.
-  test.setTimeout(180_000);
-  const lead = await bootHost(context);
-  const fleet = await openFleet(lead);
-  const second = await bootHost(context, `#${fleet.url.split('#')[1]}`);
-  await waitForSlots(second, 2);
-
-  // A phone joins the LEAD's ship with the lead's own crew code.
-  const crew = await createTestClient(context, await readHostPeerId(lead), {
+  // ── and a phone joins the LEAD's ship with the lead's own crew code ──────
+  const phone = await createTestClient(context, crew, {
     token: 'fleet-crew-a',
     name: 'Crewman',
   });
@@ -167,7 +161,7 @@ test('each crew star stays attached to its own host', async ({ context }) => {
         return (0, eval)('tokenConns').has(t);
       } catch { return false; }
     },
-    crew.token,
+    phone.token,
     { timeout: 15_000 },
   );
 
@@ -175,21 +169,27 @@ test('each crew star stays attached to its own host', async ({ context }) => {
   // the fleet link is a different socket in a different namespace carrying a
   // different protocol, so there is no filtering for this to depend on.
   expect(await tokensOn(second)).toEqual([]);
-  await crew.close();
+  await phone.close();
 });
 
-test('a crew code typed into the fleet field is refused by type', async ({ context }) => {
-  // Two WASM host pages plus a fleet handshake. The suite's 60s default is a
-  // budget for ONE host booting; these specs boot two and then talk between
-  // them, and the whole file runs after ~40 other specs on one worker.
-  test.setTimeout(180_000);
+test('a code entered into the wrong typed field is refused as wrong-type', async ({ context }) => {
+  test.setTimeout(FLEET_TIMEOUT);
   const lead = await bootHost(context);
+  const fleet = await openFleet(lead);
+
+  // A phone typing the FLEET code into the crew field.
+  const phone = await context.newPage();
+  await phone.goto('/client/');
+  await phone.fill('#join-code-input', fleet.suffix.toLowerCase());
+  await phone.click('#join-submit-btn');
+  await expect(phone.locator('#join-entry-error'))
+    .toHaveText(ts('client.join.error_wrong_type'), { timeout: 15_000 });
+  await expect(phone.locator('#join-entry')).toBeVisible();
+
+  // A ship host typing the lead's CREW code into the fleet field — five
+  // perfectly good letters, in the wrong namespace.
   const second = await bootHost(context);
-
-  // The lead's CREW code — five perfectly good letters, in the wrong namespace.
-  const crewCode = (await readHostPeerId(lead)).split('_').pop();
-  await typeFleetCode(second, crewCode);
-
+  await typeFleetCode(second, (await readHostPeerId(lead)).split('_').pop());
   await waitForFleetError(second);
   const panel = await fleetPanel(second);
   expect(panel.error).toBe(
@@ -198,25 +198,8 @@ test('a crew code typed into the fleet field is refused by type', async ({ conte
   expect(panel.slots).toEqual([]);
 });
 
-test('a fleet code typed into the crew field is refused by type', async ({ context }) => {
-  const lead = await bootHost(context);
-  const fleet = await openFleet(lead);
-
-  const phone = await context.newPage();
-  await phone.goto('/client/');
-  await phone.fill('#join-code-input', fleet.suffix.toLowerCase());
-  await phone.click('#join-submit-btn');
-
-  await expect(phone.locator('#join-entry-error'))
-    .toHaveText(ts('client.join.error_wrong_type'), { timeout: 15_000 });
-  await expect(phone.locator('#join-entry')).toBeVisible();
-});
-
 test('closing admission refuses a new host without disturbing an admitted one', async ({ context }) => {
-  // Two WASM host pages plus a fleet handshake. The suite's 60s default is a
-  // budget for ONE host booting; these specs boot two and then talk between
-  // them, and the whole file runs after ~40 other specs on one worker.
-  test.setTimeout(180_000);
+  test.setTimeout(FLEET_TIMEOUT);
   const lead = await bootHost(context);
   const fleet = await openFleet(lead);
   const second = await bootHost(context, `#${fleet.url.split('#')[1]}`);
@@ -241,37 +224,49 @@ test('closing admission refuses a new host without disturbing an admitted one', 
   expect((await fleetPanel(second)).slots).toHaveLength(2);
   expect((await fleetPanel(lead)).slots).toHaveLength(2);
 
-  // A host arriving now is refused, and the fleet is unchanged.
-  await second.evaluate(() => window.__hostFleetLeave());
-  await waitForSlots(lead, 1);
-  await second.evaluate((code) => window.__hostFleetJoin(code), fleet.suffix);
-  await waitForFleetError(second);
-  expect((await fleetPanel(second)).error).toBe(
+  // A THIRD machine arriving now is refused — and `second` stays up throughout,
+  // which is the half of this criterion that would otherwise be argued rather
+  // than shown.
+  const third = await bootHost(context, `#${fleet.url.split('#')[1]}`);
+  await waitForFleetError(third);
+  expect((await fleetPanel(third)).error).toBe(
     ts('server.fleet.error_joining', { reason: ts('client.join.error_closed') }),
   );
-  expect((await fleetPanel(lead)).slots).toHaveLength(1);
+  expect((await fleetPanel(third)).slots).toEqual([]);
+  expect((await fleetPanel(lead)).slots).toHaveLength(2);
+  expect((await fleetPanel(second)).slots).toHaveLength(2);
 
-  // Reopen, and the same host is admitted again.
+  // Reopen, and the same machine gets in.
   await openFleetTab(lead);
   await lead.click('[data-control="fleet-admission"]');
   await closeCog(lead);
-  await second.evaluate((code) => window.__hostFleetJoin(code), fleet.suffix);
-  await second.waitForFunction(
+  await third.evaluate((code) => window.__hostFleetJoin(code), fleet.suffix);
+  // Settle on EITHER outcome before asserting, so a still-refusing fleet fails
+  // with the sentence on screen rather than as a bare roster timeout.
+  await third.waitForFunction(
     () => (document.getElementById('fleet-error')?.textContent ?? '').length > 0
-      || document.querySelectorAll('#fleet-slots li').length === 2,
+      || document.querySelectorAll('#fleet-slots li').length === 3,
     { timeout: 30_000 },
   );
-  const readmitted = await fleetPanel(second);
+  const readmitted = await fleetPanel(third);
   expect(readmitted.error, JSON.stringify(readmitted)).toBe('');
+  await waitForSlots(lead, 3);
+  await waitForSlots(second, 3);
+
+  // And the ordinary operator round trip: leave a fleet, then come back to it.
+  // Its slot goes while the roster is still mutable, and it is issued a new one
+  // — an id is spent once, because #1116 will put these in a shared stream.
+  await second.evaluate(() => window.__hostFleetLeave());
   await waitForSlots(lead, 2);
-  await waitForSlots(second, 2);
+  await second.evaluate((code) => window.__hostFleetJoin(code), fleet.suffix);
+  await waitForSlots(lead, 3);
+  const rejoined = await fleetPanel(second);
+  expect(rejoined.error).toBe('');
+  expect(rejoined.slots.filter((r) => r.mine)).toHaveLength(1);
 });
 
 test('mission start freezes the slot roster', async ({ context }) => {
-  // Two WASM host pages plus a fleet handshake. The suite's 60s default is a
-  // budget for ONE host booting; these specs boot two and then talk between
-  // them, and the whole file runs after ~40 other specs on one worker.
-  test.setTimeout(180_000);
+  test.setTimeout(FLEET_TIMEOUT);
   const lead = await bootHost(context);
   const fleet = await openFleet(lead);
   const second = await bootHost(context, `#${fleet.url.split('#')[1]}`);
@@ -296,19 +291,26 @@ test('mission start freezes the slot roster', async ({ context }) => {
   }
 
   // Past the freeze the server code can no longer create a slot. It is still
-  // resolvable — it is the recovery capability #1120 will honour — so the
-  // refusal comes from the fleet lead, and it is its own reason rather than
-  // "admission closed".
-  await second.evaluate(() => window.__hostFleetLeave());
-  await second.evaluate((code) => window.__hostFleetJoin(code), fleet.suffix);
-  await waitForFleetError(second);
-  expect((await fleetPanel(second)).error).toBe(
+  // RESOLVABLE — it is the recovery capability #1120 will honour, so a claim has
+  // to reach the lead to be judged — and the refusal is its own reason rather
+  // than "admission closed".
+  const third = await bootHost(context, `#${fleet.url.split('#')[1]}`);
+  await waitForFleetError(third);
+  expect((await fleetPanel(third)).error).toBe(
     ts('server.fleet.error_joining', { reason: ts('server.fleet.error_frozen') }),
   );
+  expect((await fleetPanel(lead)).slots).toHaveLength(2);
 
-  // And the frozen slot is kept, marked disconnected, rather than deleted.
-  const onLead = await fleetPanel(lead);
-  expect(onLead.slots).toHaveLength(2);
-  expect(onLead.slots[1].text).toContain(ts('server.fleet.disconnected'));
+  // A frozen slot whose host goes is KEPT and marked disconnected, because it
+  // is the object a recovery claim will name.
+  await second.close();
+  await lead.waitForFunction(
+    (gone) => {
+      const rows = [...document.querySelectorAll('#fleet-slots li')];
+      return rows.length === 2 && rows[1].textContent.includes(gone);
+    },
+    ts('server.fleet.disconnected'),
+    { timeout: 20_000 },
+  );
   await crew.close();
 });

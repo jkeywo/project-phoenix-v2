@@ -31,6 +31,24 @@
  * It is also not a shared simulation. #1114 assembles a fleet and freezes it;
  * making the frozen fleet run one deterministic mission is #1116's, and the
  * envelope in `gui/host-mesh.js` is stamped for that work rather than doing it.
+ *
+ * ## Where the roster is shown, and where it will be shown
+ *
+ * Today the synced roster reaches each host's OWN operator surface: the
+ * `#fleet-panel` on its viewscreen and the Fleet section of its settings cog.
+ * That is the whole of #1114.
+ *
+ * Reaching a PHONE is a different route and it is worth writing down, because
+ * the obvious one is wrong. A fleet frame must never be forwarded to a crew
+ * client — that would put another ship's host protocol on a console's wire and
+ * make "each crew star belongs to one host" a forwarding rule rather than a
+ * fact. The roster reaches a phone the way everything else on that phone does:
+ * its OWN host projects it, as an ordinary `ServerMessage` broadcast to that
+ * ship's crew alone, fed in from this page through the same wasm boundary the
+ * pre-Bevy scenario catalogue already crosses. So a crew member sees the fleet
+ * their ship is in, described by their own ship's host, and never a byte from
+ * another host's link. That message belongs with #1116, which is when a crew
+ * has something to do about it.
  */
 
 import { NAMESPACE_SERVER } from './join-code.js';

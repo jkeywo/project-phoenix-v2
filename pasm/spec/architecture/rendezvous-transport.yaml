@@ -274,7 +274,8 @@ entities:
         - "[ai] A slot dropped BEFORE the freeze is deleted and one dropped after is kept and marked disconnected. The second is the object #1120's recovery claims, and it is the same non-pruning discipline SessionManager keeps for the same reason: a record that is deleted cannot be reconnected to."
         - "[ai] Fleet capacity is authored ([limits] max_fleet_hosts) rather than a number in code, and is deliberately smaller than the service's own max_peers_per_record — one is how big a fleet the game fields, the other is a memory bound on any record that knows nothing about ships."
       open_questions:
-        - Running the frozen fleet as one deterministic mission is #1116; recovering a disconnected slot onto a replacement machine is #1120. The roster reaches each host's own operator surface, not yet each crew's lobby UI.
+        - Running the frozen fleet as one deterministic mission is #1116; recovering a disconnected slot onto a replacement machine is #1120.
+        - "The roster reaches each host's own operator surface — the viewscreen fleet panel and the settings cog — and not yet a phone. The route when it does is decided and is NOT forwarding a host-mesh frame to a crew client: that would put another ship's host protocol on a console's wire and make crew isolation a forwarding rule rather than a fact. A phone learns the fleet from ITS OWN host, as an ordinary ServerMessage broadcast to that ship's crew, fed in through the same wasm boundary the pre-Bevy scenario catalogue already crosses. That message belongs with #1116, which is when a crew has something to do about it."
     architecture:
       kind: transport-adapter
       authority: non-authoritative

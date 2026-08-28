@@ -6643,7 +6643,7 @@ dependencies = [
 [[package]]
 name = "vellum-ultralight"
 version = "0.1.0"
-source = "git+file:///C:/Coding/vellum?branch=phoenix-ultralight#d018d2e013ebb7395d67c1919565558f2adba0a4"
+source = "git+file:///C:/Coding/vellum?branch=phoenix-ultralight#8b90aff0aa5794ec86fdbc80b5cc8d1434a21d84"
 dependencies = [
  "ul-next",
 ]

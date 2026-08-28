@@ -29,11 +29,52 @@ const MAX_HEAD_BYTES: usize = 8 * 1024;
 /// so it is where the bundle states which content set it was built for.
 pub const BUNDLE_MANIFEST_REL: &str = "assets/scenarios.toml";
 
+/// Where a request came from, as far as the socket loop could tell.
+///
+/// The one thing [`route`] needs from the connection itself, and the reason it
+/// needs it is [`Route::Document`]: this host binds `0.0.0.0:8080` by default,
+/// with no TLS and no authentication, because its job is handing a bundle to
+/// phones on a LAN. The bundle, the manifest and the stamp are *for* that
+/// audience. A document this process publishes in memory is not — it is a local
+/// Station pane's own page, and a pane always connects from this machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PeerOrigin {
+    /// The connection's peer address is a loopback address.
+    Loopback,
+    /// Anything else — **including** an address the OS would not report, which
+    /// is the safe way round for a gate.
+    Remote,
+}
+
+/// Classify a connection's peer address.
+///
+/// `None` (the OS refused to name the peer) is [`PeerOrigin::Remote`]: a gate
+/// that opened on "I could not tell" would be no gate at all.
+///
+/// The IPv4-mapped case is not pedantry. A dual-stack listener on `[::]`
+/// reports an IPv4 loopback connection as `::ffff:127.0.0.1`, and
+/// `Ipv6Addr::is_loopback` answers `false` for that — so without the second arm
+/// a pane on an IPv6-bound host would be refused its own document.
+pub fn peer_origin(addr: Option<std::net::SocketAddr>) -> PeerOrigin {
+    let loopback = match addr.map(|a| a.ip()) {
+        Some(std::net::IpAddr::V4(v4)) => v4.is_loopback(),
+        Some(std::net::IpAddr::V6(v6)) => {
+            v6.is_loopback() || v6.to_ipv4_mapped().is_some_and(|v4| v4.is_loopback())
+        }
+        None => false,
+    };
+    if loopback {
+        PeerOrigin::Loopback
+    } else {
+        PeerOrigin::Remote
+    }
+}
+
 /// Documents this process publishes itself, in addition to whatever is on disk
 /// under `--client-dir` (issue #1122).
 ///
 /// One user, and a deliberately general shape rather than a pane-specific one:
-/// a native Station pane loads *the shipped client page with three lines
+/// a native Station pane loads *the shipped client page with two scripts
 /// injected* (`native_host::panes::document`), and that document exists only in
 /// this process's memory. It has to arrive over HTTP from this host, same
 /// origin, at the client directory's own depth — that is what makes every
@@ -42,8 +83,9 @@ pub const BUNDLE_MANIFEST_REL: &str = "assets/scenarios.toml";
 /// question to answer.
 ///
 /// Checked **before** the static bundle, so a published document shadows a file
-/// of the same name rather than racing it. Nothing here is written to disk, and
-/// the bundle is never modified.
+/// of the same name rather than racing it, and **only for a loopback peer** —
+/// see [`PeerOrigin`]. Nothing here is written to disk, and the bundle is never
+/// modified.
 #[derive(Clone, Default)]
 pub struct HostedDocuments {
     documents: Arc<std::sync::RwLock<std::collections::BTreeMap<String, String>>>,
@@ -218,11 +260,17 @@ pub enum Route {
 /// so a published document shadows a file of the same name deterministically
 /// rather than racing it. A delivery-only host passes an empty set and routes
 /// exactly as it always did.
+///
+/// `peer` is the only thing here that comes from the connection rather than
+/// from the request, and it gates exactly one decision: a hosted document is
+/// served to [`PeerOrigin::Loopback`] and to nothing else. Everything the LAN is
+/// meant to fetch — the bundle, the manifest, the stamp — is unaffected.
 pub fn route(
     req: &Request,
     content: &LoadedContent,
     client: &ClientSource,
     documents: &HostedDocuments,
+    peer: PeerOrigin,
 ) -> Route {
     if req.method != "GET" && req.method != "HEAD" {
         return Route::MethodNotAllowed;
@@ -258,8 +306,15 @@ pub fn route(
             }
         }
         path => {
-            if let Some(body) = documents.get(path) {
-                return Route::Document { body };
+            // A hosted document is a local pane's own console page, carrying a
+            // live participant's view of the bridge. It is looked up at all
+            // only for a peer on this machine — and a remote caller then gets
+            // whatever any unknown path gets, so the refusal does not even
+            // confirm the path exists.
+            if peer == PeerOrigin::Loopback {
+                if let Some(body) = documents.get(path) {
+                    return Route::Document { body };
+                }
             }
             match client {
                 ClientSource::Hosted => Route::NotFound {
@@ -532,6 +587,10 @@ impl ShutdownSignal {
 }
 
 fn handle_connection<F: Fn(HostEvent)>(mut stream: TcpStream, state: &ServerState, on_event: &F) {
+    // Read BEFORE anything else can fail: this is the only point at which the
+    // connection's own origin is knowable, and `route` gates the host's
+    // in-memory documents on it. See `PeerOrigin`.
+    let peer = peer_origin(stream.peer_addr().ok());
     let head = match read_head(&mut stream) {
         Some(head) => head,
         None => {
@@ -567,7 +626,7 @@ fn handle_connection<F: Fn(HostEvent)>(mut stream: TcpStream, state: &ServerStat
     };
     let head_only = req.method == "HEAD";
 
-    match route(&req, &state.content, &state.client, &state.documents) {
+    match route(&req, &state.content, &state.client, &state.documents, peer) {
         Route::Json {
             status,
             reason,
@@ -853,6 +912,7 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
             &content,
             &ClientSource::Hosted,
             &HostedDocuments::default(),
+            PeerOrigin::Loopback,
         );
         match r {
             Route::Json { status, body, .. } => {
@@ -877,6 +937,7 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
             &content,
             &ClientSource::Hosted,
             &HostedDocuments::default(),
+            PeerOrigin::Loopback,
         ) {
             Route::Json {
                 status,
@@ -906,6 +967,7 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
             &content,
             &ClientSource::Hosted,
             &HostedDocuments::default(),
+            PeerOrigin::Loopback,
         ) {
             Route::Json {
                 status,
@@ -933,6 +995,7 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
             &content,
             &ClientSource::Hosted,
             &HostedDocuments::default(),
+            PeerOrigin::Loopback,
         ) {
             Route::Json {
                 status, refusal, ..
@@ -954,6 +1017,7 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
                 &content,
                 &ClientSource::Hosted,
                 &HostedDocuments::default(),
+                PeerOrigin::Loopback,
             ),
             Route::NotFound { .. }
         ));
@@ -971,7 +1035,8 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
                 &request("GET / HTTP/1.1\r\n"),
                 &content,
                 &bundled,
-                &HostedDocuments::default()
+                &HostedDocuments::default(),
+                PeerOrigin::Loopback,
             ),
             Route::Static {
                 rel_path: "index.html".to_string()
@@ -981,7 +1046,7 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
 
     #[test]
     fn a_document_the_host_publishes_itself_is_served_ahead_of_the_bundle() {
-        // Issue #1122's pane document: the shipped client page with three lines
+        // Issue #1122's pane document: the shipped client page with two scripts
         // injected, existing only in this process's memory, arriving from this
         // host at the client directory's own depth so every relative URL in it
         // resolves exactly as it does for a phone.
@@ -1001,6 +1066,7 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
                 &content,
                 &bundled,
                 &documents,
+                PeerOrigin::Loopback,
             ),
             Route::Document {
                 body: "<html>pane</html>".to_string()
@@ -1013,6 +1079,7 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
                 &content,
                 &bundled,
                 &documents,
+                PeerOrigin::Loopback,
             ),
             Route::Static {
                 rel_path: "client/index.html".to_string()
@@ -1026,9 +1093,119 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
                 &content,
                 &bundled,
                 &documents,
+                PeerOrigin::Loopback,
             ),
             Route::Static { .. }
         ));
+    }
+
+    #[test]
+    fn a_hosted_document_is_never_served_to_a_peer_that_is_not_this_machine() {
+        // The finding this gate answers. `phoenix-host` binds 0.0.0.0:8080 by
+        // default, with no TLS and no authentication — that is the shape PRD
+        // #855 wanted, because the audience is phones on a LAN. A pane's own
+        // console page is not for that audience: it belongs to a live
+        // participant on this machine, and a pane always connects from here.
+        //
+        // The bundle and the two version-pin endpoints stay LAN-open, which is
+        // their job, and this test says so rather than leaving it implied.
+        let fx = Fixture::new("documents-remote", MANIFEST);
+        let content = load_content(&fx.path(), "assets/scenarios.toml").unwrap();
+        let bundled = ClientSource::Bundled {
+            dir: "dist".to_string(),
+        };
+        let documents = HostedDocuments::default();
+        documents.publish("/client/pane-0-abcd.html", "<html>pane</html>".to_string());
+
+        let pane_request = request("GET /client/pane-0-abcd.html HTTP/1.1\r\n");
+        let remote = route(
+            &pane_request,
+            &content,
+            &bundled,
+            &documents,
+            PeerOrigin::Remote,
+        );
+        assert!(
+            !matches!(remote, Route::Document { .. }),
+            "a LAN caller must not be handed a pane's document: {remote:?}"
+        );
+        // And it is refused the way any unknown path is, so the refusal does
+        // not even confirm the document exists. (`dist/` holds no such file, so
+        // the socket loop answers this Static route 404.)
+        assert_eq!(
+            remote,
+            Route::Static {
+                rel_path: "client/pane-0-abcd.html".to_string()
+            }
+        );
+
+        // The same request from this machine is served, so the gate is about
+        // the peer and nothing else.
+        assert!(matches!(
+            route(
+                &pane_request,
+                &content,
+                &bundled,
+                &documents,
+                PeerOrigin::Loopback
+            ),
+            Route::Document { .. }
+        ));
+
+        // The LAN keeps everything it is meant to have.
+        for path in [STAMP_PATH, "/client/index.html"] {
+            let r = route(
+                &request(&format!("GET {path} HTTP/1.1\r\n")),
+                &content,
+                &bundled,
+                &documents,
+                PeerOrigin::Remote,
+            );
+            assert!(
+                !matches!(r, Route::NotFound { .. }),
+                "{path} is what this host exists to serve to a phone: {r:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_peer_address_is_loopback_only_when_it_really_is() {
+        use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+        let at = |ip: IpAddr| SocketAddr::new(ip, 51234);
+        assert_eq!(
+            peer_origin(Some(at(IpAddr::V4(Ipv4Addr::LOCALHOST)))),
+            PeerOrigin::Loopback
+        );
+        // The whole 127/8 block, not just .0.0.1.
+        assert_eq!(
+            peer_origin(Some(at(IpAddr::V4(Ipv4Addr::new(127, 3, 2, 1))))),
+            PeerOrigin::Loopback
+        );
+        assert_eq!(
+            peer_origin(Some(at(IpAddr::V6(Ipv6Addr::LOCALHOST)))),
+            PeerOrigin::Loopback
+        );
+        // A dual-stack listener reports an IPv4 loopback connection like this,
+        // and `Ipv6Addr::is_loopback` says false for it — so a pane on an
+        // IPv6-bound host would be refused its own document without this arm.
+        assert_eq!(
+            peer_origin(Some(at(IpAddr::V6(Ipv4Addr::LOCALHOST.to_ipv6_mapped())))),
+            PeerOrigin::Loopback
+        );
+
+        assert_eq!(
+            peer_origin(Some(at(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 5))))),
+            PeerOrigin::Remote
+        );
+        assert_eq!(
+            peer_origin(Some(at(IpAddr::V6(Ipv6Addr::new(
+                0x2001, 0xdb8, 0, 0, 0, 0, 0, 1
+            ))))),
+            PeerOrigin::Remote
+        );
+        // "I could not tell" is Remote: a gate that opened on an unknown peer
+        // would be no gate.
+        assert_eq!(peer_origin(None), PeerOrigin::Remote);
     }
 
     #[test]
@@ -1049,6 +1226,7 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
                         &content,
                         &ClientSource::Hosted,
                         &documents,
+                        PeerOrigin::Loopback,
                     ),
                     Route::Json { .. }
                 ),
@@ -1070,6 +1248,7 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
                 &content,
                 &bundled,
                 &HostedDocuments::default(),
+                PeerOrigin::Loopback,
             ),
             Route::NotFound { .. }
         ));
@@ -1085,6 +1264,7 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
                 &content,
                 &ClientSource::Hosted,
                 &HostedDocuments::default(),
+                PeerOrigin::Loopback,
             ),
             Route::MethodNotAllowed
         );
@@ -1102,6 +1282,7 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
             &content,
             &ClientSource::Hosted,
             &HostedDocuments::default(),
+            PeerOrigin::Loopback,
         ) {
             Route::Json { status, .. } => assert_eq!(status, 200),
             other => panic!("expected JSON, got {other:?}"),

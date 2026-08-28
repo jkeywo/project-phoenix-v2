@@ -226,6 +226,12 @@ fn main() {
     // server's own in-memory documents, so a pane loads the client bundle this
     // process is already serving, same origin, at the client directory's own
     // depth.
+    //
+    // The bus is kept here as well as handed to the app, so the shutdown at the
+    // bottom of `main` can withdraw the pane documents: the delivery thread
+    // outlives `App::run()` by however long the join takes, and nothing should
+    // be serving a bridge console in that window.
+    let mut pane_bus: Option<native_host::panes::PaneBus> = None;
     if !sim.panes.is_empty() {
         if !cfg!(feature = "ultralight") {
             eprintln!(
@@ -259,12 +265,17 @@ fn main() {
             );
             std::process::exit(1);
         }
-        for (pane, url) in panes.opened.iter().zip(panes.urls()) {
+        for pane in &panes.opened {
+            // Deliberately NOT the pane's URL. It carries this participant's
+            // whole session token in its fragment, and an operator log is a
+            // file, a scrollback and a screenshot; the first eight characters
+            // are enough to correlate a pane with what it says.
             eprintln!(
-                "phoenix-host: {} is {} on token {}… at {url}",
+                "phoenix-host: {} is {} on token {}… at http://{}/",
                 pane.id,
                 pane.identity.name(),
                 &pane.identity.token()[..8],
+                panes.host_addr,
             );
         }
         #[cfg(feature = "ultralight")]
@@ -275,6 +286,7 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        pane_bus = Some(panes.bus.clone());
         cfg.panes = Some(panes);
     }
 
@@ -322,6 +334,12 @@ fn main() {
 
     native_host::run(app);
 
+    // The window has closed, so no pane needs its document any more — and the
+    // delivery thread is still up until the join below. Withdraw before the
+    // stop signal, not after, so that window is empty rather than merely short.
+    if let Some(bus) = &pane_bus {
+        bus.withdraw_all();
+    }
     shutdown.stop();
     if let Ok(handle) = delivery {
         let _ = handle.join();

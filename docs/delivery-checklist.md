@@ -327,6 +327,15 @@ the host process. It needs a build with the `ultralight` cargo feature, which
 **no CI job sets and none may ever set**: `ul-next-sys`'s build script downloads
 a proprietary ~100 MB SDK archive at build time.
 
+Keeping that true takes an arrangement, not just a default-off feature.
+`--all-features` enables it regardless, and the `test` job's clippy step asked
+for exactly that until issue #1122's review caught it. That step now names its
+features — every one `Cargo.toml` declares except `ultralight` — and
+`AGENTS.md`'s local gate command mirrors the same list. **A new cargo feature
+belongs in both**, or it is a feature nothing lints. Vellum does the same thing
+a different way: its engine job selects the workspace with `--exclude
+vellum-ultralight`, and type-checks the SDK half in a manual, non-required job.
+
 ```
 node scripts/build-client.mjs            # a pane loads the BUILT bundle's page
 cargo build --release --features ultralight --bin phoenix-host

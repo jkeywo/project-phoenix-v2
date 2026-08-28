@@ -43,6 +43,9 @@ use bevy::prelude::*;
 
 use project_phoenix::boot::NativeRenderSurface;
 use project_phoenix::core::messages::{ClientMessage, GamePhase, ServerMessage, SystemId};
+use project_phoenix::delivery::args::ClientSource;
+use project_phoenix::delivery::http::parse_request;
+use project_phoenix::delivery::serve::{load_content, route, HostedDocuments, PeerOrigin, Route};
 use project_phoenix::entities::template_preload::TemplatePreload;
 use project_phoenix::lobby::handler::Target;
 use project_phoenix::native_host::panes::identity::PaneIdentity;
@@ -522,6 +525,101 @@ fn a_pane_and_a_transport_participant_operate_different_stations_on_the_same_shi
             ),
         "the transport participant was Welcomed on its own token"
     );
+}
+
+#[test]
+fn a_panes_identity_is_in_its_url_and_never_in_the_body_the_host_serves() {
+    // The finding, end to end and through the real router. `phoenix-host` binds
+    // 0.0.0.0:8080 by default with no TLS and no authentication — that is what
+    // PRD #855 built, because the audience is phones on a LAN. A live
+    // participant's session token in a body served on that listener would be a
+    // seat on the bridge available to anyone on the network.
+    //
+    // Three separate defences, asserted here as a chain rather than
+    // individually: the identity is in the URL fragment (which a browser never
+    // transmits), the path carries a per-pane nonce (so it cannot be
+    // enumerated), and the document is served only to a loopback peer.
+    let panes = LocalPanes::open(&["Ada".to_string()], "127.0.0.1:8080");
+    let documents = HostedDocuments::default();
+    let token = panes.opened[0].identity.token().to_string();
+    let page = "<html><head></head><body></body></html>";
+    panes
+        .publish(page, &documents)
+        .expect("the client page becomes a pane document");
+
+    let path = panes
+        .bus
+        .document_path(panes.opened[0].id)
+        .expect("the pane's document is published somewhere");
+    let url = panes.urls()[0].clone();
+    let (address, fragment) = url.split_once('#').expect("a pane URL carries a fragment");
+
+    // 1. The identity is in the fragment and in nothing else.
+    assert!(fragment.contains(&token.replace('_', "%5F")));
+    assert!(fragment.contains("Ada"));
+    assert!(
+        !address.contains(&token),
+        "the token must not be in the part of the URL a browser transmits: {address}"
+    );
+    let served = documents.get(&path).expect("the document is published");
+    assert!(
+        !served.contains(&token),
+        "a pane's session token must never appear in a served body"
+    );
+    assert!(!served.contains("Ada"), "nor the name it joins under");
+
+    // 2. The path is not `/client/pane-0.html` and cannot be guessed from the
+    //    pane's number.
+    assert!(path.starts_with("/client/pane-0-") && path.ends_with(".html"));
+    assert!(
+        documents.get("/client/pane-0.html").is_none(),
+        "the enumerable path must not resolve"
+    );
+
+    // 3. And the real router hands it out only to this machine.
+    let fx_dir = std::env::temp_dir().join("phoenix-pane-serve-gate");
+    let _ = std::fs::remove_dir_all(&fx_dir);
+    std::fs::create_dir_all(fx_dir.join("assets/worlds")).unwrap();
+    std::fs::write(
+        fx_dir.join("assets/scenarios.toml"),
+        "[content]\nid = \"phoenix-base\"\nepoch = 1\n",
+    )
+    .unwrap();
+    let content = load_content(&fx_dir.to_string_lossy(), "assets/scenarios.toml")
+        .expect("the fixture manifest loads");
+    let client = ClientSource::Bundled {
+        dir: "dist".to_string(),
+    };
+    let req = parse_request(&format!("GET {path} HTTP/1.1\r\n")).unwrap();
+    assert!(
+        matches!(
+            route(&req, &content, &client, &documents, PeerOrigin::Loopback),
+            Route::Document { .. }
+        ),
+        "the pane's own view, from this machine, is served"
+    );
+    assert!(
+        !matches!(
+            route(&req, &content, &client, &documents, PeerOrigin::Remote),
+            Route::Document { .. }
+        ),
+        "the same request from the LAN is not"
+    );
+
+    // 4. And a closed pane's path stops resolving at all — the pane's id is
+    //    never reissued, so there is nothing this document could ever be for
+    //    again.
+    panes.bus.close(panes.opened[0].id);
+    assert_eq!(panes.bus.document_path(panes.opened[0].id), None);
+    assert!(documents.get(&path).is_none());
+    assert!(
+        !matches!(
+            route(&req, &content, &client, &documents, PeerOrigin::Loopback),
+            Route::Document { .. }
+        ),
+        "a closed pane's document must stop being served, even to this machine"
+    );
+    let _ = std::fs::remove_dir_all(&fx_dir);
 }
 
 #[test]

@@ -26,9 +26,38 @@
 //! Dropping instead would be invisible and permanent: the message most likely to
 //! be in that first batch is `Welcome`, and a pane that missed its `Welcome`
 //! sits in the lobby forever with a completely clean log.
+//!
+//! # Every push costs the simulation, so a frame may only make so many
+//!
+//! This is the cost worth stating out loud rather than discovering. A push is a
+//! **synchronous** `evaluate_script` into a real browser engine, and the loop
+//! that calls it (`super::ultralight::drive_panes`) runs in `Update` on the Bevy
+//! main thread — the same thread `FixedUpdate` runs `SimSet` on (AGENTS.md rule
+//! 7). Page JavaScript execution time is therefore *simulation* time, for every
+//! participant on the ship, including the network clients issue #1112 will add.
+//!
+//! An unbounded frame is easy to reach without anything being wrong: the first
+//! frame after a document loads drains the whole load-time backlog at once, and
+//! that backlog is sized by [`super::registry::DEFAULT_OUTBOUND_CAP`]. So
+//! [`pump_pane`] pushes at most [`MAX_PUSHES_PER_FRAME`] per pane per frame and
+//! leaves the rest queued, by the same `requeue_front` a failed push uses. The
+//! backlog then arrives over several frames in order, which is what a page can
+//! render anyway.
+//!
+//! A page-side watchdog — a single push that never returns — is issues
+//! #1123/#1124's, and is not solved here.
 
 use super::registry::{PaneDispatch, PaneId};
 use super::transport::{PaneBus, PaneInputRefusal};
+
+/// How many messages one pane may be handed in one frame.
+///
+/// Not a gameplay value and not a designer's knob: it is a bound on how much of
+/// a frame the main thread may spend inside a browser engine, and the module
+/// note above says why that is the simulation's business. Sized to keep a
+/// steady-state pane (a snapshot and a handful of transitions per tick) well
+/// clear of it, so the budget only ever bites on a backlog.
+pub const MAX_PUSHES_PER_FRAME: usize = 32;
 
 /// Why a surface refused.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -77,6 +106,11 @@ pub struct PanePumpReport {
     pub refusals: Vec<PaneInputRefusal>,
     /// The push failure that stopped this frame's batch, if there was one.
     pub push_failure: Option<PaneSurfaceError>,
+    /// Whether this frame stopped because it had spent its per-frame push
+    /// budget rather than because anything went wrong. Ordinary on the first
+    /// frame after a load; a pane that reports it every frame is one whose page
+    /// cannot keep up with the ship.
+    pub budget_exhausted: bool,
 }
 
 /// One frame for one pane: push what is queued, collect what was asked for.
@@ -85,6 +119,9 @@ pub struct PanePumpReport {
 /// with no bridge is how a `Welcome` gets lost — and everything it moves goes
 /// through [`PaneBus`], so a pane's traffic crosses the same admission and
 /// projection boundaries whether its surface is Ultralight or a test double.
+///
+/// Pushes at most [`MAX_PUSHES_PER_FRAME`]; see the module note for why that
+/// bound is the simulation's business rather than the pane's.
 pub fn pump_pane(bus: &PaneBus, id: PaneId, surface: &mut dyn PaneSurface) -> PanePumpReport {
     let mut report = PanePumpReport::default();
     if !surface.is_ready() {
@@ -95,7 +132,9 @@ pub fn pump_pane(bus: &PaneBus, id: PaneId, surface: &mut dyn PaneSurface) -> Pa
     let batch = bus.take_outbound(id);
     let mut deferred: Vec<PaneDispatch> = Vec::new();
     for (index, dispatch) in batch.iter().enumerate() {
-        if report.push_failure.is_some() {
+        if report.pushed >= MAX_PUSHES_PER_FRAME {
+            report.budget_exhausted = true;
+            deferred.extend_from_slice(&batch[index..]);
             break;
         }
         match surface.push(&super::document::pane_apply_script(&dispatch.json)) {
@@ -103,6 +142,7 @@ pub fn pump_pane(bus: &PaneBus, id: PaneId, surface: &mut dyn PaneSurface) -> Pa
             Err(e) => {
                 report.push_failure = Some(e);
                 deferred.extend_from_slice(&batch[index..]);
+                break;
             }
         }
     }
@@ -254,6 +294,36 @@ mod tests {
         assert_eq!(third.deferred, 0);
         assert!(surface.pushed[0].contains("GameStarted"));
         assert!(surface.pushed[1].contains("GameOver"));
+    }
+
+    #[test]
+    fn a_frame_pushes_at_most_its_budget_and_leaves_the_rest_queued_in_order() {
+        // Every push is a synchronous evaluate_script on the Bevy main thread,
+        // which is the thread the fixed simulation tick runs on — so an
+        // unbounded frame is simulation stall for every participant on the
+        // ship. The first frame after a document loads is exactly where an
+        // unbounded one would happen: it drains the whole load-time backlog.
+        let (bus, id) = bus_with_pane();
+        let total = MAX_PUSHES_PER_FRAME + 5;
+        for _ in 0..total {
+            broadcast(&bus, ServerMessage::GameStarted);
+        }
+        let mut surface = RecordingSurface::ready();
+
+        let first = pump_pane(&bus, id, &mut surface);
+        assert_eq!(first.pushed, MAX_PUSHES_PER_FRAME);
+        assert_eq!(first.deferred, 5);
+        assert!(first.budget_exhausted);
+        assert!(
+            first.push_failure.is_none(),
+            "spending the budget is not a failure"
+        );
+
+        let second = pump_pane(&bus, id, &mut surface);
+        assert_eq!(second.pushed, 5, "the remainder arrives on the next frame");
+        assert_eq!(second.deferred, 0);
+        assert!(!second.budget_exhausted);
+        assert_eq!(surface.pushed.len(), total, "and nothing was lost");
     }
 
     #[test]

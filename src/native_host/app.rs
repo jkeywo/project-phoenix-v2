@@ -432,8 +432,7 @@ pub fn build_native_host_app(
         #[cfg(feature = "ultralight")]
         {
             app.insert_resource(crate::native_host::panes::ultralight::PaneDisplayConfig {
-                host_addr: panes.host_addr.clone(),
-                panes: panes.ids(),
+                panes: panes.views(),
             });
             app.add_plugins(crate::native_host::panes::ultralight::PaneDisplayPlugin);
         }

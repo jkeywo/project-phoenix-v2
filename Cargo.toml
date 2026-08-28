@@ -233,6 +233,13 @@ capture = ["server", "dep:image", "dep:crossbeam-channel"]
 # download to run four thousand unit tests. Nothing in `default`, `server`,
 # `host`, `headless`, `capture` or `viewer` may ever imply this feature.
 #
+# AND NEITHER MAY `--all-features`, which is the part that was got wrong the
+# first time: it enables everything declared here regardless of what any of
+# them imply, and the `test` job's clippy step asked for exactly that. That
+# step now names its features explicitly — every one below except this — and
+# AGENTS.md's local gate command mirrors it. A feature added here belongs in
+# both lists, or it is a feature nothing lints.
+#
 # `host` is implied the other way round: a pane is only meaningful in the
 # process that serves the client bundle it loads and runs the simulation it
 # talks to.

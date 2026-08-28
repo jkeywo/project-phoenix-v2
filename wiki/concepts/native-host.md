@@ -2,7 +2,7 @@
 title: Native Host
 type: concept
 tags: [native, viewscreen, boot-profile, wgpu, winit, transport, delivery, ultralight, panes]
-sources: [src/native_host/mod.rs, src/native_host/app.rs, src/native_host/transport.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/ultralight.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs]
+sources: [src/native_host/mod.rs, src/native_host/app.rs, src/native_host/transport.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs]
 updated: 2026-08-28
 ---
 
@@ -175,16 +175,32 @@ sees it, so a pane that holds no Station is named by no audience.
 
 ### What a pane loads, and from where
 
-The pane navigates to `http://<host>/client/pane-<n>.html#native`, a document
+The pane navigates to
+`http://<host>/client/pane-<n>-<nonce>.html#native&token=…&name=…`, a document
 this same process publishes in memory (`delivery::serve::HostedDocuments`,
 checked ahead of the static bundle). That document is the built bundle's own
-`client/index.html` with **three edits**:
+`client/index.html` with **two scripts injected and one removed**:
 
 | edit | why |
 |---|---|
-| a classic `<script>` first in `<head>` (`pane_boot.js`) | seeds the session token and participant name the page's own inline script reads *at parse time*, and installs the page→host queue |
-| the PeerJS CDN `<script>` tag removed | a pane never uses PeerJS, and a bridge machine may not reach unpkg.com — waiting for that is pure boot latency |
+| a classic `<script>` first in `<head>` (`pane_boot.js`) | reads the session token and participant name out of `location.hash` before the page's own inline script wants them, and installs the page→host queue |
+| the PeerJS `<script>` tag removed | a pane never uses PeerJS, and a bridge machine may not reach a CDN — waiting for that is pure boot latency. Matched on `peerjs` in the opening tag rather than a CDN host, so a move or a self-host does not silently turn the strip into a no-op |
+| the `<audio>` elements removed | **not cosmetic** — see below |
 | a `<script type="module">` last in `<body>` (`pane_link.js`) | replaces `window.connectionManager` with the in-process link, which must happen *after* `gui/connection-manager.js` published its own |
+
+The `<audio>` strip is the one worth stating in full, because it was the
+difference between a pane that works and a pane that looks like it does.
+Ultralight ships **no media backend**: `HTMLMediaElement.play` is undefined and
+calling it throws. `client.html`'s `send()` plays the UI click *before* handing
+the message to the link, so that exception propagated out of the
+`console_action` listener and the command never reached the transport. The
+page's own `NO_CLICK` set exempts `SetThrust`, `SetSteering`, `Identify` and
+`SetName` — so a pane joined, renamed itself and flew with the joystick, while
+every deliberate console command, every `ControlSystem`, was silently dropped
+with a clean log on both sides. With the element gone, `playClick`'s own
+`if (!el) return` is the path; `gui/settings-panel.js` already `.filter(Boolean)`s
+its `audioEls`. Fixing it in `client.html` would mean changing the page a phone
+loads to suit a pane, which is the thing this arrangement exists not to do.
 
 Nothing in `gui/` or in any console page is touched; the shim is native-side.
 Serving it at the **client directory's own depth** is the load-bearing detail:
@@ -197,7 +213,62 @@ in) are argued in `document.rs`'s module docs.
 Host→page is `window.__phoenixPaneApply('<json>')`; page→host is a queue drained
 once a frame with `window.__phoenixPaneOutDrain()`. Both directions carry the
 same JSON a phone would send or receive, decoded by `core::codec` — the codec
-seam is not bypassed either.
+seam is not bypassed either. A frame pushes at most
+`surface::MAX_PUSHES_PER_FRAME` messages per pane and requeues the rest: this
+loop runs in `Update` on the Bevy main thread, which is the thread `FixedUpdate`
+runs `SimSet` on, so page JavaScript time is *simulation* time for everyone on
+the ship.
+
+### The identity is in the URL, not in the page
+
+`phoenix-host` binds `0.0.0.0:8080` by default, with no TLS and no
+authentication — that is the shape PRD #855 wanted, because the audience is
+phones on a LAN. So **nothing about who a pane is may appear in a body this host
+serves**: a live participant's session token there is a seat on the bridge
+available to anyone on the network.
+
+A URL **fragment** is the one part of a URL a browser never transmits — not in
+the request line, not in a header, not in any byte the host writes — so
+`pane_url` carries `#native&token=…&name=…` and `pane_boot.js` reads
+`location.hash` at parse time. `build_pane_document` takes no identity at all,
+and every pane's document is byte-identical. (`fragment_encode` escapes `_` as
+`%5F` as well as the obvious characters: `joinRouteFromLocation` reads an
+underscore in the fragment as a rendezvous join code, so a participant named
+`ada_lovelace` would otherwise change the page's route.)
+
+Three further defences, because one is a single point of failure:
+
+1. the document path carries a **per-pane random nonce**, so it is not
+   enumerable the way `/client/pane-0.html` was;
+2. `delivery::serve::route` serves a hosted document only to a **loopback**
+   peer — a pane always connects from this machine, and a remote GET gets what
+   any unknown path gets. The bundle, the manifest and the stamp stay LAN-open,
+   which is their job;
+3. `PaneBus::close` **withdraws** the document, so a closed pane's path stops
+   resolving; `phoenix-host` withdraws the rest at shutdown, before it joins the
+   delivery thread.
+
+### A closed pane is torn down, not left on screen
+
+`drive_panes` closes a pane whose page stopped draining, and the *view* goes at
+the top of the next frame (`retire_closed_panes`): the `PaneWindow` is dropped,
+its canvas node despawned, its document withdrawn, and the closure logged once.
+Reaching that state at all takes **both** caps — the host's outbound queue only
+holds what it has not handed over, so `pane_boot.js` caps the page's own inbox
+and throws past it, which `pump_pane` requeues as an ordinary failed push.
+
+**Reopening is out of scope.** A `PaneId` is never reissued and a pane's identity
+is minted once, so "reopen" would mean a fresh participant taking the seat. The
+closed pane's station is held and flipped to `Backfill`, exactly as a dropped
+phone's is; restoring a human there is the ordinary reconnect, and that needs
+#1112's transport.
+
+Each pane's view is created in its **own Ultralight `Session`**, named after the
+pane and never written to disk. Ultralight keys cookies, `localStorage` and
+IndexedDB on the Session rather than on the view, and a view created without one
+lands in the renderer's single persistent default session — so, since every pane
+document comes from this host's one origin, panes would otherwise share a
+`localStorage`, `gui/session-token.js`'s `session-token` key included.
 
 ### The Void and Thunder audit (acceptance criterion 1)
 
@@ -249,12 +320,25 @@ No CI job sets it; `default`, `server`, `host`, `headless`, `capture` and
 `viewer` must never imply it. `/resources/`, `/default/` and `ultralight.log` are
 gitignored runtime debris.
 
+**Default-off is not sufficient on its own**, and assuming it was is how the
+feature reached CI on the commit that introduced it: `--all-features` enables
+everything declared, whatever implies what, and the `test` job's clippy step
+asked for exactly that. That step now names its features — every one
+`Cargo.toml` declares except `ultralight` — and `AGENTS.md`'s local gate command
+mirrors the list, so **a new cargo feature has to be added to both**. Vellum
+handles the same problem the other way: its engine job selects the workspace
+with `--exclude vellum-ultralight` and type-checks the SDK half in a manual,
+non-required job.
+
 ### Deferred
 
 - **A real browser participant beside a pane** is issue #1112's, exactly as in
   #1121: `tests/native_host_panes.rs` proves the contract with a
   `LoopbackTransport` participant, which is the seam a network transport plugs
-  into.
+  into. **Issue #1122's acceptance criterion 5 therefore stays unticked** and is
+  carried on #1112 instead: the same test swaps `LoopbackTransport` for the real
+  network transport and changes nothing else, which is what `PairedTransport`
+  was built for.
 - **Bridge display profiles** (which pane on which monitor) are issue #1123's.
   Panes are currently tiled evenly left to right across one window.
 - **Independent input routing** between panes is issue #1124's. Today it is one
@@ -271,9 +355,11 @@ gitignored runtime debris.
 | `tests/native_host_snapshot.rs` | AC5's snapshot half — a native-host capture restores into a fresh native host at the same digest, and the duel continues byte-identically for 120 frames (Combat Test's continuation bound is the payload gap `tests/snapshot_resume.rs` measured, not a native one) |
 | `tests/native_viewscreen_render.rs` | The viewscreen draws a scene — not one flat colour, and lit — over the **middle 40%** of a real-GPU frame, so a live HUD over a dead 3-D scene cannot pass. `#[ignore]`d: CI is ubuntu-only with no display |
 | `tests/native_host.rs` | The delivery half, unchanged, plus the serving loop's shutdown path (polled to a deadline, so a stuck loop fails rather than wedging the run) |
-| `src/native_host/panes/*` | Identity's three refusals, the projection boundary, the outbound cap's reliable/snapshot split, the pane document's three edits, and the per-frame loop's deferral of a failed push. All feature-**off**, so the ordinary `cargo test` CI runs them |
-| `tests/native_host_panes.rs` | A pane joins/claims/readies through the ordinary contracts; it is admitted for its own Station and refused another's by the real policy; it cannot read another pane's projection; a pane and a transport participant hold different Stations on the same running ship; a closed pane hands the lobby the disconnect a dropped phone would |
-| `tests/native_host_pane_ultralight.rs` | The real built `client/index.html` loads in a real Ultralight view over this process's own HTTP, joins on the host-minted token, paints, and answers a real click + keystroke on `#name-input` with a `SetName`. `#[ignore]`d: needs the SDK and a built bundle, which CI has neither of |
+| `src/native_host/panes/*` | Identity's three refusals, the projection boundary, the outbound cap's reliable/snapshot split, the document assembly (against the repository's own `client.html`, not only a stub), the identity's absence from the served body, the wildcard-bind normalisation, and the per-frame loop's push budget and deferral of a failed push. All feature-**off**, so the ordinary `cargo test` CI runs them |
+| `src/delivery/serve.rs` | A hosted document is served to a loopback peer and to nothing else, while the bundle and the version-pin endpoints stay LAN-open; `peer_origin` classifies IPv4, IPv6, IPv4-mapped and "the OS would not say" |
+| `tests/client/pane-scripts.test.js` | The two injected scripts, in jsdom: the boot script reads the identity out of the fragment and caps the page's inbox; the link sends the host-minted `Identify` and passes inbound JSON through `localiseTree` |
+| `tests/native_host_panes.rs` | A pane joins/claims/readies through the ordinary contracts; it is admitted for its own Station and refused another's by the real policy; it cannot read another pane's projection; a pane and a transport participant hold different Stations on the same running ship; a closed pane hands the lobby the disconnect a dropped phone would; and a pane's identity is in its URL, its document unenumerable, LAN-refused, and withdrawn on close |
+| `tests/native_host_pane_ultralight.rs` | The real built `client/index.html` loads in a real Ultralight view over this process's own HTTP, joins on the identity it read from the fragment, paints, answers a real click + keystroke on `#name-input` with a `SetName`, then claims a Station and operates its console: the iframe mounts with `__updateConsole` installed and a click on the Captain's Red Alert button inside it produces the expected `ControlSystem`. A second test proves two panes' `localStorage` are separate. Both `#[ignore]`d: they need the SDK and a built bundle, which CI has neither of |
 
 Each of the two digest binaries stands alone on purpose: pinning the scheduler
 means a one-thread `TaskPoolPlugin`, and Bevy's task pools are process-global and

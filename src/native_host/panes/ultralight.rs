@@ -14,8 +14,21 @@
 //! time**. Every job in `.github/workflows/ci.yml` is `ubuntu-latest`, the wasm
 //! build has no use for any of this, and a plain `cargo test` must not pay a
 //! hundred-megabyte download to run four thousand unit tests. So the SDK is
-//! behind `--features ultralight`, which no CI job sets, and the pane logic that
-//! CI *can* check is deliberately not in this file.
+//! behind `--features ultralight`, and the pane logic CI *can* check is
+//! deliberately not in this file.
+//!
+//! Default-off is not by itself enough, and assuming it was is how this feature
+//! reached CI once already: `--all-features` enables everything declared, which
+//! is exactly what a workspace clippy step asks for. `ci.yml`'s clippy step
+//! therefore names its features explicitly. See `Cargo.toml`'s `[features]`.
+//!
+//! # This loop runs on the simulation's thread
+//!
+//! [`drive_panes`] is an `Update` system on the Bevy main thread, and every
+//! `evaluate_script` it makes is synchronous. `FixedUpdate` runs `SimSet` on that
+//! same thread (AGENTS.md rule 7), so page JavaScript time is *simulation* time
+//! for every participant on the ship. [`pump_pane`] bounds the pushes one pane
+//! may take per frame for that reason — see `super::surface`'s module note.
 //!
 //! # Layout is a placeholder, and says so
 //!
@@ -44,14 +57,14 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::window::PrimaryWindow;
 
 use vellum_ultralight::runtime::{
-    KeyEventType, Modifiers, MouseButton as UlMouseButton, PaneSpec, RuntimeOptions,
+    KeyEventType, Modifiers, MouseButton as UlMouseButton, PaneSession, PaneSpec, RuntimeOptions,
     UltralightPane, UltralightRuntime, VirtualKeyCode,
 };
 use vellum_ultralight::staging;
 
 use crate::logging::{LogCat, LogFilterConfig};
 
-use super::document::{pane_drain_script, pane_url};
+use super::document::pane_drain_script;
 use super::registry::PaneId;
 use super::surface::{pump_pane, PaneSurface, PaneSurfaceError};
 use super::PaneBusResource;
@@ -59,11 +72,14 @@ use super::PaneBusResource;
 /// Where the operator's panes are configured from, and where they load from.
 #[derive(Resource, Clone, Debug)]
 pub struct PaneDisplayConfig {
-    /// `host:port` of this process's own delivery server — the address the
-    /// panes' documents are published at.
-    pub host_addr: String,
-    /// Panes to open, in left-to-right order.
-    pub panes: Vec<PaneId>,
+    /// Panes to open in left-to-right order, each with the URL its view
+    /// navigates to.
+    ///
+    /// The URL is carried rather than rebuilt from an id: it holds the pane's
+    /// session token and its document nonce (see `super::document`), so nothing
+    /// downstream of `LocalPanes` can construct one it was not given — which is
+    /// the point.
+    pub panes: Vec<(PaneId, String)>,
 }
 
 /// Copy the Ultralight SDK's shared libraries beside this executable and its
@@ -216,6 +232,9 @@ struct PaneWindow {
     id: PaneId,
     surface: UltralightPaneSurface,
     image: Handle<Image>,
+    /// The UI node showing [`image`](Self::image), so a closed pane's canvas can
+    /// be despawned rather than left on screen showing a page nothing talks to.
+    canvas: Entity,
     /// Top-left corner in physical pixels, within the primary window.
     origin: (u32, u32),
     size: (u32, u32),
@@ -246,12 +265,28 @@ struct PaneCanvas;
 ///
 /// Adding it without a [`PaneDisplayConfig`] and a [`PaneBus`] resource is a
 /// no-op, so a host can install it unconditionally.
+///
+/// The two `run_if`s keep that promise in an app with no *window*, which is a
+/// real composition rather than a hypothetical one:
+/// `NativeRenderSurface::Contract` stands up no `InputPlugin` and no image
+/// assets, and `tests/native_host_panes.rs` builds exactly that with panes
+/// attached. Bevy validates a system's parameters when it runs, so a bare
+/// `Res<ButtonInput<_>>` there is not an inert system — it is a **panic**, in a
+/// host that would otherwise be fine. `Option<Res<_>>` is the shape AGENTS.md
+/// prescribes for the same reason; a run condition says it once for two systems.
 pub struct PaneDisplayPlugin;
 
 impl Plugin for PaneDisplayPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PreUpdate, init_pane_host)
-            .add_systems(Update, (forward_pane_input, drive_panes).chain());
+        app.add_systems(PreUpdate, init_pane_host).add_systems(
+            Update,
+            (
+                forward_pane_input
+                    .run_if(resource_exists::<ButtonInput<bevy::input::mouse::MouseButton>>),
+                drive_panes.run_if(resource_exists::<Assets<Image>>),
+            )
+                .chain(),
+        );
     }
 }
 
@@ -267,6 +302,12 @@ fn init_pane_host(world: &mut World) {
     {
         return;
     }
+    // The `plog!` family, like `drive_panes` below: an exclusive system can
+    // read `LogFilterConfig` off the world, so the bare-macro exemption
+    // AGENTS.md grants to "plain helper fns with no config in scope" does not
+    // apply here. Cloned once rather than held, because everything after this
+    // takes `&mut World`.
+    let log = world.get_resource::<LogFilterConfig>().cloned();
     let Some((window_width, window_height, scale)) = world
         .query_filtered::<&Window, With<PrimaryWindow>>()
         .iter(world)
@@ -298,7 +339,7 @@ fn init_pane_host(world: &mut World) {
     let runtime = match UltralightRuntime::start(&RuntimeOptions::default()) {
         Ok(runtime) => runtime,
         Err(e) => {
-            error!(target: LogCat::Lobby.target(), "pane host: {e}");
+            crate::perror!(log, LogCat::Lobby, "pane host: {e}");
             world.insert_resource(PaneHostFailed);
             return;
         }
@@ -309,7 +350,8 @@ fn init_pane_host(world: &mut World) {
     let count = config.panes.len() as u32;
     let tile_width = (window_width / count).max(1);
     let mut windows = Vec::new();
-    for (index, id) in config.panes.iter().copied().enumerate() {
+    for (index, (id, url)) in config.panes.iter().enumerate() {
+        let (id, url) = (*id, url.as_str());
         let origin = (tile_width * index as u32, 0);
         let size = (tile_width, window_height);
         let spec = PaneSpec {
@@ -317,19 +359,32 @@ fn init_pane_host(world: &mut World) {
             height: size.1,
             device_scale: scale,
             transparent: false,
+            // One storage session per pane, named after the pane and never
+            // written to disk. Without it every pane lands in Ultralight's
+            // single persistent default session, and since every pane document
+            // is served from this host's own origin they would share one
+            // cookie jar and one `localStorage` — including the
+            // `session-token` key `gui/session-token.js` reads, which is the
+            // one value that decides which participant a page is. The ids are
+            // never reissued (`super::registry::PaneId`), so no two panes in a
+            // process can collide on a name.
+            session: Some(PaneSession::ephemeral(id.to_string())),
         };
         let view = match runtime.create_pane(&spec) {
             Ok(view) => view,
             Err(e) => {
-                error!(target: LogCat::Lobby.target(), "pane host: {id}: {e}");
+                crate::perror!(log, LogCat::Lobby, "pane host: {id}: {e}");
                 world.insert_resource(PaneHostFailed);
                 return;
             }
         };
         let mut surface = UltralightPaneSurface::new(view);
-        let url = pane_url(&config.host_addr, id);
-        if let Err(e) = surface.load(&url) {
-            error!(target: LogCat::Lobby.target(), "pane host: {id} could not load {url}: {e}");
+        if let Err(e) = surface.load(url) {
+            crate::perror!(
+                log,
+                LogCat::Lobby,
+                "pane host: {id} could not load its console: {e}"
+            );
             world.insert_resource(PaneHostFailed);
             return;
         }
@@ -345,28 +400,38 @@ fn init_pane_host(world: &mut World) {
             RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
         );
         let handle = world.resource_mut::<Assets<Image>>().add(image);
-        world.spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(origin.0 as f32 / scale as f32),
-                top: Val::Px(origin.1 as f32 / scale as f32),
-                width: Val::Px(size.0 as f32 / scale as f32),
-                height: Val::Px(size.1 as f32 / scale as f32),
-                ..default()
-            },
-            ImageNode::new(handle.clone()),
-            PaneCanvas,
-        ));
+        let canvas = world
+            .spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(origin.0 as f32 / scale as f32),
+                    top: Val::Px(origin.1 as f32 / scale as f32),
+                    width: Val::Px(size.0 as f32 / scale as f32),
+                    height: Val::Px(size.1 as f32 / scale as f32),
+                    ..default()
+                },
+                ImageNode::new(handle.clone()),
+                PaneCanvas,
+            ))
+            .id();
         windows.push(PaneWindow {
             id,
             surface,
             image: handle,
+            canvas,
             origin,
             size,
         });
-        info!(
-            target: LogCat::Lobby.target(),
-            "pane host: {id} showing {url} at {}x{}", size.0, size.1
+        // The URL is NOT logged: it carries this pane's session token in its
+        // fragment, and an operator log is a file, a scrollback and a
+        // screenshot. `phoenix-host` prints the first eight characters of the
+        // token when it opens the pane, which is enough to correlate.
+        crate::pinfo!(
+            log,
+            LogCat::Lobby,
+            "pane host: {id} showing its console at {}x{}",
+            size.0,
+            size.1
         );
     }
 
@@ -481,15 +546,26 @@ fn forward_pane_input(
 
 /// One frame for every pane: service the library, move messages both ways,
 /// rasterise, and copy what repainted into each pane's texture.
+///
+/// Runs on the Bevy main thread, which is the simulation's — see the module
+/// note, and [`pump_pane`]'s per-frame push budget.
 fn drive_panes(
     host: Option<NonSendMut<PaneHost>>,
     bus: Option<Res<PaneBusResource>>,
     mut images: ResMut<Assets<Image>>,
+    mut commands: Commands,
     log: Option<Res<LogFilterConfig>>,
 ) {
     let (Some(mut host), Some(bus)) = (host, bus) else {
         return;
     };
+    // Panes closed since the last frame — by a fault below, by the operator, or
+    // by anything else holding the bus — lose their view here, BEFORE anything
+    // is pumped or drawn. A view left behind is not inert: `forward_pane_input`
+    // would still focus it and type into it, `pump_pane` would still drain a
+    // live page's records into a registry that refuses them, once per frame,
+    // for the rest of the run.
+    retire_closed_panes(&mut host, &bus, &mut commands, &log);
     host.runtime.update();
 
     let mut pushed_this_frame = vec![false; host.windows.len()];
@@ -535,6 +611,11 @@ fn drive_panes(
     // waiting. Closing it hands the lobby the same disconnect a dropped phone
     // produces, and the station flips to Backfill rather than sitting in front
     // of a page that has quietly stopped agreeing with the simulation.
+    //
+    // `PaneBus::close` also withdraws the pane's document, so its path stops
+    // resolving. The VIEW goes at the top of the next frame, through
+    // `retire_closed_panes` — one path for every way a pane can be closed
+    // rather than a teardown that only the fault route remembers to do.
     for id in bus.0.take_faulted() {
         crate::pwarn!(
             log,
@@ -544,4 +625,48 @@ fn drive_panes(
         );
         bus.0.close(id);
     }
+}
+
+/// Tear down the view of every pane the bus no longer lists as open.
+///
+/// **Reopening is out of scope**, and deliberately: a pane's identity is minted
+/// once and its `PaneId` is never reissued (`super::registry::PaneRegistry`),
+/// so "reopen" would mean a fresh participant taking the seat rather than the
+/// same one coming back. A closed pane's station is held and flipped to
+/// `Backfill`, exactly as a dropped phone's is, and the mission carries on with
+/// AI at that console. Restoring a human there is the ordinary reconnect the
+/// browser client already has, and it needs issue #1112's transport.
+///
+/// Each closure is logged **once**, because the window is gone afterwards.
+fn retire_closed_panes(
+    host: &mut PaneHost,
+    bus: &PaneBusResource,
+    commands: &mut Commands,
+    log: &Option<Res<LogFilterConfig>>,
+) {
+    if host.windows.is_empty() {
+        return;
+    }
+    let open = bus.0.open_pane_ids();
+    if host.windows.iter().all(|w| open.contains(&w.id)) {
+        return;
+    }
+    host.windows.retain(|window| {
+        if open.contains(&window.id) {
+            return true;
+        }
+        commands.entity(window.canvas).despawn();
+        crate::pinfo!(
+            log,
+            LogCat::Lobby,
+            "pane host: {} is closed — its view is torn down and its station is \
+             the lobby's business now",
+            window.id
+        );
+        false
+    });
+    // Every remaining index has shifted, and focus is an index. Dropping it
+    // rather than trying to translate it is right: `forward_pane_input` takes
+    // focus again the moment the pointer is over a pane.
+    host.focused = None;
 }

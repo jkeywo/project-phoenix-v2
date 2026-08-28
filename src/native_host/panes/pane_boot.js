@@ -13,9 +13,39 @@
 //
 // It also installs the page->host queue. The host polls that queue once a frame
 // with evaluate_script; there is no other channel out of an Ultralight view.
-// window.__phoenixPaneIdentity is prepended by the host immediately above this.
+//
+// WHERE THE IDENTITY COMES FROM, and why it is not in the document: the host
+// binds 0.0.0.0 with no TLS and no authentication, so anything in a served body
+// is readable by anything on the LAN, and a live participant's session token
+// there would be a seat on the bridge handed out by `curl`. A URL FRAGMENT is
+// the one part of a URL a browser never transmits — not in the request line,
+// not in a header — so `pane_url` puts the token and the name there and this
+// reads them back out of location.hash. See document.rs's module note.
 (function () {
-  var identity = window.__phoenixPaneIdentity || { token: '', name: '' };
+  // `#native&token=<pct>&name=<pct>`. The `native` prefix with no `=` is the
+  // page's own join route (see document.rs); everything else is a pair.
+  var identity = { token: '', name: '' };
+  var raw = '';
+  try {
+    raw = String(window.location.hash || '').replace(/^#/, '');
+  } catch (e) {
+    // A document with no location is not a pane; the link script below still
+    // sends whatever it has, and the host refuses an empty token.
+  }
+  var parts = raw.split('&');
+  for (var p = 0; p < parts.length; p++) {
+    var eq = parts[p].indexOf('=');
+    if (eq < 0) continue;
+    var key = parts[p].slice(0, eq);
+    if (key !== 'token' && key !== 'name') continue;
+    try {
+      // The host escapes '_' as %5F so the fragment cannot look like a
+      // rendezvous join code; decodeURIComponent puts it back.
+      identity[key] = decodeURIComponent(parts[p].slice(eq + 1));
+    } catch (e) {
+      // A malformed escape in one field must not cost us the other.
+    }
+  }
 
   try {
     // gui/session-token.js reads this key; seeding it is what makes the page
@@ -26,6 +56,20 @@
     // Storage can be unavailable. The link script pins both values directly
     // when it sends Identify, so this is a convenience rather than the path.
   }
+
+  // How many undelivered messages the page may hold before it tells the host to
+  // stop. Reached only when the page has stopped draining — the link script
+  // installs `deliver` once its modules have run, and from then on every push
+  // drains immediately — so this is a wedged-page bound, not a throughput one.
+  //
+  // It is what makes the RELIABLE-overflow close reachable at all. The host's
+  // own cap (registry.rs) only sees messages it has not handed over yet, and a
+  // page that accepts every push and does nothing with it never lets that queue
+  // grow. Throwing here turns the next push into a `PaneSurfaceError::Script`,
+  // which pump_pane requeues; the host queue then fills, overflows its reliable
+  // budget, and drive_panes closes the pane — the same disconnect a dropped
+  // phone produces, so the station falls back to AI control.
+  var INBOX_CAP = 256;
 
   var pane = {
     token: identity.token,
@@ -45,6 +89,15 @@
 
   // Host -> page. Called by the host once per queued ServerMessage.
   window.__phoenixPaneApply = function (json) {
+    if (pane.inbox.length >= INBOX_CAP) {
+      // Deliberately a throw rather than a dropped message: the host is the
+      // one that knows which messages may be dropped (snapshots) and which may
+      // not (Welcome, StationAssigned, GameStarted), and it cannot make that
+      // call for a message the page silently swallowed.
+      throw new Error(
+        '[pane] ' + pane.inbox.length + ' undelivered messages: the page is not draining'
+      );
+    }
     pane.inbox.push(json);
     pane.drainInbox();
   };

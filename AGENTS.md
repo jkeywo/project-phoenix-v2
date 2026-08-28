@@ -52,7 +52,11 @@ deadline the design model does not claim is an error by design.
 # commits have been replayed onto local main, run the full list exactly once as
 # the final gate between pushes. Review passes are read-only and run no gates.
 cargo fmt -- --check                           # CI: test job, step 1
-cargo clippy --workspace --all-targets --all-features -- -D warnings  # CI: test job, step 2
+# NOT --all-features: it now implies an SDK download via the `ultralight`
+# feature (issue #1122). This is the same explicit list ci.yml's clippy step
+# uses — every feature Cargo.toml declares except that one.
+cargo clippy --workspace --all-targets \
+  --features server,viewer,debug,headless,perf,host,capture -- -D warnings   # CI: test job, step 2
 cargo test --workspace --features headless     # CI: test job, step 3
 npm run debug-surfaces:check                   # CI: editor-test job (Rust -> JS drift)
 npx vitest run                                 # CI: editor-test job (tests/client/*.test.js)
@@ -333,8 +337,9 @@ git diff perf/baselines
 #                vellum's `pasm-validate` composite action (fleet-standard,
 #                pinned by rev) ; then uv run pasm scan/traceability --json
 #                uploaded as the `pasm-reports` artifact. No pytest step.
-#   test         cargo fmt --check ; cargo clippy --all-targets --all-features
-#                -D warnings ; cargo test
+#   test         cargo fmt --check ; cargo clippy --workspace --all-targets
+#                --features <every feature but `ultralight`> -D warnings ;
+#                cargo test
 #   editor-test  npm run debug-surfaces:check ; npx vitest run ;
 #                node scripts/check-strings.mjs --strict ; npm run lods:check ;
 #                npm run lod-captures:check
@@ -600,6 +605,13 @@ ultralight = ["host", "vellum-ultralight/ultralight"]
               # may say and hear (identity, registry, routing, the frame loop,
               # the document) compiles and is tested with the feature OFF,
               # because that is where the acceptance criteria live.
+              #
+              # DEFAULT-OFF IS NOT ENOUGH, and assuming it was is how this
+              # reached CI once already: `--all-features` enables it. The
+              # clippy step in ci.yml — and the local gate command near the top
+              # of this file — therefore name their features EXPLICITLY, as
+              # every feature declared here except this one. Adding a feature
+              # means adding it to both lists.
 # The client page (client.html) is pure JS (gui/*.js) — there is no
 # `client` cargo feature and no client-side WASM (removed in #463).
 

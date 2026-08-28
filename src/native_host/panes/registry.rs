@@ -27,6 +27,22 @@
 //! not**. Over the cap, the oldest *snapshot* goes; if there are none, the pane
 //! is over its reliable budget and that is a fault worth reporting rather than
 //! hiding, so [`Pane::push_outbound`] says so.
+//!
+//! # This queue is only half the bound, and the other half is in the page
+//!
+//! What is queued here is what the host has **not handed over yet**. A `Live`
+//! pane whose page accepts every push and then does nothing with it therefore
+//! never fills this queue — the backlog would sit in an unbounded JavaScript
+//! array on the other side of the bridge, and the overflow-close this cap
+//! describes would be unreachable for every pane past [`PaneLifecycle::Loading`].
+//!
+//! So `pane_boot.js` caps the page's own inbox and **throws** past it.
+//! [`super::surface::pump_pane`] reads that throw the way it reads any failed
+//! push — stop the batch, requeue it in order — which is what puts a wedged
+//! `Live` pane's traffic back into this queue, where the cap below can see it.
+//! The division is not arbitrary: the page is the only side that knows it has
+//! stopped draining, and the host is the only side that knows which messages may
+//! be dropped to make room.
 
 use std::collections::VecDeque;
 

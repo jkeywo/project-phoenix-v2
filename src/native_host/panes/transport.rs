@@ -39,10 +39,12 @@
 //! `handle_identify`'s stay where they are; this is a third gate on a hole the
 //! other two do not cover, which is another participant's ordinary token.
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use crate::core::codec::{self, JsonCodec, MessageCodec};
 use crate::core::messages::ClientMessage;
+use crate::delivery::serve::HostedDocuments;
 use crate::native_host::transport::{NativeTransport, TransportDispatch, TransportEvent};
 
 use super::identity::PaneIdentity;
@@ -90,6 +92,12 @@ struct BusState {
     /// Panes that overflowed their reliable budget. A Bevy system reports and
     /// closes them; see [`PaneBus::take_faulted`].
     faulted: Vec<PaneId>,
+    /// The host's in-memory HTTP publications, so a closed pane's document can
+    /// be withdrawn. `None` in a test that never published one.
+    documents: Option<HostedDocuments>,
+    /// Where each pane's document is published. Keyed by pane, because that is
+    /// what closing knows about.
+    document_paths: BTreeMap<PaneId, String>,
 }
 
 /// The shared pane registry: cheap to clone, every clone the same panes.
@@ -122,12 +130,41 @@ impl PaneBus {
         self.lock().registry.open(identity)
     }
 
-    /// Close a pane and owe the lobby a disconnect for it.
+    /// Hand the bus the host's in-memory HTTP publications, so it can withdraw
+    /// a closed pane's document.
+    ///
+    /// `HostedDocuments` is cheap to clone and shared with the serving thread,
+    /// so the withdrawal below takes effect on the next request.
+    pub fn attach_documents(&self, documents: HostedDocuments) {
+        self.lock().documents = Some(documents);
+    }
+
+    /// Publish one pane's document and remember where, so [`close`](Self::close)
+    /// can take it down again.
+    ///
+    /// A no-op without a prior [`attach_documents`](Self::attach_documents) —
+    /// which is the state of every test that drives panes with no HTTP server.
+    pub fn publish_document(&self, id: PaneId, path: String, html: String) {
+        let mut state = self.lock();
+        if let Some(documents) = &state.documents {
+            documents.publish(path.clone(), html);
+            state.document_paths.insert(id, path);
+        }
+    }
+
+    /// Close a pane, owe the lobby a disconnect for it, and stop serving its
+    /// document.
     ///
     /// Anything the page had already said but not yet been polled for is kept
     /// and delivered ahead of the disconnect: it was said while the pane was
     /// still connected, and the lobby's answer to a `ReleaseStation` followed by
     /// a disconnect is not the answer to a disconnect alone.
+    ///
+    /// **The document goes with it.** A pane's path is unguessable and served
+    /// only to loopback, but neither of those is a reason to keep publishing a
+    /// page for a participant that has gone: its id is never reissued, so the
+    /// path can never become live again, and a host that ran for a week would
+    /// otherwise accumulate one dead document per closed pane.
     pub fn close(&self, id: PaneId) {
         let mut state = self.lock();
         if let Some((token, pending)) = state.registry.close(id) {
@@ -138,6 +175,34 @@ impl PaneBus {
                 });
             }
             state.departing.push(TransportEvent::Disconnected { token });
+        }
+        Self::withdraw(&mut state, id);
+    }
+
+    /// Stop serving every pane document this bus published.
+    ///
+    /// Host shutdown's half of the same rule: the process may outlive the
+    /// simulation by as long as it takes the delivery thread to notice, and
+    /// nothing should be serving a bridge console in that window.
+    pub fn withdraw_all(&self) {
+        let mut state = self.lock();
+        let ids: Vec<PaneId> = state.document_paths.keys().copied().collect();
+        for id in ids {
+            Self::withdraw(&mut state, id);
+        }
+    }
+
+    /// Where a pane's document is published, if it still is. Diagnostic, and
+    /// what a test asserts a closed pane no longer has.
+    pub fn document_path(&self, id: PaneId) -> Option<String> {
+        self.lock().document_paths.get(&id).cloned()
+    }
+
+    fn withdraw(state: &mut BusState, id: PaneId) {
+        if let Some(path) = state.document_paths.remove(&id) {
+            if let Some(documents) = &state.documents {
+                documents.withdraw(&path);
+            }
         }
     }
 
@@ -230,6 +295,24 @@ impl PaneBus {
     /// phone that dropped, and the station flips to `Backfill` rather than
     /// sitting in front of a page that has quietly stopped agreeing with the
     /// simulation.
+    ///
+    /// # How a LIVE pane's queue gets there
+    ///
+    /// This queue only holds what the host has **not handed over yet**, so a
+    /// wedged page that kept accepting pushes would never fill it — the messages
+    /// would pile up on the far side of the bridge instead, in an unbounded JS
+    /// array, and this path would be unreachable on any pane past `Loading`.
+    ///
+    /// So the page has a cap of its own (`pane_boot.js`), and when it is over
+    /// that cap `__phoenixPaneApply` **throws**. `pump_pane` reads a throw as a
+    /// `PaneSurfaceError::Script`, stops the batch and requeues it here — which
+    /// is what makes this queue grow for a `Live` pane at all. Two frames of
+    /// that and a pane carrying nothing but reliable traffic is over budget and
+    /// in this list.
+    ///
+    /// The two caps divide the same problem the way the two sides can each see
+    /// it: the page knows it is not draining, and only the host knows which
+    /// messages may be dropped to make room.
     pub fn take_faulted(&self) -> Vec<PaneId> {
         std::mem::take(&mut self.lock().faulted)
     }
@@ -469,6 +552,47 @@ mod tests {
         let err = bus.submit_json(id, "not json at all").unwrap_err();
         assert!(matches!(err, PaneInputRefusal::Undecodable { .. }));
         assert!(bus.transport().poll().is_empty());
+    }
+
+    #[test]
+    fn closing_a_pane_stops_serving_its_document() {
+        // `HostedDocuments::withdraw` had no production caller at all: a pane
+        // closed by a fault left its page published for the rest of the
+        // process's life, and a host that ran a long session accumulated one
+        // dead console per closed pane.
+        let bus = PaneBus::default();
+        let documents = HostedDocuments::default();
+        let a = bus.open(identity(1));
+        let b = bus.open(identity(2));
+        bus.attach_documents(documents.clone());
+        bus.publish_document(a, "/client/pane-0-aaaa.html".to_string(), "a".to_string());
+        bus.publish_document(b, "/client/pane-1-bbbb.html".to_string(), "b".to_string());
+        assert_eq!(documents.len(), 2);
+
+        bus.close(a);
+        assert_eq!(documents.get("/client/pane-0-aaaa.html"), None);
+        assert_eq!(bus.document_path(a), None);
+        assert_eq!(
+            documents.get("/client/pane-1-bbbb.html"),
+            Some("b".to_string()),
+            "and only the closed pane's"
+        );
+
+        // Host shutdown takes the rest, before the delivery thread is joined.
+        bus.withdraw_all();
+        assert!(documents.is_empty());
+    }
+
+    #[test]
+    fn a_bus_with_no_documents_attached_closes_panes_exactly_as_before() {
+        // Every test that drives panes without an HTTP server, which is most of
+        // them: publishing is a no-op and closing must not care.
+        let bus = PaneBus::default();
+        let id = bus.open(identity(1));
+        bus.publish_document(id, "/client/pane-0-aaaa.html".to_string(), "a".to_string());
+        assert_eq!(bus.document_path(id), None);
+        bus.close(id);
+        assert_eq!(bus.open_count(), 0);
     }
 
     #[test]

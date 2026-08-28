@@ -111,8 +111,9 @@ because it changes what scenario 4 is testing.
 host URL and the phone's) withholds the TURN server list entirely, so there is
 nothing to allocate from and any pair ICE forms is genuinely direct. It is the
 mirror image of scenario 3's `?forceRelay=1`, and it turns "we expect a
-host → host pair" into "nothing else was available". Both readouts say
-"Transport pinned to direct on this host"; if that line is missing the lever did
+host → host pair" into "nothing else was available". Each end has its own
+wording — host: "Transport pinned to direct on this host"; phone: "Transport
+pinned to direct by this link" — and if either line is missing the lever did
 not take. A failure under this pin means the LAN really is isolating clients —
 which is the answer worth having, and it comes in seconds rather than after the
 ninety-second ladder.
@@ -170,8 +171,9 @@ the other side would still win, and the session would pass while testing the
 ordinary path.
 
 **The diagnostics must show.**
-* Both ends: "Transport pinned to turn on this host". If that line is absent,
-  the lever did not take and the run is invalid — check the URL.
+* Host: "Transport pinned to turn on this host"; phone: "Transport pinned to
+  turn by this link". If either line is absent, the lever did not take and the
+  run is invalid — check the URL.
 * Phone: `route:` naming **relay** on at least the local side, and a `via`
   naming a `turn:`/`turns:` address. **Record which address** — that is how you
   tell the dedicated credential worker from the free shared fallback without

@@ -896,6 +896,16 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         crate::command_admission::AdmissionGate::InProgressOnly,
     );
 
+    // Host-to-host lockstep (issue #1116). Registered immediately after the
+    // admission seam because it is the same seam seen from the fleet's side: it
+    // owns the slot admission orders this host's commands under, the queue the
+    // peers' commands enter, and the barrier that decides whether the next tick
+    // may run at all. Everything it installs is inert for a lone host — the
+    // default `FleetRoster` is a fleet of one, no `LockstepSession` exists until
+    // one forms, and `CommandDelay` stays at zero — so a single-player run is
+    // byte-identical to a pre-#1116 one.
+    crate::lockstep::register_lockstep(app);
+
     // God Mode (issue #900): the resource `apply_god_mode_toggle` flips, and
     // the consumer registration so the unrouted-command lint below doesn't
     // warn about `god-mode` — the applier registered right after this is its

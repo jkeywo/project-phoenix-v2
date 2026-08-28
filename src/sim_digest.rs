@@ -2044,6 +2044,21 @@ impl DigestLedger {
         self.checkpoints.push(Checkpoint { tick, digest });
     }
 
+    /// The digest this ledger sampled at `tick`, if it sampled one.
+    ///
+    /// Added by issue #1116 so a host can answer a peer's digest frame the
+    /// moment it arrives — "did I fold the same thing at tick 300?" — rather
+    /// than waiting until it has a whole ledger to compare.
+    /// [`Self::first_divergence`] remains the comparator for two complete runs;
+    /// this is the same question asked one sample at a time, off the same
+    /// checkpoints, so the two can never disagree about what was sampled.
+    pub fn digest_at(&self, tick: u64) -> Option<u64> {
+        self.checkpoints
+            .iter()
+            .find(|c| c.tick == tick)
+            .map(|c| c.digest)
+    }
+
     /// The first tick at which this ledger and `other` disagree.
     ///
     /// Pairs samples by *tick*, not by index, so two runs that sampled

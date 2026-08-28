@@ -361,6 +361,7 @@ pub(crate) fn spawn_game_start_entities(
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     mut has_spawned: Local<bool>,
     id_mint: Option<Res<crate::world_id::WorldIdMint>>,
+    roster: Option<Res<crate::lockstep::FleetRoster>>,
 ) {
     if *has_spawned {
         return;
@@ -373,7 +374,13 @@ pub(crate) fn spawn_game_start_entities(
 
     let config_cache = crate::entities::config_cache::get_config_cache();
 
-    let mut ship_spawned = false;
+    // The frozen fleet (issue #1116). One ship for a lone host — the default,
+    // and the shipped single-player case — or one per host in a fleet, taking
+    // the world's GameStart `ship` rows in slot order. An app with no roster
+    // resource at all (a bare fixture) behaves as a fleet of one.
+    let solo_roster = crate::lockstep::FleetRoster::default();
+    let roster = roster.as_deref().unwrap_or(&solo_roster);
+    let mut player_ships_spawned = 0usize;
     let named_positions = crate::world::config::build_named_entity_positions(mc);
     for entity_inst in &mc.entities {
         if entity_inst.spawn_on != crate::world::config::WorldEntitySpawnOn::GameStart {
@@ -417,13 +424,25 @@ pub(crate) fn spawn_game_start_entities(
         // than being discarded by it — see `player_hull_config` for why the
         // world's per-instance tuning outlives the hull swap, and for what a
         // world without overrides is guaranteed (nothing changes at all).
-        let config = if !ship_spawned && config.tags.iter().any(|t| t == "ship") {
+        // Is this row one of the fleet's player ships? The world authors as
+        // many `ship`-tagged GameStart rows as the largest fleet it supports,
+        // and the roster decides how many of them are crewed hulls rather than
+        // ordinary NPCs — so a two-ship world played solo spawns one player
+        // ship and one NPC, exactly as it did before the fleet existed.
+        let is_fleet_ship =
+            player_ships_spawned < roster.len() && config.tags.iter().any(|t| t == "ship");
+        let fleet_ship = is_fleet_ship.then(|| roster.ship(player_ships_spawned)).flatten();
+        // Which hull this slot flies: the roster's choice for a fleet member,
+        // and this host's own lobby selection for a lone host (`ship_path` is
+        // `None` there, which is what keeps the solo spawn byte-identical).
+        let hull_path: Option<String> = fleet_ship
+            .and_then(|ship| ship.ship_path.clone())
+            .or_else(|| selected_ship.as_ref().map(|sel| sel.0.clone()));
+        let config = if is_fleet_ship {
             player_hull_config(
                 config,
                 entity_inst.overrides.as_ref(),
-                selected_ship
-                    .as_ref()
-                    .and_then(|sel| config_cache.get(&sel.0)),
+                hull_path.as_deref().and_then(|path| config_cache.get(path)),
             )
         } else {
             config
@@ -449,7 +468,11 @@ pub(crate) fn spawn_game_start_entities(
 
         // Override with player_spawn position when spawning the player ship
         // (issue #623).
-        let pos = if !ship_spawned && config.tags.iter().any(|t| t == "ship") {
+        // `[player_spawn]` places the FIRST fleet ship only. Every later slot
+        // takes its own authored `[[entity]] transform`, which is how a world
+        // gives a fleet distinct starting positions — one anchor cannot place
+        // two hulls.
+        let pos = if is_fleet_ship && player_ships_spawned == 0 {
             if let Some(ref spawn) = mc.player_spawn {
                 if let Some(ref anchor_name) = spawn.anchor {
                     match mc.anchors.get(anchor_name) {
@@ -473,7 +496,7 @@ pub(crate) fn spawn_game_start_entities(
 
         // Override with player_spawn rotation when spawning the player ship (issue #623).
         let player_spawn_rot: Option<bevy::math::Quat> =
-            if !ship_spawned && config.tags.iter().any(|t| t == "ship") {
+            if is_fleet_ship && player_ships_spawned == 0 {
                 mc.player_spawn.as_ref().and_then(|s| s.rotation).map(|r| {
                     let (q, _) = player_spawn_rotation_yaw(r);
                     q
@@ -511,7 +534,7 @@ pub(crate) fn spawn_game_start_entities(
         // the sequence and set of `.insert()` / `insert_resource` /
         // `remove_resource` calls is byte-for-byte the one that shipped inline,
         // which the archetype-order guard gates.
-        if !ship_spawned && config.tags.iter().any(|t| t == "ship") {
+        if let Some(fleet_ship) = fleet_ship {
             configure_player_ship(
                 &mut commands,
                 spawned,
@@ -520,20 +543,63 @@ pub(crate) fn spawn_game_start_entities(
                 initial_yaw,
                 &mut pending_ship_config,
                 &mut sessions,
+                &FleetPlacement {
+                    host: fleet_ship.host,
+                    is_local: roster.is_local(fleet_ship.host),
+                    solo: roster.is_solo(),
+                    crew: &fleet_ship.crew,
+                    hull_path: hull_path.as_deref(),
+                },
+                &config_cache,
             );
-            ship_spawned = true;
+            player_ships_spawned += 1;
         }
     }
 
     *has_spawned = true;
 }
 
-/// Configure the one GameStart player ship: resolve its lobby-selected hull
-/// config, seed the boot ratings and the authored power-group reactor seed,
-/// then run the per-concern builders below in the EXACT order their inserts
-/// previously ran inline. Component-insertion order is archetype-creation
-/// order, which the authoritative digest is sensitive to, so this split is
-/// pure code motion (issue #1200).
+/// Which fleet slot a GameStart player ship is being built for, and everything
+/// about that slot the builders below need (issue #1116).
+///
+/// A struct rather than five loose arguments because four of the five are only
+/// meaningful together: "this is slot 2's ship, it is not this host's, the
+/// fleet agreed its Helm is crewed at Std, and it flies this hull" is one fact.
+pub(crate) struct FleetPlacement<'a> {
+    /// The host that flies this ship.
+    pub host: crate::command_admission::HostSlot,
+    /// Whether that host is this one — the whole of what `LocalShip` means.
+    pub is_local: bool,
+    /// Whether this is a lone host rather than a fleet. A lone host keeps the
+    /// pre-#1116 seeding path exactly: its own live `Sessions`, its own
+    /// players' pending Rating choices.
+    pub solo: bool,
+    /// The frozen crewing of this ship, `(station, rating)`.
+    pub crew: &'a [(crate::core::messages::StationId, String)],
+    /// The hull this slot flies, as an entity-template path.
+    pub hull_path: Option<&'a str>,
+}
+
+/// Configure one GameStart player ship: resolve its hull config, seed the boot
+/// ratings and the authored power-group reactor seed, then run the per-concern
+/// builders below in the EXACT order their inserts previously ran inline.
+/// Component-insertion order is archetype-creation order, which the
+/// authoritative digest is sensitive to, so that split is pure code motion
+/// (issue #1200).
+///
+/// # Seeding a ship whose crew is on another machine (issue #1116)
+///
+/// The pre-#1116 seeding reads local `Sessions` — which stations have a
+/// connected player, and what complexity Rating each of them chose. That is the
+/// right answer for a lone host and the wrong one for a fleet: `Sessions`
+/// describes only THIS host's crew, so slot 2's ship would boot fully
+/// AI-backfilled here and human-crewed on the machine its crew is sitting at.
+/// The two hosts would then run different AI on the same hull from tick zero.
+///
+/// So a fleet seeds every ship — its own included — from the roster's frozen
+/// crewing, which every host received identically when the roster froze. A lone
+/// host (`solo`) keeps the live-`Sessions` path untouched, which is why nothing
+/// about single-player boot moved.
 fn configure_player_ship(
     commands: &mut Commands,
     spawned: Entity,
@@ -542,14 +608,38 @@ fn configure_player_ship(
     initial_yaw: f32,
     pending_ship_config: &mut Option<ResMut<crate::ship_plugin::PendingShipConfig>>,
     sessions: &mut Option<ResMut<crate::lobby::Sessions>>,
+    placement: &FleetPlacement<'_>,
+    config_cache: &crate::entities::config_cache::ConfigCache,
 ) {
-    let ship_config = if let Some(pending) = pending_ship_config.as_mut() {
-        let cfg = crate::ship_plugin::ShipConfigComponent(pending.0.clone());
-        commands.remove_resource::<crate::ship_plugin::PendingShipConfig>();
-        *pending_ship_config = None;
-        cfg
+    // `PendingShipConfig` is this host's own lobby selection, so it belongs to
+    // this host's own ship and nothing else. A fleet member's hull comes from
+    // the template the roster named — the same template every host in the fleet
+    // resolved, which is what makes the stations, systems and Ratings below
+    // identical everywhere.
+    let ship_config = if placement.is_local {
+        if let Some(pending) = pending_ship_config.as_mut() {
+            let cfg = crate::ship_plugin::ShipConfigComponent(pending.0.clone());
+            commands.remove_resource::<crate::ship_plugin::PendingShipConfig>();
+            *pending_ship_config = None;
+            cfg
+        } else {
+            crate::ship_plugin::load_ship_config_from_disk()
+        }
     } else {
-        crate::ship_plugin::load_ship_config_from_disk()
+        placement
+            .hull_path
+            .and_then(|path| config_cache.get(path))
+            .and_then(|entity| entity.ship_config.clone())
+            .map(crate::ship_plugin::ShipConfigComponent)
+            .unwrap_or_else(|| {
+                bevy::log::error!(
+                    "fleet {}: no station-bearing hull at {:?}; falling back to \
+                     the default so the ship still exists",
+                    placement.host.slot_id(),
+                    placement.hull_path,
+                );
+                crate::ship_plugin::load_ship_config_from_disk()
+            })
     };
     // Seed the reactor from the player ship's authored power groups
     // (issue #762) before `ship_config` is moved into the entity, so
@@ -557,7 +647,24 @@ fn configure_player_ship(
     // allocatable. Empty for a config with no `[power_groups.*]`.
     let power_group_seed =
         crate::ship::power::authored_power_group_seed(&ship_config.0.power_groups);
-    let (initial_control_sources, initial_active_ratings) = {
+    let (initial_control_sources, initial_active_ratings) = if !placement.solo {
+        // A fleet: every host seeds every ship from the SAME frozen crewing,
+        // its own included, so no two hosts can disagree about who is aboard
+        // or at what Rating.
+        let (resolver, active_ratings) =
+            crate::ship::rating::seed_boot_ratings(&ship_config.0, |station| {
+                placement
+                    .crew
+                    .iter()
+                    .find(|(id, _)| *id == station.id)
+                    .map(|(_, rating)| rating.clone())
+                    .unwrap_or_else(|| crate::ship::rating::BACKFILL_RATING.to_string())
+            });
+        (
+            crate::ship_plugin::ShipSystemControlSources(resolver),
+            crate::ship_plugin::ActiveStationRatings(active_ratings),
+        )
+    } else {
         // The shared boot-seeding path (issue #871) — the same
         // `seed_boot_ratings` `entities::spawner` calls for every other
         // hull. Only the per-station rating CHOICE differs here: this
@@ -613,6 +720,7 @@ fn configure_player_ship(
         &power_group_seed,
         pos,
         initial_yaw,
+        placement,
     );
     insert_player_identity(commands, spawned, config);
     insert_player_repair_teams(commands, spawned, config);
@@ -638,11 +746,41 @@ fn insert_player_core_bundle(
     power_group_seed: &[(crate::core::messages::PowerGroupId, u8)],
     pos: Vec3,
     initial_yaw: f32,
+    placement: &FleetPlacement<'_>,
 ) {
-    commands
-        .entity(spawned)
-        .insert(Ship)
-        .insert(LocalShip)
+    let mut ship = commands.entity(spawned);
+    ship.insert(Ship);
+    // The projection marker, and the ONE place it is decided: this host tags
+    // the ship its own crew is aboard and no other (issue #1116). Inserted
+    // immediately after `Ship`, where it has always been, so the local ship's
+    // insertion order — which is archetype-creation order — is unchanged.
+    if placement.is_local {
+        ship.insert(LocalShip);
+    }
+    ship
+        // Which host flies this hull. On every host in the fleet, for every
+        // fleet ship — so an NPC and a peer's player ship are told apart by a
+        // component rather than by absence, and a peer's `ShipKey`-routed
+        // command has something to be answered by.
+        .insert(crate::lockstep::FleetSlotOf(placement.host))
+        // The three components #984 made `LocalShip` `#[require]`. They are
+        // inserted HERE, in the spawn burst, on EVERY fleet ship — the local
+        // one and the peers' alike (issue #1116). Two reasons, and both are
+        // load-bearing:
+        //
+        //   * a mid-run `Commands::insert` of `HumanSeekingHosts` moved the
+        //     authoritative digest on `duel` and `rng_coverage` (#984/#1051),
+        //     so the resolver must never have to create them; and
+        //   * making their PRESENCE follow `LocalShip` would give two hosts
+        //     different component sets on the same hull from tick zero, which
+        //     is the cross-host asymmetry `LocalShip`'s docs now forbid.
+        //
+        // Every fleet ship needs them on their merits too: a peer's ship has
+        // human-seeking systems that must resolve the same way on every host,
+        // or one host's AI operates a console another host's crew is sitting at.
+        .insert(crate::ship_plugin::HumanSeekingHosts::default())
+        .insert(crate::ship_plugin::VisitingStationHosts::default())
+        .insert(crate::ship_plugin::ScenarioDetailFloor::default())
         // The player ship is permanently high-fidelity (`lod_ai_ships`
         // never evaluates `LocalShip`), so it takes the marker and the
         // components that travel with it from the SAME shared

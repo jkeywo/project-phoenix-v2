@@ -95,6 +95,12 @@ pub mod entities;
 /// #1025): the pure degradation/repair track and its Bevy adapter.
 pub mod infrastructure;
 pub mod lobby;
+/// Host-to-host lockstep (issue #1116): the frozen fleet as the simulation sees
+/// it, the peer-independent command order, the barrier that withholds a tick
+/// this host is not yet entitled to run, and the periodic digest exchange. Owns
+/// no socket — a transport fills its inbox and drains its outbox — so every
+/// decision it makes is testable on native with no networking at all.
+pub mod lockstep;
 pub mod modifiers;
 pub mod objectives;
 pub mod radar;

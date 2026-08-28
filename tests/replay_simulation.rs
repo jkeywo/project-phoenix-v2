@@ -18,7 +18,7 @@
 
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 
-use project_phoenix::command_admission::log::{LoggedCommand, ShipKey};
+use project_phoenix::command_admission::log::{CommandOrder, LoggedCommand, ShipKey};
 use project_phoenix::core::messages::{SystemControlPayload, SystemId};
 use project_phoenix::headless::replay::{drive_run, PhoenixSim, ReplayError};
 use project_phoenix::headless::{verify_artifact, HeadlessArgs, ReplayArtifact};
@@ -50,6 +50,10 @@ fn args() -> HeadlessArgs {
 fn command(tick: u64, target: SystemId, payload: SystemControlPayload) -> LoggedCommand {
     LoggedCommand {
         tick,
+        // The fleet order a recording run stamped (issue #1116). A synthetic
+        // script has no fleet, so it carries the solo order every lone host
+        // mints — which is what the pre-#1116 arrival counter was.
+        order: CommandOrder::default(),
         // The recording run fills this in from admission's own routing; what a
         // driver supplies is a credential derived from the TARGET (see
         // `replay::replay_token_for`), so the key a script carries is not what

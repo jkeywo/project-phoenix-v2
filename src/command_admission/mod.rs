@@ -41,8 +41,8 @@ pub mod router;
 // every AI operator imports — a second flattened path would let two spellings
 // of the same item drift apart in imports and in the PASM observed edges.
 pub use log::{
-    reset_command_log, CommandDelay, CommandLog, CommandLogReplay, LoggedCommand, PendingCommands,
-    ShipKey,
+    reset_command_log, CommandDelay, CommandLog, CommandLogReplay, CommandOrder, HostSlot,
+    LoggedCommand, PendingCommands, ShipKey,
 };
 pub use policy::{is_command_authorized, station_for_system};
 pub use router::{
@@ -250,6 +250,20 @@ pub fn validate_command(
 /// unregistered `ai:` token (player Backfill AI, synthetic test tokens)
 /// still routes to the LocalShip.
 ///
+/// # Applying by `ShipKey` (issue #1116)
+///
+/// The *acceptance* route above is unchanged — this host's own crew is aboard
+/// this host's own ship, which is what `LocalShip` means. What changed is the
+/// **apply** route: a due command is delivered to the ship its
+/// [`log::ShipKey`] names, resolved at the instant it lands rather than at the
+/// instant it was accepted. That closes the gap `src/headless/replay.rs`
+/// recorded in so many words ("reading `ShipKey` back out and resolving *it* to
+/// a destination … is issue #854's work"), and it is what lets a peer's command
+/// — which names a ship this host did not route it to, and may not even have
+/// spawned when the frame arrived — reach the right hull. An unnamed key (the
+/// bare-`App` fixture shape) falls back to the `Entity` recorded at acceptance,
+/// so nothing about a fixture moved.
+///
 /// A network `ControlSystem` message is admitted iff its token is the live
 /// controller of the target system on the routed ship: AI tokens require
 /// `operate_ai`; human tokens require `accept_human_input` AND holding the
@@ -300,6 +314,7 @@ pub fn admit_system_commands(
     delay: Res<log::CommandDelay>,
     mut command_log: ResMut<log::CommandLog>,
     mut pending: ResMut<log::PendingCommands>,
+    mut mesh_outbox: Option<ResMut<crate::lockstep::MeshOutbox>>,
     log: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
     use crate::logging::LogCat;
@@ -308,11 +323,19 @@ pub fn admit_system_commands(
 
     // Clear every ship's admitted commands: the AI decide systems refill
     // their own ship's queue later in the same tick via `validate_and_admit`.
+    // The uuid→entity index is built in the same walk, because the apply pass
+    // below routes by `ShipKey` and a second walk to find that out would be a
+    // second copy of "which ship is which".
     let mut local_ship: Option<Entity> = None;
-    for (entity, _, mut admitted, _, is_local, _, _) in ship_query.iter_mut() {
+    let mut by_ship_key: std::collections::HashMap<String, Entity> =
+        std::collections::HashMap::new();
+    for (entity, _, mut admitted, _, is_local, uuid, _) in ship_query.iter_mut() {
         admitted.0.clear();
         if is_local {
             local_ship = Some(entity);
+        }
+        if let Some(uuid) = uuid {
+            by_ship_key.insert(uuid.0.clone(), entity);
         }
     }
     for ev in reader.read() {
@@ -352,17 +375,28 @@ pub fn admit_system_commands(
             seeking_hosts,
         ) {
             Some(command) => {
-                // Accepted: stamped, queued and recorded together. A refused
-                // command reaches neither branch of this — which is the whole
-                // of "a rejection never enters the log".
-                log::stamp_accepted_command(
-                    &mut command_log,
+                // Accepted: stamped and queued for the tick it applies on. A
+                // refused command reaches neither branch of this — which is the
+                // whole of "a rejection never enters the log", since the log is
+                // written when the queue applies.
+                let order = log::stamp_accepted_command(
                     &mut pending,
                     apply_tick,
+                    None,
                     route,
-                    ship_key,
-                    command,
+                    ship_key.clone(),
+                    command.clone(),
                 );
+                // …and, if this host is in a fleet, told to the fleet. Staged
+                // here rather than derived later because this is the one place
+                // that has the accepted command, its agreed order and its
+                // routed ship in hand at once; `seal_tick_frame` turns the
+                // tick's staging into one frame.
+                if let Some(outbox) = mesh_outbox.as_deref_mut() {
+                    outbox.stage(crate::lockstep::mesh_command(
+                        apply_tick, order, ship_key, &command,
+                    ));
+                }
                 crate::ptrace!(
                     log,
                     LogCat::Admit,
@@ -389,14 +423,25 @@ pub fn admit_system_commands(
     }
 
     // Everything stamped for this tick (or, defensively, an earlier one) lands
-    // now, in `(tick, arrival)` order — the order the log records.
-    for due in pending.drain_due(now) {
-        let Ok((_, _, mut admitted, _, _, _, _)) = ship_query.get_mut(due.route) else {
+    // now, in `(tick, order)` order — and is written into the log as it lands,
+    // so the record is the applied sequence and every host in the fleet writes
+    // the same one.
+    for due in pending.drain_due(now, &mut command_log) {
+        // The ship is named, not remembered: `ShipKey` is resolved against this
+        // tick's world, and the `Entity` captured at acceptance is only the
+        // fallback for a ship that never had a uuid to be named by.
+        let route = by_ship_key
+            .get(&due.ship.0)
+            .copied()
+            .unwrap_or(due.route);
+        let Ok((_, _, mut admitted, _, _, _, _)) = ship_query.get_mut(route) else {
             crate::pwarn!(
                 log,
                 LogCat::Admit,
-                "dropping a command stamped for tick {} — its ship is gone",
+                "dropping a command stamped for tick {} on ship {:?} — that ship \
+                 is not in this world",
                 due.tick,
+                due.ship.0,
             );
             continue;
         };
@@ -586,37 +631,50 @@ station = "repair"
     }
 
     /// The future-tick path, which a zero `CommandDelay` otherwise hides: with
-    /// a delay of two ticks the command is recorded immediately, stamped for
-    /// tick 2, and does not reach `AdmittedCommands` until tick 2 comes round.
+    /// a delay of two ticks the command is queued at once, stamped for tick 2,
+    /// and neither applies nor is recorded until tick 2 comes round.
     ///
     /// This is the test that makes "logged commands carry the tick they apply
     /// on, and apply on that tick" a claim about the plumbing rather than a
-    /// tautology about a delay of nought.
+    /// tautology about a delay of nought — and, since #1116, that the log is
+    /// the APPLIED sequence rather than the accepted one. A host writes an
+    /// entry as the command lands, so two hosts in a fleet write the same log
+    /// even though each accepted its own crew's commands locally and the
+    /// other's off a socket, at different moments and in different orders.
     #[test]
     fn a_delayed_command_waits_for_the_tick_it_is_stamped_for() {
         let (mut app, ship) = admission_app(ControlSource::Human);
         app.insert_resource(log::CommandDelay(2));
         send(&mut app, HOLDER, dispatch(0));
 
-        // Tick 0: recorded and queued, but not yet applied.
+        // Tick 0: queued for tick 2, applied nowhere and written down nowhere.
         app.update();
         assert!(
             admitted(&mut app, ship).is_empty(),
             "a command stamped for tick 2 must not apply on tick 0"
         );
-        assert_eq!(command_log(&app).entries().len(), 1);
-        assert_eq!(command_log(&app).entries()[0].tick, 2);
+        assert!(
+            command_log(&app).is_empty(),
+            "and must not be in the log either: the log is what HAS applied, \
+             so an entry here would claim a tick 2 that has not happened"
+        );
         assert_eq!(app.world().resource::<log::PendingCommands>().len(), 1);
 
         // Tick 1: still waiting.
         app.update();
         assert!(admitted(&mut app, ship).is_empty());
+        assert!(command_log(&app).is_empty());
 
-        // Tick 2: applies, on exactly the tick it was stamped for.
+        // Tick 2: applies, on exactly the tick it was stamped for, and is
+        // recorded as it lands.
         app.update();
         assert_eq!(app.world().resource::<crate::sim_tick::SimTick>().0, 3);
         assert_eq!(admitted(&mut app, ship), vec![dispatch(0)]);
         assert!(app.world().resource::<log::PendingCommands>().is_empty());
+        assert_eq!(command_log(&app).entries()[0].tick, 2);
+
+        // And applying once records once.
+        app.update();
         assert_eq!(
             command_log(&app).entries().len(),
             1,

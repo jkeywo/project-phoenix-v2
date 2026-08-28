@@ -1852,6 +1852,32 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         ));
     }
 
+    // The fleet lockstep delay (issue #1116). Both bounds are refusals rather
+    // than clamps, for the same reason the tick ratios above are: a wrong value
+    // here does not make the mission play badly, it makes two hosts disagree or
+    // wait forever, and neither failure names itself at the moment it is
+    // authored. Zero is refused because a fleet running with no delay has no
+    // window in which to receive a peer's input for the tick it is about to
+    // simulate — every peer command would arrive stamped for a tick already
+    // gone, and the queue would apply it late on whichever hosts happened to be
+    // slower. The value is inert for a single host, which takes zero by
+    // construction (`lockstep::join_fleet`), so this bounds fleet play only.
+    if raw.global.command_delay_ticks == 0
+        || raw.global.command_delay_ticks > crate::entities::config::MAX_COMMAND_DELAY_TICKS
+    {
+        return Err(format!(
+            "[global] command_delay_ticks = {} is outside 1..={}: it is the number of \
+             logical ticks a fleet stamps its crews' commands into the future so that \
+             every host has every peer's input for a tick before it simulates it. Zero \
+             leaves no window at all — a peer's command would always arrive for a tick \
+             that has already passed — and anything above the ceiling puts a helm order \
+             so long after the key that a crew stops recognising it as their own input. \
+             A single host ignores this and runs at zero.",
+            raw.global.command_delay_ticks,
+            crate::entities::config::MAX_COMMAND_DELAY_TICKS,
+        ));
+    }
+
     let mut anchors: HashMap<String, [f32; 3]> = HashMap::with_capacity(raw.anchors.len());
     for (name, pos) in raw.anchors {
         let normalised = match pos.len() {

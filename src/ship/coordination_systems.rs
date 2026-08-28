@@ -193,14 +193,24 @@ fn ship_seats(
 
 // ── Human-seeking hosts (issue #984) ──────────────────────────────────────────
 
-/// Resolve the active world's hull-agnostic detail-floor vocabulary to the
-/// selected LocalShip's concrete System ids. This is the production writer of
+/// Resolve the active world's hull-agnostic detail-floor vocabulary to each
+/// fleet ship's concrete System ids. This is the production writer of
 /// [`ScenarioDetailFloor`]; the Station resolver below remains a pure consumer.
 /// Re-running is deliberate: a scenario resource or selected hull may change
 /// between missions without leaving the prior world's floor latched.
+///
+/// Scoped to `With<FleetSlotOf>` — every ship a host in the fleet flies, not
+/// just this host's own (issue #1116). A scenario floor that applied only to
+/// the locally-crewed hull would give two hosts different effective Station
+/// Ratings on the same ship, and therefore different systems under AI, from the
+/// first tick of the mission. NPCs are still excluded: they carry no slot, and
+/// a mission's crew-complexity floor has nothing to say about them.
 pub fn write_scenario_detail_floor(
     world: Option<Res<crate::world::config::WorldConfig>>,
-    mut ships: Query<(&ShipConfigComponent, &mut ScenarioDetailFloor), With<LocalShip>>,
+    mut ships: Query<
+        (&ShipConfigComponent, &mut ScenarioDetailFloor),
+        With<crate::lockstep::FleetSlotOf>,
+    >,
 ) {
     let selectors = world
         .as_deref()
@@ -248,10 +258,28 @@ pub fn write_scenario_detail_floor(
 /// actually differs keeps that re-assertion free of spurious change-detection
 /// ticks.
 ///
-/// Scoped to the `LocalShip`, which is where `ship_seats` above is already
-/// scoped for the same reason: `Sessions` describes the local crew and nothing
-/// else, so resolving an NPC hull against it would let a human seated on the
-/// player's bridge switch an enemy alliance hull's comms off AI.
+/// Scoped to the ships a host in the FLEET flies (`With<FleetSlotOf>`), never
+/// to NPCs — `Sessions` describes the local crew and nothing else, so resolving
+/// an enemy alliance hull against it would let a human seated on the player's
+/// bridge switch that hull's comms off AI.
+///
+/// # Whose crew answers for which ship (issue #1116)
+///
+/// It used to be scoped to `LocalShip`, which was right while a host had
+/// exactly one crewed hull and wrong the moment it had two. A peer's ship is
+/// crewed — by people on another machine — and a host that resolved it against
+/// its own empty `Sessions` would write `Ai` onto a console a human is sitting
+/// at, while the host that crew is connected to writes `Human`. The two hosts
+/// then run different AI on the same hull, and diverge.
+///
+/// So the holder lookup is per ship: this host's own ship answers from live
+/// `Sessions`, exactly as before; a peer's ship answers from the roster's
+/// frozen crewing, which every host received identically. A frozen answer
+/// cannot re-seek mid-mission — that is #1119's tick-stamped host-loss event,
+/// and it is deliberately not approximated here, because a re-seek each host
+/// performed on its own view of who is connected is precisely the
+/// "applied at different ticks on different peers" failure
+/// `p2p-delta-backfill-replaces-auto-crew` rules out.
 ///
 /// A system may author its own walk (`seek_order`), which this adapter hands
 /// straight through to [`coordination::seek_human_host_in`]. It is one more
@@ -282,23 +310,65 @@ pub fn write_scenario_detail_floor(
 /// burst, this system takes it as a plain `&mut`, and there is no `Commands`
 /// parameter left through which a mid-run move could be reintroduced.
 pub fn resolve_human_seeking_hosts(
-    mut ships: Query<
-        (
-            &ShipConfigComponent,
-            &mut ShipSystemControlSources,
-            Option<&ActiveStationRatings>,
-            &ScenarioDetailFloor,
-            &mut HumanSeekingHosts,
-            &mut VisitingStationHosts,
-        ),
-        With<LocalShip>,
-    >,
+    mut ships: Query<(
+        &ShipConfigComponent,
+        &mut ShipSystemControlSources,
+        Option<&ActiveStationRatings>,
+        &ScenarioDetailFloor,
+        &mut HumanSeekingHosts,
+        &mut VisitingStationHosts,
+        &crate::lockstep::FleetSlotOf,
+    )>,
     sessions: Res<Sessions>,
+    roster: Option<Res<crate::lockstep::FleetRoster>>,
 ) {
+    let solo_roster = crate::lockstep::FleetRoster::default();
+    let roster = roster.as_deref().unwrap_or(&solo_roster);
     let no_ratings = std::collections::HashMap::new();
-    for (ship_config, mut control_sources, ratings, scenario_floor, mut hosts, mut station_hosts) in
-        ships.iter_mut()
+    for (
+        ship_config,
+        mut control_sources,
+        ratings,
+        scenario_floor,
+        mut hosts,
+        mut station_hosts,
+        slot,
+    ) in ships.iter_mut()
     {
+        // Whose crew this hull answers to. A lone host, and a fleet host's own
+        // ship, answer from live `Sessions` — so a reconnecting player still
+        // re-takes a seat within a tick, which `tests/headless_runner.rs`
+        // pins. A peer's ship answers from the frozen roster, because this host
+        // has no sessions for that crew and never will.
+        let local_crew = roster.is_solo() || roster.is_local(slot.0);
+        let frozen_crew = roster.crew_of(slot.0);
+        let holder_of = |station: &crate::core::messages::StationId| -> Option<String> {
+            if local_crew {
+                sessions.0.holder_for_station(station).map(str::to_string)
+            } else {
+                frozen_crew
+                    .iter()
+                    .find(|(id, _)| id == station)
+                    // A synthetic name, never a token: the real one is a bearer
+                    // credential on another machine. Nothing downstream reads it
+                    // — the seek asks whether a seat HAS a holder — and it is
+                    // never broadcast, because projection is `LocalShip`'s and
+                    // this ship is not the local one.
+                    .map(|(id, _)| format!("fleet:{}:{}", slot.0.slot_id(), id.0))
+            }
+        };
+        let seat_is_available = |station: &crate::core::messages::StationId| -> bool {
+            if local_crew {
+                sessions.0.holder_for_station(station).is_some_and(|tok| {
+                    !sessions.0.is_afk(tok) && sessions.0.is_eligible(tok, station)
+                })
+            } else {
+                // AFK and eligibility are live local facts about a live local
+                // player. A peer's seat is exactly as crewed as the roster
+                // froze it; anything finer is #1119's tick-stamped event.
+                frozen_crew.iter().any(|(id, _)| id == station)
+            }
+        };
         let config = &ship_config.0;
         if !config.systems.iter().any(|s| s.human_seeking)
             && !config.stations.iter().any(|station| station.human_seeking)
@@ -309,7 +379,7 @@ pub fn resolve_human_seeking_hosts(
             config,
             &control_sources.0,
             ratings.map(|r| &r.0).unwrap_or(&no_ratings),
-            |station| sessions.0.holder_for_station(station).map(str::to_string),
+            holder_of,
         );
 
         let mut resolved: std::collections::BTreeMap<
@@ -357,11 +427,7 @@ pub fn resolve_human_seeking_hosts(
                 // Pure per-tick recompute, so an AFK holder is dropped as a host
                 // deterministically the moment they step away and re-included the
                 // tick after they return (AC3/AC4).
-                |candidate| {
-                    sessions.0.holder_for_station(candidate).is_some_and(|tok| {
-                        !sessions.0.is_afk(tok) && sessions.0.is_eligible(tok, &station.id)
-                    })
-                },
+                |candidate| seat_is_available(candidate),
                 &scenario_floor.0,
             );
             if assignment.host.as_ref() == Some(&station.id) {

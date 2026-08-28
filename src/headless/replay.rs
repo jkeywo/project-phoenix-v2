@@ -792,6 +792,7 @@ mod tests {
     fn a_logged_command_carries_everything_a_replay_needs_to_route_it() {
         let entry = LoggedCommand {
             tick: 7,
+            order: crate::command_admission::CommandOrder::default(),
             ship: ShipKey("uuid-1".into()),
             target: SystemId("red-alert".into()),
             payload: SystemControlPayload::SetRedAlert { active: true },

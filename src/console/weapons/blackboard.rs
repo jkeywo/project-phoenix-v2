@@ -482,33 +482,6 @@ fn publish_weapons_update_if_changed(
     vec![message]
 }
 
-#[cfg(test)]
-mod lifecycle_tests {
-    use super::*;
-
-    #[test]
-    fn registered_reset_rearms_initial_default_projection_for_a_second_run() {
-        let mut app = App::new();
-        register_weapons_replication_lifecycle(&mut app);
-        let default_projection = LastWeaponsUpdate::default();
-
-        *app.world_mut().resource_mut::<WeaponsUpdateFirstTick>() = WeaponsUpdateFirstTick(false);
-        assert!(
-            publish_weapons_update_if_changed(app.world_mut(), default_projection.clone())
-                .is_empty()
-        );
-
-        crate::core::broadcast::reset_registered_replication(app.world_mut());
-
-        assert!(app.world().resource::<WeaponsUpdateFirstTick>().0);
-        assert_eq!(
-            publish_weapons_update_if_changed(app.world_mut(), default_projection.clone()),
-            vec![weapons_update_message(default_projection)]
-        );
-        assert!(!app.world().resource::<WeaponsUpdateFirstTick>().0);
-    }
-}
-
 // ── Blackboard publish (issue #560) ─────────────────────────────────────────
 //
 // Split into one system per blackboard type (issue #725):
@@ -1511,5 +1484,32 @@ fn blip_default_color(icon: &str) -> [f32; 3] {
         "cruiser" => [0.8, 0.3, 0.1],      // orange-red — medium enemy
         "destroyer" => [1.0, 0.2, 0.2],    // bright red — small enemy
         _ => [0.659, 0.690, 0.753],        // #a8b0c0 unknown
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    #[test]
+    fn registered_reset_rearms_initial_default_projection_for_a_second_run() {
+        let mut app = App::new();
+        register_weapons_replication_lifecycle(&mut app);
+        let default_projection = LastWeaponsUpdate::default();
+
+        *app.world_mut().resource_mut::<WeaponsUpdateFirstTick>() = WeaponsUpdateFirstTick(false);
+        assert!(
+            publish_weapons_update_if_changed(app.world_mut(), default_projection.clone())
+                .is_empty()
+        );
+
+        crate::core::broadcast::reset_registered_replication(app.world_mut());
+
+        assert!(app.world().resource::<WeaponsUpdateFirstTick>().0);
+        assert_eq!(
+            publish_weapons_update_if_changed(app.world_mut(), default_projection.clone()),
+            vec![weapons_update_message(default_projection)]
+        );
+        assert!(!app.world().resource::<WeaponsUpdateFirstTick>().0);
     }
 }

@@ -1281,7 +1281,7 @@ fn registered_weapons_reconnect_targets_owner_with_live_state_without_mutating_c
     assert_weapons_update_matches_live_state(&weapon_entry.message, &expected);
     assert!(entries
         .iter()
-        .all(|entry| &entry.target != &Target::Token("observer".into())));
+        .all(|entry| entry.target != Target::Token("observer".into())));
     assert_eq!(
         *app.world().resource::<LastWeaponsUpdate>(),
         seeded_cache,

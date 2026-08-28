@@ -60,6 +60,8 @@
 
 #![cfg(feature = "host")]
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use project_phoenix::core::codec::{
@@ -93,26 +95,111 @@ fn host_stamp() -> DeliveryStamp {
     }
 }
 
-/// Poll the transport until `f` answers, or give up. Real sockets take real
-/// milliseconds, and a native host polls once per frame, so this is what a
-/// frame loop looks like with nothing else in it.
-fn pump_until<T>(
-    transport: &mut RelayTransport,
-    mut f: impl FnMut(&mut RelayTransport, Vec<TransportEvent>) -> Option<T>,
-) -> T {
-    let deadline = Instant::now() + Duration::from_secs(15);
-    loop {
-        let events = transport.poll();
-        if let Some(found) = f(transport, events) {
-            return found;
+/// The native host, polled on its own thread for the length of the test.
+///
+/// A native host polls once per frame; this is that loop with nothing else in
+/// it. It runs on a thread rather than being interleaved by hand because the
+/// joiner's socket reads block, and a test that alternated the two by hand
+/// would be asserting on its own scheduling as much as on the transport.
+struct HostPump {
+    transport: Arc<Mutex<RelayTransport>>,
+    events: Arc<Mutex<Vec<TransportEvent>>>,
+    notices: Arc<Mutex<Vec<RelayNotice>>>,
+    stop: Arc<AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl HostPump {
+    fn start(transport: RelayTransport) -> Self {
+        let transport = Arc::new(Mutex::new(transport));
+        let events: Arc<Mutex<Vec<TransportEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let notices: Arc<Mutex<Vec<RelayNotice>>> = Arc::new(Mutex::new(Vec::new()));
+        let stop = Arc::new(AtomicBool::new(false));
+
+        let t = Arc::clone(&transport);
+        let e = Arc::clone(&events);
+        let n = Arc::clone(&notices);
+        let s = Arc::clone(&stop);
+        let handle = std::thread::spawn(move || {
+            while !s.load(Ordering::Relaxed) {
+                {
+                    let mut guard = t.lock().expect("transport poisoned");
+                    e.lock().unwrap().extend(guard.poll());
+                    n.lock().unwrap().extend(guard.drain_notices());
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        });
+        Self {
+            transport,
+            events,
+            notices,
+            stop,
+            handle: Some(handle),
         }
-        assert!(
-            Instant::now() < deadline,
-            "the rendezvous service at {} never answered — is it running? \
-             See this file's header for the command.",
-            base()
-        );
-        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    /// Wait for a notice matching `f`, or fail with something an operator can act on.
+    fn notice_until<T>(&self, mut f: impl FnMut(&RelayNotice) -> Option<T>) -> T {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            {
+                let notices = self.notices.lock().unwrap();
+                for notice in notices.iter() {
+                    if let RelayNotice::Fault { reason } = notice {
+                        panic!("the service refused this host: {reason}");
+                    }
+                    if let Some(found) = f(notice) {
+                        return found;
+                    }
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the rendezvous service at {} never answered — is it running? \
+                 See this file's header for the command.",
+                base()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// Wait for the simulation-bound events this host has produced.
+    fn events_until(&self, want: usize) -> Vec<TransportEvent> {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            {
+                let events = self.events.lock().unwrap();
+                if events.len() >= want {
+                    return events.clone();
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the host never saw {want} event(s)"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn dispatch(&self, target: &Target, msg: &ServerMessage, delivery: DeliveryClass) {
+        self.transport
+            .lock()
+            .expect("transport poisoned")
+            .dispatch(TransportDispatch {
+                target,
+                msg,
+                delivery,
+            });
+    }
+}
+
+impl Drop for HostPump {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
     }
 }
 
@@ -136,6 +223,20 @@ impl Joiner {
         let (socket, _) = tungstenite::connect(request).unwrap_or_else(|e| {
             panic!("cannot reach the rendezvous service at {url}: {e} — see this file's header")
         });
+        // A read timeout, so `wait_for` below can fail with a stated reason
+        // instead of blocking forever on a frame that is never coming. A test
+        // that hangs says nothing; one that times out names what it wanted.
+        match socket.get_ref() {
+            tungstenite::stream::MaybeTlsStream::Plain(stream) => {
+                let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
+            }
+            tungstenite::stream::MaybeTlsStream::Rustls(tls) => {
+                let _ = tls
+                    .get_ref()
+                    .set_read_timeout(Some(Duration::from_millis(200)));
+            }
+            _ => {}
+        }
         Self { socket }
     }
 
@@ -163,6 +264,11 @@ impl Joiner {
                     }
                 }
                 Ok(_) => {}
+                Err(tungstenite::Error::Io(e))
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) => {}
                 Err(e) => panic!("the join socket died waiting for {kind}: {e}"),
             }
         }
@@ -174,23 +280,20 @@ impl Joiner {
 fn a_browser_shaped_client_joins_a_native_host_over_a_real_relay() {
     let socket = WsRelaySocket::connect(&base(), &origin())
         .unwrap_or_else(|e| panic!("{e} — see this file's header for the command"));
-    let mut host = RelayTransport::new(
+    let host = HostPump::start(RelayTransport::new(
         socket,
         RelayHostConfig {
             namespace: "client".to_string(),
             version: None,
             stamp: host_stamp(),
         },
-    );
+    ));
 
     // 1. The service issues a code. This alone proves the `host-open` a native
     //    host sends is one a real registry accepts over a real socket.
-    let code: JoinCode = pump_until(&mut host, |t, _| {
-        t.drain_notices().into_iter().find_map(|n| match n {
-            RelayNotice::Coded(code) => Some(code),
-            RelayNotice::Fault { reason } => panic!("the service refused this host: {reason}"),
-            _ => None,
-        })
+    let code: JoinCode = host.notice_until(|n| match n {
+        RelayNotice::Coded(code) => Some(code.clone()),
+        _ => None,
     });
     println!("issued code {} ({})", code.suffix, code.full);
     assert_eq!(code.suffix.len(), 5);
@@ -237,7 +340,6 @@ fn a_browser_shaped_client_joins_a_native_host_over_a_real_relay() {
     });
 
     // The host answers from delivery::check_join_stamp, over the real relay.
-    pump_until(&mut host, |_, _| Some(()));
     let verdict_frame = joiner.wait_for("relay");
     let verdict = decode_handshake_frame(verdict_frame.payload.as_deref().unwrap_or(""))
         .expect("a decodable verdict");
@@ -260,29 +362,28 @@ fn a_browser_shaped_client_joins_a_native_host_over_a_real_relay() {
         payload: Some(identify),
         ..RendezvousFrame::new("relay")
     });
-    let event = pump_until(&mut host, |_, events| events.into_iter().next());
     assert_eq!(
-        event,
-        TransportEvent::Received {
+        host.events_until(1),
+        vec![TransportEvent::Received {
             token: "live-token".to_string(),
             msg: ClientMessage::Identify {
                 token: "live-token".to_string(),
                 name: "Ada".to_string(),
             },
-        }
+        }]
     );
 
     // 6. And the other direction: an outbound message resolved by audience
     //    reaches the client as an ordinary ServerMessage.
-    host.dispatch(TransportDispatch {
-        target: &Target::All,
-        msg: &ServerMessage::GameStarted,
-        delivery: DeliveryClass::Reliable,
-    });
+    host.dispatch(
+        &Target::All,
+        &ServerMessage::GameStarted,
+        DeliveryClass::Reliable,
+    );
     let outbound = joiner.wait_for("relay");
     let msg = JsonCodec
         .decode_server(outbound.payload.as_deref().unwrap_or(""))
         .expect("a decodable ServerMessage");
     assert_eq!(msg, ServerMessage::GameStarted);
-    println!("native host ↔ real relay ↔ client: round trip complete");
+    println!("native host <-> real relay <-> client: round trip complete");
 }

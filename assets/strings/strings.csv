@@ -985,7 +985,6 @@ server.fleet.disconnected,Host viewscreen fleet panel — shown on a frozen slot
 server.fleet.open,"Host viewscreen fleet panel — status while new ship hosts may still join. {n} is the number of slots taken, {max} the fleet capacity",[Admitting ships — {n} of {max}]
 server.fleet.closed,Host viewscreen fleet panel — status when the operator has closed admission. Ships already in the fleet are unaffected,[Admission closed — ships already here stay]
 server.fleet.frozen,Host viewscreen fleet panel — status once the mission has started and the slot roster can no longer change,[Fleet locked — mission under way]
-server.fleet.joined,Host viewscreen fleet panel — status on a host that joined somebody else's fleet. {code} is the five-letter fleet code it typed,[In fleet {code}]
 server.fleet.error_full,Host page — the fleet refused this host because every ship slot is taken,[That fleet is full.]
 server.fleet.error_frozen,Host page — the fleet refused this host because its mission has already started and the ship roster is frozen,[That fleet has already launched — no new ship can join it.]
 server.fleet.error_joining,Host page — this host could not reach the fleet it was asked to join. {reason} is the already-localised sentence for the underlying refusal,[Could not join that fleet. {reason}]

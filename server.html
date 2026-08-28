@@ -2492,6 +2492,32 @@
     }
 
     /**
+     * The authored join table, fetched on first need.
+     *
+     * The crew half of this page never needs it — the SERVICE mints and parses
+     * crew codes, and this host only prints what it was issued. A fleet does:
+     * it composes a typed suffix into a server code here, and reads the
+     * authored fleet capacity. So the fetch lives with the fleet rather than at
+     * boot, and every entry point goes through this promise so a click that
+     * lands before it resolves waits rather than silently doing nothing.
+     */
+    let fleetDataPromise = null;
+    function fleetData() {
+      const codes = window.joinCode;
+      if (!codes) return Promise.resolve(null);
+      const installed = codes.getJoinCodeData();
+      if (installed) return Promise.resolve(installed);
+      if (!fleetDataPromise) {
+        fleetDataPromise = codes.loadJoinCodeData().catch((e) => {
+          console.error('[fleet] could not load the join-code format', e);
+          fleetDataPromise = null;
+          return null;
+        });
+      }
+      return fleetDataPromise;
+    }
+
+    /**
      * The link a fleet code's QR encodes: THIS page, with the full structured
      * code in the fragment — the host-page mirror of `joinUrlForCode`, which
      * points at `client/index.html` because a crew code invites a phone. The
@@ -2515,17 +2541,20 @@
     function joinFleetFromFragment() {
       const fragment = String(location.hash || '').replace(/^#/, '').trim();
       if (!fragment || !window.joinCode) return;
-      const parsed = window.joinCode.parseJoinCode(
-        fragment, window.joinCode.NAMESPACE_SERVER,
-      );
-      // Anything that is not a fleet code is not for us: a crew code pasted
-      // here names a phone's ship, and a stale peer-id bookmark from the PeerJS
-      // era is not a code at all. Both are left alone rather than reported —
-      // this page has no entry field they came out of.
-      if (!parsed.ok || parsed.namespace !== window.joinCode.NAMESPACE_SERVER) return;
-      const go = () => window.__hostFleetJoin(parsed.full);
-      if (hostStampField()) go();
-      else window.addEventListener('PhoenixReady', go, { once: true });
+      fleetData().then((data) => {
+        if (!data) return;
+        const parsed = window.joinCode.parseJoinCode(
+          fragment, window.joinCode.NAMESPACE_SERVER, data,
+        );
+        // Anything that is not a fleet code is not for us: a crew code pasted
+        // here names a phone's ship, and a stale peer-id bookmark from the
+        // PeerJS era is not a code at all. Both are left alone rather than
+        // reported — this page has no entry field they came out of.
+        if (!parsed.ok || parsed.namespace !== window.joinCode.NAMESPACE_SERVER) return;
+        const go = () => window.__hostFleetJoin(parsed.full);
+        if (hostStampField()) go();
+        else window.addEventListener('PhoenixReady', go, { once: true });
+      });
     }
 
     /** Paint the fleet panel from the pure view model. */
@@ -2592,15 +2621,23 @@
       }
     }
 
-    /** Tear down whatever fleet this host is in, and blank the panel. */
-    function leaveFleet() {
+    /**
+     * Tear down whatever fleet this host is in and blank the panel, optionally
+     * leaving a machine `reason` on screen.
+     *
+     * The reason survives the teardown on purpose. A refusal is an answer about
+     * THIS host — the joiner has already stopped retrying — so the link goes,
+     * putting the operator back in front of the code field, while the panel
+     * keeps saying why until they do something about it.
+     */
+    function leaveFleet(reason = null) {
       if (fleetHandle) {
         try { fleetHandle.close(); } catch (e) { console.warn('[fleet] close failed', e); }
       }
       fleetHandle = null;
       fleetRoster = null;
       fleetSuffix = null;
-      fleetFault = null;
+      fleetFault = reason;
       paintFleetPanel();
     }
 
@@ -2611,11 +2648,18 @@
       return handle;
     }
 
-    /** Open a fleet on this host and become its lead. */
-    window.__hostFleetOpen = function() {
+    /**
+     * Open a fleet on this host and become its lead.
+     *
+     * Async only because the authored join table may still be in flight;
+     * everything the operator sees is driven by `onCode`/`onRoster`, so the
+     * settings cog can call this and repaint on its ordinary refresh rather
+     * than awaiting anything.
+     */
+    window.__hostFleetOpen = async function() {
       if (fleetHandle || !window.fleetSession || !rendezvousBase) return false;
-      const data = window.joinCode.getJoinCodeData();
-      if (!data) return false;
+      const data = await fleetData();
+      if (!data || fleetHandle) return false;
       fleetFault = null;
       return !!adoptFleet(window.fleetSession.createFleetOwner({
         base: rendezvousBase,
@@ -2631,12 +2675,14 @@
     };
 
     /** Join the fleet behind a typed (or scanned) server code. */
-    window.__hostFleetJoin = function(code) {
+    window.__hostFleetJoin = async function(code) {
       if (fleetHandle || !window.fleetSession || !rendezvousBase) return false;
-      const data = window.joinCode.getJoinCodeData();
-      if (!data) return false;
+      const data = await fleetData();
+      if (!data || fleetHandle) return false;
       fleetFault = null;
-      const member = window.fleetSession.createFleetMember({
+      let handle = null;
+      let refusal = null;
+      handle = window.fleetSession.createFleetMember({
         base: rendezvousBase,
         data,
         code,
@@ -2645,11 +2691,22 @@
         ship: fleetShip(),
         onWelcome: () => { fleetFault = null; paintFleetPanel(); },
         onRoster: (roster) => { fleetRoster = roster; paintFleetPanel(); },
-        onError: (reason) => { fleetFault = reason; paintFleetPanel(); },
+        onError: (reason) => {
+          refusal = reason;
+          // This fires SYNCHRONOUSLY for a code that does not even parse —
+          // before `handle` has been adopted — which the branch below cleans
+          // up. Once adopted, the refusal tears the link down here instead.
+          if (handle && fleetHandle === handle) leaveFleet(reason);
+        },
         onLog: (msg) => console.log(msg),
       });
-      adoptFleet(member);
-      fleetSuffix = member.code ? member.code.suffix : null;
+      if (refusal) {
+        try { handle.close(); } catch (e) { /* nothing was ever opened */ }
+        leaveFleet(refusal);
+        return false;
+      }
+      adoptFleet(handle);
+      fleetSuffix = handle.code ? handle.code.suffix : null;
       paintFleetPanel();
       return true;
     };
@@ -2660,7 +2717,8 @@
       fleetHandle.setAdmission(state);
     };
 
-    window.__hostFleetLeave = leaveFleet;
+    /** The operator's "leave" — a deliberate exit, so it clears the reason too. */
+    window.__hostFleetLeave = function() { leaveFleet(); };
 
     /** What the settings cog paints its Fleet section from. */
     window.__hostFleetState = function() {

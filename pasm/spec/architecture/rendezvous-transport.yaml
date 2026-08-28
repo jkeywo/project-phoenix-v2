@@ -45,6 +45,8 @@ entities:
         - One registry instance sees both typed namespaces and every active release at once, which is the only way unknown, wrong-type and version-mismatch stay three answers instead of one.
         - The Worker adapter decides nothing, so the contract tests drive the shipped protocol without wrangler, miniflare or a socket.
         - Issue #1111 issues codes in both namespaces but admits joins only to the client one; enabling server-code joining (#1114) adds an entry to joinableNamespaces rather than reshaping the lookup.
+        - "[ai] That entry was added in #1114 and the lookup did not need reshaping — but it did need one more input. With BOTH namespaces joinable, a fleet code is a perfectly good record and only the FIELD it was typed into makes it wrong, so `resolve`/`join` carry an optional `namespace`. Absent means `client`, so a page built before #1114 means exactly what it always did."
+        - "[ai] That namespace is also the fallback a BARE five-letter suffix is composed under. Without it the fleet field would compose the crew project and resolve a crew record holding the same word — not a refusal but a wrong success, which is the failure mode the typed scheme exists to prevent."
         - It replaces the public PeerJS broker for the crew star, per p2p-delta-transport-is-a-star-today; the crew protocol itself is untouched.
         - "[ai] That replacement DID happen, in issue #1112 — see crew-transport-peerjs-to-phoenix in architecture/sessions-replication.yaml. The two bullets above still read as #1111's forward statement of it; nothing about the namespace rule or the untouched crew protocol changed in the doing."
         - "[ai] Since that cutover it is a HARD dependency: there is no second route underneath it, so an undeployed or origin-blocked service means nobody can join at all rather than a degraded connection. docs/delivery-checklist.md §3a says so at the top; it is not deployed yet."
@@ -199,6 +201,8 @@ entities:
         - "[ai] SUPERSEDES the bullet above: a stamp is REQUIRED since #1112, and absent and garbled are now both refused as client-stamp-missing. #1111 admitted an absent one because PeerJS was still the default route and had never stamped anything, so refusing the unstamped would have locked out the shipped join path. With PeerJS retired, every client that can reach a host is a built Phoenix bundle carrying the field, so admitting the silent case would leave the only version-skew hole exactly where a stale cached bundle sits."
         - A host that has not yet loaded a manifest binds the protocol half only — a browser host in the lobby has no content identity to compare, and refusing every phone until it does would be a race rather than a safety property.
         - "[ai] The host page still admits when it cannot reach wasm_check_client_stamp at all. A host that cannot ask cannot refuse, and locking out every phone because an export was unreachable is a worse failure than admitting one build the check would have caught."
+        - "[ai] A joining SHIP HOST is judged by check_host_stamp instead (#1114), and BOTH of the two leniencies above are inverted for it. There is no content-identity waiver: a host that has not loaded a manifest admits a phone on the protocol alone, because that phone will be sent whatever the host later loads, and two authoritative simulations are not in that relationship. And an unreachable export refuses rather than admits, because seating an unchecked simulation is exactly the failure this gate exists to prevent — one that does not surface loudly but desynchronises quietly, later, once #1116 shares a tick stream."
+        - "[ai] The reason codes are StampMismatch's own, unchanged, so a fleet refusal reads back through the one reasonStringId map rather than growing a fleet-only spelling of \"that build does not match\". Read `client` in client-stamp-missing as \"the joining side\"."
     architecture:
       kind: version-gate
       authority: authoritative
@@ -211,5 +215,109 @@ entities:
         - src/server/bridge.rs
         - src/core/codec.rs
         - scripts/client-stamp.mjs
-      symbols: [check_join_stamp, parse_stamp_field, wasm_check_client_stamp, encode_join_verdict]
+      symbols:
+        - check_join_stamp
+        - check_host_stamp
+        - parse_stamp_field
+        - wasm_check_client_stamp
+        - wasm_check_host_stamp
+        - encode_join_verdict
       tests: [cargo test, tests/client/client-stamp.test.js]
+
+  - message: host-mesh-frame
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Host-Mesh Frame
+      summary: >-
+        The versioned, tick-stampable JSON vocabulary between two ship hosts — hello, welcome,
+        refused, slot, roster and admission in revision 1. Carried on the direct DataChannel
+        between a fleet lead and an admitted member, and deliberately separate from both
+        ClientMessage/ServerMessage and the rendezvous signalling frames.
+      rationale:
+        - PRD #1093 and p2p-delta-transport-is-a-star-today both require the host-to-host message set to stay separate from the crew protocol; a ship host holds no station, is never projected to, and everything it says is meaningless on a phone.
+        - "[ai] The envelope keys are m/t/d, not v/type/data. `v` belongs to the rendezvous frames and `type`/`data` to the crew protocol, so a host frame that lands on the wrong wire is REFUSED by whichever decoder receives it rather than half understood — every crew decoder in the project switches on `.type`, which a host frame does not have. That is what makes \"each crew star stays attached only to its own host\" checkable rather than merely intended."
+        - "[ai] Every frame carries a `tick` field and #1114 never sets it — a fleet lobby has no running simulation to stamp against. It is present from the first frame because #1116's lockstep work cannot retrofit a stamp onto a vocabulary already in the field, and because AGENTS.md rule 7's CommandDelay amendment is precisely \"the tick a command applies on travels with the command\"."
+        - "[ai] Six frames and no more. #1116 grows this vocabulary with the lockstep command/tick traffic; a frame invented here that nothing sends would be surface that work would have to keep."
+        - "[ai] Decoding answers null for every \"this is not a frame of a revision I speak\" case together — unparseable text, a crew message, a rendezvous frame, a future revision. The caller's answer to all of them is to drop it, and distinguishing them would invite a receiver to act on a frame it does not understand."
+    architecture:
+      authority: request
+      producer: [fleet-lobby-session]
+      consumer: [fleet-lobby-session]
+      validator: [fleet-lobby-session]
+      trust_boundary: client-to-host
+      payload: HostMeshFrame
+    implementation:
+      status: declared
+      paths: [gui/host-mesh.js]
+      symbols: [hostFrame, encodeHostFrame, decodeHostFrame, asHostFrame]
+      tests: [tests/client/host-mesh.test.js, tests/client/fleet-session.test.js]
+
+  - component: fleet-lobby-session
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Fleet Lobby Session
+      summary: >-
+        The two ends of a multi-ship session: an owner that registers a SECOND rendezvous record in
+        the server namespace, is issued the one privileged fleet code and holds the slot roster, and
+        a member that types that code, passes a strict host compatibility handshake and renders
+        whatever roster the owner sends. Assembles and freezes a fleet; it does not run one.
+      rationale:
+        - p2p-human-readable-join-namespaces gives the multi-ship session exactly one privileged server code, distinct from every ship's private crew code, and it is transport metadata the simulation never sees.
+        - "[ai] The fleet is N independent single-ship processes plus this coordination layer, not more ships in one ECS world. Nothing in src/lobby, src/core/messages or the broadcaster seam changed: SessionManager, GamePhase and ShipStations stay process-singletons, exactly as the design intended."
+        - "[ai] A member never sends Identify, is never given a session token, never enters peerTokens/tokenConns and never reaches wasm_receive_message. Crew isolation is structural — a different socket, in a different namespace, carrying a different protocol — rather than a filter something downstream applies."
+        - "[ai] Slot ids are minted by the OWNER from one monotonic counter and are never reused, including after the host holding one leaves. p2p-delta-identity-is-minted says an id is a function of who minted it and in what order; members numbering their own slots would produce ids no other host agrees with the moment #1116 needs them in a shared command stream."
+        - "[ai] Closing admission answers FUTURE joiners and nothing else. An admitted member's link is a direct DataChannel that owes the signalling plane nothing — the same two-planes property the crew transport keeps — so closing a fleet is not an eviction."
+        - "[ai] Mission start RELEASES the service-side gate rather than tightening it, which looks backwards and is not. p2p-fixed-host-slot-recovery makes the server code a recovery capability that survives mission start (\"closing new-host admission does not invalidate it for a known disconnected slot\"), so an entry after the freeze has to REACH the lead to be judged. A record the service refuses at lookup could never carry that claim, and a pre-start closure would silently become a permanent lockout of the replacement machine."
+        - "[ai] What such an entry is judged AS is this issue's honest limit: every post-freeze hello is answered `recovery-only`, a reason distinct from `admission-closed` precisely so #1120 lands as a change of answer rather than a change of protocol."
+        - "[ai] A slot dropped BEFORE the freeze is deleted and one dropped after is kept and marked disconnected. The second is the object #1120's recovery claims, and it is the same non-pruning discipline SessionManager keeps for the same reason: a record that is deleted cannot be reconnected to."
+        - "[ai] Fleet capacity is authored ([limits] max_fleet_hosts) rather than a number in code, and is deliberately smaller than the service's own max_peers_per_record — one is how big a fleet the game fields, the other is a memory bound on any record that knows nothing about ships."
+      open_questions:
+        - Running the frozen fleet as one deterministic mission is #1116; recovering a disconnected slot onto a replacement machine is #1120. The roster reaches each host's own operator surface, not yet each crew's lobby UI.
+    architecture:
+      kind: transport-adapter
+      authority: non-authoritative
+      owns: [fleet-roster-state]
+      sends: [host-mesh-frame, rendezvous-signalling-frame]
+      receives: [host-mesh-frame]
+      runs_in: [host-browser-runtime]
+      platforms:
+        allowed: [browser]
+        forbidden: [host-only]
+    implementation:
+      status: declared
+      paths:
+        - gui/host-mesh.js
+        - gui/fleet-session.js
+        - gui/server-settings.js
+        - server.html
+      symbols: [createFleetOwner, createFleetMember, openFleet, admitHost, freezeFleet]
+      tests:
+        - tests/client/host-mesh.test.js
+        - tests/client/fleet-session.test.js
+        - tests/client/server-settings.test.js
+        - tests/smoke/fleet-lobby.spec.js
+
+  - state: fleet-roster-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Fleet Roster State
+      summary: >-
+        The player-ship slots of a multi-ship session — slot identity, the hull each host has
+        selected, readiness, connectedness — plus the fleet's admission state and whether mission
+        start has frozen it. Held by the fleet lead and synced to every admitted host.
+      rationale:
+        - "[ai] Transport-plane, like the join codes beside it: it is never written into simulation state, never enters a snapshot, and no ship host learns another's private crew code from it."
+        - "[ai] The synced roster carries no rendezvous peer ids. Those are the lead's own bookkeeping — ephemeral, meaningless on another machine, and the sort of cross-host identity leak p2p-human-readable-join-namespaces keeps out of everything but the service."
+        - "[ai] Mission start makes it immutable: no new slot, and no change to a slot's selected hull. The freeze is the roster's, so it is one flag rather than a rule each mutation has to remember."
+    architecture:
+      classification: transport
+      owner: fleet-lobby-session
+      writers: [fleet-lobby-session]
+    implementation:
+      status: declared
+      paths: [gui/host-mesh.js, gui/fleet-session.js]
+      symbols: [openFleet, rosterOf, updateSlot, dropHost]
+      tests: [tests/client/host-mesh.test.js, tests/client/fleet-session.test.js]

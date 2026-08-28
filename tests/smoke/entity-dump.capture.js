@@ -12,6 +12,11 @@ import { chromium } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
 
+// The origin dist/ is served on — see playwright.config.js's PHOENIX_SMOKE_PORT.
+// This aid is run by hand against whichever server is up, so it reads the same
+// variable rather than assuming 3000.
+const ORIGIN = `http://localhost:${process.env.PHOENIX_SMOKE_PORT || 3000}`;
+
 const PATROL_TOML = fs.readFileSync(path.join(__dirname, '../../assets/worlds/patrol.toml'), 'utf-8');
 const SHIM = fs.readFileSync(path.join(__dirname, 'rendezvous-shim.js'), 'utf-8');
 const REGISTRY_JS = fs.readFileSync(
@@ -46,7 +51,7 @@ async function main() {
   serverPage.on('console', msg => logs.push(`[${msg.type()}] ${msg.text()}`));
   serverPage.on('pageerror', err => logs.push(`[PAGE_ERROR] ${err.message}`));
 
-  await serverPage.goto('http://localhost:3000/?scenario=assets/worlds/default.toml');
+  await serverPage.goto(`${ORIGIN}/?scenario=assets/worlds/default.toml`);
   await serverPage.waitForFunction(() => !!window.__wasmReady, { timeout: 60_000 });
 
   const joinCode = await readJoinCode(serverPage);
@@ -56,7 +61,7 @@ async function main() {
   const helmPage = await ctx.newPage();
   const rk = Math.random().toString(16).slice(2, 10);
   await helmPage.route(`**/blank-${rk}`, r => r.fulfill({ contentType: 'text/html', body: '<html><body></body></html>' }));
-  await helmPage.goto(`http://localhost:3000/blank-${rk}`);
+  await helmPage.goto(`${ORIGIN}/blank-${rk}`);
   await helmPage.evaluate(({ joinCode, token, stamp }) => new Promise((resolve, reject) => {
     window.__messages = [];
     const factories = window.PhoenixTransportFactories;

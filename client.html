@@ -3233,6 +3233,7 @@
         },
         onLog: (msg) => console.log(msg),
         onDiag: (e) => {
+          if (!diagnostics) return;
           diagnostics.applyClientDiagEvent(diag, e);
           renderDiag();
         },
@@ -3335,6 +3336,14 @@
           code: parsed.full,
           stamp,
           iceServers: connectOptions.iceServers,
+          // The transport levers, and forwarding them is load-bearing rather
+          // than tidy: without this line the phone READ `?transport=` /
+          // `?forceRelay=` for its diagnostics readout and then joined on the
+          // defaults regardless, so every pin worked on the host and on nothing
+          // else. docs/acceptance/1113-networks.md tells a tester to pin both
+          // ends and says pinning only the phone proves nothing — it was the
+          // other way round.
+          levers: connectOptions.levers,
           getIdent: connectOptions.getIdent,
           onData: connectOptions.onData,
           onStatus: connectOptions.onStatus,

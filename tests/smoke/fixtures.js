@@ -312,7 +312,11 @@ export function captureFetchFailures(page) {
  * testing the other one's bundle (see playwright.config.js).
  *
  * Every blank page a spec opens has to be on THIS origin: BroadcastChannel is
- * same-origin, and the transport stand-in pairs pages over one.
+ * same-origin, and the transport stand-in pairs pages over one. It was once
+ * written as a literal `http://localhost:3000` in three places, so
+ * PHOENIX_SMOKE_PORT moved the host page and left every test client dialling a
+ * port with nothing on it — 95 specs failing as "Welcome timeout", which reads
+ * exactly like a broken join path rather than a wrong port.
  */
 export const SMOKE_ORIGIN = `http://localhost:${Number(process.env.PHOENIX_SMOKE_PORT || 3000)}`;
 

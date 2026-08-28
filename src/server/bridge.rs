@@ -268,6 +268,27 @@ thread_local! {
     /// Disconnect tokens queued by JS, waiting to be injected into Bevy.
     static DISCONNECT_QUEUE: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 
+    /// Host-mesh simulation frames received from another SHIP HOST, waiting to
+    /// be handed to `lockstep` (issue #1116). A separate queue from
+    /// `INBOUND_QUEUE` because it carries a separate protocol on a separate
+    /// socket: a fleet member never identifies, holds no station, and nothing it
+    /// says is a `ClientMessage`. Mixing them would make "each crew star belongs
+    /// to one host" a filtering rule rather than a fact about the wires.
+    static MESH_INBOUND: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+
+    /// Host-mesh frames this host has produced and JS has not sent yet.
+    /// Drained by `wasm_take_mesh_frames` rather than pushed through a callback,
+    /// because the fleet link is polled by the page's own frame loop and a
+    /// callback would deliver a tick frame at whatever moment the simulation
+    /// happened to seal it.
+    static MESH_OUTBOUND: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+
+    /// A fleet the page has joined but Bevy has not adopted yet: the encoded
+    /// roster, applied once on the next frame. Deferred for the same reason
+    /// every other JS→Bevy handoff here is — `wasm_join_fleet` is called from a
+    /// socket callback, which holds no `World`.
+    static PENDING_FLEET: RefCell<Option<String>> = const { RefCell::new(None) };
+
     /// JS callback registered by the host page to receive outbound messages.
     /// Signature: callback(target: string, payload: string)
     static OUTBOUND_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
@@ -887,6 +908,13 @@ pub fn wasm_init() {
             publish_waypoint_existence,
         ),
     )
+    // The fleet's ingress, before the barrier and the merge it feeds (issue
+    // #1116). Its own `add_systems` call rather than a member of the tuple
+    // above, because it carries an ordering edge that tuple has no way to state.
+    .add_systems(
+        PreUpdate,
+        drain_mesh_inbound.before(crate::lockstep::MeshSet),
+    )
     // `apply_force_start` writes `NextState<GamePhase>`, so it lives in
     // `FixedUpdate` rather than alongside its own input drain above — see the
     // #907 review note on `apply_force_start` for why.
@@ -915,6 +943,10 @@ pub fn wasm_init() {
             // both have to stand on.
             drain_snapshot_save,
             drain_snapshot_restore,
+            // The fleet's egress (issue #1116). `PostUpdate` for the same
+            // reason as its neighbours: it runs after the frame's fixed steps,
+            // so everything those ticks sealed goes out in one batch.
+            flush_mesh_outbound,
         ),
     );
 
@@ -966,6 +998,58 @@ pub fn wasm_receive_message(sender_token: &str, json: &str) {
     });
 }
 
+/// Called by JS with one host-mesh frame from another ship host (issue #1116).
+///
+/// `json` is the `{ m, t, tick, d }` envelope `gui/host-mesh.js` decoded and
+/// recognised as the simulation's — a `tick` or a `digest`. The page never
+/// reads the body; this is where it is understood.
+///
+/// A frame that is not one of those, or is of a revision this build does not
+/// speak, is dropped here rather than guessed at, exactly as the JS decoder
+/// drops one it does not recognise.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_receive_mesh_frame(json: &str) {
+    MESH_INBOUND.with(|q| q.borrow_mut().push(json.to_string()));
+}
+
+/// Everything this host wants to say to its fleet, as a JSON array of encoded
+/// frames, taken and cleared.
+///
+/// Polled by the page's own loop rather than pushed through a callback: the
+/// fleet link is a socket the page owns, and a callback would hand it a tick
+/// frame at whatever instant the simulation sealed it — inside a fixed step,
+/// which is the one place JS must not be re-entered from.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_take_mesh_frames() -> String {
+    MESH_OUTBOUND.with(|q| {
+        let frames = std::mem::take(&mut *q.borrow_mut());
+        format!("[{}]", frames.join(","))
+    })
+}
+
+/// Called by JS when the fleet roster freezes and the mission starts.
+///
+/// `roster_json` is the frozen fleet: which host flies which hull, who is
+/// aboard each and at what Station Rating, and which slot is this host's. Every
+/// host in the fleet receives the identical roster, which is what lets them
+/// spawn identical ships with identical identities and seed identical ratings.
+///
+/// Returns `""` on success or a machine reason on refusal, so the page can say
+/// what happened rather than starting a mission that will not agree.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_join_fleet(roster_json: &str) -> String {
+    match crate::core::codec::decode_fleet_roster(roster_json) {
+        Some(_) => {
+            PENDING_FLEET.with(|slot| *slot.borrow_mut() = Some(roster_json.to_string()));
+            String::new()
+        }
+        None => "fleet-roster-unreadable".to_string(),
+    }
+}
+
 /// Called by JS when a peer connection closes.
 ///
 /// Queues a disconnect lifecycle event that Bevy processes next frame,
@@ -975,6 +1059,62 @@ pub fn wasm_receive_message(sender_token: &str, json: &str) {
 pub fn wasm_player_disconnected(token: &str) {
     DISCONNECT_QUEUE.with(|q| {
         q.borrow_mut().push(token.to_string());
+    });
+}
+
+/// Adopt a fleet the page joined, and hand the simulation everything its peers
+/// have said since the last frame (issue #1116).
+///
+/// Runs in `PreUpdate` before `lockstep::MeshSet`, which is the same place and
+/// for the same reason `drain_inbound` runs before admission: the page delivers
+/// per FRAME and the simulation consumes per TICK, so the handoff has to happen
+/// once, before any of the frame's fixed steps.
+#[cfg(target_arch = "wasm32")]
+fn drain_mesh_inbound(world: &mut World) {
+    if let Some(roster_json) = PENDING_FLEET.with(|slot| slot.borrow_mut().take()) {
+        if let Some((roster, delay)) = crate::core::codec::decode_fleet_roster(&roster_json) {
+            // An authored delay of `None` means "whatever this world says",
+            // which is the ordinary case: the fleet agreed a mission, and the
+            // mission's `[global] command_delay_ticks` is the number.
+            let delay = delay.unwrap_or_else(|| crate::lockstep::authored_delay(world));
+            crate::lockstep::join_fleet(world, roster, delay);
+        }
+    }
+    let frames = MESH_INBOUND.with(|q| std::mem::take(&mut *q.borrow_mut()));
+    if frames.is_empty() {
+        return;
+    }
+    let decoded: Vec<crate::lockstep::MeshFrame> = frames
+        .iter()
+        .filter_map(|raw| crate::core::codec::decode_mesh_frame(raw))
+        .collect();
+    if let Some(mut inbox) = world.get_resource_mut::<crate::lockstep::MeshInbox>() {
+        for frame in decoded {
+            inbox.push(frame);
+        }
+    }
+}
+
+/// Encode everything the simulation wants to say to its fleet, for the page to
+/// pick up with [`wasm_take_mesh_frames`].
+#[cfg(target_arch = "wasm32")]
+fn flush_mesh_outbound(mut outbox: ResMut<crate::lockstep::MeshOutbox>) {
+    let frames = outbox.drain();
+    if frames.is_empty() {
+        return;
+    }
+    MESH_OUTBOUND.with(|q| {
+        let mut q = q.borrow_mut();
+        for frame in &frames {
+            match crate::core::codec::encode_mesh_frame(frame) {
+                Ok(json) => q.push(json),
+                // A frame that will not encode is dropped with a warning rather
+                // than panicking the host: the fleet will stall on the missing
+                // watermark and SAY so, which is a better failure than a dead
+                // page.
+                Err(e) => warn!("dropping an unencodable host-mesh frame: {e}"),
+            }
+        }
     });
 }
 

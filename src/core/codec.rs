@@ -515,6 +515,63 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
     }
 }
 
+/// Decode the frozen fleet roster a host page hands the simulation at mission
+/// start (issue #1116).
+///
+/// ```json
+/// { "local": 2, "delay": 6,
+///   "ships": [ { "host": 1, "ship_path": "assets/entities/alliance_cruiser.toml",
+///                "crew": [["helm", "Std"], ["tactical", "Std"]] } ] }
+/// ```
+///
+/// `delay` is optional and normally absent: the fleet agreed a MISSION, and the
+/// mission's own `[global] command_delay_ticks` is the number. It is accepted
+/// so a harness or a future operator control can override it without a second
+/// entry point.
+///
+/// `None` for anything unreadable, and the caller refuses to start rather than
+/// guessing — a fleet that disagreed about its own roster would spawn different
+/// ships with different identities and never agree on a single tick.
+pub fn decode_fleet_roster(raw: &str) -> Option<(crate::lockstep::FleetRoster, Option<u64>)> {
+    use crate::command_admission::HostSlot;
+    use crate::core::messages::StationId;
+    use crate::lockstep::{FleetRoster, FleetShip};
+
+    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let local = HostSlot(u32::try_from(value.get("local")?.as_u64()?).ok()?);
+    let delay = value.get("delay").and_then(|d| d.as_u64());
+    let mut ships = Vec::new();
+    for entry in value.get("ships")?.as_array()? {
+        let host = HostSlot(u32::try_from(entry.get("host")?.as_u64()?).ok()?);
+        let ship_path = entry
+            .get("ship_path")
+            .and_then(|p| p.as_str())
+            .map(str::to_string);
+        let mut crew = Vec::new();
+        for seat in entry
+            .get("crew")
+            .and_then(|c| c.as_array())
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+        {
+            let pair = seat.as_array()?;
+            crew.push((
+                StationId(pair.first()?.as_str()?.to_string()),
+                pair.get(1)?.as_str()?.to_string(),
+            ));
+        }
+        ships.push(FleetShip {
+            host,
+            ship_path,
+            crew,
+        });
+    }
+    if ships.is_empty() {
+        return None;
+    }
+    Some((FleetRoster::new(ships, local), delay))
+}
+
 #[cfg(test)]
 mod mesh_frame_tests {
     use crate::command_admission::{CommandOrder, HostSlot, ShipKey};

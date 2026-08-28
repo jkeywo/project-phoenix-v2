@@ -28,9 +28,26 @@
  * host because the fleet link is a different socket, in a different namespace,
  * carrying a different vocabulary — not because anything downstream filters it.
  *
- * It is also not a shared simulation. #1114 assembles a fleet and freezes it;
- * making the frozen fleet run one deterministic mission is #1116's, and the
- * envelope in `gui/host-mesh.js` is stamped for that work rather than doing it.
+ * ## Two vocabularies on one link (issue #1116)
+ *
+ * Since the fleet became something that RUNS a mission, this link carries two
+ * kinds of frame and routes them to two different places:
+ *
+ *   lobby frames        (hello / welcome / refused / slot / roster / admission)
+ *                       are decided here, by the model in `gui/host-mesh.js`.
+ *   simulation frames   (tick / digest) are handed straight to the wasm
+ *                       boundary through `onSimulationFrame`, and their bodies
+ *                       are never read on this side.
+ *
+ * `isSimulationFrame` is the whole of the rule, and it matters in both
+ * directions: a lobby frame that reached the simulation would be a roster edit
+ * nobody admitted, and a tick frame that reached the fleet model would be
+ * silently dropped — the fleet would then stall on the peer that sent it and
+ * nobody would be able to say why.
+ *
+ * The simulation's frames are opaque here on purpose. JavaScript that could
+ * BUILD one could build a command no host's authority gate ever accepted; Rust
+ * mints them (`core::codec::encode_mesh_frame`), and this module is the wire.
  *
  * ## Where the roster is shown, and where it will be shown
  *
@@ -70,6 +87,7 @@ import {
   encodeHostFrame,
   freezeFleet,
   helloFrame,
+  isSimulationFrame,
   openFleet,
   refusedFrame,
   rosterFrame,
@@ -118,6 +136,8 @@ const REFUSE_UNCHECKED = () => ({
  * @param {(code:object)=>void} [opts.onCode] the issued fleet code; fires again
  *   with a NEW one if the service was lost and this host re-registered.
  * @param {(roster:object)=>void} [opts.onRoster] every change, owner included.
+ * @param {(raw:string)=>void} [opts.onSimulationFrame] a `tick` or `digest`
+ *   frame from a member, still encoded — hand it to `wasm_receive_mesh_frame`.
  * @param {(reason:string, detail?:string)=>void} [opts.onError]
  * @param {(msg:string)=>void} [opts.onLog]
  */
@@ -133,6 +153,7 @@ export function createFleetOwner(opts) {
     name = '',
     onCode = () => {},
     onRoster = () => {},
+    onSimulationFrame = () => {},
     onError = () => {},
     onLog = () => {},
     factories,
@@ -230,6 +251,20 @@ export function createFleetOwner(opts) {
       conn.on('data', (raw) => {
         const frame = decodeHostFrame(raw);
         if (!frame) return;
+        if (isSimulationFrame(frame)) {
+          // This host's own simulation needs it…
+          onSimulationFrame(raw);
+          // …and so does every OTHER member. The transport is a star with the
+          // fleet lead at the centre (#1114), so a member's tick frame reaches
+          // its siblings only if the lead passes it on. Relayed VERBATIM and
+          // unread: it is the sender's statement about its own crew, and the
+          // lead has no more right to edit it than to invent it. A fleet of two
+          // has no siblings and this loop does nothing.
+          for (const [peer, other] of links) {
+            if (peer !== conn.peer) other.send(raw);
+          }
+          return;
+        }
         if (frame.t === HOST_FRAME_HELLO) onHello(conn, frame.d);
         else if (frame.t === HOST_FRAME_SLOT) onSlot(conn, frame.d);
         // Everything else is owner-to-member and is noise arriving upstream.
@@ -311,6 +346,19 @@ export function createFleetOwner(opts) {
       host.rotate();
     },
 
+    /**
+     * Say something to the whole fleet, verbatim (issue #1116).
+     *
+     * What the simulation produced through `wasm_take_mesh_frames`, sent to
+     * every admitted member. Deliberately takes the ENCODED frame rather than a
+     * body to wrap: the envelope came from the same encoder the receiving
+     * simulation decodes with, and a second wrapping on this side would be a
+     * second place for the two to disagree about the shape.
+     */
+    broadcast(raw) {
+      for (const conn of links.values()) conn.send(raw);
+    },
+
     /** The owner's own ship/readiness, which follow the same freeze. */
     update(patch) {
       const result = updateSlot(fleet, fleet.owner, patch);
@@ -348,6 +396,9 @@ export function createFleetOwner(opts) {
  * @param {(reason:string, detail?:string)=>void} [opts.onRefusedSlot] the fleet
  *   declined a change this host asked for about its OWN slot. Not terminal:
  *   this host is still in the fleet, and the roster that follows is the truth.
+ * @param {(raw:string)=>void} [opts.onSimulationFrame] a `tick` or `digest`
+ *   frame from another host, still encoded — hand it to
+ *   `wasm_receive_mesh_frame`.
  * @param {(status:string)=>void} [opts.onStatus]
  * @param {(msg:string)=>void} [opts.onLog]
  */
@@ -362,6 +413,7 @@ export function createFleetMember(opts) {
     name = '',
     onRoster = () => {},
     onWelcome = () => {},
+    onSimulationFrame = () => {},
     onError = () => {},
     onRefusedSlot = () => {},
     onStatus = () => {},
@@ -402,6 +454,15 @@ export function createFleetMember(opts) {
     onData: (frame) => {
       const decoded = asHostFrame(frame);
       if (!decoded) return;
+      if (isSimulationFrame(decoded)) {
+        // Re-encoded rather than passed through: the transport hands this
+        // callback an already-PARSED value, and what the wasm boundary takes is
+        // text. Encoding the decoded frame (not the raw input) is what makes
+        // the envelope that reaches the simulation the one this module
+        // recognised, rather than whatever arrived.
+        onSimulationFrame(encodeHostFrame(decoded));
+        return;
+      }
       if (decoded.t === HOST_FRAME_WELCOME) {
         mine = decoded.d.slot || null;
         roster = decoded.d.roster || null;
@@ -456,6 +517,17 @@ export function createFleetMember(opts) {
     get slot() { return mine; },
     get code() { return joiner.failed ? null : { suffix: joiner.suffix, full: joiner.full }; },
     roster: () => roster,
+
+    /**
+     * Say something to the fleet, verbatim (issue #1116).
+     *
+     * A member speaks to the lead, which relays to the rest — the star this
+     * transport is. See the lead's own `broadcast` for why the frame is sent as
+     * it came rather than re-wrapped.
+     */
+    broadcast(raw) {
+      joiner.sendFrame(raw);
+    },
 
     /** Announce this host's own ship or readiness to the fleet owner. */
     update(patch) {

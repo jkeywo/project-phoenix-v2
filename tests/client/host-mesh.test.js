@@ -13,6 +13,11 @@ import { fileURLToPath } from 'node:url';
 import {
   HOST_MESH_PROTOCOL,
   HOST_FRAME_TYPES,
+  HOST_SIMULATION_FRAME_TYPES,
+  HOST_FRAME_TICK,
+  HOST_FRAME_DIGEST,
+  isSimulationFrame,
+  simulationFrame,
   ADMISSION_CLOSED,
   ADMISSION_OPEN,
   REASON_ADMISSION_CLOSED,
@@ -78,9 +83,79 @@ describe('the envelope', () => {
       expect(HOST_FRAME_TYPES).toContain(frame.t);
       expect(decodeHostFrame(encodeHostFrame(frame))).toEqual(frame);
     }
-    // Every declared type is exercised above, so a seventh frame added without
-    // a round-trip here fails rather than shipping untested.
-    expect(new Set(frames.map((f) => f.t))).toEqual(new Set(HOST_FRAME_TYPES));
+    // Every declared LOBBY type is exercised above, so one added without a
+    // round-trip here fails rather than shipping untested. The simulation's two
+    // are covered by their own case below — this module never builds their
+    // bodies, so it cannot round-trip them from a builder it does not have.
+    expect(new Set(frames.map((f) => f.t)))
+      .toEqual(new Set(HOST_FRAME_TYPES.filter((t) => !HOST_SIMULATION_FRAME_TYPES.includes(t))));
+  });
+
+  it('carries the simulation\'s two frames without reading them', () => {
+    // Issue #1116. A `tick` body is minted by `core::codec::encode_mesh_frame`
+    // and read by `decode_mesh_frame`; this module owns the envelope around it
+    // and nothing else. So what is under test is the ferrying: the envelope
+    // survives, the body arrives byte-identical, and the tick stamp #1114 put
+    // in the envelope and never set is finally set.
+    const body = {
+      from: 2,
+      tick: 412,
+      ready_through: 418,
+      commands: [{
+        tick: 418,
+        origin: 2,
+        seq: 7,
+        ship: '00000000-0000-8000-8000-000000000001',
+        target: 'helm-steering',
+        payload: { SetSteering: { value: -0.4 } },
+      }],
+    };
+    const frame = simulationFrame(HOST_FRAME_TICK, body, 412);
+    expect(frame.tick).toBe(412);
+    expect(decodeHostFrame(encodeHostFrame(frame))).toEqual(frame);
+    expect(decodeHostFrame(encodeHostFrame(frame)).d).toEqual(body);
+
+    const digest = simulationFrame(HOST_FRAME_DIGEST, {
+      from: 1,
+      tick: 300,
+      // A hex STRING, because a digest is a u64 and this is JavaScript: as a
+      // number it would round, and the fleet would compare a value neither host
+      // actually folded. `core::codec` encodes it this way for that reason.
+      digest: 'deadbeefdeadbeef',
+    }, 300);
+    const back = decodeHostFrame(encodeHostFrame(digest));
+    expect(back.d.digest).toBe('deadbeefdeadbeef');
+    expect(Number.isSafeInteger(parseInt(back.d.digest, 16))).toBe(false);
+  });
+
+  it('tells the simulation\'s frames from the lobby\'s, which is the routing rule', () => {
+    // `gui/fleet-session.js` sends one to the wasm boundary and the other to
+    // the fleet model. A lobby frame reaching the simulation would be a roster
+    // edit nobody admitted; a tick frame reaching the fleet model would be
+    // silently dropped and the fleet would stall on the peer that sent it.
+    expect(isSimulationFrame(simulationFrame(HOST_FRAME_TICK, {}))).toBe(true);
+    expect(isSimulationFrame(simulationFrame(HOST_FRAME_DIGEST, {}))).toBe(true);
+    for (const frame of [rosterFrame(fleetOf()), admissionFrame(ADMISSION_CLOSED),
+      helloFrame({}), refusedFrame('fleet-full')]) {
+      expect(isSimulationFrame(frame), frame.t).toBe(false);
+    }
+    expect(isSimulationFrame(null)).toBe(false);
+  });
+
+  it('speaks the same revision as the Rust half', () => {
+    // Declared in both halves and pinned in both. A host whose JS speaks one
+    // revision and whose Rust speaks another assembles a fleet and then
+    // silently fails to agree a tick; refusing an unrecognised `m` is what
+    // makes that fail loudly, and this pair of pins is what catches a
+    // one-sided bump.
+    expect(HOST_MESH_PROTOCOL).toBe(2);
+    const rust = readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), '../../src/lockstep/frame.rs'),
+      'utf8',
+    );
+    expect(rust).toMatch(
+      new RegExp(`pub const HOST_MESH_PROTOCOL: u32 = ${HOST_MESH_PROTOCOL};`),
+    );
   });
 
   it('says WHICH request a refusal answers, so a member can tell them apart', () => {

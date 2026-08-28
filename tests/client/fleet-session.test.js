@@ -14,7 +14,14 @@ import { fileURLToPath } from 'node:url';
 
 import { createFleetOwner, createFleetMember } from '../../gui/fleet-session.js';
 import { createRegistry, ROLE_HOST, ROLE_CLIENT } from '../../worker-rendezvous/src/registry.js';
-import { ADMISSION_CLOSED, ADMISSION_OPEN, asHostFrame } from '../../gui/host-mesh.js';
+import {
+  ADMISSION_CLOSED,
+  ADMISSION_OPEN,
+  HOST_FRAME_TICK,
+  asHostFrame,
+  encodeHostFrame,
+  simulationFrame,
+} from '../../gui/host-mesh.js';
 import {
   NAMESPACE_CLIENT,
   NAMESPACE_SERVER,
@@ -653,6 +660,86 @@ describe('mission start freezes the fleet', () => {
     const slots = lastRoster(lead).slots;
     expect(slots).toHaveLength(2);
     expect(slots[1]).toMatchObject({ id: 'slot-3', connected: false });
+  });
+});
+
+describe('the running mission rides the same link (issue #1116)', () => {
+  // What is under test is the ROUTING, not the frames: a `tick` or `digest`
+  // frame's body is minted and read by Rust (`core::codec::encode_mesh_frame`),
+  // and both halves of this module are supposed to ferry it without looking.
+
+  const tickFrame = (from, tick) =>
+    encodeHostFrame(simulationFrame(HOST_FRAME_TICK, {
+      from,
+      tick,
+      ready_through: tick + 2,
+      commands: [],
+    }, tick));
+
+  it('hands a simulation frame to the wasm boundary and NOT to the fleet model', async () => {
+    const { factories, world, lead } = await fleetOf();
+    const leadFrames = [];
+    // A second lead wired with the callback the host page supplies.
+    const wired = await leadOn(world, factories, {
+      onSimulationFrame: (raw) => leadFrames.push(raw),
+    });
+    const two = await memberOn(world, factories, wired.code.suffix);
+    expect(two.member.slot).toBe('slot-2');
+    const before = lastRoster(wired);
+
+    two.member.broadcast(tickFrame(2, 412));
+    await settle();
+
+    expect(leadFrames).toHaveLength(1);
+    expect(asHostFrame(JSON.parse(leadFrames[0])).t).toBe(HOST_FRAME_TICK);
+    expect(asHostFrame(JSON.parse(leadFrames[0])).d.ready_through).toBe(414);
+    // The roster is untouched: a tick frame is not a roster edit, and the fleet
+    // model must not have seen it at all.
+    expect(lastRoster(wired)).toEqual(before);
+    expect(lead.fleet.roster()).toBeTruthy();
+  });
+
+  it("carries the lead's own frames out to every member", async () => {
+    const world = makeWorld();
+    const factories = { socket: world.socket, peer: makePeerFactory() };
+    const lead = await leadOn(world, factories);
+    const memberFrames = [];
+    const two = await memberOn(world, factories, lead.code.suffix, {
+      onSimulationFrame: (raw) => memberFrames.push(raw),
+    });
+    expect(two.member.slot).toBe('slot-2');
+
+    lead.fleet.broadcast(tickFrame(1, 400));
+    await settle();
+
+    expect(memberFrames).toHaveLength(1);
+    const decoded = asHostFrame(JSON.parse(memberFrames[0]));
+    expect(decoded.t).toBe(HOST_FRAME_TICK);
+    expect(decoded.d.from).toBe(1);
+    // The envelope's tick stamp survives the round trip — it is what #1114 put
+    // there for this, and #1118 replays against it.
+    expect(decoded.tick).toBe(400);
+  });
+
+  it("relays a member's frame to its SIBLINGS, verbatim", async () => {
+    // The transport is a star with the lead at the centre, so slot 2's input
+    // reaches slot 3 only if the lead passes it on — and a lead that edited it
+    // on the way would be speaking for a crew that is not its own.
+    const world = makeWorld();
+    const factories = { socket: world.socket, peer: makePeerFactory() };
+    const lead = await leadOn(world, factories);
+    const two = await memberOn(world, factories, lead.code.suffix);
+    const threeFrames = [];
+    const three = await memberOn(world, factories, lead.code.suffix, {
+      onSimulationFrame: (raw) => threeFrames.push(raw),
+    });
+    expect(three.member.slot).toBe('slot-3');
+
+    const sent = tickFrame(2, 412);
+    two.member.broadcast(sent);
+    await settle();
+
+    expect(threeFrames).toEqual([sent]);
   });
 });
 

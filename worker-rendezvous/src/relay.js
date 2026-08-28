@@ -61,6 +61,14 @@
  * of it, not the whole story.
  */
 
+import { relayPayloadBytes } from '../../gui/rendezvous-protocol.js';
+
+/**
+ * Re-exported so the service's own bound and the client's local courtesy
+ * refusal are measured by ONE function — see gui/rendezvous-protocol.js.
+ */
+export { relayPayloadBytes as payloadBytes };
+
 /**
  * The two delivery classes a relayed frame may declare. Anything else is
  * refused rather than guessed at — a frame whose class the service cannot read
@@ -87,22 +95,10 @@ export function relayLimits(limits = {}) {
     maxFrameBytes: limits.max_relay_frame_bytes || 65536,
     maxReliable: limits.max_relay_queue_reliable || 256,
     maxSnapshot: limits.max_relay_queue_snapshot || 32,
+    // Not this hub's own bound — it is advertised to whoever is SENDING, whose
+    // socket does report a backlog. See the module header.
+    maxSendBufferBytes: limits.max_relay_send_buffer_bytes || 262144,
   };
-}
-
-/**
- * Byte length of a relayed payload, measured the way the wire measures it.
- *
- * `String.length` counts UTF-16 code units, which under-counts every non-ASCII
- * character a display name or a comms line may carry — so a bound written
- * against it would be a different, larger bound than the one authored. Workers,
- * browsers and Node all have `TextEncoder`; the `Blob` arm is a defence for an
- * exotic host rather than a path anything shipped takes.
- */
-export function payloadBytes(payload) {
-  if (typeof payload !== 'string') return Infinity;
-  if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(payload).length;
-  return payload.length;
 }
 
 /**
@@ -235,7 +231,7 @@ export function createRelayHub({ limits } = {}) {
       const box = boxes.get(peer);
       if (!box) return { ok: false, reason: 'not-relaying' };
       if (!isRelayClass(cls)) return { ok: false, reason: 'malformed' };
-      if (payloadBytes(payload) > bounds.maxFrameBytes) {
+      if (relayPayloadBytes(payload) > bounds.maxFrameBytes) {
         return { ok: false, reason: 'relay-too-large' };
       }
       if (cls === RELAY_SNAPSHOT) {

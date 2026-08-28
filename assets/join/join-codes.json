@@ -37,7 +37,8 @@
     "max_relay_peers_per_record": 8,
     "max_relay_frame_bytes": 65536,
     "max_relay_queue_reliable": 256,
-    "max_relay_queue_snapshot": 32
+    "max_relay_queue_snapshot": 32,
+    "max_relay_send_buffer_bytes": 262144
   },
   "deny": [
     {

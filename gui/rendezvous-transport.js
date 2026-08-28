@@ -65,6 +65,22 @@
  * Both halves got this wrong at first, and both wrongnesses read as the same
  * bug from the bridge: a service blip disconnecting everybody mid-mission.
  *
+ * ## The third rung (#1113)
+ *
+ * Some networks build no direct link at any price. When the WebRTC ladder is
+ * spent, the joiner asks the service to carry the game's own frames over the
+ * rendezvous socket instead (`relay-open`, gui/rendezvous-relay.js) — and for
+ * a peer on THAT path the two planes above collapse back into one: the
+ * signalling socket IS the link, so `closed`, `error` and the socket's own
+ * death are link failures again rather than news. `socketIsTheLink()` on the
+ * joiner and `entry.relay` on the host are the two places that exception is
+ * spelled out; everything else about a relayed peer — the compatibility
+ * handshake, the Identify gate, the adapter, the delivery classes — is the
+ * ordinary code path, deliberately, because a fallback with its own admission
+ * gate would be a hole the direct path does not have.
+ *
+ * gui/transport-levers.js can pin any one rung for a test or a field check.
+ *
  * ## The compatibility handshake
  *
  * `JoinHandshake` / `JoinAccepted` / `JoinRefused` are deliberately NOT
@@ -96,6 +112,12 @@ import {
   connectTimeoutMs,
   candidateType,
 } from './connection-manager.js';
+import {
+  createRelayChannelPair,
+  relayLimitsFromFrame,
+  relayPeerStub,
+} from './rendezvous-relay.js';
+import { defaultTransportLevers } from './transport-levers.js';
 
 /** Re-exported so a consumer of this module needs only one import. */
 export { RENDEZVOUS_PROTOCOL };
@@ -437,8 +459,18 @@ export function createRendezvousHost(opts) {
     onPeerIce = () => {},
     onLog = () => {},
     reregister = true,
+    levers = defaultTransportLevers(),
     factories = defaultFactories(),
   } = opts;
+
+  /**
+   * The RTCPeerConnection config, in one place so the `?forceRelay` lever
+   * (gui/transport-levers.js) reaches every peer connection this host answers
+   * with. Forcing it on the HOST as well as the joiner matters: ICE only
+   * negotiates a relay pair if both ends offer relay candidates, so a lever
+   * applied to one side alone would still let a host candidate win.
+   */
+  const peerConfig = () => ({ iceServers, iceTransportPolicy: levers.iceTransportPolicy });
 
   const peers = new Map(); // rendezvous peer id → per-joiner state
   let socket = null;
@@ -451,10 +483,88 @@ export function createRendezvousHost(opts) {
     if (socket && socket.readyState === 1) socket.send(frame('signal', { to, payload }));
   }
 
+  /** Hand the lossy channel to the adapter once both exist. */
+  function pairSnapshot(entry) {
+    if (entry.adapter && entry.snapshot) entry.adapter.bindSnapshot(entry.snapshot);
+  }
+
+  /** Ordinary crew traffic, on whichever channel it arrived. */
+  function deliver(entry, data) {
+    if (entry.refused || !entry.admitted) return;
+    const msg = decodeFrame(data);
+    // A second handshake from an admitted peer is noise, not a re-vote.
+    if (msg && msg.type === 'JoinHandshake') return;
+    entry.adapter.emit('data', data);
+  }
+
+  /**
+   * Wire a joiner's RELIABLE channel: the compatibility handshake, then the
+   * page hand-off, then ordinary traffic.
+   *
+   * Hoisted out of `pc.ondatachannel` in #1113 so the WebSocket relay runs the
+   * SAME admission gate rather than a second copy of it. That is not tidiness:
+   * a fallback path with its own handshake would be a way into the host that
+   * the stamp check does not cover, and the two would drift on the first change
+   * to either. The relay's channels are DataChannel-shaped exactly so this
+   * function cannot tell them apart (gui/rendezvous-relay.js).
+   */
+  function attachReliableChannel(id, entry, channel) {
+    const adapter = connectionAdapter(id, channel, entry.pc, {
+      // A page-initiated eviction is a refusal like any other: nothing this
+      // peer sends afterwards, on EITHER channel, may reach the page again.
+      onSever: () => { entry.refused = true; },
+      onLog,
+    });
+    entry.adapter = adapter;
+    // The reliable channel's own close is the one true end of this peer:
+    // reap the entry and its RTCPeerConnection right there, so a joiner
+    // whose SIGNALLING died first (peer-left arrived, entry deliberately
+    // retained) cannot leak a live ICE/DTLS agent until the host itself
+    // loses its registration. The page's own close handler is identity-
+    // guarded, so a later sweep emitting again is harmless.
+    adapter.on('close', () => {
+      try { entry.pc.close(); } catch { /* already gone */ }
+      peers.delete(id);
+    });
+    pairSnapshot(entry);
+    channel.onmessage = (ev) => {
+      if (entry.refused) return;
+      if (!entry.admitted) {
+        // The compatibility handshake is transport-plane and never reaches
+        // the page's Identify gate, let alone WASM. Nothing else exists on
+        // this channel yet.
+        const msg = decodeFrame(ev.data);
+        if (!msg || msg.type !== 'JoinHandshake') return;
+        const verdict = checkStamp((msg.data && msg.data.stamp) || null);
+        if (!verdict.ok) {
+          entry.refused = true;
+          onLog(`[rendezvous] refusing ${id}: ${verdict.code} ${verdict.detail || ''}`);
+          adapter.send(JSON.stringify({
+            type: 'JoinRefused',
+            data: { code: verdict.code, detail: verdict.detail || '' },
+          }));
+          // Purely a send-flush: let the refusal reach the wire before the
+          // channel goes. A client dropped without being told why has
+          // learned nothing, and "cannot connect" is the least actionable
+          // message in the game. Nothing is admitted during the wait.
+          setTimeout(() => adapter.close(), 250);
+          return;
+        }
+        entry.admitted = true;
+        // Page first, then the acceptance the joiner answers with Identify,
+        // so the handler that reads it is already attached.
+        onConnection(adapter);
+        adapter.send(JSON.stringify({ type: 'JoinAccepted', data: {} }));
+        return;
+      }
+      deliver(entry, ev.data);
+    };
+  }
+
   function peerState(id) {
     let entry = peers.get(id);
     if (entry) return entry;
-    const pc = factories.peer({ iceServers });
+    const pc = factories.peer(peerConfig());
     // The gate, per joiner. An open DataChannel is NOT admission: until the
     // compatibility handshake has been answered `ok`, the page has never been
     // handed this connection, so nothing here can reach the Identify gate or
@@ -468,6 +578,8 @@ export function createRendezvousHost(opts) {
       admitted: false,
       refused: false,
       pendingCandidates: [],
+      /** Set by relayPeerState below; null for an ordinary WebRTC joiner. */
+      relay: null,
     };
     peers.set(id, entry);
 
@@ -476,80 +588,67 @@ export function createRendezvousHost(opts) {
     };
     pc.oniceconnectionstatechange = () => onPeerIce(id, pc.iceConnectionState);
 
-    /** Hand the lossy channel to the adapter once both exist. */
-    function pairSnapshot() {
-      if (entry.adapter && entry.snapshot) entry.adapter.bindSnapshot(entry.snapshot);
-    }
-
-    /** Ordinary crew traffic, on whichever channel it arrived. */
-    function deliver(data) {
-      if (entry.refused || !entry.admitted) return;
-      const msg = decodeFrame(data);
-      // A second handshake from an admitted peer is noise, not a re-vote.
-      if (msg && msg.type === 'JoinHandshake') return;
-      entry.adapter.emit('data', data);
-    }
-
     pc.ondatachannel = (e) => {
       const channel = e.channel;
       if (channel.label === SNAPSHOT_CHANNEL) {
         entry.snapshot = channel;
-        channel.onmessage = (ev) => deliver(ev.data);
-        pairSnapshot();
+        channel.onmessage = (ev) => deliver(entry, ev.data);
+        pairSnapshot(entry);
         return;
       }
       if (channel.label !== RELIABLE_CHANNEL) return;
-      const adapter = connectionAdapter(id, channel, pc, {
-        // A page-initiated eviction is a refusal like any other: nothing this
-        // peer sends afterwards, on EITHER channel, may reach the page again.
-        onSever: () => { entry.refused = true; },
-        onLog,
-      });
-      entry.adapter = adapter;
-      // The reliable channel's own close is the one true end of this peer:
-      // reap the entry and its RTCPeerConnection right there, so a joiner
-      // whose SIGNALLING died first (peer-left arrived, entry deliberately
-      // retained) cannot leak a live ICE/DTLS agent until the host itself
-      // loses its registration. The page's own close handler is identity-
-      // guarded, so a later sweep emitting again is harmless.
-      adapter.on('close', () => {
-        try { pc.close(); } catch { /* already gone */ }
-        peers.delete(id);
-      });
-      pairSnapshot();
-      channel.onmessage = (ev) => {
-        if (entry.refused) return;
-        if (!entry.admitted) {
-          // The compatibility handshake is transport-plane and never reaches
-          // the page's Identify gate, let alone WASM. Nothing else exists on
-          // this channel yet.
-          const msg = decodeFrame(ev.data);
-          if (!msg || msg.type !== 'JoinHandshake') return;
-          const verdict = checkStamp((msg.data && msg.data.stamp) || null);
-          if (!verdict.ok) {
-            entry.refused = true;
-            onLog(`[rendezvous] refusing ${id}: ${verdict.code} ${verdict.detail || ''}`);
-            adapter.send(JSON.stringify({
-              type: 'JoinRefused',
-              data: { code: verdict.code, detail: verdict.detail || '' },
-            }));
-            // Purely a send-flush: let the refusal reach the wire before the
-            // channel goes. A client dropped without being told why has
-            // learned nothing, and "cannot connect" is the least actionable
-            // message in the game. Nothing is admitted during the wait.
-            setTimeout(() => adapter.close(), 250);
-            return;
-          }
-          entry.admitted = true;
-          // Page first, then the acceptance the joiner answers with Identify,
-          // so the handler that reads it is already attached.
-          onConnection(adapter);
-          adapter.send(JSON.stringify({ type: 'JoinAccepted', data: {} }));
-          return;
-        }
-        deliver(ev.data);
-      };
+      attachReliableChannel(id, entry, channel);
     };
+    return entry;
+  }
+
+  /**
+   * A joiner the service is carrying for us, because it could not build a
+   * direct link (issue #1113).
+   *
+   * From the page's side this is an ORDINARY connection: the same adapter, the
+   * same compatibility handshake, the same Identify gate, the same per-token
+   * snapshot routing. The only difference is what the channels are made of, and
+   * `attachReliableChannel` above cannot tell.
+   *
+   * A peer that already has a WebRTC entry keeps it: a joiner does not ask for
+   * the relay while a DataChannel is working, and two live paths to one crew
+   * member would be a duplicate-delivery bug.
+   */
+  function relayPeerState(id, limits) {
+    const existing = peers.get(id);
+    if (existing) return existing;
+
+    const pair = createRelayChannelPair({
+      send: (body) => {
+        if (socket && socket.readyState === 1) socket.send(frame(body.type, body));
+      },
+      to: id,
+      bufferedAmount: () => (socket && socket.bufferedAmount) || 0,
+      limits: relayLimitsFromFrame(limits),
+      onDegraded: ({ dropped }) => onPeerIce(id, `relay-shedding-${dropped}`),
+      onLog,
+    });
+
+    const entry = {
+      // No ICE was negotiated, so there is no peer connection — but every
+      // caller that holds one still gets an object rather than a null to guard.
+      pc: relayPeerStub(() => pair.close()),
+      adapter: null,
+      snapshot: pair.snapshot,
+      admitted: false,
+      refused: false,
+      pendingCandidates: [],
+      relay: pair,
+    };
+    peers.set(id, entry);
+    pair.snapshot.onmessage = (ev) => deliver(entry, ev.data);
+    attachReliableChannel(id, entry, pair.reliable);
+    pair.open();
+    // The host operator's diagnostics row: this crew member is being carried by
+    // the service, which is a degraded state worth seeing even though it works.
+    onPeerIce(id, 'ws-relay');
+    onLog(`[rendezvous] ${id} attached over the WebSocket relay`);
     return entry;
   }
 
@@ -576,7 +675,13 @@ export function createRendezvousHost(opts) {
    * the two mechanisms can only drift if this one definition does.
    */
   function isLiveAdmittedLink(entry) {
-    return !!(entry.admitted && entry.adapter && entry.adapter.open);
+    // A RELAYED link is deliberately excluded, and this is the one place the
+    // two planes are not independent. The rule those two mechanisms enforce is
+    // "a signalling event may not touch a link that does not need signalling" —
+    // and a relayed link IS the signalling socket. When the service goes, so
+    // does the game path, so treating a relayed peer as live would leave the
+    // page holding a connection nothing can reach.
+    return !!(entry.admitted && entry.adapter && entry.adapter.open && !entry.relay);
   }
 
   /**
@@ -656,6 +761,43 @@ export function createRendezvousHost(opts) {
       }
       case 'signal':
         onSignal(msg.from, msg.payload).catch((e) => onError('signal', String(e && e.message)));
+        break;
+      // ── The WebSocket game relay (issue #1113) ────────────────────────────
+      case 'relay-peer':
+        relayPeerState(msg.peer, msg.limits);
+        break;
+      case 'relay': {
+        const entry = peers.get(msg.from);
+        if (entry && entry.relay) entry.relay.deliver(msg);
+        break;
+      }
+      case 'relay-peer-left': {
+        // Unlike `peer-left`, this one really is the end of the link: a relayed
+        // peer has no DataChannel to outlive its socket. Tear it down here so
+        // the page runs its ordinary disconnect lifecycle.
+        const entry = peers.get(msg.peer);
+        if (entry && entry.relay) {
+          if (entry.adapter) entry.adapter.emit('close');
+          try { entry.pc.close(); } catch { /* already gone */ }
+          peers.delete(msg.peer);
+        }
+        onPeerIce(msg.peer, 'closed');
+        break;
+      }
+      case 'relay-closed':
+        // The service closing OUR OWN relay mailbox — the reliable-queue
+        // overflow in worker-rendezvous/src/relay.js. Every peer it was
+        // carrying is now unreachable; say so rather than leaving the page
+        // holding connections nothing can deliver to.
+        onLog(`[rendezvous] the service closed our relay (${msg.reason || 'unknown'})`);
+        for (const [id, entry] of [...peers]) {
+          if (!entry.relay) continue;
+          if (entry.adapter) entry.adapter.emit('close');
+          try { entry.pc.close(); } catch { /* already gone */ }
+          peers.delete(id);
+          onPeerIce(id, 'closed');
+        }
+        onError(msg.reason || 'relay-overflow');
         break;
       case 'error':
         if (msg.reason === 'unreachable') lostService('unreachable');
@@ -781,6 +923,7 @@ export function createRendezvousJoiner(opts) {
     onError = () => {},
     onLog = () => {},
     onDiag = () => {},
+    levers = defaultTransportLevers(),
     factories = defaultFactories(),
     // ── The three options a SHIP HOST joiner needs (issue #1114) ────────────
     // A fleet member reaches a host over exactly this path — the same resolve,
@@ -842,8 +985,32 @@ export function createRendezvousJoiner(opts) {
   let retryTimer = null;
   let connectTimer = null;
   let pendingCandidates = [];
+  /**
+   * Which rung of the transport ladder this joiner is on (issue #1113).
+   *
+   *   'direct'    a WebRTC offer — over any candidate, or only over a TURN
+   *               relay one when `?forceRelay` pinned it (gui/transport-levers.js)
+   *   'ws-relay'  the game's own frames over this same rendezvous socket
+   *
+   * It only ever escalates, never goes back. A network that refused WebRTC four
+   * times running is not one to keep re-asking mid-mission, and a reload starts
+   * the ladder again from the top for the case where the network changed.
+   */
+  let mode = levers.wsRelay === 'only' ? 'ws-relay' : 'direct';
+  /** The relayed channel pair while `mode === 'ws-relay'`; null otherwise. */
+  let relay = null;
 
   const linked = () => isChannelOpen(channel);
+  /**
+   * True when this joiner's game path IS the signalling socket.
+   *
+   * The two-planes rule at the top of this file — a signalling event may not
+   * touch an established link — holds precisely because a DataChannel owes the
+   * service nothing once it is up. A relayed link owes it everything, so while
+   * relaying, `closed`, `error` and the socket's own death are link failures
+   * rather than news.
+   */
+  const socketIsTheLink = () => mode === 'ws-relay';
 
   function clearTimers() {
     if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
@@ -860,6 +1027,7 @@ export function createRendezvousJoiner(opts) {
     }
     channel = null;
     snapshot = null;
+    if (relay) { try { relay.close(); } catch { /* already gone */ } relay = null; }
     if (pc) { try { pc.close(); } catch { /* already gone */ } pc = null; }
     if (socket) {
       socket.onopen = null; socket.onmessage = null; socket.onerror = null; socket.onclose = null;
@@ -886,6 +1054,27 @@ export function createRendezvousJoiner(opts) {
     // Before acceptance the loop is BOUNDED (see JOIN_ATTEMPTS_BEFORE_ENTRY):
     // a guest who has never got in may be reading the wrong five letters, and
     // a silent backoff would never say so. After acceptance it is unbounded.
+    // The direct ladder is spent and there is one rung left: let the service
+    // carry the game itself (issue #1113). This runs BEFORE the ordinary retry
+    // branch below, and it runs whether or not the host has accepted this build
+    // — a phone that walked from a working network onto a hostile one is the
+    // same problem as a phone that started on the hostile one, and the answer
+    // is the same. `wsRelay: 'off'` (a pinned WebRTC mode) skips it, because a
+    // fallback that fired would hide the failure the pin exists to expose.
+    const ladderSpent = attemptIndex + 1 >= JOIN_ATTEMPTS_BEFORE_ENTRY;
+    if (isRetryableReason(reason) && ladderSpent
+        && mode === 'direct' && levers.wsRelay === 'auto') {
+      mode = 'ws-relay';
+      onLog('[rendezvous] direct link exhausted — falling back to the WebSocket relay');
+      onDiag({ event: 'transport', transport: 'ws-relay', reason: 'direct-exhausted' });
+      if (established) onStatus('disconnected');
+      // A fresh ladder: the relay gets its own full budget of attempts, its own
+      // backoff from the bottom, and its own attempt numbering in the
+      // diagnostics readout — "attempt 5" on a path being tried for the first
+      // time would be a lie about which rung had been given how long.
+      scheduleRetry({ restart: true });
+      return;
+    }
     if (isRetryableReason(reason)
         && (established || attemptIndex + 1 < JOIN_ATTEMPTS_BEFORE_ENTRY)) {
       onLog(`[rendezvous] link lost (${reason}) — retrying`);
@@ -905,10 +1094,16 @@ export function createRendezvousJoiner(opts) {
     onStatus('error');
   }
 
-  function scheduleRetry() {
+  /**
+   * `restart: true` begins a NEW ladder rather than continuing this one — the
+   * transport escalation in `fail()` is its only caller. The next attempt is
+   * then attempt 1 with the bottom rung of both schedules, which is what a path
+   * that has not been tried yet is entitled to.
+   */
+  function scheduleRetry({ restart = false } = {}) {
     if (closed || retryTimer) return;
-    const delay = nextBackoffDelay(attemptIndex);
-    attemptIndex += 1;
+    const delay = nextBackoffDelay(restart ? 0 : attemptIndex);
+    attemptIndex = restart ? 0 : attemptIndex + 1;
     onLog(`[rendezvous] retrying in ${delay}ms (attempt ${attemptIndex + 1})`);
     retryTimer = setTimeout(() => { retryTimer = null; attempt(); }, delay);
   }
@@ -917,34 +1112,17 @@ export function createRendezvousJoiner(opts) {
     if (socket && socket.readyState === 1) socket.send(frame('signal', { payload }));
   }
 
-  async function offer(gen) {
-    pc = factories.peer({ iceServers });
-    const mine = pc;
-    const gathered = new Set();
-    pc.onicecandidate = (e) => {
-      if (gen !== generation || pc !== mine) return;
-      if (!e || !e.candidate) return;
-      signal({ candidate: e.candidate });
-      const type = candidateType(e.candidate);
-      if (type && !gathered.has(type)) {
-        gathered.add(type);
-        onLog(`[ICE] gathered ${type} candidate`);
-        onDiag({ event: 'candidates', types: [...gathered] });
-      }
-    };
-    pc.oniceconnectionstatechange = () => {
-      if (gen !== generation || pc !== mine) return;
-      onLog(`[ICE] state — ${pc.iceConnectionState}`);
-      onDiag({ event: 'ice-state', state: pc.iceConnectionState });
-    };
-
-    // Both channels are created here, on the offerer, so the answering host
-    // picks them up by label off one negotiation. The lossy one is opened
-    // whether or not anything ends up riding it: negotiating it lazily would
-    // mean the first minute of every session runs snapshots down the reliable
-    // channel for no reason.
-    channel = pc.createDataChannel(RELIABLE_CHANNEL, { ordered: true });
-    snapshot = pc.createDataChannel(SNAPSHOT_CHANNEL, { ordered: false, maxRetransmits: 0 });
+  /**
+   * Wire this attempt's two channels: the compatibility handshake on open, the
+   * reconnect loop on close, and ordinary ServerMessage traffic in between.
+   *
+   * Hoisted out of `offer()` in #1113 so the relayed pair
+   * (gui/rendezvous-relay.js) runs through exactly the same handshake, the same
+   * `established`/`attemptIndex` bookkeeping and the same `deliver` ingress. A
+   * second copy of this for the fallback path would be a second place for the
+   * stamp handshake to drift.
+   */
+  function wireChannels(gen) {
     snapshot.onmessage = (e) => deliver(gen, e.data);
     snapshot.onopen = () => onLog('[rendezvous] snapshot channel open');
 
@@ -996,6 +1174,64 @@ export function createRendezvousJoiner(opts) {
       }
       deliver(gen, e.data);
     };
+  }
+
+  /**
+   * Ask the service to carry this joiner's game frames (issue #1113). Called
+   * instead of `offer()` once the direct ladder is spent, or straight away when
+   * `?transport=ws-relay` pinned it.
+   */
+  function relayAttach(gen, readyFrame) {
+    if (gen !== generation) return;
+    relay = createRelayChannelPair({
+      send: (body) => {
+        if (socket && socket.readyState === 1) socket.send(frame(body.type, body));
+      },
+      bufferedAmount: () => (socket && socket.bufferedAmount) || 0,
+      limits: relayLimitsFromFrame(readyFrame && readyFrame.limits),
+      onDegraded: ({ dropped }) => onDiag({ event: 'relay-degraded', dropped, from: 'client' }),
+      onLog,
+    });
+    channel = relay.reliable;
+    snapshot = relay.snapshot;
+    wireChannels(gen);
+    // 'open' the moment the service has confirmed the attachment: on this path
+    // that IS "the far end can be reached", exactly as a DataChannel's open is.
+    relay.open();
+  }
+
+  async function offer(gen) {
+    // `iceTransportPolicy` carries the `?forceRelay` lever. 'relay' makes the
+    // browser discard host and server-reflexive candidates, so any pair that
+    // forms is over a TURN allocation — see gui/transport-levers.js.
+    pc = factories.peer({ iceServers, iceTransportPolicy: levers.iceTransportPolicy });
+    const mine = pc;
+    const gathered = new Set();
+    pc.onicecandidate = (e) => {
+      if (gen !== generation || pc !== mine) return;
+      if (!e || !e.candidate) return;
+      signal({ candidate: e.candidate });
+      const type = candidateType(e.candidate);
+      if (type && !gathered.has(type)) {
+        gathered.add(type);
+        onLog(`[ICE] gathered ${type} candidate`);
+        onDiag({ event: 'candidates', types: [...gathered] });
+      }
+    };
+    pc.oniceconnectionstatechange = () => {
+      if (gen !== generation || pc !== mine) return;
+      onLog(`[ICE] state — ${pc.iceConnectionState}`);
+      onDiag({ event: 'ice-state', state: pc.iceConnectionState });
+    };
+
+    // Both channels are created here, on the offerer, so the answering host
+    // picks them up by label off one negotiation. The lossy one is opened
+    // whether or not anything ends up riding it: negotiating it lazily would
+    // mean the first minute of every session runs snapshots down the reliable
+    // channel for no reason.
+    channel = pc.createDataChannel(RELIABLE_CHANNEL, { ordered: true });
+    snapshot = pc.createDataChannel(SNAPSHOT_CHANNEL, { ordered: false, maxRetransmits: 0 });
+    wireChannels(gen);
 
     // `mine`, not `pc`, from here down: this function is async, and a failure
     // during the awaits tears `pc` out from under it. Reading the field would
@@ -1043,11 +1279,32 @@ export function createRendezvousJoiner(opts) {
         socket.send(frame('join', { code: parsed.full, namespace }));
         break;
       case 'joined':
+        if (mode === 'ws-relay') {
+          onLog(`[rendezvous] resolved ${parsed.suffix}; asking the service to relay`);
+          socket.send(frame('relay-open', {}));
+          break;
+        }
         onLog(`[rendezvous] resolved ${parsed.suffix}; offering`);
         offer(gen).catch((e) => fail(gen, 'unreachable', String(e && e.message)));
         break;
       case 'signal':
         onSignal(gen, msg.payload).catch((e) => fail(gen, 'unreachable', String(e && e.message)));
+        break;
+      // ── The WebSocket game relay (issue #1113) ────────────────────────────
+      case 'relay-ready':
+        relayAttach(gen, msg);
+        break;
+      case 'relay':
+        if (relay) relay.deliver(msg);
+        break;
+      case 'relay-closed':
+        // The service has stopped carrying this link. Unlike a `closed` frame
+        // against a DataChannel, this really is the end of the game path.
+        onLog(`[rendezvous] relay closed (${msg.reason || 'unknown'})`);
+        fail(gen, isRetryableReason(msg.reason) ? 'unreachable' : msg.reason);
+        break;
+      case 'relay-degraded':
+        onDiag({ event: 'relay-degraded', dropped: msg.dropped, from: 'service' });
         break;
       // Signalling-plane news. Before the direct channels are up these are
       // answers, not blips — the record is gone, or the service refused the
@@ -1064,15 +1321,19 @@ export function createRendezvousJoiner(opts) {
       // the link still up. Only the channel's own close drives the reconnect
       // loop from here — and if the link then genuinely goes, the next resolve
       // gets the honest answer about the code.
+      //
+      // `socketIsTheLink()` is the exception #1113 adds: while the SERVICE is
+      // carrying the game there is no second plane to be independent of, so
+      // these frames are answers again rather than news.
       case 'closed':
-        if (linked()) {
+        if (linked() && !socketIsTheLink()) {
           onLog(`[rendezvous] record closed (${msg.reason || 'host-gone'}) — the direct link is up, playing on`);
           break;
         }
         fail(gen, msg.reason || 'host-gone');
         break;
       case 'error':
-        if (linked()) {
+        if (linked() && !socketIsTheLink()) {
           onLog(`[rendezvous] service error (${msg.reason}) — the direct link is up, playing on`);
           break;
         }
@@ -1106,6 +1367,11 @@ export function createRendezvousJoiner(opts) {
     // and being retried reads as "reconnecting" until it is actually back.
     if (!established) onStatus('connecting');
     onDiag({ event: 'attempt', attempt: attemptIndex + 1 });
+    // Which rung of the ladder this attempt is on, and whether a lever pinned
+    // it there. Reported on EVERY attempt rather than only on a change, so the
+    // readout always names a transport instead of leaving the first rung to be
+    // inferred from silence.
+    onDiag({ event: 'transport', transport: mode, pinned: levers.pinned, mode: levers.mode });
     onDiag({ event: 'signaling', state: 'connecting' });
 
     const timeoutMs = connectTimeoutMs(attemptIndex);
@@ -1131,7 +1397,10 @@ export function createRendezvousJoiner(opts) {
     // thing here, and neither means anything once the direct channel is up:
     // afterwards the signalling socket going away is expected, not a failure.
     const socketGone = () => {
-      if (closed || gen !== generation || socket !== mine || linked()) return;
+      if (closed || gen !== generation || socket !== mine) return;
+      // A live DIRECT link does not care that its signalling socket went; a
+      // relayed one has just lost the wire the game was on (issue #1113).
+      if (linked() && !socketIsTheLink()) return;
       fail(gen, 'unreachable');
     };
     socket.onerror = socketGone;

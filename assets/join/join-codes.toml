@@ -123,6 +123,15 @@ max_relay_frame_bytes = 65536
 # session, closed and said so, rather than a quietly lossy one.
 max_relay_queue_reliable = 256
 max_relay_queue_snapshot = 32
+# The SENDER's half of the same rule, advertised to both ends on `relay-ready`.
+# A WebSocket is reliable and ordered, so a relay would silently upgrade the
+# snapshot class into a reliable one unless the sender sheds; once its socket's
+# own `bufferedAmount` is past this many bytes, a snapshot frame is dropped
+# rather than queued behind the backlog. Reliable frames are never shed there —
+# the socket buffers them. Browsers and tungstenite both report
+# `bufferedAmount`; a Durable Object's WebSocket does not, which is why this
+# bound belongs to whoever is sending rather than to the service.
+max_relay_send_buffer_bytes = 262144
 
 # ── Deny-list ────────────────────────────────────────────────────────────────
 # Words never minted and never accepted, in ordinary spelling: gui/join-code.js

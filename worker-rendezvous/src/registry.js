@@ -545,18 +545,36 @@ export function createRegistry({
     // and it needs the same bound. Uncounted, so it never costs a crew slot.
     relay.attach(record.host, record.key, { counted: false });
 
+    // The HOST is told first, deliberately. The joiner's very next act is to
+    // put its compatibility handshake on the relay, and a host that had not yet
+    // built its side of the pair would drop it — invisible over a real socket,
+    // where the two frames are separate messages in order, but immediate in any
+    // adapter that dispatches a batch synchronously (the contract tests, and
+    // tests/smoke/rendezvous-shim.js).
     return [
+      out(record.host, { type: 'relay-peer', peer: connId, limits: relayAdvice() }),
       out(connId, {
         type: 'relay-ready',
         peer: connId,
-        limits: {
-          max_frame_bytes: relay.limits.maxFrameBytes,
-          max_queue_reliable: relay.limits.maxReliable,
-          max_queue_snapshot: relay.limits.maxSnapshot,
-        },
+        limits: relayAdvice(),
       }),
-      out(record.host, { type: 'relay-peer', peer: connId }),
     ];
+  }
+
+  /**
+   * The bounds both ends of a relayed link are told about, in the wire's own
+   * snake_case. Sent to the joiner on `relay-ready` and to the host on
+   * `relay-peer` from ONE place, because a host that believed a different
+   * ceiling from its crew member would refuse frames the service would have
+   * carried, or send frames it would not.
+   */
+  function relayAdvice() {
+    return {
+      max_frame_bytes: relay.limits.maxFrameBytes,
+      max_queue_reliable: relay.limits.maxReliable,
+      max_queue_snapshot: relay.limits.maxSnapshot,
+      max_send_buffer_bytes: relay.limits.maxSendBufferBytes,
+    };
   }
 
   /**

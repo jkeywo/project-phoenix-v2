@@ -22,6 +22,7 @@ import {
   JOIN_ATTEMPTS_BEFORE_ENTRY,
 } from '../../gui/rendezvous-transport.js';
 import { createRegistry, ROLE_HOST, ROLE_CLIENT } from '../../worker-rendezvous/src/registry.js';
+import { transportLeversFromLocation } from '../../gui/transport-levers.js';
 import {
   NAMESPACE_CLIENT,
   NAMESPACE_SERVER,
@@ -721,6 +722,12 @@ describe('a joiner that fails cleans up after itself', () => {
         data: DATA,
         code: code.suffix,
         factories,
+        // Pinned to direct WebRTC. Since #1113 an unpinned joiner that runs out
+        // of direct attempts escalates to the WebSocket relay instead of giving
+        // up, and the relay in this fixture works — so without the pin this
+        // test would prove the fallback rather than the claim it is making,
+        // which is that a spent ladder ends in front of the guest.
+        levers: transportLeversFromLocation('?transport=direct'),
         onError: (reason) => errors.push(reason),
         onStatus: (s) => statuses.push(s),
       });
@@ -1063,6 +1070,11 @@ describe('automatic reconnect', () => {
         data: DATA,
         code: code.suffix,
         factories,
+        // Direct only: this test is about the SHAPE of the direct ladder — four
+        // attempts, escalating timeouts, then the entry field. #1113's relay
+        // fallback is a fifth thing that happens after all of that, and it has
+        // its own cases below.
+        levers: transportLeversFromLocation('?transport=direct'),
         onError: (r) => errors.push(r),
         onStatus: (s) => statuses.push(s),
         onDiag: (e) => { if (e.event === 'attempt') attempts.push(e.attempt); },
@@ -1430,5 +1442,234 @@ describe('a host that loses its record', () => {
     expect(errors).toEqual(['unreachable']);
     expect(host.code).toBeNull();
     host.close();
+  });
+});
+
+// ── The WebSocket game relay (issue #1113) ──────────────────────────────────
+//
+// The third rung of the transport ladder: when no direct WebRTC link can be
+// built, the rendezvous service carries the game's own frames. These cases run
+// the whole path in process — a real registry, a real relay hub, the shipped
+// host and joiner — so what they prove is that the FALLBACK reaches the same
+// admission gate and the same delivery classes the direct path does. What they
+// cannot prove is that a network which blocks WebRTC lets a `wss:` socket
+// through; that is the acceptance kit's (docs/acceptance/1113-networks.md).
+
+/**
+ * A joiner whose WebRTC never links, because its peer factory is its own and so
+ * has nothing to link to. That is exactly the shape of the real failure the
+ * relay exists for: signalling works, the media path does not.
+ */
+function unlinkableFactories(world, sink = []) {
+  return {
+    socket: (url) => {
+      const s = world.socket(url);
+      if (String(url).endsWith('/v1/join')) sink.push(s);
+      return s;
+    },
+    peer: makePeerFactory(),
+  };
+}
+
+describe('the WebSocket game relay', () => {
+  it('gets a joiner all the way in when no direct link is possible', async () => {
+    const world = makeWorld();
+    const { code, inbound, announced } = await hostOn(world);
+    const statuses = [];
+    const diag = [];
+    const joiner = createRendezvousJoiner({
+      base: 'https://rendezvous.test',
+      data: DATA,
+      code: code.suffix,
+      factories: unlinkableFactories(world),
+      levers: transportLeversFromLocation('?transport=ws-relay'),
+      getIdent: () => ({ token: 'tok-relay', name: 'Ada' }),
+      onStatus: (s) => statuses.push(s),
+      onDiag: (e) => diag.push(e),
+    });
+    await settle();
+
+    // The host was handed an ORDINARY connection: same adapter, same
+    // compatibility handshake, same Identify. Nothing downstream of the
+    // transport can tell which path this crew member came in on.
+    expect(announced).toHaveLength(1);
+    expect(inbound).toContainEqual({
+      type: 'Identify',
+      data: { token: 'tok-relay', name: 'Ada' },
+    });
+    expect(statuses).toContain('ready');
+    expect(joiner.connected).toBe(true);
+    expect(diag).toContainEqual(
+      expect.objectContaining({ event: 'transport', transport: 'ws-relay' }),
+    );
+    joiner.close();
+  });
+
+  it('keeps the snapshot class distinct from the reliable one over the relay', async () => {
+    // The relay's whole risk: a WebSocket is reliable and ordered, so a naive
+    // implementation silently upgrades the lossy class. The two channels stay
+    // separate objects with separate classes on the wire, which is what the
+    // host's per-token snapshot routing needs to keep working.
+    const world = makeWorld();
+    const { code, announced } = await hostOn(world);
+    const relayFrames = [];
+    const factories = unlinkableFactories(world);
+    const openSocket = factories.socket;
+    factories.socket = (url) => {
+      const s = openSocket(url);
+      const send = s.send.bind(s);
+      s.send = (text) => {
+        const f = JSON.parse(text);
+        if (f.type === 'relay') relayFrames.push(f);
+        send(text);
+      };
+      return s;
+    };
+
+    const joiner = createRendezvousJoiner({
+      base: 'https://rendezvous.test',
+      data: DATA,
+      code: code.suffix,
+      factories,
+      levers: transportLeversFromLocation('?transport=ws-relay'),
+      getIdent: () => ({ token: 'tok-relay', name: 'Ada' }),
+    });
+    await settle();
+    joiner.send('ControlSystem', { target: 'Helm' }, 'snapshot');
+    joiner.send('SetReady', { ready: true });
+    await settle();
+
+    const classOf = (type) =>
+      relayFrames.find((f) => JSON.parse(f.payload).type === type).class;
+    expect(classOf('ControlSystem')).toBe('snapshot');
+    expect(classOf('SetReady')).toBe('reliable');
+    // And the host's side of the pair is a lossy channel the outbound router
+    // can prefer per token, exactly as a negotiated DataChannel would be.
+    expect(announced[0].snapshotChannel).toBeTruthy();
+    expect(announced[0].snapshotChannel.label).toBe('snapshot');
+    joiner.close();
+  });
+
+  it('falls back on its own once the direct ladder is spent, and says so', async () => {
+    vi.useFakeTimers();
+    try {
+      const world = makeWorld();
+      const { code, announced } = await hostOn(world);
+      const diag = [];
+      const joiner = createRendezvousJoiner({
+        base: 'https://rendezvous.test',
+        data: DATA,
+        code: code.suffix,
+        factories: unlinkableFactories(world),
+        getIdent: () => ({ token: 'tok-fallback', name: 'Ada' }),
+        onDiag: (e) => diag.push(e),
+      });
+
+      // The four direct attempts, each timing out on its own rung of the
+      // connect-timeout ladder, and nothing relayed yet.
+      await vi.advanceTimersByTimeAsync(200_000);
+      const transports = diag.filter((e) => e.event === 'transport');
+      expect(transports.slice(0, JOIN_ATTEMPTS_BEFORE_ENTRY).map((e) => e.transport))
+        .toEqual(Array(JOIN_ATTEMPTS_BEFORE_ENTRY).fill('direct'));
+      // …then the escalation, named with the reason a readout can render.
+      expect(diag).toContainEqual(
+        expect.objectContaining({ transport: 'ws-relay', reason: 'direct-exhausted' }),
+      );
+      // …and the guest is IN, rather than in front of the entry field.
+      expect(announced).toHaveLength(1);
+      expect(joiner.connected).toBe(true);
+      joiner.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not fall back when a lever pinned the transport to WebRTC', async () => {
+    vi.useFakeTimers();
+    try {
+      const world = makeWorld();
+      const { code, announced } = await hostOn(world);
+      const errors = [];
+      createRendezvousJoiner({
+        base: 'https://rendezvous.test',
+        data: DATA,
+        code: code.suffix,
+        factories: unlinkableFactories(world),
+        // The point of a pin: a fallback that fired would hide the very
+        // failure the acceptance kit is trying to observe.
+        levers: transportLeversFromLocation('?forceRelay=1'),
+        onError: (r) => errors.push(r),
+      });
+      await vi.advanceTimersByTimeAsync(200_000);
+      expect(announced).toHaveLength(0);
+      expect(errors).toEqual(['unreachable']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('offers only relay candidates when ?forceRelay pins the ICE policy', async () => {
+    const world = makeWorld();
+    const { code } = await hostOn(world);
+    const configs = [];
+    const inner = makePeerFactory();
+    const factories = {
+      socket: world.socket,
+      peer: (config) => { configs.push(config); return inner(config); },
+    };
+    createRendezvousJoiner({
+      base: 'https://rendezvous.test',
+      data: DATA,
+      code: code.suffix,
+      factories,
+      levers: transportLeversFromLocation('?forceRelay=1'),
+    });
+    await settle();
+    expect(configs).not.toHaveLength(0);
+    expect(configs.every((c) => c.iceTransportPolicy === 'relay')).toBe(true);
+  });
+
+  it('ends a relayed session when the record behind it dies', async () => {
+    // A DataChannel outlives the record that introduced it; a relayed link
+    // cannot, because the record IS the link. The joiner must learn that
+    // rather than sitting on a socket nothing will arrive on.
+    const world = makeWorld();
+    const { code, host } = await hostOn(world);
+    const statuses = [];
+    const joiner = createRendezvousJoiner({
+      base: 'https://rendezvous.test',
+      data: DATA,
+      code: code.suffix,
+      factories: unlinkableFactories(world),
+      levers: transportLeversFromLocation('?transport=ws-relay'),
+      onStatus: (s) => statuses.push(s),
+    });
+    await settle();
+    expect(joiner.connected).toBe(true);
+
+    host.close();
+    await settle();
+    expect(joiner.connected).toBe(false);
+    joiner.close();
+  });
+
+  it('tells the host a relayed crew member is being carried by the service', async () => {
+    const world = makeWorld();
+    const iceStates = [];
+    const { code } = await hostOn(world, {
+      onPeerIce: (peer, state) => iceStates.push(state),
+    });
+    const joiner = createRendezvousJoiner({
+      base: 'https://rendezvous.test',
+      data: DATA,
+      code: code.suffix,
+      factories: unlinkableFactories(world),
+      levers: transportLeversFromLocation('?transport=ws-relay'),
+    });
+    await settle();
+    // Not one of WebRTC's five ICE states: no ICE was negotiated, and a readout
+    // that printed "connected" here would be claiming a result nothing produced.
+    expect(iceStates).toContain('ws-relay');
+    joiner.close();
   });
 });

@@ -39,11 +39,11 @@ import {
   fleetPanelViewModel,
 } from '../../gui/host-mesh.js';
 import { reasonStringId } from '../../gui/join-code.js';
-import { buildTable, parseCsv } from '../../gui/strings.js';
+import { buildTable } from '../../gui/strings.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const JOIN_DATA = JSON.parse(readFileSync(path.join(root, 'assets/join/join-codes.json'), 'utf8'));
-const STRINGS = buildTable(parseCsv(readFileSync(path.join(root, 'assets/strings/strings.csv'), 'utf8')));
+const STRINGS = buildTable(readFileSync(path.join(root, 'assets/strings/strings.csv'), 'utf8'));
 
 const MAX = JOIN_DATA.limits.max_fleet_hosts;
 const fleetOf = (over = {}) => openFleet({ maxSlots: MAX, ...over });

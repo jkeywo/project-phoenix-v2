@@ -374,6 +374,21 @@ drops is re-resolved against the SAME code on a backoff, with the same session
 token re-sent as `Identify` — the host restores the held station and pushes the
 current projection, and nobody re-types five letters.
 
+### Assembling a fleet (issue #1114)
+
+A multi-ship session adds ONE privileged code in the `server` namespace, which
+admits ship HOSTS and never reaches the simulation. The fleet lead opens a
+SECOND rendezvous registration beside its own crew one; a second host types
+those letters (or opens `server.html#<full code>`), passes the same in-band
+`JoinHandshake` — judged by the STRICTER `delivery::check_host_stamp`, which
+drops both of the crew path's leniencies — and then speaks a separate
+vocabulary, `gui/host-mesh.js`'s `{ m, t, tick, d }` envelope. A fleet member
+sends no `Identify`, holds no session token and never reaches
+`wasm_receive_message`, so each crew star stays on its own host structurally
+rather than by a filter. `gui/fleet-session.js` is the wiring; `gui/host-mesh.js`
+is the pure model. #1114 assembles and freezes a fleet; running one as a shared
+deterministic mission is #1116's, which is what the unset `tick` field is for.
+
 ### Once on the wire
 
 ```
@@ -441,6 +456,9 @@ worker-rendezvous/ — The rendezvous service (Cloudflare Worker + Durable
                   `src/registry.js` is the whole protocol as a pure state
                   machine; `src/index.js` only terminates the socket. NOT
                   DEPLOYED yet — see docs/delivery-checklist.md
+gui/host-mesh.js  — HOST-to-host protocol + the pure fleet-lobby model (#1114);
+gui/fleet-session.js — its two ends wired onto the transport. Separate from the
+                  crew protocol by design; see "Assembling a fleet" above
 tests/client/   — Vitest tests for gui/*.js
 tests/smoke/    — Playwright smoke tests
 wiki/           — LLM-maintained knowledge base. Read SCHEMA.md first; update as you work.
@@ -574,7 +592,7 @@ When extending `ClientMessage` or `ServerMessage` (prefer a new `SystemControlPa
 4. Client inbound: fold into state in `gui/sim-state.js` `apply()` (or `gui/comms-state.js` / `gui/lobby-state.js`), then surface via the relevant `build*()` in `gui/console-state.js`
 5. Client outbound: add the UI action to `gui/action-map.js` (and the button/control to the console's `gui/<name>-console.html`)
 6. Add/extend Vitest coverage in `tests/client/`
-7. Touch `server.html` `routeOutbound()` / `client.html` only if routing or the join handshake changes. The transport-plane frames (`JoinHandshake`/`JoinAccepted`/`JoinRefused`) are deliberately NOT `ClientMessage`/`ServerMessage` variants — see `gui/rendezvous-transport.js` and `pasm/spec/design/p2p-design-deltas.yaml`
+7. Touch `server.html` `routeOutbound()` / `client.html` only if routing or the join handshake changes. The transport-plane frames (`JoinHandshake`/`JoinAccepted`/`JoinRefused`) are deliberately NOT `ClientMessage`/`ServerMessage` variants — see `gui/rendezvous-transport.js` and `pasm/spec/design/p2p-design-deltas.yaml`. **Host-to-host traffic is a third vocabulary and belongs in `gui/host-mesh.js`, never here**: its envelope is `{ m, t, tick, d }` precisely so a host frame that lands on the crew wire is refused by a decoder switching on `.type` rather than half understood.
 
 ## AI-origin decisions
 

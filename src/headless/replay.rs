@@ -420,7 +420,16 @@ fn is_game_over(app: &App) -> bool {
 /// because an empty `side_a`/`side_b` is indistinguishable from a real
 /// `--world`-only run with no duel sides, and reading it that way would
 /// silently replay the wrong scenario instead of refusing to.
-pub const ARTIFACT_VERSION: u32 = 2;
+///
+/// `3` (from `2`): issue #1116 gave every `LoggedCommand` a `CommandOrder` —
+/// which fleet slot issued it, and where it sat in that slot's own sequence —
+/// and moved the log's write point from acceptance to apply. A version-2
+/// artifact therefore carries a log with no order field at all, and one whose
+/// entries are in accepted rather than applied order. Both are refused rather
+/// than defaulted: a missing order would read as `slot-0 seq 0` on every entry,
+/// which is a claim that one host issued the whole run in a single instant, and
+/// #1118's recovery is going to merge two hosts' logs on exactly that key.
+pub const ARTIFACT_VERSION: u32 = 3;
 
 /// Everything a second run needs to reproduce the first: the run's setup, the
 /// commands it accepted, and the digests it passed through.

@@ -507,7 +507,15 @@ pub const SNAPSHOT_FORMAT: u32 = 14;
 /// say so. Earlier fold widenings (#1025/#1028/#1041/#1107/#1156) left this
 /// alone because each moved the digest only for the worlds that used the surface
 /// it added; this one moves it for essentially every scenario world.
-pub const SIMULATION_RULES: &str = "0.2";
+///
+/// `"0.3"` — issue #1116. Two rule changes, both of which move a run without
+/// changing the payload's shape: `ShipPhysics.roll` is now integrated for every
+/// ship rather than only the locally-projected one (a folded field, so every
+/// world with a manoeuvring NPC folds differently from the first tick), and a
+/// `StoredRun`'s continuation log element gained a `CommandOrder`. A pre-#1116
+/// save restores intact and then diverges on its first continuation tick, which
+/// is precisely the failure the rules dimension exists to name.
+pub const SIMULATION_RULES: &str = "0.3";
 
 /// The authored data, computed rather than remembered.
 ///

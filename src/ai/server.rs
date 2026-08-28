@@ -460,6 +460,7 @@ pub(crate) fn build_world_snapshot(
         With<crate::server_app::Asteroid>,
     >,
 ) {
+    // Sorted by uuid at the end of this build — see below.
     snapshot.entities = query
         .iter()
         .map(

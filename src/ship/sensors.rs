@@ -497,6 +497,15 @@ pub fn tick_sensors_threat_warning(
             ));
         }
     }
+    // Sorted before the walk, because the walk below keeps the FIRST strict
+    // minimum and two contacts can be exactly equidistant — the fleet case is
+    // not exotic, it is two ships in formation with a hostile on the centreline.
+    // Raw query order is archetype-creation order, which is not the same on two
+    // hosts of one mission (`LocalShip` is on a different ship on each, so the
+    // ships group into archetypes differently). This is the pattern issue #1052
+    // established for the damage sites, applied to a decision instead of a draw:
+    // collect, sort on a stable key, then walk.
+    candidates.sort_by(|a, b| a.0.cmp(&b.0));
 
     for (
         entity,
@@ -849,7 +858,7 @@ pub fn operate_sensors_ai(
 
     // Build the shared candidate snapshot once (world state is the same for
     // every ship this tick). Each entry: (uuid, [x, y, z], faction).
-    let hostile_candidates: Vec<(String, [f32; 3], Option<uuid::Uuid>)> = hostile_ship_q
+    let mut hostile_candidates: Vec<(String, [f32; 3], Option<uuid::Uuid>)> = hostile_ship_q
         .iter()
         .map(|(uuid, physics, faction)| {
             (uuid.0.clone(), [physics.x, 0.0, physics.z], Some(faction.0))
@@ -862,6 +871,10 @@ pub fn operate_sensors_ai(
             )
         }))
         .collect();
+    // Sorted for the reason the threat scan above is: this list is scored and
+    // the top score wins, so two candidates that score identically are decided
+    // by position in the list, and raw query order is archetype order.
+    hostile_candidates.sort_by(|a, b| a.0.cmp(&b.0));
     for (
         ship_entity,
         entity_uuid,

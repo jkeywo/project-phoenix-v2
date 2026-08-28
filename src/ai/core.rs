@@ -1648,7 +1648,17 @@ pub fn find_nearest_hostile(
         .min_by(|a, b| {
             let da = dist_sq(pos, a.position);
             let db = dist_sq(pos, b.position);
-            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+            // Distance first, then the contact's own id — never the order the
+            // caller happened to build the list in (issue #1116). Two hostiles
+            // CAN be exactly equidistant: a fleet flying in formation with a
+            // contact on the centreline is the ordinary case, not a contrived
+            // one, and `min_by` keeping whichever came first would then make
+            // this pure function answer differently on two hosts whose query
+            // order differs. A uuid tiebreak is the same discipline
+            // `sim_digest::FoldKey` and issue #1052's damage sites use.
+            da.partial_cmp(&db)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.uuid.cmp(&b.uuid))
         })
         .map(|e| e.uuid)
 }

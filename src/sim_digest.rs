@@ -406,19 +406,70 @@ pub fn state_digest(app: &App) -> u64 {
 /// the widening, so `tests/fixtures/cross-target-ledger.json` is untouched.
 pub fn world_digest(world: &World) -> u64 {
     let mut acc = FOLD_SEED;
-    acc = fold_run_scope(world, acc);
-    acc = fold_scenario_scope(world, acc);
-    acc = fold_entity_namespace(world, acc);
-    acc = fold_infrastructure_namespace(world, acc);
-    acc = fold_civilian_namespace(world, acc);
-    acc = fold_weapons_hold_namespace(world, acc);
-    acc = fold_station_stances_namespace(world, acc);
-    acc = fold_tractor_namespace(world, acc);
-    acc = fold_dock_namespace(world, acc);
-    acc = fold_external_repair_namespace(world, acc);
-    acc = fold_umbilical_namespace(world, acc);
-    acc = fold_asteroid_namespace(world, acc);
-    fold_collisions(world, acc)
+    for (_, fold) in FOLD_STAGES {
+        acc = fold(world, acc);
+    }
+    acc
+}
+
+/// The fold, in order, with each stage named.
+///
+/// [`world_digest`] is the sum of these and nothing else, so the list cannot
+/// drift out of step with what it folds — adding a namespace here is what adds
+/// it to the digest.
+type FoldStage = (&'static str, fn(&World, u64) -> u64);
+const FOLD_STAGES: &[FoldStage] = &[
+    ("run", fold_run_scope),
+    ("scenario", fold_scenario_scope),
+    ("entity", fold_entity_namespace),
+    ("infrastructure", fold_infrastructure_namespace),
+    ("civilian", fold_civilian_namespace),
+    ("weapons-hold", fold_weapons_hold_namespace),
+    ("station-stances", fold_station_stances_namespace),
+    ("tractor", fold_tractor_namespace),
+    ("dock", fold_dock_namespace),
+    ("external-repair", fold_external_repair_namespace),
+    ("umbilical", fold_umbilical_namespace),
+    ("asteroid", fold_asteroid_namespace),
+    ("collisions", fold_collisions),
+];
+
+/// The running accumulator after each named stage of the fold.
+///
+/// A divergence diagnostic (issue #1116). "Two hosts disagree at tick 240" is
+/// where an investigation starts and not where it can usefully stop; comparing
+/// these two lists says *which scope* they disagree in — the entity namespace,
+/// the scenario's flags and scheduled work, the station stances — which is the
+/// difference between a bisection and a look.
+///
+/// Cheap to call and free not to: it is exactly the work [`world_digest`]
+/// already does, and nothing calls it on a healthy tick.
+///
+/// It is **not** a second digest and must never become one. The accumulator is
+/// threaded through the same stages in the same order, so the last entry here
+/// is always `world_digest`'s answer — a property
+/// [`the_stage_breakdown_ends_where_the_digest_does`] pins.
+pub fn digest_stages(world: &World) -> Vec<(&'static str, u64)> {
+    let mut acc = FOLD_SEED;
+    FOLD_STAGES
+        .iter()
+        .map(|(name, fold)| {
+            acc = fold(world, acc);
+            (*name, acc)
+        })
+        .collect()
+}
+
+/// The first named scope in which two hosts' folds disagree.
+///
+/// `None` when they agree. The stages are cumulative, so the first difference
+/// is the first scope that actually diverged — every later one inherits it.
+pub fn first_divergent_scope(mine: &World, theirs: &[(&'static str, u64)]) -> Option<&'static str> {
+    digest_stages(mine)
+        .into_iter()
+        .zip(theirs.iter())
+        .find(|((_, a), (_, b))| a != b)
+        .map(|((name, _), _)| name)
 }
 
 /// The run-scope preamble: tick, RNG, phase, ending, captain boosts, world.

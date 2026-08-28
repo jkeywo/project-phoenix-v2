@@ -51,7 +51,12 @@
  *   host    `lostService()` discards the socket, the code and the peers still
  *           mid-signalling, then re-registers so NEW joiners have a way in.
  *           Admitted adapters and their peer connections are untouched — a
- *           Durable Object eviction is not a reason to end a mission.
+ *           Durable Object eviction is not a reason to end a mission. A
+ *           `peer-left` for one already-admitted, still-open joiner is the
+ *           same story at per-peer scale: the registry sends it because THAT
+ *           joiner's own rendezvous socket died, not its DataChannel, so its
+ *           link stays up too — only the reliable channel's own close (or a
+ *           page-initiated `close()`) may end that session.
  *   joiner  a `closed`/`error` frame, or the signalling socket dying, is
  *           logged and ignored while `linked()`. Only the DataChannel's own
  *           close drives the reconnect loop, and only `close()` (or the host
@@ -542,6 +547,18 @@ export function createRendezvousHost(opts) {
   }
 
   /**
+   * True for a joiner the compatibility handshake admitted whose reliable
+   * channel is, right now, really open — the reliable channel's own
+   * `readyState`, not this map's bookkeeping. This is THE test for "is this
+   * an established link a signalling event may not touch": both
+   * `dropUnadmittedPeers()` below and the `peer-left` handler apply it, so
+   * the two mechanisms can only drift if this one definition does.
+   */
+  function isLiveAdmittedLink(entry) {
+    return !!(entry.admitted && entry.adapter && entry.adapter.open);
+  }
+
+  /**
    * Discard the peers that existed only inside the dead REGISTRATION.
    *
    * A joiner still mid-signalling is one of them: its offer and answer were
@@ -559,10 +576,15 @@ export function createRendezvousHost(opts) {
    * and since this no longer clears the whole map, a host that lost the service
    * a few times would otherwise keep every dead peer it ever had: `peer-left`
    * can never arrive for one whose record is gone.
+   *
+   * That last sentence used to be strictly true; since the `peer-left` handler
+   * below stopped tearing down a live admitted link itself, THIS is where such
+   * an entry finally gets reaped — once its own channel has actually closed
+   * and `isLiveAdmittedLink()` says so.
    */
   function dropUnadmittedPeers() {
     for (const [id, entry] of [...peers]) {
-      if (entry.admitted && entry.adapter && entry.adapter.open) continue;
+      if (isLiveAdmittedLink(entry)) continue;
       if (entry.adapter) entry.adapter.emit('close');
       try { entry.pc.close(); } catch { /* already closed */ }
       peers.delete(id);
@@ -584,8 +606,20 @@ export function createRendezvousHost(opts) {
         peerState(msg.peer);
         break;
       case 'peer-left': {
+        // registry.js's leave() sends this when THAT peer's own rendezvous
+        // WebSocket dies — a Durable Object eviction, a worker redeploy, a
+        // phone radio dropping the WS on a lock screen. It says nothing about
+        // that peer's DataChannel. An admitted, still-open link is the exact
+        // case `dropUnadmittedPeers()` above protects from a dead HOST
+        // socket; a signalling event may not touch it here either, or a
+        // healthy mid-mission player gets evicted (wasm_player_disconnected
+        // + pc.close) while the joiner still thinks it's connected. Leave the
+        // entry in the map — `isLiveAdmittedLink()` will say false the moment
+        // the reliable channel actually closes, and `dropUnadmittedPeers()`
+        // reaps it then; the channel's own `onclose` is what reaches the page
+        // as a disconnect, exactly as if this frame had never arrived.
         const entry = peers.get(msg.peer);
-        if (entry) {
+        if (entry && !isLiveAdmittedLink(entry)) {
           if (entry.adapter) entry.adapter.emit('close');
           try { entry.pc.close(); } catch { /* already closed */ }
           peers.delete(msg.peer);

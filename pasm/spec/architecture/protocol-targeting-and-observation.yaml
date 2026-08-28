@@ -4,7 +4,9 @@ entities:
       status: implemented
       confidence: confirmed
       title: Host Local Console Bridge
-      summary: Routes host-page HTML console actions through the shared gui/action-map.js dispatch table into full ClientMessage envelopes and injects them via wasm_receive_message under the dedicated local-console identity, allowing only the host's local ship to be controlled without a network session claim.
+      summary: Routes host-page HTML console actions through the shared gui/action-map.js dispatch table into full ClientMessage envelopes and injects them via wasm_receive_message under the dedicated local-console identity, allowing only the host's local ship to be controlled without a PeerJS session claim.
+      rationale:
+        - "[ai] #1112 retired PeerJS. \"A PeerJS session claim\" above is the human's original wording and stands as written; it now denotes a network session claim generally — any rendezvous/WebRTC session token, not literally a PeerJS one — since PeerJS is no longer the (or any) transport. The distinction this bridge draws, host-local UI versus a remote player's session claim, is unchanged; only what backs a remote claim changed."
     architecture:
       kind: local-command-bridge
       authority: authoritative

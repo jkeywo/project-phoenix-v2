@@ -129,9 +129,12 @@ re-registers on a backoff and is issued a **fresh** code, because the old record
 really is gone and the letters on screen resolve to nothing — while **every
 admitted crew connection stays up**. Only the peers still mid-signalling on the
 dead socket are discarded; an established `RTCPeerConnection` needs no service,
-and only its own channel closing reaches `wasm_player_disconnected`. Keeping the
-*same* code across a host drop needs persistence in the service and is issue
-#1115's.
+and only its own channel closing reaches `wasm_player_disconnected`. The same
+rule holds per peer, not just for a dead host socket: `peer-left` — sent when
+ONE joiner's own rendezvous WebSocket dies (registry.js's `leave()`) — never
+closes that joiner's admitted, still-open link either; only that joiner's own
+DataChannel closing does. Keeping the *same* code across a host drop needs
+persistence in the service and is issue #1115's.
 
 `connectionAdapter.close()` — the host's only eviction mechanism, used by the
 reserved-token refusal and the duplicate-token dance — closes **both** channels

@@ -95,13 +95,10 @@ entities:
     core:
       status: implemented
       confidence: confirmed
-      title: Client Command Gateway
-      summary: >-
-        The phone's outbound command boundary: it builds every ControlSystem envelope and hands it
-        to the live link. It does NOT own the transport — rendezvous-transport-bridge does; this
-        entity resolves that bridge and calls it.
+      title: Client Network Interface
+      summary: PeerJS/WebRTC client transport for console messages and state snapshots.
       rationale:
-        - "[ai] Narrowed in issue #1112. It used to describe \"the PeerJS/WebRTC client transport\", which duplicated peer-transport-bridge in sessions-replication.yaml — two entities claiming the same thing, which WRITING_PASM §2.6 forbids. The transport now has one owner and this slice keeps the part it actually needed: where a console action turns into a wire envelope. The id is unchanged because four other slices reference it; only the claim it makes has narrowed."
+        - "[ai] Narrowed in issue #1112, which also retired PeerJS itself — the title, summary and evidence[0].summary above are the human's and stand as written pending ratification, but all three now describe this entity's ORIGINAL, wider scope rather than its current one. It used to describe \"the PeerJS/WebRTC client transport\", which duplicated peer-transport-bridge in sessions-replication.yaml — two entities claiming the same thing, which WRITING_PASM §2.6 forbids. The transport now has one owner, rendezvous-transport-bridge, and this slice keeps only the part it actually needed: where a console action turns into a wire envelope. A ratified rename would retitle this \"Client Command Gateway\", rewrite the summary to: \"The phone's outbound command boundary: it builds every ControlSystem envelope and hands it to the live link. It does NOT own the transport — rendezvous-transport-bridge does; this entity resolves that bridge and calls it.\", and rewrite evidence[0].summary's closing clause from \"the live ConnectionManager singleton\" to \"the page's live link\" — tests/client/command-gateway.test.js no longer mentions ConnectionManager at all. The id is unchanged because four other slices reference it; only the claim it makes has narrowed."
     architecture:
       kind: adapter
       authority: non-authoritative
@@ -125,7 +122,7 @@ entities:
         summary: >-
           gui/command-gateway.js is the explicit client command gateway: it
           builds every ControlSystem envelope and resolves the transport, either
-          an injected send or the page's live link.
+          an injected send or the live ConnectionManager singleton.
 
   - component: repair-console-interface
     core:

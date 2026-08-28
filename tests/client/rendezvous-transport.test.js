@@ -1243,6 +1243,128 @@ describe('signalling loss never reaches an established link', () => {
   });
 });
 
+describe('peer-left is a per-peer signalling relay, not an eviction', () => {
+  // registry.js's leave() sends `peer-left` to the HOST when THAT peer's own
+  // rendezvous WebSocket dies — a DO eviction, a worker redeploy, a phone
+  // radio dropping the WS on a lock screen. Since the joiner-side H2 fix (see
+  // the describe block above) a linked joiner deliberately ignores its own
+  // signalling socket dying, so before this fix the host would unilaterally
+  // evict (wasm_player_disconnected + pc.close) a mid-mission player whose
+  // DataChannel was perfectly healthy, while that player's own page still
+  // believed it was connected.
+
+  it('does not evict an admitted, still-open joiner whose own signalling socket died', async () => {
+    const world = makeWorld();
+    const hostFactories = { socket: world.socket, peer: makePeerFactory() };
+    let code = null;
+    const announced = [];
+    const inbound = [];
+    const severed = [];
+    createRendezvousHost({
+      base: 'https://rendezvous.test',
+      factories: hostFactories,
+      onCode: (c) => { code = c; },
+      onConnection: (conn) => {
+        announced.push(conn);
+        conn.on('data', (raw) => inbound.push(JSON.parse(raw)));
+        conn.on('close', () => severed.push(conn.peer));
+      },
+    });
+    await settle();
+
+    const joinSockets = [];
+    const joinFactories = {
+      socket: (url) => {
+        const s = world.socket(url);
+        if (String(url).endsWith('/v1/join')) joinSockets.push(s);
+        return s;
+      },
+      peer: hostFactories.peer,
+    };
+    const received = [];
+    const joiner = createRendezvousJoiner({
+      base: 'https://rendezvous.test',
+      data: DATA,
+      code: code.suffix,
+      factories: joinFactories,
+      getIdent: () => ({ token: 'tok-1', name: 'Ada' }),
+      onData: (m) => received.push(m),
+    });
+    await settle();
+    expect(joiner.connected).toBe(true);
+    expect(announced).toHaveLength(1);
+
+    // The joiner's OWN rendezvous WebSocket dies. Its DataChannel is
+    // untouched — closing this fake socket goes through the REAL registry's
+    // disconnect() → leave() and delivers a genuine `peer-left` to the host
+    // for exactly this peer id, with no `closed`/`error` frame and no
+    // interaction with the RTCPeerConnection at all.
+    joinSockets[0].close();
+    await settle();
+
+    // The admitted link must be untouched: no close emitted, still open.
+    expect(severed).toEqual([]);
+    expect(announced[0].open).toBe(true);
+    expect(joiner.connected).toBe(true);
+
+    // Not merely un-severed — still a live two-way link.
+    joiner.send('SetThrust', { value: 1 }, 'reliable');
+    announced[0].send(JSON.stringify({ type: 'Welcome', data: {} }));
+    await settle();
+    expect(inbound.at(-1)).toEqual({ type: 'SetThrust', data: { value: 1 } });
+    expect(received.map((m) => m.type)).toContain('Welcome');
+  });
+
+  it('control: still tears down a peer that is mid-signalling (never admitted)', async () => {
+    // The same frame for a peer that never got as far as the compatibility
+    // handshake must still be torn down — dropping this teardown entirely
+    // would leak an RTCPeerConnection per abandoned join attempt forever.
+    const world = makeWorld();
+    const basePeer = makePeerFactory();
+    const closedPcs = new Set();
+    const peerFactory = (iceOpts) => {
+      const pc = basePeer(iceOpts);
+      const origClose = pc.close.bind(pc);
+      pc.close = () => { closedPcs.add(pc); origClose(); };
+      return pc;
+    };
+    peerFactory.channels = basePeer.channels;
+
+    let code = null;
+    const iceEvents = [];
+    createRendezvousHost({
+      base: 'https://rendezvous.test',
+      factories: { socket: world.socket, peer: peerFactory },
+      onCode: (c) => { code = c; },
+      onPeerIce: (peer, state) => iceEvents.push({ peer, state }),
+    });
+    await settle();
+
+    // A joiner that only ever sends `join` — never creates an
+    // RTCPeerConnection or exchanges SDP — is exactly "mid-signalling": the
+    // host has a `peerState()` entry (built on `peer-joined`) with a `pc` but
+    // no adapter and `admitted: false`.
+    const joinSocket = world.socket('https://rendezvous.test/v1/join');
+    let joined = false;
+    joinSocket.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'ready') joinSocket.send(JSON.stringify({ v: 1, type: 'join', code: code.suffix }));
+      else if (msg.type === 'joined') joined = true;
+    };
+    await settle();
+    expect(joined).toBe(true);
+    expect(closedPcs.size).toBe(0);
+
+    // That joiner's own signalling socket now dies too, still mid-signalling.
+    joinSocket.close();
+    await settle();
+
+    // Unlike the admitted case above, today's full teardown still applies.
+    expect(closedPcs.size).toBe(1);
+    expect(iceEvents).toContainEqual({ peer: expect.any(String), state: 'closed' });
+  });
+});
+
 describe('a host that loses its record', () => {
   it('re-registers and is issued a fresh code rather than sitting unjoinable', async () => {
     // There is no PeerJS underneath any more: a host whose socket blipped and

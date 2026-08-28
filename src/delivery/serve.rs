@@ -29,6 +29,72 @@ const MAX_HEAD_BYTES: usize = 8 * 1024;
 /// so it is where the bundle states which content set it was built for.
 pub const BUNDLE_MANIFEST_REL: &str = "assets/scenarios.toml";
 
+/// Documents this process publishes itself, in addition to whatever is on disk
+/// under `--client-dir` (issue #1122).
+///
+/// One user, and a deliberately general shape rather than a pane-specific one:
+/// a native Station pane loads *the shipped client page with three lines
+/// injected* (`native_host::panes::document`), and that document exists only in
+/// this process's memory. It has to arrive over HTTP from this host, same
+/// origin, at the client directory's own depth — that is what makes every
+/// relative URL in the page, every `gui/` module and every console iframe
+/// resolve exactly as they do for a phone, with nothing rewritten and no CORS
+/// question to answer.
+///
+/// Checked **before** the static bundle, so a published document shadows a file
+/// of the same name rather than racing it. Nothing here is written to disk, and
+/// the bundle is never modified.
+#[derive(Clone, Default)]
+pub struct HostedDocuments {
+    documents: Arc<std::sync::RwLock<std::collections::BTreeMap<String, String>>>,
+}
+
+impl HostedDocuments {
+    fn read(&self) -> std::sync::RwLockReadGuard<'_, std::collections::BTreeMap<String, String>> {
+        self.documents.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Publish `html` at `path` (an absolute request path, e.g.
+    /// `/client/pane-0.html`). Replaces whatever was there.
+    pub fn publish(&self, path: impl Into<String>, html: String) {
+        self.documents
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(path.into(), html);
+    }
+
+    /// Stop publishing `path`.
+    pub fn withdraw(&self, path: &str) {
+        self.documents
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(path);
+    }
+
+    /// The document published at `path`, if any.
+    pub fn get(&self, path: &str) -> Option<String> {
+        self.read().get(path).cloned()
+    }
+
+    /// How many documents are published. Diagnostic.
+    pub fn len(&self) -> usize {
+        self.read().len()
+    }
+
+    /// Whether nothing is published — the state of every delivery-only host.
+    pub fn is_empty(&self) -> bool {
+        self.read().is_empty()
+    }
+}
+
+impl std::fmt::Debug for HostedDocuments {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HostedDocuments")
+            .field("paths", &self.read().keys().collect::<Vec<_>>())
+            .finish()
+    }
+}
+
 /// What a host has loaded off disk and is ready to publish.
 #[derive(Clone, Debug)]
 pub struct LoadedContent {
@@ -135,6 +201,8 @@ pub enum Route {
         body: String,
         refusal: Option<&'static str>,
     },
+    /// Serve this in-memory document, published by the host itself.
+    Document { body: String },
     /// Serve this bundle-relative file.
     Static { rel_path: String },
     /// No bundle is being served, or the path escaped it.
@@ -144,7 +212,18 @@ pub enum Route {
 }
 
 /// Decide what a request gets. Pure.
-pub fn route(req: &Request, content: &LoadedContent, client: &ClientSource) -> Route {
+///
+/// `documents` are the host's own in-memory publications (issue #1122) and are
+/// checked after the two version-pin endpoints and **before** the client bundle,
+/// so a published document shadows a file of the same name deterministically
+/// rather than racing it. A delivery-only host passes an empty set and routes
+/// exactly as it always did.
+pub fn route(
+    req: &Request,
+    content: &LoadedContent,
+    client: &ClientSource,
+    documents: &HostedDocuments,
+) -> Route {
     if req.method != "GET" && req.method != "HEAD" {
         return Route::MethodNotAllowed;
     }
@@ -178,20 +257,25 @@ pub fn route(req: &Request, content: &LoadedContent, client: &ClientSource) -> R
                 }
             }
         }
-        path => match client {
-            ClientSource::Hosted => Route::NotFound {
-                detail: "this host serves no client assets (started without --client-dir)",
-            },
-            ClientSource::Bundled { .. } => match http::resolve_static_path(path) {
-                Ok(rel_path) => Route::Static { rel_path },
-                Err(PathRefusal::Traversal) => Route::NotFound {
-                    detail: "path escapes the client directory",
+        path => {
+            if let Some(body) = documents.get(path) {
+                return Route::Document { body };
+            }
+            match client {
+                ClientSource::Hosted => Route::NotFound {
+                    detail: "this host serves no client assets (started without --client-dir)",
                 },
-                Err(PathRefusal::NotAbsolute) => Route::NotFound {
-                    detail: "path is not absolute",
+                ClientSource::Bundled { .. } => match http::resolve_static_path(path) {
+                    Ok(rel_path) => Route::Static { rel_path },
+                    Err(PathRefusal::Traversal) => Route::NotFound {
+                        detail: "path escapes the client directory",
+                    },
+                    Err(PathRefusal::NotAbsolute) => Route::NotFound {
+                        detail: "path is not absolute",
+                    },
                 },
-            },
-        },
+            }
+        }
     }
 }
 
@@ -227,6 +311,7 @@ struct ServerState {
     content: LoadedContent,
     client: ClientSource,
     client_root: Option<PathBuf>,
+    documents: HostedDocuments,
 }
 
 impl HostServer {
@@ -276,8 +361,19 @@ impl HostServer {
                 content,
                 client: args.client.clone(),
                 client_root,
+                documents: HostedDocuments::default(),
             }),
         })
+    }
+
+    /// The host's own in-memory publications (issue #1122), for a caller that
+    /// wants to publish into them.
+    ///
+    /// Cheap to clone and shared with the serving thread, so a caller may keep
+    /// its handle and publish or withdraw while the host runs — which is what a
+    /// pane opening or closing mid-mission does.
+    pub fn hosted_documents(&self) -> HostedDocuments {
+        self.state.documents.clone()
     }
 
     /// The address actually bound — the port a `:0` bind was given.
@@ -471,7 +567,7 @@ fn handle_connection<F: Fn(HostEvent)>(mut stream: TcpStream, state: &ServerStat
     };
     let head_only = req.method == "HEAD";
 
-    match route(&req, &state.content, &state.client) {
+    match route(&req, &state.content, &state.client, &state.documents) {
         Route::Json {
             status,
             reason,
@@ -505,6 +601,30 @@ fn handle_connection<F: Fn(HostEvent)>(mut stream: TcpStream, state: &ServerStat
                     status,
                 }),
             }
+        }
+        Route::Document { body } => {
+            // Revalidated, never cached as immutable: a pane document carries
+            // that pane's own session token, and the pane it belongs to may be
+            // closed and reopened within one process lifetime. The same policy
+            // the client's own `index.html` gets.
+            let head = http::response_head(
+                200,
+                "OK",
+                "text/html; charset=utf-8",
+                CachePolicy::Revalidate,
+                body.len(),
+                &[],
+            );
+            write_all(
+                &mut stream,
+                &head,
+                if head_only { &[] } else { body.as_bytes() },
+            );
+            on_event(HostEvent::Served {
+                method: req.method.clone(),
+                path: req.path.clone(),
+                status: 200,
+            });
         }
         Route::Static { rel_path } => {
             let root = state.client_root.as_ref();
@@ -732,6 +852,7 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
             &request("GET /host/stamp.json HTTP/1.1\r\n"),
             &content,
             &ClientSource::Hosted,
+            &HostedDocuments::default(),
         );
         match r {
             Route::Json { status, body, .. } => {
@@ -751,7 +872,12 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
             "GET /host/manifest.json?{} HTTP/1.1\r\n",
             matching_stamp_query()
         );
-        match route(&request(&head), &content, &ClientSource::Hosted) {
+        match route(
+            &request(&head),
+            &content,
+            &ClientSource::Hosted,
+            &HostedDocuments::default(),
+        ) {
             Route::Json {
                 status,
                 body,
@@ -775,7 +901,12 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
             "GET /host/manifest.json?protocol={}&content_id=phoenix-base&content_epoch=1 HTTP/1.1\r\n",
             PROTOCOL_VERSION + 7
         );
-        match route(&request(&head), &content, &ClientSource::Hosted) {
+        match route(
+            &request(&head),
+            &content,
+            &ClientSource::Hosted,
+            &HostedDocuments::default(),
+        ) {
             Route::Json {
                 status,
                 body,
@@ -801,6 +932,7 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
             &request("GET /host/manifest.json HTTP/1.1\r\n"),
             &content,
             &ClientSource::Hosted,
+            &HostedDocuments::default(),
         ) {
             Route::Json {
                 status, refusal, ..
@@ -820,7 +952,8 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
             route(
                 &request("GET /index.html HTTP/1.1\r\n"),
                 &content,
-                &ClientSource::Hosted
+                &ClientSource::Hosted,
+                &HostedDocuments::default(),
             ),
             Route::NotFound { .. }
         ));
@@ -834,11 +967,94 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
             dir: "dist".to_string(),
         };
         assert_eq!(
-            route(&request("GET / HTTP/1.1\r\n"), &content, &bundled),
+            route(
+                &request("GET / HTTP/1.1\r\n"),
+                &content,
+                &bundled,
+                &HostedDocuments::default()
+            ),
             Route::Static {
                 rel_path: "index.html".to_string()
             }
         );
+    }
+
+    #[test]
+    fn a_document_the_host_publishes_itself_is_served_ahead_of_the_bundle() {
+        // Issue #1122's pane document: the shipped client page with three lines
+        // injected, existing only in this process's memory, arriving from this
+        // host at the client directory's own depth so every relative URL in it
+        // resolves exactly as it does for a phone.
+        let fx = Fixture::new("documents", MANIFEST);
+        let content = load_content(&fx.path(), "assets/scenarios.toml").unwrap();
+        let bundled = ClientSource::Bundled {
+            dir: "dist".to_string(),
+        };
+        let documents = HostedDocuments::default();
+        assert!(documents.is_empty());
+        documents.publish("/client/pane-0.html", "<html>pane</html>".to_string());
+        assert_eq!(documents.len(), 1);
+
+        assert_eq!(
+            route(
+                &request("GET /client/pane-0.html HTTP/1.1\r\n"),
+                &content,
+                &bundled,
+                &documents,
+            ),
+            Route::Document {
+                body: "<html>pane</html>".to_string()
+            }
+        );
+        // Everything else still routes to the bundle, unchanged.
+        assert_eq!(
+            route(
+                &request("GET /client/index.html HTTP/1.1\r\n"),
+                &content,
+                &bundled,
+                &documents,
+            ),
+            Route::Static {
+                rel_path: "client/index.html".to_string()
+            }
+        );
+
+        documents.withdraw("/client/pane-0.html");
+        assert!(matches!(
+            route(
+                &request("GET /client/pane-0.html HTTP/1.1\r\n"),
+                &content,
+                &bundled,
+                &documents,
+            ),
+            Route::Static { .. }
+        ));
+    }
+
+    #[test]
+    fn the_version_pin_endpoints_cannot_be_shadowed_by_a_published_document() {
+        // A host publishes its own documents; it does not get to replace the
+        // compatibility handshake with one. The stamp and the manifest are
+        // matched before anything else in `route` for exactly this reason.
+        let fx = Fixture::new("shadow", MANIFEST);
+        let content = load_content(&fx.path(), "assets/scenarios.toml").unwrap();
+        let documents = HostedDocuments::default();
+        documents.publish(STAMP_PATH, "<html>not the stamp</html>".to_string());
+        documents.publish(MANIFEST_PATH, "<html>not the manifest</html>".to_string());
+        for path in [STAMP_PATH, MANIFEST_PATH] {
+            assert!(
+                matches!(
+                    route(
+                        &request(&format!("GET {path} HTTP/1.1\r\n")),
+                        &content,
+                        &ClientSource::Hosted,
+                        &documents,
+                    ),
+                    Route::Json { .. }
+                ),
+                "{path} must stay the version pin's"
+            );
+        }
     }
 
     #[test]
@@ -852,7 +1068,8 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
             route(
                 &request("GET /../../etc/passwd HTTP/1.1\r\n"),
                 &content,
-                &bundled
+                &bundled,
+                &HostedDocuments::default(),
             ),
             Route::NotFound { .. }
         ));
@@ -866,7 +1083,8 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
             route(
                 &request("POST /host/manifest.json HTTP/1.1\r\n"),
                 &content,
-                &ClientSource::Hosted
+                &ClientSource::Hosted,
+                &HostedDocuments::default(),
             ),
             Route::MethodNotAllowed
         );
@@ -879,7 +1097,12 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
         let head = format!(
             "GET /host/manifest.json HTTP/1.1\r\n{CLIENT_STAMP_HEADER}: {PROTOCOL_VERSION}/phoenix-base/1\r\n"
         );
-        match route(&request(&head), &content, &ClientSource::Hosted) {
+        match route(
+            &request(&head),
+            &content,
+            &ClientSource::Hosted,
+            &HostedDocuments::default(),
+        ) {
             Route::Json { status, .. } => assert_eq!(status, 200),
             other => panic!("expected JSON, got {other:?}"),
         }

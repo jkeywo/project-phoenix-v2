@@ -92,7 +92,9 @@ export function isRelayClass(value) {
 export function relayLimits(limits = {}) {
   return {
     maxPeers: limits.max_relay_peers_per_record || 8,
-    maxFrameBytes: limits.max_relay_frame_bytes || 65536,
+    // The DataChannel's own SDP-negotiated ceiling, so a payload that crosses
+    // the direct path crosses this one — see the authored table's comment.
+    maxFrameBytes: limits.max_relay_frame_bytes || 262144,
     maxReliable: limits.max_relay_queue_reliable || 256,
     maxSnapshot: limits.max_relay_queue_snapshot || 32,
     // Not this hub's own bound — it is advertised to whoever is SENDING, whose
@@ -109,6 +111,18 @@ export function relayLimits(limits = {}) {
  * (the registry does), which is what lets the contract tests drive every rule
  * in here with plain objects.
  *
+ * ## One mailbox per PAIR, not per connection
+ *
+ * A record's host is the target of every relaying joiner on it. Keying the
+ * queue by the destination connection alone therefore put all N of them in one
+ * box, and made both bounds record-wide by accident: while the host was
+ * unwritable, one phone's reliable burst past `max_relay_queue_reliable` ended
+ * the HOST's relay and left every other crew member answering `not-relaying`,
+ * and one phone's snapshot burst evicted another's queued frames while the shed
+ * count was attributed to whoever happened to send last. So a mailbox is keyed
+ * by `(owner, from)`: the bound bites the pair that caused it, and the session
+ * that ends is the one crew member on that pair.
+ *
  * @param {object} [opts]
  * @param {object} [opts.limits] the authored `[limits]` table
  */
@@ -116,27 +130,53 @@ export function createRelayHub({ limits } = {}) {
   const bounds = relayLimits(limits);
 
   /**
+   * Who is on the relay, independent of what is queued for them.
+   *
+   * @type {Map<string, { key: string, counted: boolean, writable: boolean }>}
+   */
+  const participants = new Map();
+
+  /**
+   * What is queued, per (owner, from) pair, created on first use.
+   *
    * @type {Map<string, {
-   *   key: string,
+   *   owner: string,
+   *   from: string,
    *   reliable: object[],
    *   snapshot: object[],
    *   dropped: number,
    *   overflowed: boolean,
-   * }>} peer connection id → mailbox
+   * }>}
    */
   const boxes = new Map();
+
+  // A NUL separator, because a connection id can be anything the adapter mints
+  // and two ids concatenated with a printable character could collide.
+  const boxKey = (owner, from) => `${owner}\u0000${from}`;
+
+  function boxFor(owner, from) {
+    const key = boxKey(owner, from);
+    let box = boxes.get(key);
+    if (!box) {
+      box = { owner, from, reliable: [], snapshot: [], dropped: 0, overflowed: false };
+      boxes.set(key, box);
+    }
+    return box;
+  }
+
+  const boxesOwnedBy = (owner) => [...boxes.values()].filter((b) => b.owner === owner);
 
   /**
    * How many COUNTED peers are attached to one record key.
    *
-   * A record's host holds a mailbox here too — the many-phones-to-one-host
+   * A record's host is a participant here too — the many-phones-to-one-host
    * direction is exactly where a burst lands, and it needs the same bound — but
    * it is not one of the joiners the authored `max_relay_peers_per_record`
    * limits, so it attaches uncounted.
    */
   function countFor(key) {
     let n = 0;
-    for (const box of boxes.values()) if (box.key === key && box.counted) n += 1;
+    for (const p of participants.values()) if (p.key === key && p.counted) n += 1;
     return n;
   }
 
@@ -145,22 +185,22 @@ export function createRelayHub({ limits } = {}) {
 
     /** True once `attach` has taken this connection and before `detach`. */
     isAttached(peer) {
-      return boxes.has(peer);
+      return participants.has(peer);
     },
 
     /** The record key a peer is relaying through, or null. */
     keyFor(peer) {
-      const box = boxes.get(peer);
-      return box ? box.key : null;
+      const p = participants.get(peer);
+      return p ? p.key : null;
     },
 
     /**
      * Every COUNTED peer attached to one record, in attachment order — the
-     * joiners, not the host's own uncounted mailbox.
+     * joiners, not the record host's own uncounted attachment.
      */
     peersFor(key) {
-      return [...boxes.entries()]
-        .filter(([, b]) => b.key === key && b.counted)
+      return [...participants.entries()]
+        .filter(([, p]) => p.key === key && p.counted)
         .map(([id]) => id);
     },
 
@@ -172,22 +212,18 @@ export function createRelayHub({ limits } = {}) {
      * a crew list that is full and a relay that is full are different problems
      * with different remedies, and the phone's diagnostics say which.
      *
-     * `counted: false` is how a record's HOST takes a mailbox without spending
-     * one of the joiner slots — see `countFor`.
+     * `counted: false` is how a record's HOST attaches without spending one of
+     * the joiner slots — see `countFor`.
      */
     attach(peer, key, { counted = true } = {}) {
-      const existing = boxes.get(peer);
+      const existing = participants.get(peer);
       if (existing) {
         return existing.key === key ? { ok: true } : { ok: false, reason: 'already-relaying' };
       }
       if (counted && countFor(key) >= bounds.maxPeers) return { ok: false, reason: 'relay-full' };
-      boxes.set(peer, {
+      participants.set(peer, {
         key,
         counted,
-        reliable: [],
-        snapshot: [],
-        dropped: 0,
-        overflowed: false,
         // Writable until the adapter says otherwise. A socket the object holds
         // and has accepted is open, so this is the ordinary state; `false` is
         // a peer mid-close or one whose socket has already gone.
@@ -200,40 +236,51 @@ export function createRelayHub({ limits } = {}) {
      * Report whether the adapter can currently put bytes on `peer`'s socket.
      *
      * This is the ONLY backpressure signal a Durable Object has — see the
-     * module header. While a peer is unwritable its mailbox holds, which is
+     * module header. While a peer is unwritable its mailboxes hold, which is
      * when the authored queue depths do their work.
      */
     setWritable(peer, writable) {
-      const box = boxes.get(peer);
-      if (box) box.writable = !!writable;
+      const p = participants.get(peer);
+      if (p) p.writable = !!writable;
     },
 
     /** True when `drain` will hand this peer's frames over. */
     isWritable(peer) {
-      const box = boxes.get(peer);
-      return !box || box.writable;
-    },
-
-    /** Detach `peer`, discarding anything still queued for it. */
-    detach(peer) {
-      return boxes.delete(peer);
+      const p = participants.get(peer);
+      return !p || p.writable;
     },
 
     /**
-     * Queue one frame for `peer`.
-     *
-     * @returns {{ok: true, dropped: number} | {ok: false, reason: string}}
-     *   `dropped` is how many SNAPSHOT frames this enqueue displaced — the
-     *   number the sender is told about so "the relay is shedding snapshots"
-     *   can reach a diagnostics readout instead of being invisible.
+     * Detach `peer`, discarding everything queued FOR it and everything queued
+     * BY it. Both halves matter: a pair has two ends, and leaving the other
+     * end's box behind would leak a queue nothing will ever drain.
      */
-    enqueue(peer, cls, frame, payload) {
-      const box = boxes.get(peer);
-      if (!box) return { ok: false, reason: 'not-relaying' };
+    detach(peer) {
+      const had = participants.delete(peer);
+      for (const [key, box] of [...boxes]) {
+        if (box.owner === peer || box.from === peer) boxes.delete(key);
+      }
+      return had;
+    },
+
+    /**
+     * Queue one frame from `from`, for `owner`.
+     *
+     * @returns {{ok: true, dropped: number, totalDropped: number}
+     *   | {ok: false, reason: string}}
+     *   `dropped` is how many SNAPSHOT frames THIS enqueue displaced;
+     *   `totalDropped` is the pair's running total, which is the number worth
+     *   putting in front of a person — a per-enqueue delta is 1 essentially
+     *   always, and a readout showing "1" forever while hundreds are lost is
+     *   worse than no readout.
+     */
+    enqueue(owner, from, cls, frame, payload) {
+      if (!participants.has(owner)) return { ok: false, reason: 'not-relaying' };
       if (!isRelayClass(cls)) return { ok: false, reason: 'malformed' };
       if (relayPayloadBytes(payload) > bounds.maxFrameBytes) {
         return { ok: false, reason: 'relay-too-large' };
       }
+      const box = boxFor(owner, from);
       if (cls === RELAY_SNAPSHOT) {
         box.snapshot.push(frame);
         let dropped = 0;
@@ -242,51 +289,74 @@ export function createRelayHub({ limits } = {}) {
           dropped += 1;
         }
         box.dropped += dropped;
-        return { ok: true, dropped };
+        return { ok: true, dropped, totalDropped: box.dropped };
       }
       // The reliable class may not shed anything, so a full queue is the end of
-      // the session rather than a quiet loss. The frame is still queued: the
-      // adapter drains before it acts on the overflow, so whatever fitted is
-      // delivered and the peer is then closed with a reason it can render.
+      // that pair's session rather than a quiet loss. Everything queued is
+      // discarded with it, and this is the honest reading of why: a queue can
+      // only exceed its bound while the owner is UNWRITABLE (the registry
+      // flushes after every enqueue), and `drain` hands nothing over for an
+      // unwritable peer — so there is no "whatever fitted is delivered first".
+      // The frames go, the session ends, and it ends with a reason both ends
+      // can render rather than becoming a quietly lossy reliable channel.
       box.reliable.push(frame);
       if (box.reliable.length > bounds.maxReliable) box.overflowed = true;
-      return { ok: true, dropped: 0 };
+      return { ok: true, dropped: 0, totalDropped: box.dropped };
     },
 
     /**
-     * True once a peer's reliable queue has passed its bound. The caller ends
-     * that session — see `enqueue`.
+     * True once any queue held FOR `owner` has passed its reliable bound.
      */
-    hasOverflowed(peer) {
-      const box = boxes.get(peer);
-      return !!(box && box.overflowed);
+    hasOverflowed(owner) {
+      return boxesOwnedBy(owner).some((b) => b.overflowed);
     },
 
     /**
-     * Take everything queued for `peer`, reliable class first — or nothing at
-     * all while that peer is unwritable, which is what makes the queue a queue.
+     * Which SENDERS overflowed a queue held for `owner`. The caller ends the
+     * session of the crew member on each of those pairs — see `enqueue`.
+     */
+    overflowedSources(owner) {
+      return boxesOwnedBy(owner)
+        .filter((b) => b.overflowed)
+        .map((b) => b.from);
+    },
+
+    /**
+     * Take everything queued for `owner`, reliable class first across every
+     * sender — or nothing at all while that peer is unwritable, which is what
+     * makes the queue a queue.
      *
-     * Reliable before snapshot on purpose: within one drain the two queues are
+     * Reliable before snapshot on purpose: within one drain the queues are
      * concurrent, and if a burst is being shed anyway the commands are the half
      * that must not wait behind snapshots that are about to be superseded.
      */
-    drain(peer) {
-      const box = boxes.get(peer);
-      if (!box || !box.writable) return [];
-      const frames = [...box.reliable, ...box.snapshot];
-      box.reliable = [];
-      box.snapshot = [];
+    drain(owner) {
+      const p = participants.get(owner);
+      if (!p || !p.writable) return [];
+      const held = boxesOwnedBy(owner);
+      const frames = [
+        ...held.flatMap((b) => b.reliable),
+        ...held.flatMap((b) => b.snapshot),
+      ];
+      for (const b of held) {
+        b.reliable = [];
+        b.snapshot = [];
+      }
       return frames;
     },
 
     /**
-     * A peer's counters, for diagnostics: how many snapshot frames its mailbox
-     * has shed over its whole life, and whether its reliable queue overflowed.
+     * A peer's counters, for diagnostics: how many snapshot frames the mailboxes
+     * held for it have shed over their whole life, and whether any reliable
+     * queue overflowed.
      */
     stats(peer) {
-      const box = boxes.get(peer);
-      if (!box) return null;
-      return { dropped: box.dropped, overflowed: box.overflowed };
+      if (!participants.has(peer)) return null;
+      const held = boxesOwnedBy(peer);
+      return {
+        dropped: held.reduce((n, b) => n + b.dropped, 0),
+        overflowed: held.some((b) => b.overflowed),
+      };
     },
   };
 }

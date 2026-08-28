@@ -35,8 +35,13 @@
  *   pinned by a lever         → the transport is deliberately restricted, so a
  *                               failure here may not be the network's fault
  *
- * Prose is never written here: every line is a strings.csv id resolved through
- * the `t` the caller passes in (AGENTS.md rule 11).
+ * The READOUT LINES are never prose: each one is a strings.csv id resolved
+ * through the `t` the caller passes in (AGENTS.md rule 11). `diagnosticsDump`
+ * at the bottom is the deliberate exception and the header used to claim
+ * otherwise: its labels are operator prose in a block pasted into an issue
+ * thread by one tester and read by another, the same standing that
+ * `StampMismatch::detail()` has on the Rust side. It is never shown to a
+ * player, and `check-strings.mjs --strict` is green on it for that reason.
  */
 
 /** The transport rung names, as the joiner reports them on its diag events. */
@@ -66,7 +71,20 @@ export function createClientDiagnostics(initial = {}) {
     signaling: null,
     /** `{ local, remote, protocol, url }` once ICE has chosen a pair. */
     selectedPair: null,
-    /** Snapshot frames the relay has shed, either end. */
+    /**
+     * Snapshot frames the relay has shed, per REPORTER.
+     *
+     * The two ends measure different queues — `client` is what this device shed
+     * against its own send buffer on the way up, `service` is what the service
+     * shed on the way down — so they are held apart and added, not folded with
+     * `Math.max`. Both numbers are now cumulative; the fold used to take the
+     * larger on the stated assumption that both were, which was true of the
+     * client's and false of the service's (a per-enqueue delta, 1 essentially
+     * always), so the readout sat at "Dropping display updates (1)" however
+     * many hundreds were being lost.
+     */
+    relayDroppedBy: { client: 0, service: 0 },
+    /** The rendered total: the sum of the two above. */
     relayDropped: 0,
     ...initial,
   };
@@ -119,12 +137,21 @@ export function applyClientDiagEvent(state, event) {
     case 'selected-pair':
       state.selectedPair = e.pair || null;
       break;
-    case 'relay-degraded':
-      // Either end may report shedding; the number is a running total from
-      // whichever end reported it, so take the larger rather than adding two
-      // views of the same link together.
-      state.relayDropped = Math.max(state.relayDropped, e.dropped || 0);
+    case 'relay-degraded': {
+      // Two reporters, two different queues, both cumulative — so keep them
+      // apart and add. `from` is 'client' (this device's own send buffer) or
+      // 'service' (the service's mailbox on the way down); an event with
+      // neither is this device's, which is where the counter started.
+      const source = e.from === 'service' ? 'service' : 'client';
+      if (!state.relayDroppedBy) state.relayDroppedBy = { client: 0, service: 0 };
+      state.relayDroppedBy[source] = Math.max(
+        state.relayDroppedBy[source] || 0,
+        e.dropped || 0,
+      );
+      state.relayDropped = (state.relayDroppedBy.client || 0)
+        + (state.relayDroppedBy.service || 0);
       break;
+    }
     default:
       break;
   }
@@ -195,6 +222,14 @@ export function clientDiagnosticsLines(state, t) {
  * `state.peers` is `[[shortId, iceState], …]` — the host's own map of joiners
  * that are NOT healthy, plus any being carried by the service, which is a
  * working-but-degraded state the operator should still see.
+ *
+ * `state.shedding` is `[[shortId, count], …]`, held SEPARATELY and rendered as
+ * its own line. A relayed peer that starts shedding is two facts at once, and
+ * folding the count into the peer-state map made it one: the state string
+ * became a fabricated `relay-shedding-3`, which is not one of ICE's five, so
+ * the row stopped saying "carried by the join service" — the exact line the
+ * acceptance kit tells a tester to look for — and printed a raw technical
+ * token in an operator-facing sentence instead.
  */
 export function hostDiagnosticsLines(state, t) {
   const lines = [];
@@ -226,6 +261,10 @@ export function hostDiagnosticsLines(state, t) {
       ? t('server.client_ws_relay', { id })
       : t('server.client_ice_state', { id, state: peerState }));
   }
+  for (const [id, n] of state.shedding || []) {
+    if (!n) continue;
+    lines.push(t('server.client_relay_shedding', { id, n }));
+  }
   return lines;
 }
 
@@ -248,9 +287,15 @@ function selectedPairParams(pair, t) {
  * peer id beyond the short prefixes already on screen — a diagnostics dump that
  * leaked the five letters would be a dump nobody could safely paste.
  *
+ * What is deliberately NOT in it: the network's name. Neither page has a field
+ * for one and nothing could invent it, so the row was always omitted and the
+ * acceptance kit's worked example showed output the product cannot produce.
+ * docs/acceptance/1113-networks.md asks the tester to write the network above
+ * the pasted block instead, which is where a human sentence belongs anyway.
+ *
  * @param {object} state a client or host diagnostics state
- * @param {object} meta `{ page, service, build, network, now }` — what the page
- *   knows about itself and the tester knows about the network
+ * @param {object} meta `{ page, service, build, now }` — what the page knows
+ *   about itself
  */
 export function diagnosticsDump(state, meta = {}) {
   const rows = [];
@@ -261,7 +306,6 @@ export function diagnosticsDump(state, meta = {}) {
 
   add('page', meta.page);
   add('when', meta.now || new Date().toISOString());
-  add('network', meta.network);
   add('build', meta.build);
   add('service', meta.service);
   add('transport', state.transport);
@@ -280,6 +324,9 @@ export function diagnosticsDump(state, meta = {}) {
   }
   if (state.relayDropped) add('shed', `${state.relayDropped} snapshot frames`);
   for (const [id, peerState] of state.peers || []) add(`peer ${id}`, peerState);
+  for (const [id, n] of state.shedding || []) {
+    if (n) add(`shed ${id}`, `${n} snapshot frames`);
+  }
 
   return ['phoenix connection diagnostics', ...rows].join('\n');
 }

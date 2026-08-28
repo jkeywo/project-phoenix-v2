@@ -2371,7 +2371,9 @@
     // transport and the diagnostics readout cannot disagree about it. Filled in
     // by initHostTransport, because gui/transport-levers.js is a deferred
     // module like every other gui/ one; the default is the whole ladder.
-    let transportLevers = { mode: 'auto', iceTransportPolicy: 'all', wsRelay: 'auto', pinned: false };
+    let transportLevers = {
+      mode: 'auto', iceTransportPolicy: 'all', useIceServers: true, wsRelay: 'auto', pinned: false,
+    };
 
     /** Paint the join panel for a URL: the QR, the click-through and the text. */
     function paintJoinPanel(url) {
@@ -3019,7 +3021,18 @@
       // What stays here is the state this host knows about itself; the getters
       // keep the three `rendezvous*` variables the single source of truth
       // rather than copying them into a second object that could go stale.
+      // Guarded like its two neighbours above (window.rendezvousTransport,
+      // window.transportLevers): every gui/ module is deferred, and a module
+      // that genuinely failed to load must cost this page its diagnostics
+      // panel and nothing else. Unguarded, the very next line threw inside
+      // initHostTransport — before the transport was built — so a missing
+      // readout became NO JOIN CODE AT ALL.
       const diagnostics = window.connectionDiagnostics;
+      // Which relayed crew members are shedding snapshot frames, and how many.
+      // Kept apart from clientIceStages deliberately: a relayed peer that is
+      // shedding is two facts at once, and writing the count into the ICE map
+      // replaced the "carried by the join service" row with a raw token.
+      const clientRelayShed = new Map(); // shortId → cumulative frames shed
       const hostDiag = {
         relayAvailable,
         relaySource,
@@ -3029,17 +3042,20 @@
         get retrying() { return rendezvousRetrying; },
         reregister: RENDEZVOUS_REREGISTER,
         get peers() { return [...clientIceStages]; },
+        get shedding() { return [...clientRelayShed]; },
       };
-      renderConnDiag = function renderConnDiagImpl() {
-        writeDiagLines(diagnostics.hostDiagnosticsLines(hostDiag, t));
-      };
+      renderConnDiag = diagnostics
+        ? function renderConnDiagImpl() {
+          writeDiagLines(diagnostics.hostDiagnosticsLines(hostDiag, t));
+        }
+        : () => {};
       renderConnDiag();
 
       // The copy control the acceptance kit asks the operator to use
       // (docs/acceptance/1113-networks.md). Hidden when the browser has no
       // clipboard to write to — an inert button is worse than no button.
       const diagCopyBtn = document.getElementById('conn-diag-copy');
-      if (diagCopyBtn && navigator.clipboard && navigator.clipboard.writeText) {
+      if (diagnostics && diagCopyBtn && navigator.clipboard && navigator.clipboard.writeText) {
         diagCopyBtn.style.display = '';
         diagCopyBtn.textContent = t('server.diag_copy');
         diagCopyBtn.onclick = () => {
@@ -3212,6 +3228,7 @@
 
         conn.on('close', () => {
           clientIceStages.delete(shortId);
+          clientRelayShed.delete(shortId);
           renderConnDiag();
           const token = peerTokens.get(conn.peer);
           console.log(`[host] connection closed — ${shortId}… (token ${token ? token.slice(0, 8) + '…' : 'unknown'})`);
@@ -3274,9 +3291,21 @@
           // refused a direct link — so it stays on the readout deliberately.
           if (state === 'connected' || state === 'completed' || state === 'closed') {
             clientIceStages.delete(shortId);
+            // A peer that has gone takes its shed count with it: the number
+            // belongs to a link, not to a short id that may come back.
+            if (state === 'closed') clientRelayShed.delete(shortId);
           } else {
             clientIceStages.set(shortId, state);
           }
+          renderConnDiag();
+        },
+        // How many snapshot frames this relayed crew member's link has shed,
+        // from either end of it (issue #1113). Its own callback rather than
+        // another onPeerIce state, so the transport row and the shed row are
+        // both on screen instead of one replacing the other.
+        onPeerShedding: (peer, dropped) => {
+          const shortId = String(peer).slice(0, 8);
+          clientRelayShed.set(shortId, Math.max(clientRelayShed.get(shortId) || 0, dropped || 0));
           renderConnDiag();
         },
         onError: (reason, detail) => {

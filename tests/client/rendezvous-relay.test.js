@@ -96,11 +96,15 @@ describe('the bounded mailbox', () => {
     const h = hub();
     h.attach('peer-1', 'record');
     const result = [1, 2, 3, 4].map((n) =>
-      h.enqueue('peer-1', RELAY_SNAPSHOT, { n }, `${n}`),
+      h.enqueue('peer-1', 'host', RELAY_SNAPSHOT, { n }, `${n}`),
     );
     // Two shed, and the two SURVIVORS are the newest — the whole point of the
     // lossy class is that a late snapshot is worthless.
     expect(result.map((r) => r.dropped)).toEqual([0, 0, 1, 1]);
+    // The RUNNING TOTAL is the number a sender is told, because a per-enqueue
+    // delta is 1 essentially always once a queue is sitting at its bound — a
+    // readout folding deltas said "1" however many hundreds were lost.
+    expect(result.map((r) => r.totalDropped)).toEqual([0, 0, 1, 2]);
     expect(h.drain('peer-1').map((f) => f.n)).toEqual([3, 4]);
     expect(h.stats('peer-1').dropped).toBe(2);
   });
@@ -108,10 +112,11 @@ describe('the bounded mailbox', () => {
   it('never drops a reliable frame, and marks the session dead instead', () => {
     const h = hub();
     h.attach('peer-1', 'record');
-    for (const n of [1, 2, 3]) h.enqueue('peer-1', RELAY_RELIABLE, { n }, `${n}`);
+    for (const n of [1, 2, 3]) h.enqueue('peer-1', 'host', RELAY_RELIABLE, { n }, `${n}`);
     expect(h.hasOverflowed('peer-1')).toBe(false);
-    h.enqueue('peer-1', RELAY_RELIABLE, { n: 4 }, '4');
+    h.enqueue('peer-1', 'host', RELAY_RELIABLE, { n: 4 }, '4');
     expect(h.hasOverflowed('peer-1')).toBe(true);
+    expect(h.overflowedSources('peer-1')).toEqual(['host']);
     // Everything that was queued is still there. A command the service accepted
     // and then silently discarded would be worse than a closed session, because
     // the game would carry on believing it had been sent.
@@ -121,17 +126,45 @@ describe('the bounded mailbox', () => {
   it('drains reliable frames ahead of snapshot ones', () => {
     const h = hub();
     h.attach('peer-1', 'record');
-    h.enqueue('peer-1', RELAY_SNAPSHOT, { s: 1 }, 's');
-    h.enqueue('peer-1', RELAY_RELIABLE, { r: 1 }, 'r');
+    h.enqueue('peer-1', 'host', RELAY_SNAPSHOT, { s: 1 }, 's');
+    h.enqueue('peer-1', 'host', RELAY_RELIABLE, { r: 1 }, 'r');
     const [first, second] = h.drain('peer-1');
     expect(first).toEqual({ r: 1 });
     expect(second).toEqual({ s: 1 });
   });
 
+  it('bounds each SENDER separately, so one phone cannot evict another', () => {
+    // Every relaying joiner sends to the same host, so a mailbox keyed by the
+    // DESTINATION alone made both bounds record-wide by accident: one phone's
+    // reliable burst overflowed the box every other phone was queued in, and
+    // one phone's snapshots displaced another's. The bound has to bite the
+    // pair that caused it.
+    const h = hub();
+    h.attach('host', 'record', { counted: false });
+    h.attach('a', 'record');
+    h.attach('b', 'record');
+
+    // A floods the host past the reliable bound; B queues one frame.
+    for (let i = 0; i <= 3; i += 1) h.enqueue('host', 'a', RELAY_RELIABLE, { a: i }, `${i}`);
+    h.enqueue('host', 'b', RELAY_RELIABLE, { b: 1 }, 'b');
+    expect(h.overflowedSources('host')).toEqual(['a']);
+
+    // B's snapshots are its own too: A's burst cannot displace them.
+    h.enqueue('host', 'b', RELAY_SNAPSHOT, { b: 's1' }, 's');
+    for (let i = 0; i < 5; i += 1) h.enqueue('host', 'a', RELAY_SNAPSHOT, { a: i }, 's');
+    expect(h.drain('host')).toContainEqual({ b: 's1' });
+
+    // …and ending A's session leaves B relaying, with a mailbox of its own.
+    h.detach('a');
+    expect(h.overflowedSources('host')).toEqual([]);
+    h.enqueue('host', 'b', RELAY_RELIABLE, { b: 2 }, 'b');
+    expect(h.drain('host')).toEqual([{ b: 2 }]);
+  });
+
   it('refuses a frame larger than the authored ceiling', () => {
     const h = hub();
     h.attach('peer-1', 'record');
-    expect(h.enqueue('peer-1', RELAY_RELIABLE, {}, 'x'.repeat(33))).toEqual({
+    expect(h.enqueue('peer-1', 'host', RELAY_RELIABLE, {}, 'x'.repeat(33))).toEqual({
       ok: false,
       reason: 'relay-too-large',
     });
@@ -140,7 +173,7 @@ describe('the bounded mailbox', () => {
   it('refuses a class it cannot honour rather than guessing one', () => {
     const h = hub();
     h.attach('peer-1', 'record');
-    expect(h.enqueue('peer-1', 'best-effort', {}, 'x').reason).toBe('malformed');
+    expect(h.enqueue('peer-1', 'host', 'best-effort', {}, 'x').reason).toBe('malformed');
   });
 
   it('bounds how many joiners one record may relay', () => {
@@ -163,12 +196,17 @@ describe('the bounded mailbox', () => {
 
   it('discards a detached peer’s queue rather than leaking it', () => {
     const h = hub();
+    h.attach('host', 'record', { counted: false });
     h.attach('peer-1', 'record');
-    h.enqueue('peer-1', RELAY_RELIABLE, { n: 1 }, '1');
+    h.enqueue('peer-1', 'host', RELAY_RELIABLE, { n: 1 }, '1');
+    // The other end of the same pair, which a detach must also clear: leaving
+    // it behind would leak a queue nothing will ever drain.
+    h.enqueue('host', 'peer-1', RELAY_RELIABLE, { n: 2 }, '2');
     h.detach('peer-1');
     expect(h.drain('peer-1')).toEqual([]);
+    expect(h.drain('host')).toEqual([]);
     expect(h.stats('peer-1')).toBeNull();
-    expect(h.enqueue('peer-1', RELAY_RELIABLE, {}, 'x').reason).toBe('not-relaying');
+    expect(h.enqueue('peer-1', 'host', RELAY_RELIABLE, {}, 'x').reason).toBe('not-relaying');
   });
 });
 
@@ -344,7 +382,11 @@ describe('carrying game frames', () => {
     // down and the one whose operator is looking at a diagnostics readout.
     const degraded = h.frames('host-1').filter((f) => f.type === 'relay-degraded');
     expect(degraded).toHaveLength(3);
-    expect(degraded[0]).toMatchObject({ peer: 'peer-1', class: 'snapshot', dropped: 1 });
+    // A RUNNING TOTAL, not this enqueue's delta. The delta is 1 every time once
+    // the queue is at its bound, so a readout built on it reads "1" for the
+    // whole mission however many hundreds of frames are actually being lost.
+    expect(degraded.map((f) => f.dropped)).toEqual([1, 2, 3]);
+    expect(degraded[0]).toMatchObject({ peer: 'peer-1', class: 'snapshot' });
 
     // What survives is the NEWEST window, which is the whole point of the
     // lossy class: the stale snapshots are the ones worth losing.
@@ -385,7 +427,87 @@ describe('carrying game frames', () => {
   });
 });
 
+  it('ends only the offending phone’s session when the host’s mailbox overflows', () => {
+    // Every relaying joiner sends to the same host. Scoped to the host's
+    // CONNECTION, one phone's reliable burst detached the host's mailbox and
+    // left every other crew member answering `not-relaying` for the rest of
+    // the mission — one guest's bad radio ending everybody else's game.
+    const h = harness();
+    session(h, ['noisy', 'quiet']);
+    h.send('noisy', { type: 'relay-open' });
+    h.send('quiet', { type: 'relay-open' });
+    h.reg.setWritable('host-1', false);
+
+    const depth = DATA.limits.max_relay_queue_reliable;
+    for (let i = 0; i <= depth; i += 1) {
+      h.send('noisy', { type: 'relay', class: 'reliable', payload: `${i}` });
+    }
+    // The phone that overflowed is the session that ends, and it is told why.
+    expect(h.last('noisy', 'relay-closed')).toMatchObject({ reason: 'relay-overflow' });
+    expect(h.last('host-1', 'relay-peer-left')).toMatchObject({
+      peer: 'noisy',
+      reason: 'relay-overflow',
+    });
+    // The quiet one is untouched and still carried.
+    expect(h.last('quiet', 'relay-closed')).toBeNull();
+    expect(h.reg.snapshot()[0].relayPeers).toBe(1);
+    h.reg.setWritable('host-1', true);
+    h.send('quiet', { type: 'relay', class: 'reliable', payload: 'still here' });
+    expect(h.last('quiet', 'error')).toBeNull();
+    expect(h.last('host-1', 'relay')).toMatchObject({ from: 'quiet', payload: 'still here' });
+  });
+});
+
 describe('the relay’s lifetime', () => {
+  it('lets a host detach one crew member, and tells that phone', () => {
+    // The host's only eviction mechanism is closing the connection — the
+    // reserved-token refusal and the duplicate-token dance in server.html. For
+    // a WebRTC peer that severs real DataChannels the phone observes; for a
+    // relayed peer it closed nothing but local JavaScript, so the evicted
+    // device sat on a status line reading "connected", sending commands the
+    // host dropped on the floor.
+    const h = harness();
+    session(h, ['peer-1', 'peer-2']);
+    h.send('peer-1', { type: 'relay-open' });
+    h.send('peer-2', { type: 'relay-open' });
+
+    h.send('host-1', { type: 'relay-close', to: 'peer-1' });
+    expect(h.last('peer-1', 'relay-closed')).toMatchObject({ reason: 'host-closed' });
+    expect(h.last('host-1', 'relay-peer-left')).toMatchObject({ peer: 'peer-1' });
+    expect(h.reg.snapshot()[0].relayPeers).toBe(1);
+    // The other crew member is untouched.
+    expect(h.last('peer-2', 'relay-closed')).toBeNull();
+  });
+
+  it('refuses a host detaching a peer that is not on its own relay', () => {
+    const h = harness();
+    session(h, ['peer-1']);
+    h.send('peer-1', { type: 'relay-open' });
+    h.send('host-1', { type: 'relay-close', to: 'somebody-else' });
+    expect(h.last('host-1', 'error')).toMatchObject({
+      request: 'relay-close',
+      reason: 'no-peer',
+    });
+    expect(h.reg.snapshot()[0].relayPeers).toBe(1);
+  });
+
+  it('refuses a host stepping off its OWN relay, which would end everyone’s', () => {
+    // `relay-close` with no `to` detaches the sender. From a host that would
+    // silently end the relay for every crew member on the record, with no
+    // notification to any of them — a footgun waiting for the next issue that
+    // reaches for this verb.
+    const h = harness();
+    session(h, ['peer-1']);
+    h.send('peer-1', { type: 'relay-open' });
+    h.send('host-1', { type: 'relay-close' });
+    expect(h.last('host-1', 'error')).toMatchObject({
+      request: 'relay-close',
+      reason: 'forbidden-role',
+    });
+    h.send('peer-1', { type: 'relay', class: 'reliable', payload: 'still carried' });
+    expect(h.last('host-1', 'relay')).toMatchObject({ payload: 'still carried' });
+  });
+
   it('tells a relayed peer the relay is gone when the record dies', () => {
     // A DataChannel outlives the record that introduced it — that is #1112's
     // whole two-planes rule. A RELAYED link does not: the record IS the link,

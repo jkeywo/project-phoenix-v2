@@ -74,10 +74,33 @@ const diagText = (page) =>
 const channelsOn = (page) => page.evaluate(() => window.__transportShim.dataChannels());
 const peerConfigsOn = (page) => page.evaluate(() => window.__transportShim.peerConfigs());
 
+/**
+ * The part of the host's "carried by the join service" line that does not
+ * depend on the peer id, taken FROM strings.csv rather than retyped.
+ *
+ * Two assertions in this file used to hand-copy a fragment of
+ * `server.client_ws_relay`, which meant a wording edit broke them with no
+ * signal from check-strings.mjs and no way to notice the drift.
+ */
+const WS_RELAY_LINE = ts('server.client_ws_relay', { id: 'PEERID' }).split('PEERID').pop();
+
 test('a direct join negotiates both channels and never reaches for a fallback', async ({ context }) => {
-  const host = await bootHost(context);
-  const client = await joinWith(context, await joinCodeOn(host));
+  // PINNED to direct on both ends, which is what makes this the direct-path
+  // spec rather than "whatever the shim happened to build". `?transport=direct`
+  // withholds the STUN/TURN list from the peer connection — the only spelling
+  // of "no relay in this path", since iceTransportPolicy has no such value —
+  // and switches off the WebSocket fallback.
+  const host = await bootHost(context, '?scenario=assets/worlds/default.toml&transport=direct');
+  const client = await joinWith(context, await joinCodeOn(host), '?transport=direct');
   await waitForConnected(client);
+
+  // The pin reached BOTH peer connections. Until #1113's review this mode gave
+  // `iceTransportPolicy: 'all'` and a full server list — identical to auto — so
+  // the one lever whose job is proving a direct link proved nothing.
+  for (const configs of [await peerConfigsOn(client), await peerConfigsOn(host)]) {
+    expect(configs.length).toBeGreaterThan(0);
+    expect(configs.every((c) => c.iceServers === 0)).toBe(true);
+  }
 
   // Two channels, from ONE negotiation, with the lossy one really unordered
   // and non-retransmitting rather than the reliable one under another name.
@@ -87,13 +110,16 @@ test('a direct join negotiates both channels and never reaches for a fallback', 
   expect(reliable).toMatchObject({ readyState: 'open', ordered: true });
   expect(snapshot).toMatchObject({ readyState: 'open', ordered: false });
 
-  // Nothing was pinned and nothing degraded, so neither readout says anything
-  // about a relay. Asserting the ABSENCE is the point: these lines are how a
-  // degraded path announces itself, and a spec that only ever checks for them
-  // when they are expected cannot notice them appearing by accident.
+  // Nothing degraded, so neither readout says anything about the WebSocket
+  // relay. Asserting the ABSENCE is the point: these lines are how a degraded
+  // path announces itself, and a spec that only ever checks for them when they
+  // are expected cannot notice them appearing by accident.
   expect(await diagText(client)).not.toContain(ts('client.diag_ws_relay'));
-  expect(await diagText(host)).not.toContain(ts('server.transport_pinned', { mode: 'auto' }));
-  expect(await diagText(host)).not.toContain('carried by the join service');
+  expect(await diagText(host)).not.toContain(WS_RELAY_LINE);
+  // …and both surfaces SAY the transport was pinned, so a field failure is not
+  // blamed on the network when the link was restricted by hand.
+  expect(await diagText(client)).toContain(ts('client.diag_transport_pinned', { mode: 'direct' }));
+  expect(await diagText(host)).toContain(ts('server.transport_pinned', { mode: 'direct' }));
 });
 
 test('?forceRelay pins both ends of the negotiation to relay candidates', async ({ context }) => {
@@ -114,6 +140,12 @@ test('?forceRelay pins both ends of the negotiation to relay candidates', async 
   const hostConfigs = await peerConfigsOn(host);
   expect(hostConfigs.length).toBeGreaterThan(0);
   expect(hostConfigs.every((c) => c.iceTransportPolicy === 'relay')).toBe(true);
+
+  // The mirror image of the direct pin, and the reason that pin's assertion is
+  // not vacuous: TURN-only KEEPS the server list (there is nothing to allocate
+  // from without it) where direct withholds it.
+  expect(clientConfigs.every((c) => c.iceServers > 0)).toBe(true);
+  expect(hostConfigs.every((c) => c.iceServers > 0)).toBe(true);
 
   // And both readouts SAY the transport was restricted, so a failure in the
   // field is not blamed on the network when the link was pinned by hand.
@@ -175,7 +207,50 @@ test('the WebSocket relay carries a whole session when WebRTC is off the table',
   expect(await diagText(client)).toContain(ts('client.diag_ws_relay'));
   await expect
     .poll(() => diagText(host), { timeout: 15_000 })
-    .toContain('carried by the join service');
+    .toContain(WS_RELAY_LINE);
+});
+
+test('a snapshot channel that opened before Identify is promoted when the token lands', async ({ context }) => {
+  // The lossy channel can finish negotiating on EITHER side of the Identify
+  // that names this connection's token, and the host's per-token routing map
+  // has to end up holding it whichever way round it happened. In the ordinary
+  // WebRTC join it is always the early one: both channels come off one
+  // negotiation and the compatibility handshake has to complete before the
+  // phone may send Identify at all. So this is the ordering that runs on every
+  // real join, and nothing covered it after the peerjs shim was retired — the
+  // behaviour lives in server.html's attachHostConn/bindSnapshot pair, both
+  // halves guarded on connection identity so a torn-down stale connection
+  // cannot delete the live one's entry.
+  const host = await bootHost(context);
+  const client = await joinWith(context, await joinCodeOn(host));
+  await waitForConnected(client);
+
+  const token = await client.evaluate(() => sessionStorage.getItem('session-token'));
+  expect(token).toBeTruthy();
+
+  // The lossy channel opened first…
+  const channels = Object.values(await channelsOn(client));
+  expect(channels.find((c) => c.side === 'offer' && c.maxRetransmits === 0))
+    .toMatchObject({ readyState: 'open' });
+
+  // …and the token, once it arrived, adopted it. Without the promotion the
+  // entry is simply absent and every snapshot for this player silently falls
+  // back to the reliable channel for the rest of the mission — a regression
+  // with no error, no log line and no visible symptom short of head-of-line
+  // stalls on a bad radio.
+  const bound = await host.waitForFunction(
+    (t) => {
+      try {
+        // eslint-disable-next-line no-eval
+        const chan = (0, eval)('tokenSnapshotConns').get(t);
+        return chan ? { label: chan.label, readyState: chan.readyState } : false;
+      } catch { return false; }
+    },
+    token,
+    { timeout: 15_000 },
+  );
+  // The LOSSY one, not the reliable channel under another name.
+  expect(await bound.jsonValue()).toMatchObject({ label: 'snapshot', readyState: 'open' });
 });
 
 test('the diagnostics dump is offered on both pages for the field sessions', async ({ context }) => {

@@ -46,6 +46,23 @@
  * which is why the shedding rule lives here rather than in the service: a
  * Durable Object's WebSocket does not expose one (see
  * worker-rendezvous/src/relay.js).
+ *
+ * ## The one frame that will never fit
+ *
+ * "Reliable frames are never dropped here" used to be contradicted three lines
+ * below it: a payload over `max_relay_frame_bytes` was refused with a log line
+ * and nothing else, for BOTH classes. The authored ceiling now matches the
+ * DataChannel's own (262144, the SDP-negotiated `max-message-size` between two
+ * Chromiums), so a payload that crosses one crosses the other and a mission
+ * that works direct works relayed — but the two rules still have to differ when
+ * one is crossed anyway:
+ *
+ *   snapshot  counted as shed and reported, which is what the lossy class is
+ *             for. The next tick supersedes it.
+ *   reliable  the LINK fails. There is no chunking layer under either transport
+ *             and no honest way to deliver it, and a silently vanished command
+ *             leaves the game believing it was sent. Both channels close, the
+ *             page runs its ordinary disconnect, and the crew member re-joins.
  */
 
 import { relayPayloadBytes } from './rendezvous-protocol.js';
@@ -57,9 +74,10 @@ export const RELAY_SNAPSHOT_LABEL = 'snapshot';
 
 /**
  * Fallback ceilings, used only until the service's `relay-ready` frame arrives
- * with the authored ones. Deliberately conservative: a joiner that guessed
- * generously and then met a stricter service would be cut off mid-mission
- * rather than shedding a snapshot.
+ * with the authored ones — which it always does before `open()`. Deliberately
+ * conservative: a joiner that guessed generously and then met a stricter
+ * service would be cut off mid-mission rather than shedding a snapshot, so this
+ * stays BELOW the authored `max_relay_frame_bytes` rather than tracking it.
  */
 export const RELAY_LIMIT_DEFAULTS = {
   maxFrameBytes: 65536,
@@ -92,6 +110,8 @@ export function relayLimitsFromFrame(limits) {
  *   bytes. Defaults to 0, which disables shedding — honest for a transport that
  *   cannot report one, rather than a fabricated number.
  * @param {(info:{dropped:number, reason:string})=>void} [opts.onDegraded]
+ * @param {(info:{reason:string, bytes:number})=>void} [opts.onFailure] the link
+ *   could not keep its reliable guarantee and has closed itself.
  * @param {(msg:string)=>void} [opts.onLog]
  * @param {object} [opts.limits] from {@link relayLimitsFromFrame}
  */
@@ -100,12 +120,29 @@ export function createRelayChannelPair({
   to = null,
   bufferedAmount = () => 0,
   onDegraded = () => {},
+  onFailure = () => {},
   onLog = () => {},
   limits = RELAY_LIMIT_DEFAULTS,
 } = {}) {
   let bounds = limits;
   /** Snapshot frames shed over this pair's whole life, for diagnostics. */
   let dropped = 0;
+  /** Set by `failLink` so closing both channels cannot re-enter it. */
+  let failed = false;
+
+  /**
+   * This link cannot keep the promise its reliable class makes. End it: the
+   * page's ordinary disconnect path is a far better outcome than a command
+   * that vanished while the game carried on believing it was sent.
+   */
+  function failLink(reason, bytes) {
+    if (failed) return;
+    failed = true;
+    onLog(`[relay] ${reason} (${bytes} bytes) — ending this relayed link`);
+    onFailure({ reason, bytes });
+    reliable.close();
+    snapshot.close();
+  }
 
   function makeChannel(label, cls) {
     const channel = {
@@ -119,13 +156,15 @@ export function createRelayChannelPair({
         if (channel.readyState !== 'open') return;
         const text = typeof payload === 'string' ? payload : String(payload);
         // Measured by the SAME function the service measures with, so a
-        // courtesy refusal here can never disagree with the ceiling there.
+        // refusal here can never disagree with the ceiling there.
         if (relayPayloadBytes(text) > bounds.maxFrameBytes) {
-          // Refused locally rather than by being cut off at the service's own
-          // ceiling — the same courtesy the DataChannel's max-message-size gets
-          // in gui/rendezvous-transport.js, and for the same reason: one lost
-          // frame beats a dead link.
-          onLog(`[relay] frame too large for the relay (${text.length} bytes) — dropping`);
+          if (cls === RELAY_SNAPSHOT_LABEL) {
+            // The lossy class losing a frame is the lossy class working.
+            dropped += 1;
+            onDegraded({ dropped, reason: 'too-large' });
+            return;
+          }
+          failLink('relay-too-large', relayPayloadBytes(text));
           return;
         }
         if (cls === RELAY_SNAPSHOT_LABEL && bufferedAmount() > bounds.maxSendBufferBytes) {

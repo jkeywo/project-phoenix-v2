@@ -23,6 +23,7 @@ describe('the default', () => {
       expect(transportLeversFromLocation(search)).toEqual({
         mode: TRANSPORT_AUTO,
         iceTransportPolicy: 'all',
+        useIceServers: true,
         wsRelay: 'auto',
         pinned: false,
       });
@@ -69,15 +70,37 @@ describe('?transport — the full lever', () => {
     expect(transportLeversFromLocation('?transport=direct')).toEqual({
       mode: TRANSPORT_DIRECT,
       iceTransportPolicy: 'all',
+      useIceServers: false,
       wsRelay: 'off',
       pinned: true,
     });
+  });
+
+  it('makes the direct pin real by withholding the relay servers', () => {
+    // The title above used to be a claim the implementation did not keep:
+    // direct gave `iceTransportPolicy: 'all'`, which is exactly what auto
+    // gives, so ICE was free to select a relayed pair and the only thing the
+    // pin actually did was switch off the WebSocket fallback. There is no
+    // 'no-relay' policy value, so the only honest spelling of "no relay in
+    // this path" is to hand the peer connection no relay servers at all.
+    const direct = transportLeversFromLocation('?transport=direct');
+    const auto = transportLeversFromLocation('');
+    expect(direct.useIceServers).toBe(false);
+    expect(auto.useIceServers).toBe(true);
+    // …and it is genuinely narrower than auto in the ICE plane, not only in
+    // the fallback one — which is what its name promises a field tester.
+    expect(direct.useIceServers).not.toBe(auto.useIceServers);
+    // The TURN pin is its mirror image: relay candidates ONLY, servers kept.
+    const turn = transportLeversFromLocation('?transport=turn');
+    expect(turn.useIceServers).toBe(true);
+    expect(turn.iceTransportPolicy).toBe('relay');
   });
 
   it('pins the WebSocket relay, skipping WebRTC entirely', () => {
     expect(transportLeversFromLocation('?transport=ws-relay')).toEqual({
       mode: TRANSPORT_WS_RELAY,
       iceTransportPolicy: 'all',
+      useIceServers: true,
       wsRelay: 'only',
       pinned: true,
     });
@@ -123,7 +146,9 @@ describe('what a lever can and cannot do', () => {
     for (const search of ['?transport=direct', '?transport=turn', '?transport=ws-relay']) {
       const pinned = transportLeversFromLocation(search);
       const narrower =
-        pinned.iceTransportPolicy !== auto.iceTransportPolicy || pinned.wsRelay !== auto.wsRelay;
+        pinned.iceTransportPolicy !== auto.iceTransportPolicy
+        || pinned.useIceServers !== auto.useIceServers
+        || pinned.wsRelay !== auto.wsRelay;
       expect(narrower, search).toBe(true);
       expect(pinned.pinned, search).toBe(true);
     }

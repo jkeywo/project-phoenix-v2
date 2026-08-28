@@ -379,6 +379,41 @@ describe('reason reporting', () => {
     expect(reasonStringId('unknown-namespace')).toBe(reasonStringId('unknown-project'));
   });
 
+  it('maps every refusal reason the rendezvous service can actually emit', () => {
+    // Driven from the SERVICE's source, not from this map's own keys. A
+    // coverage test that iterates knownReasons() can only agree with itself,
+    // and that is precisely how #1113's four relay refusals (relay-full,
+    // relay-too-large, not-relaying, no-peer) shipped rendering as "No ship is
+    // using that code" — the least actionable sentence in the game, and a lie
+    // about a correct code with a live host behind it.
+    const registry = readFileSync(
+      path.join(root, 'worker-rendezvous/src/registry.js'),
+      'utf8',
+    );
+    const relay = readFileSync(path.join(root, 'worker-rendezvous/src/relay.js'), 'utf8');
+    const emitted = new Set([
+      // `fail(connId, request, 'reason')` / `cut(...)` — the error frames.
+      ...[...registry.matchAll(/(?:fail|cut)\([^)]*?'([a-z-]+)'\s*\)/g)].map((m) => m[1]),
+      // …plus the reasons relay.js hands back for the registry to relay on, and
+      // the ones it puts on a `relay-closed` frame.
+      ...[...relay.matchAll(/reason:\s*'([a-z-]+)'/g)].map((m) => m[1]),
+      ...[...registry.matchAll(/reason:\s*'([a-z-]+)'/g)].map((m) => m[1]),
+    ]);
+    // A regex that matched nothing would pass this vacuously, which is the
+    // exact failure the stamp-code test above already had to close.
+    expect(
+      emitted.size,
+      'extracted no refusal reasons from worker-rendezvous/src — the regexes are stale',
+    ).toBeGreaterThan(8);
+
+    const mapped = new Set(knownReasons());
+    const unmapped = [...emitted].filter((r) => !mapped.has(r));
+    expect(
+      unmapped,
+      `the service emits these with no row in REASON_STRING_IDS: ${unmapped.join(', ')}`,
+    ).toEqual([]);
+  });
+
   it('has an authored strings.csv row for every reason it can display', () => {
     const table = buildTable(readFileSync(path.join(root, 'assets/strings/strings.csv'), 'utf8'));
     for (const reason of knownReasons()) {
@@ -401,9 +436,20 @@ describe('reason reporting', () => {
     }
   });
 
+  it('gives a full relay its own sentence rather than the code-is-wrong one', () => {
+    // The one degraded state a guest actually meets: a correct code, a live
+    // host, and a relay at its authored ceiling. The remedy is somebody
+    // disconnecting or another network, and neither is discoverable from
+    // "check the viewscreen and try again".
+    expect(reasonStringId('relay-full')).not.toBe(reasonStringId('unknown'));
+    expect(reasonStringId('relay-full')).not.toBe(reasonStringId('admission-closed'));
+    expect(reasonStringId('relay-too-large')).not.toBe(reasonStringId('unknown'));
+    expect(reasonStringId('not-relaying')).not.toBe(reasonStringId('unknown'));
+    expect(reasonStringId('no-peer')).not.toBe(reasonStringId('unknown'));
+  });
+
   it('defaults to the phone\'s wording, so an unqualified lookup is unchanged', () => {
     for (const reason of knownReasons()) {
       expect(reasonStringId(reason), reason).toBe(reasonStringId(reason, SURFACE_CLIENT));
     }
-  });
 });

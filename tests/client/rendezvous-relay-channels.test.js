@@ -154,23 +154,65 @@ describe('the lossy class stays lossy', () => {
     expect(sent).toHaveLength(2);
   });
 
-  it('refuses an oversized frame locally rather than being cut off at the ceiling', () => {
-    const { pair, sent } = pairOn({ limits: { maxFrameBytes: 8, maxSendBufferBytes: 1024 } });
+  it('sheds an oversized SNAPSHOT frame and counts it, like any other shed', () => {
+    const degraded = [];
+    const { pair, sent } = pairOn({
+      limits: { maxFrameBytes: 8, maxSendBufferBytes: 1024 },
+      onDegraded: (e) => degraded.push(e),
+    });
     pair.open();
+    pair.snapshot.send('123456789');
+    expect(sent).toEqual([]);
+    // Counted rather than merely logged: an invisible drop is exactly what the
+    // diagnostics readout exists to end.
+    expect(degraded).toEqual([{ dropped: 1, reason: 'too-large' }]);
+    // …and the link carries on, because losing a snapshot is what the lossy
+    // class is for.
+    pair.snapshot.send('12345678');
+    expect(sent).toHaveLength(1);
+    expect(pair.reliable.readyState).toBe('open');
+  });
+
+  it('fails the LINK on an oversized RELIABLE frame rather than dropping it', () => {
+    // There is no chunking layer under either transport and no honest way to
+    // deliver it. A silently dropped command leaves the game believing it was
+    // sent; a failed link is a disconnect the page already knows how to run,
+    // and the crew member re-joins.
+    const failures = [];
+    const closed = [];
+    const { pair, sent } = pairOn({
+      limits: { maxFrameBytes: 8, maxSendBufferBytes: 1024 },
+      onFailure: (e) => failures.push(e),
+    });
+    pair.open();
+    pair.reliable.onclose = () => closed.push('reliable');
+    pair.snapshot.onclose = () => closed.push('snapshot');
+
     pair.reliable.send('123456789');
     expect(sent).toEqual([]);
+    expect(failures).toEqual([{ reason: 'relay-too-large', bytes: 9 }]);
+    // BOTH channels go: leaving the lossy one open would leave a peer half
+    // connected, still delivering snapshots into a session with no commands.
+    expect(closed).toEqual(['reliable', 'snapshot']);
+    expect(pair.reliable.readyState).toBe('closed');
+    // Nothing more goes out on a link that has ended.
     pair.reliable.send('12345678');
-    expect(sent).toHaveLength(1);
+    expect(sent).toEqual([]);
   });
 
   it('measures that ceiling in bytes, matching the service', () => {
     // Four euro signs are 4 UTF-16 units and 12 bytes. A client that measured
     // in units would send a frame the service then refused, and the operator
     // would see a link fail for a payload the client thought was fine.
-    const { pair, sent } = pairOn({ limits: { maxFrameBytes: 8, maxSendBufferBytes: 1024 } });
+    const degraded = [];
+    const { pair, sent } = pairOn({
+      limits: { maxFrameBytes: 8, maxSendBufferBytes: 1024 },
+      onDegraded: (e) => degraded.push(e),
+    });
     pair.open();
-    pair.reliable.send('€€€€');
+    pair.snapshot.send('€€€€');
     expect(sent).toEqual([]);
+    expect(degraded).toEqual([{ dropped: 1, reason: 'too-large' }]);
   });
 });
 
@@ -192,12 +234,14 @@ describe('the advertised limits', () => {
   });
 
   it('adopts a later advertisement without rebuilding the pair', () => {
+    // On the lossy channel, because an oversized RELIABLE frame now ends the
+    // link — there would be no pair left to re-measure.
     const { pair, sent } = pairOn({ limits: { maxFrameBytes: 4, maxSendBufferBytes: 1024 } });
     pair.open();
-    pair.reliable.send('12345');
+    pair.snapshot.send('12345');
     expect(sent).toEqual([]);
     pair.applyLimits({ maxFrameBytes: 64, maxSendBufferBytes: 1024 });
-    pair.reliable.send('12345');
+    pair.snapshot.send('12345');
     expect(sent).toHaveLength(1);
   });
 });

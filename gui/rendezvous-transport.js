@@ -172,9 +172,11 @@ const TERMINAL_REASONS = new Set([
   // answer to "is this reason worth another attempt", and a future path that
   // does route a fleet refusal through the joiner must not learn a second one.
   'fleet-full', 'recovery-only',
-  // The host's own StampMismatch::code() values, relayed through JoinRefused.
+  // The host's own StampMismatch::code() values, relayed through JoinRefused,
+  // plus the native host's refusal of a token only its runtime may use — which
+  // this page would present again, identically, on every retry.
   'protocol-mismatch', 'content-id-mismatch', 'content-epoch-mismatch',
-  'bundle-content-missing', 'client-stamp-missing',
+  'bundle-content-missing', 'client-stamp-missing', 'reserved-token',
 ]);
 
 /** True when a machine reason is worth another attempt. */
@@ -445,6 +447,12 @@ function connectionAdapter(peerId, channel, pc, hooks = {}) {
  * @param {(peer:string, state:string)=>void} [opts.onPeerIce] one joiner's ICE
  *   connection state. When ICE never completes no channel ever opens, so this
  *   is the only way the host operator learns a phone is trying and failing.
+ * @param {(peer:string, dropped:number)=>void} [opts.onPeerShedding] how many
+ *   snapshot frames this relayed joiner's link has shed, cumulative. Its OWN
+ *   callback rather than another `onPeerIce` state: those two facts are both
+ *   true at once, and folding the count into the ICE-state map replaced the
+ *   "carried by the join service" row with a raw `relay-shedding-3` token in an
+ *   operator-facing line.
  * @param {(msg:string)=>void} [opts.onLog]
  * @param {boolean} [opts.reregister] retry registration after service loss
  */
@@ -458,6 +466,7 @@ export function createRendezvousHost(opts) {
     onConnection = () => {},
     onError = () => {},
     onPeerIce = () => {},
+    onPeerShedding = () => {},
     onLog = () => {},
     reregister = true,
     levers = defaultTransportLevers(),
@@ -465,13 +474,17 @@ export function createRendezvousHost(opts) {
   } = opts;
 
   /**
-   * The RTCPeerConnection config, in one place so the `?forceRelay` lever
-   * (gui/transport-levers.js) reaches every peer connection this host answers
-   * with. Forcing it on the HOST as well as the joiner matters: ICE only
-   * negotiates a relay pair if both ends offer relay candidates, so a lever
-   * applied to one side alone would still let a host candidate win.
+   * The RTCPeerConnection config, in one place so the `?transport` levers
+   * (gui/transport-levers.js) reach every peer connection this host answers
+   * with. Applying them on the HOST as well as the joiner matters in both
+   * directions: ICE only negotiates a relay pair if BOTH ends offer relay
+   * candidates, and it can only avoid one if neither end has a TURN server to
+   * allocate from — so a lever applied to one side alone proves nothing.
    */
-  const peerConfig = () => ({ iceServers, iceTransportPolicy: levers.iceTransportPolicy });
+  const peerConfig = () => ({
+    iceServers: levers.useIceServers === false ? [] : iceServers,
+    iceTransportPolicy: levers.iceTransportPolicy,
+  });
 
   const peers = new Map(); // rendezvous peer id → per-joiner state
   let socket = null;
@@ -513,7 +526,18 @@ export function createRendezvousHost(opts) {
     const adapter = connectionAdapter(id, channel, entry.pc, {
       // A page-initiated eviction is a refusal like any other: nothing this
       // peer sends afterwards, on EITHER channel, may reach the page again.
-      onSever: () => { entry.refused = true; },
+      onSever: () => {
+        entry.refused = true;
+        // For a WebRTC peer, closing the channels IS the eviction — the phone
+        // sees `channel.onclose` and re-enters its reconnect loop. A RELAYED
+        // peer's channels are local JavaScript objects, so the same close told
+        // it nothing: it went on reading a status line that said connected and
+        // sending commands the host dropped on the floor. Ask the service to
+        // detach it, which sends it the `relay-closed` it already handles.
+        if (entry.relay && socket && socket.readyState === 1) {
+          socket.send(frame('relay-close', { to: id }));
+        }
+      },
       onLog,
     });
     entry.adapter = adapter;
@@ -649,7 +673,13 @@ export function createRendezvousHost(opts) {
       to: id,
       bufferedAmount: () => (socket && socket.bufferedAmount) || 0,
       limits: relayLimitsFromFrame(limits),
-      onDegraded: ({ dropped }) => onPeerIce(id, `relay-shedding-${dropped}`),
+      onDegraded: ({ dropped }) => onPeerShedding(id, dropped),
+      onFailure: ({ reason }) => {
+        // A reliable frame the relay cannot carry is a broken guarantee, not a
+        // dropped frame. The pair has already closed itself, which reaches the
+        // page through the adapter's ordinary `close`; this only names it.
+        onLog(`[rendezvous] relayed link to ${id} failed: ${reason}`);
+      },
       onLog,
     });
 
@@ -810,6 +840,13 @@ export function createRendezvousHost(opts) {
         onPeerIce(msg.peer, 'closed');
         break;
       }
+      case 'relay-degraded':
+        // The service shedding snapshot frames it could not hand to one of our
+        // relayed crew. The host operator is the one who can act on this
+        // direction of it, and until #1113's review nothing here read the
+        // frame at all. `dropped` is the pair's running total.
+        onPeerShedding(msg.peer, msg.dropped || 0);
+        break;
       case 'relay-closed':
         // The service closing OUR OWN relay mailbox — the reliable-queue
         // overflow in worker-rendezvous/src/relay.js. Every peer it was
@@ -1239,10 +1276,18 @@ export function createRendezvousJoiner(opts) {
   }
 
   async function offer(gen) {
-    // `iceTransportPolicy` carries the `?forceRelay` lever. 'relay' makes the
-    // browser discard host and server-reflexive candidates, so any pair that
-    // forms is over a TURN allocation — see gui/transport-levers.js.
-    pc = factories.peer({ iceServers, iceTransportPolicy: levers.iceTransportPolicy });
+    // Both halves of the ICE lever, and they pull opposite ways on purpose
+    // (gui/transport-levers.js): `iceTransportPolicy: 'relay'` carries
+    // `?forceRelay` — the browser discards host and server-reflexive
+    // candidates, so any pair that forms is over a TURN allocation — while
+    // `useIceServers: false` carries `?transport=direct`, withholding the
+    // server list entirely so there is no allocation to make and no relay
+    // candidate to gather. `iceTransportPolicy` has no 'no-relay' value, so
+    // that second pin can only be spelled this way.
+    pc = factories.peer({
+      iceServers: levers.useIceServers === false ? [] : iceServers,
+      iceTransportPolicy: levers.iceTransportPolicy,
+    });
     const mine = pc;
     const gathered = new Set();
     pc.onicecandidate = (e) => {

@@ -134,13 +134,38 @@ describe('a relay that is shedding', () => {
     expect(clientText(state)).toContain(t('client.diag_relay_shedding', { n: 4 }));
   });
 
-  it('takes the larger of two ends’ counts rather than adding them up', () => {
-    // Both ends report a running total for the same link; summing them would
-    // double-count the same dropped frames.
+  it('keeps the two ends’ counts apart and adds them', () => {
+    // They measure DIFFERENT queues: `client` is what this device shed against
+    // its own send buffer on the way up, `service` what the service shed on the
+    // way down. Both are running totals, so the old Math.max fold discarded the
+    // smaller of two genuinely separate losses.
     const state = connecting();
     applyClientDiagEvent(state, { event: 'relay-degraded', dropped: 4, from: 'client' });
     applyClientDiagEvent(state, { event: 'relay-degraded', dropped: 2, from: 'service' });
-    expect(state.relayDropped).toBe(4);
+    expect(state.relayDropped).toBe(6);
+  });
+
+  it('does not double-count one end reporting its running total again', () => {
+    // The half the Math.max fold got right, and the half a naive sum would get
+    // wrong: consecutive reports from the SAME end are the same frames counted
+    // again, not new ones.
+    const state = connecting();
+    for (const dropped of [1, 2, 3, 12]) {
+      applyClientDiagEvent(state, { event: 'relay-degraded', dropped, from: 'service' });
+    }
+    expect(state.relayDropped).toBe(12);
+  });
+
+  it('does not pin at 1 while the service keeps reporting', () => {
+    // The bug this fold existed to have: the service used to send a per-enqueue
+    // delta, which is 1 essentially always once a queue is at its bound, so the
+    // readout said "Dropping display updates (1)" for the whole mission.
+    const state = connecting();
+    for (let n = 1; n <= 200; n += 1) {
+      applyClientDiagEvent(state, { event: 'relay-degraded', dropped: n, from: 'service' });
+    }
+    expect(state.relayDropped).toBe(200);
+    expect(clientText(state)).toContain(t('client.diag_relay_shedding', { n: 200 }));
   });
 });
 
@@ -187,6 +212,25 @@ describe('the host readout', () => {
     expect(text).not.toContain(t('server.client_ice_state', { id: 'ab12cd34', state: 'ws-relay' }));
   });
 
+  it('shows a shedding relayed peer BOTH facts, not one instead of the other', () => {
+    // The shed count used to be written into the same map as the transport
+    // marker, as a fabricated `relay-shedding-3` state. That is not one of
+    // ICE's five, so the row stopped rendering "carried by the join service" —
+    // the exact line docs/acceptance/1113-networks.md tells a tester to look
+    // for — and printed the raw token through the ICE sentence instead.
+    const text = hostText(host({
+      peers: [['ab12cd34', 'ws-relay']],
+      shedding: [['ab12cd34', 3]],
+    }));
+    expect(text).toContain(t('server.client_ws_relay', { id: 'ab12cd34' }));
+    expect(text).toContain(t('server.client_relay_shedding', { id: 'ab12cd34', n: 3 }));
+    expect(text).not.toContain('relay-shedding');
+  });
+
+  it('says nothing about a peer that has shed nothing', () => {
+    expect(hostDiagnosticsLines(host({ shedding: [['ab12cd34', 0]] }), t)).toEqual([]);
+  });
+
   it('is silent on a healthy host with nobody in trouble', () => {
     expect(hostDiagnosticsLines(host(), t)).toEqual([]);
   });
@@ -201,13 +245,11 @@ describe('the copy-pasteable dump', () => {
     const dump = diagnosticsDump(state, {
       page: 'client',
       now: '2026-08-28T05:00:00.000Z',
-      network: 'public wifi',
       service: 'https://phoenix-rendezvous.example',
       build: '1/phoenix-base/3',
     });
     for (const expected of [
       'page         client',
-      'network      public wifi',
       'service      https://phoenix-rendezvous.example',
       'build        1/phoenix-base/3',
       'transport    ws-relay',
@@ -220,6 +262,12 @@ describe('the copy-pasteable dump', () => {
     ]) {
       expect(dump).toContain(expected);
     }
+    // And NOT a network row. Neither page has a field for one and nothing can
+    // invent it, so the row was always silently omitted while the acceptance
+    // kit's worked example showed it — documenting output the product cannot
+    // produce. The kit now asks the tester to write the network above the
+    // pasted block, which is where a human sentence belongs.
+    expect(dump).not.toContain('network');
   });
 
   it('never carries a join code, a token or a full peer id', () => {

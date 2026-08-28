@@ -109,11 +109,25 @@ max_code_length = 160
 # costs the Durable Object real bandwidth every tick, where a peer that only
 # ever signalled costs it two SDP blobs and then nothing.
 max_relay_peers_per_record = 8
-# Largest single relayed game frame, in bytes. Comfortably above the biggest
-# payload class that crosses this wire (WorldData — see the max-message-size
-# note in gui/rendezvous-transport.js) and far below anything that would let
-# one socket park megabytes inside the object.
-max_relay_frame_bytes = 65536
+# Largest single relayed game frame, in bytes. THE SAME NUMBER THE DIRECT PATH
+# HAS TO FIT, and that is the whole reason for it: a DataChannel's ceiling is
+# the SDP-negotiated `max-message-size`, 262144 bytes between two Chromiums and
+# the smallest ceiling any browser pair negotiates in practice (see the note in
+# gui/rendezvous-transport.js). A relay ceiling BELOW it would mean a payload
+# that crosses a good network perfectly well cannot cross a bad one — a mission
+# that works direct and fails relayed, which is the exact failure this fallback
+# exists to prevent, and it failed silently.
+#
+# The two payload classes that scale with content are WorldData (one
+# EntitySnapshot per STATIC entity; the largest world in assets/worlds authors
+# 17 [[entity]] blocks) and the per-tick snapshot (dynamic entities — hundreds
+# of asteroids at worst, a few tens of KB). The SECOND is the one that can
+# approach this bound, not the first. tests/relay_frame_budget.rs measures both
+# against this number rather than calling them "comfortably" under it.
+#
+# Still far below anything that would let one socket park megabytes inside the
+# Durable Object: the queue depths below are what bound a mailbox's total.
+max_relay_frame_bytes = 262144
 # Bounded queue depth per relay peer, per delivery class. This is the
 # lossy/reliable split made structural: the snapshot queue DROPS its oldest
 # entries once full, because a late snapshot is worthless and the next tick

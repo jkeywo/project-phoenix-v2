@@ -523,15 +523,27 @@ export function createRegistry({
   // snapshot overflow is not all live in src/relay.js; these functions are the
   // registry's half — who is allowed to ask, and who the frame goes to.
 
-  /** Push a peer's mailbox onto the wire, plus whatever the drain implies. */
-  function flushRelay(peer) {
-    const frames = relay.drain(peer).map((f) => out(peer, f));
-    if (!relay.hasOverflowed(peer)) return frames;
+  /** Push a peer's mailboxes onto the wire, plus whatever the drain implies. */
+  function flushRelay(owner) {
+    const frames = relay.drain(owner).map((f) => out(owner, f));
     // A reliable queue that filled is a session that can no longer keep the
     // promise its delivery class makes. Say so and end it, rather than becoming
     // a quietly lossy reliable channel.
-    frames.push(out(peer, { type: 'relay-closed', reason: 'relay-overflow' }));
-    frames.push(...detachRelay(peer, 'relay-overflow'));
+    //
+    // Which session, precisely: the mailbox that overflowed belongs to ONE
+    // (owner, sender) pair, and exactly one end of any such pair is a joiner —
+    // the other is the record's host. It is the joiner's relay that ends, so a
+    // burst from one phone costs that phone its session and leaves the rest of
+    // the crew on the wire. Ending the HOST's attachment instead, which is what
+    // a per-connection mailbox forced, left every other relayed crew member
+    // answering `not-relaying` for the rest of the mission.
+    const key = relay.keyFor(owner);
+    const record = key ? records.get(key) : null;
+    for (const source of relay.overflowedSources(owner)) {
+      const joiner = record && record.host === owner ? source : owner;
+      frames.push(out(joiner, { type: 'relay-closed', reason: 'relay-overflow' }));
+      frames.push(...detachRelay(joiner, 'relay-overflow'));
+    }
     return frames;
   }
 
@@ -623,7 +635,7 @@ export function createRegistry({
     }
     if (!isRelayClass(frame.class)) return [fail(connId, 'relay', 'malformed')];
 
-    const queued = relay.enqueue(target, frame.class, {
+    const queued = relay.enqueue(target, connId, frame.class, {
       type: 'relay',
       from: connId,
       class: frame.class,
@@ -635,20 +647,54 @@ export function createRegistry({
     // Tell the SENDER what its own traffic cost, not the receiver: the sender
     // is the one that can slow down, and on the host side it is the one whose
     // operator is looking at a diagnostics readout.
+    //
+    // The number is the pair's RUNNING TOTAL rather than this enqueue's delta.
+    // A delta is 1 essentially always — a queue at its bound sheds one frame
+    // per arrival — so a readout folding deltas showed "1" for the whole
+    // mission however many hundreds were actually lost.
     if (queued.dropped > 0) {
       frames.push(out(connId, {
         type: 'relay-degraded',
         peer: target,
         class: frame.class,
-        dropped: queued.dropped,
+        dropped: queued.totalDropped,
       }));
     }
     return frames;
   }
 
-  /** A client stepping off the relay (it got a direct link, or it is leaving). */
-  function relayClose(connId) {
-    return detachRelay(connId, 'closed');
+  /**
+   * Stepping off the relay.
+   *
+   * Without `to` this is a CLIENT saying it no longer needs carrying (it got a
+   * direct link, or it is leaving). With `to` it is a HOST evicting one crew
+   * member — the reserved-token refusal and the duplicate-token dance in
+   * server.html, which for a WebRTC peer sever real DataChannels the phone
+   * observes, and for a relayed peer previously severed nothing but local
+   * JavaScript: the evicted device kept its channels "open", kept sending
+   * commands the host dropped on the floor, and had no diagnosis available at
+   * either end.
+   *
+   * A host may NOT send the un-addressed form: it would detach its own
+   * attachment and silently end the relay for every crew member on the record.
+   */
+  function relayClose(connId, frame) {
+    const record = recordFor(connId);
+    const target = frame && frame.to;
+    const isHost = !!record && record.host === connId;
+    if (!target) {
+      if (isHost) return [fail(connId, 'relay-close', 'forbidden-role')];
+      return detachRelay(connId, 'closed');
+    }
+    if (!isHost) return [fail(connId, 'relay-close', 'forbidden-role')];
+    if (relay.keyFor(target) !== record.key) return [fail(connId, 'relay-close', 'no-peer')];
+    // The joiner already treats `relay-closed` as the end of its game path, so
+    // it fails and re-enters its reconnect loop exactly as a severed
+    // DataChannel peer does.
+    return [
+      out(target, { type: 'relay-closed', reason: 'host-closed' }),
+      ...detachRelay(target, 'host-closed'),
+    ];
   }
 
   // ── Public surface ───────────────────────────────────────────────────────
@@ -712,7 +758,7 @@ export function createRegistry({
           case 'signal': return relaySignal(connId, frame);
           case 'relay-open': return relayOpen(connId);
           case 'relay': return relayFrame(connId, frame);
-          case 'relay-close': return relayClose(connId);
+          case 'relay-close': return relayClose(connId, frame);
           case 'leave': return leave(connId);
           default: return [fail(connId, String(frame.type || 'unknown'), 'malformed')];
         }

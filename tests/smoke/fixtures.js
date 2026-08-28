@@ -79,10 +79,22 @@ import {
 // is not part of dist/ (it is a Cloudflare Worker's source), so it is served
 // from disk through a route. Its own `../../gui/join-code.js` import resolves
 // against the site root, where the built gui/ directory already sits.
-export const RENDEZVOUS_REGISTRY_JS = fs.readFileSync(
-  path.join(__dirname, '..', '..', 'worker-rendezvous', 'src', 'registry.js'),
-  'utf-8',
-);
+//
+// Its SIBLING imports do not, and that is worth stating because it cost a whole
+// smoke run. The registry is served at `/__rendezvous-registry.js`, so the
+// `import './relay.js'` #1113 added resolves to `/relay.js` at the site root —
+// a URL dist/ has no file for. The dynamic import rejected, the host page's
+// registry promise stayed rejected, every `callOwner` silently dropped, no host
+// socket ever reached the registry, no `hosted` frame, no five-letter code, and
+// EVERY spec timed out waiting for `__wasmReady`. One 404 on one sibling module
+// reads as seventeen unrelated failures with nothing in the logs connecting
+// them. So each worker-rendezvous module the registry pulls in is routed below,
+// at the path its own specifier resolves to.
+const workerSrc = (name) =>
+  fs.readFileSync(path.join(__dirname, '..', '..', 'worker-rendezvous', 'src', name), 'utf-8');
+
+export const RENDEZVOUS_REGISTRY_JS = workerSrc('registry.js');
+export const RENDEZVOUS_RELAY_JS = workerSrc('relay.js');
 
 // Stub the QR CDN script so it doesn't block execution. In CI environments the
 // jsdelivr CDN can be slow or blocked, and a synchronous <script src="...">
@@ -186,9 +198,15 @@ export const test = base.extend({
     await installTransportFixture(ctx);
     await ctx.addInitScript({ content: STUB_QRCODE });
 
-    // Serve the rendezvous service's own registry module to the host page.
+    // Serve the rendezvous service's own registry module to the host page,
+    // and the sibling it imports at the path that import resolves to. See the
+    // note beside RENDEZVOUS_RELAY_JS — this second route is the difference
+    // between the whole suite running and the whole suite timing out.
     await ctx.route('**/__rendezvous-registry.js', (route) =>
       route.fulfill({ contentType: 'application/javascript', body: RENDEZVOUS_REGISTRY_JS }),
+    );
+    await ctx.route('**/relay.js', (route) =>
+      route.fulfill({ contentType: 'application/javascript', body: RENDEZVOUS_RELAY_JS }),
     );
 
     // Intercept the QR CDN load — stub QRCode so it doesn't block.

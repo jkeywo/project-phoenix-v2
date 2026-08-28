@@ -313,14 +313,23 @@ export function mintSuffix(data, isTaken, randomInt, maxAttempts = 64) {
  * phone entry field and the host page so one failure never gets two wordings.
  *
  * Three sources feed it, and all three must be covered or a real refusal
- * renders as the misleading `unknown` fallback:
+ * renders as the misleading `unknown` fallback — "No ship is using that code",
+ * which sends a guest back to re-type five letters that were already right:
  *
  *   1. this module — `validateSuffix`, `parseJoinCode`;
- *   2. the rendezvous service's `error` frames (worker-rendezvous/src/registry.js);
+ *   2. the rendezvous service's `error` frames (worker-rendezvous/src/registry.js).
+ *      tests/client/join-code.test.js reads the reasons that module actually
+ *      emits out of its source and demands a row for each, rather than
+ *      iterating this map's own keys: a coverage test driven by the map can
+ *      only ever agree with itself, which is how every relay refusal #1113
+ *      added — `relay-full`, `relay-too-large`, `not-relaying`, `no-peer` —
+ *      shipped unmapped underneath a green test;
  *   3. the HOST's authoritative compatibility verdict, whose codes are Rust's
- *      `StampMismatch::code()` (src/delivery/stamp.rs) relayed verbatim through
- *      `JoinRefused`. tests/client/join-code.test.js pins that list, so adding
- *      a variant there without a row here fails the editor-test job.
+ *      `StampMismatch::code()` (src/delivery/stamp.rs) plus the native host's
+ *      `RESERVED_TOKEN_CODE` (src/native_host/relay_transport.rs), relayed
+ *      verbatim through `JoinRefused`. tests/client/join-code.test.js pins that
+ *      list too, so adding a variant there without a row here fails the
+ *      editor-test job.
  */
 const REASON_STRING_IDS = {
   empty: 'client.join.error_empty',
@@ -350,6 +359,32 @@ const REASON_STRING_IDS = {
   unreachable: 'client.join.error_unreachable',
   'too-many-attempts': 'client.join.error_too_many',
   'unsupported-protocol': 'client.join.error_version',
+  // ── The WebSocket game relay's refusals (issue #1113) ─────────────────────
+  // A relay that is full is the ONE degraded state a guest actually meets: a
+  // correct code, a live host, and a network so restrictive that the service is
+  // already carrying its authored maximum of phones for that ship. The remedy
+  // is somebody else disconnecting or a different network, and neither is
+  // discoverable from "check the viewscreen and try again".
+  'relay-full': 'client.join.error_relay_full',
+  // The rest are link-level: the service would not carry one frame, or has
+  // stopped carrying this connection. The joiner retries them, so the sentence
+  // says the service rather than the code.
+  'relay-too-large': 'client.join.error_relay_lost',
+  'not-relaying': 'client.join.error_relay_lost',
+  'already-relaying': 'client.join.error_relay_lost',
+  'no-peer': 'client.join.error_relay_lost',
+  'host-closed': 'client.join.error_relay_lost',
+  'relay-overflow': 'client.join.error_relay_lost',
+  // The service and this page disagree about what state this connection is in
+  // — it was swept, or a frame arrived out of order. Nothing to do but reload.
+  'not-joined': 'client.join.error_unreachable',
+  'not-connected': 'client.join.error_unreachable',
+  'forbidden-role': 'client.join.error_unreachable',
+  // HOST-side refusals. A phone cannot produce either — they answer a `host-open`
+  // — but they are mapped rather than left to the fallback so that the coverage
+  // test's demand is met by a DECISION about each reason rather than by silence.
+  'already-hosting': 'client.join.error_unknown',
+  'not-hosting': 'client.join.error_unknown',
   // ── The host's own verdict (StampMismatch::code()) ────────────────────────
   // A protocol difference and a content difference have the same fix for the
   // player — reload this page against the ship they are joining — but they are
@@ -360,6 +395,9 @@ const REASON_STRING_IDS = {
   'content-epoch-mismatch': 'client.join.error_content',
   'bundle-content-missing': 'client.join.error_content',
   'client-stamp-missing': 'client.join.error_stamp_missing',
+  // Not a StampMismatch: the native host refuses a peer that claims a token
+  // only the host runtime may use (`__local_console__`, the `ai:` prefix).
+  'reserved-token': 'client.join.error_reserved_token',
 };
 
 /** The two surfaces a refusal can be read on. */

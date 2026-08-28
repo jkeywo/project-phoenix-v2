@@ -3046,7 +3046,7 @@
       // what an ordinary QR scan gets.
       const transportLevers = window.transportLevers
         ? window.transportLevers.transportLeversFromLocation(location.search)
-        : { mode: 'auto', iceTransportPolicy: 'all', wsRelay: 'auto', pinned: false };
+        : { mode: 'auto', iceTransportPolicy: 'all', useIceServers: true, wsRelay: 'auto', pinned: false };
 
       if (joinRoute.route === 'none') {
         // Not "no host id in the URL" — there are no host ids any more, and
@@ -3149,13 +3149,21 @@
       // the link is shedding snapshots), and it now has a second reader — the
       // copy-pasteable dump below, which must not be able to disagree with
       // what is on screen. What stays here is the wiring.
+      // Guarded like window.rendezvousTransport and window.transportLevers
+      // above, and for the same stated reason: every gui/ module is deferred,
+      // and one genuinely failing to load must cost this page its diagnostics
+      // readout and nothing else. Unguarded, the next line threw a TypeError
+      // partway through the join wiring.
       const diagnostics = window.connectionDiagnostics;
-      const diag = diagnostics.createClientDiagnostics({
-        relayAvailable,
-        relaySource,
-        lever: transportLevers,
-      });
+      const diag = diagnostics
+        ? diagnostics.createClientDiagnostics({
+          relayAvailable,
+          relaySource,
+          lever: transportLevers,
+        })
+        : { relayAvailable, relaySource, probe: null, lever: transportLevers };
       function renderDiag() {
+        if (!diagnostics) return;
         writeDiagLines(diagnostics.clientDiagnosticsLines(diag, t));
       }
       renderDiag();
@@ -3166,7 +3174,7 @@
       // browser has no clipboard to write to — an inert button that silently
       // does nothing is worse than no button.
       const diagCopyBtn = document.getElementById('conn-diag-copy');
-      if (diagCopyBtn && navigator.clipboard && navigator.clipboard.writeText) {
+      if (diagnostics && diagCopyBtn && navigator.clipboard && navigator.clipboard.writeText) {
         diagCopyBtn.style.display = '';
         diagCopyBtn.textContent = t('client.diag_copy');
         diagCopyBtn.onclick = () => {

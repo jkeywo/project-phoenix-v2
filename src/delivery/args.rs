@@ -258,7 +258,8 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
     // the prompt rather than 403-ing against a live service later.
     if rendezvous.is_some() && origin.is_none() {
         return Err(
-            "--rendezvous needs --origin: the service refuses an upgrade whose Origin is not              on its deployed allowlist, and a native host has no page origin to send"
+            "--rendezvous needs --origin: the service refuses an upgrade whose Origin is \
+             not on its deployed allowlist, and a native host has no page origin to send"
                 .to_string(),
         );
     }

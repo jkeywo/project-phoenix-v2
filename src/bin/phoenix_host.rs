@@ -339,7 +339,9 @@ fn main() {
         }
     } else if !sim.solo {
         eprintln!(
-            "phoenix-host: no --rendezvous, so nobody can join this host — it will wait in the              lobby forever. Pass --rendezvous <URL> --origin <URL> for a crew, or --solo to              start with every station on Backfill."
+            "phoenix-host: no --rendezvous, so nobody can join this host — it will wait in the \
+             lobby forever. Pass --rendezvous <URL> --origin <URL> for a crew, or --solo \
+             to start with every station on Backfill."
         );
     }
     eprintln!(

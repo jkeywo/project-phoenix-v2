@@ -26,11 +26,11 @@
  *
  * Every value here can only make the transport try LESS than it otherwise
  * would: pinning TURN-only refuses host candidates, pinning ws-relay skips the
- * WebRTC ladder, pinning direct refuses the ws-relay fallback. None of them
- * reaches a host, a peer or a payload a default load could not, so the worst a
- * hostile link can do with one is give its recipient a worse connection than
- * they would have had — visibly, because a pinned transport is named in the
- * diagnostics readout on both pages.
+ * WebRTC ladder, pinning direct withholds the relay servers AND refuses the
+ * ws-relay fallback. None of them reaches a host, a peer or a payload a default
+ * load could not, so the worst a hostile link can do with one is give its
+ * recipient a worse connection than they would have had — visibly, because a
+ * pinned transport is named in the diagnostics readout on both pages.
  *
  * Pure and dependency-free, so both pages, the transport, the smoke suite and
  * the vitest suites read one implementation of what a lever means.
@@ -38,7 +38,16 @@
 
 /** The default: try every rung, in order, falling back as each fails. */
 export const TRANSPORT_AUTO = 'auto';
-/** Direct WebRTC only — no TURN candidates, no WebSocket fallback. */
+/**
+ * Direct WebRTC only — no TURN candidates, no WebSocket fallback.
+ *
+ * Made real rather than merely named: `iceTransportPolicy` has no 'no-relay'
+ * value, so the only way to keep ICE off a TURN allocation is to hand the peer
+ * connection NO ice servers at all, which is what `useIceServers: false`
+ * below is for. Before that this mode gave `iceTransportPolicy: 'all'` —
+ * identical to auto — so ICE was free to pick a relayed pair, and the one
+ * lever whose whole job is proving a direct link proved nothing.
+ */
 export const TRANSPORT_DIRECT = 'direct';
 /** WebRTC, but only over a TURN relay candidate. */
 export const TRANSPORT_TURN = 'turn';
@@ -68,6 +77,7 @@ function flagIsOn(value) {
  * @returns {{
  *   mode: string,
  *   iceTransportPolicy: 'all'|'relay',
+ *   useIceServers: boolean,
  *   wsRelay: 'auto'|'only'|'off',
  *   pinned: boolean,
  * }}
@@ -89,6 +99,13 @@ export function transportLeversFromLocation(search) {
     // host and server-reflexive candidates, so any pair that forms is over a
     // TURN allocation — which is what "prove the relay path works" means.
     iceTransportPolicy: mode === TRANSPORT_TURN ? 'relay' : 'all',
+    // Whether the STUN/TURN server list reaches the peer connection at all.
+    // False ONLY for the direct pin, and it is what makes that pin real: with
+    // no TURN server configured there is no allocation to make and no relay
+    // candidate to gather, so any pair ICE forms is host or server-reflexive.
+    // (STUN goes with it. A pin whose point is "no relay in the path" is a LAN
+    // check, and the honest counterpart to forceRelay's TURN-only.)
+    useIceServers: mode !== TRANSPORT_DIRECT,
     // Whether the WebSocket game relay may be used, and whether it is the only
     // thing to try. 'off' for the two WebRTC modes, because a fallback that
     // fires would hide the very failure the pin exists to expose.

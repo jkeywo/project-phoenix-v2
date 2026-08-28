@@ -492,8 +492,6 @@ fn test_app() -> App {
     .init_resource::<TrackedEntities>()
     .init_resource::<WorldSetupBroadcast>()
     .init_resource::<SimOutbox>()
-    .init_resource::<LastBroadcastEntityPositions>()
-    .init_resource::<LastBroadcastEntityHealth>()
     .init_resource::<LastBroadcastHull>()
     .init_resource::<crate::core::messages::InterSystemQueue>()
     .init_resource::<crate::ai::server::AiTokenRegistry>()
@@ -542,6 +540,7 @@ fn test_app() -> App {
     .add_plugins(sim_state_broadcaster())
     .add_plugins(modifier_events_broadcaster())
     .add_systems(PostUpdate, collect);
+    register_entity_state_replication_lifecycle(&mut app);
     register_blackboard_replication_lifecycle(&mut app);
     // One fixed step per update (issue #895): the sim chain above lives in
     // `FixedUpdate`, and each 200 ms harness tick advances it once (so the
@@ -602,6 +601,230 @@ fn test_app() -> App {
     ));
     app.insert_resource(ShipEntity(ship));
     app
+}
+
+#[test]
+fn replication_lifecycle_registry_is_complete_stable_and_resets_entity_state() {
+    let mut app = test_app();
+
+    assert_eq!(
+        app.world()
+            .resource::<crate::core::broadcast::ReplicationLifecycleRegistry>()
+            .keys()
+            .collect::<Vec<_>>(),
+        vec!["blackboards", "entity-state", "hull", "shields", "weapons"],
+        "every replication owner must register under one stable lexical key"
+    );
+    let census = app.world().resource::<crate::authoritative::StateCensus>();
+    for type_name in [
+        std::any::type_name::<LastBroadcastEntityPositions>(),
+        std::any::type_name::<LastBroadcastEntityHealth>(),
+    ] {
+        assert_eq!(
+            census.get(type_name),
+            Some((
+                crate::authoritative::StateClass::Cache,
+                "digest-exclusion-classes"
+            )),
+            "the entity-state owner must classify {type_name} in StateCensus"
+        );
+    }
+
+    app.world_mut()
+        .resource_mut::<LastBroadcastEntityPositions>()
+        .0
+        .insert("entity-1".into(), (Vec3::ZERO, 0.0));
+    app.world_mut()
+        .resource_mut::<LastBroadcastEntityHealth>()
+        .0
+        .insert("entity-1".into(), (Some(1.0), Some(1.0), None, None));
+
+    crate::core::broadcast::reset_registered_replication(app.world_mut());
+
+    assert!(app
+        .world()
+        .resource::<LastBroadcastEntityPositions>()
+        .0
+        .is_empty());
+    assert!(app
+        .world()
+        .resource::<LastBroadcastEntityHealth>()
+        .0
+        .is_empty());
+}
+
+#[test]
+fn reconnect_registry_routes_in_owner_order_without_mutating_shared_caches() {
+    let mut app = test_app();
+    let ship = app.world().resource::<ShipEntity>().0;
+
+    // A single composite station makes every reconnect-producing owner
+    // observable in one call. The topology starts from a shipped hull and only
+    // co-locates its already-authored Systems for this routing fixture.
+    let mut config = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_destroyer.toml",
+    )
+    .expect("destroyer fixture composes")
+    .ship_config
+    .expect("destroyer fixture carries ship topology");
+    let composite = StationId("engineering".into());
+    for system in &mut config.systems {
+        system.station = Some(composite.clone());
+    }
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(crate::ship_plugin::ShipConfigComponent(config));
+    {
+        let mut sessions = app.world_mut().resource_mut::<crate::lobby::Sessions>();
+        sessions
+            .0
+            .register("reconnector".into(), "Reconnect Operator".into())
+            .expect("fresh reconnect token registers");
+        sessions
+            .0
+            .set_station("reconnector", Some(composite.clone()));
+    }
+
+    let current_blackboard = SystemBlackboard::Helm(HelmBlackboard {
+        boost_battery: 1.0,
+        boost_enabled: true,
+        ..Default::default()
+    });
+    app.world_mut()
+        .get_mut::<ShipSystemBlackboards>(ship)
+        .expect("LocalShip blackboards")
+        .0
+        .insert(SystemId("helm-radar".into()), current_blackboard.clone());
+
+    let cached_blackboard = SystemBlackboard::Helm(HelmBlackboard {
+        yaw: 7.0,
+        ..Default::default()
+    });
+    app.world_mut()
+        .resource_mut::<LastBroadcastBlackboards>()
+        .0
+        .insert(SystemId("cached".into()), cached_blackboard.clone());
+    {
+        let mut cache =
+            app.world_mut()
+                .resource_mut::<crate::console::repair::visibility::LastVisibleRepairBlackboard>();
+        cache.projections.insert(
+            "existing-client".into(),
+            RepairBlackboard {
+                travel_duration_secs: 9.0,
+                ..Default::default()
+            },
+        );
+        cache.stations.insert(
+            "existing-client".into(),
+            Some(StationId("engineering".into())),
+        );
+    }
+    let cached_hull = crate::console::repair::visibility::HullProjection {
+        entries: vec![SystemHullStatus {
+            system_id: SystemId("cached".into()),
+            display_name: "Cached".into(),
+            current: 7.0,
+            max_hp: 10.0,
+            tier: crate::ship::damage::DamageTier::Damaged,
+            debuff_magnitude: 0.3,
+        }],
+        aggregate_fraction: Some(0.7),
+        destroyed_fraction: Some(0.0),
+    };
+    app.world_mut()
+        .resource_mut::<LastBroadcastHull>()
+        .0
+        .insert("existing-client".into(), cached_hull.clone());
+    let cached_weapons = LastWeaponsUpdate {
+        target_uuid: Some("cached-target".into()),
+        torpedo_count: 7,
+        ..Default::default()
+    };
+    *app.world_mut().resource_mut::<LastWeaponsUpdate>() = cached_weapons.clone();
+    app.world_mut()
+        .resource_mut::<LastBroadcastEntityPositions>()
+        .0
+        .insert("cached-entity".into(), (Vec3::new(1.0, 2.0, 3.0), 0.5));
+    app.world_mut()
+        .resource_mut::<LastBroadcastEntityHealth>()
+        .0
+        .insert(
+            "cached-entity".into(),
+            (Some(0.7), Some(0.6), None, Some(0.4)),
+        );
+
+    crate::core::broadcast::resync_registered_replication_for_token(app.world_mut(), "reconnector");
+
+    let entries = app.world_mut().resource_mut::<SimOutbox>().drain();
+    assert_eq!(entries.len(), 4, "four owners produce reconnect state");
+    assert!(entries.iter().all(|entry| {
+        entry.target == Target::Token("reconnector".into())
+            && entry.delivery == DeliveryClass::Snapshot
+    }));
+    assert!(matches!(
+        entries[0].message,
+        ServerMessage::BlackboardUpdate { .. }
+    ));
+    assert!(matches!(
+        entries[1].message,
+        ServerMessage::SystemHullUpdate { .. }
+    ));
+    assert!(matches!(
+        entries[2].message,
+        ServerMessage::ShieldStatus { .. }
+    ));
+    assert!(matches!(
+        entries[3].message,
+        ServerMessage::WeaponsUpdate { .. }
+    ));
+
+    assert_eq!(
+        app.world()
+            .resource::<LastBroadcastBlackboards>()
+            .0
+            .get(&SystemId("cached".into())),
+        Some(&cached_blackboard)
+    );
+    let repair_cache = app
+        .world()
+        .resource::<crate::console::repair::visibility::LastVisibleRepairBlackboard>();
+    assert_eq!(
+        repair_cache
+            .projections
+            .get("existing-client")
+            .map(|repair| repair.travel_duration_secs),
+        Some(9.0)
+    );
+    assert_eq!(
+        repair_cache
+            .stations
+            .get("existing-client")
+            .and_then(Option::as_ref),
+        Some(&StationId("engineering".into()))
+    );
+    assert_eq!(
+        app.world()
+            .resource::<LastBroadcastHull>()
+            .0
+            .get("existing-client"),
+        Some(&cached_hull)
+    );
+    assert_eq!(app.world().resource::<LastWeaponsUpdate>(), &cached_weapons);
+    assert_eq!(
+        app.world()
+            .resource::<LastBroadcastEntityPositions>()
+            .0
+            .get("cached-entity"),
+        Some(&(Vec3::new(1.0, 2.0, 3.0), 0.5))
+    );
+    assert_eq!(
+        app.world()
+            .resource::<LastBroadcastEntityHealth>()
+            .0
+            .get("cached-entity"),
+        Some(&(Some(0.7), Some(0.6), None, Some(0.4)))
+    );
 }
 
 // ── PR 7 (issue #597) test helpers ──────────────────────────────────────

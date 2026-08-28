@@ -18,6 +18,78 @@
 
 use super::*;
 
+/// Stable lifecycle key for the `SimState` entity position/health delta pair.
+pub(crate) const ENTITY_STATE_REPLICATION_KEY: &str = "entity-state";
+
+/// Last-broadcast positions for non-asteroid entities (NPCs, stations).
+///
+/// Keyed by UUID string; the live [`sim_state_broadcaster`] uses this cache to
+/// suppress unchanged position/yaw fields. Reset and UUID pruning deliberately
+/// live here with that producer rather than in the generic lifecycle runner.
+#[derive(Resource, Default)]
+pub struct LastBroadcastEntityPositions(pub HashMap<String, (bevy::math::Vec3, f32)>);
+
+/// Last-broadcast health and shield detail for every entity.
+///
+/// Keyed by UUID string; the tuple mirrors the four independently optional
+/// health fields in `EntityStateSnapshot`. This is transport bookkeeping, not
+/// authoritative simulation state.
+#[derive(Resource, Default)]
+pub struct LastBroadcastEntityHealth(
+    pub  HashMap<
+        String,
+        (
+            Option<f32>,
+            Option<f32>,
+            Option<Vec<crate::core::messages::ShieldFacingStatus>>,
+            Option<f32>,
+        ),
+    >,
+);
+
+/// Register the entity-state producer's reset-only lifecycle behavior.
+///
+/// Entity positions and health need no reconnect projection because the
+/// targeted `Welcome` already carries the current world snapshot. They do need
+/// a run-boundary reset so the first live delta contains every field.
+pub(crate) fn register_entity_state_replication_lifecycle(app: &mut App) {
+    use crate::authoritative::{DeclareState, StateClass};
+    use crate::core::broadcast::{RegisterReplicationLifecycle, ReplicationLifecycleAdapter};
+
+    app.init_resource::<LastBroadcastEntityPositions>()
+        .init_resource::<LastBroadcastEntityHealth>()
+        .declare_state::<LastBroadcastEntityPositions>(
+            StateClass::Cache,
+            "digest-exclusion-classes",
+        )
+        .declare_state::<LastBroadcastEntityHealth>(StateClass::Cache, "digest-exclusion-classes")
+        .register_replication_lifecycle(
+            ReplicationLifecycleAdapter::new(ENTITY_STATE_REPLICATION_KEY)
+                .with_reset(reset_entity_state_replication),
+        );
+}
+
+fn reset_entity_state_replication(world: &mut World) {
+    *world.resource_mut::<LastBroadcastEntityPositions>() = LastBroadcastEntityPositions::default();
+    *world.resource_mut::<LastBroadcastEntityHealth>() = LastBroadcastEntityHealth::default();
+}
+
+/// Remove despawned UUIDs from the only replication caches keyed by entity.
+///
+/// Other owner-local caches are ship-, System-, or recipient-keyed and must
+/// not acquire a synthetic pruning contract. Asteroid and runtime-entity
+/// despawn paths call this explicit operation with their known UUIDs.
+pub(crate) fn prune_entity_replication_caches(
+    positions: &mut LastBroadcastEntityPositions,
+    health: &mut LastBroadcastEntityHealth,
+    uuids: &[String],
+) {
+    for uuid in uuids {
+        positions.0.remove(uuid);
+        health.0.remove(uuid);
+    }
+}
+
 /// Returns a [`SimBroadcaster`] pre-configured with the `SimState` producer.
 ///
 /// Broadcasts `SimState` at 10 Hz to all players (`Audience::All`).
@@ -572,4 +644,59 @@ pub(crate) fn build_sim_state_entity_states(
     };
 
     asteroid_states.into_iter().chain(npc_states).collect()
+}
+
+#[cfg(test)]
+mod replication_tests {
+    use super::*;
+
+    fn seed(
+        positions: &mut LastBroadcastEntityPositions,
+        health: &mut LastBroadcastEntityHealth,
+        uuid: &str,
+    ) {
+        positions.0.insert(uuid.into(), (Vec3::ZERO, 0.0));
+        health
+            .0
+            .insert(uuid.into(), (Some(1.0), Some(1.0), None, None));
+    }
+
+    #[test]
+    fn uuid_pruning_removes_only_named_entities() {
+        let mut positions = LastBroadcastEntityPositions::default();
+        let mut health = LastBroadcastEntityHealth::default();
+        for uuid in ["keep", "gone-a", "gone-b"] {
+            seed(&mut positions, &mut health, uuid);
+        }
+
+        prune_entity_replication_caches(
+            &mut positions,
+            &mut health,
+            &["gone-a".into(), "gone-b".into(), "unknown".into()],
+        );
+
+        assert_eq!(positions.0.keys().collect::<Vec<_>>(), vec!["keep"]);
+        assert_eq!(health.0.keys().collect::<Vec<_>>(), vec!["keep"]);
+    }
+
+    #[test]
+    fn repeated_uuid_pruning_keeps_long_session_caches_bounded() {
+        let mut positions = LastBroadcastEntityPositions::default();
+        let mut health = LastBroadcastEntityHealth::default();
+        const LIVE_AT_ONCE: usize = 5;
+
+        for cycle in 0..500 {
+            seed(&mut positions, &mut health, &format!("asteroid-{cycle}"));
+            if cycle >= LIVE_AT_ONCE {
+                prune_entity_replication_caches(
+                    &mut positions,
+                    &mut health,
+                    &[format!("asteroid-{}", cycle - LIVE_AT_ONCE)],
+                );
+            }
+        }
+
+        assert_eq!(positions.0.len(), LIVE_AT_ONCE);
+        assert_eq!(health.0.len(), LIVE_AT_ONCE);
+    }
 }

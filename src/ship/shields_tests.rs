@@ -344,12 +344,12 @@ fn drain_coord(app: &mut App) -> Vec<CoordinationEnqueue> {
 
 // ── Blackboard publish tests ─────────────────────────────────────────────
 
-fn shipped_hull_shield_status(
+fn shipped_hull_shields_app(
     hull_path: &str,
     station_id: &str,
     holder: &str,
     station_systems: &[&str],
-) -> Vec<OutboundMessage> {
+) -> App {
     let config = crate::entities::include_resolve::load_entity_config(hull_path)
         .unwrap_or_else(|e| panic!("{hull_path} must compose and parse: {e}"))
         .ship_config
@@ -380,6 +380,17 @@ fn shipped_hull_shield_status(
             .expect("a fresh holder token registers");
         sessions.0.set_station(holder, Some(station));
     }
+
+    app
+}
+
+fn shipped_hull_shield_status(
+    hull_path: &str,
+    station_id: &str,
+    holder: &str,
+    station_systems: &[&str],
+) -> Vec<OutboundMessage> {
+    let mut app = shipped_hull_shields_app(hull_path, station_id, holder, station_systems);
 
     // Bevy's first update after TimePlugin reports a zero delta, so the 10 Hz
     // broadcaster's timer first finishes on the following 100 ms logical step.
@@ -433,6 +444,94 @@ fn composite_engineering_station_receives_the_authoritative_shields_snapshot() {
     );
 
     assert_shield_status_reaches_only_holder(&messages, "engineering-officer");
+}
+
+#[test]
+fn authored_shields_instance_id_reaches_the_same_holder_live_and_on_reconnect() {
+    let mut app = shipped_hull_shields_app(
+        "assets/entities/alliance_destroyer.toml",
+        "engineering",
+        "engineering-officer",
+        &["shields-system", "power-reactor", "repair"],
+    );
+    let ship = ship_e(&mut app);
+    let custom_id = SystemId("deflectors".into());
+    let mut config = app
+        .world_mut()
+        .get_mut::<ShipConfigComponent>(ship)
+        .expect("LocalShip config");
+    config
+        .0
+        .systems
+        .iter_mut()
+        .find(|system| system.kind == crate::ship::system_registry::SHIELDS_KIND)
+        .expect("destroyer declares the Shields capability")
+        .id = custom_id;
+
+    tick(&mut app);
+    let messages = tick(&mut app)
+        .into_iter()
+        .filter(|message| matches!(message.msg, ServerMessage::ShieldStatus { .. }))
+        .collect::<Vec<_>>();
+    assert_shield_status_reaches_only_holder(&messages, "engineering-officer");
+
+    let expected = current_shield_status(app.world_mut()).expect("live Shields payload");
+    crate::core::broadcast::resync_registered_replication_for_token(
+        app.world_mut(),
+        "engineering-officer",
+    );
+    let entries = app.world_mut().resource_mut::<SimOutbox>().drain();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(
+        entries[0].target,
+        Target::Token("engineering-officer".into())
+    );
+    assert_eq!(entries[0].delivery, DeliveryClass::Snapshot);
+    assert_eq!(entries[0].message, expected);
+}
+
+#[test]
+fn registered_shields_reconnect_matches_live_builder_for_only_the_authored_holder() {
+    let mut app = shipped_hull_shields_app(
+        "assets/entities/alliance_destroyer.toml",
+        "engineering",
+        "engineering-officer",
+        &["shields-system", "power-reactor", "repair"],
+    );
+    app.world_mut()
+        .resource_mut::<crate::lobby::Sessions>()
+        .0
+        .register("observer".into(), "Observer".into())
+        .expect("observer token registers");
+
+    assert_eq!(
+        app.world()
+            .resource::<crate::core::broadcast::ReplicationLifecycleRegistry>()
+            .keys()
+            .collect::<Vec<_>>(),
+        vec![SHIELDS_REPLICATION_KEY],
+        "ShipShieldsPlugin must register one cache-free reconnect owner"
+    );
+    let expected = current_shield_status(app.world_mut()).expect("live Shields payload");
+
+    crate::core::broadcast::resync_registered_replication_for_token(
+        app.world_mut(),
+        "engineering-officer",
+    );
+    let entries = app.world_mut().resource_mut::<SimOutbox>().drain();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(
+        entries[0].target,
+        Target::Token("engineering-officer".into())
+    );
+    assert_eq!(entries[0].delivery, DeliveryClass::Snapshot);
+    assert_eq!(entries[0].message, expected);
+
+    crate::core::broadcast::resync_registered_replication_for_token(app.world_mut(), "observer");
+    assert!(
+        app.world().resource::<SimOutbox>().is_empty(),
+        "a non-holder must receive no Shields reconnect projection"
+    );
 }
 
 fn shields_bb(app: &mut App) -> ShieldsBlackboard {

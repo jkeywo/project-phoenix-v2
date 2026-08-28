@@ -2,8 +2,8 @@
 title: Shields Runtime
 type: concept
 tags: [shields, ai, damage, focus, coordination, pasm]
-sources: [src/ship/shields.rs, src/console_ai/server.rs, src/console_ai/core.rs, src/ship/coordination_systems.rs, pasm/spec/architecture/coordination-blackboards.yaml]
-updated: 2026-08-27
+sources: [src/ship/shields.rs, src/ship/config.rs, src/core/broadcast/audience.rs, src/core/broadcast/lifecycle.rs, src/console_ai/server.rs, src/console_ai/core.rs, src/ship/coordination_systems.rs, pasm/spec/architecture/coordination-blackboards.yaml]
+updated: 2026-08-28
 ---
 
 # Shields Runtime
@@ -23,6 +23,14 @@ analysis and focuses the authored arc whose centre is closest to the bearing.
 The generic lag router never reads or writes `PendingShieldsThreatBearing`.
 That component is private Shields-domain state, written by the Shields receiver
 and consumed once by the Shields AI.
+
+`ShipShieldsPlugin` also owns Shields replication lifecycle. The periodic and
+reconnect paths share one `ShieldStatus` builder and the same
+`HoldingSystemKind("shields")` audience resolution against the LocalShip's
+authored topology. The instance id remains hull-authored rather than becoming
+a hidden protocol constant. Reconnect therefore reaches only the current
+holder of the actual owning Station, and because Shields has no delta cache it
+cannot disturb another recipient's next live snapshot.
 
 Without a pending bearing, the authored policy examines timestamped recent
 damage and normalized arc health: concentrated incoming damage wins, then a

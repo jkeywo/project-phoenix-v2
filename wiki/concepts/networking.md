@@ -78,8 +78,10 @@ Reconnect uses persistent exponential backoff from 100 ms to a 30 s cap.
 enters the server-side seat/rating restore flow. During a round, registered
 replication owners reconstruct current Snapshot state in stable key order for
 that token only. The Blackboard and Hull adapters reproduce live recipient
-visibility, while the Weapons adapter produces the live projection only for a
-session holding the ship's authored Weapons Station; none resets shared caches.
+visibility. The cache-free Shields adapter reuses the periodic publisher's
+authored-System audience and current payload builder, while the Weapons adapter
+produces the live projection only for a session holding the ship's authored
+Weapons Station; none resets shared caches.
 The client offers **Retry now**, and a
 generation guard ignores callbacks from superseded attempts.
 `reconnect-midgame-sever.spec.js` exercises sever and revive during play.

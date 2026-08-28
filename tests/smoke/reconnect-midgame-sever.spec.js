@@ -216,7 +216,7 @@ test('sever + revive mid-game: seat restored and console reflects current system
   );
 
   // ── Console reflects current system state within one broadcast tick ────
-  // Issue #613's resync_for_token pushes a fresh BlackboardUpdate (among
+  // The registered reconnect runner pushes a fresh BlackboardUpdate (among
   // others) targeted at the reconnecting token immediately after Welcome.
   // Confirm gui/sim-state.js actually applied it — the repair console's
   // per-system hull list must be repopulated (not stuck empty/stale from

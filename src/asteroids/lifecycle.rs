@@ -124,8 +124,8 @@ pub fn check_destroyed_asteroids(
     mut world: ResMut<WorldResource>,
     asteroid_query: Query<(Entity, &Transform, &AsteroidUuid, &EntitySystemHull)>,
     mut outbox: ResMut<SimOutbox>,
-    mut positions_cache: ResMut<crate::core::broadcast::LastBroadcastEntityPositions>,
-    mut health_cache: ResMut<crate::core::broadcast::LastBroadcastEntityHealth>,
+    mut positions_cache: ResMut<crate::server_app::LastBroadcastEntityPositions>,
+    mut health_cache: ResMut<crate::server_app::LastBroadcastEntityHealth>,
 ) {
     for (entity, transform, uuid, hull_comp) in asteroid_query.iter() {
         if !hull_comp.0.is_destroyed() {
@@ -158,7 +158,7 @@ pub fn check_destroyed_asteroids(
         // respawning asteroids get a fresh UUID every cycle, so without this
         // the position/health caches would grow by one stale entry per
         // historical asteroid forever.
-        crate::core::broadcast::cache_registry::prune(
+        crate::server_app::prune_entity_replication_caches(
             &mut positions_cache,
             &mut health_cache,
             std::slice::from_ref(&uuid.0),
@@ -192,8 +192,8 @@ pub fn update_asteroid_window(
     mut world: ResMut<WorldResource>,
     mut entity_map: ResMut<AsteroidEntityMap>,
     mut outbox: ResMut<SimOutbox>,
-    mut positions_cache: ResMut<crate::core::broadcast::LastBroadcastEntityPositions>,
-    mut health_cache: ResMut<crate::core::broadcast::LastBroadcastEntityHealth>,
+    mut positions_cache: ResMut<crate::server_app::LastBroadcastEntityPositions>,
+    mut health_cache: ResMut<crate::server_app::LastBroadcastEntityHealth>,
 ) {
     // Deterministic composition order: Bevy allocates Entity ids in spawn
     // order and world spawning walks the TOML in author order, so sorting by
@@ -347,8 +347,8 @@ fn clear_window_contents(
     window: &mut AsteroidWindow,
     entity_map: &mut AsteroidEntityMap,
     world: &mut ResMut<WorldResource>,
-    positions_cache: &mut crate::core::broadcast::LastBroadcastEntityPositions,
-    health_cache: &mut crate::core::broadcast::LastBroadcastEntityHealth,
+    positions_cache: &mut crate::server_app::LastBroadcastEntityPositions,
+    health_cache: &mut crate::server_app::LastBroadcastEntityHealth,
 ) {
     let owned_uuids: Vec<String> = window
         .slots
@@ -365,7 +365,7 @@ fn clear_window_contents(
     }
     // Prune despawned UUIDs from the delta caches (issue #613) — same
     // rationale as `clear_slot`'s window-eviction prune below.
-    crate::core::broadcast::cache_registry::prune(positions_cache, health_cache, &owned_uuids);
+    crate::server_app::prune_entity_replication_caches(positions_cache, health_cache, &owned_uuids);
 
     for row in window.slots.iter_mut() {
         for slot in row.iter_mut() {
@@ -398,8 +398,8 @@ fn full_rebuild(
     entity_map: &mut AsteroidEntityMap,
     world: &mut ResMut<WorldResource>,
     outbox: &mut ResMut<SimOutbox>,
-    positions_cache: &mut crate::core::broadcast::LastBroadcastEntityPositions,
-    health_cache: &mut crate::core::broadcast::LastBroadcastEntityHealth,
+    positions_cache: &mut crate::server_app::LastBroadcastEntityPositions,
+    health_cache: &mut crate::server_app::LastBroadcastEntityHealth,
     gx: i32,
     gz: i32,
     contributions: &[FieldContribution],
@@ -819,8 +819,8 @@ fn clear_slot(
     commands: &mut Commands,
     entity_map: &mut AsteroidEntityMap,
     world: &mut ResMut<WorldResource>,
-    positions_cache: &mut crate::core::broadcast::LastBroadcastEntityPositions,
-    health_cache: &mut crate::core::broadcast::LastBroadcastEntityHealth,
+    positions_cache: &mut crate::server_app::LastBroadcastEntityPositions,
+    health_cache: &mut crate::server_app::LastBroadcastEntityHealth,
     slot_x: usize,
     slot_z: usize,
 ) {
@@ -835,7 +835,7 @@ fn clear_slot(
             }
             entity_map.0.remove(&data.uuid);
             world.0.entities.retain(|e| e.uuid != data.uuid);
-            crate::core::broadcast::cache_registry::prune(
+            crate::server_app::prune_entity_replication_caches(
                 positions_cache,
                 health_cache,
                 std::slice::from_ref(&data.uuid),
@@ -941,8 +941,6 @@ impl Plugin for AsteroidLifecyclePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AsteroidWindow>()
             .init_resource::<AsteroidEntityMap>()
-            .init_resource::<crate::core::broadcast::LastBroadcastEntityPositions>()
-            .init_resource::<crate::core::broadcast::LastBroadcastEntityHealth>()
             // `FixedUpdate` (issue #895): the window tracks the ship the sim
             // moves, spawns/despawns are sim state, and destroyed-asteroid
             // respawn bookkeeping must count in ticks, not frames.
@@ -1024,8 +1022,8 @@ mod tests {
         app.init_resource::<AsteroidWindow>();
         app.init_resource::<AsteroidEntityMap>();
         app.init_resource::<WorldResource>();
-        app.init_resource::<crate::core::broadcast::LastBroadcastEntityPositions>();
-        app.init_resource::<crate::core::broadcast::LastBroadcastEntityHealth>();
+        app.init_resource::<crate::server_app::LastBroadcastEntityPositions>();
+        app.init_resource::<crate::server_app::LastBroadcastEntityHealth>();
         // Spawn a LocalShip entity with ShipPhysics so update_asteroid_window can query it.
         app.world_mut().spawn((
             crate::server_app::LocalShip,

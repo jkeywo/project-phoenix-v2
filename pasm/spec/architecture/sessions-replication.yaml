@@ -127,8 +127,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/core/broadcast, src/core/broadcast/lifecycle.rs, src/core/broadcast/cache_registry.rs, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/lobby/server.rs, src/server/bridge.rs]
-      symbols: [SimBroadcaster, LobbyBroadcaster, SimOutbox, push_snapshot, push_reliable, Audience, Cadence, reconnect_registered_replication, reset_registered_replication]
+      paths: [src/core/broadcast, src/core/broadcast/lifecycle.rs, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/lobby/server.rs, src/server/bridge.rs]
+      symbols: [SimBroadcaster, LobbyBroadcaster, SimOutbox, push_snapshot, push_reliable, Audience, Cadence, reconnect_registered_replication, reset_registered_replication, resync_registered_replication_for_token]
       tests: [cargo test, tests/smoke/snapshot-channel.spec.js]
 
   - component: replication-lifecycle-registry
@@ -141,19 +141,21 @@ entities:
         - A BTreeMap orders adapters by semantic owner key, so plugin insertion order cannot change the sequence of reconnect snapshots.
         - Adapters may register reset only, reconnect only, or both. This keeps UUID pruning specialized rather than inventing a generic lifecycle operation that unrelated caches do not have.
         - The Blackboard adapter owns LastBroadcastBlackboards and the per-recipient Repair projection cache. Its reconnect projection sorts every current SystemId, applies the same Repair visibility function as the live path, and reads but never mutates either cache.
+        - The entity-state adapter is registered beside sim_state_broadcaster under the stable `entity-state` key. It owns LastBroadcastEntityPositions and LastBroadcastEntityHealth and resets them at a run boundary; it has no reconnect projector because Welcome already carries the current world snapshot. UUID pruning remains an explicit owner operation called only from entity-despawn paths.
         - The Hull adapter is registered by the Repair owner under the stable `hull` key. It owns LastBroadcastHull, reuses HullVisibility for live and reconnect projection, and never mutates the token-keyed live delta cache while reconstructing one session.
+        - The Shields adapter is registered by ShipShieldsPlugin under the stable `shields` key. It owns no cache and reuses the sole live publisher's current ShieldStatus builder and authored HoldingSystem audience, returning a reconnect projection only for that resolved holder.
         - The Weapons adapter is registered by WeaponsPlugin under the stable `weapons` key. It owns LastWeaponsUpdate, resolves the authored Weapons Station and current holder by the same rule as the live HoldingWeapons audience, and rebuilds the live WeaponsUpdate without reading or mutating the shared delta cache.
     architecture:
       kind: replication-registry
       authority: authoritative
-      reads: [session-identity-state, session-station-ownership-state, ship-station-system-topology-state, ship-system-blackboards-state, authoritative-damage-state, repair-team-state, weapons-target-state, phaser-beam-state, blaster-projectile-state, torpedo-state]
+      reads: [session-identity-state, session-station-ownership-state, ship-station-system-topology-state, ship-system-blackboards-state, authoritative-ship-motion-state, authoritative-damage-state, repair-team-state, shield-arc-state, weapons-target-state, phaser-beam-state, blaster-projectile-state, torpedo-state]
       produces: [simulation-state-replica]
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/core/broadcast/lifecycle.rs, src/server_app/broadcast_publish.rs, src/console/repair/visibility.rs, src/console/repair/server.rs, src/console/weapons/blackboard.rs, src/console/weapons/server.rs, src/core/broadcast/cache_registry.rs]
-      symbols: [ReplicationLifecycleRegistry, ReplicationLifecycleAdapter, RegisterReplicationLifecycle, LastBroadcastBlackboards, LastBroadcastHull, LastWeaponsUpdate, register_hull_replication_lifecycle, register_weapons_replication_lifecycle]
-      messages: [BlackboardUpdate, SystemHullUpdate, WeaponsUpdate]
+      paths: [src/core/broadcast/lifecycle.rs, src/server_app/broadcast.rs, src/server_app/broadcast_publish.rs, src/console/repair/visibility.rs, src/console/repair/server.rs, src/ship/shields.rs, src/console/weapons/blackboard.rs, src/console/weapons/server.rs]
+      symbols: [ReplicationLifecycleRegistry, ReplicationLifecycleAdapter, RegisterReplicationLifecycle, LastBroadcastBlackboards, LastBroadcastEntityPositions, LastBroadcastEntityHealth, LastBroadcastHull, LastWeaponsUpdate, register_entity_state_replication_lifecycle, prune_entity_replication_caches, register_hull_replication_lifecycle, register_shields_replication_lifecycle, register_weapons_replication_lifecycle]
+      messages: [BlackboardUpdate, SystemHullUpdate, ShieldStatus, WeaponsUpdate]
       tests: [cargo test]
 
   - state: lobby-session-replica

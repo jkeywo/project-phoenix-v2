@@ -244,6 +244,7 @@ impl Plugin for ShipShieldsPlugin {
             crate::ship::system_registry::SHIELD_ARC_KIND,
             "shield-arc-",
         ));
+        register_shields_replication_lifecycle(app);
         app.add_message::<CoordinationEnqueue>()
             .add_message::<DeliveredCoordination>()
             .init_resource::<ShieldsAiConfigResource>()
@@ -363,21 +364,64 @@ pub fn tick_shields(
 
 // ── Broadcaster ────────────────────────────────────────────────────────────────
 
+/// Stable lifecycle key for the Shields console's current-state projection.
+pub(crate) const SHIELDS_REPLICATION_KEY: &str = "shields";
+
+fn shields_status_audience() -> Audience {
+    Audience::HoldingSystemKind(crate::ship::system_registry::SHIELDS_KIND.into())
+}
+
+fn current_shield_status(world: &mut World) -> Option<crate::core::messages::ServerMessage> {
+    let shields = world
+        .query_filtered::<&ShipShields, With<crate::server_app::LocalShip>>()
+        .single(world)
+        .ok()?;
+    let facings = shield_facing_statuses(&shields.0.snapshot());
+    let frequency = shields.frequency();
+    Some(crate::core::messages::ServerMessage::ShieldStatus { facings, frequency })
+}
+
+fn register_shields_replication_lifecycle(app: &mut App) {
+    use crate::core::broadcast::{RegisterReplicationLifecycle, ReplicationLifecycleAdapter};
+
+    app.register_replication_lifecycle(
+        ReplicationLifecycleAdapter::new(SHIELDS_REPLICATION_KEY)
+            .with_reconnect(reconnect_shields_projection),
+    );
+}
+
+/// Project Shields only when `token` is the holder resolved by the same
+/// authored-System audience as the periodic live broadcaster. No cache exists
+/// or is mutated by this one-shot reconnect projection.
+fn reconnect_shields_projection(
+    world: &mut World,
+    token: &str,
+) -> Vec<crate::core::messages::ServerMessage> {
+    let ship_config = {
+        let mut query =
+            world.query_filtered::<&ShipConfigComponent, With<crate::server_app::LocalShip>>();
+        query.single(world).ok().cloned()
+    };
+    let is_holder = world
+        .get_resource::<crate::lobby::Sessions>()
+        .and_then(|sessions| {
+            shields_status_audience()
+                .resolve(&sessions.0, ship_config.as_ref().map(|config| &config.0))
+        })
+        .is_some_and(|target| target == crate::lobby::Target::Token(token.to_string()));
+
+    if !is_holder {
+        return Vec::new();
+    }
+
+    current_shield_status(world).into_iter().collect()
+}
+
 pub fn shields_state_broadcaster() -> SimBroadcaster {
     SimBroadcaster::new().register(
-        Audience::HoldingSystem(SystemId("shields-system".into())),
+        shields_status_audience(),
         Cadence::Hz(10.0),
-        |world: &mut World| {
-            let Ok(shields) = world
-                .query_filtered::<&ShipShields, With<crate::server_app::LocalShip>>()
-                .single(world)
-            else {
-                return vec![];
-            };
-            let facings = shield_facing_statuses(&shields.0.snapshot());
-            let frequency = shields.frequency();
-            vec![crate::core::messages::ServerMessage::ShieldStatus { facings, frequency }]
-        },
+        |world: &mut World| current_shield_status(world).into_iter().collect(),
     )
 }
 
@@ -598,7 +642,7 @@ pub fn emit_shields_coordination(
 /// The one conversion every broadcaster of a ship's shield facings uses:
 /// this ship's own `ShieldsBlackboard.facings` (below, via
 /// `publish_shields_blackboard`), a reconnecting client's resync
-/// `ShieldStatus` (`core::broadcast::cache_registry::resync_for_token`), the
+/// `ShieldStatus` (`reconnect_shields_projection`), the
 /// `SimState` world snapshot other ships see this ship's facings through
 /// when it is their Sensors target (issue #927,
 /// `server_app::build_sim_state_entity_states`), and the periodic 10 Hz

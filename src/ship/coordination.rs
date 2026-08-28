@@ -71,11 +71,9 @@ pub fn address_for_system_kind(
     config: &crate::ship::config::ShipConfig,
     kind: &str,
 ) -> Option<CoordinationAddress> {
-    let mut systems = config.systems.iter().filter(|system| system.kind == kind);
-    let station = systems.next()?.station.clone()?;
-    systems
-        .all(|system| system.station.as_ref() == Some(&station))
-        .then_some(CoordinationAddress::Station(station))
+    config
+        .station_for_system_kind(kind)
+        .map(CoordinationAddress::Station)
 }
 
 /// Display label for the Station that owns an emitting System, with Core as

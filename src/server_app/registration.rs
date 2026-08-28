@@ -315,16 +315,6 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 StateClass::Timer,
                 "digest-exclusion-classes",
             )
-            // Broadcast caches: one-directional delta-suppression mirrors of
-            // already-authoritative state (`src/core/broadcast/cache_registry.rs`).
-            .declare_state::<LastBroadcastEntityPositions>(
-                StateClass::Cache,
-                "digest-exclusion-classes",
-            )
-            .declare_state::<LastBroadcastEntityHealth>(
-                StateClass::Cache,
-                "digest-exclusion-classes",
-            )
             // Cache of the presentation-only debug flags (issue #940):
             // `report_debug_state` compares against it to skip re-announcing.
             // "debug-overlay-state" is the PASM state entity in
@@ -707,8 +697,6 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         .init_resource::<WorldSetupBroadcast>()
         .init_resource::<TrackedEntities>()
         .init_resource::<SimOutbox>()
-        .init_resource::<LastBroadcastEntityPositions>()
-        .init_resource::<LastBroadcastEntityHealth>()
         .init_resource::<crate::core::messages::InterSystemQueue>()
         // `handle_collisions` (registered below, in SimSet::Damage) writes this,
         // so the simulation owns it. `DebugOverlayPlugin` also init_resource's it
@@ -927,9 +915,10 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             .run_if(in_state(GamePhase::InProgress)),
     );
 
-    // The Blackboard cache owner registers its reset/reconnect adapter beside
-    // the live publisher. The composition root only calls the owner registrar;
-    // neither lifecycle runner learns the cache or payload shape.
+    // Replication owners register their lifecycle adapters beside their live
+    // publishers. The composition root only calls the owner registrars;
+    // neither lifecycle runner learns cache resources or payload shapes.
+    register_entity_state_replication_lifecycle(app);
     register_blackboard_replication_lifecycle(app);
 
     app.add_systems(

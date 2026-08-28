@@ -1215,8 +1215,8 @@ fn registered_weapons_lifecycle_resets_its_cache() {
             .resource::<crate::core::broadcast::ReplicationLifecycleRegistry>()
             .keys()
             .collect::<Vec<_>>(),
-        vec!["weapons"],
-        "WeaponsPlugin must register its lifecycle under the stable owner key"
+        vec!["shields", "weapons"],
+        "the fixture's Shields and Weapons plugins must retain stable owner-key order"
     );
     assert_eq!(
         app.world()
@@ -1269,7 +1269,7 @@ fn registered_weapons_reconnect_targets_owner_with_live_state_without_mutating_c
     };
     *app.world_mut().resource_mut::<LastWeaponsUpdate>() = seeded_cache.clone();
 
-    crate::core::broadcast::cache_registry::resync_for_token(app.world_mut(), "owner");
+    crate::core::broadcast::resync_registered_replication_for_token(app.world_mut(), "owner");
 
     let entries = app.world_mut().resource_mut::<SimOutbox>().drain();
     let weapon_entry = entries
@@ -1295,7 +1295,7 @@ fn registered_weapons_reconnect_omits_non_owner_while_an_owner_exists() {
     register_reconnect_player(&mut app, "owner", Some("tactical"));
     register_reconnect_player(&mut app, "observer", None);
 
-    crate::core::broadcast::cache_registry::resync_for_token(app.world_mut(), "observer");
+    crate::core::broadcast::resync_registered_replication_for_token(app.world_mut(), "observer");
 
     assert!(app
         .world()

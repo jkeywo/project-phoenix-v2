@@ -2,7 +2,7 @@
 title: Broadcaster Seam
 type: concept
 tags: [broadcast, messages, networking, audience, cadence, delivery-class, snapshot, reliable]
-sources: [src/core/broadcast/, src/core/broadcast/cache_registry.rs, src/server_app/components.rs, src/server_app/broadcast.rs, src/server_app/broadcast_publish.rs, src/console/weapons/blackboard.rs, src/console/weapons/server.rs, src/ship/power.rs, src/ship/shields.rs, src/console/repair/server.rs, src/console/repair/visibility.rs, src/lobby/server.rs, src/debug_overlay.rs]
+sources: [src/core/broadcast/, src/server_app/components.rs, src/server_app/broadcast.rs, src/server_app/broadcast_publish.rs, src/console/weapons/blackboard.rs, src/console/weapons/server.rs, src/ship/power.rs, src/ship/shields.rs, src/console/repair/server.rs, src/console/repair/visibility.rs, src/lobby/server.rs, src/debug_overlay.rs]
 updated: 2026-08-28
 ---
 
@@ -22,6 +22,7 @@ messages take the direct `LobbyOutboxPlugin` path described below.
 - `All`, `Token`, and `AllExcept` for direct routing;
 - `Holding(StationId)` for an explicitly addressed station;
 - `HoldingSystem(SystemId)` for the live holder of the station that owns an authored system;
+- `HoldingSystemKind(String)` for a capability whose author-defined instances share one owning station;
 - `HoldingWeapons` for the hull's projected Tactical/weapons audience.
 
 The system-derived variants require the current `ShipConfig`; they do not infer station identity from a matching string.
@@ -36,7 +37,7 @@ The system-derived variants require the current `ShipConfig`; they do not infer 
 | `weapons_update_broadcaster` | Tactical weapons state | weapons holder, 10 Hz | `src/console/weapons/blackboard.rs` |
 | `power_state_broadcaster` | reactor/power state | holder of `power-reactor`, 10 Hz | `src/ship/power.rs` |
 | `repair_state_broadcaster` | repair state | holder of `repair`, 10 Hz | `src/console/repair/server.rs` |
-| `shields_state_broadcaster` | shield facings and frequency | holder of `shields-system`, 10 Hz | `src/ship/shields.rs` |
+| `shields_state_broadcaster` | shield facings and frequency | holder of the authored `shields` System kind, 10 Hz | `src/ship/shields.rs` |
 | `modifier_events_broadcaster` | modifier add/remove edges | all, on event | `src/server_app/broadcast_publish.rs` |
 | `sim_outbox_broadcaster` | arbitrary-target `SimOutbox` entries | target and class already carried by each entry | `src/server_app/broadcast_publish.rs` |
 
@@ -66,20 +67,16 @@ the class at the Rust-to-JavaScript boundary.
 a reconnect projection callback, or both. The registry is a `BTreeMap`, so
 reset and reconnect runners invoke owners in lexical key order regardless of
 plugin insertion order. Reconnect callbacks return current permitted
-`ServerMessage` projections; the central caller targets them only to the
-reconnecting token as Snapshot traffic.
+`ServerMessage` projections; the generic routing seam targets them only to the
+reconnecting token as Snapshot traffic and knows no message variant.
 
-Blackboards, Hull, and Weapons are migrated owners:
+The complete registry has five owners in lexical order:
 
 - `LastBroadcastBlackboards`, its live diff publisher, reset, and reconnect projector live together in `src/server_app/broadcast_publish.rs`. Reset also clears the per-recipient `LastVisibleRepairBlackboard`; reconnect sorts every current Blackboard by `SystemId`, applies the same Repair visibility policy as live publication, and does not mutate either cache.
+- `LastBroadcastEntityPositions` and `LastBroadcastEntityHealth` live beside `sim_state_broadcaster` in `src/server_app/broadcast.rs` under the reset-only `entity-state` key. `Welcome` already carries current world state, so this owner has no reconnect projector. Its explicit UUID-pruning function is called only by asteroid/runtime despawn paths; unrelated caches have no synthetic pruning hook.
 - `RepairPlugin` registers token-keyed `LastBroadcastHull` beside `push_hull_updates` under the stable `hull` key. Reconnect uses the same `HullVisibility` projection as live publication, including on-site detail, without writing the cache or perturbing another recipient's next delta.
+- `ShipShieldsPlugin` registers a cache-free reconnect projector under `shields`. It reuses the periodic publisher's current-message builder and `HoldingSystemKind("shields")` audience, so only the holder of the Station that owns the authored Shields capability receives the snapshot even when a hull chooses another instance id.
 - `WeaponsPlugin` registers `LastWeaponsUpdate` beside `weapons_update_broadcaster` under the stable `weapons` key. Reconnect uses the same authored Weapons Station ownership rule and current message builder as live publication, returns nothing for a non-holder, and does not mutate the delta cache.
-
-`src/core/broadcast/cache_registry.rs` is the transitional census for owners
-not yet migrated. It resets the position and health caches. On reconnect it
-directly reconstructs uncached Shields; position and health travel in
-`Welcome`'s world snapshot. It retains specialized UUID pruning for position
-and health.
 
 ## Adding a producer
 

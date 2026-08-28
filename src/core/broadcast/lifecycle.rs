@@ -172,6 +172,27 @@ pub fn reconnect_registered_replication(world: &mut World, token: &str) -> Vec<S
         .collect()
 }
 
+/// Route every registered reconnect projection to one session as snapshots.
+///
+/// This is the only generic reconnect delivery seam. It knows the target token
+/// and delivery class, but no owner cache types, source components, audience
+/// policies, or `ServerMessage` variants.
+pub fn resync_registered_replication_for_token(world: &mut World, token: &str) {
+    let messages = reconnect_registered_replication(world, token);
+    if messages.is_empty() {
+        return;
+    }
+
+    let target = crate::lobby::Target::Token(token.to_string());
+    world
+        .resource_mut::<crate::server_app::SimOutbox>()
+        .extend_snapshot(
+            messages
+                .into_iter()
+                .map(|message| (target.clone(), message)),
+        );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -460,6 +460,20 @@ impl ShipConfig {
             .filter(move |system| system.station.as_ref() == Some(id))
     }
 
+    /// The single owning Station shared by every authored System of `kind`.
+    ///
+    /// Instance ids are author-defined and therefore cannot stand in for a
+    /// capability kind. A missing kind, an ownerless instance, or instances
+    /// split across Stations is ambiguous and returns `None` rather than
+    /// widening the audience.
+    pub fn station_for_system_kind(&self, kind: &str) -> Option<StationId> {
+        let mut systems = self.systems.iter().filter(|system| system.kind == kind);
+        let station = systems.next()?.station.clone()?;
+        systems
+            .all(|system| system.station.as_ref() == Some(&station))
+            .then_some(station)
+    }
+
     /// The station whose holder is authoritative for this ship's weapons.
     ///
     /// Ship-level Tactical operations (SetTarget / SetPhaserMode /

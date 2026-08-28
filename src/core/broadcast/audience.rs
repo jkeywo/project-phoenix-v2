@@ -12,6 +12,12 @@ pub enum Audience {
     /// ship config, then targets that station's holder.  Falls back to
     /// `None` (skip broadcast) when no config is available.
     HoldingSystem(SystemId),
+    /// Dynamically resolves the single station shared by every authored System
+    /// of the given kind, then targets that station's holder. Instance ids are
+    /// author-defined, so capability-level publishers use this instead of
+    /// freezing one hull's id. Missing, ownerless, or split ownership skips the
+    /// broadcast.
+    HoldingSystemKind(String),
     /// Resolves the station owning this ship's weapons suite from the ship
     /// config, then targets that station's holder. `None` (skip broadcast)
     /// when there's no config, no weapons owner, or the station is unheld.
@@ -27,8 +33,8 @@ pub enum Audience {
 impl Audience {
     /// Resolve this audience to a `Target` given current session state.
     /// Returns `None` when `Holding` names a station with no current holder,
-    /// or when `HoldingSystem` cannot determine the owning station from the
-    /// ship config, signalling the caller to skip this broadcast.
+    /// or when a System-derived audience cannot determine one owning station
+    /// from the ship config, signalling the caller to skip this broadcast.
     pub fn resolve(
         &self,
         sessions: &SessionManager,
@@ -43,6 +49,12 @@ impl Audience {
                 let station_id = ship_config
                     .and_then(|config| config.system(system_id))
                     .and_then(|sys| sys.station.clone())?;
+                sessions
+                    .holder_for_station(&station_id)
+                    .map(|t| Target::Token(t.to_string()))
+            }
+            Audience::HoldingSystemKind(kind) => {
+                let station_id = ship_config?.station_for_system_kind(kind)?;
                 sessions
                     .holder_for_station(&station_id)
                     .map(|t| Target::Token(t.to_string()))
@@ -202,6 +214,15 @@ mod tests {
         assert_eq!(
             Audience::HoldingSystem(SystemId("power-reactor".into()))
                 .resolve(&sm, Some(&ship_config())),
+            Some(Target::Token("tok1".to_string()))
+        );
+    }
+
+    #[test]
+    fn audience_holding_system_kind_uses_authored_kind_not_instance_id() {
+        let sm = sm_with_holder("tok1", StationId("power".into()));
+        assert_eq!(
+            Audience::HoldingSystemKind("power_reactor".into()).resolve(&sm, Some(&ship_config())),
             Some(Target::Token("tok1".to_string()))
         );
     }

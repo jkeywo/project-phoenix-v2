@@ -18,8 +18,7 @@
 //! Load-bearing invariant: anything collected from a `HashMap` before it
 //! reaches the wire is sorted (blackboard updates, spawned ids, boost pairs)
 //! so two seeded runs emit byte-identical broadcasts; the delta caches are
-//! digest exclusions (`cache_registry`), so the suppression logic here never
-//! feeds the digest.
+//! digest exclusions, so the suppression logic here never feeds the digest.
 
 use super::*;
 
@@ -484,11 +483,10 @@ pub(crate) fn on_game_over_enter(
 /// multi-game restart case where stale cache from a previous game would
 /// otherwise suppress initial updates.
 ///
-/// The transitional cache census resets its remaining owners first; the
-/// stable-keyed lifecycle runner then invokes the migrated Blackboard, Hull,
-/// and Weapons owners without knowing their resource types.
+/// The stable-keyed lifecycle runner invokes every owner without knowing its
+/// resource types. Owners with no delta cache (such as Shields) simply do not
+/// register a reset hook.
 pub(crate) fn reset_broadcast_caches_on_start(world: &mut World) {
-    crate::core::broadcast::cache_registry::reset_unregistered(world);
     crate::core::broadcast::reset_registered_replication(world);
 }
 
@@ -612,7 +610,8 @@ pub fn broadcast_blackboard_updates(
 /// `handle_identify_system` (in `LobbySystemSet`) queues a `Welcome { .. }` into
 /// `LobbyOutbox` targeted at that player's
 /// token. Detect this and push a full-state resync to *just that token* via
-/// [`crate::core::broadcast::cache_registry::resync_for_token`] (issue #613).
+/// [`crate::core::broadcast::resync_registered_replication_for_token`]
+/// (issue #613).
 ///
 /// This replaces the #599 quick fix, which reset every then-registered shared
 /// broadcast delta cache — correct for the reconnecting player, but it also
@@ -637,7 +636,7 @@ pub(crate) fn refresh_caches_on_midgame_reconnect(world: &mut World) {
             .collect()
     };
     for token in reconnecting_tokens {
-        crate::core::broadcast::cache_registry::resync_for_token(world, &token);
+        crate::core::broadcast::resync_registered_replication_for_token(world, &token);
     }
 }
 
@@ -978,7 +977,7 @@ pub(crate) fn reconcile_runtime_entities(
             // Prune the despawned UUID from the delta caches (issue #613) —
             // runtime-spawned entities (e.g. scenario-triggered NPCs) can
             // despawn and respawn with fresh UUIDs just like asteroids.
-            crate::core::broadcast::cache_registry::prune(
+            prune_entity_replication_caches(
                 &mut positions_cache,
                 &mut health_cache,
                 std::slice::from_ref(uuid),

@@ -34,6 +34,43 @@ fn collect_coord(
 }
 
 #[test]
+fn damage_history_prunes_with_the_shared_strict_tick_window() {
+    let mut history = ShieldsDamageHistory {
+        arcs: vec![vec![
+            DamageRecord {
+                recorded_tick: 6,
+                amount: 40,
+            },
+            DamageRecord {
+                recorded_tick: 7,
+                amount: 30,
+            },
+            DamageRecord {
+                recorded_tick: 10,
+                amount: 20,
+            },
+            DamageRecord {
+                recorded_tick: 11,
+                amount: 10,
+            },
+        ]],
+        last_hp: vec![100],
+    };
+
+    history.prune_old(10, 4);
+
+    assert_eq!(
+        history.arcs[0]
+            .iter()
+            .map(|record| record.recorded_tick)
+            .collect::<Vec<_>>(),
+        vec![7, 10],
+        "age 3 and age 0 remain; age == window and future stamps are removed"
+    );
+    assert!(!damage_record_is_recent(10, 10, 0));
+}
+
+#[test]
 fn generic_coordination_router_does_not_name_shields_pending_state() {
     let router = include_str!("coordination_systems.rs");
     assert!(

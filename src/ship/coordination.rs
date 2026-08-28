@@ -505,16 +505,32 @@ pub struct QueuedCoordination {
     pub presentation: crate::core::messages::CoordinationPresentation,
     /// Human-readable label for the sender (e.g. "AI Tactical", "Captain").
     pub sender_label: String,
-    /// Simulation time (seconds) at which this message is due for delivery.
-    pub due_time: f32,
+    /// Logical simulation tick at which this message is due for delivery.
+    pub due_tick: u64,
 }
 
 /// Lag scheduler for channel-3 coordination messages.
 ///
-/// Every coordination message is queued with `due_time = sent_at + lag_secs`.
-/// At delivery time the target's live control source is resolved by the caller.
+/// Every coordination message converts its authored seconds to logical ticks
+/// once, at enqueue. At delivery time the target's live control source is
+/// resolved by the caller.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CoordinationLagQueue(Vec<QueuedCoordination>);
+
+/// Convert an authored Coordination delay to whole logical simulation ticks.
+///
+/// Multiplication intentionally stays in `f32`: both inputs are authored/stored
+/// as `f32`, and widening `0.6_f32` before multiplying by 60 turns its exact
+/// intended 36 ticks into `36.000001...` and therefore 37 after `ceil`. World
+/// and Ship config validation keep the production inputs finite and
+/// non-negative; the guards retain deterministic no-delay behaviour in small
+/// pure fixtures that call this helper directly.
+pub fn coordination_lag_ticks(lag_secs: f32, sim_tick_hz: f32) -> u64 {
+    if !lag_secs.is_finite() || lag_secs <= 0.0 || !sim_tick_hz.is_finite() || sim_tick_hz <= 0.0 {
+        return 0;
+    }
+    (lag_secs * sim_tick_hz).ceil() as u64
+}
 
 impl CoordinationLagQueue {
     pub fn new() -> Self {
@@ -529,17 +545,29 @@ impl CoordinationLagQueue {
         self.0.len()
     }
 
+    /// Pending messages in enqueue order, for authoritative snapshot
+    /// projection. The queue's runtime representation stays private; callers
+    /// can observe the values but cannot reorder them in place.
+    pub(crate) fn pending(&self) -> &[QueuedCoordination] {
+        &self.0
+    }
+
+    /// Replace bootstrap state with a restored enqueue-ordered queue.
+    pub(crate) fn replace(&mut self, pending: Vec<QueuedCoordination>) {
+        self.0 = pending;
+    }
+
     /// Enqueue a coordination message with its due time already computed.
     pub fn enqueue(&mut self, msg: QueuedCoordination) {
         self.0.push(msg);
     }
 
-    /// Drain all messages whose due_time has passed, returning them in
-    /// enqueue order. `now` is the current simulation time in seconds.
-    pub fn due_messages(&mut self, now: f32) -> Vec<QueuedCoordination> {
+    /// Drain all messages whose due tick has passed, returning them in enqueue
+    /// order. Equal-tick entries retain their original FIFO order.
+    pub fn due_messages(&mut self, now_tick: u64) -> Vec<QueuedCoordination> {
         let mut due = Vec::new();
         self.0.retain(|msg| {
-            if msg.due_time <= now {
+            if msg.due_tick <= now_tick {
                 due.push(msg.clone());
                 false
             } else {

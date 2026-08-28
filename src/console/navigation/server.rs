@@ -347,6 +347,37 @@ impl NavigationWaypoint {
             }),
         }
     }
+
+    /// Replace the exact continuation carried by a world snapshot.
+    ///
+    /// This deliberately bypasses [`set`](Self::set): replaying the public
+    /// mutation path would bump `generation` and turn a restore into a new
+    /// waypoint command rather than reinstating the captured command frontier.
+    pub(crate) fn replace_continuation(
+        &mut self,
+        mode: Option<WaypointMode>,
+        generation: u64,
+    ) {
+        self.mode = mode;
+        self.generation = generation;
+    }
+}
+
+impl NavClearanceIssueState {
+    /// Scalar continuation read by the snapshot boundary.
+    pub(crate) fn continuation(&self) -> (Option<u64>, bool) {
+        (self.issued_generation, self.helm_axes_were_ai)
+    }
+
+    /// Replace the issuer's exact debounce/edge frontier on restore.
+    pub(crate) fn replace_continuation(
+        &mut self,
+        issued_generation: Option<u64>,
+        helm_axes_were_ai: bool,
+    ) {
+        self.issued_generation = issued_generation;
+        self.helm_axes_were_ai = helm_axes_were_ai;
+    }
 }
 
 fn handle_navigation_waypoint(

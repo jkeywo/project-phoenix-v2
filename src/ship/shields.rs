@@ -76,19 +76,35 @@ impl ShipShields {
 // ── Resources ──────────────────────────────────────────────────────────────────
 
 /// A single damage event recorded for the shields AI damage-tracking window.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DamageRecord {
-    /// Absolute time (seconds) at which damage was recorded.
-    pub timestamp: f32,
+    /// Absolute logical simulation tick on which damage was recorded.
+    pub recorded_tick: u64,
     /// Amount of HP lost in this damage event.
     pub amount: i32,
+}
+
+/// Whether a damage record belongs to the current tick-native history window.
+///
+/// The end boundary is deliberately strict: a record remains recent while
+/// `age < window_ticks` and expires exactly when its age reaches the authored
+/// window. A future-stamped record is never recent; treating subtraction as
+/// saturating would otherwise make malformed continuation state look new.
+pub(crate) fn damage_record_is_recent(
+    recorded_tick: u64,
+    current_tick: u64,
+    window_ticks: u64,
+) -> bool {
+    current_tick
+        .checked_sub(recorded_tick)
+        .is_some_and(|age| age < window_ticks)
 }
 
 /// Per-arc damage history for the shields AI controller.
 ///
 /// Indexed by facing index (`Vec<Vec<DamageRecord>>`). Each record is
-/// stamped with an absolute time and pruned when older than
-/// `ShieldsAiConfigResource::damage_window_secs`.
+/// stamped with the authoritative [`crate::sim_tick::SimTick`] and pruned once
+/// its tick age reaches the configured history window.
 ///
 /// Per-ship `Component` so each ship (player + NPC) maintains independent
 /// tracking. Initialised lazily to match the ship's actual arc count.
@@ -135,16 +151,20 @@ impl ShieldsDamageHistory {
         }
     }
 
-    pub(crate) fn record_damage(&mut self, facing_idx: usize, timestamp: f32, amount: i32) {
+    pub(crate) fn record_damage(&mut self, facing_idx: usize, recorded_tick: u64, amount: i32) {
         if facing_idx < self.arcs.len() {
-            self.arcs[facing_idx].push(DamageRecord { timestamp, amount });
+            self.arcs[facing_idx].push(DamageRecord {
+                recorded_tick,
+                amount,
+            });
         }
     }
 
-    pub(crate) fn prune_old(&mut self, current_time: f32, window_secs: f32) {
-        let cutoff = current_time - window_secs;
+    pub(crate) fn prune_old(&mut self, current_tick: u64, window_ticks: u64) {
         for arc in &mut self.arcs {
-            arc.retain(|r| r.timestamp > cutoff);
+            arc.retain(|record| {
+                damage_record_is_recent(record.recorded_tick, current_tick, window_ticks)
+            });
         }
     }
 }
@@ -222,6 +242,21 @@ pub struct ShieldsCoordinationState {
 }
 
 impl ShieldsCoordinationState {
+    /// Read the authoritative advisory debounce for continuation projection.
+    pub(crate) fn continuation(&self) -> (&[bool], &[bool]) {
+        (&self.down_notified, &self.restore_notified)
+    }
+
+    /// Replace bootstrap debounce state with a restored continuation.
+    pub(crate) fn replace_continuation(
+        &mut self,
+        down_notified: Vec<bool>,
+        restore_notified: Vec<bool>,
+    ) {
+        self.down_notified = down_notified;
+        self.restore_notified = restore_notified;
+    }
+
     fn ensure_len(&mut self, n: usize) {
         if self.down_notified.len() < n {
             self.down_notified.resize(n, false);

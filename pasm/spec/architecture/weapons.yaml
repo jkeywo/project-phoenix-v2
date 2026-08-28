@@ -141,6 +141,42 @@ entities:
       symbols: [tick_blaster_auto_fire, handle_fire_blaster, BlasterBankAiPolicies, seed_blaster_bank_facts]
       tests: [cargo test]
 
+  - component: npc-phaser-frequency-match-ai
+    core:
+      status: implemented
+      confidence: confirmed
+      title: NPC Phaser Frequency Match AI
+      summary: Per-high-fidelity-NPC delayed matcher that follows the frozen Combat Lock and, after the fixed authored reaction delay, sets the ship-wide phaser frequency to the target's current shield frequency.
+      rationale:
+        - "The delay continuation is a world resource keyed by process-local Entity handles. Snapshot format 14 projects those keys through EntityUuid, stores current_target / elapsed_secs / match_sent, and wholesale-replaces the fresh bootstrap map on restore; a present empty map is authoritative and clears bootstrap timers."
+    architecture:
+      kind: ai-controller
+      authority: authoritative
+      owns: [npc-frequency-match-state]
+      reads: [viewscreen-target-facts-state, shield-arc-state, system-control-source-state]
+      writes: [ship-phaser-frequency-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/weapons/server.rs, src/console_ai/core.rs, src/snapshot.rs, tests/snapshot_resume.rs]
+      symbols: [tick_npc_auto_match_frequency, NpcFrequencyMatchStates, FrequencyMatchState, NpcFrequencyMatchStatesState]
+      tests: [cargo test]
+
+  - state: npc-frequency-match-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: NPC Frequency Match State
+      summary: "Complete per-NPC delayed-match continuation: locked target UUID, accumulated seconds and already-matched latch, keyed at runtime by the ship Entity."
+    architecture:
+      classification: authoritative
+      owner: npc-phaser-frequency-match-ai
+      writers: [npc-phaser-frequency-match-ai]
+    implementation:
+      status: declared
+      paths: [src/console/weapons/server.rs, src/console_ai/core.rs, src/snapshot.rs, tests/snapshot_resume.rs]
+      symbols: [NpcFrequencyMatchStates, FrequencyMatchState, NpcFrequencyMatchState, NpcFrequencyMatchStatesState]
+
   - component: tactical-weapons-controls
     core:
       status: implemented
@@ -156,7 +192,7 @@ entities:
     architecture:
       kind: control-interface
       authority: authoritative
-      owns: [weapons-target-state]
+      owns: [weapons-target-state, ship-phaser-frequency-state, tactical-frequency-hint-inbox-state]
       produces: [weapons-target-state]
       runs_in: [host-browser-runtime]
     implementation:
@@ -188,6 +224,36 @@ entities:
       paths: [src/console/weapons/beam.rs]
       symbols: [TacticalRadarSelection]
       tests: [cargo test]
+
+  - state: ship-phaser-frequency-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Ship Phaser Frequency State
+      summary: Authoritative ship-wide phaser emitter frequency shared by every bank. Snapshot format 14 carries a present component as Some(ShipPhaserFrequencyState), including its default, and replaces the bootstrap value on restore.
+    architecture:
+      classification: authoritative
+      owner: tactical-weapons-controls
+      writers: [tactical-weapons-controls, npc-phaser-frequency-match-ai]
+    implementation:
+      status: declared
+      paths: [src/ship/state.rs, src/console/weapons/server.rs, src/console/weapons/beam.rs, src/snapshot.rs, tests/snapshot_resume.rs]
+      symbols: [ShipPhaserFrequency, ShipPhaserFrequencyState]
+
+  - state: tactical-frequency-hint-inbox-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Tactical Frequency Hint Inbox State
+      summary: Authoritative one-tick Tactical inbox holding a delivered Sensors frequency hint until the next Input application. Snapshot format 14 preserves component presence separately from the optional pending value and replaces bootstrap state even for an empty inbox.
+    architecture:
+      classification: authoritative
+      owner: tactical-weapons-controls
+      writers: [tactical-weapons-controls]
+    implementation:
+      status: declared
+      paths: [src/ship/components.rs, src/console/weapons/server.rs, src/snapshot.rs, tests/snapshot_resume.rs]
+      symbols: [PendingTacticalFrequencyHint, TacticalFrequencyHintInboxState, receive_tactical_coordination, apply_tactical_frequency_hint]
 
   - component: phaser-beam-system
     core:

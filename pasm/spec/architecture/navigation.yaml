@@ -12,9 +12,9 @@ entities:
     architecture:
       kind: control-handler
       authority: authoritative
-      owns: [navigation-waypoint-state]
+      owns: [navigation-waypoint-state, navigation-clearance-issue-state]
       reads: [system-control-source-state]
-      writes: [navigation-waypoint-state]
+      writes: [navigation-waypoint-state, navigation-clearance-issue-state]
       consumes: [system-control-command]
       coordinates: [coordination-lag-router]
       runs_in: [host-browser-runtime]
@@ -29,7 +29,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Navigation Waypoint State
-      summary: "Per-ship current waypoint: a fixed X/Z position or an entity UUID whose live position is followed until that entity despawns."
+      summary: "Per-ship current waypoint: a fixed X/Z position or an entity UUID whose live position is followed until that entity despawns. Snapshot format 14 carries the stable UUID/scalar projection and exact monotonic generation, including a present default component."
     architecture:
       classification: authoritative
       owner: navigation-waypoint-controller
@@ -42,6 +42,22 @@ entities:
       status: declared
       paths: [src/console/navigation/mod.rs, src/core/messages.rs]
       symbols: [NavigationWaypoint, WaypointMode]
+
+  - state: navigation-clearance-issue-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Navigation Clearance Issue State
+      summary: Exactly-once issuer memory for the last enqueued waypoint generation plus the prior Helm-axis AI-control edge. Snapshot format 14 replaces both scalars, including a present default component.
+    architecture:
+      classification: authoritative
+      owner: navigation-waypoint-controller
+      writers: [navigation-waypoint-controller]
+      derived_from: [navigation-waypoint-state, system-control-source-state]
+    implementation:
+      status: declared
+      paths: [src/console/navigation/server.rs, src/snapshot.rs]
+      symbols: [NavClearanceIssueState, NavigationClearanceIssueState]
 
   - component: navigation-anchor-refresher
     core:
@@ -135,8 +151,9 @@ entities:
     architecture:
       kind: ai-input-adapter
       authority: authoritative
+      owns: [helm-waypoint-clearance-state]
       reads: [navigation-waypoint-state, system-control-source-state, coordination-delivery-state]
-      writes: [desired-motion-state]
+      writes: [helm-waypoint-clearance-state, desired-motion-state]
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
@@ -148,6 +165,22 @@ entities:
         - helm_ai_decision
         - helm_motion_planner
       tests: [cargo test]
+
+  - state: helm-waypoint-clearance-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Helm Waypoint Clearance State
+      summary: Last Navigation waypoint generation delivered to and accepted by AI Helm. Snapshot format 14 replaces the optional generation, including a present empty latch.
+    architecture:
+      classification: authoritative
+      owner: helm-shared-waypoint-consumer
+      writers: [helm-shared-waypoint-consumer]
+      derived_from: [coordination-delivery-state]
+    implementation:
+      status: declared
+      paths: [src/console/helm/server.rs, src/ship/components.rs, src/snapshot.rs]
+      symbols: [HelmWaypointClearance, HelmWaypointClearanceState]
 
   - component: civilian-traffic-adapter
     core:

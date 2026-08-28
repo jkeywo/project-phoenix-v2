@@ -20,6 +20,14 @@ fn collect_coord(mut reader: MessageReader<CoordinationEnqueue>, mut box_: ResMu
     }
 }
 
+/// `ai_shield_focus` normally reads the 0-based tick being executed in
+/// `FixedUpdate`. These focused fixtures deliberately host the production
+/// system in `Update`, so advance the explicit authoritative counter only after
+/// every Update-based decision has observed it.
+fn advance_shield_fixture_tick(mut sim_tick: ResMut<crate::sim_tick::SimTick>) {
+    sim_tick.0 += 1;
+}
+
 /// Registers `ai_shield_focus` (decide + admitted emit) chained before
 /// the shields module's `handle_shields_messages` (the single applier for
 /// human and AI commands, issue #826) — the production pipeline minus
@@ -36,11 +44,15 @@ fn shield_test_app() -> App {
     let mut ship_config = ShipConfigComponent::default();
     crate::ship::test_support::add_default_shield_arc_systems(&mut ship_config.0);
     let control_sources = ai_shield_control_sources(&ship_config.0);
+    let mut world_config = crate::world::config::WorldConfig::default();
+    world_config.global.sim_tick_hz = 60.0;
     crate::ai::host::register_ai_host_env(&mut app);
     app.add_plugins(bevy::time::TimePlugin)
         .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             std::time::Duration::from_millis(100),
         ))
+        .insert_resource(crate::sim_tick::SimTick::default())
+        .insert_resource(world_config)
         .init_resource::<crate::ai::server::WorldSnapshot>()
         .init_resource::<ShieldsAiConfigResource>()
         .init_resource::<CoordBox>()
@@ -58,7 +70,8 @@ fn shield_test_app() -> App {
                     .after(crate::ship::shields::handle_shields_messages),
             ),
         )
-        .add_systems(PostUpdate, collect_coord);
+        .add_systems(PostUpdate, collect_coord)
+        .add_systems(Last, advance_shield_fixture_tick);
 
     app.world_mut().spawn((
         crate::server_app::Ship,
@@ -73,6 +86,26 @@ fn shield_test_app() -> App {
     ));
 
     app
+}
+
+#[test]
+fn authored_shield_windows_convert_to_expected_whole_ticks() {
+    assert_eq!(shield_window_ticks(0.0, 60.0), 0);
+    assert_eq!(
+        shield_window_ticks(0.001, 60.0),
+        1,
+        "a positive sub-tick window includes the current tick"
+    );
+    assert_eq!(
+        shield_window_ticks(0.6, 60.0),
+        36,
+        "f32-authored 0.6 seconds must not widen into a spurious 37th tick"
+    );
+    assert_eq!(
+        shield_window_ticks(0.61, 60.0),
+        37,
+        "a fractional final tick rounds up instead of shortening the window"
+    );
 }
 
 /// Mimics `AdmissionPlugin`'s per-tick clear of every ship's
@@ -516,6 +549,14 @@ fn ai_shield_focus_accumulates_repeated_hits_on_one_arc_across_ticks() {
         2,
         "both hits on arc 1 must accumulate as separate records in the window"
     );
+    assert_eq!(
+        history.arcs[1]
+            .iter()
+            .map(|record| record.recorded_tick)
+            .collect::<Vec<_>>(),
+        vec![1, 2],
+        "the two records must carry the authoritative logical ticks they landed on"
+    );
     let arc1_total: i32 = history.arcs[1].iter().map(|r| r.amount).sum();
     assert_eq!(
         arc1_total, 6,
@@ -552,10 +593,18 @@ fn ai_shield_focus_reverts_when_concentrated_damage_expires() {
         "the concentrated hit should focus arc 1"
     );
 
-    // Advance ~5s of ManualDuration(100ms) ticks with no further hits. The
-    // record at ~t=0.2 ages past the 4s window and prunes; the focus must
-    // revert to None once concentration is gone and health is balanced.
-    for _ in 0..50 {
+    // Advance exactly the authored four-second window at the authoritative
+    // 60 Hz tick rate. The hit was recorded at tick 1; on the last pass below
+    // current_tick is 241, age is exactly 240, and strict `age < window`
+    // expires it. The focus must then revert with balanced health.
+    let window_ticks = shield_window_ticks(
+        ShieldsAiConfigResource::default().damage_window_secs,
+        app.world()
+            .resource::<crate::world::config::WorldConfig>()
+            .global
+            .sim_tick_hz,
+    );
+    for _ in 0..window_ticks {
         app.update();
     }
 

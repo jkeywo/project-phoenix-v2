@@ -169,6 +169,23 @@ pub struct PowerBrownoutState {
     pub locked_changed: bool,
 }
 
+impl PowerBrownoutState {
+    /// Read the authoritative advisory debounce for continuation projection.
+    pub(crate) fn continuation(&self) -> (&std::collections::HashSet<String>, bool) {
+        (&self.notified_groups, self.locked_changed)
+    }
+
+    /// Replace bootstrap debounce state with a restored continuation.
+    pub(crate) fn replace_continuation(
+        &mut self,
+        notified_groups: std::collections::HashSet<String>,
+        locked_changed: bool,
+    ) {
+        self.notified_groups = notified_groups;
+        self.locked_changed = locked_changed;
+    }
+}
+
 /// Maps a canonical power group id string to the `strings.csv` id for its
 /// display label. Anything unknown falls back to `power.group.unknown`.
 ///

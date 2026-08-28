@@ -241,6 +241,289 @@ fn shield_charge_by_uuid(
         .collect()
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct ShieldAiContinuation {
+    damage_by_arc: Vec<Vec<(u64, i32)>>,
+    last_hp: Vec<i32>,
+    pending_threat_bearing_rad: Option<f32>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct SensorsThreatContinuation {
+    last_threat_uuid: Option<String>,
+    last_bearing_rad: Option<f32>,
+    last_label: Option<String>,
+    last_distance: Option<f32>,
+}
+
+/// Read Shields AI continuation state in the same scalar, tick-native shape as
+/// the snapshot projection without reading it through serde.
+fn shield_ai_by_uuid(
+    world: &mut bevy::prelude::World,
+) -> std::collections::BTreeMap<String, ShieldAiContinuation> {
+    use project_phoenix::entities::spawner::EntityUuid;
+    use project_phoenix::ship::shields::{PendingShieldsThreatBearing, ShieldsDamageHistory};
+
+    let mut query = world.query::<(
+        &EntityUuid,
+        &ShieldsDamageHistory,
+        &PendingShieldsThreatBearing,
+    )>();
+    query
+        .iter(world)
+        .map(|(uuid, history, pending)| {
+            (
+                uuid.0.clone(),
+                ShieldAiContinuation {
+                    damage_by_arc: history
+                        .arcs
+                        .iter()
+                        .map(|records| {
+                            records
+                                .iter()
+                                .map(|record| (record.recorded_tick, record.amount))
+                                .collect()
+                        })
+                        .collect(),
+                    last_hp: history.last_hp.clone(),
+                    pending_threat_bearing_rad: pending.0,
+                },
+            )
+        })
+        .collect()
+}
+
+/// Damage records carry authoritative logical ticks, so their continuation is
+/// exact rather than an elapsed-time projection with tolerance.
+fn assert_shield_ai_matches(
+    actual: &std::collections::BTreeMap<String, ShieldAiContinuation>,
+    expected: &std::collections::BTreeMap<String, ShieldAiContinuation>,
+    context: &str,
+) {
+    assert_eq!(
+        actual.keys().collect::<Vec<_>>(),
+        expected.keys().collect::<Vec<_>>(),
+        "{context}: ship rows"
+    );
+    for (uuid, actual) in actual {
+        let expected = &expected[uuid];
+        assert_eq!(
+            actual.last_hp, expected.last_hp,
+            "{context}: {uuid} last HP"
+        );
+        assert_eq!(
+            actual.pending_threat_bearing_rad, expected.pending_threat_bearing_rad,
+            "{context}: {uuid} pending bearing"
+        );
+        assert_eq!(
+            actual.damage_by_arc.len(),
+            expected.damage_by_arc.len(),
+            "{context}: {uuid} arc rows"
+        );
+        for (arc, (actual_records, expected_records)) in actual
+            .damage_by_arc
+            .iter()
+            .zip(&expected.damage_by_arc)
+            .enumerate()
+        {
+            assert_eq!(
+                actual_records, expected_records,
+                "{context}: {uuid} arc {arc} records"
+            );
+        }
+    }
+}
+
+fn sensors_threat_by_uuid(
+    world: &mut bevy::prelude::World,
+) -> std::collections::BTreeMap<String, SensorsThreatContinuation> {
+    use project_phoenix::entities::spawner::EntityUuid;
+    use project_phoenix::ship::sensors::SensorsThreatState;
+
+    let mut query = world.query::<(&EntityUuid, &SensorsThreatState)>();
+    query
+        .iter(world)
+        .map(|(uuid, state)| {
+            (
+                uuid.0.clone(),
+                SensorsThreatContinuation {
+                    last_threat_uuid: state.last_threat_uuid.clone(),
+                    last_bearing_rad: state.last_bearing_rad,
+                    last_label: state.last_label.clone(),
+                    last_distance: state.last_distance,
+                },
+            )
+        })
+        .collect()
+}
+
+fn assert_coordination_queues_match(
+    actual: &PhoenixSnapshot,
+    expected: &PhoenixSnapshot,
+    context: &str,
+) {
+    let actual: std::collections::BTreeMap<_, _> = actual
+        .entities
+        .iter()
+        .filter_map(|entity| {
+            entity
+                .coordination_queue
+                .as_ref()
+                .map(|queue| (entity.uuid.as_str(), queue))
+        })
+        .collect();
+    let expected: std::collections::BTreeMap<_, _> = expected
+        .entities
+        .iter()
+        .filter_map(|entity| {
+            entity
+                .coordination_queue
+                .as_ref()
+                .map(|queue| (entity.uuid.as_str(), queue))
+        })
+        .collect();
+    assert_eq!(
+        actual.keys().collect::<Vec<_>>(),
+        expected.keys().collect::<Vec<_>>(),
+        "{context}: ship rows"
+    );
+    for (uuid, actual) in actual {
+        let expected = expected[uuid];
+        assert_eq!(
+            actual.pending.len(),
+            expected.pending.len(),
+            "{context}: {uuid} queue length; actual={:?}; expected={:?}",
+            actual.pending,
+            expected.pending,
+        );
+        for (index, (actual, expected)) in actual.pending.iter().zip(&expected.pending).enumerate()
+        {
+            assert_eq!(
+                actual.sender_origin, expected.sender_origin,
+                "{context}: {uuid} entry {index} sender origin"
+            );
+            assert_eq!(
+                actual.address, expected.address,
+                "{context}: {uuid} entry {index} address"
+            );
+            assert_eq!(
+                actual.payload, expected.payload,
+                "{context}: {uuid} entry {index} payload"
+            );
+            assert_eq!(
+                actual.presentation, expected.presentation,
+                "{context}: {uuid} entry {index} presentation"
+            );
+            assert_eq!(
+                actual.sender_label, expected.sender_label,
+                "{context}: {uuid} entry {index} sender label"
+            );
+            assert_eq!(
+                actual.due_after_fixed_ticks, expected.due_after_fixed_ticks,
+                "{context}: {uuid} entry {index} first due fixed step; payload={:?}",
+                actual.payload
+            );
+        }
+    }
+}
+
+fn assert_selected_continuation_memories_match(
+    actual: &PhoenixSnapshot,
+    expected: &PhoenixSnapshot,
+    context: &str,
+) {
+    assert_eq!(
+        actual.npc_frequency_matches, expected.npc_frequency_matches,
+        "{context}: NPC frequency-match timers"
+    );
+    let actual: std::collections::BTreeMap<_, _> = actual
+        .entities
+        .iter()
+        .map(|entity| (entity.uuid.as_str(), entity))
+        .collect();
+    let expected: std::collections::BTreeMap<_, _> = expected
+        .entities
+        .iter()
+        .map(|entity| (entity.uuid.as_str(), entity))
+        .collect();
+    assert_eq!(
+        actual.keys().collect::<Vec<_>>(),
+        expected.keys().collect::<Vec<_>>(),
+        "{context}: entity rows"
+    );
+    for (uuid, actual) in actual {
+        let expected = expected[uuid];
+        assert_eq!(
+            actual.intent_narration, expected.intent_narration,
+            "{context}: {uuid} intent narration"
+        );
+        assert_eq!(
+            actual.frequency_hint, expected.frequency_hint,
+            "{context}: {uuid} frequency hint"
+        );
+        assert_eq!(
+            actual.phaser_frequency, expected.phaser_frequency,
+            "{context}: {uuid} phaser frequency"
+        );
+        assert_eq!(
+            actual.tactical_frequency_hint, expected.tactical_frequency_hint,
+            "{context}: {uuid} Tactical frequency-hint inbox"
+        );
+        assert_eq!(
+            actual.last_system_tiers, expected.last_system_tiers,
+            "{context}: {uuid} damage-tier baselines"
+        );
+        assert_eq!(
+            actual.power_brownout, expected.power_brownout,
+            "{context}: {uuid} power brownout"
+        );
+        assert_eq!(
+            actual.shields_coordination, expected.shields_coordination,
+            "{context}: {uuid} Shields notification debounce"
+        );
+        match (&actual.recent_combat, &expected.recent_combat) {
+            (None, None) => {}
+            (Some(actual), Some(expected)) => {
+                assert_eq!(
+                    actual.prev_hull, expected.prev_hull,
+                    "{context}: {uuid} previous hull"
+                );
+                for (name, actual, expected) in [
+                    (
+                        "damage",
+                        actual.last_damage_taken_age_secs,
+                        expected.last_damage_taken_age_secs,
+                    ),
+                    (
+                        "hostile fire",
+                        actual.last_hostile_fire_taken_age_secs,
+                        expected.last_hostile_fire_taken_age_secs,
+                    ),
+                    (
+                        "weapon fire",
+                        actual.last_weapon_fired_age_secs,
+                        expected.last_weapon_fired_age_secs,
+                    ),
+                ] {
+                    match (actual, expected) {
+                        (None, None) => {}
+                        (Some(actual), Some(expected)) => assert!(
+                            (actual - expected).abs() <= 1.0e-5,
+                            "{context}: {uuid} {name} age {actual} != {expected}"
+                        ),
+                        _ => panic!(
+                            "{context}: {uuid} {name} age presence {actual:?} != {expected:?}"
+                        ),
+                    }
+                }
+            }
+            (actual, expected) => {
+                panic!("{context}: {uuid} recent-combat presence {actual:?} != {expected:?}")
+            }
+        }
+    }
+}
+
 /// Bring a fresh app up to the point where the scenario's world exists.
 ///
 /// A fresh app has no ships at tick 0 — the lobby's collective auto-start has
@@ -923,6 +1206,1214 @@ fn the_resumed_ship_keeps_its_weapon_and_repair_state() {
     }
 }
 
+/// The selected producer memories are authoritative by COMPONENT PRESENCE, not
+/// by whether their current value is interesting. A default component therefore
+/// travels as `Some(default)` and replaces the fresh bootstrap just as a live
+/// debounce frontier does.
+#[test]
+fn continuation_memories_replace_bootstrap_even_when_the_capture_is_default() {
+    use project_phoenix::console::weapons::NpcFrequencyMatchStates;
+    use project_phoenix::console_ai::{server::ShipFrequencyHintState, FrequencyMatchState};
+    use project_phoenix::entities::spawner::EntityUuid;
+    use project_phoenix::ship::combat_activity::RecentCombatActivity;
+    use project_phoenix::ship::components::{LastSystemTiers, PendingTacticalFrequencyHint};
+    use project_phoenix::ship::intent_narration_systems::ShipIntentNarration;
+    use project_phoenix::ship::power::PowerBrownoutState;
+    use project_phoenix::ship::shields::ShieldsCoordinationState;
+    use project_phoenix::ship::state::ShipPhaserFrequency;
+    use project_phoenix::snapshot::{
+        FrequencyHintContinuationState, IntentNarrationState, LastSystemTiersState,
+        NpcFrequencyMatchStatesState, PowerBrownoutContinuationState, RecentCombatActivityState,
+        ShieldsCoordinationContinuationState, ShipPhaserFrequencyState,
+        TacticalFrequencyHintInboxState,
+    };
+
+    let mut live = duel();
+    step(&mut live, CAPTURE_AT);
+    let default_uuid = {
+        let world = live.world_mut();
+        let mut query = world.query::<(
+            &EntityUuid,
+            &mut RecentCombatActivity,
+            &mut ShipFrequencyHintState,
+            &mut ShipPhaserFrequency,
+            &mut PendingTacticalFrequencyHint,
+            &mut LastSystemTiers,
+            &mut PowerBrownoutState,
+            &mut ShieldsCoordinationState,
+            &mut ShipIntentNarration,
+        )>();
+        let (
+            uuid,
+            mut recent,
+            mut frequency,
+            mut phaser_frequency,
+            mut tactical_hint,
+            mut tiers,
+            mut brownout,
+            mut shields,
+            mut narration,
+        ) = query
+            .iter_mut(world)
+            .next()
+            .expect("the duel has a high-fidelity ship carrying every selected memory");
+        *recent = RecentCombatActivity::default();
+        *frequency = ShipFrequencyHintState::default();
+        *phaser_frequency = ShipPhaserFrequency::default();
+        *tactical_hint = PendingTacticalFrequencyHint::default();
+        *tiers = LastSystemTiers::default();
+        *brownout = PowerBrownoutState::default();
+        *shields = ShieldsCoordinationState::default();
+        *narration = ShipIntentNarration::default();
+        uuid.0.clone()
+    };
+    live.world_mut()
+        .resource_mut::<NpcFrequencyMatchStates>()
+        .0
+        .clear();
+
+    let payload = capture(live.world());
+    let row = payload
+        .entities
+        .iter()
+        .find(|entity| entity.uuid == default_uuid)
+        .expect("the default-bearing ship is captured");
+    assert_eq!(
+        row.intent_narration.clone(),
+        Some(IntentNarrationState::default())
+    );
+    assert_eq!(
+        row.recent_combat.clone(),
+        Some(RecentCombatActivityState::default())
+    );
+    assert_eq!(
+        row.frequency_hint.clone(),
+        Some(FrequencyHintContinuationState::default())
+    );
+    assert_eq!(
+        row.phaser_frequency.clone(),
+        Some(ShipPhaserFrequencyState::default())
+    );
+    assert_eq!(
+        row.tactical_frequency_hint.clone(),
+        Some(TacticalFrequencyHintInboxState::default())
+    );
+    assert_eq!(
+        payload.npc_frequency_matches.clone(),
+        Some(NpcFrequencyMatchStatesState::default())
+    );
+    assert_eq!(
+        row.last_system_tiers.clone(),
+        Some(LastSystemTiersState::default())
+    );
+    assert_eq!(
+        row.power_brownout.clone(),
+        Some(PowerBrownoutContinuationState::default())
+    );
+    assert_eq!(
+        row.shields_coordination.clone(),
+        Some(ShieldsCoordinationContinuationState::default())
+    );
+
+    let mut resumed = boot_to_restore_point(&args(DUEL, ("cruiser", "destroyer")), &payload);
+    let bootstrap = capture(resumed.world());
+    let bootstrap_row = bootstrap
+        .entities
+        .iter()
+        .find(|entity| entity.uuid == default_uuid)
+        .expect("the bootstrap has the same deterministic ship uuid");
+    assert_ne!(
+        bootstrap_row.last_system_tiers.clone(),
+        Some(LastSystemTiersState::default()),
+        "the destination starts with a non-empty damage baseline, so equality after restore \
+         cannot be a bootstrap coincidence"
+    );
+
+    // Seed each otherwise-default destination memory through the snapshot's
+    // own projection. `ShipIntentNarration` deliberately keeps its map private,
+    // so this also avoids growing a production mutation API solely for a test.
+    let mut seeded_bootstrap = bootstrap.clone();
+    let seeded_row = seeded_bootstrap
+        .entities
+        .iter_mut()
+        .find(|entity| entity.uuid == default_uuid)
+        .expect("the bootstrap seed has the same deterministic ship uuid");
+    seeded_row.intent_narration = Some(IntentNarrationState {
+        last: Vec::new(),
+        generation: 73,
+    });
+    seeded_row.recent_combat = Some(RecentCombatActivityState {
+        last_damage_taken_age_secs: Some(0.25),
+        last_hostile_fire_taken_age_secs: Some(0.5),
+        last_weapon_fired_age_secs: Some(0.75),
+        prev_hull: 17.0,
+    });
+    seeded_row.frequency_hint = Some(FrequencyHintContinuationState {
+        current_target: Some("bootstrap-only-target".into()),
+        elapsed_secs: 99.0,
+        hint_sent: true,
+    });
+    seeded_row.power_brownout = Some(PowerBrownoutContinuationState {
+        notified_groups: vec!["bootstrap-only-group".into()],
+        locked_changed: true,
+    });
+    seeded_row.shields_coordination = Some(ShieldsCoordinationContinuationState {
+        down_notified: vec![true, false],
+        restore_notified: vec![false, true],
+    });
+    let seed_report = restore(resumed.world_mut(), &seeded_bootstrap);
+    assert!(
+        seed_report.is_complete(),
+        "bootstrap seed gaps: {:?}",
+        seed_report.gaps
+    );
+    let seeded = capture(resumed.world());
+    let seeded_row = seeded
+        .entities
+        .iter()
+        .find(|entity| entity.uuid == default_uuid)
+        .expect("the seeded bootstrap still has the same ship");
+    assert_ne!(
+        seeded_row.intent_narration,
+        Some(IntentNarrationState::default())
+    );
+    assert_ne!(
+        seeded_row.recent_combat,
+        Some(RecentCombatActivityState::default())
+    );
+    assert_ne!(
+        seeded_row.frequency_hint,
+        Some(FrequencyHintContinuationState::default())
+    );
+    assert_ne!(
+        seeded_row.power_brownout,
+        Some(PowerBrownoutContinuationState::default())
+    );
+    assert_ne!(
+        seeded_row.shields_coordination,
+        Some(ShieldsCoordinationContinuationState::default())
+    );
+
+    let bootstrap_entity = {
+        let world = resumed.world_mut();
+        let mut query = world.query::<(bevy::prelude::Entity, &EntityUuid)>();
+        query
+            .iter(world)
+            .find_map(|(entity, uuid)| (uuid.0 == default_uuid).then_some(entity))
+            .expect("the bootstrap has the default-bearing ship")
+    };
+    {
+        let mut entity = resumed.world_mut().entity_mut(bootstrap_entity);
+        entity
+            .get_mut::<ShipPhaserFrequency>()
+            .expect("the bootstrap ship has phaser frequency")
+            .0 = 0.91;
+        entity
+            .get_mut::<PendingTacticalFrequencyHint>()
+            .expect("the bootstrap ship has the Tactical inbox")
+            .0 = Some(0.92);
+    }
+    resumed
+        .world_mut()
+        .resource_mut::<NpcFrequencyMatchStates>()
+        .0
+        .insert(
+            bootstrap_entity,
+            FrequencyMatchState {
+                current_target: Some("bootstrap-only-target".into()),
+                elapsed_secs: 99.0,
+                match_sent: true,
+            },
+        );
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    let after = capture(resumed.world());
+    assert_selected_continuation_memories_match(
+        &after,
+        &payload,
+        "default and live producer memories replace bootstrap state",
+    );
+    let after_row = after
+        .entities
+        .iter()
+        .find(|entity| entity.uuid == default_uuid)
+        .expect("the restored world still has the default-bearing ship");
+    assert_eq!(
+        after_row.intent_narration,
+        Some(IntentNarrationState::default())
+    );
+    assert_eq!(
+        after_row.recent_combat,
+        Some(RecentCombatActivityState::default())
+    );
+    assert_eq!(
+        after_row.frequency_hint,
+        Some(FrequencyHintContinuationState::default())
+    );
+    assert_eq!(
+        after_row.power_brownout,
+        Some(PowerBrownoutContinuationState::default())
+    );
+    assert_eq!(
+        after_row.shields_coordination,
+        Some(ShieldsCoordinationContinuationState::default())
+    );
+}
+
+/// `PhaserMode::Auto` is the wire enum's default, but the live Weapons resource
+/// starts in Manual. The outer option must therefore carry `Some(Auto)` and
+/// overwrite a freshly bootstrapped Manual resource.
+#[test]
+fn current_phaser_mode_replaces_the_fresh_bootstrap_resource() {
+    use project_phoenix::console::weapons::CurrentPhaserMode;
+    use project_phoenix::core::messages::PhaserMode;
+
+    let mut live = duel();
+    step(&mut live, CAPTURE_AT);
+    live.world_mut().resource_mut::<CurrentPhaserMode>().0 = PhaserMode::Auto;
+
+    let payload = capture(live.world());
+    assert_eq!(
+        payload.phaser_mode,
+        Some(PhaserMode::Auto),
+        "the default enum variant still travels as an authoritative Some"
+    );
+
+    let mut resumed = boot_to_restore_point(&args(DUEL, ("cruiser", "destroyer")), &payload);
+    assert_eq!(
+        resumed.world().resource::<CurrentPhaserMode>().0,
+        PhaserMode::Manual,
+        "the fresh Weapons resource starts in Manual"
+    );
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    assert_eq!(
+        resumed.world().resource::<CurrentPhaserMode>().0,
+        PhaserMode::Auto,
+        "restore replaces the bootstrap resource"
+    );
+    assert_eq!(capture(resumed.world()).phaser_mode, payload.phaser_mode);
+}
+
+/// An idle arc-bearing seam is authoritative state, not absence. Both
+/// components remain attached while their internals are empty, so capture must
+/// emit `Some(default)` and restore must clear a bootstrap-only request.
+#[test]
+fn default_arc_request_state_replaces_a_bootstrap_request() {
+    use bevy::prelude::{Entity, With};
+    use project_phoenix::console::weapons::WeaponsArcRequestState;
+    use project_phoenix::core::messages::{WeaponEmitterArc, WeaponFamily};
+    use project_phoenix::entities::spawner::EntityUuid;
+    use project_phoenix::ship::components::PendingArcBearingRequest;
+    use project_phoenix::snapshot::ArcRequestState;
+
+    let mut live = duel();
+    step(&mut live, CAPTURE_AT);
+    let (source_entity, source_uuid, target_uuid) = {
+        let world = live.world_mut();
+        let mut query = world.query_filtered::<
+            (Entity, &EntityUuid),
+            (With<WeaponsArcRequestState>, With<PendingArcBearingRequest>),
+        >();
+        let rows: Vec<_> = query
+            .iter(world)
+            .map(|(entity, uuid)| (entity, uuid.0.clone()))
+            .collect();
+        assert!(rows.len() >= 2, "the duel has two arc-bearing ships");
+        (rows[0].0, rows[0].1.clone(), rows[1].1.clone())
+    };
+    {
+        let mut source = live.world_mut().entity_mut(source_entity);
+        *source
+            .get_mut::<WeaponsArcRequestState>()
+            .expect("the source carries the Weapons debounce") = WeaponsArcRequestState::default();
+        *source
+            .get_mut::<PendingArcBearingRequest>()
+            .expect("the source carries Helm's pending request") =
+            PendingArcBearingRequest::default();
+    }
+
+    let payload = capture(live.world());
+    let source_row = payload
+        .entities
+        .iter()
+        .find(|row| row.uuid == source_uuid)
+        .expect("the source ship is captured");
+    assert_eq!(
+        source_row.arc_request,
+        Some(ArcRequestState::default()),
+        "component presence preserves an empty authoritative seam"
+    );
+
+    let mut resumed = boot_to_restore_point(&args(DUEL, ("cruiser", "destroyer")), &payload);
+    let resumed_entity = {
+        let world = resumed.world_mut();
+        let mut query = world.query::<(Entity, &EntityUuid)>();
+        query
+            .iter(world)
+            .find_map(|(entity, uuid)| (uuid.0 == source_uuid).then_some(entity))
+            .expect("the bootstrap has the source ship")
+    };
+    let bootstrap_arc = WeaponEmitterArc {
+        facing_deg: 45.0,
+        arc_deg: 90.0,
+        range: 800.0,
+    };
+    {
+        let mut destination = resumed.world_mut().entity_mut(resumed_entity);
+        destination
+            .get_mut::<WeaponsArcRequestState>()
+            .expect("the bootstrap carries the Weapons debounce")
+            .last = Some((
+            WeaponFamily::Blasters,
+            target_uuid.clone(),
+            vec![bootstrap_arc],
+        ));
+        let mut pending = destination
+            .get_mut::<PendingArcBearingRequest>()
+            .expect("the bootstrap carries Helm's pending request");
+        pending.target = Some(uuid::Uuid::parse_str(&target_uuid).expect("target uuid is valid"));
+        pending.arcs = vec![bootstrap_arc];
+    }
+    let bootstrap_row = capture(resumed.world())
+        .entities
+        .into_iter()
+        .find(|row| row.uuid == source_uuid)
+        .expect("the seeded bootstrap ship is captured");
+    assert_ne!(
+        bootstrap_row.arc_request,
+        Some(ArcRequestState::default()),
+        "the destination really starts with a live bootstrap request"
+    );
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    let restored = resumed.world().entity(resumed_entity);
+    assert!(
+        restored
+            .get::<WeaponsArcRequestState>()
+            .expect("the debounce remains attached")
+            .last
+            .is_none()
+    );
+    let pending = restored
+        .get::<PendingArcBearingRequest>()
+        .expect("the pending request remains attached");
+    assert!(pending.target.is_none());
+    assert!(pending.arcs.is_empty());
+    let restored_row = capture(resumed.world())
+        .entities
+        .into_iter()
+        .find(|row| row.uuid == source_uuid)
+        .expect("the restored ship is captured");
+    assert_eq!(restored_row.arc_request, source_row.arc_request);
+}
+
+/// AI fidelity is authoritative by BUNDLE PRESENCE, not by what the fresh
+/// bootstrap happened to derive before restore. A captured Low ship must
+/// therefore remove the canonical High-fidelity bundle wholesale; leaving even
+/// the marker behind lets every `With<AiHighFidelity>` policy run until LOD's
+/// dwell window eventually repairs the bootstrap mismatch.
+#[test]
+fn low_fidelity_capture_replaces_a_high_fidelity_bootstrap_bundle() {
+    use bevy::prelude::{Entity, Transform, With, Without};
+    use project_phoenix::ai::server::{
+        ai_high_fidelity_components, AiHighFidelity, AiHighFidelityComponents,
+        LodTransitionTimer,
+    };
+    use project_phoenix::console_ai::server::ShipFrequencyHintState;
+    use project_phoenix::entities::spawner::EntityUuid;
+    use project_phoenix::server_app::LocalShip;
+    use project_phoenix::ship::helm::ThrustInput;
+    use project_phoenix::ship::helm_ai::HelmBoostAiPolicyState;
+    use project_phoenix::ship::state::ShipPhysics;
+
+    let mut live = duel();
+    step(&mut live, CAPTURE_AT);
+    let (source_entity, source_uuid) = {
+        let world = live.world_mut();
+        let mut query = world.query_filtered::<
+            (Entity, &EntityUuid),
+            (With<AiHighFidelity>, Without<LocalShip>),
+        >();
+        query
+            .iter(world)
+            .next()
+            .map(|(entity, uuid)| (entity, uuid.0.clone()))
+            .expect("the live duel has a high-fidelity NPC to demote")
+    };
+    {
+        let mut ship = live.world_mut().entity_mut(source_entity);
+        let far_from_every_bubble = 10_000.0;
+        ship.get_mut::<ShipPhysics>()
+            .expect("the source NPC has authoritative physics")
+            .x = far_from_every_bubble;
+        ship.get_mut::<Transform>()
+            .expect("the source NPC has a transform")
+            .translation
+            .x = far_from_every_bubble;
+        ship.remove::<AiHighFidelityComponents>();
+        ship.remove::<LodTransitionTimer>();
+    }
+
+    let payload = capture(live.world());
+    let source_row = payload
+        .entities
+        .iter()
+        .find(|row| row.uuid == source_uuid)
+        .expect("the demoted NPC has a snapshot row");
+    assert!(
+        source_row.control.is_none() && source_row.frequency_hint.is_none(),
+        "precondition: removing the canonical bundle produces a Low-fidelity row"
+    );
+
+    let mut resumed = boot_to_restore_point(&args(DUEL, ("cruiser", "destroyer")), &payload);
+    let bootstrap_entity = {
+        let world = resumed.world_mut();
+        let mut query = world.query::<(Entity, &EntityUuid)>();
+        query
+            .iter(world)
+            .find_map(|(entity, uuid)| (uuid.0 == source_uuid).then_some(entity))
+            .expect("the bootstrap has the captured NPC")
+    };
+    resumed
+        .world_mut()
+        .entity_mut(bootstrap_entity)
+        .insert(ai_high_fidelity_components())
+        .insert(LodTransitionTimer {
+            last_state_change_secs: 0.0,
+        });
+    assert!(
+        resumed
+            .world()
+            .get::<AiHighFidelity>(bootstrap_entity)
+            .is_some(),
+        "precondition: the destination begins with a stale High-fidelity bundle"
+    );
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    let assert_low = |app: &bevy::prelude::App, context: &str| {
+        let world = app.world();
+        assert!(
+            world.get::<AiHighFidelity>(bootstrap_entity).is_none(),
+            "{context}: the High-fidelity marker was removed"
+        );
+        assert!(
+            world.get::<ShipFrequencyHintState>(bootstrap_entity).is_none(),
+            "{context}: the High-fidelity frequency timer was removed"
+        );
+        assert!(
+            world.get::<ThrustInput>(bootstrap_entity).is_none(),
+            "{context}: the High-fidelity actuator bundle was removed"
+        );
+        assert!(
+            world
+                .get::<HelmBoostAiPolicyState>(bootstrap_entity)
+                .is_none(),
+            "{context}: the High-fidelity policy state was removed"
+        );
+        assert!(
+            world
+                .get::<LodTransitionTimer>(bootstrap_entity)
+                .is_none(),
+            "{context}: an absent captured transition boundary replaced bootstrap state"
+        );
+    };
+    assert_low(&resumed, "immediately after restore");
+
+    step(&mut resumed, 1);
+    assert_low(
+        &resumed,
+        "after the first continuation update, when High-fidelity AI would otherwise run",
+    );
+}
+
+/// The frequency continuation spans one resource keyed by process-local Entity
+/// handles and two per-ship components. Capture must project the resource key
+/// through EntityUuid; restore must bind that uuid to the fresh app's Entity and
+/// replace, rather than merge with, every bootstrap value.
+#[test]
+fn frequency_continuation_rebinds_entity_keys_and_replaces_bootstrap_state() {
+    use bevy::prelude::Entity;
+    use project_phoenix::console::weapons::NpcFrequencyMatchStates;
+    use project_phoenix::console_ai::FrequencyMatchState;
+    use project_phoenix::entities::spawner::EntityUuid;
+    use project_phoenix::ship::components::PendingTacticalFrequencyHint;
+    use project_phoenix::ship::state::ShipPhaserFrequency;
+    use project_phoenix::snapshot::{
+        NpcFrequencyMatchState, NpcFrequencyMatchStatesState, ShipPhaserFrequencyState,
+        TacticalFrequencyHintInboxState,
+    };
+
+    let mut live = duel();
+    step(&mut live, CAPTURE_AT);
+    let (ship_entity, ship_uuid, target_uuid) = {
+        let world = live.world_mut();
+        let mut query = world.query::<(Entity, &EntityUuid, &ShipPhaserFrequency)>();
+        let rows: Vec<_> = query
+            .iter(world)
+            .map(|(entity, uuid, _)| (entity, uuid.0.clone()))
+            .collect();
+        assert!(rows.len() >= 2, "the duel has two frequency-bearing ships");
+        (rows[0].0, rows[0].1.clone(), rows[1].1.clone())
+    };
+    {
+        let mut ship = live.world_mut().entity_mut(ship_entity);
+        ship.get_mut::<ShipPhaserFrequency>()
+            .expect("the source ship has phaser frequency")
+            .0 = 0.27;
+        ship.get_mut::<PendingTacticalFrequencyHint>()
+            .expect("the source ship has the Tactical inbox")
+            .0 = Some(0.73);
+    }
+    {
+        let mut states = live.world_mut().resource_mut::<NpcFrequencyMatchStates>();
+        states.0.clear();
+        states.0.insert(
+            ship_entity,
+            FrequencyMatchState {
+                current_target: Some(target_uuid.clone()),
+                elapsed_secs: 1.25,
+                match_sent: true,
+            },
+        );
+    }
+
+    let payload = capture(live.world());
+    let expected_match = NpcFrequencyMatchState {
+        current_target: Some(target_uuid),
+        elapsed_secs: 1.25,
+        match_sent: true,
+    };
+    assert_eq!(
+        payload.npc_frequency_matches,
+        Some(NpcFrequencyMatchStatesState {
+            states: vec![(ship_uuid.clone(), expected_match.clone())],
+        })
+    );
+    let source_row = payload
+        .entities
+        .iter()
+        .find(|row| row.uuid == ship_uuid)
+        .expect("the source ship has a snapshot row");
+    assert_eq!(
+        source_row.phaser_frequency,
+        Some(ShipPhaserFrequencyState { frequency: 0.27 })
+    );
+    assert_eq!(
+        source_row.tactical_frequency_hint,
+        Some(TacticalFrequencyHintInboxState {
+            frequency: Some(0.73),
+        })
+    );
+
+    let mut resumed = boot_to_restore_point(&args(DUEL, ("cruiser", "destroyer")), &payload);
+    let (resumed_entity, stale_entity) = {
+        let world = resumed.world_mut();
+        let mut query = world.query::<(Entity, &EntityUuid)>();
+        let rows: Vec<_> = query
+            .iter(world)
+            .map(|(entity, uuid)| (entity, uuid.0.clone()))
+            .collect();
+        let resumed_entity = rows
+            .iter()
+            .find_map(|(entity, uuid)| (uuid == &ship_uuid).then_some(*entity))
+            .expect("the fresh app has the captured ship uuid");
+        let stale_entity = rows
+            .iter()
+            .find_map(|(entity, uuid)| (uuid != &ship_uuid).then_some(*entity))
+            .expect("the fresh duel has another ship for bootstrap noise");
+        (resumed_entity, stale_entity)
+    };
+    {
+        let mut ship = resumed.world_mut().entity_mut(resumed_entity);
+        ship.get_mut::<ShipPhaserFrequency>()
+            .expect("the destination ship has phaser frequency")
+            .0 = 0.81;
+        ship.get_mut::<PendingTacticalFrequencyHint>()
+            .expect("the destination ship has the Tactical inbox")
+            .0 = Some(0.19);
+    }
+    {
+        let mut states = resumed
+            .world_mut()
+            .resource_mut::<NpcFrequencyMatchStates>();
+        states.0.clear();
+        states.0.insert(
+            stale_entity,
+            FrequencyMatchState {
+                current_target: Some("bootstrap-only-target".into()),
+                elapsed_secs: 88.0,
+                match_sent: false,
+            },
+        );
+    }
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    let world = resumed.world();
+    let frequency = world
+        .get::<ShipPhaserFrequency>(resumed_entity)
+        .expect("the restored ship retains phaser frequency");
+    assert_eq!(frequency.0, 0.27);
+    let pending = world
+        .get::<PendingTacticalFrequencyHint>(resumed_entity)
+        .expect("the restored ship retains the Tactical inbox");
+    assert_eq!(pending.0, Some(0.73));
+    let states = &world.resource::<NpcFrequencyMatchStates>().0;
+    assert_eq!(states.len(), 1, "bootstrap-only map entries were replaced");
+    let restored = states
+        .get(&resumed_entity)
+        .expect("the captured UUID was rebound to the destination Entity");
+    assert_eq!(
+        restored,
+        &FrequencyMatchState {
+            current_target: expected_match.current_target,
+            elapsed_secs: expected_match.elapsed_secs,
+            match_sent: expected_match.match_sent,
+        }
+    );
+    assert_eq!(
+        world
+            .get::<EntityUuid>(resumed_entity)
+            .expect("the rebound key still has a stable uuid")
+            .0,
+        ship_uuid
+    );
+
+    let after = capture(resumed.world());
+    assert_selected_continuation_memories_match(
+        &after,
+        &payload,
+        "frequency continuation replaces the fresh bootstrap",
+    );
+}
+
+/// Snapshot format 14 carries the exact unread suffix behind Coordination's
+/// production cursor, not merely both retained Bevy message buffers. Keep one
+/// consumed event and one unread event together in the older buffer, then prove
+/// the fresh app's own unread event is replaced and the restored event routes
+/// exactly once.
+#[test]
+fn coordination_staging_round_trips_only_the_unread_suffix_once() {
+    use bevy::ecs::system::RunSystemOnce;
+    use bevy::prelude::{Entity, Messages, Mut};
+    use project_phoenix::core::messages::{CoordinationPayload, CoordinationPresentation};
+    use project_phoenix::entities::spawner::EntityUuid;
+    use project_phoenix::ship::components::{
+        CoordinationEnqueue, CoordinationEnqueueCursor, ShipConfigComponent,
+    };
+    use project_phoenix::ship::control_source::ControlSource;
+    use project_phoenix::ship::coordination::address_for_system_kind;
+    use project_phoenix::ship::coordination_systems::handle_coordination_enqueue;
+    use project_phoenix::ship::system_registry::{sensors_system_id, SHIELD_ARC_KIND};
+
+    let mut live = duel();
+    step(&mut live, CAPTURE_AT);
+
+    let (source_entity, source_uuid, address) = {
+        let world = live.world_mut();
+        let mut query = world.query::<(Entity, &EntityUuid, &ShipConfigComponent)>();
+        query
+            .iter(world)
+            .find_map(|(entity, uuid, config)| {
+                address_for_system_kind(&config.0, SHIELD_ARC_KIND)
+                    .map(|address| (entity, uuid.0.clone(), address))
+            })
+            .expect("the duel has a uuid-bearing ship with an authored Shields Station")
+    };
+    let event = |source_entity: Entity, label: &str| CoordinationEnqueue {
+        source_entity,
+        sender_origin: ControlSource::Ai,
+        address: address.clone(),
+        payload: CoordinationPayload::ThreatBearing {
+            bearing_rad: 0.625,
+            label: label.into(),
+        },
+        presentation: CoordinationPresentation::titled("coordination.threat_bearing.title"),
+        sender_label: "chatter.sender.sensors".into(),
+        sender_system: sensors_system_id(),
+    };
+
+    // Establish the real production boundary: A is consumed by the handler's
+    // resource cursor, then B arrives. One Messages update leaves both retained
+    // in the older buffer, but only B is behind that cursor.
+    live.world_mut()
+        .resource_mut::<Messages<project_phoenix::lobby::InboundMessage>>()
+        .clear();
+    live.world_mut()
+        .resource_scope(|world, mut cursor: Mut<CoordinationEnqueueCursor>| {
+            let mut messages = world.resource_mut::<Messages<CoordinationEnqueue>>();
+            messages.clear();
+            cursor.0.clear(&messages);
+            messages.write(event(source_entity, "snapshot.staging.consumed-a"));
+        });
+    live.world_mut()
+        .run_system_once(handle_coordination_enqueue)
+        .expect("the production handler consumes A");
+    live.world_mut()
+        .resource_scope(|world, _cursor: Mut<CoordinationEnqueueCursor>| {
+            let mut messages = world.resource_mut::<Messages<CoordinationEnqueue>>();
+            messages.write(event(source_entity, "snapshot.staging.unread-b"));
+            messages.update();
+        });
+
+    let payload = capture(live.world());
+    assert_eq!(
+        payload.coordination_staging.len(),
+        1,
+        "only the cursor-defined unread suffix is captured"
+    );
+    let staged = &payload.coordination_staging[0];
+    assert_eq!(staged.source_uuid, source_uuid);
+    assert_eq!(staged.sender_origin, 1);
+    assert_eq!(staged.address, address);
+    assert_eq!(staged.sender_system, sensors_system_id().0);
+    assert!(matches!(
+        &staged.payload,
+        CoordinationPayload::ThreatBearing { label, .. }
+            if label == "snapshot.staging.unread-b"
+    ));
+
+    let mut resumed = boot_to_restore_point(&args(DUEL, ("cruiser", "destroyer")), &payload);
+    let resumed_source = {
+        let world = resumed.world_mut();
+        let mut query = world.query::<(Entity, &EntityUuid)>();
+        query
+            .iter(world)
+            .find_map(|(entity, uuid)| (uuid.0 == source_uuid).then_some(entity))
+            .expect("the bootstrap contains the source ship restore will map")
+    };
+    resumed
+        .world_mut()
+        .resource_mut::<Messages<project_phoenix::lobby::InboundMessage>>()
+        .clear();
+    resumed
+        .world_mut()
+        .resource_scope(|world, mut cursor: Mut<CoordinationEnqueueCursor>| {
+            let mut messages = world.resource_mut::<Messages<CoordinationEnqueue>>();
+            messages.clear();
+            cursor.0.clear(&messages);
+            messages.write(event(
+                resumed_source,
+                "snapshot.staging.bootstrap-must-clear-c",
+            ));
+            messages.update();
+        });
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    assert_eq!(
+        capture(resumed.world()).coordination_staging,
+        payload.coordination_staging,
+        "restore replaces bootstrap staging with the captured unread suffix"
+    );
+
+    let queued_label_count = |snapshot: &PhoenixSnapshot, wanted: &str| {
+        snapshot
+            .entities
+            .iter()
+            .filter_map(|entity| entity.coordination_queue.as_ref())
+            .flat_map(|queue| &queue.pending)
+            .filter(|message| {
+                matches!(
+                    &message.payload,
+                    CoordinationPayload::ThreatBearing { label, .. } if label == wanted
+                )
+            })
+            .count()
+    };
+    resumed
+        .world_mut()
+        .run_system_once(handle_coordination_enqueue)
+        .expect("the restored handler routes B");
+    let after_once = capture(resumed.world());
+    assert!(
+        after_once.coordination_staging.is_empty(),
+        "the authoritative cursor consumes the restored suffix"
+    );
+    assert_eq!(
+        queued_label_count(&after_once, "snapshot.staging.unread-b"),
+        1,
+        "B is attached once"
+    );
+    assert_eq!(
+        queued_label_count(&after_once, "snapshot.staging.bootstrap-must-clear-c"),
+        0,
+        "the bootstrap's C event was replaced, not merged"
+    );
+
+    resumed
+        .world_mut()
+        .run_system_once(handle_coordination_enqueue)
+        .expect("the second handler run has no restored event left to read");
+    let after_twice = capture(resumed.world());
+    assert_eq!(
+        queued_label_count(&after_twice, "snapshot.staging.unread-b"),
+        1,
+        "the restored suffix is read exactly once"
+    );
+}
+
+/// The #1258 Shields receiver made both its recent-damage window and its
+/// one-shot threat bearing observable continuation state. Exercise the exact
+/// cadence boundary a restore must preserve: an inactive frame leaves the
+/// inbox untouched, then the first active AI frame consumes the same starboard
+/// bearing and produces the same focus in both worlds.
+#[test]
+fn shield_ai_state_round_trips_through_inactive_and_active_frames() {
+    use project_phoenix::ai::cadence::AiTickReady;
+    use project_phoenix::server_app::ShipShields;
+    use project_phoenix::ship::shields::{
+        DamageRecord, PendingShieldsThreatBearing, ShieldsDamageHistory,
+    };
+    use project_phoenix::ship::{
+        components::{CoordinationQueue, ShipConfigComponent},
+        coordination::{address_for_system_kind, coordination_lag_ticks, QueuedCoordination},
+        system_registry::SHIELD_ARC_KIND,
+    };
+    use project_phoenix::{
+        core::messages::{CoordinationPayload, CoordinationPresentation},
+        ship::control_source::ControlSource,
+    };
+
+    let mut live = duel();
+    step(&mut live, CAPTURE_AT);
+
+    // Park the capture on an INACTIVE AI cadence phase. The following frame
+    // proves the restored latch was re-derived from SimTick rather than inherited
+    // from however far the fresh bootstrap happened to run; the frame after
+    // that is the first active Shields decision.
+    for _ in 0..3 {
+        if !live.world().resource::<AiTickReady>().0 {
+            break;
+        }
+        live.update();
+    }
+    assert!(
+        !live.world().resource::<AiTickReady>().0,
+        "the fixture reaches an inactive AI cadence phase"
+    );
+
+    {
+        let world = live.world_mut();
+        let captured_tick = world.resource::<project_phoenix::sim_tick::SimTick>().0;
+        let sim_tick_hz = world
+            .resource::<project_phoenix::world::config::WorldConfig>()
+            .global
+            .sim_tick_hz;
+        let seeded_due_tick = captured_tick
+            .saturating_add(coordination_lag_ticks(0.75, sim_tick_hz).saturating_sub(1));
+        let mut query = world.query::<(
+            &mut ShipShields,
+            &mut ShieldsDamageHistory,
+            &mut PendingShieldsThreatBearing,
+            &mut CoordinationQueue,
+            &ShipConfigComponent,
+        )>();
+        let mut seeded = 0usize;
+        let mut seeded_queues = 0usize;
+        for (mut shields, mut history, mut pending, mut queue, ship_config) in query.iter_mut(world)
+        {
+            if shields.0.facings.is_empty() {
+                continue;
+            }
+            shields.0.set_focused_facing(Some(0));
+            history.arcs = vec![Vec::new(); shields.0.facings.len()];
+            history.arcs[0].push(DamageRecord {
+                recorded_tick: captured_tick
+                    .saturating_sub(coordination_lag_ticks(0.75, sim_tick_hz)),
+                amount: 3,
+            });
+            history.last_hp = shields.0.facings.iter().map(|facing| facing.hp).collect();
+            // Sensors' relative-bearing convention is positive to starboard.
+            pending.0 = Some(std::f32::consts::FRAC_PI_2);
+            // Make the captured shape deliberate: the two-facing destroyer
+            // contributes Some(empty), while the four-facing cruiser carries
+            // two equal-deadline messages in an order delivery can observe.
+            let _ = queue.0.due_messages(u64::MAX);
+            if shields
+                .0
+                .facings
+                .iter()
+                .any(|facing| facing.id == "starboard")
+            {
+                let address = address_for_system_kind(&ship_config.0, SHIELD_ARC_KIND)
+                    .expect("an authored shield arc has an owning Station");
+                for (bearing_rad, label) in [
+                    (0.25, "snapshot.queue.first"),
+                    (-0.75, "snapshot.queue.second"),
+                ] {
+                    queue.0.enqueue(QueuedCoordination {
+                        sender_origin: ControlSource::Ai,
+                        address: address.clone(),
+                        payload: CoordinationPayload::ThreatBearing {
+                            bearing_rad,
+                            label: label.into(),
+                        },
+                        presentation: CoordinationPresentation::titled(
+                            "coordination.threat_bearing.title",
+                        ),
+                        sender_label: "chatter.sender.sensors".into(),
+                        due_tick: seeded_due_tick,
+                    });
+                }
+                seeded_queues += 1;
+            }
+            seeded += 1;
+        }
+        assert!(seeded > 0, "the duel carries Shields AI state to seed");
+        assert_eq!(
+            seeded_queues, 1,
+            "only the cruiser carries the four-facing queue fixture"
+        );
+    }
+
+    let payload = capture(live.world());
+    let narration_generations_before: std::collections::BTreeMap<_, _> = payload
+        .entities
+        .iter()
+        .filter_map(|entity| {
+            entity
+                .intent_narration
+                .as_ref()
+                .map(|state| (entity.uuid.clone(), state.generation))
+        })
+        .collect();
+    let carried: Vec<_> = payload
+        .entities
+        .iter()
+        .filter_map(|entity| entity.shield_ai.as_ref())
+        .collect();
+    assert!(
+        carried.iter().any(|state| {
+            state
+                .damage_by_arc
+                .iter()
+                .flatten()
+                .any(|(_, amount)| *amount == 3)
+        }),
+        "the scalar payload carries a recent-damage record"
+    );
+    assert!(
+        carried
+            .iter()
+            .all(|state| state.pending_threat_bearing_rad.is_some()),
+        "the scalar payload carries each pending threat bearing"
+    );
+    let live_sensors_threat = sensors_threat_by_uuid(live.world_mut());
+    assert!(
+        live_sensors_threat
+            .values()
+            .any(|state| state.last_threat_uuid.is_some()),
+        "the duel has observed a threat before capture"
+    );
+    assert!(
+        payload
+            .entities
+            .iter()
+            .filter_map(|entity| entity.sensors_threat.as_ref())
+            .any(|state| state.last_threat_uuid.is_some()),
+        "the scalar payload carries Sensors' threat-warning debounce memory"
+    );
+    assert!(
+        payload
+            .entities
+            .iter()
+            .filter_map(|entity| entity.coordination_queue.as_ref())
+            .flat_map(|queue| &queue.pending)
+            .any(|message| matches!(
+                &message.payload,
+                CoordinationPayload::ThreatBearing { label, .. }
+                    if label == "snapshot.queue.second"
+            )),
+        "the scalar payload carries both seeded in-flight queue entries"
+    );
+    assert!(
+        payload
+            .entities
+            .iter()
+            .filter_map(|entity| entity.coordination_queue.as_ref())
+            .any(|queue| queue.pending.is_empty()),
+        "an attached but empty queue is represented as Some(empty)"
+    );
+
+    let mut resumed = boot_to_restore_point(&args(DUEL, ("cruiser", "destroyer")), &payload);
+    // Prove restore REPLACES bootstrap queues even for a captured Some(empty),
+    // rather than merely writing non-empty rows over them.
+    {
+        let world = resumed.world_mut();
+        let mut query = world.query::<(&ShipConfigComponent, &mut CoordinationQueue)>();
+        let mut seeded = 0usize;
+        for (ship_config, mut queue) in query.iter_mut(world) {
+            let address = address_for_system_kind(&ship_config.0, SHIELD_ARC_KIND)
+                .expect("an authored shield arc has an owning Station");
+            queue.0.enqueue(QueuedCoordination {
+                sender_origin: ControlSource::Ai,
+                address,
+                payload: CoordinationPayload::ThreatBearing {
+                    bearing_rad: 1.0,
+                    label: "snapshot.bootstrap.must-clear".into(),
+                },
+                presentation: CoordinationPresentation::titled("coordination.threat_bearing.title"),
+                sender_label: "chatter.sender.sensors".into(),
+                due_tick: u64::MAX,
+            });
+            seeded += 1;
+        }
+        assert!(seeded > 0, "the bootstrap queues carry a sentinel to clear");
+    }
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+
+    assert_eq!(
+        resumed.world().resource::<AiTickReady>().0,
+        live.world().resource::<AiTickReady>().0,
+        "restore re-derives the AI cadence phase from the restored SimTick"
+    );
+    assert_shield_ai_matches(
+        &shield_ai_by_uuid(resumed.world_mut()),
+        &shield_ai_by_uuid(live.world_mut()),
+        "damage record ticks, last-HP baselines and pending bearing round-trip",
+    );
+    assert_eq!(
+        sensors_threat_by_uuid(resumed.world_mut()),
+        live_sensors_threat,
+        "Sensors threat-warning debounce memory round-trips directly"
+    );
+    let recaptured = capture(resumed.world());
+    assert_coordination_queues_match(
+        &recaptured,
+        &payload,
+        "in-flight Coordination payloads, order and first-due step round-trip",
+    );
+    assert_selected_continuation_memories_match(
+        &recaptured,
+        &payload,
+        "producer debounce/counter memories round-trip directly",
+    );
+
+    // Inactive: no Shields AI host consumes the one-shot bearing.
+    live.update();
+    resumed.update();
+    assert_shield_ai_matches(
+        &shield_ai_by_uuid(resumed.world_mut()),
+        &shield_ai_by_uuid(live.world_mut()),
+        "the inactive continuation frame preserves Shields AI state",
+    );
+    assert!(
+        live.world().resource::<AiTickReady>().0 && resumed.world().resource::<AiTickReady>().0,
+        "the next frame is the first active AI cadence arm"
+    );
+
+    // Active: both worlds consume the same bearing and apply the same focus.
+    live.update();
+    resumed.update();
+    let live_shield_ai = shield_ai_by_uuid(live.world_mut());
+    assert_shield_ai_matches(
+        &shield_ai_by_uuid(resumed.world_mut()),
+        &live_shield_ai,
+        "the first active Shields AI frame preserves its continuation state",
+    );
+    assert!(
+        live_shield_ai
+            .values()
+            .all(|state| state.pending_threat_bearing_rad.is_none()),
+        "the first active Shields decision consumes every seeded bearing"
+    );
+    let live_charge = shield_charge_by_uuid(live.world_mut());
+    assert!(
+        live_charge.values().any(|facings| {
+            facings
+                .iter()
+                .any(|(id, _, _, _, focused)| id == "starboard" && *focused)
+        }),
+        "the seeded bearing is observably consumed as the cruiser's starboard focus"
+    );
+    assert_eq!(
+        shield_charge_by_uuid(resumed.world_mut()),
+        live_charge,
+        "the first active Shields AI frame applies the same focus and charge"
+    );
+    let live_after_active = capture(live.world());
+    let resumed_after_active = capture(resumed.world());
+    assert_selected_continuation_memories_match(
+        &resumed_after_active,
+        &live_after_active,
+        "the first real focus change advances the same narration/debounce state",
+    );
+    assert!(
+        live_after_active.entities.iter().any(|entity| {
+            entity
+                .intent_narration
+                .as_ref()
+                .zip(narration_generations_before.get(&entity.uuid))
+                .is_some_and(|(after, before)| after.generation > *before)
+        }),
+        "the active frame produces a real narrated state change, so narration restore is exercised"
+    );
+
+    // Continue through the queued deadline. Both messages have the same due
+    // time, so their enqueue order is observable: the receiver writes 0.25
+    // first, then -0.75, leaving the second bearing in Shields' one-shot inbox
+    // on the exact frame the queue entries disappear.
+    let has_second = |snapshot: &PhoenixSnapshot| {
+        snapshot
+            .entities
+            .iter()
+            .filter_map(|entity| entity.coordination_queue.as_ref())
+            .flat_map(|queue| &queue.pending)
+            .any(|message| {
+                matches!(
+                    &message.payload,
+                    CoordinationPayload::ThreatBearing { label, .. }
+                        if label == "snapshot.queue.second"
+                )
+            })
+    };
+    let mut observed_delivery = None;
+    for frame in 1..=60 {
+        let before = capture(live.world());
+        live.update();
+        resumed.update();
+        let live_after = capture(live.world());
+        let resumed_after = capture(resumed.world());
+        assert_coordination_queues_match(
+            &resumed_after,
+            &live_after,
+            "queue continuation through the equal-deadline delivery",
+        );
+        assert_selected_continuation_memories_match(
+            &resumed_after,
+            &live_after,
+            "producer memories continue through the queue deadline",
+        );
+        if has_second(&before) && !has_second(&live_after) {
+            let live_shield_ai = shield_ai_by_uuid(live.world_mut());
+            assert_shield_ai_matches(
+                &shield_ai_by_uuid(resumed.world_mut()),
+                &live_shield_ai,
+                "the due tick delivers the same ordered Shields inbox",
+            );
+            assert!(
+                live_shield_ai
+                    .values()
+                    .any(|state| { state.pending_threat_bearing_rad == Some(-0.75) }),
+                "equal-deadline delivery preserves enqueue order: the second bearing wins"
+            );
+            observed_delivery = Some(frame);
+            break;
+        }
+    }
+    assert!(
+        observed_delivery.is_some(),
+        "the test advances across the seeded queue deadline"
+    );
+}
+
 /// The shield-charge **continuation** claim, read DIRECTLY off `ShipShields` in
 /// both worlds rather than through `world_digest`.
 ///
@@ -977,6 +2468,15 @@ fn the_resumed_ship_holds_its_shield_charge_step_for_step() {
 
     let payload = capture(live.world());
     assert_capture_is_alive(&payload, DUEL, true);
+    assert!(
+        payload
+            .entities
+            .iter()
+            .filter_map(|entity| entity.coordination_queue.as_ref())
+            .flat_map(|queue| &queue.pending)
+            .any(|message| message.due_after_fixed_ticks == 1),
+        "the shield continuation capture carries a one-step Coordination boundary"
+    );
     let damaged_arc_captured = payload
         .entities
         .iter()
@@ -992,6 +2492,11 @@ fn the_resumed_ship_holds_its_shield_charge_step_for_step() {
     let mut resumed = boot_to_restore_point(&args(DUEL, ("cruiser", "destroyer")), &payload);
     let report = restore(resumed.world_mut(), &payload);
     assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    assert_coordination_queues_match(
+        &capture(resumed.world()),
+        &payload,
+        "the shield continuation queue round-trips before frame one",
+    );
 
     // At the instant of restore the two worlds' shield charge is equal — the
     // photograph, read off the component rather than the digest.
@@ -1014,11 +2519,50 @@ fn the_resumed_ship_holds_its_shield_charge_step_for_step() {
     for frame in 1..=CONTINUE_FOR {
         live.update();
         resumed.update();
+        let resumed_snapshot = capture(resumed.world());
+        let live_snapshot = capture(live.world());
+        let context = format!("{frame} frame(s) after the restore");
+        assert_coordination_queues_match(&resumed_snapshot, &live_snapshot, &context);
         assert_eq!(
-            shield_charge_by_uuid(resumed.world_mut()),
-            shield_charge_by_uuid(live.world_mut()),
-            "shield charge diverged {frame} frame(s) after the restore"
+            resumed_snapshot.coordination_staging, live_snapshot.coordination_staging,
+            "{context}: unread CoordinationEnqueue suffix"
         );
+        assert_selected_continuation_memories_match(&resumed_snapshot, &live_snapshot, &context);
+        assert_eq!(
+            sensors_threat_by_uuid(resumed.world_mut()),
+            sensors_threat_by_uuid(live.world_mut()),
+            "{context}: Sensors threat-warning debounce memory"
+        );
+        assert_shield_ai_matches(
+            &shield_ai_by_uuid(resumed.world_mut()),
+            &shield_ai_by_uuid(live.world_mut()),
+            &context,
+        );
+        let resumed_charge = shield_charge_by_uuid(resumed.world_mut());
+        let live_charge = shield_charge_by_uuid(live.world_mut());
+        if resumed_charge != live_charge {
+            panic!(
+                "shield charge diverged {frame} frame(s) after the restore\n\
+                 resumed charge: {resumed_charge:?}\n\
+                 live charge: {live_charge:?}\n\
+                 resumed queues: {:?}\n\
+                 live queues: {:?}\n\
+                 resumed shield AI: {:?}\n\
+                 live shield AI: {:?}",
+                resumed_snapshot
+                    .entities
+                    .iter()
+                    .map(|entity| (&entity.uuid, &entity.coordination_queue))
+                    .collect::<Vec<_>>(),
+                live_snapshot
+                    .entities
+                    .iter()
+                    .map(|entity| (&entity.uuid, &entity.coordination_queue))
+                    .collect::<Vec<_>>(),
+                shield_ai_by_uuid(resumed.world_mut()),
+                shield_ai_by_uuid(live.world_mut()),
+            );
+        }
     }
 }
 
@@ -5111,5 +6655,183 @@ fn the_transfer_store_behaves_like_any_other_store() {
         holding.take("autosave"),
         None,
         "taken means taken — an export must not be handed out twice"
+    );
+}
+
+#[test]
+fn navigation_continuation_round_trips_anchor_and_exact_generations() {
+    use project_phoenix::snapshot::{
+        HelmWaypointClearanceState, NavigationClearanceIssueState, NavigationWaypointState,
+    };
+
+    let mut live = duel();
+    step(&mut live, CAPTURE_AT);
+    let mut payload = capture(live.world());
+    let navigation_uuids: Vec<_> = payload
+        .entities
+        .iter()
+        .filter(|row| row.navigation_waypoint.is_some())
+        .map(|row| row.uuid.clone())
+        .collect();
+    assert!(
+        navigation_uuids.len() >= 2,
+        "the duel has a ship and a stable anchor UUID"
+    );
+    let ship_uuid = navigation_uuids[0].clone();
+    let anchor_uuid = navigation_uuids[1].clone();
+    let waypoint = NavigationWaypointState {
+        position: Some([137.25, -41.5]),
+        source_uuid: Some(anchor_uuid),
+        generation: 41,
+    };
+    let clearance_issue = NavigationClearanceIssueState {
+        issued_generation: Some(40),
+        helm_axes_were_ai: true,
+    };
+    let helm_clearance = HelmWaypointClearanceState {
+        generation: Some(39),
+    };
+    let row = payload
+        .entities
+        .iter_mut()
+        .find(|row| row.uuid == ship_uuid)
+        .expect("the chosen ship has a snapshot row");
+    row.navigation_waypoint = Some(waypoint.clone());
+    row.navigation_clearance_issue = Some(clearance_issue.clone());
+    row.helm_waypoint_clearance = Some(helm_clearance.clone());
+
+    let mut resumed = boot_to_restore_point(&args(DUEL, ("cruiser", "destroyer")), &payload);
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+
+    let after = capture(resumed.world());
+    let row = after
+        .entities
+        .iter()
+        .find(|row| row.uuid == ship_uuid)
+        .expect("the restored ship is recaptured");
+    assert_eq!(row.navigation_waypoint.as_ref(), Some(&waypoint));
+    assert_eq!(
+        row.navigation_clearance_issue.as_ref(),
+        Some(&clearance_issue)
+    );
+    assert_eq!(
+        row.helm_waypoint_clearance.as_ref(),
+        Some(&helm_clearance)
+    );
+}
+
+#[test]
+fn default_navigation_continuation_replaces_non_default_bootstrap() {
+    use project_phoenix::snapshot::{
+        HelmWaypointClearanceState, NavigationClearanceIssueState, NavigationWaypointState,
+    };
+
+    let mut live = duel();
+    step(&mut live, CAPTURE_AT);
+    let mut default_seed = capture(live.world());
+    let ship_uuid = default_seed
+        .entities
+        .iter()
+        .find(|row| {
+            row.navigation_waypoint.is_some()
+                && row.navigation_clearance_issue.is_some()
+                && row.helm_waypoint_clearance.is_some()
+        })
+        .map(|row| row.uuid.clone())
+        .expect("the duel ship carries the complete Navigation continuation");
+    {
+        let row = default_seed
+            .entities
+            .iter_mut()
+            .find(|row| row.uuid == ship_uuid)
+            .expect("the chosen ship has a snapshot row");
+        row.navigation_waypoint = Some(NavigationWaypointState::default());
+        row.navigation_clearance_issue = Some(NavigationClearanceIssueState::default());
+        row.helm_waypoint_clearance = Some(HelmWaypointClearanceState::default());
+    }
+    let report = restore(live.world_mut(), &default_seed);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    let default_payload = capture(live.world());
+    let default_row = default_payload
+        .entities
+        .iter()
+        .find(|row| row.uuid == ship_uuid)
+        .expect("the default-bearing ship is captured");
+    assert_eq!(
+        default_row.navigation_waypoint,
+        Some(NavigationWaypointState::default())
+    );
+    assert_eq!(
+        default_row.navigation_clearance_issue,
+        Some(NavigationClearanceIssueState::default())
+    );
+    assert_eq!(
+        default_row.helm_waypoint_clearance,
+        Some(HelmWaypointClearanceState::default())
+    );
+
+    let mut resumed =
+        boot_to_restore_point(&args(DUEL, ("cruiser", "destroyer")), &default_payload);
+    let mut non_default = default_payload.clone();
+    let seeded_waypoint = NavigationWaypointState {
+        position: Some([88.0, -23.0]),
+        source_uuid: None,
+        generation: 17,
+    };
+    let seeded_issue = NavigationClearanceIssueState {
+        issued_generation: Some(17),
+        helm_axes_were_ai: true,
+    };
+    let seeded_clearance = HelmWaypointClearanceState {
+        generation: Some(17),
+    };
+    {
+        let row = non_default
+            .entities
+            .iter_mut()
+            .find(|row| row.uuid == ship_uuid)
+            .expect("the bootstrap payload has the chosen ship");
+        row.navigation_waypoint = Some(seeded_waypoint.clone());
+        row.navigation_clearance_issue = Some(seeded_issue.clone());
+        row.helm_waypoint_clearance = Some(seeded_clearance.clone());
+    }
+    let report = restore(resumed.world_mut(), &non_default);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    let seeded = capture(resumed.world());
+    let seeded_row = seeded
+        .entities
+        .iter()
+        .find(|row| row.uuid == ship_uuid)
+        .expect("the seeded bootstrap ship is captured");
+    assert_eq!(seeded_row.navigation_waypoint.as_ref(), Some(&seeded_waypoint));
+    assert_eq!(
+        seeded_row.navigation_clearance_issue.as_ref(),
+        Some(&seeded_issue)
+    );
+    assert_eq!(
+        seeded_row.helm_waypoint_clearance.as_ref(),
+        Some(&seeded_clearance)
+    );
+
+    let report = restore(resumed.world_mut(), &default_payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    let after = capture(resumed.world());
+    let after_row = after
+        .entities
+        .iter()
+        .find(|row| row.uuid == ship_uuid)
+        .expect("the cleared bootstrap ship is recaptured");
+    assert_eq!(
+        after_row.navigation_waypoint,
+        Some(NavigationWaypointState::default())
+    );
+    assert_eq!(
+        after_row.navigation_clearance_issue,
+        Some(NavigationClearanceIssueState::default())
+    );
+    assert_eq!(
+        after_row.helm_waypoint_clearance,
+        Some(HelmWaypointClearanceState::default())
     );
 }

@@ -11,7 +11,9 @@ pub struct ShipConfig {
     #[serde(default)]
     pub power_groups: HashMap<PowerGroupId, PowerGroupConfig>,
     /// Seconds of artificial lag applied to every channel-3 coordination
-    /// message (issue #494). Defaults to 2.0 seconds when absent.
+    /// message (issue #494). Defaults to 2.0 seconds when absent; validation
+    /// requires a finite, non-negative value before runtime converts it to
+    /// logical ticks.
     #[serde(default = "default_coordination_lag_secs")]
     pub coordination_lag_secs: f32,
 }
@@ -284,6 +286,9 @@ pub const fn default_max_power_level() -> u8 {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ShipConfigError {
     ParseError(String),
+    InvalidCoordinationLagSecs {
+        value: f32,
+    },
     EmptyStations,
     EmptySystems,
     EmptyStationId,
@@ -577,6 +582,11 @@ pub fn validate(
     config: &ShipConfig,
     registered_system_kinds: &[&str],
 ) -> Result<(), ShipConfigError> {
+    if !config.coordination_lag_secs.is_finite() || config.coordination_lag_secs < 0.0 {
+        return Err(ShipConfigError::InvalidCoordinationLagSecs {
+            value: config.coordination_lag_secs,
+        });
+    }
     // Empty stations is legitimate: NPC ships have no human consoles. Every
     // system on such a config must be `ai_only = true` (enforced below via the
     // OwnerlessSystemWithoutAiOnly check, since no station can own them).

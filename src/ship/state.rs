@@ -194,6 +194,18 @@ impl ShipViewMode {
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub struct ShipPhaserFrequency(pub f32);
 
+impl ShipPhaserFrequency {
+    /// Read the authoritative ship-wide emitter frequency for continuation.
+    pub(crate) fn continuation(&self) -> f32 {
+        self.0
+    }
+
+    /// Replace the bootstrap frequency with the restored continuation.
+    pub(crate) fn replace_continuation(&mut self, frequency: f32) {
+        self.0 = frequency;
+    }
+}
+
 impl Default for ShipPhaserFrequency {
     fn default() -> Self {
         Self(0.5)

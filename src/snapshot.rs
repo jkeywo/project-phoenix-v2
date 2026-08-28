@@ -437,7 +437,36 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// could restore fired-state onto another layer's handler. Nothing in an older
 /// payload distinguishes those cases from a genuinely base-owned, startup-loaded
 /// layer, so the format dimension refuses it rather than guessing ownership.
-pub const SNAPSHOT_FORMAT: u32 = 13;
+///
+/// `14` — issue #1258 made the Shields AI continuation seam active in ordinary
+/// Backfill combat: [`ShieldsAiState`]'s recent-damage window and one-shot
+/// threat-bearing inbox, [`SensorsThreatMemoryState`]'s producer-side debounce
+/// memory, [`CoordinationQueueState`]'s attached in-flight deliveries, and the
+/// unread [`CoordinationEnqueueState`] suffix ahead of that queue. All are
+/// runtime state, so the content digest cannot
+/// distinguish a format-13 save taken with empty state from one taken while a
+/// value was live. Accepting the older payload would therefore resume a ship
+/// with a plausible but wrong focus decision — including a fresh Sensors state
+/// re-emitting an already-delivered bearing after the Coordination delay. A
+/// bootstrap may also have queued—or left unread—that duplicate before restore
+/// applies the producer memory, so both attached and staged destinations are
+/// replaced rather than merged. Shields damage records carry their exact
+/// authoritative `recorded_tick`, while each queued message carries the first
+/// future FIXED STEP on which it becomes due rather than a raw `Time`-relative
+/// timestamp. Keeping both boundaries integral avoids moving an expiry or
+/// delivery by one step through an `f32` projection.
+///
+/// The same unshipped 13→14 boundary carries the other fixture-reachable
+/// producer memories whose fresh-bootstrap values can manufacture a later edge:
+/// intent narration's complete station map and generation, recent combat ages,
+/// the high-fidelity frequency-hint timer, NPC frequency-match timers, exact
+/// ship phaser frequency, the global phaser firing mode, Tactical's one-tick
+/// frequency-hint inbox, exact
+/// damage-tier/HP baselines, Power's brownout debounce, and Shields'
+/// down/restore notification debounce. Each component or resource's presence
+/// is represented as `Some`, including a wholly default value, because omission
+/// and an authoritative empty frontier are different statements during restore.
+pub const SNAPSHOT_FORMAT: u32 = 14;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -539,12 +568,65 @@ pub struct EntityState {
     /// byte-identical to a never-commanded ship and folds to the same number.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub station_stances: Vec<(String, String)>,
+    /// The entity's AI LOD lifecycle — see [`AiFidelityState`].
+    ///
+    /// This is explicit rather than inferred from [`Self::control`]: fidelity
+    /// owns one canonical component bundle, and a Low capture must remove that
+    /// whole bundle even when the fresh bootstrap happened to promote the same
+    /// authored entity before restore.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_fidelity: Option<AiFidelityState>,
     /// The helm axes as they stood at the capture — see [`ControlState`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control: Option<ControlState>,
+    /// Navigation's current goal and exact monotonic generation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub navigation_waypoint: Option<NavigationWaypointState>,
+    /// Navigation's exactly-once clearance issuer frontier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub navigation_clearance_issue: Option<NavigationClearanceIssueState>,
+    /// Helm's generation latch for the current Navigation waypoint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub helm_waypoint_clearance: Option<HelmWaypointClearanceState>,
     /// The weapon state machines — see [`WeaponState`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub weapons: Option<WeaponState>,
+    /// The state a Shields AI decision must carry across a save — see
+    /// [`ShieldsAiState`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shield_ai: Option<ShieldsAiState>,
+    /// Sensors' per-ship threat-warning debounce memory — see
+    /// [`SensorsThreatMemoryState`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sensors_threat: Option<SensorsThreatMemoryState>,
+    /// Intent narration's coalescing frontier and monotonic advisory counter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intent_narration: Option<IntentNarrationState>,
+    /// Recent combat timestamps, stored as fixed-clock ages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recent_combat: Option<RecentCombatActivityState>,
+    /// High-fidelity Sensors' delayed frequency-hint timer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frequency_hint: Option<FrequencyHintContinuationState>,
+    /// The ship-wide phaser emitter frequency.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phaser_frequency: Option<ShipPhaserFrequencyState>,
+    /// Tactical's one-tick inbox for a delivered frequency hint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tactical_frequency_hint: Option<TacticalFrequencyHintInboxState>,
+    /// Damage-tier crossing baselines, including exact previous HP.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_system_tiers: Option<LastSystemTiersState>,
+    /// Power's brownout notification debounce and same-tick lock edge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub power_brownout: Option<PowerBrownoutContinuationState>,
+    /// Per-facing Shields down/restore notification debounce.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shields_coordination: Option<ShieldsCoordinationContinuationState>,
+    /// In-flight channel-3 messages in enqueue order — see
+    /// [`CoordinationQueueState`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coordination_queue: Option<CoordinationQueueState>,
     /// The repair crew — see [`RepairState`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repair: Option<RepairState>,
@@ -818,6 +900,265 @@ pub struct EntityState {
     /// and fell out of `torpedo_run` into `acquire` on the first AI tick.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blackboards: Vec<(String, crate::core::messages::SystemBlackboard)>,
+}
+
+/// Navigation's authoritative shared waypoint, projected to stable scalars.
+///
+/// `position = None` is a clear waypoint. A present position with no
+/// `source_uuid` is a fixed waypoint; with a UUID it is an anchored waypoint
+/// whose last-known coordinates are the two position scalars. The outer
+/// [`EntityState`] option records component presence, so a default component is
+/// still stored as `Some(default)` and clears bootstrap state on restore.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct NavigationWaypointState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<[f32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_uuid: Option<String>,
+    pub generation: u64,
+}
+
+/// Navigation's authoritative exactly-once clearance issuer frontier.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct NavigationClearanceIssueState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issued_generation: Option<u64>,
+    #[serde(default)]
+    pub helm_axes_were_ai: bool,
+}
+
+/// Helm's authoritative latch for the Navigation generation it may follow.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct HelmWaypointClearanceState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation: Option<u64>,
+}
+
+/// A ship's authoritative Shields AI continuation state, projected to scalars.
+///
+/// `ShieldsDamageHistory` and `PendingShieldsThreatBearing` are runtime ECS
+/// types, not stored schema. The payload writes only the decision state they
+/// own: per-arc `(recorded_tick, damage)` records, the last-observed HP
+/// baseline, and the one-shot pending bearing. The runtime expires records on
+/// exact [`SimTick`] boundaries, so the authoritative tick travels verbatim;
+/// projecting it through elapsed `f32` seconds can move a record across the
+/// strict authored-window boundary by an ULP after restore.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ShieldsAiState {
+    /// Per-facing recent damage as `(recorded_tick, amount)`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub damage_by_arc: Vec<Vec<(u64, i32)>>,
+    /// Per-facing HP observed on the previous Shields AI decision.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub last_hp: Vec<i32>,
+    /// One-shot Sensors bearing waiting for the next Shields AI decision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_threat_bearing_rad: Option<f32>,
+}
+
+/// Sensors' authoritative threat-warning debounce memory, projected to
+/// serializable scalars.
+///
+/// A fresh [`crate::ship::sensors::SensorsThreatState`] treats the hostile that
+/// was already visible at capture as a new threat and enqueues its bearing a
+/// second time. That duplicate reaches Shields only after the authored
+/// Coordination delay, making the omission look like a later Shields focus
+/// divergence rather than a restore-time gap. These are the exact four values
+/// the producer reads to decide whether another warning is due.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SensorsThreatMemoryState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_threat_uuid: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_bearing_rad: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_distance: Option<f32>,
+}
+
+/// Intent narration's complete per-ship continuation memory.
+///
+/// The runtime map is projected into station-id order so a `HashMap` seed can
+/// never enter the stored bytes. Every [`IntentSnapshotState`] field travels:
+/// an axis omitted here can resurface after restore as a decision change that
+/// never happened. `generation` is the ship-wide ordering counter already
+/// stamped onto queued advisories; it is not a clock.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct IntentNarrationState {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub last: Vec<(String, IntentSnapshotState)>,
+    #[serde(default)]
+    pub generation: u64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct IntentSnapshotState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub combat_posture: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hull_fraction: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shield_focus: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub brownout_groups: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manoeuvre: Option<String>,
+}
+
+/// Per-ship combat-memory timestamps projected as ages against `Time<Fixed>`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct RecentCombatActivityState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_damage_taken_age_secs: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_hostile_fire_taken_age_secs: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_weapon_fired_age_secs: Option<f32>,
+    #[serde(default)]
+    pub prev_hull: f32,
+}
+
+/// High-fidelity Sensors' target-relative frequency-hint delay state.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct FrequencyHintContinuationState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_target: Option<String>,
+    #[serde(default)]
+    pub elapsed_secs: f32,
+    #[serde(default)]
+    pub hint_sent: bool,
+}
+
+/// One NPC ship's delayed phaser-frequency match continuation.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct NpcFrequencyMatchState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_target: Option<String>,
+    #[serde(default)]
+    pub elapsed_secs: f32,
+    #[serde(default)]
+    pub match_sent: bool,
+}
+
+/// The complete NPC frequency-match resource, keyed by stable ship uuid.
+///
+/// The runtime map uses process-local `Entity` handles. Vector order is uuid
+/// order so map seeding cannot enter the stored bytes. `Some(default)` is
+/// load-bearing: an authoritative empty map must clear any timers the fresh
+/// bootstrap happened to start before restore.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct NpcFrequencyMatchStatesState {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub states: Vec<(String, NpcFrequencyMatchState)>,
+}
+
+/// A ship's authoritative emitter frequency, projected out of its component.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ShipPhaserFrequencyState {
+    #[serde(default = "default_ship_phaser_frequency")]
+    pub frequency: f32,
+}
+
+fn default_ship_phaser_frequency() -> f32 {
+    crate::ship::state::ShipPhaserFrequency::default().continuation()
+}
+
+impl Default for ShipPhaserFrequencyState {
+    fn default() -> Self {
+        Self {
+            frequency: default_ship_phaser_frequency(),
+        }
+    }
+}
+
+/// Tactical's authoritative one-tick frequency-hint inbox.
+///
+/// The outer [`EntityState`] option records component presence; this inner
+/// option records whether a hint is pending. A present empty inbox therefore
+/// survives as `Some(default)` and clears a bootstrap hint on restore.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct TacticalFrequencyHintInboxState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frequency: Option<f32>,
+}
+
+/// Exact damage-tier and HP baselines, each map independently sorted by System
+/// id so even an incomplete intermediate map is reproduced rather than joined
+/// into an invented entry.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct LastSystemTiersState {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tiers: Vec<(String, u8)>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hp: Vec<(String, f32)>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PowerBrownoutContinuationState {
+    /// Sorted group ids projected from the runtime `HashSet`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notified_groups: Vec<String>,
+    #[serde(default)]
+    pub locked_changed: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ShieldsCoordinationContinuationState {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub down_notified: Vec<bool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub restore_notified: Vec<bool>,
+}
+
+/// One ship's in-flight channel-3 messages, in authoritative enqueue order.
+///
+/// The live queue is deliberately not serializable. This projection carries
+/// its already-serializable wire envelope plus the scalar sender-origin tag and
+/// the number of fixed steps before each message first becomes due. Restore
+/// replaces the fresh bootstrap queue wholesale and rebases that discrete
+/// boundary onto the destination process clock.
+///
+/// This is the attached `CoordinationQueue`; top-level
+/// [`PhoenixSnapshot::coordination_staging`] separately carries the unread
+/// `CoordinationEnqueue` suffix waiting to enter it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct CoordinationQueueState {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending: Vec<QueuedCoordinationState>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct QueuedCoordinationState {
+    /// `0 = Human`, `1 = Ai`, `2 = Offline`.
+    pub sender_origin: u8,
+    pub address: crate::core::messages::CoordinationAddress,
+    pub payload: crate::core::messages::CoordinationPayload,
+    pub presentation: crate::core::messages::CoordinationPresentation,
+    pub sender_label: String,
+    /// Number of future fixed steps, counting the next step as one, until the
+    /// lag router's `due_tick <= SimTick` predicate becomes true.
+    pub due_after_fixed_ticks: u64,
+}
+
+/// One unread `CoordinationEnqueue`, projected out of Bevy's message buffers.
+///
+/// The event's ECS `Entity` handle is process-local, so the payload stores the
+/// source ship's stable uuid and resolves it only after entity restoration.
+/// Every other field is already a scalar or the serializable Coordination wire
+/// vocabulary. Vector position is the message sequence.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CoordinationEnqueueState {
+    pub source_uuid: String,
+    /// `0 = Human`, `1 = Ai`, `2 = Offline`.
+    pub sender_origin: u8,
+    pub address: crate::core::messages::CoordinationAddress,
+    pub payload: crate::core::messages::CoordinationPayload,
+    pub presentation: crate::core::messages::CoordinationPresentation,
+    pub sender_label: String,
+    pub sender_system: String,
 }
 
 /// A ship's **weapon state machines**, named by this issue's AC2.
@@ -1219,6 +1560,26 @@ pub struct ControlState {
     /// `HelmRecoveryHistory` — see [`RecoveryHistory`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub helm_recovery: Option<RecoveryHistory>,
+}
+
+/// One entity's authoritative AI LOD tier and transition boundary.
+///
+/// `AiHighFidelity` is a marker, but not a derivation a restore may leave to the
+/// next LOD pass: every high-fidelity policy gates on it, and demotion is
+/// deliberately delayed. The marker therefore travels as an explicit boolean.
+/// [`crate::ai::server::LodTransitionTimer`] is separate from the canonical
+/// high-fidelity bundle and its absence is meaningful (a ship in its first Low
+/// stretch has never transitioned), so its presence is preserved independently.
+///
+/// The timer's process-local timestamp is projected as an age against the same
+/// fixed-step clock `lod_ai_ships` reads. Restore rebases that age onto the fresh
+/// process so the first eligible demotion tick does not move.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AiFidelityState {
+    #[serde(default)]
+    pub high_fidelity: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_transition_age_secs: Option<f64>,
 }
 
 /// The host-side bounded range windows a ship's helm policies read through
@@ -1921,6 +2282,20 @@ pub struct PhoenixSnapshot {
     /// restore whose digest had matched exactly.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai_policy_clock: Option<f64>,
+    /// Per-NPC delayed frequency-match timers, projected from process-local
+    /// Entity keys to stable ship uuids. Present even when the map is empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub npc_frequency_matches: Option<NpcFrequencyMatchStatesState>,
+    /// The player ship's global phaser Auto/Manual selection. Present whenever
+    /// the Weapons plugin owns the resource, including `Some(PhaserMode::Auto)`
+    /// even though `Auto` is the wire enum's default variant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phaser_mode: Option<crate::core::messages::PhaserMode>,
+    /// The exact unread suffix behind `handle_coordination_enqueue`'s
+    /// world-visible cursor, in message order. This is separate from each
+    /// entity's already-attached [`CoordinationQueueState`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub coordination_staging: Vec<CoordinationEnqueueState>,
     /// Sorted by uuid — a payload must not inherit ECS iteration order any more
     /// than the digest may.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1981,6 +2356,11 @@ pub fn capture(world: &World) -> PhoenixSnapshot {
         ai_policy_clock: world
             .get_resource::<crate::ship::helm_ai::AiPolicyTickClock>()
             .map(|clock| clock.0),
+        npc_frequency_matches: capture_npc_frequency_matches(world),
+        phaser_mode: world
+            .get_resource::<crate::console::weapons::CurrentPhaserMode>()
+            .map(|mode| mode.0),
+        coordination_staging: capture_coordination_staging(world),
         entities: capture_entities(world),
         asteroids: capture_asteroids(world),
         asteroid_window: capture_asteroid_window(world),
@@ -2038,6 +2418,70 @@ fn fixed_elapsed_secs(world: &World) -> Option<f32> {
     world
         .get_resource::<Time<bevy::time::Fixed>>()
         .map(|t| t.elapsed_secs())
+}
+
+/// Project the NPC frequency-match resource through stable ship identities.
+///
+/// Returning `Some` whenever the resource exists is deliberate: an empty map
+/// is authoritative continuation state and must clear a fresh bootstrap's
+/// newly-started timers rather than inherit them.
+fn capture_npc_frequency_matches(world: &World) -> Option<NpcFrequencyMatchStatesState> {
+    let runtime = world.get_resource::<crate::console::weapons::NpcFrequencyMatchStates>()?;
+    let mut states: Vec<_> = runtime
+        .continuation()
+        .iter()
+        .filter_map(|(entity, state)| {
+            let uuid = world.get::<EntityUuid>(*entity)?;
+            let (current_target, elapsed_secs, match_sent) = state.continuation();
+            Some((
+                uuid.0.clone(),
+                NpcFrequencyMatchState {
+                    current_target: current_target.map(str::to_owned),
+                    elapsed_secs,
+                    match_sent,
+                },
+            ))
+        })
+        .collect();
+    states.sort_by(|a, b| a.0.cmp(&b.0));
+    Some(NpcFrequencyMatchStatesState { states })
+}
+
+/// Project the exact unread suffix of the Coordination enqueue channel.
+///
+/// Cloning the authoritative cursor is load-bearing: reading a fresh cursor
+/// would include already-consumed events still retained in Bevy's older
+/// buffer, while reading the live cursor would mutate the run being captured.
+fn capture_coordination_staging(world: &World) -> Vec<CoordinationEnqueueState> {
+    let Some(messages) =
+        world.get_resource::<Messages<crate::ship::components::CoordinationEnqueue>>()
+    else {
+        return Vec::new();
+    };
+    let Some(cursor) = world.get_resource::<crate::ship::components::CoordinationEnqueueCursor>()
+    else {
+        return Vec::new();
+    };
+    let mut unread = cursor.0.clone();
+    unread
+        .read(messages)
+        .filter_map(|message| {
+            let source_uuid = world.get::<EntityUuid>(message.source_entity)?.0.clone();
+            Some(CoordinationEnqueueState {
+                source_uuid,
+                sender_origin: match message.sender_origin {
+                    crate::ship::control_source::ControlSource::Human => 0,
+                    crate::ship::control_source::ControlSource::Ai => 1,
+                    crate::ship::control_source::ControlSource::Offline => 2,
+                },
+                address: message.address.clone(),
+                payload: message.payload.clone(),
+                presentation: message.presentation.clone(),
+                sender_label: message.sender_label.clone(),
+                sender_system: message.sender_system.0.clone(),
+            })
+        })
+        .collect()
 }
 
 /// Walk the scenario's progression state — see [`ScenarioState`].
@@ -2278,6 +2722,42 @@ fn hull_rows(hull: &crate::ship::damage::SystemHull) -> Vec<(String, f32, f32)> 
         .collect()
 }
 
+/// Project the AI LOD lifecycle through stable entity identities.
+///
+/// A row is emitted for every NPC carrying an `AiProfile`, plus any entity that
+/// currently carries either half of the lifecycle. That includes a never-
+/// promoted Low NPC (`AiProfile`, no marker, no timer), a demoted NPC (timer but
+/// no marker), and the permanently High local ship (marker, no `AiProfile`).
+fn capture_ai_fidelity(world: &World) -> Vec<(String, AiFidelityState)> {
+    let captured_at = f64::from(fixed_elapsed_secs(world).unwrap_or_default());
+    let Some(mut query) = world.try_query::<(
+        &EntityUuid,
+        Option<&crate::ai::server::AiProfile>,
+        Has<crate::ai::server::AiHighFidelity>,
+        Option<&crate::ai::server::LodTransitionTimer>,
+    )>() else {
+        return Vec::new();
+    };
+    let mut rows: Vec<_> = query
+        .iter(world)
+        .filter(|(_, profile, high_fidelity, timer)| {
+            profile.is_some() || *high_fidelity || timer.is_some()
+        })
+        .map(|(uuid, _, high_fidelity, timer)| {
+            (
+                uuid.0.clone(),
+                AiFidelityState {
+                    high_fidelity,
+                    last_transition_age_secs: timer
+                        .map(|timer| captured_at - timer.last_state_change_secs),
+                },
+            )
+        })
+        .collect();
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    rows
+}
+
 /// The helm axes, in a query of their own.
 ///
 /// Separate from [`capture_entities`]' walk because Bevy's query tuples do not
@@ -2494,10 +2974,9 @@ fn capture_weapons_and_repair(world: &World) -> Vec<WeaponRepairRow> {
 /// The Weapons→Helm arc-bearing seam, in a query of its own.
 ///
 /// Separate from [`capture_weapons_and_repair`] for that helper's reason — the
-/// query tuple is already at its limit — and joined back by uuid. A row is
-/// emitted only when at least one half of the seam carries something the restore
-/// must put back, so an idle ship (no debounce, no pending bearing) stores
-/// nothing rather than a default `ArcRequestState`.
+/// query tuple is already at its limit — and joined back by uuid. Component
+/// presence is authoritative even when both halves are default: `Some(default)`
+/// must clear a request the fresh bootstrap produced rather than merge it.
 fn capture_arc_requests(world: &World) -> Vec<(String, ArcRequestState)> {
     let Some(mut query) = world.try_query::<(
         &EntityUuid,
@@ -2516,7 +2995,7 @@ fn capture_arc_requests(world: &World) -> Vec<(String, ArcRequestState)> {
             });
             let pending_target = pending.and_then(|p| p.target.map(|t| t.to_string()));
             let pending_arcs = pending.map(|p| p.arcs.clone()).unwrap_or_default();
-            (last.is_some() || pending_target.is_some() || !pending_arcs.is_empty()).then(|| {
+            (weapons_state.is_some() || pending.is_some()).then(|| {
                 (
                     uuid.0.clone(),
                     ArcRequestState {
@@ -3035,9 +3514,411 @@ fn capture_civilians(world: &World) -> Vec<(String, crate::civilian::CivilianSta
         .collect()
 }
 
+/// Shields AI continuation state, in a query of its own and joined by uuid.
+///
+/// Damage records are stamped with the authoritative logical tick. Persisting
+/// that tick verbatim preserves the strict integer expiry boundary exactly.
+fn capture_shield_ai(world: &World) -> Vec<(String, ShieldsAiState)> {
+    let Some(mut query) = world.try_query::<(
+        &EntityUuid,
+        Option<&crate::ship::shields::ShieldsDamageHistory>,
+        Option<&crate::ship::shields::PendingShieldsThreatBearing>,
+    )>() else {
+        return Vec::new();
+    };
+    let mut rows: Vec<_> = query
+        .iter(world)
+        .filter_map(|(uuid, history, pending)| {
+            (history.is_some() || pending.is_some()).then(|| {
+                let damage_by_arc = history
+                    .map(|history| {
+                        history
+                            .arcs
+                            .iter()
+                            .map(|records| {
+                                records
+                                    .iter()
+                                    .map(|record| (record.recorded_tick, record.amount))
+                                    .collect()
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let last_hp = history
+                    .map(|history| history.last_hp.clone())
+                    .unwrap_or_default();
+                (
+                    uuid.0.clone(),
+                    ShieldsAiState {
+                        damage_by_arc,
+                        last_hp,
+                        pending_threat_bearing_rad: pending.and_then(|bearing| bearing.0),
+                    },
+                )
+            })
+        })
+        .collect();
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    rows
+}
+
+/// Sensors threat-warning debounce memory, joined to entity rows by uuid.
+fn capture_sensors_threat(world: &World) -> Vec<(String, SensorsThreatMemoryState)> {
+    let Some(mut query) =
+        world.try_query::<(&EntityUuid, &crate::ship::sensors::SensorsThreatState)>()
+    else {
+        return Vec::new();
+    };
+    let mut rows: Vec<_> = query
+        .iter(world)
+        .map(|(uuid, state)| {
+            (
+                uuid.0.clone(),
+                SensorsThreatMemoryState {
+                    last_threat_uuid: state.last_threat_uuid.clone(),
+                    last_bearing_rad: state.last_bearing_rad,
+                    last_label: state.last_label.clone(),
+                    last_distance: state.last_distance,
+                },
+            )
+        })
+        .collect();
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    rows
+}
+
+fn capture_intent_narration(world: &World) -> Vec<(String, IntentNarrationState)> {
+    let Some(mut query) = world.try_query::<(
+        &EntityUuid,
+        &crate::ship::intent_narration_systems::ShipIntentNarration,
+    )>() else {
+        return Vec::new();
+    };
+    let mut rows: Vec<_> = query
+        .iter(world)
+        .map(|(uuid, narration)| {
+            let (last, generation) = narration.continuation();
+            let mut last: Vec<_> = last
+                .iter()
+                .map(|(station, snapshot)| {
+                    (
+                        station.0.clone(),
+                        IntentSnapshotState {
+                            target_label: snapshot.target_label.clone(),
+                            combat_posture: snapshot.combat_posture,
+                            hull_fraction: snapshot.hull_fraction,
+                            shield_focus: snapshot.shield_focus.clone(),
+                            brownout_groups: snapshot.brownout_groups.clone(),
+                            manoeuvre: snapshot.manoeuvre.clone(),
+                        },
+                    )
+                })
+                .collect();
+            last.sort_by(|a, b| a.0.cmp(&b.0));
+            (uuid.0.clone(), IntentNarrationState { last, generation })
+        })
+        .collect();
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    rows
+}
+
+fn capture_recent_combat(world: &World) -> Vec<(String, RecentCombatActivityState)> {
+    let captured_at = fixed_elapsed_secs(world).unwrap_or_default();
+    let Some(mut query) = world.try_query::<(
+        &EntityUuid,
+        &crate::ship::combat_activity::RecentCombatActivity,
+    )>() else {
+        return Vec::new();
+    };
+    let mut rows: Vec<_> = query
+        .iter(world)
+        .map(|(uuid, activity)| {
+            let (damage, hostile_fire, weapon_fired, prev_hull) = activity.continuation();
+            (
+                uuid.0.clone(),
+                RecentCombatActivityState {
+                    last_damage_taken_age_secs: damage.map(|timestamp| captured_at - timestamp),
+                    last_hostile_fire_taken_age_secs: hostile_fire
+                        .map(|timestamp| captured_at - timestamp),
+                    last_weapon_fired_age_secs: weapon_fired
+                        .map(|timestamp| captured_at - timestamp),
+                    prev_hull,
+                },
+            )
+        })
+        .collect();
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    rows
+}
+
+fn capture_frequency_hints(world: &World) -> Vec<(String, FrequencyHintContinuationState)> {
+    let Some(mut query) = world.try_query::<(
+        &EntityUuid,
+        &crate::console_ai::server::ShipFrequencyHintState,
+    )>() else {
+        return Vec::new();
+    };
+    let mut rows: Vec<_> = query
+        .iter(world)
+        .map(|(uuid, state)| {
+            let (current_target, elapsed_secs, hint_sent) = state.continuation();
+            (
+                uuid.0.clone(),
+                FrequencyHintContinuationState {
+                    current_target: current_target.map(str::to_owned),
+                    elapsed_secs,
+                    hint_sent,
+                },
+            )
+        })
+        .collect();
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    rows
+}
+
+fn capture_ship_phaser_frequencies(world: &World) -> Vec<(String, ShipPhaserFrequencyState)> {
+    let Some(mut query) =
+        world.try_query::<(&EntityUuid, &crate::ship::state::ShipPhaserFrequency)>()
+    else {
+        return Vec::new();
+    };
+    let mut rows: Vec<_> = query
+        .iter(world)
+        .map(|(uuid, frequency)| {
+            (
+                uuid.0.clone(),
+                ShipPhaserFrequencyState {
+                    frequency: frequency.continuation(),
+                },
+            )
+        })
+        .collect();
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    rows
+}
+
+fn capture_tactical_frequency_hints(
+    world: &World,
+) -> Vec<(String, TacticalFrequencyHintInboxState)> {
+    let Some(mut query) = world.try_query::<(
+        &EntityUuid,
+        &crate::ship::components::PendingTacticalFrequencyHint,
+    )>() else {
+        return Vec::new();
+    };
+    let mut rows: Vec<_> = query
+        .iter(world)
+        .map(|(uuid, pending)| {
+            (
+                uuid.0.clone(),
+                TacticalFrequencyHintInboxState {
+                    frequency: pending.continuation(),
+                },
+            )
+        })
+        .collect();
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    rows
+}
+
+fn damage_tier_tag(tier: crate::ship::damage::DamageTier) -> u8 {
+    match tier {
+        crate::ship::damage::DamageTier::Operational => 0,
+        crate::ship::damage::DamageTier::Damaged => 1,
+        crate::ship::damage::DamageTier::Disabled => 2,
+        crate::ship::damage::DamageTier::Destroyed => 3,
+    }
+}
+
+fn capture_last_system_tiers(world: &World) -> Vec<(String, LastSystemTiersState)> {
+    let Some(mut query) =
+        world.try_query::<(&EntityUuid, &crate::ship::components::LastSystemTiers)>()
+    else {
+        return Vec::new();
+    };
+    let mut rows: Vec<_> = query
+        .iter(world)
+        .map(|(uuid, state)| {
+            let (tiers, hp) = state.continuation();
+            let mut tiers: Vec<_> = tiers
+                .iter()
+                .map(|(system, tier)| (system.0.clone(), damage_tier_tag(*tier)))
+                .collect();
+            let mut hp: Vec<_> = hp
+                .iter()
+                .map(|(system, value)| (system.0.clone(), *value))
+                .collect();
+            tiers.sort_by(|a, b| a.0.cmp(&b.0));
+            hp.sort_by(|a, b| a.0.cmp(&b.0));
+            (uuid.0.clone(), LastSystemTiersState { tiers, hp })
+        })
+        .collect();
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    rows
+}
+
+fn capture_power_brownout(world: &World) -> Vec<(String, PowerBrownoutContinuationState)> {
+    let Some(mut query) =
+        world.try_query::<(&EntityUuid, &crate::ship::power::PowerBrownoutState)>()
+    else {
+        return Vec::new();
+    };
+    let mut rows: Vec<_> = query
+        .iter(world)
+        .map(|(uuid, state)| {
+            let (notified_groups, locked_changed) = state.continuation();
+            let mut notified_groups: Vec<_> = notified_groups.iter().cloned().collect();
+            notified_groups.sort();
+            (
+                uuid.0.clone(),
+                PowerBrownoutContinuationState {
+                    notified_groups,
+                    locked_changed,
+                },
+            )
+        })
+        .collect();
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    rows
+}
+
+fn capture_shields_coordination(
+    world: &World,
+) -> Vec<(String, ShieldsCoordinationContinuationState)> {
+    let Some(mut query) =
+        world.try_query::<(&EntityUuid, &crate::ship::shields::ShieldsCoordinationState)>()
+    else {
+        return Vec::new();
+    };
+    let mut rows: Vec<_> = query
+        .iter(world)
+        .map(|(uuid, state)| {
+            let (down_notified, restore_notified) = state.continuation();
+            (
+                uuid.0.clone(),
+                ShieldsCoordinationContinuationState {
+                    down_notified: down_notified.to_vec(),
+                    restore_notified: restore_notified.to_vec(),
+                },
+            )
+        })
+        .collect();
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    rows
+}
+
+fn capture_coordination_queues(world: &World) -> Vec<(String, CoordinationQueueState)> {
+    // Outside FixedUpdate, SimTick is the index the NEXT fixed step will read:
+    // FixedLast has already advanced it after the most recently completed one.
+    let captured_tick = world.get_resource::<SimTick>().map_or(0, |tick| tick.0);
+    let Some(mut query) =
+        world.try_query::<(&EntityUuid, &crate::ship::components::CoordinationQueue)>()
+    else {
+        return Vec::new();
+    };
+    let mut rows: Vec<_> = query
+        .iter(world)
+        .map(|(uuid, queue)| {
+            let pending = queue
+                .0
+                .pending()
+                .iter()
+                .map(|message| QueuedCoordinationState {
+                    sender_origin: match message.sender_origin {
+                        crate::ship::control_source::ControlSource::Human => 0,
+                        crate::ship::control_source::ControlSource::Ai => 1,
+                        crate::ship::control_source::ControlSource::Offline => 2,
+                    },
+                    address: message.address.clone(),
+                    payload: message.payload.clone(),
+                    presentation: message.presentation.clone(),
+                    sender_label: message.sender_label.clone(),
+                    due_after_fixed_ticks: message
+                        .due_tick
+                        .saturating_sub(captured_tick)
+                        .saturating_add(1),
+                })
+                .collect();
+            (uuid.0.clone(), CoordinationQueueState { pending })
+        })
+        .collect();
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    rows
+}
+
+#[derive(Clone)]
+struct CapturedNavigationContinuation {
+    uuid: String,
+    waypoint: Option<NavigationWaypointState>,
+    clearance_issue: Option<NavigationClearanceIssueState>,
+    helm_clearance: Option<HelmWaypointClearanceState>,
+}
+
+/// Capture all three pieces of the Navigation→Helm waypoint frontier.
+///
+/// Component presence is independent and explicit. In particular, a default
+/// component is still `Some(default)` so restore can clear a value produced by
+/// the fresh bootstrap rather than silently inheriting it.
+fn capture_navigation_continuation(world: &World) -> Vec<CapturedNavigationContinuation> {
+    let Some(mut query) = world.try_query::<(
+        &EntityUuid,
+        Option<&crate::console::navigation::NavigationWaypoint>,
+        Option<&crate::console::navigation::NavClearanceIssueState>,
+        Option<&crate::ship_plugin::HelmWaypointClearance>,
+    )>() else {
+        return Vec::new();
+    };
+    let mut rows: Vec<_> = query
+        .iter(world)
+        .filter_map(|(uuid, waypoint, clearance_issue, helm_clearance)| {
+            (waypoint.is_some() || clearance_issue.is_some() || helm_clearance.is_some()).then(|| {
+                let waypoint = waypoint.map(|waypoint| {
+                    let snapshot = waypoint.snapshot();
+                    NavigationWaypointState {
+                        position: snapshot.as_ref().map(|point| [point.x, point.z]),
+                        source_uuid: snapshot.and_then(|point| point.source_uuid),
+                        generation: waypoint.generation(),
+                    }
+                });
+                let clearance_issue = clearance_issue.map(|state| {
+                    let (issued_generation, helm_axes_were_ai) = state.continuation();
+                    NavigationClearanceIssueState {
+                        issued_generation,
+                        helm_axes_were_ai,
+                    }
+                });
+                let helm_clearance = helm_clearance.map(|state| HelmWaypointClearanceState {
+                    generation: state.0,
+                });
+                CapturedNavigationContinuation {
+                    uuid: uuid.0.clone(),
+                    waypoint,
+                    clearance_issue,
+                    helm_clearance,
+                }
+            })
+        })
+        .collect();
+    rows.sort_by(|a, b| a.uuid.cmp(&b.uuid));
+    rows
+}
+
 fn capture_entities(world: &World) -> Vec<EntityState> {
+    let ai_fidelity = capture_ai_fidelity(world);
     let controls = capture_controls(world);
+    let navigation = capture_navigation_continuation(world);
     let machines = capture_weapons_and_repair(world);
+    let shield_ai = capture_shield_ai(world);
+    let sensors_threat = capture_sensors_threat(world);
+    let intent_narration = capture_intent_narration(world);
+    let recent_combat = capture_recent_combat(world);
+    let frequency_hints = capture_frequency_hints(world);
+    let phaser_frequencies = capture_ship_phaser_frequencies(world);
+    let tactical_frequency_hints = capture_tactical_frequency_hints(world);
+    let last_system_tiers = capture_last_system_tiers(world);
+    let power_brownout = capture_power_brownout(world);
+    let shields_coordination = capture_shields_coordination(world);
+    let coordination_queues = capture_coordination_queues(world);
     let arc_requests = capture_arc_requests(world);
     let power = capture_power(world);
     let sensor_locks = capture_sensor_locks(world);
@@ -3064,6 +3945,10 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
     let mut rows: Vec<EntityState> = query
         .iter(world)
         .map(|(uuid, physics, hull, alert, hold, stances)| EntityState {
+            ai_fidelity: ai_fidelity
+                .iter()
+                .find(|(id, _)| id == &uuid.0)
+                .map(|(_, state)| state.clone()),
             control: controls
                 .iter()
                 .find(|(id, _)| id == &uuid.0)
@@ -3075,10 +3960,66 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
                         .map(|(_, target)| target.clone());
                     state
                 }),
+            navigation_waypoint: navigation
+                .iter()
+                .find(|state| state.uuid == uuid.0)
+                .and_then(|state| state.waypoint.clone()),
+            navigation_clearance_issue: navigation
+                .iter()
+                .find(|state| state.uuid == uuid.0)
+                .and_then(|state| state.clearance_issue.clone()),
+            helm_waypoint_clearance: navigation
+                .iter()
+                .find(|state| state.uuid == uuid.0)
+                .and_then(|state| state.helm_clearance.clone()),
             weapons: machines
                 .iter()
                 .find(|(id, ..)| id == &uuid.0)
                 .and_then(|(_, weapons, ..)| weapons.clone()),
+            shield_ai: shield_ai
+                .iter()
+                .find(|(id, _)| id == &uuid.0)
+                .map(|(_, state)| state.clone()),
+            sensors_threat: sensors_threat
+                .iter()
+                .find(|(id, _)| id == &uuid.0)
+                .map(|(_, state)| state.clone()),
+            intent_narration: intent_narration
+                .iter()
+                .find(|(id, _)| id == &uuid.0)
+                .map(|(_, state)| state.clone()),
+            recent_combat: recent_combat
+                .iter()
+                .find(|(id, _)| id == &uuid.0)
+                .map(|(_, state)| state.clone()),
+            frequency_hint: frequency_hints
+                .iter()
+                .find(|(id, _)| id == &uuid.0)
+                .map(|(_, state)| state.clone()),
+            phaser_frequency: phaser_frequencies
+                .iter()
+                .find(|(id, _)| id == &uuid.0)
+                .map(|(_, state)| state.clone()),
+            tactical_frequency_hint: tactical_frequency_hints
+                .iter()
+                .find(|(id, _)| id == &uuid.0)
+                .map(|(_, state)| state.clone()),
+            last_system_tiers: last_system_tiers
+                .iter()
+                .find(|(id, _)| id == &uuid.0)
+                .map(|(_, state)| state.clone()),
+            power_brownout: power_brownout
+                .iter()
+                .find(|(id, _)| id == &uuid.0)
+                .map(|(_, state)| state.clone()),
+            shields_coordination: shields_coordination
+                .iter()
+                .find(|(id, _)| id == &uuid.0)
+                .map(|(_, state)| state.clone()),
+            coordination_queue: coordination_queues
+                .iter()
+                .find(|(id, _)| id == &uuid.0)
+                .map(|(_, state)| state.clone()),
             repair: machines
                 .iter()
                 .find(|(id, ..)| id == &uuid.0)
@@ -3560,6 +4501,9 @@ pub fn load_from<S: vellum_save::Store>(
 pub enum RestoreGap {
     /// A captured `EntityUuid` no entity in the target world carries.
     MissingEntity(String),
+    /// The payload carries unread Coordination enqueues but the target app did
+    /// not register the message buffers/cursor that own that staging seam.
+    CoordinationStagingUnavailable { pending: usize },
     /// A captured `AsteroidUuid` no asteroid in the target world carries.
     MissingAsteroid(String),
     /// A supporting world present at capture has not finished loading in the
@@ -3622,6 +4566,11 @@ impl std::fmt::Display for RestoreGap {
             RestoreGap::MissingEntity(uuid) => {
                 write!(f, "the world has no entity `{uuid}` to restore into")
             }
+            RestoreGap::CoordinationStagingUnavailable { pending } => write!(
+                f,
+                "this save has {pending} unread coordination enqueue(s), but the target world \
+                 did not register their staging cursor"
+            ),
             RestoreGap::MissingAsteroid(uuid) => {
                 write!(f, "the world has no asteroid `{uuid}` to restore into")
             }
@@ -3716,13 +4665,148 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
     }
 
     restore_entities(world, snapshot, &mut report);
+    restore_npc_frequency_matches(world, snapshot, &mut report);
+    restore_coordination_staging(world, snapshot, &mut report);
     restore_asteroids(world, snapshot, &mut report);
     restore_run_scope(world, snapshot, &mut report);
+    restore_ai_cadence(world);
     rebuild_power_modifiers(world);
     restore_ai_world_snapshot(world, snapshot);
     restore_motion_plans(world, snapshot);
 
     report
+}
+
+/// Replace the complete NPC frequency-match map after rebinding its ship keys.
+///
+/// Even `Some(default)` reaches `replace_continuation`: an empty capture is an
+/// instruction to clear timers that the fresh bootstrap may have started.
+fn restore_npc_frequency_matches(
+    world: &mut World,
+    snapshot: &PhoenixSnapshot,
+    report: &mut RestoreReport,
+) {
+    let Some(stored) = &snapshot.npc_frequency_matches else {
+        return;
+    };
+    let Some(mut query) = world.try_query::<(Entity, &EntityUuid)>() else {
+        return;
+    };
+    let entities: std::collections::HashMap<_, _> = query
+        .iter(world)
+        .map(|(entity, uuid)| (uuid.0.clone(), entity))
+        .collect();
+    let mut restored = std::collections::HashMap::with_capacity(stored.states.len());
+    for (uuid, state) in &stored.states {
+        let Some(entity) = entities.get(uuid).copied() else {
+            report.gaps.push(RestoreGap::MissingEntity(uuid.clone()));
+            continue;
+        };
+        restored.insert(
+            entity,
+            crate::console_ai::FrequencyMatchState::from_continuation(
+                state.current_target.clone(),
+                state.elapsed_secs,
+                state.match_sent,
+            ),
+        );
+    }
+    if let Some(mut runtime) =
+        world.get_resource_mut::<crate::console::weapons::NpcFrequencyMatchStates>()
+    {
+        runtime.replace_continuation(restored);
+    }
+}
+
+/// Replace the fresh bootstrap's unread Coordination suffix.
+///
+/// The `Messages` buffers alone are insufficient because consumed entries stay
+/// retained for up to two updates. The resource cursor is the authority: clear
+/// the destination buffers, align that cursor to the now-empty monotonic
+/// message count, then append the projected suffix so the handler sees it once.
+/// Source uuids resolve only after [`restore_entities`] has rebuilt/mapped the
+/// captured roster.
+fn restore_coordination_staging(
+    world: &mut World,
+    snapshot: &PhoenixSnapshot,
+    report: &mut RestoreReport,
+) {
+    use crate::ship::components::{CoordinationEnqueue, CoordinationEnqueueCursor};
+    use crate::ship::control_source::ControlSource;
+
+    let Some(mut query) = world.try_query::<(Entity, &EntityUuid)>() else {
+        if !snapshot.coordination_staging.is_empty() {
+            report
+                .gaps
+                .push(RestoreGap::CoordinationStagingUnavailable {
+                    pending: snapshot.coordination_staging.len(),
+                });
+        }
+        return;
+    };
+    let entities: Vec<_> = query
+        .iter(world)
+        .map(|(entity, uuid)| (uuid.0.clone(), entity))
+        .collect();
+    let mut restored = Vec::with_capacity(snapshot.coordination_staging.len());
+    for stored in &snapshot.coordination_staging {
+        let Some((_, source_entity)) = entities
+            .iter()
+            .find(|(uuid, _)| uuid == &stored.source_uuid)
+        else {
+            report
+                .gaps
+                .push(RestoreGap::MissingEntity(stored.source_uuid.clone()));
+            continue;
+        };
+        restored.push(CoordinationEnqueue {
+            source_entity: *source_entity,
+            sender_origin: match stored.sender_origin {
+                0 => ControlSource::Human,
+                1 => ControlSource::Ai,
+                _ => ControlSource::Offline,
+            },
+            address: stored.address.clone(),
+            payload: stored.payload.clone(),
+            presentation: stored.presentation.clone(),
+            sender_label: stored.sender_label.clone(),
+            sender_system: SystemId(stored.sender_system.clone()),
+        });
+    }
+
+    if !world.contains_resource::<Messages<CoordinationEnqueue>>()
+        || !world.contains_resource::<CoordinationEnqueueCursor>()
+    {
+        if !snapshot.coordination_staging.is_empty() {
+            report
+                .gaps
+                .push(RestoreGap::CoordinationStagingUnavailable {
+                    pending: snapshot.coordination_staging.len(),
+                });
+        }
+        return;
+    }
+    world.resource_scope(|world, mut cursor: Mut<CoordinationEnqueueCursor>| {
+        let mut messages = world.resource_mut::<Messages<CoordinationEnqueue>>();
+        messages.clear();
+        cursor.0.clear(&messages);
+        let _ = messages.write_batch(restored);
+    });
+}
+
+/// Re-derive the AI cadence latches from the restored [`SimTick`].
+///
+/// The latches are intentionally absent from the payload because they are pure
+/// functions of the tick and authored rates. The fresh bootstrap nevertheless
+/// leaves them phased for ITS tick; without this immediate re-derivation the
+/// first post-restore frame can consume a coincidentally armed or disarmed
+/// latch before `FixedLast` corrects it.
+fn restore_ai_cadence(world: &mut World) {
+    use bevy::ecs::system::RunSystemOnce;
+    // A partial bare-World fixture may not have installed the cadence
+    // resources. That is the same best-effort partial-restore contract used by
+    // `restore_ai_world_snapshot` below.
+    let _ = world.run_system_once(crate::ai::cadence::tick_ai_cadence);
 }
 
 /// Rebuild each ship's `ShipModifiers` from the reactor allocation this restore
@@ -3802,6 +4886,10 @@ fn rebuild_ai_world_snapshot(world: &mut World) {
 /// half-updated tick.
 fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut RestoreReport) {
     world.insert_resource(SimTick(snapshot.tick));
+
+    if let Some(mode) = snapshot.phaser_mode {
+        world.insert_resource(crate::console::weapons::CurrentPhaserMode(mode));
+    }
 
     if let Some(state) = snapshot.rng.clone() {
         match SimRng::from_state(state) {
@@ -4207,6 +5295,7 @@ fn restore_collisions(world: &mut World, snapshot: &PhoenixSnapshot) {
 /// Overwrite each captured entity's state, despawning anything the capture did
 /// not have.
 fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut RestoreReport) {
+    let restored_at = fixed_elapsed_secs(world).unwrap_or_default();
     let Some(mut query) = world.try_query::<(Entity, &EntityUuid)>() else {
         return;
     };
@@ -4255,6 +5344,14 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
 
     for (entity, row) in writes {
         let mut entity_mut = world.entity_mut(entity);
+        // Reconcile the canonical LOD bundle before applying any of the
+        // continuations it owns. A High capture restored onto a Low bootstrap
+        // needs those components inserted so the writes below have somewhere to
+        // land; a Low capture restored onto High must remove them before any
+        // high-fidelity system can observe the stale bootstrap marker.
+        if let Some(ai_fidelity) = &row.ai_fidelity {
+            apply_ai_fidelity(&mut entity_mut, ai_fidelity, f64::from(restored_at));
+        }
         if let Some(p) = row.physics {
             if let Some(mut physics) = entity_mut.get_mut::<ShipPhysics>() {
                 physics.x = p[0];
@@ -4449,8 +5546,50 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
                 }
             }
         }
+        if let Some(waypoint) = &row.navigation_waypoint {
+            apply_navigation_waypoint(&mut entity_mut, waypoint);
+        }
+        if let Some(clearance_issue) = &row.navigation_clearance_issue {
+            apply_navigation_clearance_issue(&mut entity_mut, clearance_issue);
+        }
+        if let Some(helm_clearance) = &row.helm_waypoint_clearance {
+            apply_helm_waypoint_clearance(&mut entity_mut, helm_clearance);
+        }
         if let Some(weapons) = &row.weapons {
             apply_weapons(&mut entity_mut, weapons);
+        }
+        if let Some(shield_ai) = &row.shield_ai {
+            apply_shield_ai(&mut entity_mut, shield_ai);
+        }
+        if let Some(sensors_threat) = &row.sensors_threat {
+            apply_sensors_threat(&mut entity_mut, sensors_threat);
+        }
+        if let Some(intent_narration) = &row.intent_narration {
+            apply_intent_narration(&mut entity_mut, intent_narration);
+        }
+        if let Some(recent_combat) = &row.recent_combat {
+            apply_recent_combat(&mut entity_mut, recent_combat, restored_at);
+        }
+        if let Some(frequency_hint) = &row.frequency_hint {
+            apply_frequency_hint(&mut entity_mut, frequency_hint);
+        }
+        if let Some(phaser_frequency) = &row.phaser_frequency {
+            apply_ship_phaser_frequency(&mut entity_mut, phaser_frequency);
+        }
+        if let Some(tactical_frequency_hint) = &row.tactical_frequency_hint {
+            apply_tactical_frequency_hint(&mut entity_mut, tactical_frequency_hint);
+        }
+        if let Some(last_system_tiers) = &row.last_system_tiers {
+            apply_last_system_tiers(&mut entity_mut, last_system_tiers);
+        }
+        if let Some(power_brownout) = &row.power_brownout {
+            apply_power_brownout(&mut entity_mut, power_brownout);
+        }
+        if let Some(shields_coordination) = &row.shields_coordination {
+            apply_shields_coordination(&mut entity_mut, shields_coordination);
+        }
+        if let Some(coordination_queue) = &row.coordination_queue {
+            apply_coordination_queue(&mut entity_mut, coordination_queue, snapshot.tick);
         }
         if let Some(repair) = &row.repair {
             apply_repair(&mut entity_mut, repair);
@@ -4550,6 +5689,289 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
     }
 }
 
+fn apply_navigation_waypoint(
+    entity: &mut EntityWorldMut<'_>,
+    stored: &NavigationWaypointState,
+) {
+    let mode = stored.position.map(|[x, z]| {
+        stored.source_uuid.as_ref().map_or(
+            crate::console::navigation::WaypointMode::Free { x, z },
+            |source_uuid| crate::console::navigation::WaypointMode::Anchored {
+                source_uuid: source_uuid.clone(),
+                last_x: x,
+                last_z: z,
+            },
+        )
+    });
+    if let Some(mut waypoint) =
+        entity.get_mut::<crate::console::navigation::NavigationWaypoint>()
+    {
+        waypoint.replace_continuation(mode, stored.generation);
+    } else {
+        let mut waypoint = crate::console::navigation::NavigationWaypoint::default();
+        waypoint.replace_continuation(mode, stored.generation);
+        entity.insert(waypoint);
+    }
+}
+
+fn apply_navigation_clearance_issue(
+    entity: &mut EntityWorldMut<'_>,
+    stored: &NavigationClearanceIssueState,
+) {
+    if let Some(mut state) =
+        entity.get_mut::<crate::console::navigation::NavClearanceIssueState>()
+    {
+        state.replace_continuation(stored.issued_generation, stored.helm_axes_were_ai);
+    } else {
+        let mut state = crate::console::navigation::NavClearanceIssueState::default();
+        state.replace_continuation(stored.issued_generation, stored.helm_axes_were_ai);
+        entity.insert(state);
+    }
+}
+
+fn apply_helm_waypoint_clearance(
+    entity: &mut EntityWorldMut<'_>,
+    stored: &HelmWaypointClearanceState,
+) {
+    if let Some(mut clearance) =
+        entity.get_mut::<crate::ship_plugin::HelmWaypointClearance>()
+    {
+        clearance.0 = stored.generation;
+    } else {
+        entity.insert(crate::ship_plugin::HelmWaypointClearance(
+            stored.generation,
+        ));
+    }
+}
+
+/// Restore the two runtime components that form Shields AI's continuation.
+///
+/// The payload carries the authoritative record ticks verbatim. Snapshot
+/// restore later installs the capture's [`SimTick`], so the next Shields AI
+/// decision observes the same recorded ticks against the restored logical tick.
+fn apply_shield_ai(entity: &mut EntityWorldMut<'_>, stored: &ShieldsAiState) {
+    if let Some(mut history) = entity.get_mut::<crate::ship::shields::ShieldsDamageHistory>() {
+        history.arcs = stored
+            .damage_by_arc
+            .iter()
+            .map(|records| {
+                records
+                    .iter()
+                    .map(
+                        |(recorded_tick, amount)| crate::ship::shields::DamageRecord {
+                            recorded_tick: *recorded_tick,
+                            amount: *amount,
+                        },
+                    )
+                    .collect()
+            })
+            .collect();
+        history.last_hp = stored.last_hp.clone();
+    }
+    if let Some(mut pending) = entity.get_mut::<crate::ship::shields::PendingShieldsThreatBearing>()
+    {
+        pending.0 = stored.pending_threat_bearing_rad;
+    }
+}
+
+/// Restore exactly the state read by `tick_sensors_threat_warning`'s debounce.
+fn apply_sensors_threat(entity: &mut EntityWorldMut<'_>, stored: &SensorsThreatMemoryState) {
+    if let Some(mut state) = entity.get_mut::<crate::ship::sensors::SensorsThreatState>() {
+        state.last_threat_uuid = stored.last_threat_uuid.clone();
+        state.last_bearing_rad = stored.last_bearing_rad;
+        state.last_label = stored.last_label.clone();
+        state.last_distance = stored.last_distance;
+    }
+}
+
+fn apply_intent_narration(entity: &mut EntityWorldMut<'_>, stored: &IntentNarrationState) {
+    if let Some(mut narration) =
+        entity.get_mut::<crate::ship::intent_narration_systems::ShipIntentNarration>()
+    {
+        narration.replace_continuation(
+            stored
+                .last
+                .iter()
+                .map(|(station, snapshot)| {
+                    (
+                        crate::core::messages::StationId(station.clone()),
+                        crate::ship::intent_narration::IntentSnapshot {
+                            target_label: snapshot.target_label.clone(),
+                            combat_posture: snapshot.combat_posture,
+                            hull_fraction: snapshot.hull_fraction,
+                            shield_focus: snapshot.shield_focus.clone(),
+                            brownout_groups: snapshot.brownout_groups.clone(),
+                            manoeuvre: snapshot.manoeuvre.clone(),
+                        },
+                    )
+                })
+                .collect(),
+            stored.generation,
+        );
+    }
+}
+
+fn apply_recent_combat(
+    entity: &mut EntityWorldMut<'_>,
+    stored: &RecentCombatActivityState,
+    restored_at: f32,
+) {
+    if let Some(mut activity) =
+        entity.get_mut::<crate::ship::combat_activity::RecentCombatActivity>()
+    {
+        activity.replace_continuation(
+            stored
+                .last_damage_taken_age_secs
+                .map(|age| restored_at - age),
+            stored
+                .last_hostile_fire_taken_age_secs
+                .map(|age| restored_at - age),
+            stored
+                .last_weapon_fired_age_secs
+                .map(|age| restored_at - age),
+            stored.prev_hull,
+        );
+    }
+}
+
+fn apply_frequency_hint(entity: &mut EntityWorldMut<'_>, stored: &FrequencyHintContinuationState) {
+    if let Some(mut state) = entity.get_mut::<crate::console_ai::server::ShipFrequencyHintState>() {
+        state.replace_continuation(
+            stored.current_target.clone(),
+            stored.elapsed_secs,
+            stored.hint_sent,
+        );
+    }
+}
+
+/// Replace, rather than merge, one entity's AI LOD lifecycle.
+///
+/// The insert/remove unit is the same canonical bundle `lod_ai_ships` uses.
+/// `LodTransitionTimer` is intentionally outside that bundle, so its presence
+/// is replaced separately and its process-local timestamp is rebased from the
+/// captured fixed-clock age.
+fn apply_ai_fidelity(
+    entity: &mut EntityWorldMut<'_>,
+    stored: &AiFidelityState,
+    restored_at: f64,
+) {
+    use crate::ai::server::{
+        ai_high_fidelity_components, AiHighFidelityComponents, LodTransitionTimer,
+    };
+
+    entity.remove::<AiHighFidelityComponents>();
+    entity.remove::<LodTransitionTimer>();
+    if stored.high_fidelity {
+        entity.insert(ai_high_fidelity_components());
+    }
+    if let Some(age) = stored.last_transition_age_secs {
+        entity.insert(LodTransitionTimer {
+            last_state_change_secs: restored_at - age,
+        });
+    }
+}
+
+fn apply_ship_phaser_frequency(entity: &mut EntityWorldMut<'_>, stored: &ShipPhaserFrequencyState) {
+    if let Some(mut frequency) = entity.get_mut::<crate::ship::state::ShipPhaserFrequency>() {
+        frequency.replace_continuation(stored.frequency);
+    }
+}
+
+fn apply_tactical_frequency_hint(
+    entity: &mut EntityWorldMut<'_>,
+    stored: &TacticalFrequencyHintInboxState,
+) {
+    if let Some(mut pending) =
+        entity.get_mut::<crate::ship::components::PendingTacticalFrequencyHint>()
+    {
+        pending.replace_continuation(stored.frequency);
+    }
+}
+
+fn damage_tier_from_tag(tag: u8) -> crate::ship::damage::DamageTier {
+    match tag {
+        0 => crate::ship::damage::DamageTier::Operational,
+        1 => crate::ship::damage::DamageTier::Damaged,
+        2 => crate::ship::damage::DamageTier::Disabled,
+        _ => crate::ship::damage::DamageTier::Destroyed,
+    }
+}
+
+fn apply_last_system_tiers(entity: &mut EntityWorldMut<'_>, stored: &LastSystemTiersState) {
+    if let Some(mut state) = entity.get_mut::<crate::ship::components::LastSystemTiers>() {
+        state.replace_continuation(
+            stored
+                .tiers
+                .iter()
+                .map(|(system, tier)| (SystemId(system.clone()), damage_tier_from_tag(*tier)))
+                .collect(),
+            stored
+                .hp
+                .iter()
+                .map(|(system, hp)| (SystemId(system.clone()), *hp))
+                .collect(),
+        );
+    }
+}
+
+fn apply_power_brownout(entity: &mut EntityWorldMut<'_>, stored: &PowerBrownoutContinuationState) {
+    if let Some(mut state) = entity.get_mut::<crate::ship::power::PowerBrownoutState>() {
+        state.replace_continuation(
+            stored.notified_groups.iter().cloned().collect(),
+            stored.locked_changed,
+        );
+    }
+}
+
+fn apply_shields_coordination(
+    entity: &mut EntityWorldMut<'_>,
+    stored: &ShieldsCoordinationContinuationState,
+) {
+    if let Some(mut state) = entity.get_mut::<crate::ship::shields::ShieldsCoordinationState>() {
+        state.replace_continuation(
+            stored.down_notified.clone(),
+            stored.restore_notified.clone(),
+        );
+    }
+}
+
+/// Replace the fresh bootstrap's in-flight messages with the capture's queue.
+///
+/// Queue order is the delivery tie-break, so rebuilding iterates the stored
+/// vector verbatim. `restore_entities` runs before `restore_run_scope` installs
+/// the captured [`SimTick`], so due ticks are rebuilt from the snapshot's tick
+/// passed explicitly rather than from the fresh bootstrap resource.
+fn apply_coordination_queue(
+    entity: &mut EntityWorldMut<'_>,
+    stored: &CoordinationQueueState,
+    snapshot_tick: u64,
+) {
+    use crate::ship::control_source::ControlSource;
+    use crate::ship::coordination::QueuedCoordination;
+
+    if let Some(mut queue) = entity.get_mut::<crate::ship::components::CoordinationQueue>() {
+        queue.0.replace(
+            stored
+                .pending
+                .iter()
+                .map(|message| QueuedCoordination {
+                    sender_origin: match message.sender_origin {
+                        0 => ControlSource::Human,
+                        1 => ControlSource::Ai,
+                        _ => ControlSource::Offline,
+                    },
+                    address: message.address.clone(),
+                    payload: message.payload.clone(),
+                    presentation: message.presentation.clone(),
+                    sender_label: message.sender_label.clone(),
+                    due_tick: snapshot_tick
+                        .saturating_add(message.due_after_fixed_ticks.saturating_sub(1)),
+                })
+                .collect(),
+        );
+    }
+}
+
 /// Rebuild one mid-run spawn the bootstrapped world does not have (issue #863).
 ///
 /// The same three steps the live spawn took, through the same two functions, so
@@ -4570,12 +5992,10 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
 /// The helm axes are not spawn components — they arrive with
 /// `ai_high_fidelity_components()` when the LOD system promotes a ship inside the
 /// player's bubble — so a freshly built ship has none of them and every
-/// [`ControlState`] write below would land nowhere. That is the exact silent
-/// failure `ready_to_restore` was written to prevent, and the capture already
-/// answers it: a row carries `control` if and only if the ship it was taken from
-/// was high-fidelity. So the tier is *read*, not guessed. It is also
-/// self-correcting either way — `update_ai_lod` re-derives the tier from range on
-/// its next tick, with its own dwell timer — whereas a dropped write is not.
+/// [`ControlState`] write below would land nowhere. The capture answers that
+/// explicitly through [`EntityState::ai_fidelity`], rather than inferring a tier
+/// from one bundle member. So the tier is *read*, not guessed, and the canonical
+/// bundle is present before the ordinary entity restore applies its continuations.
 fn spawn_from_origin(
     world: &mut World,
     row: &EntityState,
@@ -4629,7 +6049,11 @@ fn spawn_from_origin(
     // resume can rebuild it again. A resumed run that could only be resumed once
     // is a continuation with an expiry date.
     entity_mut.insert(crate::entities::spawner::EntitySpawnOrigin(origin.clone()));
-    if row.control.is_some() {
+    if row
+        .ai_fidelity
+        .as_ref()
+        .is_some_and(|fidelity| fidelity.high_fidelity)
+    {
         entity_mut.insert(crate::ai::server::ai_high_fidelity_components());
     }
 
@@ -5052,9 +6476,11 @@ fn restore_asteroid_window(world: &mut World, snapshot: &PhoenixSnapshot) {
 ///
 /// This predicate is unchanged by issue #863 and deliberately so: a bootstrapped
 /// ship is a *better* ship than one [`restore`] builds, because the bootstrap ran
-/// the world's own systems over it — faction registration, AI token, LOD
-/// promotion and its dwell timer, the power seed — and the payload does not
-/// cover every one of those. The duel's 120-frame continuation claim is measured
+/// the world's own systems over it — faction registration, AI token and the
+/// power seed among them — and the payload does not cover every one of those.
+/// AI fidelity is no longer one of the reasons to wait: format 14 explicitly
+/// replaces its canonical bundle and dwell boundary. The duel's 120-frame
+/// continuation claim is measured
 /// against a fully bootstrapped roster and is the standing proof: restoring
 /// earlier, onto hulls this module had built instead, parts the two worlds one
 /// frame after a matching digest.
@@ -5063,23 +6489,19 @@ fn restore_asteroid_window(world: &mut World, snapshot: &PhoenixSnapshot) {
 /// never arrives. [`ready_to_rebuild`] is the second half of that sentence, and
 /// the caller's own deadline is what decides when to ask it.
 pub fn ready_to_restore(world: &World, snapshot: &PhoenixSnapshot) -> bool {
-    let Some(mut query) = world.try_query::<(&EntityUuid, Option<&ThrustInput>)>() else {
+    let Some(mut query) = world.try_query::<&EntityUuid>() else {
         return false;
     };
-    // Both halves matter. A ship's `EntityUuid` appears at spawn, but its helm
-    // axes are inserted a beat later, and a restore that fired in that window
-    // found no `ThrustInput` to write to and silently left the ship coasting —
-    // a world whose digest matched the capture exactly and diverged one tick
-    // afterwards. Waiting for the controls is what closes it.
-    let present: Vec<(&str, bool)> = query
-        .iter(world)
-        .map(|(uuid, thrust)| (uuid.0.as_str(), thrust.is_some()))
-        .collect();
-    let roster_ready = snapshot.entities.iter().all(|row| {
-        present.iter().any(|(uuid, has_controls)| {
-            *uuid == row.uuid && (*has_controls || row.control.is_none())
-        })
-    });
+    // Before format 14 this also waited for `ThrustInput`: a High row restored
+    // onto a not-yet-promoted bootstrap had nowhere to apply its controls. The
+    // explicit fidelity restore now inserts the canonical bundle FIRST, so
+    // waiting for one of that bundle's members would deadlock the inverse case
+    // (captured High, bootstrap Low) instead of protecting the write.
+    let present: Vec<&str> = query.iter(world).map(|uuid| uuid.0.as_str()).collect();
+    let roster_ready = snapshot
+        .entities
+        .iter()
+        .all(|row| present.contains(&row.uuid.as_str()));
     roster_ready && belt_ready(world, snapshot) && layers_ready(world, snapshot)
 }
 
@@ -5103,26 +6525,19 @@ pub fn ready_to_restore(world: &World, snapshot: &PhoenixSnapshot) -> bool {
 /// distinguishes those two futures, so the only honest discriminator is *time*:
 /// wait, and if the ships have still not arrived, build them.
 ///
-/// True when every captured row is either standing with its controls — the
-/// ordinary case, and the same rule as above — or carries a
-/// [`SpawnOrigin`](crate::world::spawn_origin::SpawnOrigin) that
-/// [`restore`] can build it from. A row that is standing *without* its controls
-/// makes this false as well: building does not help a ship that is already there,
-/// so a caller in that state should keep waiting or give up, not restore over a
-/// half-built hull.
+/// True when every captured row is either standing — the ordinary case and the
+/// same roster rule as above — or carries a
+/// [`SpawnOrigin`](crate::world::spawn_origin::SpawnOrigin) that [`restore`] can
+/// build it from. Fidelity-owned controls are deliberately not a second gate:
+/// restore inserts their canonical bundle from the captured tier before writing
+/// them.
 pub fn ready_to_rebuild(world: &World, snapshot: &PhoenixSnapshot) -> bool {
-    let Some(mut query) = world.try_query::<(&EntityUuid, Option<&ThrustInput>)>() else {
+    let Some(mut query) = world.try_query::<&EntityUuid>() else {
         return false;
     };
-    let present: Vec<(&str, bool)> = query
-        .iter(world)
-        .map(|(uuid, thrust)| (uuid.0.as_str(), thrust.is_some()))
-        .collect();
+    let present: Vec<&str> = query.iter(world).map(|uuid| uuid.0.as_str()).collect();
     let roster_rebuildable = snapshot.entities.iter().all(|row| {
-        match present.iter().find(|(uuid, _)| *uuid == row.uuid) {
-            Some((_, has_controls)) => *has_controls || row.control.is_none(),
-            None => row.spawn.is_some(),
-        }
+        present.contains(&row.uuid.as_str()) || row.spawn.is_some()
     });
     roster_rebuildable && belt_ready(world, snapshot) && layers_ready(world, snapshot)
 }

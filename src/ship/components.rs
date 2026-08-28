@@ -145,6 +145,18 @@ pub struct PendingArcBearingRequest {
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
 pub struct PendingTacticalFrequencyHint(pub Option<f32>);
 
+impl PendingTacticalFrequencyHint {
+    /// Read the exact one-tick Tactical inbox continuation.
+    pub(crate) fn continuation(&self) -> Option<f32> {
+        self.0
+    }
+
+    /// Replace the bootstrap inbox with the restored continuation.
+    pub(crate) fn replace_continuation(&mut self, frequency: Option<f32>) {
+        self.0 = frequency;
+    }
+}
+
 /// The per-ship channel-3 BUS SLOTS, named once (issue #873).
 ///
 /// Every member is the same shape: the post-lag receiving path lands a consumed
@@ -242,6 +254,28 @@ pub struct LastSystemTiers {
     pub hp: std::collections::HashMap<SystemId, f32>,
 }
 
+impl LastSystemTiers {
+    /// Read the authoritative damage-edge memory for continuation projection.
+    pub(crate) fn continuation(
+        &self,
+    ) -> (
+        &std::collections::HashMap<SystemId, DamageTier>,
+        &std::collections::HashMap<SystemId, f32>,
+    ) {
+        (&self.tiers, &self.hp)
+    }
+
+    /// Replace bootstrap memory with a restored continuation.
+    pub(crate) fn replace_continuation(
+        &mut self,
+        tiers: std::collections::HashMap<SystemId, DamageTier>,
+        hp: std::collections::HashMap<SystemId, f32>,
+    ) {
+        self.tiers = tiers;
+        self.hp = hp;
+    }
+}
+
 /// Tracks which stations have already been flagged for human repair popups
 /// (issue #682). Key: station_id. Value: the worst tier already alerted for.
 /// Prevents re-popup every tick for Operational->Damaged crossings.
@@ -283,6 +317,17 @@ pub struct CoordinationEnqueue {
     /// (the intent-narration path, which already stamps its own station id).
     pub sender_system: crate::core::messages::SystemId,
 }
+
+/// World-visible unread position for the sole production
+/// [`CoordinationEnqueue`] consumer.
+///
+/// A `MessageReader` hides this cursor in system-local state, which makes the
+/// unread suffix impossible to snapshot faithfully: the `Messages` buffers
+/// alone cannot distinguish an already-consumed entry from a late entry still
+/// waiting for the next Input tick. Keeping the cursor as a Resource exposes
+/// that exact boundary without changing when the handler drains it.
+#[derive(Resource, Debug, Default)]
+pub struct CoordinationEnqueueCursor(pub bevy::ecs::message::MessageCursor<CoordinationEnqueue>);
 
 /// Outcome already resolved by the generic Coordination lag router.
 ///

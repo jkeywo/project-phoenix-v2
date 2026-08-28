@@ -17,6 +17,32 @@ pub struct RecentCombatActivity {
     pub prev_hull: f32,
 }
 
+impl RecentCombatActivity {
+    /// Read the authoritative activity memory for continuation projection.
+    pub(crate) fn continuation(&self) -> (Option<f32>, Option<f32>, Option<f32>, f32) {
+        (
+            self.last_damage_taken,
+            self.last_hostile_fire_taken,
+            self.last_weapon_fired,
+            self.prev_hull,
+        )
+    }
+
+    /// Replace bootstrap memory with a restored continuation.
+    pub(crate) fn replace_continuation(
+        &mut self,
+        last_damage_taken: Option<f32>,
+        last_hostile_fire_taken: Option<f32>,
+        last_weapon_fired: Option<f32>,
+        prev_hull: f32,
+    ) {
+        self.last_damage_taken = last_damage_taken;
+        self.last_hostile_fire_taken = last_hostile_fire_taken;
+        self.last_weapon_fired = last_weapon_fired;
+        self.prev_hull = prev_hull;
+    }
+}
+
 /// Update every ship's `RecentCombatActivity` and clear its per-tick
 /// `WeaponFiredThisTick`/`ShipAttackedThisTick` markers. Runs in
 /// `SimSet::Broadcast` so damage systems in earlier sets have already

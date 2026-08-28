@@ -133,6 +133,43 @@ pub fn check_join_stamp(
     stamp::check_client_stamp(host, Some(&client))
 }
 
+/// The fleet's authoritative host-to-host check (issue #1114).
+///
+/// Same three numbers, same [`stamp::check_client_stamp`] comparison, one
+/// deliberate difference: **there is no grace here at all.** Protocol AND
+/// content must match, including the content-identity half that
+/// [`check_join_stamp`] waives for a host that has not loaded a manifest yet.
+///
+/// The waiver is right for a phone and wrong for a ship. A phone that connects
+/// to a host still sitting in its lobby is joining something that has not
+/// chosen its content yet, and refusing it would be a race rather than a safety
+/// property — the phone will be sent whatever the host later loads. Two HOSTS
+/// are not in that relationship. Each runs its own authoritative simulation
+/// over its own content, and #1116 will make them advance one shared tick
+/// stream; two hosts that agree on the protocol and differ on the content set
+/// do not desynchronise loudly, they desynchronise silently and later. "I have
+/// not decided what I am running yet" is therefore not a reason to admit a
+/// fleet member — it is the strongest possible reason not to.
+///
+/// The reason codes are `StampMismatch`'s own, unchanged, and deliberately so:
+/// a fleet refusal reads back through the same `reasonStringId` map on the same
+/// wire (`gui/join-code.js`), so "the other ship is on a different build" gets
+/// one sentence in this project rather than two. Read `client` in
+/// `client-stamp-missing` as "the joining side", which is what it has always
+/// meant.
+pub fn check_host_stamp(
+    host: &DeliveryStamp,
+    peer_field: Option<&str>,
+) -> Result<(), StampMismatch> {
+    let Some(raw) = peer_field.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Err(StampMismatch::ClientStampMissing);
+    };
+    let Some(peer) = parse_stamp_field(raw) else {
+        return Err(StampMismatch::ClientStampMissing);
+    };
+    stamp::check_client_stamp(host, Some(&peer))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -285,6 +322,74 @@ mod tests {
         assert_eq!(
             check_join_stamp(&lobby, Some(&bad)).unwrap_err().code(),
             "protocol-mismatch"
+        );
+    }
+
+    // ── The fleet's host-to-host handshake (issue #1114) ────────────────────
+
+    #[test]
+    fn a_matching_ship_host_is_admitted_to_the_fleet() {
+        let field = format!("{PROTOCOL_VERSION}/phoenix-base/1");
+        assert!(check_host_stamp(&browser_host(), Some(&field)).is_ok());
+    }
+
+    #[test]
+    fn a_ship_host_on_another_protocol_or_content_set_is_refused() {
+        for (field, code) in [
+            (
+                format!("{}/phoenix-base/1", PROTOCOL_VERSION + 1),
+                "protocol-mismatch",
+            ),
+            (
+                format!("{PROTOCOL_VERSION}/other-game/1"),
+                "content-id-mismatch",
+            ),
+            (
+                format!("{PROTOCOL_VERSION}/phoenix-base/2"),
+                "content-epoch-mismatch",
+            ),
+        ] {
+            assert_eq!(
+                check_host_stamp(&browser_host(), Some(&field))
+                    .unwrap_err()
+                    .code(),
+                code,
+                "{field}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unstamped_or_garbled_ship_host_is_refused_like_an_unstamped_phone() {
+        for absent in [
+            None,
+            Some(""),
+            Some("  "),
+            Some("1/phoenix-base"),
+            Some("junk"),
+        ] {
+            assert_eq!(
+                check_host_stamp(&browser_host(), absent)
+                    .unwrap_err()
+                    .code(),
+                "client-stamp-missing",
+                "{absent:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_fleet_admits_nobody_until_it_knows_what_content_it_is_running() {
+        // The one behavioural difference from the crew handshake, and the whole
+        // reason this function exists rather than a call to check_join_stamp: a
+        // host with no manifest loaded waives the CONTENT half for a phone, and
+        // must not waive it for another authoritative simulation.
+        let undecided = DeliveryStamp::for_manifest("");
+        let ok = format!("{PROTOCOL_VERSION}/phoenix-base/1");
+        assert!(check_join_stamp(&undecided, Some(&ok)).is_ok());
+        assert_eq!(
+            check_host_stamp(&undecided, Some(&ok)).unwrap_err().code(),
+            "content-id-mismatch"
         );
     }
 

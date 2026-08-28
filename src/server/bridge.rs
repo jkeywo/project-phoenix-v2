@@ -2473,6 +2473,48 @@ pub fn wasm_check_client_stamp(client_stamp: String) -> String {
     crate::core::codec::encode_join_verdict(&verdict, &host)
 }
 
+/// Judge a joining SHIP HOST's version stamp against this host's (issue #1114).
+///
+/// The fleet half of the same handshake, and a separate export rather than a
+/// flag on the one above because the two answers genuinely differ: a host with
+/// no manifest loaded admits a phone on the protocol alone and admits no ship
+/// at all. See [`crate::delivery::check_host_stamp`] for why.
+///
+/// Same `{"ok":…}` shape and the same `StampMismatch::code()` vocabulary, so
+/// neither `gui/host-mesh.js` nor `gui/join-code.js`'s reason map needs a
+/// fleet-only spelling of "that build does not match".
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_check_host_stamp(peer_stamp: String) -> String {
+    let manifest_toml =
+        crate::entities::config_cache::get_scenario_manifest_toml().unwrap_or_default();
+    let host = crate::delivery::stamp::DeliveryStamp::for_manifest(&manifest_toml);
+    let verdict = crate::delivery::check_host_stamp(&host, Some(peer_stamp.as_str()));
+    crate::core::codec::encode_join_verdict(&verdict, &host)
+}
+
+/// This host's own stamp as the three-part `<protocol>/<content_id>/<epoch>`
+/// FIELD (issue #1114).
+///
+/// [`wasm_delivery_stamp`] answers the same three numbers as a JSON object,
+/// because that is what `/host/stamp.json` publishes. A ship host JOINING a
+/// fleet has to present them in the compact form the handshake reads, and
+/// having the page reassemble that string from the JSON would be a second,
+/// quietly divergent spelling of a format `delivery::parse_stamp_field`
+/// already owns — the same field a client bundle carries in its
+/// `phoenix-client-stamp` meta tag.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_delivery_stamp_field() -> String {
+    let manifest_toml =
+        crate::entities::config_cache::get_scenario_manifest_toml().unwrap_or_default();
+    let stamp = crate::delivery::stamp::DeliveryStamp::for_manifest(&manifest_toml);
+    format!(
+        "{}/{}/{}",
+        stamp.protocol, stamp.content_id, stamp.content_epoch
+    )
+}
+
 /// Return the Rhai host-fn signature registry for the scenario script editor
 /// (issue #983, Rhai M5).
 ///

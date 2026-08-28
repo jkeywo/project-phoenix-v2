@@ -2089,6 +2089,14 @@ fn ship_entry_to_js(ship: &crate::world::config::AvailableShipEntry) -> Object {
 ///
 /// Called by JS during preload, before any world is loaded. Stored so
 /// `wasm_get_scenario_catalog` can build the pre-load catalog (issue #754).
+///
+/// It is ALSO this host's content identity: [`wasm_delivery_stamp`],
+/// [`wasm_delivery_stamp_field`], [`wasm_check_client_stamp`] and
+/// [`wasm_check_host_stamp`] all build their stamp from whatever was pushed
+/// here, and an empty store stamps an identity that matches nothing (and, for a
+/// fleet, is refused outright). So `server.html` pushes it on EVERY boot path —
+/// `pushScenarioManifest()` — not only from the catalogue build the
+/// `?scenario=` bypass skips.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_push_scenario_manifest(toml_str: String) {

@@ -389,6 +389,19 @@ rather than by a filter. `gui/fleet-session.js` is the wiring; `gui/host-mesh.js
 is the pure model. #1114 assembles and freezes a fleet; running one as a shared
 deterministic mission is #1116's, which is what the unset `tick` field is for.
 
+Two rules that are load-bearing and easy to undo by accident:
+
+- **A host's content identity is established on every boot path.** The stamp
+  both sides compare comes from the scenario manifest, so `server.html` pushes
+  it in `pushScenarioManifest()` — from the `?scenario=` bypass as well as from
+  the catalogue build. `check_host_stamp` refuses an EMPTY identity on either
+  side rather than comparing two of them, so a missed push is a loud refusal
+  instead of two hosts agreeing on nothing.
+- **The `namespace` on a `resolve`/`join` frame names the FIELD, never the
+  code.** `parseJoinCode` reads a full code's namespace out of the project GUID
+  inside it, so sending that makes the asker agree with the record by
+  construction and "you typed the other kind of code" becomes unanswerable.
+
 ### Once on the wire
 
 ```

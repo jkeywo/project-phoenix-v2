@@ -151,6 +151,15 @@ pub fn check_join_stamp(
 /// not decided what I am running yet" is therefore not a reason to admit a
 /// fleet member — it is the strongest possible reason not to.
 ///
+/// "Undecided" is refused on BOTH sides, and that is not the same as comparing
+/// them. Two hosts that have not loaded a manifest both carry `content_id ==
+/// ""`, and an equality test admits that pair happily — `"" == ""`, epochs
+/// `(0, 0)` — which is the exact case the paragraph above says is the strongest
+/// possible reason to refuse. An empty identity is an ABSENT one, not a value
+/// two parties can agree on, and it is treated here the way
+/// [`stamp::check_bundle_content`] already treats a bundle whose manifest
+/// declares no `[content]`: as missing, never as matching.
+///
 /// The reason codes are `StampMismatch`'s own, unchanged, and deliberately so:
 /// a fleet refusal reads back through the same `reasonStringId` map on the same
 /// wire (`gui/join-code.js`), so "the other ship is on a different build" gets
@@ -167,7 +176,18 @@ pub fn check_host_stamp(
     let Some(peer) = parse_stamp_field(raw) else {
         return Err(StampMismatch::ClientStampMissing);
     };
-    stamp::check_client_stamp(host, Some(&peer))
+    // Protocol first, then the ordinary comparison — the shared check owns the
+    // order, and reporting a content difference over a protocol one would send
+    // the operator after the wrong thing.
+    stamp::check_client_stamp(host, Some(&peer))?;
+    // They agreed. On nothing, if neither has decided what it is running.
+    if host.content_id.trim().is_empty() || peer.content_id.trim().is_empty() {
+        return Err(StampMismatch::ContentId {
+            host: host.content_id.clone(),
+            client: peer.content_id.clone(),
+        });
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -390,6 +410,34 @@ mod tests {
         assert_eq!(
             check_host_stamp(&undecided, Some(&ok)).unwrap_err().code(),
             "content-id-mismatch"
+        );
+        // The other direction: a host that knows what it is running refuses a
+        // ship host that does not.
+        let unstated = format!("{PROTOCOL_VERSION}//0");
+        assert_eq!(
+            check_host_stamp(&browser_host(), Some(&unstated))
+                .unwrap_err()
+                .code(),
+            "content-id-mismatch"
+        );
+        // And the case an equality test admits: NEITHER of them has decided.
+        // "" is an absent identity, not a value two hosts can agree on — this
+        // is the pair that would otherwise fly one mission over two different
+        // content sets and desynchronise silently, later.
+        assert_eq!(
+            check_host_stamp(&undecided, Some(&unstated))
+                .unwrap_err()
+                .code(),
+            "content-id-mismatch"
+        );
+        // A protocol difference still outranks it, so the operator is sent
+        // after the thing that makes every other field's meaning uncertain.
+        let other_protocol = format!("{}//0", PROTOCOL_VERSION + 1);
+        assert_eq!(
+            check_host_stamp(&undecided, Some(&other_protocol))
+                .unwrap_err()
+                .code(),
+            "protocol-mismatch"
         );
     }
 

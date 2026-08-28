@@ -27,6 +27,13 @@
  * client → service
  *   resolve | join | signal | leave
  *
+ * `resolve` and `join` carry an optional `namespace` naming which typed field
+ * the code was entered into — the crew field on a phone, the fleet field on a
+ * ship host (issue #1114). Absent means `client`, so a frame written before
+ * that issue means exactly what it always did. It is what keeps "you typed the
+ * other kind of code" answerable now that BOTH namespaces are joinable: a fleet
+ * code is a perfectly good record, just not one a phone may attach to.
+ *
  * Failures are always an `error` frame naming the request and one stable
  * machine `reason`; the phone maps that reason to a strings.csv id through
  * gui/join-code.js's `reasonStringId`, so the service never ships prose.
@@ -105,15 +112,17 @@ function defaultRandomInt(n) {
  * @param {(n:number)=>number} [opts.randomInt] injectable draw, for tests
  * @param {()=>number} [opts.now] injectable clock, for tests
  * @param {string[]} [opts.joinableNamespaces] which namespaces admit a join.
- *   #1111 ships `['client']`: the server namespace must EXIST so a wrong-type
- *   answer is possible, but joining it is #1114's to enable — by adding one
- *   entry here, not by reshaping the lookup.
+ *   #1111 shipped `['client']` and #1114 added `'server'` — one entry, exactly
+ *   as that comment promised, because the lookup was already typed. The
+ *   parameter stays because "a namespace that exists so wrong-type is
+ *   answerable but which nothing may join" is a state a future namespace can
+ *   be in again; it is not a switch for turning fleets off.
  */
 export function createRegistry({
   data,
   randomInt = defaultRandomInt,
   now = () => Date.now(),
-  joinableNamespaces = [NAMESPACE_CLIENT],
+  joinableNamespaces = [NAMESPACE_CLIENT, NAMESPACE_SERVER],
 } = {}) {
   if (!data) throw new Error('rendezvous: no join-code format data');
   // The Worker bundles this table at build time; a mismatch means the service
@@ -155,12 +164,20 @@ export function createRegistry({
    * Typed lookup. Returns `{ok:true, record}` or `{ok:false, reason}` with one
    * of the three failures the PRD demands kept apart: `unknown`, `wrong-type`
    * and `version-mismatch`. Nothing beyond the class of failure is revealed.
+   *
+   * `expected` is the namespace the ASKER is asking within — the crew field on
+   * a phone, the fleet field on a ship host. Since #1114 both namespaces are
+   * joinable, so "you typed the other kind of code" can no longer be answered
+   * by the record's own type alone: a fleet code IS joinable, just not by the
+   * phone that typed it into the crew field. This parameter is what keeps that
+   * refusal typed instead of admitting a phone to a fleet record.
    */
-  function lookup(project, version, suffix) {
+  function lookup(project, version, suffix, expected) {
     const exact = records.get(recordKey(project, version, suffix));
     if (exact) {
       const ns = namespaceOf(exact.project, data);
       if (!joinable.has(ns)) return { ok: false, reason: 'wrong-type' };
+      if (expected && ns !== expected) return { ok: false, reason: 'wrong-type' };
       return { ok: true, record: exact };
     }
     // Same release, the other typed namespace: the operator typed a server
@@ -186,15 +203,29 @@ export function createRegistry({
     return { ok: false, reason: 'unknown' };
   }
 
-  function resolveRequest(code) {
+  /**
+   * Which namespace a `resolve`/`join` frame is asking within.
+   *
+   * Absent, misspelled or anything but `server` means the crew namespace, which
+   * is exactly #1111's behaviour — the field is additive, and a phone built
+   * before #1114 keeps resolving crew codes without sending it.
+   */
+  const askedNamespace = (frame) =>
+    frame && frame.namespace === NAMESPACE_SERVER ? NAMESPACE_SERVER : NAMESPACE_CLIENT;
+
+  function resolveRequest(code, expected) {
     // Bound before parsing: a code is a bounded identifier, and a megabyte of
     // "code" is a request to spend the Durable Object's CPU, not to join.
     if (typeof code !== 'string' || code.length > maxCodeLength) {
       return { ok: false, reason: 'malformed' };
     }
-    const parsed = parseJoinCode(code, NAMESPACE_CLIENT, data);
+    // The asked namespace is also the FALLBACK the parse composes a bare
+    // five-letter suffix around: five letters typed into the fleet field are a
+    // server code, and composing them under the crew project would resolve the
+    // wrong record entirely rather than refuse.
+    const parsed = parseJoinCode(code, expected, data);
     if (!parsed.ok) return { ok: false, reason: parsed.reason };
-    return lookup(parsed.project, parsed.version, parsed.suffix);
+    return lookup(parsed.project, parsed.version, parsed.suffix, expected);
   }
 
   /**
@@ -354,7 +385,7 @@ export function createRegistry({
     if (!conn || conn.role !== ROLE_CLIENT) return [fail(connId, 'resolve', 'forbidden-role')];
     const capped = chargeLookup(conn, connId, 'resolve');
     if (capped) return capped;
-    const found = resolveRequest(frame.code);
+    const found = resolveRequest(frame.code, askedNamespace(frame));
     if (!found.ok) return [fail(connId, 'resolve', found.reason)];
     const record = found.record;
     return [
@@ -371,7 +402,7 @@ export function createRegistry({
     if (!conn || conn.role !== ROLE_CLIENT) return [fail(connId, 'join', 'forbidden-role')];
     const capped = chargeLookup(conn, connId, 'join');
     if (capped) return capped;
-    const found = resolveRequest(frame.code);
+    const found = resolveRequest(frame.code, askedNamespace(frame));
     if (!found.ok) return [fail(connId, 'join', found.reason)];
     const record = found.record;
     if (record.admission !== 'open') return [fail(connId, 'join', 'admission-closed')];

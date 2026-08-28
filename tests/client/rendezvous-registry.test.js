@@ -101,12 +101,29 @@ describe('code issue', () => {
     expect(h.reg.snapshot()).toHaveLength(2);
   });
 
-  it('opens the server namespace so its codes exist, without making them joinable', () => {
+  it('issues the privileged fleet code in the server namespace', () => {
     const h = harness();
     const code = openHost(h, 'fleet-host', NAMESPACE_SERVER);
     expect(code.namespace).toBe(NAMESPACE_SERVER);
     expect(code.project).toBe(SERVER_PROJECT);
     expect(h.reg.snapshot().map((r) => r.namespace)).toContain(NAMESPACE_SERVER);
+  });
+
+  it('lets one page hold a crew code and a fleet code at once, on two sockets', () => {
+    // What a fleet lead actually is: the same browser tab registered twice,
+    // once per namespace. The two records are independent keys, so neither
+    // sees the other's admission state, peers or lifetime.
+    const h = harness();
+    const crew = openHost(h, 'crew-socket', NAMESPACE_CLIENT);
+    const fleet = openHost(h, 'fleet-socket', NAMESPACE_SERVER);
+    expect(h.reg.snapshot()).toHaveLength(2);
+    h.send('fleet-socket', { type: 'host-admission', state: 'closed' });
+    const byNamespace = Object.fromEntries(
+      h.reg.snapshot().map((r) => [r.namespace, r.admission]),
+    );
+    expect(byNamespace).toEqual({ client: 'open', server: 'closed' });
+    // And the two codes are different words in different namespaces.
+    expect(crew.project).not.toBe(fleet.project);
   });
 
   it('refuses a second code on one host socket', () => {
@@ -247,6 +264,30 @@ describe('admission state', () => {
     expect(h.last('host-1', 'peer-joined')).not.toHaveProperty('stamp');
   });
 
+  it('leaves an already-admitted joiner alone when admission closes', () => {
+    // The lever the fleet operator pulls before mission start (issue #1114).
+    // Closing must answer FUTURE joiners and nothing else: a ship already in
+    // the fleet keeps its presence, gets no frame at all, and is admitted again
+    // the moment the operator reopens.
+    const h = harness();
+    const code = openHost(h);
+    h.connect('early', ROLE_CLIENT);
+    h.send('early', { type: 'join', code: code.suffix });
+    const seenBefore = h.frames('early').length;
+
+    h.send('host-1', { type: 'host-admission', state: 'closed' });
+    h.connect('late', ROLE_CLIENT);
+    h.send('late', { type: 'join', code: code.suffix });
+    expect(h.last('late', 'error')).toMatchObject({ reason: 'admission-closed' });
+    expect(h.frames('early')).toHaveLength(seenBefore);
+    expect(h.reg.snapshot()[0].peers).toBe(1);
+
+    h.send('host-1', { type: 'host-admission', state: 'open' });
+    h.send('late', { type: 'join', code: code.suffix });
+    expect(h.last('late', 'joined')).toMatchObject({ peer: 'late', admission: 'open' });
+    expect(h.reg.snapshot()[0].peers).toBe(2);
+  });
+
   it('refuses joiners past the authored per-record cap', () => {
     const cap = DATA.limits.max_peers_per_record;
     const h = harness();
@@ -260,6 +301,103 @@ describe('admission state', () => {
     h.send('one-too-many', { type: 'join', code: code.suffix });
     expect(h.last('one-too-many', 'error')).toMatchObject({ reason: 'admission-closed' });
     expect(h.reg.snapshot()[0].peers).toBe(cap);
+  });
+});
+
+describe('fleet joining (issue #1114)', () => {
+  /** A second ship host asking to join a fleet: role client, namespace server. */
+  const fleetJoin = (h, connId, code) => {
+    h.connect(connId, ROLE_CLIENT);
+    return h.send(connId, { type: 'join', code, namespace: NAMESPACE_SERVER });
+  };
+
+  it('admits a second ship host on the privileged code', () => {
+    const h = harness();
+    const code = openHost(h, 'fleet-lead', NAMESPACE_SERVER);
+    fleetJoin(h, 'ship-2', code.suffix);
+    expect(h.last('ship-2', 'joined')).toMatchObject({ peer: 'ship-2', admission: 'open' });
+    expect(h.last('fleet-lead', 'peer-joined')).toMatchObject({ peer: 'ship-2' });
+  });
+
+  it('composes a bare five-letter fleet code under the SERVER project', () => {
+    // The sharpest case for the typed fallback: one suffix, two records, two
+    // fields. Without a per-request namespace the fleet field would compose
+    // the crew project and attach a ship host to a phone's ship.
+    const script = [...letters('QUARK'), ...letters('QUARK')];
+    let i = 0;
+    const h = harness({ randomInt: () => script[i++] });
+    const crew = openHost(h, 'crew-host', NAMESPACE_CLIENT);
+    const fleet = openHost(h, 'fleet-lead', NAMESPACE_SERVER);
+    expect(crew.suffix).toBe(fleet.suffix);
+
+    fleetJoin(h, 'ship-2', 'quark');
+    expect(h.last('fleet-lead', 'peer-joined')).toMatchObject({ peer: 'ship-2' });
+    expect(h.last('crew-host', 'peer-joined')).toBeNull();
+
+    h.connect('phone', ROLE_CLIENT);
+    h.send('phone', { type: 'join', code: 'quark' });
+    expect(h.last('crew-host', 'peer-joined')).toMatchObject({ peer: 'phone' });
+  });
+
+  it('refuses a crew code typed into the fleet field, by type', () => {
+    const h = harness();
+    const crew = openHost(h, 'crew-host', NAMESPACE_CLIENT);
+    fleetJoin(h, 'ship-2', crew.suffix);
+    expect(h.last('ship-2', 'error')).toMatchObject({ request: 'join', reason: 'wrong-type' });
+    // And the same answer for a whole pasted crew code, not only five letters.
+    fleetJoin(h, 'ship-3', crew.full);
+    expect(h.last('ship-3', 'error')).toMatchObject({ reason: 'wrong-type' });
+  });
+
+  it('refuses a fleet code typed into the crew field, by type', () => {
+    const h = harness();
+    const fleet = openHost(h, 'fleet-lead', NAMESPACE_SERVER);
+    h.connect('phone', ROLE_CLIENT);
+    h.send('phone', { type: 'join', code: fleet.suffix, namespace: NAMESPACE_CLIENT });
+    expect(h.last('phone', 'error')).toMatchObject({ reason: 'wrong-type' });
+    // A phone built before #1114 sends no namespace at all and gets the same
+    // answer — the field is additive, not a behaviour switch.
+    h.connect('old-phone', ROLE_CLIENT);
+    h.send('old-phone', { type: 'join', code: fleet.suffix });
+    expect(h.last('old-phone', 'error')).toMatchObject({ reason: 'wrong-type' });
+  });
+
+  it('keeps the fleet lead closable without disconnecting an admitted ship', () => {
+    const h = harness();
+    const code = openHost(h, 'fleet-lead', NAMESPACE_SERVER);
+    fleetJoin(h, 'ship-2', code.suffix);
+    h.send('fleet-lead', { type: 'host-admission', state: 'closed' });
+
+    fleetJoin(h, 'ship-3', code.suffix);
+    expect(h.last('ship-3', 'error')).toMatchObject({ reason: 'admission-closed' });
+    expect(h.last('ship-2', 'closed')).toBeNull();
+    expect(h.reg.snapshot().find((r) => r.namespace === NAMESPACE_SERVER).peers).toBe(1);
+
+    h.send('fleet-lead', { type: 'host-admission', state: 'open' });
+    h.send('ship-3', { type: 'join', code: code.suffix, namespace: NAMESPACE_SERVER });
+    expect(h.last('ship-3', 'joined')).toBeTruthy();
+  });
+
+  it('relays signalling between two ship hosts exactly as it does to a phone', () => {
+    const h = harness();
+    const code = openHost(h, 'fleet-lead', NAMESPACE_SERVER);
+    fleetJoin(h, 'ship-2', code.suffix);
+    h.send('ship-2', { type: 'signal', payload: { sdp: 'offer' } });
+    expect(h.last('fleet-lead', 'signal')).toMatchObject({ from: 'ship-2', payload: { sdp: 'offer' } });
+    h.send('fleet-lead', { type: 'signal', to: 'ship-2', payload: { sdp: 'answer' } });
+    expect(h.last('ship-2', 'signal')).toMatchObject({ from: 'fleet-lead', payload: { sdp: 'answer' } });
+  });
+
+  it('resolves a fleet code without attaching, for a check-before-committing step', () => {
+    const h = harness();
+    const code = openHost(h, 'fleet-lead', NAMESPACE_SERVER);
+    h.connect('ship-2', ROLE_CLIENT);
+    h.send('ship-2', { type: 'resolve', code: code.suffix, namespace: NAMESPACE_SERVER });
+    expect(h.last('ship-2', 'resolved')).toMatchObject({
+      namespace: NAMESPACE_SERVER,
+      admission: 'open',
+    });
+    expect(h.reg.snapshot().find((r) => r.namespace === NAMESPACE_SERVER).peers).toBe(0);
   });
 });
 

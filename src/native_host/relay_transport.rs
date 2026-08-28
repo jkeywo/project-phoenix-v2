@@ -401,8 +401,9 @@ impl RelayTransport {
     /// and for the same reason: on a same-token reconnect the NEW peer has
     /// already claimed the token by the time the stale peer's departure lands,
     /// and reporting that departure would flip an actively-driven station to
-    /// Backfill. `on_game_payload` clears the stale peer's token when it
-    /// severs it, so this test is "is this peer still the live holder".
+    /// Backfill. So the question asked here is "is anybody ELSE still holding
+    /// this token" — which is what makes a late departure silent for a player
+    /// who has already come back on a fresh rendezvous peer id.
     fn drop_peer(&mut self, peer: &str, out: &mut Vec<TransportEvent>) {
         let Some(entry) = self.peers.remove(peer) else {
             return;

@@ -138,6 +138,11 @@ const TERMINAL_REASONS = new Set([
   'unknown', 'wrong-type', 'version-mismatch', 'not-joinable',
   'admission-closed', 'host-gone', 'exhausted',
   'too-many-attempts', 'unsupported-protocol', 'forbidden-role', 'not-joined',
+  // The fleet owner's own answers (gui/host-mesh.js, issue #1114). Both are
+  // statements about the FLEET rather than about the link, and re-offering
+  // gets the same one: a full fleet does not empty because somebody retried,
+  // and a launched mission does not un-launch.
+  'fleet-full', 'recovery-only',
   // The host's own StampMismatch::code() values, relayed through JoinRefused.
   'protocol-mismatch', 'content-id-mismatch', 'content-epoch-mismatch',
   'bundle-content-missing', 'client-stamp-missing',
@@ -771,6 +776,17 @@ export function createRendezvousJoiner(opts) {
     onLog = () => {},
     onDiag = () => {},
     factories = defaultFactories(),
+    // ── The three options a SHIP HOST joiner needs (issue #1114) ────────────
+    // A fleet member reaches a host over exactly this path — the same resolve,
+    // offer, channel pair, compatibility handshake, backoff and diagnostics —
+    // and differs only in what it is. It holds no station, so it does not
+    // Identify; it speaks its own vocabulary, so its frames carry no
+    // localisable string ids and it encodes them itself. Three narrow hooks
+    // rather than a second copy of the whole dance.
+    /** Called instead of sending `Identify` once the host accepts this build. */
+    onAccepted = null,
+    /** False for a peer whose frames are not ServerMessages. */
+    localise = true,
   } = opts;
 
   const parsed = parseJoinCode(code, namespace, data);
@@ -931,6 +947,14 @@ export function createRendezvousJoiner(opts) {
         established = true;
         attemptIndex = 0;
         onStatus('ready');
+        if (onAccepted) {
+          // A ship host announces itself in its own vocabulary instead — and
+          // on every reconnect, for the same reason the crew path re-sends
+          // Identify: the far end restores this peer's slot from what it says
+          // here, not from a memory of a connection that has gone.
+          onAccepted();
+          return;
+        }
         // Re-sent on EVERY reconnect, not just the first: the host restores
         // seat, rating and projection from the token on every Identify, which
         // is what makes an automatic reconnect resume the same station.
@@ -965,7 +989,9 @@ export function createRendezvousJoiner(opts) {
     if (!msg) return;
     // localiseTree resolves string ids to display text once, here, so no
     // console downstream has to know which of its fields are localisable.
-    onData(localiseTree(msg));
+    // A host-mesh peer opts out: its frames carry no string ids, and walking
+    // them would be a resolver looking for ids in another protocol's data.
+    onData(localise ? localiseTree(msg) : msg);
   }
 
   function handle(gen, msg) {
@@ -976,7 +1002,13 @@ export function createRendezvousJoiner(opts) {
         // The joiner's own stamp travels in the in-band JoinHandshake, to the
         // host that decides on it — never through the service, which has no
         // say and would only be relaying dead metadata.
-        socket.send(frame('join', { code: parsed.full }));
+        //
+        // The NAMESPACE does travel, because it is a fact about the request
+        // rather than about either build: it names the typed field these five
+        // letters came out of, which is the only thing that makes "that is the
+        // other kind of code" answerable now that both namespaces are joinable
+        // (worker-rendezvous/src/registry.js, issue #1114).
+        socket.send(frame('join', { code: parsed.full, namespace: parsed.namespace }));
         break;
       case 'joined':
         onLog(`[rendezvous] resolved ${parsed.suffix}; offering`);
@@ -1105,6 +1137,24 @@ export function createRendezvousJoiner(opts) {
         channel.send(json);
       } catch (e) {
         onLog(`[rendezvous] send failed (${type}) — dropping this command: ${e && e.message}`);
+      }
+    },
+    /**
+     * Send one already-encoded frame on the reliable channel (issue #1114).
+     *
+     * `send` above builds the crew protocol's `{type, data}` shape. A ship host
+     * speaks a different vocabulary and encodes it in its own module
+     * (`gui/host-mesh.js`), so it needs the channel and not the wrapper —
+     * having this function learn a second envelope would put the host protocol
+     * in the crew transport, which is the thing the two protocols being
+     * separate is for.
+     */
+    sendFrame(json) {
+      if (!isChannelOpen(channel)) return;
+      try {
+        channel.send(json);
+      } catch (e) {
+        onLog(`[rendezvous] frame send failed — dropping it: ${e && e.message}`);
       }
     },
     /** The page's "retry now" control: skip the backoff wait and go again. */

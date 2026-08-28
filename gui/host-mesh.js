@@ -115,14 +115,21 @@ export function encodeHostFrame(frame) {
  * to act on a frame it does not understand.
  */
 export function decodeHostFrame(raw) {
-  const text = typeof raw === 'string' ? raw : null;
-  if (text === null) return null;
-  let parsed = null;
+  if (typeof raw !== 'string') return null;
   try {
-    parsed = JSON.parse(text);
+    return asHostFrame(JSON.parse(raw));
   } catch {
     return null;
   }
+}
+
+/**
+ * The same judgement over an ALREADY-PARSED value, for a receiver that was
+ * handed an object rather than text — which is what the transport's own
+ * `onData` delivers. Re-serialising just to re-parse it would be a second
+ * decode path one careless edit away from disagreeing with this one.
+ */
+export function asHostFrame(parsed) {
   if (!parsed || typeof parsed !== 'object') return null;
   if (parsed.m !== HOST_MESH_PROTOCOL) return null;
   if (HOST_FRAME_TYPES.indexOf(parsed.t) < 0) return null;
@@ -438,6 +445,7 @@ if (typeof window !== 'undefined') {
     hostFrame,
     encodeHostFrame,
     decodeHostFrame,
+    asHostFrame,
     isHostFrame,
     openFleet,
     slotForPeer,

@@ -144,7 +144,18 @@ promise. Everything below still needs doing.
       and a source that starts failing then costs a header line rather than the
       relay.
 - [ ] **Verify each worker by hand after any domain, origin or secret change.**
-      The failure is silent from the page's side, so check it from outside:
+      The failure is silent from the page's side, so check it from outside. The
+      whole recipe — this worker and the rendezvous one in §3a — is now a script
+      (issue #1113), which makes the judgements for you and exits non-zero when
+      one fails:
+
+      ```
+      node scripts/check-rendezvous.mjs \
+        --turn   https://phoenix-turn-credentials-demo.project-phoenix.workers.dev \
+        --origin https://pp-demo.kiwigamedesign.co.uk
+      ```
+
+      The `curl` it replaces, for when you want to look at the raw headers:
 
       ```
       curl -D - -o /dev/null -H "Origin: https://pp-demo.kiwigamedesign.co.uk" \
@@ -225,7 +236,26 @@ mitigation, so do not skip the health check.
       agent trusts a CI guard that is not there.
 - [ ] **Verify each worker by hand after any origin change.** This service has a
       health endpoint precisely because a WebSocket upgrade is awkward to curl
-      and an origin refusal is otherwise invisible from the page's side:
+      and an origin refusal is otherwise invisible from the page's side. Since
+      issue #1113 the whole contract — both workers — is a script, and it is
+      what a field session's preconditions ask you to run:
+
+      ```
+      node scripts/check-rendezvous.mjs \
+        --rendezvous https://phoenix-rendezvous-demo.project-phoenix.workers.dev \
+        --turn       https://phoenix-turn-credentials-demo.project-phoenix.workers.dev \
+        --origin     https://pp-demo.kiwigamedesign.co.uk
+      ```
+
+      Exit 0 means both contracts hold; 1 is a real finding; 2 means something
+      was unreachable. It asserts more than the eye does: TLS, the protocol
+      revision against this checkout's, the bundled join-code table version,
+      that a socket endpoint demands an upgrade, and — the one a human never
+      thinks to check — that an origin that is NOT ours is refused, because an
+      `ALLOWED_ORIGIN` of `"*"` passes every other test while letting anybody's
+      page register a host here.
+
+      The `curl` it replaces, for when you want the raw body:
 
       ```
       curl -s -H "Origin: https://pp-demo.kiwigamedesign.co.uk" \
@@ -235,6 +265,11 @@ mitigation, so do not skip the health check.
       Expect `{"ok":true,…,"origin_allowed":true}`, with the `origin` field
       echoing what you sent. `"origin_allowed":false` is the 2026-08 failure
       class, caught before a player meets it.
+- [ ] **Run the check before every field session, not only after a deploy.** The
+      deployed value is invisible and drifts with nothing to notice; the whole
+      point of §3's story is that the repository was right and the edge was
+      wrong for weeks. `docs/acceptance/1113-networks.md` makes this its first
+      precondition for exactly that reason.
 - [ ] **Keep the two `ALLOWED_ORIGIN` lists in step with reality**, and **record
       what you deployed** — date and value, per worker. Same reasoning as §3: a
       worker only picks up `[vars]` on `wrangler deploy`.
@@ -310,11 +345,18 @@ State this in any release notes, because the gap is not obvious from the name:
   the version pin, and nothing else — the authoritative sim is then still the
   browser host (`server.html`) or `phoenix-headless`. With `--world` (issue
   #1121) it *is* the authoritative host and draws the viewscreen itself.
-- It does **not** do rendezvous signalling, and **browser clients cannot join a
-  native host yet**: the rendezvous Worker (§3a) carries a browser host to its
-  browser clients, and the native host is a delivery server, not a signalling
-  one. A `--world` host is therefore crewed by `--solo` (all Backfill) or by
-  local Ultralight panes (below), not by phones.
+- Since issue #1113 it **can** carry a crew of its own: `--rendezvous <URL>
+  --origin <URL>` registers it with the rendezvous service and browser clients
+  join over the service's WebSocket game relay, because a native process has no
+  WebRTC. It prints the five-letter code at startup. A `--world` host can
+  therefore be crewed by phones over the relay, by `--solo` (all Backfill), or
+  by local Ultralight panes (§4a) — and without the rendezvous flags nobody can
+  join and the host says so at boot, which is what `--solo` is for.
+- What it still does **not** do is WebRTC. Every crew member on a native host is
+  relayed, so the service carries their traffic for the whole mission rather
+  than only introducing them. That is a real cost difference from a browser
+  host, and the reason the relay's bounds are authored in
+  `assets/join/join-codes.toml` rather than assumed.
 - Snapshot save/restore works (`tests/native_host_snapshot.rs`); there is no
   operator-facing session surface for it yet.
 

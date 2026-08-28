@@ -441,3 +441,49 @@ describe('the relay’s lifetime', () => {
     expect(h.last('one-too-many', 'relay-ready')).toBeTruthy();
   });
 });
+
+describe('what a host says it can answer on', () => {
+  it('tells a joiner both rungs by default, so an older host still works', () => {
+    const h = harness();
+    session(h);
+    expect(h.last('peer-1', 'joined').transports).toEqual(['webrtc', 'ws-relay']);
+  });
+
+  it('relays a relay-only claim, which is what a native host is', () => {
+    // A native host is a Rust process with a WebSocket and no WebRTC at all.
+    // Without this its crew would spend the whole 8/16/30 s ladder discovering
+    // that, four times over, before falling back to the path that was always
+    // the only one.
+    const h = harness();
+    h.connect('host-1', ROLE_HOST);
+    h.send('host-1', { type: 'host-open', namespace: NAMESPACE_CLIENT, transports: ['ws-relay'] });
+    const code = h.last('host-1', 'hosted').code;
+    h.connect('peer-1', ROLE_CLIENT);
+    h.send('peer-1', { type: 'join', code: code.full });
+    expect(h.last('peer-1', 'joined').transports).toEqual(['ws-relay']);
+  });
+
+  it('drops a claim it does not understand rather than relaying it', () => {
+    // The field reaches a joiner that branches on it, so an unrecognised name
+    // must not become a rung nobody implements.
+    const h = harness();
+    h.connect('host-1', ROLE_HOST);
+    h.send('host-1', { type: 'host-open', namespace: NAMESPACE_CLIENT, transports: ['quic', 'ws-relay'] });
+    const code = h.last('host-1', 'hosted').code;
+    h.connect('peer-1', ROLE_CLIENT);
+    h.send('peer-1', { type: 'join', code: code.full });
+    expect(h.last('peer-1', 'joined').transports).toEqual(['ws-relay']);
+  });
+
+  it('reads a claim of nothing at all as a claim of everything', () => {
+    // Better a host that is dialled on a rung it cannot answer — which fails
+    // visibly and falls back — than one nobody tries at all.
+    const h = harness();
+    h.connect('host-1', ROLE_HOST);
+    h.send('host-1', { type: 'host-open', namespace: NAMESPACE_CLIENT, transports: [] });
+    const code = h.last('host-1', 'hosted').code;
+    h.connect('peer-1', ROLE_CLIENT);
+    h.send('peer-1', { type: 'join', code: code.full });
+    expect(h.last('peer-1', 'joined').transports).toEqual(['webrtc', 'ws-relay']);
+  });
+});

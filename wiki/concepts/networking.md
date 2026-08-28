@@ -1,14 +1,16 @@
 ---
 title: Networking
 type: concept
-tags: [networking, webrtc, rendezvous, join-code, session-token, star-topology, datachannel, snapshot, fleet, host-mesh]
-sources: [server.html, client.html, gui/rendezvous-transport.js, gui/rendezvous-protocol.js, gui/join-code.js, gui/host-mesh.js, gui/fleet-session.js, gui/connection-manager.js, gui/host-peer-routing.js, worker-rendezvous/src/registry.js, worker-rendezvous/src/index.js, gui/session-token.js, src/core/broadcast/sim.rs, src/core/broadcast/lifecycle.rs, src/server/bridge.rs, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/console/repair/visibility.rs, src/console/weapons/blackboard.rs, src/delivery/mod.rs, AGENTS.md]
+tags: [networking, webrtc, rendezvous, join-code, session-token, star-topology, datachannel, snapshot, fleet, host-mesh, ws-relay, diagnostics]
+sources: [server.html, client.html, gui/rendezvous-transport.js, gui/rendezvous-relay.js, gui/rendezvous-protocol.js, gui/transport-levers.js, gui/connection-diagnostics.js, gui/join-code.js, gui/host-mesh.js, gui/fleet-session.js, gui/connection-manager.js, gui/host-peer-routing.js, worker-rendezvous/src/registry.js, worker-rendezvous/src/relay.js, worker-rendezvous/src/index.js, gui/session-token.js, src/core/rendezvous.rs, src/native_host/relay_transport.rs, src/native_host/relay_socket.rs, src/core/broadcast/sim.rs, src/core/broadcast/lifecycle.rs, src/server/bridge.rs, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/console/repair/visibility.rs, src/console/weapons/blackboard.rs, src/delivery/mod.rs, AGENTS.md]
 updated: 2026-08-28
 ---
 
 # Networking
 
 Phoenix uses the **Phoenix transport** in a **star topology** with **two DataChannels** per client: a Phoenix-owned rendezvous service carries typed join-code lookup and WebRTC signalling over a secure WebSocket, and the game traffic then runs over direct WebRTC DataChannels. Issue #1112 made this the only route — PeerJS, its public broker and the peer-id-in-the-URL-fragment mechanic are gone, along with the flag that used to choose between them.
+
+Issue #1113 added a **third rung** under it. Some networks build no direct link at any price, and since PeerJS went that meant no connection at all rather than a degraded one — so when the WebRTC ladder is spent, the same rendezvous socket carries the game's own frames. See [The transport ladder](#the-transport-ladder-issue-1113) below.
 
 ## Topology
 
@@ -202,6 +204,32 @@ The per-attempt connect timeout escalates 8s → 16s → 30s (`connectTimeoutMs(
 
 Both workers validate CORS against the comma-separated `ALLOWED_ORIGIN` list in their own `wrangler.toml`. The deployed value only changes after `wrangler deploy`; an incorrect allowlist blocks the TURN credential fetch (removing relay) or the rendezvous upgrade (removing joining altogether).
 
+## The transport ladder (issue #1113)
+
+Three ways onto the wire, tried in order, each a fallback for the last:
+
+| Rung | What it is | When it wins |
+| --- | --- | --- |
+| `direct` | WebRTC over host/srflx candidates | LAN, or any workable NAT |
+| TURN | WebRTC over a relay candidate from the credential worker | CGNAT, hotspots, mobile data |
+| `ws-relay` | the game's own frames over the rendezvous WebSocket | nothing else could be built |
+
+**The load-bearing rule is that the third rung does not fork the game protocol.** A relayed payload is the same string the DataChannel would have carried — same `ClientMessage`/`ServerMessage` JSON, same in-band compatibility handshake, same `Identify` gate, same `localiseTree` ingress. It is *enforced* rather than intended: `gui/rendezvous-relay.js` hands back objects shaped like `RTCDataChannel`, and `gui/rendezvous-transport.js` wires them through the same `connectionAdapter` and the same `attachReliableChannel` (hoisted out of `pc.ondatachannel` for exactly this) it wires a real channel through. There is one admission path, and the fallback is a different pair of channels on it.
+
+- **Service side:** `worker-rendezvous/src/relay.js` is a bounded mailbox hub, `registry.js` gains four additive verbs (`relay-open`, `relay`, `relay-close`, plus `relay-peer`/`relay-peer-left`/`relay-ready`/`relay-closed`/`relay-degraded` outbound). The delivery classes stay distinct because that is a transport property: **snapshot sheds oldest-first** at the authored depth, **reliable never sheds** and a full queue ends the session with `relay-overflow` instead. A Durable Object exposes no `bufferedAmount`, so the service's own bound bites only while a target socket cannot take bytes (`setWritable`, driven from `index.js`); the backpressure half that meets a real backlog belongs to whoever is *sending*, in `gui/rendezvous-relay.js` and the native host, both of which do have that signal. Every bound is authored in `[limits]` in `assets/join/join-codes.toml` and advertised to both ends.
+- **Escalation:** the joiner falls back after the direct ladder is spent (four attempts, `JOIN_ATTEMPTS_BEFORE_ENTRY`), starts a fresh ladder on the new rung, and never goes back — a network that refused WebRTC four times is not one to keep re-asking mid-mission. It also skips straight to the relay when the host's `joined` frame carries `transports` without `webrtc`.
+- **Two planes, and the exception:** #1112's rule is that a signalling event may not touch an established link, because a DataChannel owes the service nothing once it is up. A *relayed* link owes it everything, so for that peer the planes collapse back into one — `socketIsTheLink()` on the joiner and `entry.relay` on the host are the two places that exception is written down.
+- **Levers:** `gui/transport-levers.js` pins one rung. `?forceRelay=1` is TURN-only (`iceTransportPolicy: 'relay'`, applied to *both* ends, because ICE only negotiates a relayed pair when both offer relay candidates); `?transport=direct|turn|ws-relay|auto` names all four. Every value can only make the transport try *less*, which is what makes a URL lever safe to ship — and a pinned transport is named on both readouts.
+- **Native hosts** (`phoenix-host --world … --rendezvous <URL> --origin <URL>`) reach their crew this way and no other: a Rust process has no WebRTC. It registers `transports: ["ws-relay"]` so joiners skip the direct ladder. `src/core/rendezvous.rs` is the Rust frame vocabulary, `src/native_host/relay_transport.rs` the protocol, `relay_socket.rs` the `tungstenite` socket. `tests/native_relay_protocol.rs` pins the Rust and JavaScript vocabularies together by reading the JS source, because nothing else can catch the two drifting.
+
+## Connection diagnostics (`gui/connection-diagnostics.js`)
+
+The `#conn-diag` readout on both pages, and the copy-pasteable dump behind the button beside it. `gui/page-chrome.js` still owns only the mechanical half (guard, join, set `textContent`) and there are still two line builders — the host summarises every connected phone, the client summarises one device — but the state behind them is one object with two readers, so the dump and the screen cannot disagree.
+
+What it says, and why each line is actionable: no relay at all (mobile networks will fail; §3 of the delivery checklist), the free shared fallback (the credential worker is unreachable), *carried by the join service* (this network blocks direct links; expect latency), *shedding snapshot updates* (the link cannot keep up; commands still land), and *pinned by a lever* (the restriction is deliberate, so a failure here may not be the network's fault). `readSelectedPair()` in `gui/connection-manager.js` reads the candidate pair ICE actually chose out of `getStats()` — the candidate *list* says what was offered, and on a hotspot the difference between a server-reflexive pair and a relayed one is the difference between a working network and a working credential worker.
+
+`scripts/check-rendezvous.mjs` is the deployed half of the same question: §3 and §3a's curl recipes as code, including the check no human thinks to make — that an origin which is *not* ours is refused, because `ALLOWED_ORIGIN = "*"` passes every other test. `docs/acceptance/1113-networks.md` is the field script that starts by running it.
+
 ## Why almost no backend
 
 - Game data is peer-to-peer. Only the WebRTC handshake touches a signalling service — Phoenix's own rendezvous Worker, which holds transport metadata and nothing else.
@@ -212,7 +240,9 @@ Both workers validate CORS against the comma-separated `ALLOWED_ORIGIN` list in 
 
 CI has no real WebRTC and no deployed worker, so the Playwright suite installs one stand-in before any page script runs (`addInitScript`): `tests/smoke/rendezvous-shim.js`, published as `window.PhoenixTransportFactories`, which `gui/rendezvous-transport.js` takes its socket and peer from. It fakes a WebSocket onto the **real** `worker-rendezvous` registry running inside the host page, and an `RTCPeerConnection` that pairs two pages' DataChannels over a `BroadcastChannel`, honouring the `createDataChannel` init bag so the lossy channel is distinguishable from the reliable one. Only the transport is faked, never the protocol.
 
-It also carries `window.__wasmReady` (set once the host page has both opened its rendezvous socket and dispatched `PhoenixReady`) and `window.__transportShim.sever()/revive()`, a page-scoped kill switch for the "phone's radio slept" failure.
+It also carries `window.__wasmReady` (set once the host page has both opened its rendezvous socket and dispatched `PhoenixReady`), `window.__transportShim.sever()/revive()`, a page-scoped kill switch for the "phone's radio slept" failure, and `peerConfigs()`/`dataChannels()` for inspecting what the transport asked for.
+
+`tests/smoke/transport-paths.spec.js` (issue #1113) drives all four paths through it, and its header is explicit about which are real and which are shim-level: direct and `ws-relay` are genuinely end to end (the second over the real registry's real relay hub), reconnect is real, and **TURN-only is shim-level** — the fake peer connection has no ICE to restrict, so what is proved is that the lever reaches both peer connections, not that a TURN allocation succeeds. That last one is `docs/acceptance/1113-networks.md` scenario 3's, against the deployed service, and nothing in CI can stand in for it.
 
 `tests/smoke/transport-fixture.js` is the single seam every transport assumption lives behind — `fixtures.js` and the ~40 specs importing `readHostPeerId`/`createTestClient` know nothing about it. See `tests/smoke/transport-shim.spec.js` (the stand-in itself), `rendezvous-join.spec.js` (typed join, QR link, distinct refusals), `multi-client-crew.spec.js` (four phones on one code) and `snapshot-channel.spec.js` (the delivery-class split and its per-token fallback), plus [Testing Strategy](./testing-strategy.md).
 

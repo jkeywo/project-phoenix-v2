@@ -108,6 +108,21 @@ const recordKey = (project, version, suffix) =>
  */
 const RELEASE_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** The transports a host may claim. Anything else is dropped, not relayed. */
+const TRANSPORTS = ['webrtc', 'ws-relay'];
+
+/**
+ * What a host said it can answer on, reduced to the names this vocabulary
+ * knows. An absent, empty or unrecognised claim means BOTH — the browser
+ * host's own answer, and what every host built before this field existed
+ * meant by saying nothing.
+ */
+function sanitiseTransports(claimed) {
+  if (!Array.isArray(claimed)) return [...TRANSPORTS];
+  const kept = TRANSPORTS.filter((name) => claimed.includes(name));
+  return kept.length ? kept : [...TRANSPORTS];
+}
+
 function defaultRandomInt(n) {
   // crypto is present in Workers, in browsers and in Node 20+.
   const buf = new Uint32Array(1);
@@ -310,6 +325,13 @@ export function createRegistry({
       suffix: minted.suffix,
       namespace,
       host: connId,
+      // Which transports this host can actually answer on (issue #1113),
+      // relayed verbatim to every joiner so it does not have to spend the whole
+      // WebRTC ladder discovering that the host has no WebRTC. A NATIVE host
+      // has none — it is a Rust process with a WebSocket, not a browser — so
+      // its crew must go straight to the relay. A browser host offers both and
+      // omitting the field means exactly that, so an older host still works.
+      transports: sanitiseTransports(frame.transports),
       // No host delivery stamp is stored or relayed. The authoritative
       // protocol/content check is the host's own, in-band over the DataChannel
       // (delivery::check_join_stamp), and a copy here was read by nothing —
@@ -452,6 +474,10 @@ export function createRegistry({
         type: 'joined',
         peer: connId,
         admission: record.admission,
+        // What this host can answer on. A joiner that reads no 'webrtc' here
+        // skips the whole direct ladder instead of spending ninety seconds
+        // discovering the same thing (issue #1113).
+        transports: record.transports,
       }),
       // Presence only. The joiner's build identity travels in-band on the
       // DataChannel, to the host that actually decides on it — relaying a copy

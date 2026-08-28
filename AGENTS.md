@@ -4,7 +4,7 @@
 
 ## TL;DR
 
-A browser-based spaceship bridge simulator. One browser tab shows a shared 3D view of space. Players join from phones by scanning a QR code, or by typing the five letters shown next to it — no installation. The host (view screen) runs Rust/Bevy compiled to WebAssembly and is the authoritative server; the client (phone console) is **pure HTML/CSS/JS** — no client-side WASM. Clients send inputs and receive state snapshots. Networking is the **Phoenix transport** (issue #1112) in a star topology: a Phoenix-owned rendezvous service (`worker-rendezvous/`, a Cloudflare Worker + Durable Object) carries typed join-code lookup and WebRTC signalling over a secure WebSocket, and the game traffic then runs over direct WebRTC DataChannels — a reliable ordered one for commands and reliable messages, and a lossy unordered one for the snapshot class. PeerJS and its public cloud broker were retired in #1112.
+A browser-based spaceship bridge simulator. One browser tab shows a shared 3D view of space. Players join from phones by scanning a QR code, or by typing the five letters shown next to it — no installation. The host (view screen) runs Rust/Bevy compiled to WebAssembly and is the authoritative server; the client (phone console) is **pure HTML/CSS/JS** — no client-side WASM. Clients send inputs and receive state snapshots. Networking is the **Phoenix transport** (issue #1112) in a star topology: a Phoenix-owned rendezvous service (`worker-rendezvous/`, a Cloudflare Worker + Durable Object) carries typed join-code lookup and WebRTC signalling over a secure WebSocket, and the game traffic then runs over direct WebRTC DataChannels — a reliable ordered one for commands and reliable messages, and a lossy unordered one for the snapshot class. PeerJS and its public cloud broker were retired in #1112. When a network builds no direct link at all, the same rendezvous socket carries the game's own frames instead (issue #1113) — the two delivery classes preserved, the same admission gate, no second protocol — and that fallback is also how a browser client joins a **native** host, which has no WebRTC.
 
 For the current feature set, read **[wiki/concepts/project-overview.md](./wiki/concepts/project-overview.md)** and the relevant PASM slice under [`pasm/spec/`](./pasm/spec/). Planned work lives on the GitHub issue tracker (label `PRD`). Domain vocabulary lives in **[CONTEXT.md](./CONTEXT.md)** — use those terms, don't invent synonyms.
 
@@ -166,9 +166,17 @@ cargo build --release --features host --bin phoenix-host
 #   plausible mission with the wrong numbers.
 #   src/entities/template_preload.rs is the one strict populate every native
 #   process shares.
-#   NOT YET: browser clients cannot join a native host. That needs the Phoenix
-#   transport (issue #1112) — PeerJS is browser JS and cannot run natively.
-#   src/native_host/transport.rs is the seam it plugs into.
+#   --rendezvous <URL> --origin <URL>  IS the crew path (issue #1113), and the
+#     answer to what #1121 deferred. The host registers with the rendezvous
+#     service, prints its five-letter code at startup, and every crew member
+#     reaches it over the service's WebSocket game relay — a native process has
+#     no WebRTC, so it registers saying `transports: ["ws-relay"]` and joiners
+#     skip the direct ladder instead of spending 90 s discovering that.
+#     `--origin` is required and deliberately not defaulted: the service refuses
+#     an upgrade whose Origin is not on its deployed allowlist. Without these
+#     flags nobody can join and the host says so at boot — that is `--solo`.
+#     src/native_host/transport.rs is the seam; relay_transport.rs is what
+#     plugs into it and relay_socket.rs is the tungstenite half.
 ./target/release/phoenix-host --help
 #   --manifest assets/scenarios.demo.toml  IS the catalogue restriction — the
 #     same lever `?manifest=` pulls in the browser (issue #917).
@@ -205,6 +213,25 @@ cargo test --features headless --test native_headless_digest -- --ignored --noca
 #   under NativeRenderSurface::Offscreen — a REAL wgpu device — because the
 #   default Contract composition stands up no render stack and so cannot
 #   observe what one does to the main world.
+
+# The two Cloudflare workers' deploy contract, as code (issue #1113): §3 and
+# §3a of docs/delivery-checklist.md, which are otherwise two curl commands and
+# a careful read at the end of a deploy. Takes LIVE urls; never a push gate, and
+# the first precondition of docs/acceptance/1113-networks.md.
+node scripts/check-rendezvous.mjs \
+  --rendezvous https://phoenix-rendezvous.project-phoenix.workers.dev \
+  --turn       https://phoenix-turn-credentials.project-phoenix.workers.dev \
+  --origin     https://pp-dev.kiwigamedesign.co.uk
+#   Exit 0 = both contracts hold, 1 = a real finding, 2 = unreachable. The
+#   judgements are pure (scripts/rendezvous-checks.mjs) and fixture-tested.
+
+# The rendezvous service on localhost, running the REAL registry over real
+# sockets — no Cloudflare account, no wrangler, no dependencies. The only way
+# to exercise a real WebSocket against this repo's own service.
+npm run rendezvous:dev              # → http://127.0.0.1:8788
+cargo test --features host --test native_relay_live -- --ignored --nocapture
+#   The native host ↔ real relay ↔ real client round trip. #[ignore]d because
+#   it needs the server above (or PHOENIX_RENDEZVOUS pointed at a deployed one).
 
 # Deployed header/caching contract (PRD #855). Takes a LIVE url; run it after a
 # public deploy, from a laptop (Node 20, no npm install) or by dispatching the
@@ -486,13 +513,18 @@ server.html     — Host page: loads server WASM, runs Bevy, registers with the
 client.html     — Client page: pure HTML/JS, joins by typed five-letter code or
                   by the structured code a QR link puts in the URL fragment
 worker-rendezvous/ — The rendezvous service (Cloudflare Worker + Durable
-                  Object): typed join codes, presence, WebRTC signalling relay.
-                  `src/registry.js` is the whole protocol as a pure state
-                  machine; `src/index.js` only terminates the socket. NOT
+                  Object): typed join codes, presence, WebRTC signalling relay,
+                  and (issue #1113) a bounded game relay for when no direct
+                  link can be built. `src/registry.js` is the whole protocol as
+                  a pure state machine, `src/relay.js` the game relay's
+                  mailboxes; `src/index.js` only terminates the socket. NOT
                   DEPLOYED yet — see docs/delivery-checklist.md
 gui/host-mesh.js  — HOST-to-host protocol + the pure fleet-lobby model (#1114);
 gui/fleet-session.js — its two ends wired onto the transport. Separate from the
                   crew protocol by design; see "Assembling a fleet" above
+docs/acceptance/ — Step-by-step kits for the human half of a HITL issue, one
+                  file per issue. `1113-networks.md` is the field script for
+                  connecting across real networks.
 tests/client/   — Vitest tests for gui/*.js
 tests/smoke/    — Playwright smoke tests
 wiki/           — LLM-maintained knowledge base. Read SCHEMA.md first; update as you work.

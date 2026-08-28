@@ -723,7 +723,10 @@ export function createRendezvousHost(opts) {
   function handle(msg) {
     switch (msg.type) {
       case 'ready':
-        socket.send(frame('host-open', { namespace }));
+        // A browser host answers on both rungs; declaring it explicitly is what
+        // lets a host that CANNOT (the native one, which has no WebRTC at all)
+        // declare the truth in the same field rather than by omission.
+        socket.send(frame('host-open', { namespace, transports: ['webrtc', 'ws-relay'] }));
         break;
       case 'hosted':
         code = msg.code;
@@ -1291,6 +1294,22 @@ export function createRendezvousJoiner(opts) {
         socket.send(frame('join', { code: parsed.full, namespace }));
         break;
       case 'joined':
+        // The host has said what it can answer on. A host with no WebRTC — the
+        // native one — must not be dialled for ninety seconds first, and a
+        // joiner pinned to a WebRTC mode against such a host is told so rather
+        // than left timing out against a rung that does not exist.
+        if (Array.isArray(msg.transports) && !msg.transports.includes('webrtc')) {
+          if (levers.wsRelay === 'off') {
+            onLog('[rendezvous] this host answers only on the relay, and the transport is pinned');
+            fail(gen, 'not-joinable');
+            break;
+          }
+          if (mode !== 'ws-relay') {
+            mode = 'ws-relay';
+            onLog('[rendezvous] host answers only on the relay — skipping the direct ladder');
+            onDiag({ event: 'transport', transport: 'ws-relay', reason: 'host-has-no-webrtc' });
+          }
+        }
         if (mode === 'ws-relay') {
           onLog(`[rendezvous] resolved ${parsed.suffix}; asking the service to relay`);
           socket.send(frame('relay-open', {}));

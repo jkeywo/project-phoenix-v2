@@ -290,13 +290,58 @@ fn main() {
         cfg.panes = Some(panes);
     }
 
-    let app = match native_host::build_native_host_app(&cfg, &preload) {
+    let mut app = match native_host::build_native_host_app(&cfg, &preload) {
         Ok(app) => app,
         Err(e) => {
             eprintln!("phoenix-host: {e}");
             std::process::exit(1);
         }
     };
+
+    // The crew path (issue #1113), and the answer to #1121's deferred "browser
+    // clients cannot join a native host": one outbound WebSocket to the
+    // rendezvous service, over which the service carries the game itself.
+    //
+    // Installed as a resource into the seam `NativeTransportPlugin` already
+    // registered — an `insert_resource`, exactly as
+    // `native_host::transport`'s doc comment promised it would be. A host given
+    // no `--rendezvous` inserts nothing and runs exactly as it did before, which
+    // is what `--solo` is for.
+    if let Some(base) = sim.rendezvous.as_deref() {
+        let origin = sim
+            .origin
+            .as_deref()
+            .expect("parse_args refuses --rendezvous without --origin");
+        match native_host::relay_socket::WsRelaySocket::connect(base, origin) {
+            Ok(socket) => {
+                let transport = native_host::relay_transport::RelayTransport::new(
+                    socket,
+                    native_host::relay_transport::RelayHostConfig {
+                        namespace: "client".to_string(),
+                        version: None,
+                        stamp: content.manifest.stamp.clone(),
+                    },
+                );
+                app.insert_resource(transport.notices());
+                app.insert_resource(
+                    project_phoenix::native_host::transport::NativeTransportLink::new(transport),
+                );
+                app.add_systems(bevy::prelude::Update, report_relay_notices);
+                eprintln!("phoenix-host: registering with {base} as {origin}");
+            }
+            Err(e) => {
+                // Fail at the prompt. A host that silently carried on would sit
+                // in a lobby nobody can enter, which is the exact experience
+                // #1121 shipped and #1113 exists to end.
+                eprintln!("phoenix-host: {e}");
+                std::process::exit(1);
+            }
+        }
+    } else if !sim.solo {
+        eprintln!(
+            "phoenix-host: no --rendezvous, so nobody can join this host — it will wait in the              lobby forever. Pass --rendezvous <URL> --origin <URL> for a crew, or --solo to              start with every station on Backfill."
+        );
+    }
     eprintln!(
         "phoenix-host: authoritative simulation on {} — native viewscreen",
         sim.world
@@ -343,6 +388,37 @@ fn main() {
     shutdown.stop();
     if let Ok(handle) = delivery {
         let _ = handle.join();
+    }
+}
+
+/// Print what the crew transport has to say — the issued join code above all.
+///
+/// A Bevy system rather than a callback because the transport is a resource the
+/// scheduler owns, and because the code has to reach the operator's terminal on
+/// the frame the service issues it: the five letters are how anybody joins, and
+/// a native host has no viewscreen panel to paint them on.
+#[cfg(not(target_arch = "wasm32"))]
+fn report_relay_notices(
+    notices: Option<bevy::prelude::Res<project_phoenix::native_host::relay_transport::RelayNotices>>,
+) {
+    use project_phoenix::native_host::relay_transport::RelayNotice;
+    let Some(notices) = notices else {
+        return;
+    };
+    for notice in notices.drain() {
+        match notice {
+            RelayNotice::Coded(code) => eprintln!(
+                "phoenix-host: crew join code {} (full: {})",
+                code.suffix, code.full
+            ),
+            RelayNotice::Refused { peer, code } => {
+                eprintln!("phoenix-host: refused {peer}: {code}")
+            }
+            RelayNotice::Fault { reason } => eprintln!("phoenix-host: rendezvous: {reason}"),
+            RelayNotice::Shedding { total, .. } => eprintln!(
+                "phoenix-host: relay is behind — {total} snapshot frames shed so far"
+            ),
+        }
     }
 }
 

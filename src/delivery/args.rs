@@ -81,6 +81,21 @@ pub struct SimArgs {
     /// `assets/strings/strings.csv` rather than in Rust. A crew member's own
     /// name is neither — it is operator input.
     pub panes: Vec<String>,
+    /// The rendezvous service to register with, so browser clients can join
+    /// this native host over the WebSocket game relay (issue #1113). `None`
+    /// keeps the pre-#1113 behaviour: a host nobody can connect to, which is
+    /// exactly what `--solo` is for.
+    pub rendezvous: Option<String>,
+    /// The `Origin` header the rendezvous socket claims.
+    ///
+    /// Required with `--rendezvous`, and deliberately not defaulted: the
+    /// service refuses an upgrade whose Origin is not on its deployed
+    /// allowlist (worker-rendezvous/src/index.js), and a native host does not
+    /// have one the way a page does. Which origin a given deployment allows is
+    /// an operator decision recorded in docs/delivery-checklist.md §3a, not
+    /// something this binary can invent — inventing one would produce a 403
+    /// whose cause is invisible.
+    pub origin: Option<String>,
 }
 
 /// What `parse_args` decided.
@@ -112,11 +127,9 @@ SIMULATION
     --seed <N>            Override the world's [global] seed
     --solo                Start the mission immediately with nobody connected;
                           every station runs on Backfill. Without it the host
-                          waits in the lobby for participants to ready up —
-                          but browser clients CANNOT JOIN A NATIVE HOST YET
-                          (issue #1112: PeerJS is browser JavaScript), so
-                          --solo is currently the only mode that ever reaches
-                          a running mission.
+                          waits in the lobby for participants to ready up,
+                          which needs --rendezvous below — a host with neither
+                          waits for a crew that has no way in, and says so.
     --log <SPEC>          Log filter, e.g. info,ai=debug,admit=trace
     --log-entity <NAMES>  Restrict logging to these entity names
 
@@ -128,6 +141,23 @@ LOCAL STATIONS (requires a build with --features ultralight)
                           through exactly the contracts a phone does, with its
                           own minted session token. Needs --client-dir: a pane
                           loads the client bundle this host serves.
+
+CREW (issue #1113)
+    --rendezvous <URL>    Register with this rendezvous service so browser
+                          clients can join, e.g.
+                          https://phoenix-rendezvous.project-phoenix.workers.dev
+                          The five-letter code the service issues is printed at
+                          startup. A native host has no WebRTC, so every crew
+                          member is carried over the service's WebSocket game
+                          relay; it registers saying so, and joiners skip the
+                          direct ladder rather than spending ninety seconds
+                          discovering it.
+    --origin <URL>        The Origin header that socket claims. REQUIRED with
+                          --rendezvous and deliberately not defaulted: the
+                          service refuses an upgrade whose Origin is not on its
+                          deployed allowlist, and which origins a deployment
+                          allows is an operator decision recorded in
+                          docs/delivery-checklist.md §3a.
 
 CLIENT
     --client-dir <PATH>   Serve a built client bundle from this directory
@@ -172,6 +202,8 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
     let mut content_dir = DEFAULT_CONTENT_DIR.to_string();
     let mut skip_bundle_check = false;
     let mut world: Option<String> = None;
+    let mut rendezvous: Option<String> = None;
+    let mut origin: Option<String> = None;
     let mut ship: Option<String> = None;
     let mut seed: Option<u64> = None;
     let mut log_spec = String::new();
@@ -201,6 +233,8 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
             "--log-entity" => log_entity = value_for(&arg, &mut it)?,
             "--solo" => solo = true,
             "--pane" => panes.push(value_for(&arg, &mut it)?),
+            "--rendezvous" => rendezvous = Some(value_for(&arg, &mut it)?),
+            "--origin" => origin = Some(value_for(&arg, &mut it)?),
             other => return Err(format!("unknown argument {other:?}")),
         }
     }
@@ -219,6 +253,18 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
                 .to_string(),
         );
     }
+    // `--origin` is only meaningful with `--rendezvous`, and a host given one
+    // without the other would dial nothing or claim nothing. Refuse both ways at
+    // the prompt rather than 403-ing against a live service later.
+    if rendezvous.is_some() && origin.is_none() {
+        return Err(
+            "--rendezvous needs --origin: the service refuses an upgrade whose Origin is not              on its deployed allowlist, and a native host has no page origin to send"
+                .to_string(),
+        );
+    }
+    if origin.is_some() && rendezvous.is_none() {
+        return Err("--origin only means anything with --rendezvous".to_string());
+    }
 
     let sim = match world {
         Some(world) => Some(SimArgs {
@@ -229,6 +275,8 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
             log_entity,
             solo,
             panes,
+            rendezvous,
+            origin,
         }),
         None => {
             for (flag, given) in [
@@ -238,6 +286,8 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
                 ("--log-entity", !log_entity.is_empty()),
                 ("--solo", solo),
                 ("--pane", !panes.is_empty()),
+                ("--rendezvous", rendezvous.is_some()),
+                ("--origin", origin.is_some()),
             ] {
                 if given {
                     return Err(format!("{flag} needs --world — it configures the simulation, and without a world this host serves delivery only"));
@@ -316,6 +366,45 @@ mod tests {
             }
         );
         assert_eq!(a.manifest, DEFAULT_MANIFEST);
+    }
+
+    #[test]
+    fn a_crew_needs_both_a_service_and_an_origin_to_claim(/* issue #1113 */) {
+        let a = run(&[
+            "--world",
+            "assets/worlds/combat_test.toml",
+            "--rendezvous",
+            "https://phoenix-rendezvous.project-phoenix.workers.dev",
+            "--origin",
+            "https://pp-dev.kiwigamedesign.co.uk",
+        ]);
+        let sim = a.sim.expect("a simulation");
+        assert_eq!(
+            sim.rendezvous.as_deref(),
+            Some("https://phoenix-rendezvous.project-phoenix.workers.dev")
+        );
+        assert_eq!(sim.origin.as_deref(), Some("https://pp-dev.kiwigamedesign.co.uk"));
+    }
+
+    #[test]
+    fn a_service_without_an_origin_is_refused_at_the_prompt() {
+        // The service refuses an upgrade whose Origin is not on its deployed
+        // allowlist, and a native host has no page origin to send. Defaulting
+        // one would produce a 403 whose cause is invisible; refusing here says
+        // what is missing while the operator is still looking at the terminal.
+        let err = parse(&["--world", "w.toml", "--rendezvous", "https://x.test"]).unwrap_err();
+        assert!(err.contains("--origin"), "{err}");
+        let err = parse(&["--world", "w.toml", "--origin", "https://x.test"]).unwrap_err();
+        assert!(err.contains("--rendezvous"), "{err}");
+    }
+
+    #[test]
+    fn the_crew_flags_need_a_world_like_every_other_simulation_flag() {
+        // Delivery-only hosts serve files; there is no mission for a crew to
+        // join, and silently ignoring the flags would be the worst answer.
+        let err = parse(&["--rendezvous", "https://x.test", "--origin", "https://y.test"])
+            .unwrap_err();
+        assert!(err.contains("--world"), "{err}");
     }
 
     #[test]

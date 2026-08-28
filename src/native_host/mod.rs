@@ -20,6 +20,10 @@
 //!   its own minted session token. Everything about *what a pane may say and
 //!   hear* compiles and is tested with the SDK feature off; only the drawing and
 //!   the input translation are behind `--features ultralight`.
+//! * [`relay_transport`] — what else plugs into it (issue #1113): the rendezvous
+//!   service's WebSocket game relay, which is how a browser client joins a
+//!   native host. #1121 deferred that acceptance criterion to a transport that
+//!   did not exist yet; this is it.
 //! * `phoenix-host` (`src/bin/phoenix_host.rs`) — the process. Issue #1121
 //!   **evolves** that binary rather than adding a parallel one, so PRD #855's
 //!   bundle serving, catalogue restriction and startup version pin are shared
@@ -33,6 +37,12 @@
 
 pub mod app;
 pub mod panes;
+/// The real WebSocket behind [`relay_transport`]. Behind the `host` feature
+/// because it is the only thing here that needs `tungstenite`; the protocol it
+/// carries, and that protocol's tests, stay on the default feature set.
+#[cfg(feature = "host")]
+pub mod relay_socket;
+pub mod relay_transport;
 pub mod transport;
 
 pub use app::{

@@ -237,6 +237,49 @@ pub fn decode_bridge_client_messages(
     (successes, failures)
 }
 
+// ── Rendezvous frames (issue #1113) ──────────────────────────────────────────
+//
+// The native host's crew path speaks the SAME frames the browser does
+// (worker-rendezvous/src/registry.js, gui/rendezvous-transport.js), so it needs
+// JSON — and this module is the only one allowed to name `serde_json`
+// (AGENTS.md rule 1). The types are `crate::core::rendezvous`'s; the two calls
+// per direction are here.
+//
+// Both decoders are TOLERANT by construction rather than by effort: the frame
+// types carry `#[serde(default)]` on every optional field and no
+// `deny_unknown_fields`, so an additive field from a newer service (#1114's and
+// #1115's are coming) decodes as a frame this build does not act on rather than
+// as an error that drops the socket.
+
+/// Encode one rendezvous frame for the socket.
+pub fn encode_rendezvous_frame(
+    frame: &crate::core::rendezvous::RendezvousFrame,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(frame)
+}
+
+/// Decode one rendezvous frame off the socket.
+pub fn decode_rendezvous_frame(
+    s: &str,
+) -> Result<crate::core::rendezvous::RendezvousFrame, serde_json::Error> {
+    serde_json::from_str(s)
+}
+
+/// Encode one in-band compatibility-handshake frame — the payload INSIDE a
+/// relayed game frame, never a `ServerMessage`.
+pub fn encode_handshake_frame(
+    frame: &crate::core::rendezvous::HandshakeFrame,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(frame)
+}
+
+/// Decode one in-band compatibility-handshake frame.
+pub fn decode_handshake_frame(
+    s: &str,
+) -> Result<crate::core::rendezvous::HandshakeFrame, serde_json::Error> {
+    serde_json::from_str(s)
+}
+
 // ── Delivery documents (PRD #855) ─────────────────────────────────────────────
 //
 // The native host serves these over HTTP and the browser host publishes the

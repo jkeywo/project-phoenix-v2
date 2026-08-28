@@ -259,7 +259,14 @@
     }
   }
 
-  function makePeer() {
+  // Every RTCPeerConnection config the transport asked for, so a spec can
+  // assert that a `?forceRelay` lever actually reached the peer connection
+  // (issue #1113). The fake links regardless of the policy — it has no ICE to
+  // restrict — so this records the REQUEST, not a relayed connection.
+  const peerConfigs = [];
+
+  function makePeer(config) {
+    peerConfigs.push(config || {});
     let linkId = null;
     let side = null;
     let link = null;
@@ -406,6 +413,18 @@
      */
     revive() {
       offline = false;
+    },
+
+    /**
+     * Every RTCPeerConnection config this page's transport asked for, newest
+     * last (issue #1113). What a `?forceRelay` spec asserts on: the lever has
+     * to reach the peer connection, and only the config says whether it did.
+     */
+    peerConfigs() {
+      return peerConfigs.map((c) => ({
+        iceTransportPolicy: c.iceTransportPolicy || 'all',
+        iceServers: (c.iceServers || []).length,
+      }));
     },
 
     /**

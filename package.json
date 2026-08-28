@@ -10,6 +10,8 @@
     "balance:falling-skyway": "cargo build --release --features headless --bin phoenix-headless && node scripts/balance-runs.mjs scripts/balance-runs.falling-skyway.toml --out .balance-out",
     "debug-surfaces": "node scripts/generate-debug-surfaces.mjs",
     "debug-surfaces:check": "node scripts/generate-debug-surfaces.mjs --check",
+    "check:rendezvous": "node scripts/check-rendezvous.mjs",
+    "rendezvous:dev": "node scripts/rendezvous-dev-server.mjs",
     "lods": "node scripts/generate-lods.mjs",
     "lods:check": "node scripts/generate-lods.mjs --check",
     "lod-captures:check": "node scripts/capture-billboards.mjs --check"

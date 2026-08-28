@@ -212,7 +212,7 @@ perf = []
 # now DEPENDS on `server` instead of standing alone: without that dependency
 # `--no-default-features --features host` compiles a `main` that names a module
 # which is not there, a combination CI never builds and nothing would catch.
-host = ["server"]
+host = ["server", "dep:tungstenite"]
 # Capture feature: builds the `capture-billboard` tool, a native headless
 # renderer that bakes a model's far-LOD billboard atlas (see src/bin). Pulls in
 # the `image` crate for PNG encoding; kept out of the default/wasm builds because
@@ -480,6 +480,23 @@ bevy = { version = "0.18.1", features = ["debug"] }
 # the guard that makes silently re-adding it fail.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 bevy_rapier3d = { version = "0.33" }
+# The native host's crew path (issue #1113): one outbound `wss:` client socket
+# to the rendezvous service, which is how a browser client joins a native host.
+#
+# `[ai]` DEPENDENCY CHOICE, and it is a deliberate one rather than the obvious
+# one. `tokio-tungstenite` and `async-tungstenite` are the names usually reached
+# for; both wrap THIS crate and both bring an async runtime with them. This
+# repository has no async runtime and every native I/O surface it owns is
+# blocking std threads — `delivery::serve` is a `TcpListener` with a thread per
+# connection — so a runtime would be a new architectural dependency bought for
+# one socket, and `native_host::relay_transport`'s seam is a non-blocking
+# `poll()`/`send()` pair that a reader thread feeds either way. Optional and
+# enabled by `host`, so plain `cargo test` does not build it while the protocol
+# logic it carries (and that logic's tests) stay on the default feature set.
+# `rustls-tls-webpki-roots` rather than `native-tls`: the service is a
+# `*.workers.dev` origin with an ordinary public certificate, and bundled roots
+# mean no platform trust-store dependency on a Windows release build.
+tungstenite = { version = "0.28", optional = true, default-features = false, features = ["handshake", "rustls-tls-webpki-roots"] }
 # Baselines are authored RON read by the headless harness, which is native-only
 # (`src/headless` is cfg'd off under wasm). Keeping the reader here means the
 # browser build carries no parser it cannot reach.

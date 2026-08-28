@@ -144,7 +144,7 @@ entities:
         - The entity-state adapter is registered beside sim_state_broadcaster under the stable `entity-state` key. It owns LastBroadcastEntityPositions and LastBroadcastEntityHealth and resets them at a run boundary; it has no reconnect projector because Welcome already carries the current world snapshot. UUID pruning remains an explicit owner operation called only from entity-despawn paths.
         - The Hull adapter is registered by the Repair owner under the stable `hull` key. It owns LastBroadcastHull, reuses HullVisibility for live and reconnect projection, and never mutates the token-keyed live delta cache while reconstructing one session.
         - The Shields adapter is registered by ShipShieldsPlugin under the stable `shields` key. It owns no cache and reuses the sole live publisher's current ShieldStatus builder and authored HoldingSystem audience, returning a reconnect projection only for that resolved holder.
-        - The Weapons adapter is registered by WeaponsPlugin under the stable `weapons` key. It owns LastWeaponsUpdate, resolves the authored Weapons Station and current holder by the same rule as the live HoldingWeapons audience, and rebuilds the live WeaponsUpdate without reading or mutating the shared delta cache.
+        - The Weapons adapter is registered by WeaponsPlugin under the stable `weapons` key. It owns LastWeaponsUpdate and WeaponsUpdateFirstTick, resets the last-value cache and rearms the first-projection latch at every run boundary, resolves the authored Weapons Station and current holder by the same rule as the live HoldingWeapons audience, and rebuilds the live WeaponsUpdate for reconnect without reading or mutating either publisher cache.
     architecture:
       kind: replication-registry
       authority: authoritative
@@ -154,7 +154,7 @@ entities:
     implementation:
       status: declared
       paths: [src/core/broadcast/lifecycle.rs, src/server_app/broadcast.rs, src/server_app/broadcast_publish.rs, src/console/repair/visibility.rs, src/console/repair/server.rs, src/ship/shields.rs, src/console/weapons/blackboard.rs, src/console/weapons/server.rs]
-      symbols: [ReplicationLifecycleRegistry, ReplicationLifecycleAdapter, RegisterReplicationLifecycle, LastBroadcastBlackboards, LastBroadcastEntityPositions, LastBroadcastEntityHealth, LastBroadcastHull, LastWeaponsUpdate, register_entity_state_replication_lifecycle, prune_entity_replication_caches, register_hull_replication_lifecycle, register_shields_replication_lifecycle, register_weapons_replication_lifecycle]
+      symbols: [ReplicationLifecycleRegistry, ReplicationLifecycleAdapter, RegisterReplicationLifecycle, LastBroadcastBlackboards, LastBroadcastEntityPositions, LastBroadcastEntityHealth, LastBroadcastHull, LastWeaponsUpdate, WeaponsUpdateFirstTick, register_entity_state_replication_lifecycle, prune_entity_replication_caches, register_hull_replication_lifecycle, register_shields_replication_lifecycle, register_weapons_replication_lifecycle]
       messages: [BlackboardUpdate, SystemHullUpdate, ShieldStatus, WeaponsUpdate]
       tests: [cargo test]
 

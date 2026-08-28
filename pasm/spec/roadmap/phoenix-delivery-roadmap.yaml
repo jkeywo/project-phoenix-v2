@@ -211,21 +211,39 @@ entities:
 
   - component: roadmap-local-message-knowledge
     core:
-      status: accepted
+      status: implemented
       confidence: confirmed
       title: "T1 — Local Message Knowledge and Runtime Registries"
-      summary: "Make message and runtime extension knowledge local to the Module that owns each decision (PRD #1249; issues #1250-#1268). Coordination producers carry generic localized presentation beside typed gameplay payloads, explicit Station/ship addresses replace SystemId aliases, and receiving Systems consume delivered messages without exposing their private state to the lag router. Authoritative System descriptors project Console Family metadata and command capability instead of asking the client and admission tests to infer them from id spelling. Client reducers report semantic changes and effects rather than feeding parallel ServerMessage censuses. Replication owners register cache lifecycle and reconnect projections while producers declare Snapshot/Reliable delivery. One Debug Surface catalogue and one authored AI Directive interpreter retire their parallel vocabularies. The programme preserves simulation behavior, authority, visibility, timing, and existing TOML while making each future variant a local change."
+      summary: "Delivered PRD #1249 through issues #1250-#1268, making message and runtime extension knowledge local to the Module that owns each decision. Coordination producers carry generic localized presentation beside typed gameplay payloads, explicit Station/ship addresses replace SystemId aliases, and receiving Systems consume delivered messages without exposing their private state to the lag router. Authoritative System descriptors project Console Family metadata and command capability instead of asking the client and admission tests to infer them from id spelling. Client reducers report semantic changes and effects rather than feeding parallel ServerMessage censuses. Replication owners register cache lifecycle and reconnect projections while producers declare Snapshot/Reliable delivery. One Debug Surface catalogue and one authored AI Directive interpreter own their respective vocabularies. The delivered programme preserves simulation behavior, authority, visibility, timing, and existing TOML while making each future variant a local change."
       rationale:
-        - "PRD #1249 is split into nineteen tracer-bullet issues #1250-#1268. Command/Dock, Tactical Frequency Hint, Blackboard-to-iframe refresh, and Blackboard reconnect are the first vertical tracers for their respective registries; the remaining slices complete each migration and delete its temporary census."
+        - "PRD #1249 shipped as nineteen tracer-bullet issues #1250-#1268. Command/Dock, Tactical Frequency Hint, Blackboard-to-iframe refresh, and Blackboard reconnect established the vertical tracers for their respective registries; the remaining slices completed each migration and deleted its temporary census."
         - "This belongs in T1 because Crew Control, Distributed Ship Operations, Native/Network replication and Debug Observability have expanded the shared Station/System/message seams that T2's GM and Workshop work will build on. Settling their extension contracts now prevents every later feature from multiplying the same cross-module knowledge."
         - "The work is architecture hardening, not a gameplay redesign: Coordination lag and recipient policy, Control Source authority, reconnect visibility, AI decisions, fixed-tick behavior and player-facing outcomes remain unchanged. Host, phone bundle and Viewscreen protocol changes land atomically; no permanent legacy adapter is introduced."
-        - "Each issue is independently green and revertible, asserts behavior through its public seam, updates its affected PASM/wiki truth, and runs the relevant validation gates before closure."
+        - "Each issue landed independently green and revertible, asserted behavior through its public seam, and updated its affected PASM/wiki truth before closure."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
       reads: [ship-station-system-topology-state, coordination-lag-queue-state, simulation-state-replica, objective-directive-state]
       coordinates: [roadmap-band-a2-crew-control, roadmap-band-a2-native-network-foundation, roadmap-debug-observability]
       runs_in: [host-browser-runtime, phone-browser-runtime, headless-runtime, node-tooling-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/ship/system_registry.rs
+        - src/ship/coordination.rs
+        - gui/reducer-result.js
+        - src/server_app/components.rs
+        - src/core/broadcast/lifecycle.rs
+        - src/debug/catalogue.rs
+        - scripts/generate-debug-surfaces.mjs
+        - src/objectives/directive.rs
+      tests:
+        - cargo test --workspace --features headless
+        - npm run debug-surfaces:check
+        - npx vitest run
+        - tests/smoke/snapshot-channel.spec.js
+        - tests/smoke/reconnect-midgame-sever.spec.js
+        - tests/smoke/debug-overlay.spec.js
 
   - component: roadmap-scenario-scripting
     core:

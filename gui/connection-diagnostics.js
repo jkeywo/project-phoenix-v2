@@ -257,14 +257,22 @@ export function hostDiagnosticsLines(state, t) {
     lines.push(t('server.transport_pinned', { mode: state.lever.mode }));
   }
 
-  // Why there is no five-letter code on screen. Two sentences, because the
-  // operator's next move differs: a lost service is being re-registered and a
-  // new code is on its way, while anything else means nobody joins until the
-  // service comes back.
+  // Why there is no five-letter code on screen. The operator's next move
+  // differs by case. Three sentences, not two, since issue #1115: a lost
+  // service that is retrying either has a code worth reclaiming (this host has
+  // held one before — surfaced here as state.resuming, off rendezvousHost.
+  // resuming) or does not (its very first registration never got that far).
+  // Both are honest about what happens next; the old wording promised a NEW
+  // code unconditionally, which stopped being true the moment reclaim started
+  // working. Anything not retrying means nobody joins until the service comes
+  // back.
   if (state.fault) {
-    lines.push(t(state.retrying && state.reregister
-      ? 'server.join.rendezvous_reregistering'
-      : 'server.join.rendezvous_lost'));
+    const reclaiming = state.retrying && state.reregister && !!state.resuming;
+    lines.push(t(
+      !state.retrying || !state.reregister ? 'server.join.rendezvous_lost'
+        : reclaiming ? 'server.join.rendezvous_reclaiming'
+          : 'server.join.rendezvous_reregistering',
+    ));
   }
 
   for (const [id, peerState] of state.peers || []) {

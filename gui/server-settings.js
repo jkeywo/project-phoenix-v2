@@ -252,7 +252,7 @@ export function mountServerSettings(opts = {}) {
   let rafHandle = null;
   const controls = {
     toggles: {}, commands: {}, outputs: {}, pause: null, qr: null,
-    volumeReadout: null, fleet: {},
+    volumeReadout: null, joinCode: {}, fleet: {},
   };
 
   // ── Elements ───────────────────────────────────────────────────────────────
@@ -486,6 +486,8 @@ export function mountServerSettings(opts = {}) {
     qrSection.appendChild(qrRow);
     body.appendChild(qrSection);
 
+    buildJoinCodeSection(body);
+
     const sessionSection = section('settings.gameplay.session');
     const sessionRow = rowHost();
     sessionRow.appendChild(
@@ -498,6 +500,65 @@ export function mountServerSettings(opts = {}) {
     body.appendChild(sessionSection);
 
     buildFleetSection(body);
+  }
+
+  /**
+   * The crew join-code readout + rotate lever (issue #1115) — this ship's
+   * OWN five-letter code, mirrored from the viewscreen overlay onto the cog
+   * so the operator can regenerate it without hunting for the QR panel.
+   *
+   * Built once and painted from `refresh()`, same discipline as the fleet
+   * section below: an operator who has the panel open sees a rotate that
+   * just happened (this host's own click, or — in principle — any other
+   * cause) within one animation frame, without the click handler needing to
+   * know that.
+   */
+  function buildJoinCodeSection(body) {
+    const el = section('settings.gameplay.join_code');
+    const row = rowHost();
+
+    const readout = doc.createElement('span');
+    readout.className = 'server-settings-code-readout';
+    readout.setAttribute('data-control', 'join-code-readout');
+    readout.setAttribute('aria-label', t('settings.gameplay.join_code_label'));
+    controls.joinCode.readout = readout;
+    row.appendChild(readout);
+
+    controls.joinCode.rotate = control('rotate-join-code', 'settings.gameplay.rotate_code', () => {
+      invoke('__hostRotateJoinCode');
+      refresh();
+    });
+    row.appendChild(controls.joinCode.rotate);
+
+    el.appendChild(row);
+    body.appendChild(el);
+  }
+
+  /** What `server.html` says about this host's crew join code, or null. */
+  function joinCodeState() {
+    const raw = invoke('__hostJoinCodeState');
+    return raw && typeof raw === 'object' ? raw : null;
+  }
+
+  /** Paint the readout and the rotate lever's enabled state. */
+  function paintJoinCode() {
+    const state = joinCodeState();
+    if (controls.joinCode.readout) {
+      controls.joinCode.readout.textContent = (state && state.suffix) || '';
+    }
+    applyRotateLockState(controls.joinCode.rotate, state && state.rotatable !== false);
+  }
+
+  /**
+   * Shared disabled/tooltip treatment for a rotate lever (issue #1115 AC2) —
+   * the crew one above and the fleet one below both use it, so the same rule
+   * cannot drift between the two surfaces.
+   */
+  function applyRotateLockState(el, rotatable) {
+    if (!el) return;
+    el.disabled = !rotatable;
+    el.classList.toggle('disabled', !rotatable);
+    el.title = rotatable ? '' : t('settings.gameplay.rotate_locked_hint');
   }
 
   /**
@@ -564,6 +625,14 @@ export function mountServerSettings(opts = {}) {
     });
     openRow.appendChild(controls.fleet.leave);
 
+    // Lead only (issue #1115 AC2/AC3) — a member has no code of its own to
+    // rotate, it is a guest on the lead's.
+    controls.fleet.rotate = control('fleet-rotate', 'settings.fleet.rotate', () => {
+      invoke('__hostFleetRotate');
+      refresh();
+    });
+    openRow.appendChild(controls.fleet.rotate);
+
     el.appendChild(openRow);
     body.appendChild(el);
   }
@@ -604,6 +673,12 @@ export function mountServerSettings(opts = {}) {
       controls.fleet.admission.disabled = !!state.frozen;
       controls.fleet.admission.classList.toggle('disabled', !!state.frozen);
     }
+    // Rotation is independent of the freeze latch — see gui/fleet-session.js's
+    // `rotate()` doc — so this reads the mission-phase gate, not `frozen`.
+    show(controls.fleet.rotate, has && !!state.owner);
+    if (controls.fleet.rotate && has && state.owner) {
+      applyRotateLockState(controls.fleet.rotate, !!invoke('__hostCodesRotatable'));
+    }
   }
 
   // ── Panel ──────────────────────────────────────────────────────────────────
@@ -622,6 +697,7 @@ export function mountServerSettings(opts = {}) {
     controls.pause = null;
     controls.qr = null;
     controls.volumeReadout = null;
+    controls.joinCode = {};
     controls.fleet = {};
 
     overlay.innerHTML = '';
@@ -690,6 +766,7 @@ export function mountServerSettings(opts = {}) {
       controls.qr.classList.toggle('active', visible);
       controls.qr.setAttribute('aria-pressed', visible ? 'true' : 'false');
     }
+    if (controls.joinCode.rotate) paintJoinCode();
     if (controls.fleet.open) paintFleet();
     // The output panel keeps streaming while it is open, panel or no panel.
     if (outputs.viewing) paintOutput();

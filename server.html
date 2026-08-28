@@ -1675,6 +1675,11 @@
        click, a Rust host-channel push) that only ever happens after this
        module has finished loading. -->
   <script type="module" src="gui/host-scenarios.js"></script>
+  <!-- GamePhase predicates shared with client.html (issue #440), including
+       codesRotatable() — the pure "may the operator regenerate a join code
+       right now" gate (issue #1115 AC2: rotatable in Lobby/GameOver, refused
+       in Loading/InProgress). Self-registers window.codesRotatable. -->
+  <script type="module" src="gui/phase-toggle.js"></script>
   <!-- Host lobby view-model (issue #1229): the pure phase-transition, title/
        crew/ready-badge/countdown/station-card/reserved-chip/spectator-pill/
        hint computation behind __updateLobby's station-grid renderer lives in
@@ -2419,17 +2424,19 @@
 
     /**
      * The rendezvous service went away (unreachable at boot, or the host socket
-     * dropped later). The record died with it, so the five letters on screen
-     * now resolve to nothing and the QR link carries a dead code — and since
-     * #1112 there is no PeerJS route left underneath to fall back to. Blank the
-     * whole panel rather than leave a code being read aloud across the room,
-     * and let renderConnDiag name the failure so the operator is not staring at
-     * an empty box.
+     * dropped later). Blank the whole panel while it is out of reach rather
+     * than leave a code being read aloud across the room that cannot be
+     * signalled through right now, and let renderConnDiag name the failure so
+     * the operator is not staring at an empty box.
      *
      * gui/rendezvous-transport.js re-registers on a backoff by itself and
-     * repaints through showJoinCode() with a NEW code. Keeping the SAME code
-     * across a host drop needs persistence in the service and is #1115's
-     * (rotation/rebinding), not something to half-do here.
+     * repaints through showJoinCode() once it is back — usually with the SAME
+     * code, reclaimed with the secret this host's own earlier registration
+     * carried (issue #1115; the registry holds a lost record in grace for the
+     * authored `reclaim_grace_seconds` rather than dropping it on the spot).
+     * Only once that window has genuinely run out, or the Durable Object
+     * instance itself was evicted, does a fresh suffix come back instead —
+     * and showJoinCode repaints exactly the same way either time.
      */
     function clearJoinCode() {
       const codeEl = document.getElementById('join-code');
@@ -2444,6 +2451,48 @@
       if (canvas) canvas.style.display = 'none';
       rendezvousCodeShown = false;
     }
+
+    // ── Join-code rotation (issue #1115) ───────────────────────────────────
+    //
+    // AC2's gate lives HERE, not in the registry or the transport: GamePhase
+    // never reaches either of those, so "only between missions" can only be
+    // enforced by the one place that actually knows the current phase. Both
+    // the crew code (below) and the fleet code (__hostFleetRotate, in the
+    // fleet section) route through this same predicate.
+    //
+    // NOT named `codesRotatable` — this classic script's top-level function
+    // declarations are `window` properties like any other global var, so a
+    // name matching the module export gui/phase-toggle.js installs at
+    // `window.codesRotatable` would collide with it: whichever assignment
+    // runs last wins the shared slot, and every bare call in between silently
+    // starts calling the WRONG one with the wrong arguments.
+    function hostCanRotateCodes() {
+      return window.codesRotatable ? window.codesRotatable(_lobbyPrevPhase) : true;
+    }
+
+    /** What the settings cog's Join Code section paints from. */
+    window.__hostCodesRotatable = function() { return hostCanRotateCodes(); };
+
+    /** What the settings cog's crew join-code readout paints from. */
+    window.__hostJoinCodeState = function() {
+      return {
+        suffix: (rendezvousHost && rendezvousHost.code) ? rendezvousHost.code.suffix : null,
+        rotatable: hostCanRotateCodes(),
+      };
+    };
+
+    /**
+     * The operator's crew-code rotate lever. Refuses outright while a mission
+     * is running (AC2) rather than sending a frame the registry would have no
+     * way to refuse on its own — the registry has no notion of GamePhase at
+     * all. `rotate()` itself is a no-op with nothing to rotate (no live
+     * socket), which covers the boot race for free.
+     */
+    window.__hostRotateJoinCode = function() {
+      if (!rendezvousHost || !hostCanRotateCodes()) return false;
+      rendezvousHost.rotate();
+      return true;
+    };
 
     // ── The fleet (issue #1114) ────────────────────────────────────────────
     //
@@ -2928,6 +2977,18 @@
     /** The operator's "leave" — a deliberate exit, so it clears the reason too. */
     window.__hostFleetLeave = function() { leaveFleet(); };
 
+    /**
+     * The operator's fleet-code rotate lever (issue #1115 AC2/AC3). Lead
+     * only — a member has no code of its own to rotate, it is a guest on the
+     * lead's — and refused outright while a mission is running, same gate
+     * and same reasoning as the crew code's `__hostRotateJoinCode`.
+     */
+    window.__hostFleetRotate = function() {
+      if (!fleetHandle || !fleetHandle.isOwner || !hostCanRotateCodes()) return false;
+      fleetHandle.rotate();
+      return true;
+    };
+
     /** What the settings cog paints its Fleet section from. */
     window.__hostFleetState = function() {
       return {
@@ -3056,6 +3117,12 @@
         get shedding() {
           return [...clientRelayShed].map(([id, s]) => [id, (s.local || 0) + (s.service || 0)]);
         },
+        // issue #1115: does this host have a code worth reclaiming right now?
+        // rendezvousHost.resuming is true only while a lost registration is
+        // being re-resolved WITH a held reclaim secret; hostDiagnosticsLines
+        // reads it to choose the three-way "reclaiming / re-registering / lost"
+        // fault line rather than promising a new code unconditionally.
+        get resuming() { return !!(rendezvousHost && rendezvousHost.resuming); },
       };
       renderConnDiag = diagnostics
         ? function renderConnDiagImpl() {

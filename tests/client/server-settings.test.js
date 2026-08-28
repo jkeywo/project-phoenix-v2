@@ -57,6 +57,8 @@ function makeBindings(overrides = {}) {
     waypoint: true,
     master: 1,
     debugFlags: {},
+    joinCodeSuffix: 'QUARK',
+    codesRotatable: true,
   };
   const record = (name) => (...args) => { calls.push([name, ...args]); };
   const bindings = {
@@ -98,6 +100,15 @@ function makeBindings(overrides = {}) {
     __hostReturnToLobby: record('__hostReturnToLobby'),
     __hostToggleQrCode: () => { calls.push(['__hostToggleQrCode']); state.qr = !state.qr; },
     __hostIsQrVisible: () => !!state.qr,
+    // The crew join code + rotate lever (issue #1115).
+    __hostJoinCodeState: () => ({ suffix: state.joinCodeSuffix, rotatable: state.codesRotatable }),
+    __hostRotateJoinCode: () => {
+      calls.push(['__hostRotateJoinCode']);
+      if (!state.codesRotatable) return false;
+      state.joinCodeSuffix = `${state.joinCodeSuffix}-ROTATED`;
+      return true;
+    },
+    __hostCodesRotatable: () => state.codesRotatable,
     __getMasterVolume: () => state.master,
     __setMasterVolume: (v) => { calls.push(['__setMasterVolume', v]); state.master = v; },
   };
@@ -428,6 +439,7 @@ describe('the Fleet section', () => {
         bindings.calls.push(['__hostFleetLeave']);
         fleet = { open: false, owner: false, admission: null, frozen: false };
       },
+      __hostFleetRotate: () => { bindings.calls.push(['__hostFleetRotate']); },
       /** For the tests that need to arrive already frozen. */
       __setFleet: (next) => { fleet = { ...fleet, ...next }; },
     });
@@ -568,11 +580,103 @@ describe('the Fleet section', () => {
     for (const name of [
       '__hostFleetState', '__hostFleetOpen', '__hostFleetJoin',
       '__hostFleetSetAdmission', '__hostFleetLeave', '__hostFleetCodeLimit',
+      '__hostFleetRotate',
     ]) {
       expect(SRC, name).toContain(`window.${name}`);
     }
   });
+
+  // ── Rotating the fleet code (issue #1115) ─────────────────────────────────
+
+  it('offers the rotate lever only to the fleet\'s own lead', () => {
+    const bindings = fleetBindings();
+    bindings.__hostCodesRotatable = () => true;
+    openFleetTab(bindings);
+    control('fleet-open').click();
+    expect(control('fleet-rotate')).toBeTruthy();
+    expect(visible('fleet-rotate')).toBe(true);
+
+    // A member has no code of its own to rotate — it is a guest on the
+    // lead's — so the lever stays hidden for it.
+    control('fleet-leave').click();
+    control('fleet-code').value = 'quark';
+    control('fleet-join').click();
+    expect(visible('fleet-rotate')).toBe(false);
+  });
+
+  it('rotating calls the binding', () => {
+    const bindings = fleetBindings();
+    bindings.__hostCodesRotatable = () => true;
+    openFleetTab(bindings);
+    control('fleet-open').click();
+    control('fleet-rotate').click();
+    expect(bindings.calls.map((c) => c[0])).toContain('__hostFleetRotate');
+  });
+
+  it('disables the rotate lever, with a tooltip, while a mission is running — independently of the freeze latch', () => {
+    const bindings = fleetBindings();
+    bindings.__hostCodesRotatable = () => false;
+    openFleetTab(bindings);
+    control('fleet-open').click();
+    // Not frozen — the mission-phase gate is what disables it here, exactly
+    // as it does for the crew code's own lever.
+    expect(control('fleet-admission').disabled).toBe(false);
+    expect(control('fleet-rotate').disabled).toBe(true);
+    expect(control('fleet-rotate').classList.contains('disabled')).toBe(true);
+    expect(control('fleet-rotate').title).toBe(t('settings.gameplay.rotate_locked_hint'));
+  });
 });
+
+// ── Join code rotation, crew and fleet (issue #1115) ────────────────────────
+
+describe('the Join Code section', () => {
+  function openGameplayTab(bindings) {
+    ({ menu: mounted } = mount({ bindings }));
+    mounted.open();
+    mounted.selectTab('gameplay');
+  }
+
+  it('shows the current crew code and a rotate lever', () => {
+    openGameplayTab(makeBindings());
+    expect(control('join-code-readout').textContent).toBe('QUARK');
+    expect(control('rotate-join-code')).toBeTruthy();
+    expect(control('rotate-join-code').disabled).toBe(false);
+  });
+
+  it('rotating calls the binding and repaints the new suffix', () => {
+    const bindings = makeBindings();
+    openGameplayTab(bindings);
+    control('rotate-join-code').click();
+    expect(bindings.calls).toContainEqual(['__hostRotateJoinCode']);
+    expect(control('join-code-readout').textContent).toBe('QUARK-ROTATED');
+  });
+
+  it('disables the lever, with a tooltip, while a mission is running (AC2)', () => {
+    const bindings = makeBindings();
+    bindings.state.codesRotatable = false;
+    openGameplayTab(bindings);
+    const rotate = control('rotate-join-code');
+    expect(rotate.disabled).toBe(true);
+    expect(rotate.classList.contains('disabled')).toBe(true);
+    expect(rotate.title).toBe(t('settings.gameplay.rotate_locked_hint'));
+  });
+
+  it('degrades to a blank readout and a disabled lever with no bindings published', () => {
+    ({ menu: mounted } = mount({ bindings: {} }));
+    mounted.open();
+    mounted.selectTab('gameplay');
+    expect(control('join-code-readout').textContent).toBe('');
+    expect(control('rotate-join-code').disabled).toBe(true);
+    expect(() => mounted.refresh()).not.toThrow();
+  });
+
+  it('is wired to bindings server.html actually publishes', () => {
+    for (const name of ['__hostJoinCodeState', '__hostRotateJoinCode', '__hostCodesRotatable']) {
+      expect(SRC, name).toContain(`window.${name}`);
+    }
+  });
+});
+
 
 // ── Demo gate (AC5) ──────────────────────────────────────────────────────
 

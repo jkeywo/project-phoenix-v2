@@ -16,10 +16,10 @@
 //!    not the security origin, which stays unique, so every cross-origin fetch
 //!    to the host's own address is then refused by CORS.
 //! 3. **`load_url` the bundle's real `client/index.html`.** Correct origin,
-//!    everything resolves — and no way in. The page's transport is PeerJS
-//!    (browser JavaScript, no use in a native process, and behind a CDN script
-//!    tag this machine may not be able to reach), and the injection points that
-//!    would replace it are all inside the document.
+//!    everything resolves — and no way in. The page's transport reaches a
+//!    rendezvous service over a WebSocket and then a browser-to-browser
+//!    DataChannel, neither of which a pane has or wants, and the injection
+//!    points that would supply one are all inside the document.
 //! 4. **`load_url` an *injected copy* of that same document, served by the host
 //!    that is already serving the bundle.** ← this one.
 //!
@@ -36,14 +36,43 @@
 //!
 //! | edit | why |
 //! |---|---|
-//! | a classic `<script>` first in `<head>` ([`PANE_BOOT_JS`]) | reads the session token and name **out of the URL fragment** at parse time, before the page's own inline script wants them, and installs the page→host queue |
-//! | the PeerJS `<script>` tag removed | a pane never uses PeerJS, and a bridge machine may not be able to reach a CDN — waiting for that to fail is pure boot latency |
+//! | a classic `<script>` first in `<head>` ([`PANE_BOOT_JS`]) | reads the session token and name **out of the URL fragment** at parse time, before the page's own inline script wants them; normalises the fragment down to the join code the page's one route expects; installs the page→host queue |
+//! | the PeerJS `<script>` tag removed | a no-op since issue #1112 deleted the tag, and kept because the assertion it backs — no pane document loads PeerJS — is worth making in both states |
 //! | the `<audio>` elements removed | see below — this one is not a nicety |
-//! | a `<script type="module">` last in `<body>` ([`PANE_LINK_JS`]) | replaces `window.connectionManager` with the in-process link, which must happen **after** `gui/connection-manager.js` has published its own |
+//! | a `<script type="module">` last in `<body>` ([`PANE_LINK_JS`]) | installs `window.PhoenixTransportFactories`, the in-process stand-ins for `WebSocket` and `RTCPeerConnection`, and imports the channel labels from `gui/rendezvous-transport.js` — which is why it is a module and why it runs after the page's own module island |
 //!
 //! Both scripts are documented in their own files. The page is unchanged in
 //! every other byte, which is what makes "the same console surface" true rather
 //! than approximately true.
+//!
+//! # How a pane joins: through the page's own front door
+//!
+//! A pane is an ORDINARY JOINER in the page's own eyes. `client.html`'s
+//! `startPhoenixJoin` runs exactly as it does on a phone: it reads the fragment,
+//! resolves a code, builds a `createRendezvousJoiner`, sends `Identify` from its
+//! own `getIdent()`, and publishes the `activeLink` façade every console command
+//! and the retry control go through. Nothing about that path is pane-aware.
+//!
+//! What differs is one documented override point:
+//! `gui/rendezvous-transport.js`'s `defaultFactories()` reads
+//! `window.PhoenixTransportFactories` on every call, and names "a native
+//! in-process host" as an intended user of it. [`PANE_LINK_JS`] is that user.
+//! Its socket answers the two frames the joiner waits on and relays nothing; its
+//! peer connection's reliable channel opens at once, answers the compatibility
+//! handshake itself (a pane loads the very bundle this process is serving, so
+//! there is no version to disagree about), and is a pipe onto the page→host
+//! queue in one direction and `window.__phoenixPaneApply` in the other.
+//!
+//! The alternative — publishing a link object of the pane's own — is not
+//! available and should not be wanted. `currentLink()` reads a closure variable
+//! that only `startPhoenixJoin` assigns, so short-circuiting it would mean
+//! editing `client.html` to suit a pane, which is the thing this module exists
+//! not to do. Going through the front door also means `localiseTree`, the status
+//! line, the `#conn-diag` readout and `window.phoenixLink` (which
+//! `gui/command-gateway.js` resolves against) are the page's own, not a second
+//! implementation of them that can rot the next time the page moves. It rotted
+//! once already: the previous arrangement published `window.connectionManager`,
+//! a global #1112 retired with PeerJS, and the page never called it.
 //!
 //! # Why the `<audio>` element has to go
 //!
@@ -79,9 +108,27 @@
 //!
 //! A fragment is the one part of a URL a browser never transmits: it is not in
 //! the request line, not in a header, and not in any byte this host writes. So
-//! [`pane_url`] carries `#native&token=…&name=…`, [`PANE_BOOT_JS`] reads
+//! [`pane_url`] carries `#<code>&token=…&name=…`, [`PANE_BOOT_JS`] reads
 //! `location.hash` at parse time, and [`build_pane_document`] does not take an
 //! identity at all — the document is the same bytes for every pane.
+//!
+//! # Why the fragment also carries a join code
+//!
+//! The fragment is not free real estate: it is the client page's ONE join input.
+//! `joinRouteFromLocation` reads any non-empty fragment as a rendezvous route
+//! and hands it to `parseJoinCode`, which refuses `token=…&name=…` and drops the
+//! join-entry overlay over the console — a pane that never joins, in front of a
+//! field nobody is going to type into.
+//!
+//! So the pane's route is composed rather than dodged. The fragment leads with
+//! [`PANE_JOIN_CODE`], a five-letter suffix the authored table in
+//! `assets/join/join-codes.toml` accepts, and [`PANE_BOOT_JS`] rewrites
+//! `location.hash` down to just that before any page code reads it. From that
+//! line on the page's URL is indistinguishable from a phone's that scanned a QR,
+//! and the pane's own token has stopped being readable out of `location.hash`
+//! into the bargain. The code text itself is never resolved against anything —
+//! the pane's socket answers `joined` to whatever it is asked — so it is a
+//! sentinel, not a secret.
 //!
 //! That also retires a second problem rather than fixing it. The identity used
 //! to be interpolated into an inline `<script>` element through
@@ -143,7 +190,7 @@ pub enum DocumentError {
     /// runs before the page's own inline script.
     NoHead,
     /// The document has no `</body>`, so the link script has nowhere to go that
-    /// runs after `gui/connection-manager.js`.
+    /// runs after the page's own module island.
     NoBody,
 }
 
@@ -158,7 +205,7 @@ impl std::fmt::Display for DocumentError {
             DocumentError::NoBody => write!(
                 f,
                 "the client page has no </body>; a pane's link script must run after \
-                 gui/connection-manager.js, and there is nowhere to put it"
+                 gui/rendezvous-transport.js, and there is nowhere to put it"
             ),
         }
     }
@@ -223,26 +270,48 @@ pub fn connectable_host_addr(bound: &str) -> String {
 
 /// Percent-encode `raw` for the URL fragment [`pane_url`] builds.
 ///
-/// Deliberately stricter than a fragment requires: everything outside
-/// `A-Za-z0-9-._~`'s **unreserved set minus the underscore** is escaped.
+/// Exactly RFC 3986's unreserved set — `A-Za-z0-9-._~` — and everything else
+/// escaped. The fragment is a `&`-separated list of `key=value` pairs read by
+/// [`PANE_BOOT_JS`], so `&`, `=` and `%` are the characters that must not
+/// survive a value; escaping the whole of the rest is simply the rule that has
+/// no edge cases.
 ///
-/// The underscore is the one that matters and it is not about safety. The page's
-/// own `joinRouteFromLocation` (`gui/rendezvous-transport.js`) reads a fragment
-/// *containing an underscore* as a rendezvous join code and anything else as a
-/// peer id — so a participant named `ada_lovelace` would silently put the pane
-/// on the rendezvous route, where it would sit trying to reach a service that
-/// is not there. `%5F` is the same character to `decodeURIComponent` and a
-/// different one to that check.
+/// **The underscore is no longer special, and that is a change worth naming.**
+/// It used to be escaped as `%5F` for a routing reason rather than a safety one:
+/// the page read an underscore in the fragment as a rendezvous join code, so a
+/// participant named `ada_lovelace` silently changed the route. Since #1112
+/// *any* non-empty fragment is that route, escaping one character could not
+/// avoid it, and the pane now takes the route deliberately — see the module
+/// note's "Why the fragment also carries a join code". The identity is consumed
+/// and the fragment rewritten before the page reads it, so nothing a
+/// participant can be called reaches the route decision at all.
 pub fn fragment_encode(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
     for byte in raw.bytes() {
         match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'~' => out.push(byte as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(byte as char)
+            }
             _ => out.push_str(&format!("%{byte:02X}")),
         }
     }
     out
 }
+
+/// The join code a pane's fragment leads with.
+///
+/// A five-letter suffix in `assets/join/join-codes.toml`'s alphabet
+/// (`ABCDEFGHIJKMNOPQRSTUVWXYZ`) that is not on its deny list, so
+/// `gui/join-code.js`'s `parseJoinCode` composes it into a full identifier and
+/// `client.html`'s `startPhoenixJoin` takes its ordinary rendezvous route
+/// instead of opening the join-entry overlay. `tests/client/pane-scripts.test.js`
+/// checks this literal against that authored table, because a value only Rust
+/// knows and only JavaScript validates is a value nothing checks.
+///
+/// It resolves to nothing and is meant to: the pane's own socket stand-in
+/// answers `joined` to whatever it is handed, so this is a sentinel that gets
+/// the page onto its join route, not a code any service has heard of.
+pub const PANE_JOIN_CODE: &str = "PANES";
 
 /// The URL a pane's view navigates to — **including its identity**.
 ///
@@ -252,16 +321,15 @@ pub fn fragment_encode(raw: &str) -> String {
 /// the LAN can read it out of the document the way it could when this was an
 /// injected `window.__phoenixPaneIdentity`. See the module note.
 ///
-/// And it is what puts the page on its "join a host" route at all:
-/// `joinRouteFromLocation` reads a fragment with no underscore as a peer id, and
-/// an empty fragment as "nothing to join", which makes the page print a status
-/// line and stop. The `native` prefix is that host id; it is never used, because
-/// the pane link ignores the id it is handed — but it has to be there, and
-/// [`fragment_encode`] is what guarantees the token and the name cannot
-/// introduce an underscore and change the route.
+/// And it is what puts the page on its join route at all. `joinRouteFromLocation`
+/// reads an empty fragment as "nothing to join" — the page prints a status line
+/// and stops — and any non-empty one as a code to resolve, which
+/// `parseJoinCode` then has to accept or the join-entry overlay covers the
+/// console. [`PANE_JOIN_CODE`] leads the fragment for exactly that reason, and
+/// [`PANE_BOOT_JS`] leaves only it behind once it has taken the identity out.
 pub fn pane_url(host_addr: &str, id: PaneId, nonce: &str, identity: &PaneIdentity) -> String {
     format!(
-        "http://{host_addr}{}#native&token={}&name={}",
+        "http://{host_addr}{}#{PANE_JOIN_CODE}&token={}&name={}",
         pane_document_path(id, nonce),
         fragment_encode(identity.token()),
         fragment_encode(identity.name()),
@@ -383,10 +451,16 @@ mod tests {
          <script src=\"gui/bg-raf-keepalive.js\"></script>\n\
          <script src=\"https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js\"></script>\n\
          <script type=\"module\" src=\"gui/connection-manager.js\"></script>\n\
+         <script type=\"module\" src=\"gui/rendezvous-transport.js\"></script>\n\
          </head>\n<body>\n<div id=\"app\"></div>\n\
          <audio id=\"ui-click\" src=\"assets/sounds/ui_click.ogg\"></audio>\n\
          <script>var myName = 'x';</script>\n\
          </body>\n</html>\n";
+
+    /// The link script's own import, used as the marker for "the link is here".
+    /// The relative path only resolves because a pane document is published at
+    /// the client directory's own depth, which is the whole reason for it.
+    const PANE_LINK_IMPORT: &str = "from './gui/rendezvous-transport.js'";
 
     fn identity() -> PaneIdentity {
         PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000001", "Ada").unwrap()
@@ -410,30 +484,54 @@ mod tests {
 
     #[test]
     fn the_boot_script_runs_before_the_pages_own_scripts() {
-        // It reads the session token and the player name out of the fragment,
-        // both of which the page's inline script wants at parse time. One
-        // script too late and the pane joins under a random name on a token
-        // nothing else knows.
+        // Two reasons, both load-bearing. It reads the session token and the
+        // player name out of the fragment, which the page's inline script wants
+        // at parse time — one script too late and the pane joins under a random
+        // name on a token nothing else knows. And it replaces
+        // `requestAnimationFrame`, which `gui/bg-raf-keepalive.js` — the very
+        // first script the page loads — captures once and then delegates to.
         let html = build_pane_document(CLIENT).unwrap();
         let boot = html.find("__phoenixPane").unwrap();
-        let first_page_script = html.find("gui/bg-raf-keepalive.js").unwrap();
+        let raf = html.find("window.requestAnimationFrame =").unwrap();
+        // The TAG, not the name: the boot script's own comment says why it has
+        // to precede that module, so a bare name matches inside the prose.
+        let first_page_script = html.find("src=\"gui/bg-raf-keepalive.js\"").unwrap();
         assert!(
             boot < first_page_script,
             "the boot script must be the first script in the document"
+        );
+        assert!(
+            raf < first_page_script,
+            "bg-raf-keepalive.js captures whatever rAF it finds; a pane's has to be there first"
         );
         assert!(html.find("<head>").unwrap() < boot);
     }
 
     #[test]
-    fn the_link_script_runs_after_the_pages_connection_manager() {
-        // Module scripts evaluate in document order, and the link replaces
-        // `window.connectionManager` — which gui/connection-manager.js has not
-        // published yet if the link runs first.
+    fn the_link_script_runs_after_the_pages_transport_module() {
+        // Module scripts evaluate in document order, and the link IMPORTS the
+        // channel labels from gui/rendezvous-transport.js — the same module
+        // instance the page loads, which has to be in the graph first.
         let html = build_pane_document(CLIENT).unwrap();
-        let manager = html.find("gui/connection-manager.js").unwrap();
-        let link = html.find("import { localiseTree }").unwrap();
-        assert!(manager < link);
+        let transport = html.find("src=\"gui/rendezvous-transport.js\"").unwrap();
+        let link = html.find(PANE_LINK_IMPORT).unwrap();
+        assert!(transport < link);
         assert!(link < html.rfind("</body>").unwrap());
+    }
+
+    #[test]
+    fn the_link_script_installs_the_transport_factories_and_nothing_else() {
+        // The seam it attaches through, named here so a rewrite that quietly
+        // went back to publishing a global of its own fails. `currentLink()`
+        // reads a closure `startPhoenixJoin` assigns, so a pane-owned link
+        // object is unreachable without editing client.html; the factories are
+        // the override the transport module documents for exactly this.
+        let html = build_pane_document(CLIENT).unwrap();
+        assert!(html.contains("window.PhoenixTransportFactories ="));
+        assert!(
+            !html.contains("window.connectionManager ="),
+            "that global went with PeerJS in #1112; assigning it reaches nothing"
+        );
     }
 
     #[test]
@@ -506,11 +604,16 @@ mod tests {
         let fragment = url.split_once('#').unwrap().1;
         assert!(fragment.contains(&fragment_encode(awkward.token())));
         assert!(fragment.contains(&fragment_encode(awkward.name())));
-        assert!(
-            !fragment.contains('_'),
-            "an underscore in the fragment puts the page on the rendezvous route"
-        );
         assert!(!fragment.contains('<'));
+        // The fragment is a `&`-separated list of `key=value` pairs, so a value
+        // that carried either separator would swallow the field after it — or,
+        // in the first field's case, look like the join code.
+        assert_eq!(
+            fragment.split('&').count(),
+            3,
+            "one code and two pairs, whatever the participant is called: {fragment}"
+        );
+        assert!(fragment.starts_with(&format!("{PANE_JOIN_CODE}&")));
     }
 
     #[test]
@@ -553,7 +656,7 @@ mod tests {
         assert_eq!(
             pane_url("127.0.0.1:8080", PaneId(3), "abcd", &identity()),
             "http://127.0.0.1:8080/client/pane-3-abcd.html\
-             #native&token=3f1a6c2e-0a11-4b3c-9d55-000000000001&name=Ada"
+             #PANES&token=3f1a6c2e-0a11-4b3c-9d55-000000000001&name=Ada"
         );
     }
 
@@ -574,16 +677,34 @@ mod tests {
     }
 
     #[test]
-    fn the_url_carries_a_fragment_because_an_empty_one_means_nothing_to_join() {
-        // `joinRouteFromLocation` reads an empty fragment as `route: 'none'`,
-        // which makes the page print a status line and stop before it ever
-        // reaches the link.
+    fn the_fragment_leads_with_a_join_code_the_page_can_actually_resolve() {
+        // The two ways this page load can fail before a pane ever speaks:
+        // an EMPTY fragment is `route: 'entry'`, which shows the join field and
+        // stops; a fragment `parseJoinCode` refuses is `route: 'rendezvous'`
+        // and then the same field with a reason on it. The code has to come
+        // first, on its own, with no `=` in it — that is how PANE_BOOT_JS tells
+        // it apart from the identity pairs, and it is what gets left in
+        // `location.hash` for the page to read.
         let url = pane_url("127.0.0.1:8080", PaneId(0), "abcd", &identity());
         let fragment = url.split('#').nth(1).unwrap();
         assert!(!fragment.is_empty());
+        let code = fragment.split('&').next().unwrap();
+        assert_eq!(code, PANE_JOIN_CODE);
+        assert!(!code.contains('='));
+    }
+
+    #[test]
+    fn the_join_code_is_one_the_authored_table_accepts() {
+        // The Rust half of a claim `tests/client/pane-scripts.test.js` makes
+        // against the real table: five letters, all in the authored alphabet,
+        // none of them the confusables the canonicaliser rewrites. A code that
+        // did not round-trip would compose into an identifier the page then
+        // refuses, and the console would come up behind the join overlay.
+        const ALPHABET: &str = "ABCDEFGHIJKMNOPQRSTUVWXYZ";
+        assert_eq!(PANE_JOIN_CODE.len(), 5);
         assert!(
-            !fragment.contains('_'),
-            "an underscore would put the page on the rendezvous route instead"
+            PANE_JOIN_CODE.chars().all(|c| ALPHABET.contains(c)),
+            "{PANE_JOIN_CODE} is not spelled in assets/join/join-codes.toml's alphabet"
         );
     }
 
@@ -609,16 +730,20 @@ mod tests {
     }
 
     #[test]
-    fn the_fragment_encoding_escapes_the_underscore_the_join_route_reads() {
-        // Not a safety escape — a routing one. `joinRouteFromLocation` reads a
-        // fragment containing `_` as a rendezvous join code, so a participant
-        // called `ada_lovelace` would put the pane on a route that reaches for
-        // a service this machine may not have.
-        assert_eq!(fragment_encode("ada_lovelace"), "ada%5Flovelace");
+    fn the_fragment_encoding_escapes_everything_that_is_not_unreserved() {
+        // The three that matter are the fragment's own grammar — `&` separates
+        // fields, `=` separates a key from its value, `%` is the escape — and
+        // escaping the whole of the rest is the rule with no edge cases.
+        assert_eq!(fragment_encode("a&b=c%d"), "a%26b%3Dc%25d");
         assert_eq!(fragment_encode("O'Neil"), "O%27Neil");
         assert_eq!(fragment_encode("a b"), "a%20b");
         assert_eq!(fragment_encode("</script>"), "%3C%2Fscript%3E");
-        assert_eq!(fragment_encode("Ada-1.0~x"), "Ada-1.0~x");
+        // The whole unreserved set survives, the underscore now included: it
+        // was escaped for a routing reason that no longer exists (see
+        // `fragment_encode`), and `PANE_BOOT_JS` strips the identity out of the
+        // fragment before the page's route is decided at all.
+        assert_eq!(fragment_encode("ada_lovelace"), "ada_lovelace");
+        assert_eq!(fragment_encode("Ada-1.0~x_y"), "Ada-1.0~x_y");
         // Non-ASCII goes out as UTF-8 bytes, which decodeURIComponent restores.
         assert_eq!(fragment_encode("é"), "%C3%A9");
     }
@@ -654,15 +779,15 @@ mod tests {
             "the boot script must precede every gui/ module the page loads"
         );
 
-        let manager = html
-            .find("gui/connection-manager.js")
-            .expect("the real page loads the connection manager");
+        let transport = html
+            .find("src=\"gui/rendezvous-transport.js\"")
+            .expect("the real page loads the crew transport");
         let link = html
-            .find("import { localiseTree }")
+            .find(PANE_LINK_IMPORT)
             .expect("the link script is injected");
         assert!(
-            manager < link,
-            "the link must replace a manager that exists"
+            transport < link,
+            "the link imports the transport's channel labels; it must not run first"
         );
         assert!(link < html.rfind("</body>").unwrap());
     }

@@ -183,10 +183,10 @@ checked ahead of the static bundle). That document is the built bundle's own
 
 | edit | why |
 |---|---|
-| a classic `<script>` first in `<head>` (`pane_boot.js`) | reads the session token and participant name out of `location.hash` before the page's own inline script wants them, and installs the page→host queue |
-| the PeerJS `<script>` tag removed | a pane never uses PeerJS, and a bridge machine may not reach a CDN — waiting for that is pure boot latency. Matched on `peerjs` in the opening tag rather than a CDN host, so a move or a self-host does not silently turn the strip into a no-op |
+| a classic `<script>` first in `<head>` (`pane_boot.js`) | reads the session token and participant name out of `location.hash` before the page's own inline script wants them; rewrites the fragment down to the join code the page's one route expects; installs the page→host queue |
+| the PeerJS `<script>` tag removed | a no-op since #1112 deleted the tag from `client.html`, kept because the claim it backs — no pane document loads PeerJS — is worth asserting in both states. Matched on `peerjs` in the opening tag rather than a CDN host, so a move or a self-host could not silently turn the strip into a no-op either |
 | the `<audio>` elements removed | **not cosmetic** — see below |
-| a `<script type="module">` last in `<body>` (`pane_link.js`) | replaces `window.connectionManager` with the in-process link, which must happen *after* `gui/connection-manager.js` published its own |
+| a `<script type="module">` last in `<body>` (`pane_link.js`) | installs `window.PhoenixTransportFactories`, the in-process stand-ins the page's own joiner then uses — see "A pane joins through the page's own front door". A module, and last, because it *imports* the channel labels from `gui/rendezvous-transport.js` rather than spelling them itself |
 
 The `<audio>` strip is the one worth stating in full, because it was the
 difference between a pane that works and a pane that looks like it does.
@@ -229,12 +229,68 @@ available to anyone on the network.
 
 A URL **fragment** is the one part of a URL a browser never transmits — not in
 the request line, not in a header, not in any byte the host writes — so
-`pane_url` carries `#native&token=…&name=…` and `pane_boot.js` reads
+`pane_url` carries `#<code>&token=…&name=…` and `pane_boot.js` reads
 `location.hash` at parse time. `build_pane_document` takes no identity at all,
-and every pane's document is byte-identical. (`fragment_encode` escapes `_` as
-`%5F` as well as the obvious characters: `joinRouteFromLocation` reads an
-underscore in the fragment as a rendezvous join code, so a participant named
-`ada_lovelace` would otherwise change the page's route.)
+and every pane's document is byte-identical. (`fragment_encode` escapes
+everything outside RFC 3986's unreserved set, which is what keeps the fragment's
+own `&`/`=`/`%` grammar out of a participant's name. It no longer singles the
+underscore out: that escape existed to keep a name like `ada_lovelace` off the
+rendezvous route, and since #1112 *every* non-empty fragment is that route.)
+
+### A pane joins through the page's own front door
+
+The fragment is also the client page's **one join input**, and since #1112 there
+is no other route: `joinRouteFromLocation` reads any non-empty fragment as a
+code and hands it to `parseJoinCode`, which refuses `token=…&name=…` and drops
+the join-entry overlay over the console. So the pane's route is composed rather
+than dodged — the fragment leads with `document::PANE_JOIN_CODE`, a five-letter
+suffix the authored table in `assets/join/join-codes.toml` accepts, and
+`pane_boot.js` rewrites `location.hash` down to just that before any page code
+reads it. Two consequences worth naming: the page's URL is then
+indistinguishable from a phone's that scanned a QR, and the pane's session token
+has stopped being readable out of its own `location.hash`.
+
+From there `client.html`'s `startPhoenixJoin` runs **unchanged**. What the pane
+supplies is one documented override: `gui/rendezvous-transport.js`'s
+`defaultFactories()` reads `window.PhoenixTransportFactories` on every call and
+names "a native in-process host" as an intended user of it, and `pane_link.js`
+is that user. Its socket answers the two frames the joiner waits on; its peer
+connection's reliable channel opens at once, answers the compatibility handshake
+itself (one process, one bundle, nothing to disagree about), and is a pipe onto
+`window.phoenixPaneOut` outbound and `window.__phoenixPaneApply` inbound.
+
+### A pane's `requestAnimationFrame` is a timer
+
+`pane_boot.js` replaces `requestAnimationFrame`/`cancelAnimationFrame` with
+`setTimeout` before any page script runs — before `gui/bg-raf-keepalive.js`,
+which captures whatever it finds and delegates to it whenever the document is
+visible (a pane always is).
+
+This is not about smoothness. An offscreen Ultralight view services rAF inside a
+*rendering update*, and only runs one when the page is dirty. The client page's
+whole render loop is a single outstanding rAF (`scheduleRender`'s `_renderFrame`
+guard), so a pane that reaches a quiet moment deadlocks against itself: no
+rendering update, so the callback never fires; the callback never fires, so
+nothing mutates the DOM; nothing mutates the DOM, so there is no rendering
+update. `_renderFrame` stays non-null, every later `scheduleRender()` returns at
+its first line, and the console is frozen at its last paint while its transport
+goes on delivering perfectly good state. It presented as roughly one pane in
+four (5 failures in 13 runs of `tests/native_host_pane_ultralight.rs`) coming up
+with the lobby still over a Station it knew it held. Timers are not starved that
+way — `Renderer::update()` runs them whether or not anything painted, which is
+why the page's own 500 ms name-field debounce fired in exactly the runs whose
+rAF never did.
+
+### The seam, not a convenience
+
+`currentLink()` reads a closure only
+`startPhoenixJoin` assigns, so a pane-owned link object cannot be reached
+without editing the page a phone loads; and going through the front door is what
+makes `localiseTree`, the status line, the `#conn-diag` readout and
+`window.phoenixLink` (which `gui/command-gateway.js` resolves against) the
+page's own, rather than a second implementation of them that can rot. It rotted
+once: the first `pane_link.js` published `window.connectionManager`, a global
+#1112 retired with PeerJS, and the page never called it.
 
 Three further defences, because one is a single point of failure:
 
@@ -357,7 +413,7 @@ non-required job.
 | `tests/native_host.rs` | The delivery half, unchanged, plus the serving loop's shutdown path (polled to a deadline, so a stuck loop fails rather than wedging the run) |
 | `src/native_host/panes/*` | Identity's three refusals, the projection boundary, the outbound cap's reliable/snapshot split, the document assembly (against the repository's own `client.html`, not only a stub), the identity's absence from the served body, the wildcard-bind normalisation, and the per-frame loop's push budget and deferral of a failed push. All feature-**off**, so the ordinary `cargo test` CI runs them |
 | `src/delivery/serve.rs` | A hosted document is served to a loopback peer and to nothing else, while the bundle and the version-pin endpoints stay LAN-open; `peer_origin` classifies IPv4, IPv6, IPv4-mapped and "the OS would not say" |
-| `tests/client/pane-scripts.test.js` | The two injected scripts, in jsdom: the boot script reads the identity out of the fragment and caps the page's inbox; the link sends the host-minted `Identify` and passes inbound JSON through `localiseTree` |
+| `tests/client/pane-scripts.test.js` | The two injected scripts, in jsdom, **driven through the real seam**: the boot script reads the identity out of the fragment, leaves a fragment `joinRouteFromLocation`/`parseJoinCode` accept (the literal is read out of `document.rs`, so the cross-language pin is checked), and caps the page's inbox; then the repository's own `createRendezvousJoiner` is run over the link's factories and asserted to produce the host-minted `Identify` on the page→host queue, to keep `JoinHandshake` off it, and to hand `onData` a `localiseTree`d message |
 | `tests/native_host_panes.rs` | A pane joins/claims/readies through the ordinary contracts; it is admitted for its own Station and refused another's by the real policy; it cannot read another pane's projection; a pane and a transport participant hold different Stations on the same running ship; a closed pane hands the lobby the disconnect a dropped phone would; and a pane's identity is in its URL, its document unenumerable, LAN-refused, and withdrawn on close |
 | `tests/native_host_pane_ultralight.rs` | The real built `client/index.html` loads in a real Ultralight view over this process's own HTTP, joins on the identity it read from the fragment, paints, answers a real click + keystroke on `#name-input` with a `SetName`, then claims a Station and operates its console: the iframe mounts with `__updateConsole` installed and a click on the Captain's Red Alert button inside it produces the expected `ControlSystem`. A second test proves two panes' `localStorage` are separate. Both `#[ignore]`d: they need the SDK and a built bundle, which CI has neither of |
 

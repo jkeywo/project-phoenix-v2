@@ -550,8 +550,25 @@ fn two_panes_load_real_console_pages_join_operate_a_station_and_share_no_storage
             .unwrap_or_default();
     }
     if rect.is_empty() {
-        // The three things that put a seated pane in front of a hidden console:
-        // the page's view of the phase, of its own seat, and of its readiness.
+        // Four different failures land here and they read identically from
+        // outside, so the readout separates them. Each of the last three has
+        // been a real one:
+        //
+        //   * the button is DISABLED — the station is still on Backfill, so the
+        //     seat never took;
+        //   * the page cannot find ITSELF in the roster (`ui.me=null`) — a token
+        //     question, not a seating one: the page matches on `myToken`, which
+        //     `gui/session-token.js` resolves from storage, while the pane's
+        //     transport identifies with the token the host minted;
+        //   * the link is down or nothing is being delivered (`link=false`,
+        //     `deliver=object`, a growing `inbox`);
+        //   * `pendingFrame` is non-null with everything else correct — the page
+        //     asked for a render and its `requestAnimationFrame` never fired.
+        //     An offscreen Ultralight view services rAF only inside a rendering
+        //     update and only runs one when something is dirty, so a page whose
+        //     only pending work IS that render deadlocks against itself.
+        //     `pane_boot.js` drives rAF off a timer for exactly this reason;
+        //     seeing it here again means that override did not take.
         let state = surfaces[0]
             .1
             .view_mut()
@@ -563,17 +580,30 @@ fn two_panes_load_real_console_pages_join_operate_a_station_and_share_no_storage
                  var r=f?f.getBoundingClientRect():null;\
                  var ls=window.lobbyState;\
                  var roster=ls&&ls.players?JSON.stringify(ls.players.map(function(p){\
-                 return {n:p.name,s:p.station,r:p.ready,sp:p.spectator};})):'no lobbyState';\
+                 return {n:p.name,t:p.token,s:p.station,r:p.ready,sp:p.spectator};})):\
+                 'no lobbyState';\
+                 var pane=window.__phoenixPane||{};\
+                 var mine='<page scope unreadable>';\
+                 try{mine='myToken='+String(myToken)\
+                 +' claim='+String(pendingMidGameClaim)\
+                 +' active='+String(activeConsole)\
+                 +' pendingFrame='+String(_renderFrame)\
+                 +' ui='+JSON.stringify({ph:uiState.phase,n:(uiState.players||[]).length,\
+                 me:(uiState.players||[]).find(function(p){return p.token===myToken;})||null});}\
+                 catch(e){mine='<page scope unreadable: '+e+'>';}\
                  return 'phase='+(ls?ls.phase:'?')+' roster='+roster\
+                 +' '+mine\
+                 +' pane.token='+String(pane.token)\
+                 +' link='+String(window.phoenixLink&&window.phoenixLink.connected)\
+                 +' deliver='+(typeof pane.deliver)+' inbox='+((pane.inbox||[]).length)\
                  +' lobby-ui.class='+(lob?(lob.className||'(empty)'):'absent')\
                  +' captain-ui.display='+(sec?getComputedStyle(sec).display:'absent')\
                  +' iframe='+(r?(r.width+'x'+r.height):'absent');})()",
             )
             .unwrap_or_else(|e| format!("<unreadable: {e}>"));
         panic!(
-            "the captain console's Red Alert button is not laid out or is disabled — a \
-             disabled one means the station is still on Backfill, which would mean the seat \
-             never took. The page says: {state}"
+            "the captain console's Red Alert button is not laid out or is disabled. The page \
+             says: {state}"
         );
     }
     let mut fields = rect.split(',');

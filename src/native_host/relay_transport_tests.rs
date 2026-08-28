@@ -15,6 +15,7 @@
 
 use super::*;
 use crate::core::messages::ServerMessage;
+use crate::core::rendezvous::JOIN_REFUSED;
 use std::sync::{Arc, Mutex};
 
 /// A [`RelaySocket`] with two queues and a settable backlog.
@@ -547,12 +548,22 @@ fn the_service_s_authored_limits_beat_this_builds_defaults() {
         msg: &ServerMessage::GameStarted,
         delivery: DeliveryClass::Reliable,
     });
-    // Refused locally rather than by being cut off at the service's ceiling.
+    // Refused locally rather than by being cut off at the service's ceiling,
+    // and the notice names the SERVICE's number rather than this build's
+    // default — which is the whole claim of this test.
     assert_eq!(socket.sent_of("relay").len(), before);
     assert!(t
         .drain_notices()
         .iter()
-        .any(|n| matches!(n, RelayNotice::Fault { reason } if reason.contains("at most 8"))));
+        .any(|n| matches!(n, RelayNotice::Fault { reason } if reason.contains("8 byte frame"))));
+    // A reliable frame that will not fit is a broken guarantee, not a dropped
+    // frame, so the link it was for ends rather than going quiet.
+    assert_eq!(
+        t.poll(),
+        vec![TransportEvent::Disconnected {
+            token: "tok-1".to_string()
+        }]
+    );
 }
 
 // ── Endings ─────────────────────────────────────────────────────────────────
@@ -612,6 +623,233 @@ fn the_service_closing_our_relay_disconnects_everyone_it_was_carrying() {
     tokens.sort();
     assert_eq!(tokens, vec!["tok-1".to_string(), "tok-2".to_string()]);
     assert!(t.code().is_none(), "the code is gone with the record");
+}
+
+#[test]
+fn a_per_request_refusal_leaves_the_crew_and_the_code_alone() {
+    // `error` is the registry's generic per-REQUEST refusal, not a link event.
+    // A host broadcasting to Target::All addresses a peer the service detached
+    // a tick ago and is answered `relay/no-peer` — the NORMAL case every time
+    // somebody closes their phone. Folding that into the terminal arm
+    // disconnected the whole crew and wiped the join code on every departure.
+    let (mut t, socket) = transport();
+    socket.arrive(&RendezvousFrame {
+        code: Some(crate::core::rendezvous::CodeField::Issued(Box::new(
+            JoinCode {
+                suffix: "ABCDE".to_string(),
+                ..Default::default()
+            },
+        ))),
+        ..frame("hosted")
+    });
+    t.poll();
+    admit(&mut t, &socket, "peer-1", "tok-1");
+    admit(&mut t, &socket, "peer-2", "tok-2");
+    t.drain_notices();
+
+    for reason in ["no-peer", "not-relaying", "relay-too-large", "malformed"] {
+        socket.arrive(&RendezvousFrame {
+            reason: Some(reason.to_string()),
+            request: Some("relay".to_string()),
+            ..frame("error")
+        });
+        assert!(
+            t.poll().is_empty(),
+            "a {reason} refusal reported somebody disconnected"
+        );
+        assert_eq!(t.relayed_peers(), 2, "a {reason} refusal dropped the crew");
+        assert!(
+            t.code().is_some(),
+            "a {reason} refusal wiped the join code off the viewscreen"
+        );
+        // It is still SAID, so the operator sees the service refusing things.
+        assert!(matches!(
+            t.drain_notices().as_slice(),
+            [RelayNotice::Fault { .. }]
+        ));
+    }
+}
+
+#[test]
+fn an_unreachable_error_really_does_end_every_relayed_session() {
+    // The other half of the same split: `unreachable` is the registry's
+    // record-is-gone answer, and a relayed link cannot outlive its record.
+    let (mut t, socket) = transport();
+    admit(&mut t, &socket, "peer-1", "tok-1");
+    admit(&mut t, &socket, "peer-2", "tok-2");
+    socket.arrive(&RendezvousFrame {
+        reason: Some("unreachable".to_string()),
+        request: Some("relay".to_string()),
+        ..frame("error")
+    });
+    let mut tokens: Vec<_> = t
+        .poll()
+        .into_iter()
+        .filter_map(|e| match e {
+            TransportEvent::Disconnected { token } => Some(token),
+            _ => None,
+        })
+        .collect();
+    tokens.sort();
+    assert_eq!(tokens, vec!["tok-1".to_string(), "tok-2".to_string()]);
+    assert_eq!(t.relayed_peers(), 0);
+}
+
+#[test]
+fn a_peer_claiming_a_reserved_token_is_refused_rather_than_carried() {
+    // The seam drops COMMANDS under a reserved token, but a peer left attached
+    // under one still sits in audience() and receives that token's private
+    // projection and every broadcast. server.html closes such a connection
+    // outright; so does this.
+    let (mut t, socket) = transport();
+    socket.arrive(&peer_joined("peer-1"));
+    let handshake = encode_handshake_frame(&HandshakeFrame {
+        kind: JOIN_HANDSHAKE.to_string(),
+        data: crate::core::rendezvous::HandshakeData {
+            stamp: Some(matching_stamp_field()),
+            ..Default::default()
+        },
+    })
+    .unwrap();
+    socket.arrive(&relayed("peer-1", &handshake));
+    t.poll();
+    t.drain_notices();
+    socket.outbound.lock().unwrap().clear();
+
+    let identify = JsonCodec
+        .encode_client(&ClientMessage::Identify {
+            token: crate::console_bridge::LOCAL_CONSOLE_TOKEN.to_string(),
+            name: "Mallory".to_string(),
+        })
+        .unwrap();
+    socket.arrive(&relayed("peer-1", &identify));
+    assert!(
+        t.poll().is_empty(),
+        "a reserved token must not reach the simulation as an Identify"
+    );
+
+    // It is TOLD, in the same in-band frame the compatibility handshake uses.
+    let refusal = socket
+        .sent_of("relay")
+        .into_iter()
+        .find_map(|f| decode_handshake_frame(&f.payload.unwrap_or_default()).ok())
+        .expect("the peer was told why");
+    assert_eq!(refusal.kind, JOIN_REFUSED);
+    assert_eq!(refusal.data.code.as_deref(), Some(RESERVED_TOKEN_CODE));
+
+    // …and it is no longer addressable: a broadcast reaches nobody.
+    socket.outbound.lock().unwrap().clear();
+    t.dispatch(TransportDispatch {
+        target: &Target::All,
+        msg: &ServerMessage::GameStarted,
+        delivery: DeliveryClass::Reliable,
+    });
+    assert!(
+        socket.sent_of("relay").is_empty(),
+        "a refused peer was still handed simulation traffic"
+    );
+}
+
+#[test]
+fn a_stale_peers_departure_cannot_evict_the_player_that_just_reconnected() {
+    // Every native crew member is relayed, so re-Identify on a fresh peer id IS
+    // the ordinary reconnect — and a phone that lost radio without a TCP FIN
+    // leaves the service holding its old socket for minutes. When that stale
+    // close finally lands it must not disconnect the player who is at that
+    // moment driving a station.
+    let (mut t, socket) = transport();
+    admit(&mut t, &socket, "peer-1", "tok-1");
+    let events = admit(&mut t, &socket, "peer-2", "tok-1");
+    assert_eq!(
+        t.relayed_peers(),
+        1,
+        "the stale peer is severed, not kept alongside the live one"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, TransportEvent::Disconnected { .. })),
+        "the player moved devices; nobody left"
+    );
+
+    socket.arrive(&RendezvousFrame {
+        peer: Some("peer-1".to_string()),
+        ..frame("relay-peer-left")
+    });
+    assert!(
+        t.poll().is_empty(),
+        "the stale peer's late departure disconnected the live player"
+    );
+
+    // And exactly ONE delivery per broadcast: two peers under one token would
+    // have double-delivered every Target::Token and Target::All.
+    socket.outbound.lock().unwrap().clear();
+    t.dispatch(TransportDispatch {
+        target: &Target::All,
+        msg: &ServerMessage::GameStarted,
+        delivery: DeliveryClass::Reliable,
+    });
+    assert_eq!(socket.sent_of("relay").len(), 1);
+}
+
+#[test]
+fn the_service_reporting_its_own_shedding_reaches_the_operator() {
+    // The host→phone direction of the shed count, which the operator is the one
+    // who can act on. Nothing read this frame before.
+    let (mut t, socket) = transport();
+    admit(&mut t, &socket, "peer-1", "tok-1");
+    t.drain_notices();
+    socket.arrive(&RendezvousFrame {
+        peer: Some("peer-1".to_string()),
+        dropped: Some(17),
+        ..frame("relay-degraded")
+    });
+    t.poll();
+    assert_eq!(
+        t.drain_notices(),
+        vec![RelayNotice::Shedding {
+            peer: "peer-1".to_string(),
+            total: 17,
+        }]
+    );
+}
+
+#[test]
+fn an_oversized_reliable_message_fails_the_link_rather_than_vanishing() {
+    // There is no such thing as a quietly dropped reliable frame: the
+    // simulation is written against that guarantee. So the LINK fails and the
+    // crew member re-joins, which is what gui/rendezvous-relay.js does too.
+    let (mut t, socket) = transport();
+    admit(&mut t, &socket, "peer-1", "tok-1");
+    // A ceiling the service could authorise, small enough that an ordinary
+    // message crosses it.
+    socket.arrive(&RendezvousFrame {
+        peer: Some("peer-2".to_string()),
+        limits: Some(RelayLimits {
+            max_frame_bytes: 4,
+            max_send_buffer_bytes: 262_144,
+        }),
+        ..frame("relay-peer")
+    });
+    t.poll();
+    socket.outbound.lock().unwrap().clear();
+
+    t.dispatch(TransportDispatch {
+        target: &Target::All,
+        msg: &ServerMessage::GameStarted,
+        delivery: DeliveryClass::Reliable,
+    });
+    assert!(
+        socket.sent_of("relay").is_empty(),
+        "an unsendable frame must not be put on the wire"
+    );
+    assert_eq!(
+        t.poll(),
+        vec![TransportEvent::Disconnected {
+            token: "tok-1".to_string()
+        }],
+        "the link that could not carry it is ended, visibly"
+    );
 }
 
 #[test]

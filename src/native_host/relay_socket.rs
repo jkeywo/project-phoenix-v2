@@ -6,6 +6,27 @@
 //! per frame and may not block for a network round trip, so the thread does the
 //! blocking and the queues do the crossing.
 //!
+//! # It redials, and it has to
+//!
+//! A rendezvous socket dies for entirely routine reasons: a Durable Object
+//! eviction, a worker redeploy, an idle timeout, a laptop's Wi-Fi blip. The
+//! browser host answers that with `lostService()` — discard the socket,
+//! re-register on a backoff, repaint the new five letters — and states why: a
+//! host that simply stopped would be unjoinable until somebody reloaded the
+//! viewscreen. A NATIVE host has no viewscreen to reload; it is a process
+//! running an authoritative mission, and losing this socket would end every
+//! route in for the rest of it.
+//!
+//! So the thread is a supervisor rather than a single pump: dial, pump until
+//! the socket dies, discard whatever was queued for the dead socket, wait a
+//! backoff, dial again. `is_open()` goes false in between, which is what
+//! `RelayTransport::poll` reads to report the crew gone and clear both the code
+//! and its `registered` flag; when the redial lands, the service's `ready`
+//! frame re-registers the host and issues a FRESH code, which the operator log
+//! prints. The old code really is dead — the record went with it — and keeping
+//! the same letters across a host drop needs persistence in the service
+//! (issue #1115), exactly as on the browser side.
+//!
 //! # `[ai]` — why `tungstenite` and not one of its async wrappers
 //!
 //! Stated fully in `Cargo.toml` beside the dependency, and in short: this crate
@@ -49,6 +70,10 @@ pub struct WsRelaySocket {
     /// exactly when the writer cannot keep up, which is the condition the
     /// shedding rule is about.
     queued: Arc<AtomicUsize>,
+    /// Set by [`RelaySocket::close`]: stop pumping and stop REDIALING. Without
+    /// it a closed transport would leave a thread reconnecting to the service
+    /// for the life of the process.
+    shutdown: Arc<AtomicBool>,
 }
 
 /// Why a native host could not reach the rendezvous service.
@@ -108,40 +133,35 @@ impl WsRelaySocket {
     /// which one is an operator decision and a checklist item, not a default
     /// this file can invent.
     pub fn connect(base: &str, origin: &str) -> Result<Self, RelayConnectError> {
-        use tungstenite::client::IntoClientRequest;
-
         let url = host_socket_url(base)?;
-        let mut request = url
-            .as_str()
-            .into_client_request()
-            .map_err(|e| RelayConnectError::BadUrl(format!("{url}: {e}")))?;
-        request.headers_mut().insert(
-            "Origin",
-            origin
-                .parse()
-                .map_err(|_| RelayConnectError::BadUrl(format!("bad origin {origin}")))?,
-        );
-
-        let (socket, _response) = tungstenite::connect(request)
-            .map_err(|e| RelayConnectError::Handshake(e.to_string()))?;
+        // The FIRST dial is synchronous, so a typo'd URL, an unreachable
+        // service or an origin the deployment does not allow is a startup
+        // error the operator reads immediately — rather than a process that
+        // boots into a silent redial loop against a service that will never
+        // accept it.
+        let socket = dial(&url, origin)?;
 
         let (inbound_tx, inbound_rx) = mpsc::channel::<String>();
         let (outbound_tx, outbound_rx) = mpsc::channel::<String>();
         let open = Arc::new(AtomicBool::new(true));
         let queued = Arc::new(AtomicUsize::new(0));
+        let shutdown = Arc::new(AtomicBool::new(false));
 
         // One thread owns the socket, because `tungstenite`'s is not `Sync` and
-        // splitting it would need a lock held across a blocking read. A single
-        // pump alternates: drain everything queued for sending, then take one
-        // inbound frame with a read timeout, then go round again. The timeout is
-        // what keeps a quiet link from starving the outbound direction.
-        let pump_open = Arc::clone(&open);
-        let pump_queued = Arc::clone(&queued);
+        // splitting it would need a lock held across a blocking read. It
+        // supervises rather than pumps once: see the module header.
+        let supervisor = Supervisor {
+            url,
+            origin: origin.to_string(),
+            inbound: inbound_tx,
+            outbound: outbound_rx,
+            open: Arc::clone(&open),
+            queued: Arc::clone(&queued),
+            shutdown: Arc::clone(&shutdown),
+        };
         std::thread::Builder::new()
             .name("phoenix-relay".to_string())
-            .spawn(move || {
-                pump(socket, inbound_tx, outbound_rx, pump_open, pump_queued);
-            })
+            .spawn(move || supervisor.run(socket))
             .map_err(|e| {
                 RelayConnectError::Handshake(format!("cannot start the relay thread: {e}"))
             })?;
@@ -151,7 +171,107 @@ impl WsRelaySocket {
             outbound: outbound_tx,
             open,
             queued,
+            shutdown,
         })
+    }
+}
+
+/// Dial the host endpoint once, claiming `origin`.
+fn dial(url: &str, origin: &str) -> Result<WsStream, RelayConnectError> {
+    use tungstenite::client::IntoClientRequest;
+
+    let mut request = url
+        .into_client_request()
+        .map_err(|e| RelayConnectError::BadUrl(format!("{url}: {e}")))?;
+    request.headers_mut().insert(
+        "Origin",
+        origin
+            .parse()
+            .map_err(|_| RelayConnectError::BadUrl(format!("bad origin {origin}")))?,
+    );
+    let (socket, _response) =
+        tungstenite::connect(request).map_err(|e| RelayConnectError::Handshake(e.to_string()))?;
+    Ok(socket)
+}
+
+/// The redial ladder, in milliseconds, capped so a service that is down for an
+/// hour is still polled about once a minute rather than once a day.
+///
+/// The same shape as `nextBackoffDelay` in gui/connection-manager.js, which the
+/// browser host's `lostService()` uses for the identical event — doubling from
+/// a second, ceiling at a minute. Not a gameplay value: it is how often one
+/// socket asks an unreachable service to try again (AGENTS.md rule 11).
+pub(crate) fn redial_delay_ms(attempt: u32) -> u64 {
+    const BASE_MS: u64 = 1_000;
+    const CEILING_MS: u64 = 60_000;
+    BASE_MS
+        .saturating_mul(1u64 << attempt.min(6))
+        .min(CEILING_MS)
+}
+
+type WsStream = tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>;
+
+/// Why one pump stopped: the socket died (redial), or this end is finished.
+#[derive(PartialEq)]
+enum PumpEnd {
+    SocketDied,
+    Finished,
+}
+
+/// Owns the socket for the process's lifetime, across as many dials as it takes.
+struct Supervisor {
+    url: String,
+    origin: String,
+    inbound: Sender<String>,
+    outbound: Receiver<String>,
+    open: Arc<AtomicBool>,
+    queued: Arc<AtomicUsize>,
+    shutdown: Arc<AtomicBool>,
+}
+
+impl Supervisor {
+    fn run(self, first: WsStream) {
+        let mut socket = Some(first);
+        let mut attempt = 0u32;
+        loop {
+            if let Some(s) = socket.take() {
+                self.open.store(true, Ordering::Relaxed);
+                attempt = 0;
+                let end = pump(
+                    s,
+                    &self.inbound,
+                    &self.outbound,
+                    &self.queued,
+                    &self.shutdown,
+                );
+                self.open.store(false, Ordering::Relaxed);
+                if end == PumpEnd::Finished {
+                    return;
+                }
+            }
+            if self.shutdown.load(Ordering::Relaxed) {
+                return;
+            }
+            // Anything queued for the socket that just died is thrown away
+            // rather than replayed onto the next one. Those frames name peers
+            // and a record that no longer exist, and `RelayTransport` has
+            // already reported that whole crew gone.
+            while self.outbound.try_recv().is_ok() {}
+            self.queued.store(0, Ordering::Relaxed);
+
+            // Sleep in short slices so `close()` is not held up for a minute.
+            let delay = redial_delay_ms(attempt);
+            attempt = attempt.saturating_add(1);
+            let mut slept = 0;
+            while slept < delay {
+                if self.shutdown.load(Ordering::Relaxed) {
+                    return;
+                }
+                std::thread::sleep(PUMP_READ_TIMEOUT);
+                slept += PUMP_READ_TIMEOUT.as_millis() as u64;
+            }
+            socket = dial(&self.url, &self.origin).ok();
+        }
     }
 }
 
@@ -165,12 +285,12 @@ impl WsRelaySocket {
 const PUMP_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(20);
 
 fn pump(
-    mut socket: tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>,
-    inbound: Sender<String>,
-    outbound: Receiver<String>,
-    open: Arc<AtomicBool>,
-    queued: Arc<AtomicUsize>,
-) {
+    mut socket: WsStream,
+    inbound: &Sender<String>,
+    outbound: &Receiver<String>,
+    queued: &Arc<AtomicUsize>,
+    shutdown: &Arc<AtomicBool>,
+) -> PumpEnd {
     if let tungstenite::stream::MaybeTlsStream::Plain(stream) = socket.get_ref() {
         let _ = stream.set_read_timeout(Some(PUMP_READ_TIMEOUT));
     }
@@ -180,6 +300,10 @@ fn pump(
     }
 
     loop {
+        if shutdown.load(Ordering::Relaxed) {
+            let _ = socket.close(None);
+            return PumpEnd::Finished;
+        }
         // Everything waiting to go out, before blocking on a read.
         loop {
             match outbound.try_recv() {
@@ -189,17 +313,16 @@ fn pump(
                         .send(tungstenite::Message::Text(text.into()))
                         .is_err()
                     {
-                        open.store(false, Ordering::Relaxed);
-                        return;
+                        return PumpEnd::SocketDied;
                     }
                     queued.fetch_sub(len.min(queued.load(Ordering::Relaxed)), Ordering::Relaxed);
                 }
                 Err(TryRecvError::Empty) => break,
-                // The transport was dropped; nothing more will ever be sent.
+                // The transport was dropped; nothing more will ever be sent,
+                // so there is nothing left to redial FOR.
                 Err(TryRecvError::Disconnected) => {
                     let _ = socket.close(None);
-                    open.store(false, Ordering::Relaxed);
-                    return;
+                    return PumpEnd::Finished;
                 }
             }
         }
@@ -207,26 +330,19 @@ fn pump(
         match socket.read() {
             Ok(tungstenite::Message::Text(text)) => {
                 if inbound.send(text.to_string()).is_err() {
-                    open.store(false, Ordering::Relaxed);
-                    return;
+                    return PumpEnd::Finished;
                 }
             }
             // The service speaks JSON text; binary, ping and pong are
             // tungstenite's own business or nothing of ours.
-            Ok(tungstenite::Message::Close(_)) => {
-                open.store(false, Ordering::Relaxed);
-                return;
-            }
+            Ok(tungstenite::Message::Close(_)) => return PumpEnd::SocketDied,
             Ok(_) => {}
             Err(tungstenite::Error::Io(e))
                 if matches!(
                     e.kind(),
                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
                 ) => {}
-            Err(_) => {
-                open.store(false, Ordering::Relaxed);
-                return;
-            }
+            Err(_) => return PumpEnd::SocketDied,
         }
     }
 }
@@ -264,6 +380,7 @@ impl RelaySocket for WsRelaySocket {
     }
 
     fn close(&mut self) {
+        self.shutdown.store(true, Ordering::Relaxed);
         self.open.store(false, Ordering::Relaxed);
     }
 }
@@ -291,6 +408,21 @@ mod tests {
             host_socket_url("wss://example.test").unwrap(),
             "wss://example.test/v1/host"
         );
+    }
+
+    #[test]
+    fn the_redial_ladder_doubles_and_then_holds_at_a_minute() {
+        // The same shape gui/connection-manager.js's nextBackoffDelay gives the
+        // browser host for the identical event. A service that is down for an
+        // hour is still asked once a minute; a blip is retried in a second.
+        assert_eq!(redial_delay_ms(0), 1_000);
+        assert_eq!(redial_delay_ms(1), 2_000);
+        assert_eq!(redial_delay_ms(4), 16_000);
+        assert_eq!(redial_delay_ms(6), 60_000);
+        // And it never runs away: an attempt count that keeps climbing for the
+        // rest of the mission must not overflow or stop retrying.
+        assert_eq!(redial_delay_ms(40), 60_000);
+        assert_eq!(redial_delay_ms(u32::MAX), 60_000);
     }
 
     #[test]

@@ -108,6 +108,12 @@ pub struct RelayHostConfig {
     pub stamp: DeliveryStamp,
 }
 
+/// The `JoinRefused` code a peer gets for claiming a token only the host
+/// runtime may use. Not a [`crate::delivery::stamp::StampMismatch`] code — this
+/// is not a verdict about the joiner's BUILD — so it is spelled here and mapped
+/// to its own sentence in `gui/join-code.js`'s `REASON_STRING_IDS`.
+pub const RESERVED_TOKEN_CODE: &str = "reserved-token";
+
 /// One crew member the service is carrying for us.
 struct RelayPeer {
     /// True once the compatibility handshake admitted this build.
@@ -134,6 +140,13 @@ pub struct RelayTransport {
     /// Snapshot frames shed for backpressure, over this transport's whole life.
     /// A diagnostics counter, not a control: nothing branches on it.
     shed_snapshots: u64,
+    /// False while the socket is down. Held so the teardown runs ONCE on the
+    /// way down and a redialed socket (see [`crate::native_host::relay_socket`])
+    /// is noticed on the way back up instead of being polled forever as dead.
+    link_up: bool,
+    /// Peers whose link failed inside [`NativeTransport::dispatch`], which
+    /// cannot emit events. Drained by the next [`NativeTransport::poll`].
+    pending_drops: Vec<String>,
     /// Anything the operator should see, drained by the host each frame.
     notices: RelayNotices,
 }
@@ -170,8 +183,9 @@ impl RelayNotices {
 /// The transport cannot log for itself: `plog!` takes an
 /// `Option<Res<LogFilterConfig>>`, which is a Bevy system parameter, and this
 /// object is a resource that Bevy calls rather than a system. So it reports,
-/// and [`crate::native_host::transport`]'s systems — which do have the
-/// parameter — do the logging.
+/// and whoever owns the transport drains it — today that is
+/// `report_relay_notices` in `src/bin/phoenix_host.rs`, which writes them onto
+/// the host binary's own operator log beside the join code it prints.
 #[derive(Clone, Debug, PartialEq)]
 pub enum RelayNotice {
     /// The service issued a join code. The five letters go on the viewscreen.
@@ -196,6 +210,8 @@ impl RelayTransport {
             code: None,
             registered: false,
             shed_snapshots: 0,
+            link_up: true,
+            pending_drops: Vec::new(),
             notices: RelayNotices::default(),
         }
     }
@@ -305,9 +321,43 @@ impl RelayTransport {
 
         // `Identify` is what names a session token, exactly as it is in
         // server.html. Until one arrives this peer has no identity, so a
-        // message before it has nowhere to be delivered and is dropped — the
-        // seam's reserved-token gate then refuses the tokens nobody may claim.
+        // message before it has nowhere to be delivered and is dropped.
         if let ClientMessage::Identify { token, .. } = &msg {
+            // A peer's token is SELF-DECLARED, and two shapes are reserved for
+            // the host runtime (`__local_console__` and the `ai:` prefix). The
+            // seam refuses commands under them, but a peer left attached under
+            // a reserved token still sits in `audience()` and receives that
+            // token's projection and every broadcast — so refuse the CONNECTION
+            // here, the way server.html does, rather than silently dropping the
+            // half of the traffic that happens to travel upwards.
+            if crate::lobby::handler::is_reserved_token(token) {
+                self.refuse_peer(
+                    peer,
+                    RESERVED_TOKEN_CODE,
+                    format!(
+                    "{peer} claimed the reserved token {token}, which only the host runtime may use"
+                ),
+                );
+                return;
+            }
+            // Duplicate-token sever, and the reason it has to happen HERE: on a
+            // native host every crew member is relayed, so re-`Identify` on a
+            // fresh rendezvous peer id is the ordinary reconnect, and a phone
+            // that lost radio without a TCP FIN leaves the service holding its
+            // old socket for minutes. Two peers under one token would both pass
+            // `audience()` and double-deliver every `Target::Token` and
+            // `Target::All`. The prior peer is dropped WITHOUT a disconnect —
+            // the player did not leave, they moved — exactly as server.html
+            // replaces `tokenConns` before closing the earlier connection.
+            let stale: Vec<String> = self
+                .peers
+                .iter()
+                .filter(|(id, p)| id.as_str() != peer && p.token.as_deref() == Some(token.as_str()))
+                .map(|(id, _)| id.clone())
+                .collect();
+            for id in stale {
+                self.peers.remove(&id);
+            }
             if let Some(entry) = self.peers.get_mut(peer) {
                 entry.token = Some(token.clone());
             }
@@ -321,14 +371,53 @@ impl RelayTransport {
         out.push(TransportEvent::Received { token, msg });
     }
 
+    /// Refuse this peer at the transport: tell it why in the same in-band
+    /// `JoinRefused` the compatibility handshake uses, mark it refused so
+    /// nothing it sends afterwards reaches the simulation, and stop carrying
+    /// it. It keeps no token, so it is out of `audience()` at once and its
+    /// eventual departure reports no disconnect for a player that never was.
+    fn refuse_peer(&mut self, peer: &str, code: &str, detail: String) {
+        self.notices.push(RelayNotice::Refused {
+            peer: peer.to_string(),
+            code: code.to_string(),
+        });
+        match encode_handshake_frame(&HandshakeFrame::refused(code, detail)) {
+            Ok(text) => self.send_payload(peer, CLASS_RELIABLE, text),
+            Err(e) => self.notices.push(RelayNotice::Fault {
+                reason: format!("could not encode a refusal: {e}"),
+            }),
+        }
+        if let Some(entry) = self.peers.get_mut(peer) {
+            entry.refused = true;
+            entry.admitted = false;
+            entry.token = None;
+        }
+    }
+
     /// A peer's link ended. Reports a disconnect only for one that got as far
     /// as identifying — the lobby has nothing to restore for anybody else.
+    ///
+    /// The identity guard is the same one server.html's `close` handler applies,
+    /// and for the same reason: on a same-token reconnect the NEW peer has
+    /// already claimed the token by the time the stale peer's departure lands,
+    /// and reporting that departure would flip an actively-driven station to
+    /// Backfill. `on_game_payload` clears the stale peer's token when it
+    /// severs it, so this test is "is this peer still the live holder".
     fn drop_peer(&mut self, peer: &str, out: &mut Vec<TransportEvent>) {
-        if let Some(entry) = self.peers.remove(peer) {
-            if let Some(token) = entry.token {
-                out.push(TransportEvent::Disconnected { token });
-            }
+        let Some(entry) = self.peers.remove(peer) else {
+            return;
+        };
+        let Some(token) = entry.token else {
+            return;
+        };
+        if self
+            .peers
+            .values()
+            .any(|p| p.token.as_deref() == Some(token.as_str()))
+        {
+            return;
         }
+        out.push(TransportEvent::Disconnected { token });
     }
 
     fn on_frame(&mut self, frame: RendezvousFrame, out: &mut Vec<TransportEvent>) {
@@ -391,20 +480,82 @@ impl RelayTransport {
                     self.drop_peer(&peer, out);
                 }
             }
-            "relay-closed" | "error" => {
-                // The service has stopped carrying us, or refused something.
-                // Either way every relayed crew member is now unreachable:
-                // unlike a DataChannel, a relayed link does not outlive the
-                // service that introduced it.
+            "relay-closed" => {
+                // The service has stopped carrying us. Every relayed crew
+                // member is now unreachable: unlike a DataChannel, a relayed
+                // link does not outlive the service that introduced it.
                 let reason = frame.reason.unwrap_or_else(|| "unreachable".to_string());
-                for peer in self.peers.keys().cloned().collect::<Vec<_>>() {
-                    self.drop_peer(&peer, out);
+                self.lose_relay(reason, out);
+            }
+            "error" => {
+                // NOT the same thing, and folding the two was a crew-wide
+                // outage on every ordinary departure. `error` is `registry.js`'s
+                // generic per-REQUEST refusal (`fail(connId, request, reason)`):
+                // a host broadcasting snapshots to `Target::All` addresses a
+                // peer the service detached a tick ago and is answered
+                // `relay/no-peer`, every single time somebody closes their
+                // phone. Treating that as total relay loss disconnected
+                // everybody else and wiped the join code.
+                //
+                // So a refusal is a NOTICE and nothing more — matching
+                // `createRendezvousHost`'s `case 'error'`, which only tears
+                // down for `unreachable`. Nothing is dropped for it either: the
+                // frame names the request, never the peer, so there is no
+                // subject to drop even when the reason is `no-peer`. The peer
+                // that really went arrives as `relay-peer-left` a moment later,
+                // which is the frame that DOES name it.
+                let reason = frame.reason.unwrap_or_else(|| "unreachable".to_string());
+                if Self::is_terminal_error(&reason) {
+                    self.lose_relay(reason, out);
+                    return;
                 }
-                self.code = None;
-                self.notices.push(RelayNotice::Fault { reason });
+                let request = frame.request.unwrap_or_else(|| "unknown".to_string());
+                self.notices.push(RelayNotice::Fault {
+                    reason: format!("the service refused a {request} frame: {reason}"),
+                });
+            }
+            "relay-degraded" => {
+                // The service shedding snapshot frames it could not hand to a
+                // peer. Reported as the service's own cumulative total for that
+                // mailbox, NOT folded into `shed_snapshots`: that counter is
+                // what this host shed against its own send buffer, and adding
+                // two different measurements of two different queues together
+                // would give the operator a number that means nothing.
+                self.notices.push(RelayNotice::Shedding {
+                    peer: frame.peer.unwrap_or_default(),
+                    total: u64::from(frame.dropped.unwrap_or(0)),
+                });
             }
             _ => {}
         }
+    }
+
+    /// Reasons on an `error` frame that are about the LINK rather than one
+    /// request, and so really do end every relayed session.
+    ///
+    /// `unreachable` is the registry's record-is-gone answer, `not-connected`
+    /// says the service is not holding this socket at all, and a protocol
+    /// refusal means every subsequent frame gets the same answer. Everything
+    /// else — `no-peer`, `not-relaying`, `relay-too-large`, `malformed`,
+    /// `relay-full`, `forbidden-role` — is a refusal of ONE request.
+    fn is_terminal_error(reason: &str) -> bool {
+        matches!(
+            reason,
+            "unreachable" | "not-connected" | "unsupported-protocol"
+        )
+    }
+
+    /// The relay itself is gone: report every identified crew member as
+    /// disconnected, forget the code, and allow a future `ready` to register
+    /// again (a reconnected socket re-sends `host-open` and is issued a fresh
+    /// code, exactly as the browser host's `lostService()` does).
+    fn lose_relay(&mut self, reason: String, out: &mut Vec<TransportEvent>) {
+        for peer in self.peers.keys().cloned().collect::<Vec<_>>() {
+            self.drop_peer(&peer, out);
+        }
+        self.code = None;
+        self.registered = false;
+        self.notices.push(RelayNotice::Fault { reason });
     }
 
     /// Every peer an audience target resolves to, as rendezvous peer ids.
@@ -425,15 +576,24 @@ impl RelayTransport {
 impl NativeTransport for RelayTransport {
     fn poll(&mut self) -> Vec<TransportEvent> {
         let mut out = Vec::new();
+        // Links this transport gave up on while dispatching, where it had no
+        // way to say so (see `dispatch`).
+        for peer in std::mem::take(&mut self.pending_drops) {
+            self.drop_peer(&peer, &mut out);
+        }
         if !self.socket.is_open() {
             // The link died. Report every identified crew member gone, once —
-            // `drop_peer` removes as it goes, so a second poll produces nothing.
-            for peer in self.peers.keys().cloned().collect::<Vec<_>>() {
-                self.drop_peer(&peer, &mut out);
+            // `lose_relay` empties the map, so a second poll produces nothing.
+            // It also clears `registered`, which is what lets a socket that
+            // redials (relay_socket.rs's supervisor) re-send `host-open` on the
+            // service's next `ready` and put a fresh code on the viewscreen.
+            if self.link_up {
+                self.link_up = false;
+                self.lose_relay("unreachable".to_string(), &mut out);
             }
-            self.code = None;
             return out;
         }
+        self.link_up = true;
         for text in self.socket.poll() {
             match decode_rendezvous_frame(&text) {
                 Ok(frame) => self.on_frame(frame, &mut out),
@@ -456,16 +616,39 @@ impl NativeTransport for RelayTransport {
             });
             return;
         };
-        // The same courtesy refusal the browser makes, measured against the
-        // same authored ceiling: one lost frame beats a link the service cuts.
+        // Over the authored ceiling, measured the same way the service measures
+        // it. What happens next depends on the CLASS, because the two classes
+        // promise different things:
+        //
+        //   snapshot  a lost frame is what the class is for. Count it as shed,
+        //             say so, and let the next tick supersede it.
+        //   reliable  there is no such thing as a quietly dropped reliable
+        //             frame — the simulation is written against the guarantee.
+        //             So the LINK fails instead, and the affected crew members
+        //             re-join (their stations flip to Backfill meanwhile),
+        //             which is the same answer gui/rendezvous-relay.js gives.
         if payload.len() > self.limits.max_frame_bytes {
-            self.notices.push(RelayNotice::Fault {
-                reason: format!(
-                    "dropping a {} byte message: the relay carries at most {}",
-                    payload.len(),
-                    self.limits.max_frame_bytes
-                ),
-            });
+            let over = format!(
+                "a {} byte message does not fit the relay's {} byte frame",
+                payload.len(),
+                self.limits.max_frame_bytes
+            );
+            match dispatch.delivery {
+                DeliveryClass::Snapshot => {
+                    self.shed_snapshots += targets.len() as u64;
+                    self.notices.push(RelayNotice::Shedding {
+                        peer: targets.first().cloned().unwrap_or_default(),
+                        total: self.shed_snapshots,
+                    });
+                    self.notices.push(RelayNotice::Fault { reason: over });
+                }
+                DeliveryClass::Reliable => {
+                    self.notices.push(RelayNotice::Fault {
+                        reason: format!("{over}: ending the relayed links it was for"),
+                    });
+                    self.pending_drops.extend(targets);
+                }
+            }
             return;
         }
 

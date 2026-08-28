@@ -160,6 +160,12 @@ pub struct RendezvousFrame {
     pub payload: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// Which request an `error` frame is refusing — `registry.js`'s `fail()`
+    /// stamps it. Load-bearing for telling a per-REQUEST refusal (one frame the
+    /// service would not carry) from a link event, which is the difference
+    /// between one lost frame and a whole crew reported gone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

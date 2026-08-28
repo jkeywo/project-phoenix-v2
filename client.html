@@ -152,11 +152,24 @@
     /* Connection diagnostics readout: sits above #status, same corner. Shows
        relay reachability + per-attempt ICE stage so a phone user can report
        why a connection is stuck without opening devtools. */
-    #conn-diag { position: fixed; bottom: 1.6rem; left: 0.75rem; color: var(--edge-strong);
-      font-size: var(--text-xs); z-index: 25; white-space: pre-line; max-width: 85vw; }
-    /* The copy control, tucked into the opposite corner of the same row so it
-       never overlaps a readout that has grown to several lines. */
-    #conn-diag-copy { position: fixed; bottom: 1.6rem; right: 0.75rem; z-index: 26;
+    /* Readout and its copy control share ONE left-anchored fixed row, sized to
+       its contents. The button used to be pinned to the opposite corner "so it
+       never overlaps a readout that has grown to several lines" — which solved
+       the harmless overlap and created a real one: bottom-right is where the
+       lobby footer puts #ready-btn, so a fixed button at z-index 26 sat on top
+       of the primary control of the whole screen and swallowed the tap. Four
+       smoke specs could not press READY, and neither could a player.
+       Bottom-LEFT is already this page's chrome corner (#status lives there),
+       and a row that ends where its content ends cannot reach the far side. */
+    #conn-diag-row { position: fixed; bottom: 1.6rem; left: 0.75rem; z-index: 25;
+      display: flex; align-items: flex-end; gap: 0.5rem; max-width: 85vw;
+      pointer-events: none; }
+    #conn-diag { color: var(--edge-strong);
+      font-size: var(--text-xs); white-space: pre-line; }
+    /* Only the button takes pointer events back — the readout beside it is
+       text, and a transparent div over the lobby would swallow taps for
+       nothing. */
+    #conn-diag-copy { pointer-events: auto; flex: 0 0 auto;
       font-size: var(--text-xs); color: var(--edge-strong); background: transparent;
       border: 1px solid var(--edge-strong); border-radius: 3px; padding: 0.1rem 0.4rem; }
     /* Typed join entry (issue #1111). Shown only when this page was opened
@@ -1194,11 +1207,16 @@
   </div>
 
   <div id="status" data-i18n="client.connecting">Connecting…</div>
-  <div id="conn-diag"></div>
-  <!-- Copies the readout above, plus everything behind it, for pasting into an
-       issue thread (issue #1113, docs/acceptance/1113-networks.md). Hidden
-       until the script confirms the browser has a clipboard to write to. -->
-  <button id="conn-diag-copy" type="button" style="display:none"></button>
+  <!-- The readout and the control that copies it, in one left-anchored row so
+       neither can reach the corner the lobby's READY button lives in. -->
+  <div id="conn-diag-row">
+    <div id="conn-diag"></div>
+    <!-- Copies the readout beside it, plus everything behind it, for pasting
+         into an issue thread (issue #1113, docs/acceptance/1113-networks.md).
+         Hidden until the script confirms the browser has a clipboard to write
+         to. -->
+    <button id="conn-diag-copy" type="button" style="display:none"></button>
+  </div>
 
   <!-- Typed join entry (issue #1111). Hidden while a join from the fragment is
        in flight; shown when there is nothing to join with, or when an attempt

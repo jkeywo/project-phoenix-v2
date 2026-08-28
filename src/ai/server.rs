@@ -574,6 +574,13 @@ pub(crate) fn build_world_snapshot(
                     weapon_arcs: Vec::new(),
                 }),
         );
+
+    // Bevy query iteration follows archetype-creation order, which can change
+    // after an unrelated component insert. Hazard assessment accumulates
+    // floating-point contributions in this order, so publish one canonical
+    // world order for every consumer rather than leaking ECS layout into the
+    // authoritative simulation.
+    snapshot.entities.sort_by_key(|entity| entity.uuid);
 }
 
 /// This entity's longest usable direct-fire reach (issue #788), or `0.0` when it

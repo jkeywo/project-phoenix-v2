@@ -29,6 +29,50 @@ fn snapshot_test_app() -> App {
     app
 }
 
+/// The snapshot is an authoritative AI input, so its order must not inherit
+/// Bevy's archetype-creation order. `assess_hazards` sums floating-point force
+/// contributions in this order; a different order can move a ship by a few
+/// ULPs and then diverge the whole seeded run.
+#[test]
+fn world_snapshot_orders_all_entity_kinds_by_uuid() {
+    const LOW: &str = "00000000-0000-4000-8000-000000000001";
+    const MID: &str = "00000000-0000-4000-8000-000000000002";
+    const HIGH: &str = "00000000-0000-4000-8000-000000000003";
+
+    let mut app = snapshot_test_app();
+    app.world_mut().spawn((
+        crate::entities::spawner::EntityUuid(HIGH.into()),
+        Transform::default(),
+    ));
+    app.world_mut().spawn((
+        crate::server_app::Asteroid,
+        crate::server_app::AsteroidUuid(LOW.into()),
+        Transform::default(),
+        crate::entities::spawner::ColliderSection(crate::entities::config::ColliderConfig {
+            shape: crate::entities::config::ColliderShape::Ball,
+            radius: 1.0,
+            length: 0.0,
+            half_height: None,
+            movable: false,
+        }),
+    ));
+    app.world_mut().spawn((
+        crate::entities::spawner::EntityUuid(MID.into()),
+        Transform::default(),
+    ));
+
+    app.update();
+
+    let ids: Vec<_> = app
+        .world()
+        .resource::<WorldSnapshot>()
+        .entities
+        .iter()
+        .map(|entity| entity.uuid.to_string())
+        .collect();
+    assert_eq!(ids, [LOW, MID, HIGH]);
+}
+
 /// Field asteroids carry `AsteroidUuid`, not `EntityUuid`, because they are
 /// streamed rather than spawned through `spawn_entity`. They used to fall
 /// out of the snapshot entirely, which left `avoidance_steering` blind to

@@ -1737,6 +1737,40 @@ describe('the WebSocket game relay', () => {
     joiner.close();
   });
 
+  it('tells a relayed phone it has been evicted instead of dropping it silently', async () => {
+    // `connectionAdapter.close()` is the host's ONLY eviction mechanism — the
+    // reserved-token refusal and the duplicate-token dance in server.html. For
+    // a WebRTC peer it severs real DataChannels the phone observes as a close;
+    // for a relayed peer it closed local JavaScript objects and sent nothing,
+    // so the evicted device kept a status line reading connected and kept
+    // sending commands the host dropped on the floor.
+    const world = makeWorld({ queued: true });
+    const { code, announced } = await hostOn(world);
+    const statuses = [];
+    const joiner = createRendezvousJoiner({
+      base: 'https://rendezvous.test',
+      data: DATA,
+      code: code.suffix,
+      factories: unlinkableFactories(world),
+      levers: transportLeversFromLocation('?transport=ws-relay'),
+      getIdent: () => ({ token: 'tok-evicted', name: 'Ada' }),
+      onStatus: (s) => statuses.push(s),
+    });
+    await settle();
+    expect(joiner.connected).toBe(true);
+    expect(announced).toHaveLength(1);
+
+    announced[0].close();
+    await settle();
+
+    // The phone learns. Without the service being asked to detach it, its own
+    // channels stayed 'open' locally and nothing ever told it otherwise.
+    expect(joiner.connected).toBe(false);
+    // …and the service has stopped carrying it, so its relay slot is free.
+    expect(world.registry.snapshot()[0].relayPeers).toBe(0);
+    joiner.close();
+  });
+
   it('tells the host a relayed crew member is being carried by the service', async () => {
     const world = makeWorld();
     const iceStates = [];

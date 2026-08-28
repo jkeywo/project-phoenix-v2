@@ -362,14 +362,61 @@ const REASON_STRING_IDS = {
   'client-stamp-missing': 'client.join.error_stamp_missing',
 };
 
-/** String id for a machine reason; a reason with no row falls back to unknown. */
-export function reasonStringId(reason) {
-  return REASON_STRING_IDS[reason] || REASON_STRING_IDS.unknown;
+/** The two surfaces a refusal can be read on. */
+export const SURFACE_CLIENT = 'client';
+export const SURFACE_SERVER = 'server';
+
+/**
+ * The rows a HOST operator gets instead, when the phone's sentence would be
+ * wrong rather than merely terse (issue #1114).
+ *
+ * The map above is worded for the one surface that had refusals until #1114: a
+ * phone, joining a ship's crew. Read out on a viewscreen through
+ * `server.fleet.error_joining`, several of those sentences are actively
+ * misleading — a ship host that types the lead's CREW code into the fleet field
+ * is told "That is a fleet code", the exact inverse of what happened, and a
+ * closed fleet is described as a closed crew list nobody was joining.
+ *
+ * Only the reasons whose wording DEPENDS on the surface are listed. Everything
+ * else ("Enter a code first.", "A join code is five letters.") says the same
+ * true thing on either screen and falls through to the one map, so there is no
+ * second copy of it to drift.
+ */
+const SERVER_STRING_IDS = {
+  'wrong-type': 'server.fleet.error_wrong_type',
+  'not-joinable': 'server.fleet.error_wrong_type',
+  'admission-closed': 'server.fleet.error_closed',
+  unknown: 'server.fleet.error_unknown',
+  'host-gone': 'server.fleet.error_host_gone',
+  'version-mismatch': 'server.fleet.error_version',
+  'protocol-mismatch': 'server.fleet.error_version',
+  'content-id-mismatch': 'server.fleet.error_content',
+  'content-epoch-mismatch': 'server.fleet.error_content',
+  'bundle-content-missing': 'server.fleet.error_content',
+  'client-stamp-missing': 'server.fleet.error_stamp_missing',
+};
+
+/**
+ * String id for a machine reason; a reason with no row falls back to unknown.
+ *
+ * @param {string} reason machine reason
+ * @param {string} [surface] {@link SURFACE_CLIENT} (the default, a phone's join
+ *   screen) or {@link SURFACE_SERVER} (a host page's fleet panel).
+ */
+export function reasonStringId(reason, surface = SURFACE_CLIENT) {
+  const key = String(reason == null ? '' : reason);
+  if (surface === SURFACE_SERVER && SERVER_STRING_IDS[key]) return SERVER_STRING_IDS[key];
+  return REASON_STRING_IDS[key] || REASON_STRING_IDS.unknown;
 }
 
 /** Every reason this build can put on screen. Read by the coverage tests. */
 export function knownReasons() {
   return Object.keys(REASON_STRING_IDS);
+}
+
+/** Every reason the HOST surface words differently. Read by the coverage tests. */
+export function serverSurfaceReasons() {
+  return Object.keys(SERVER_STRING_IDS);
 }
 
 // Expose for classic-script consumers (client.html / server.html are not modules).
@@ -378,6 +425,8 @@ if (typeof window !== 'undefined') {
     JOIN_CODE_FORMAT_VERSION,
     NAMESPACE_CLIENT,
     NAMESPACE_SERVER,
+    SURFACE_CLIENT,
+    SURFACE_SERVER,
     checkJoinCodeFormat,
     setJoinCodeData,
     getJoinCodeData,
@@ -395,5 +444,6 @@ if (typeof window !== 'undefined') {
     mintSuffix,
     reasonStringId,
     knownReasons,
+    serverSurfaceReasons,
   };
 }

@@ -30,6 +30,8 @@ import {
   mintSuffix,
   reasonStringId,
   knownReasons,
+  SURFACE_CLIENT,
+  SURFACE_SERVER,
 } from '../../gui/join-code.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -382,6 +384,26 @@ describe('reason reporting', () => {
     for (const reason of knownReasons()) {
       const id = reasonStringId(reason);
       expect(table.get(id), `${reason} maps to ${id}, which has no strings.csv row`).toBeTruthy();
+    }
+  });
+
+  it('gives a fleet operator every StampMismatch code in a host-page sentence', () => {
+    // A ship host refused on its BUILD reads the answer through
+    // `server.fleet.error_joining`, so every one of these codes has to have a
+    // server-surface row too — otherwise a fleet refusal quietly borrows a
+    // sentence written for a phone ("Reload this page from the ship's own
+    // address") on a screen where it means nothing.
+    const table = buildTable(readFileSync(path.join(root, 'assets/strings/strings.csv'), 'utf8'));
+    for (const code of STAMP_MISMATCH_CODES) {
+      const id = reasonStringId(code, SURFACE_SERVER);
+      expect(id, code).toMatch(/^server\.fleet\./);
+      expect(table.get(id), `${code} maps to ${id}, which has no strings.csv row`).toBeTruthy();
+    }
+  });
+
+  it('defaults to the phone\'s wording, so an unqualified lookup is unchanged', () => {
+    for (const reason of knownReasons()) {
+      expect(reasonStringId(reason), reason).toBe(reasonStringId(reason, SURFACE_CLIENT));
     }
   });
 });

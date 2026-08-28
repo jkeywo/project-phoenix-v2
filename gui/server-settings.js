@@ -525,11 +525,19 @@ export function mountServerSettings(opts = {}) {
 
     // The typed route. A ship host reads five letters off another viewscreen
     // exactly as a phone does; the QR on that panel is the same code by camera.
+    //
+    // No `maxLength` literal. The OTHER route through this one field is a paste
+    // of the whole structured code the fleet panel renders as selectable text —
+    // two GUIDs and a suffix, 79 characters — and a length invented here would
+    // silently truncate it into a `malformed` refusal that says nothing about
+    // truncation. The authored bound (`[limits] max_code_length`, the same one
+    // the rendezvous service applies) is installed by `paintFleet` as soon as
+    // the host page has the join table; until then the field is unbounded,
+    // because accepting too much is a refusal and accepting too little is a lie.
     const input = doc.createElement('input');
     input.type = 'text';
     input.className = 'server-settings-input';
     input.setAttribute('data-control', 'fleet-code');
-    input.maxLength = 32;
     input.placeholder = t('settings.fleet.code_placeholder');
     input.setAttribute('aria-label', t('settings.fleet.code_label'));
     controls.fleet.input = input;
@@ -577,6 +585,11 @@ export function mountServerSettings(opts = {}) {
     const state = fleetState();
     const has = !!(state && state.open);
     const show = (el, on) => { if (el) el.style.display = on ? '' : 'none'; };
+    // The authored bound, once the host page has the join table in hand.
+    const limit = invoke('__hostFleetCodeLimit');
+    if (controls.fleet.input && Number.isFinite(limit) && limit > 0) {
+      controls.fleet.input.maxLength = limit;
+    }
     show(controls.fleet.open, !has);
     show(controls.fleet.input, !has);
     show(controls.fleet.join, !has);

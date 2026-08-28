@@ -38,7 +38,12 @@ import {
   admissionFrame,
   fleetPanelViewModel,
 } from '../../gui/host-mesh.js';
-import { reasonStringId } from '../../gui/join-code.js';
+import {
+  SURFACE_CLIENT,
+  SURFACE_SERVER,
+  reasonStringId,
+  serverSurfaceReasons,
+} from '../../gui/join-code.js';
 import { buildTable } from '../../gui/strings.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -62,9 +67,9 @@ function withMembers(fleet, n) {
 describe('the envelope', () => {
   it('round-trips every frame this revision speaks', () => {
     const frames = [
-      helloFrame({ stamp: '1/phoenix-base/1', ship: { template_path: 'a.toml' }, name: 'Two' }),
+      helloFrame({ ship: { template_path: 'a.toml' }, name: 'Two' }),
       welcomeFrame('slot-2', rosterOf(fleetOf())),
-      refusedFrame('recovery-only', 'the mission has started'),
+      refusedFrame('recovery-only', { detail: 'the mission has started' }),
       slotFrame({ ship: { template_path: 'b.toml' }, ready: true }),
       rosterFrame(fleetOf()),
       admissionFrame(ADMISSION_CLOSED),
@@ -76,6 +81,29 @@ describe('the envelope', () => {
     // Every declared type is exercised above, so a seventh frame added without
     // a round-trip here fails rather than shipping untested.
     expect(new Set(frames.map((f) => f.t))).toEqual(new Set(HOST_FRAME_TYPES));
+  });
+
+  it('says WHICH request a refusal answers, so a member can tell them apart', () => {
+    // The owner refuses from two places — a hello it will not seat, and a slot
+    // patch from a host it already seated — and only the first is terminal.
+    // Without the subject a member has to treat both as terminal, which throws
+    // a legitimate host out of its own fleet for touching its loadout.
+    expect(refusedFrame('recovery-only', { of: 'slot' }).d.of).toBe('slot');
+    expect(refusedFrame('fleet-full', { of: 'hello' }).d.of).toBe('hello');
+    // Unqualified means the admission itself: the older, terminal answer, so a
+    // caller that forgets the subject cannot accidentally make a refusal look
+    // survivable.
+    expect(refusedFrame('fleet-full').d.of).toBe('hello');
+  });
+
+  it('carries no delivery stamp in a hello — that check is the transport plane\'s', () => {
+    // The authoritative verdict is delivery::check_host_stamp's, made over the
+    // in-band JoinHandshake before a hello is ever read. A copy of it here
+    // would be a peer-supplied, unvalidated fact sitting in the frame a future
+    // reader reaches for first.
+    const hello = helloFrame({ ship: { template_path: 'a.toml' }, name: 'Two' });
+    expect(hello.d).not.toHaveProperty('stamp');
+    expect(Object.keys(hello.d).sort()).toEqual(['name', 'ship']);
   });
 
   it('carries a tick field from the first frame, unset until #1116 stamps one', () => {
@@ -249,6 +277,75 @@ describe('updating a slot', () => {
   });
 });
 
+describe('what a member may say about itself', () => {
+  // `name` and `ship` are the only two fields one host writes into every other
+  // host's roster, and the lead re-encodes that roster to the whole fleet on
+  // every change. So they get a SHAPE on the way in, the same discipline the
+  // rendezvous registry applies to the one host-supplied value it indexes on.
+  const NAME_CAP = JOIN_DATA.limits.max_slot_name_length;
+  const PATH_CAP = JOIN_DATA.limits.max_slot_ship_path_length;
+  /** A fleet carrying the AUTHORED bounds, as server.html builds one. */
+  const boundedFleetOf = (over = {}) => openFleet({
+    maxSlots: MAX,
+    maxNameLength: NAME_CAP,
+    maxShipPathLength: PATH_CAP,
+    ...over,
+  });
+
+  it('bounds a name at the authored length, at the door and on every update', () => {
+    const long = 'N'.repeat(NAME_CAP + 500);
+    const seated = admitHost(boundedFleetOf(), { peer: 'p2', name: long }).fleet;
+    expect(seated.slots[1].name).toHaveLength(NAME_CAP);
+    const patched = updateSlot(seated, 'slot-2', { name: long }).fleet;
+    expect(patched.slots[1].name).toHaveLength(NAME_CAP);
+  });
+
+  it('falls back to a bound of its own when a caller passes none', () => {
+    // `openFleet` is called with the authored table in the product, and the
+    // parse-time default is what an older table loads under (AGENTS.md rule
+    // 11a) — never an absence of a bound.
+    const seated = admitHost(fleetOf(), { peer: 'p2', name: 'N'.repeat(5_000) }).fleet;
+    expect(seated.slots[1].name.length).toBeLessThanOrEqual(NAME_CAP);
+    expect(seated.slots[1].name.length).toBeGreaterThan(0);
+  });
+
+  it('bounds the hull path and keeps only the two fields a roster carries', () => {
+    const seated = admitHost(boundedFleetOf(), {
+      peer: 'p2',
+      ship: {
+        template_path: `a${'/deep'.repeat(400)}.toml`,
+        name: 'X'.repeat(NAME_CAP + 50),
+        // Nothing else survives: a roster row is a hull and a label, and an
+        // extra field here would be one member's payload on every viewscreen.
+        payload: 'Z'.repeat(100_000),
+        nested: { and: ['more'] },
+      },
+    }).fleet;
+    const ship = seated.slots[1].ship;
+    expect(Object.keys(ship).sort()).toEqual(['name', 'template_path']);
+    expect(ship.template_path).toHaveLength(PATH_CAP);
+    expect(ship.name).toHaveLength(NAME_CAP);
+  });
+
+  it('reads anything that is not a usable ship as "no hull chosen yet"', () => {
+    for (const bogus of [42, 'destroyer.toml', [], { name: 'no path' }, { template_path: '' }]) {
+      const seated = admitHost(boundedFleetOf(), { peer: 'p2', ship: bogus }).fleet;
+      expect(seated.slots[1].ship, JSON.stringify(bogus)).toBeNull();
+    }
+    // …and null stays a real answer rather than becoming a shape.
+    expect(admitHost(boundedFleetOf(), { peer: 'p2' }).fleet.slots[1].ship).toBeNull();
+  });
+
+  it('holds the owner\'s own slot to the same rule', () => {
+    const fleet = boundedFleetOf({
+      name: 'L'.repeat(NAME_CAP + 9),
+      ship: { template_path: 'a.toml', junk: 1 },
+    });
+    expect(fleet.slots[0].name).toHaveLength(NAME_CAP);
+    expect(fleet.slots[0].ship).toEqual({ template_path: 'a.toml' });
+  });
+});
+
 describe('the roster that crosses the wire', () => {
   it('carries the lobby and not the transport', () => {
     const roster = rosterOf(admitHost(fleetOf({ name: 'Lead' }), { peer: 'secret-peer-id' }).fleet);
@@ -312,7 +409,35 @@ describe('every reason this module can produce has a sentence', () => {
 
   it('resolves every id the panel view model can name', () => {
     const ids = new Set(['server.fleet.open', 'server.fleet.closed', 'server.fleet.frozen',
-      'server.fleet.slot_owner', 'server.fleet.slot_member']);
+      'server.fleet.slot_owner', 'server.fleet.slot_member', 'server.fleet.no_ship',
+      'server.fleet.disconnected', 'server.fleet.ready']);
     for (const id of ids) expect(STRINGS.get(id)).toBeTruthy();
+  });
+
+  it('words a fleet refusal for the surface it is read on, not the phone\'s', () => {
+    // Every refusal a fleet can produce reaches an operator through
+    // `server.fleet.error_joining`, and the phone's wording for several of them
+    // is not merely terse but wrong: a ship host that types the lead's CREW
+    // code into the fleet field is not being told "that is a fleet code".
+    for (const reason of serverSurfaceReasons()) {
+      const onPhone = reasonStringId(reason, SURFACE_CLIENT);
+      const onHost = reasonStringId(reason, SURFACE_SERVER);
+      expect(onHost, reason).not.toBe(onPhone);
+      expect(onHost, reason).toMatch(/^server\.fleet\./);
+      expect(STRINGS.get(onHost), onHost).toBeTruthy();
+    }
+    // The inversion that motivated it, stated as the two sentences it is.
+    expect(STRINGS.get(reasonStringId('wrong-type', SURFACE_CLIENT))).toContain('fleet code');
+    expect(STRINGS.get(reasonStringId('wrong-type', SURFACE_SERVER))).toContain('crew code');
+  });
+
+  it('leaves surface-independent refusals with exactly one wording', () => {
+    // A second copy of "A join code is five letters." is a second thing to
+    // keep true. Only the reasons whose wording DEPENDS on the surface are
+    // listed, and the rest fall through to the one map.
+    for (const reason of ['empty', 'length', 'charset', 'unreachable', 'malformed']) {
+      expect(reasonStringId(reason, SURFACE_SERVER), reason)
+        .toBe(reasonStringId(reason, SURFACE_CLIENT));
+    }
   });
 });

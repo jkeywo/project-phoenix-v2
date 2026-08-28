@@ -32,6 +32,12 @@ const SERVER_HTML = path.join(
 );
 const SRC = fs.readFileSync(SERVER_HTML, 'utf-8');
 
+/** The shipped join-code table — the bounds the fleet controls read. */
+const JOIN_DATA = JSON.parse(fs.readFileSync(
+  path.join(path.dirname(fileURLToPath(import.meta.url)), '../../assets/join/join-codes.json'),
+  'utf-8',
+));
+
 /** server.html's real #debug-dock subtree, lifted into the test document. */
 function installOutputPanel(doc) {
   const parsed = new DOMParser().parseFromString(SRC, 'text/html');
@@ -506,6 +512,37 @@ describe('the Fleet section', () => {
     expect(visible('fleet-leave')).toBe(true);
   });
 
+  it('takes a whole pasted code, sized from the authored bound', () => {
+    // The other route through this one field. The fleet panel renders the full
+    // structured code as selectable text precisely so the machine being invited
+    // — usually a laptop — can paste it, and a length invented here would drop
+    // everything past it and then report `malformed`, saying nothing about
+    // truncation. `[limits] max_code_length` is the bound the rendezvous
+    // service itself applies.
+    const authored = JOIN_DATA.limits.max_code_length;
+    const bindings = fleetBindings();
+    bindings.__hostFleetCodeLimit = () => authored;
+    openFleetTab(bindings);
+    expect(control('fleet-code').maxLength).toBe(authored);
+
+    const full = [
+      JOIN_DATA.namespaces.server, JOIN_DATA.version.guid, 'QUARK',
+    ].join('_');
+    expect(full.length).toBeGreaterThan(32);
+    expect(full.length).toBeLessThanOrEqual(authored);
+    control('fleet-code').value = full;
+    control('fleet-join').click();
+    expect(bindings.calls).toContainEqual(['__hostFleetJoin', full]);
+  });
+
+  it('leaves the field unbounded until the host page knows the authored bound', () => {
+    // A page mid-boot has not fetched the join table yet. Unbounded is the
+    // honest state: accepting too much is a refusal the operator can read,
+    // accepting too little is a silent lie about what they typed.
+    openFleetTab(fleetBindings());
+    expect(control('fleet-code').getAttribute('maxlength')).toBeNull();
+  });
+
   it('leaving puts the open/join pair back', () => {
     const bindings = fleetBindings();
     openFleetTab(bindings);
@@ -530,7 +567,7 @@ describe('the Fleet section', () => {
   it('is wired to bindings server.html actually publishes', () => {
     for (const name of [
       '__hostFleetState', '__hostFleetOpen', '__hostFleetJoin',
-      '__hostFleetSetAdmission', '__hostFleetLeave',
+      '__hostFleetSetAdmission', '__hostFleetLeave', '__hostFleetCodeLimit',
     ]) {
       expect(SRC, name).toContain(`window.${name}`);
     }

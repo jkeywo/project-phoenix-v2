@@ -258,6 +258,13 @@
     #fleet-slots li.mine { color: var(--gold-bright); }
     #fleet-slots li.gone { opacity: 0.55; }
     #fleet-slots .fleet-ship { color: var(--ink-faint); text-align: right; }
+    /* The ship name pushes right and the readiness marker sits after it, so a
+       row reads "Ship 2 … Alliance Destroyer  ready" rather than spacing the
+       three cells apart evenly. */
+    #fleet-slots .fleet-ship { margin-left: auto; }
+    #fleet-slots .fleet-ready {
+      color: var(--cyan-bright); letter-spacing: var(--tracking-wide);
+    }
     #fleet-status, #fleet-error {
       margin-top: 4px; text-align: center; font-size: var(--text-xs);
       color: var(--ink-faint);
@@ -2441,8 +2448,22 @@
     let fleetSuffix = null;
     /** A machine reason for why there is no fleet, already localisable. */
     let fleetFault = null;
+    /**
+     * A machine reason for a change this host asked for that the fleet declined
+     * — a loadout patch that raced the freeze, typically. NOT a fault: this host
+     * is still in the fleet and its roster is still live, so it is cleared by
+     * the next roster sync rather than surviving a teardown the way `fleetFault`
+     * deliberately does.
+     */
+    let fleetNotice = null;
     /** ICE servers, latched by initHostTransport so a fleet can reuse them. */
     let fleetIceServers = [];
+    /**
+     * The hull `wasm_select_ship` was last called with, as a fleet ship — see
+     * `lockPlayerHull`. Held here rather than read back out of Rust because the
+     * fleet needs it on paths where Bevy is not running yet.
+     */
+    let _selectedHull = null;
 
     /**
      * This host's own delivery stamp, in the field form the handshake reads.
@@ -2485,11 +2506,93 @@
       }
     }
 
-    /** The hull this host has selected, as the fleet describes a ship. */
+    /**
+     * The hull this host has selected, as the fleet describes a ship.
+     *
+     * Two sources, most-final first. `_selectedHull` is set the moment
+     * `wasm_select_ship` is called — the one point EVERY boot path passes
+     * through, including the `?scenario=` bypass and the post-load ship picker,
+     * neither of which ever touches `_preSelection`. The arbiter's pre-load
+     * selection is the earlier answer, and is what a host that opens a fleet
+     * during scenario selection has to show until the world loads.
+     */
     function fleetShip() {
+      if (_selectedHull) return _selectedHull;
       const path = _preSelection && _preSelection.template_path;
       return path ? { template_path: path } : null;
     }
+
+    /**
+     * Tell the fleet what this host has picked, whenever that changes.
+     *
+     * Without this the roster carried whatever `fleetShip()` happened to answer
+     * at the instant the fleet was opened or joined — which for the invitation
+     * route is guaranteed to be nothing, since the link is opened before the
+     * operator has chosen anything. AC5 freezes "the player-ship slots and
+     * their selected loadouts", and a field frozen at a value the operator's
+     * real selection never reached is only nominally that.
+     *
+     * `ready` is the same fact one level up: this host has a hull AND a world
+     * to fly it in. It is derived rather than tracked, so the roster cannot
+     * claim a readiness the page has since walked back.
+     *
+     * Called from every point this host's answer can change — the hull lock,
+     * the pre-load arbiter, and the moment a fleet is joined or opened — and
+     * inert when there is no fleet, which is the ordinary case.
+     */
+    function announceFleetSelection() {
+      if (!fleetHandle) return;
+      try {
+        fleetHandle.update({ ship: fleetShip(), ready: !!_selectedHull });
+      } catch (e) {
+        console.warn('[fleet] could not announce this slot', e);
+      }
+    }
+
+    /**
+     * This host's hull is final: tell Rust, and tell the fleet.
+     *
+     * `wasm_select_ship` is the one call EVERY route to a running mission makes
+     * — the arbiter's pre-load lock, the legacy fallback, the single-hull
+     * auto-select and the post-load picker — so it is the honest place to
+     * record what this ship IS. Wrapping it means a fifth route cannot be added
+     * that quietly leaves the fleet roster reading "no ship chosen yet".
+     *
+     * `ready` travels with it. A slot is ready when its host has locked a hull
+     * and has a world to fly it in; before that the roster says so rather than
+     * implying a choice nobody made.
+     *
+     * @param {string} templatePath the hull's entity template path
+     * @param {object} [entry] its `wasm_get_available_ships` row, when the
+     *   caller has one — its authored label is what the fleet panel reads.
+     */
+    function lockPlayerHull(templatePath, entry) {
+      window.wasm_select_ship(templatePath);
+      // The authored label when it resolves, the hull's own file name when it
+      // does not — the same fallback ladder ph-ship-picker walks. A raw string
+      // id on another operator's viewscreen would be worse than no name at all.
+      const label = entry && (entry.label || entry.name);
+      const strings = window.phStrings;
+      const resolved = (label && strings) ? strings.localiseTree(label) : '';
+      const name = (resolved && resolved !== label)
+        ? resolved
+        : String(templatePath).split('/').pop().replace(/\.toml$/, '');
+      _selectedHull = { template_path: templatePath, name };
+      announceFleetSelection();
+    }
+
+    /**
+     * The authored bound on a pasted fleet code, or null before the join table
+     * has loaded. Read by the settings cog to size its one code field, so the
+     * five-letter route and the paste-the-whole-code route share a control
+     * without either inventing a length.
+     */
+    window.__hostFleetCodeLimit = function() {
+      const codes = window.joinCode;
+      const installed = codes && codes.getJoinCodeData();
+      const limit = installed && installed.limits && installed.limits.max_code_length;
+      return typeof limit === 'number' ? limit : null;
+    };
 
     /**
      * The authored join table, fetched on first need.
@@ -2497,9 +2600,15 @@
      * The crew half of this page never needs it — the SERVICE mints and parses
      * crew codes, and this host only prints what it was issued. A fleet does:
      * it composes a typed suffix into a server code here, and reads the
-     * authored fleet capacity. So the fetch lives with the fleet rather than at
-     * boot, and every entry point goes through this promise so a click that
-     * lands before it resolves waits rather than silently doing nothing.
+     * authored fleet capacity and slot bounds. Every entry point goes through
+     * this one promise so a click that lands before it resolves waits rather
+     * than silently doing nothing.
+     *
+     * It IS warmed once at transport init — see the call beside
+     * `joinFleetFromFragment` — because the settings cog sizes its fleet-code
+     * field from `[limits] max_code_length` and has to know that bound before
+     * the operator pastes a whole code into it, which is earlier than any fleet
+     * action would otherwise have asked.
      */
     let fleetDataPromise = null;
     function fleetData() {
@@ -2520,23 +2629,42 @@
     /**
      * The link a fleet code's QR encodes: THIS page, with the full structured
      * code in the fragment — the host-page mirror of `joinUrlForCode`, which
-     * points at `client/index.html` because a crew code invites a phone. The
-     * query string is deliberately dropped: the machine being invited picks its
-     * own scenario and its own hull, and inheriting this one's `?scenario`
-     * would quietly make that choice for it.
+     * points at `client/index.html` because a crew code invites a phone.
+     *
+     * Almost all of the query string is deliberately dropped: the machine being
+     * invited picks its own scenario and its own hull, and inheriting this
+     * one's `?scenario` would quietly make that choice for it.
+     *
+     * `?manifest` is the exception, and it is not a scenario choice. It selects
+     * which catalogue FILE this host serves, and that file's `[content]` block
+     * IS this host's content identity — the half of `delivery::check_host_stamp`
+     * that has no grace at all. An invitation that dropped it would hand the
+     * other machine a link that cannot possibly be admitted, from the one host
+     * that knows why.
      */
     function fleetJoinUrl(fullCode) {
-      return `${location.href.replace(/[?#].*$/, '')}#${fullCode}`;
+      const base = location.href.replace(/[?#].*$/, '');
+      const manifest = new URLSearchParams(location.search).get('manifest');
+      const query = manifest ? `?manifest=${encodeURIComponent(manifest)}` : '';
+      return `${base}${query}#${fullCode}`;
     }
 
     /**
      * Join a fleet whose code arrived in this page's URL fragment — the QR/paste
      * route, exactly as `client/index.html#<code>` is for a phone.
      *
-     * Deferred until the simulation is up, because a joining ship host must
-     * present its own delivery stamp and `wasm_delivery_stamp_field` does not
-     * exist until then. A crew join has no such wait: the PHONE presents the
-     * stamp there, and this host only judges it.
+     * Deferred until the WASM EXPORTS exist, because a joining ship host must
+     * present its own delivery stamp and `wasm_delivery_stamp_field` is one of
+     * them. A crew join has no such wait: the PHONE presents the stamp there,
+     * and this host only judges it.
+     *
+     * `TrunkApplicationStarted` and not `PhoenixReady`: the exports arrive with
+     * the former, while the latter means a world has finished loading. On the
+     * picker boot path — which is exactly the path the published invitation
+     * link puts the invited machine on, since it carries no `?scenario` — a
+     * world does not load until the operator has chosen one, so waiting for a
+     * running simulation would leave the invitation unanswered on the screen
+     * the operator is looking at.
      */
     function joinFleetFromFragment() {
       const fragment = String(location.hash || '').replace(/^#/, '').trim();
@@ -2553,7 +2681,7 @@
         if (!parsed.ok || parsed.namespace !== window.joinCode.NAMESPACE_SERVER) return;
         const go = () => window.__hostFleetJoin(parsed.full);
         if (hostStampField()) go();
-        else window.addEventListener('PhoenixReady', go, { once: true });
+        else window.addEventListener('TrunkApplicationStarted', go, { once: true });
       });
     }
 
@@ -2607,6 +2735,16 @@
             : t('server.fleet.disconnected');
           li.appendChild(label);
           li.appendChild(ship);
+          // Readiness is what a host says when it has locked its hull and
+          // loaded its world — the slot is standing by rather than still being
+          // set up. Only shown when true and while the host is there: a
+          // disconnected slot's last readiness is not news.
+          if (row.ready && row.connected) {
+            const ready = document.createElement('span');
+            ready.className = 'fleet-ready';
+            ready.textContent = t('server.fleet.ready');
+            li.appendChild(ready);
+          }
           list.appendChild(li);
         }
       }
@@ -2615,9 +2753,25 @@
       if (status) status.textContent = vm.status ? t(vm.status.id, vm.status.params) : '';
       const error = document.getElementById('fleet-error');
       if (error) {
-        error.textContent = fleetFault
-          ? t('server.fleet.error_joining', { reason: t(window.joinCode.reasonStringId(fleetFault)) })
-          : '';
+        // Refusals are resolved on the SERVER surface. The same machine reason
+        // is a different sentence here than on a phone — a ship host that types
+        // a crew code into the fleet field is not being told "that is a fleet
+        // code" — and `reasonStringId` takes the surface for exactly that.
+        const surface = window.joinCode.SURFACE_SERVER;
+        if (fleetFault) {
+          error.textContent = t('server.fleet.error_joining', {
+            reason: t(window.joinCode.reasonStringId(fleetFault, surface)),
+          });
+        } else if (fleetNotice) {
+          // A change this host asked for that the fleet did not take. It is
+          // still in the fleet, so this is a notice beside a live roster, not
+          // the epitaph of a link that has gone.
+          error.textContent = t('server.fleet.refused_change', {
+            reason: t(window.joinCode.reasonStringId(fleetNotice, surface)),
+          });
+        } else {
+          error.textContent = '';
+        }
       }
     }
 
@@ -2638,12 +2792,22 @@
       fleetRoster = null;
       fleetSuffix = null;
       fleetFault = reason;
+      fleetNotice = null;
       paintFleetPanel();
     }
 
-    /** Shared wiring for both halves: roster paints, refusals surface. */
+    /**
+     * Shared wiring for both halves: roster paints, refusals surface.
+     *
+     * The announcement is here as well as at every selection point because a
+     * fleet is usually joined AFTER this host has chosen — the operator picks a
+     * ship, then goes looking for somebody to fly it with. For the owner it
+     * lands immediately; for a member the joiner is not up yet, so `onWelcome`
+     * repeats it over the link that by then exists.
+     */
     function adoptFleet(handle) {
       fleetHandle = handle;
+      announceFleetSelection();
       paintFleetPanel();
       return handle;
     }
@@ -2658,13 +2822,21 @@
      */
     window.__hostFleetOpen = async function() {
       if (fleetHandle || !window.fleetSession || !rendezvousBase) return false;
+      // The content identity has to exist before this host can answer a
+      // handshake with it — see pushScenarioManifest. On the picker path the
+      // catalogue build has already done this; on the `?scenario=` bypass
+      // nothing else would.
+      await pushScenarioManifest();
       const data = await fleetData();
       if (!data || fleetHandle) return false;
       fleetFault = null;
+      fleetNotice = null;
       return !!adoptFleet(window.fleetSession.createFleetOwner({
         base: rendezvousBase,
         iceServers: fleetIceServers,
         maxSlots: data.limits.max_fleet_hosts,
+        maxNameLength: data.limits.max_slot_name_length,
+        maxShipPathLength: data.limits.max_slot_ship_path_length,
         checkStamp: checkHostStamp,
         ship: fleetShip(),
         onCode: (code) => { fleetSuffix = code.suffix; paintFleetPanel(); },
@@ -2677,9 +2849,14 @@
     /** Join the fleet behind a typed (or scanned) server code. */
     window.__hostFleetJoin = async function(code) {
       if (fleetHandle || !window.fleetSession || !rendezvousBase) return false;
+      // This host presents its own stamp below, so its content identity must be
+      // established first — otherwise it declares an empty one and is refused
+      // by a lead that knows perfectly well what it is running.
+      await pushScenarioManifest();
       const data = await fleetData();
       if (!data || fleetHandle) return false;
       fleetFault = null;
+      fleetNotice = null;
       let handle = null;
       let refusal = null;
       handle = window.fleetSession.createFleetMember({
@@ -2689,8 +2866,21 @@
         stamp: hostStampField(),
         iceServers: fleetIceServers,
         ship: fleetShip(),
-        onWelcome: () => { fleetFault = null; paintFleetPanel(); },
-        onRoster: (roster) => { fleetRoster = roster; paintFleetPanel(); },
+        onWelcome: () => {
+          fleetFault = null;
+          fleetNotice = null;
+          // The link exists now, so this host can state its own slot over it.
+          // The `hello` carried the hull; this adds what the hello has no field
+          // for, and re-states both on every reconnect for the same reason the
+          // crew path re-sends Identify.
+          announceFleetSelection();
+          paintFleetPanel();
+        },
+        onRoster: (roster) => { fleetRoster = roster; fleetNotice = null; paintFleetPanel(); },
+        // The fleet declined a change this host asked for about its own slot.
+        // It is still IN the fleet — reporting it is the whole answer, and
+        // tearing the link down would evict a member for touching its loadout.
+        onRefusedSlot: (reason) => { fleetNotice = reason; paintFleetPanel(); },
         onError: (reason) => {
           refusal = reason;
           // This fires SYNCHRONOUSLY for a code that does not even parse —
@@ -3082,6 +3272,12 @@
       // else's fleet. Only now: it needs `rendezvousBase`, which is resolved
       // above and nowhere else (issue #1114).
       joinFleetFromFragment();
+      // …and warm the authored join table whether or not there was one. The
+      // settings cog sizes its fleet-code field from `[limits] max_code_length`
+      // so a pasted full code is not silently truncated, and it has to know
+      // that bound BEFORE the operator pastes — which is before any fleet
+      // action would otherwise have asked for the table.
+      fleetData();
     }
 
     // ── QR-first scenario + ship selection (issue #755) ───────────────────
@@ -3225,6 +3421,12 @@
       if (r.outcome !== 'accepted') return;
       _preSelection = r.selection;
       renderScenarioLockState();
+      // The fleet hears about the hull as soon as it is chosen, not only once
+      // the world has finished loading — an operator who opened a fleet during
+      // scenario selection is looking at that roster right now, and world load
+      // is measured in seconds. `lockPlayerHull` says it again, `ready` this
+      // time, when there is actually a world to fly it in.
+      announceFleetSelection();
       // When the selection completes, driveWorldLoad() (for round 1) or
       // broadcastSelectionComplete() inside it (round 2) informs phones — so
       // don't also broadcast an intermediate fully-locked catalog here.
@@ -3416,16 +3618,56 @@
       return new URLSearchParams(location.search).get('manifest') || 'assets/scenarios.toml';
     }
 
+    /**
+     * Fetch the scenario manifest and push it into Rust. Once per page.
+     *
+     * This is what gives the host a CONTENT IDENTITY: `DeliveryStamp` is built
+     * from the manifest's `[content]` block, and every version answer this page
+     * gives — `wasm_delivery_stamp_field`, `wasm_check_client_stamp`,
+     * `wasm_check_host_stamp` — is derived from it.
+     *
+     * It used to live only inside `buildScenarioCatalog`, which the
+     * `?scenario=<path>` bypass skips entirely, so a bypassed host stamped
+     * `<protocol>//0` — an EMPTY identity. Two bypassed hosts on different
+     * worlds then compared "" against "" and were seated in one fleet, while a
+     * bypassed host and a picker host could never agree at all. Content
+     * identity is a fact about what this page serves, not about which route
+     * reached it, so it is established here and every boot path goes through
+     * it. `check_host_stamp` refuses an empty identity outright now, which
+     * makes a missed push a loud refusal rather than a silent admission.
+     *
+     * A failed fetch does not latch: the next caller tries again, and the boot
+     * it was called from carries on (a host that cannot name its content can
+     * still fly alone — it just cannot join a fleet).
+     */
+    let _manifestPush = null;
+    function pushScenarioManifest() {
+      if (_manifestPush) return _manifestPush;
+      if (!window.wasmBindings || typeof wasmBindings.wasm_push_scenario_manifest !== 'function') {
+        return Promise.resolve(null);
+      }
+      _manifestPush = (async function () {
+        const resp = await fetch(resolveManifestPath());
+        if (!resp.ok) throw new Error('manifest HTTP ' + resp.status);
+        const toml = await resp.text();
+        wasmBindings.wasm_push_scenario_manifest(toml);
+        return toml;
+      })().catch(function (e) {
+        console.error('[Phoenix] scenario manifest push failed:', e);
+        _manifestPush = null;
+        return null;
+      });
+      return _manifestPush;
+    }
+
     // Build the pre-load catalog once WASM is ready: push the base manifest and
     // each referenced world TOML into Rust so wasm_get_scenario_catalog() (the
     // #754 authoritative catalog) can resolve titles + per-scenario ships.
     async function buildScenarioCatalog() {
       if (_catalogBuilt) return;
       try {
-        const manifestResp = await fetch(resolveManifestPath());
-        if (!manifestResp.ok) throw new Error('manifest HTTP ' + manifestResp.status);
-        const manifestToml = await manifestResp.text();
-        wasmBindings.wasm_push_scenario_manifest(manifestToml);
+        const manifestToml = await pushScenarioManifest();
+        if (manifestToml == null) throw new Error('manifest unavailable');
         const worldPaths = [...manifestToml.matchAll(/world\s*=\s*"([^"]+)"/g)].map(function (m) { return m[1]; });
         await Promise.all([...new Set(worldPaths)].map(async function (p) {
           try {
@@ -4112,7 +4354,7 @@ function finishInit() {
   // Use it directly instead of re-showing a post-load picker.
   if (_lockedShipTemplate) {
     const templatePath = _lockedShipTemplate;
-    wasm_select_ship(templatePath);
+    lockPlayerHull(templatePath, (ships || []).find(s => s.template_path === templatePath));
     fetch(templatePath)
       .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then(toml => {
@@ -4138,7 +4380,7 @@ function finishInit() {
     fetch('assets/entities/alliance_cruiser.toml')
       .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then(toml => {
-        wasm_select_ship('assets/entities/alliance_cruiser.toml');
+        lockPlayerHull('assets/entities/alliance_cruiser.toml');
         try { wasm_validate_stations('assets/entities/alliance_cruiser.toml', toml); } catch (err) {
           showFatalError(t('server.fatal.station_config', { detail: (err && err.message) ? err.message : String(err) }));
           return;
@@ -4149,7 +4391,7 @@ function finishInit() {
   } else if (shipResult.action === 'auto-select') {
     // Single ship — auto-select and proceed.
     const templatePath = shipResult.templatePath;
-    wasm_select_ship(templatePath);
+    lockPlayerHull(templatePath, ships[0]);
     fetch(templatePath)
       .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then(toml => {
@@ -4175,7 +4417,8 @@ function finishInit() {
 
       picker.addEventListener('ship-selected', (e) => {
         const { template_path } = e.detail;
-        wasm_select_ship(template_path);
+        lockPlayerHull(template_path, e.detail.ship
+          || (shipResult.ships || []).find(s => s.template_path === template_path));
         panel.style.display = 'none';
         fetch(template_path)
           .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
@@ -4406,7 +4649,12 @@ window.addEventListener('TrunkApplicationStarted', () => {
   // ?scenario bypass (or an arbiter selection that completed before WASM was
   // ready) sets selectedScenario — start straight into world load. Otherwise
   // build the #754 catalog and render the QR-first scenario picker (issue #755).
-  if (selectedScenario) startPhoenix();
+  //
+  // The bypass still pushes the scenario manifest first, because that is where
+  // this host's content identity comes from and the catalogue build it skips
+  // was the only thing doing it. `finally`, not `then`: a manifest that cannot
+  // be fetched must not stop a host flying the world it was pointed at.
+  if (selectedScenario) pushScenarioManifest().finally(startPhoenix);
   else buildScenarioCatalog();
 });
 

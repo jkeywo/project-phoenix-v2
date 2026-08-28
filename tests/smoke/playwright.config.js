@@ -3,6 +3,16 @@ import path from 'path';
 
 const distDir = path.resolve(__dirname, '../../dist');
 
+// Which port THIS checkout's `dist/` is served on. CI and an ordinary local run
+// want 3000 and get it. The override exists because `reuseExistingServer` below
+// will happily adopt a server somebody else started — and when two worktrees of
+// this repo are open at once, which is the normal way work happens here, that
+// server is publishing the OTHER checkout's bundle. The failure is silent and
+// genuinely baffling: every spec runs against a build you did not make, and the
+// evidence (a page missing code you can see on disk) points nowhere near the
+// port. Set PHOENIX_SMOKE_PORT to give a second worktree its own.
+const PORT = Number(process.env.PHOENIX_SMOKE_PORT || 3000);
+
 export default defineConfig({
   testDir: '.',
   testMatch: '*.spec.js',
@@ -12,7 +22,7 @@ export default defineConfig({
   expect: { timeout: 30_000 },
 
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: `http://localhost:${PORT}`,
     // Capture traces on first retry to aid debugging
     trace: 'on-first-retry',
   },
@@ -64,8 +74,8 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: `npx serve "${distDir}" -p 3000 --no-clipboard`,
-    url: 'http://localhost:3000',
+    command: `npx serve "${distDir}" -p ${PORT} --no-clipboard`,
+    url: `http://localhost:${PORT}`,
     reuseExistingServer: !process.env.CI,
     timeout: 15_000,
   },

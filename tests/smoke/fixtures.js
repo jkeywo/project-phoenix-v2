@@ -288,8 +288,18 @@ export function captureFetchFailures(page) {
   return failures;
 }
 
+/**
+ * The origin this checkout's `dist/` is served on — 3000 unless
+ * `PHOENIX_SMOKE_PORT` moved it, which is how a second worktree avoids silently
+ * testing the other one's bundle (see playwright.config.js).
+ *
+ * Every blank page a spec opens has to be on THIS origin: BroadcastChannel is
+ * same-origin, and the transport stand-in pairs pages over one.
+ */
+export const SMOKE_ORIGIN = `http://localhost:${Number(process.env.PHOENIX_SMOKE_PORT || 3000)}`;
+
 // ── Test client helper ────────────────────────────────────────────────────────
-// Creates a blank page at localhost:3000 (same BroadcastChannel origin),
+// Creates a blank page on SMOKE_ORIGIN (same BroadcastChannel origin),
 // joins the host through the rendezvous service with its join code, completes
 // the compatibility handshake, sends Identify, and waits for Welcome.
 // Exposes helpers for sending messages and waiting for specific message types.
@@ -339,7 +349,7 @@ export async function createTestClient(
   await page.route(`**/blank-${routeKey}`, (r) =>
     r.fulfill({ contentType: 'text/html', body: '<!DOCTYPE html><html><body></body></html>' }),
   );
-  await page.goto(`http://localhost:3000/blank-${routeKey}`);
+  await page.goto(`${SMOKE_ORIGIN}/blank-${routeKey}`);
 
   // Connect to host and wait for the readiness message before returning.
   // Every transport-shaped detail of "connect" lives in transport-fixture.js

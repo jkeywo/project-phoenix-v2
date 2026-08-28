@@ -1,7 +1,7 @@
 // The transport stand-in the whole smoke suite runs on (issue #1112, replacing
 // the #52 PeerJS-shim tests).
 //
-// Two blank pages at localhost:3000 drive `window.PhoenixTransportFactories`
+// Two blank pages on the served origin drive `window.PhoenixTransportFactories`
 // directly — no production WASM, no client bundle — and assert the behaviours
 // every other spec silently depends on: one page owns the real
 // worker-rendezvous registry and is issued a code, the other resolves that code
@@ -13,16 +13,16 @@
 // or opens a "snapshot" channel that is really ordered and retransmitting,
 // would leave forty specs green while proving something the product does not do.
 
-import { test, expect } from './fixtures';
+import { test, expect, SMOKE_ORIGIN } from './fixtures';
 
-// Blank pages must be on localhost:3000: BroadcastChannel is same-origin, and
+// Blank pages must be on the served origin: BroadcastChannel is same-origin, and
 // null-origin pages cannot reach each other.
 async function blankPage(ctx, slug) {
   const page = await ctx.newPage();
   await page.route(`**/${slug}`, (r) =>
     r.fulfill({ contentType: 'text/html', body: '<!DOCTYPE html><html><body></body></html>' }),
   );
-  await page.goto(`http://localhost:3000/${slug}`);
+  await page.goto(`${SMOKE_ORIGIN}/${slug}`);
   return page;
 }
 

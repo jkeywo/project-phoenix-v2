@@ -21,10 +21,21 @@
 //                relay. Honours the `createDataChannel` init bag, so the lossy
 //                'snapshot' channel is distinguishable from the reliable one.
 //
-// The first page to open a `/v1/host` socket owns the registry; every other
-// page relays its frames to that page over a BroadcastChannel. The product is
-// one host and N crew clients, so one owner is enough — a multi-host smoke case
-// (#1114) would need an election here.
+// One page owns the registry and every other page relays its frames to that
+// page over a BroadcastChannel. Which page owns it is settled by a Web Lock
+// (issue #1114): the first page to acquire `phoenix-rendezvous-owner` builds
+// the registry and holds the lock for its lifetime, and everybody else routes
+// over the bus. It used to be "the first page to open a /v1/host socket", which
+// was enough while the product was one host and N crew clients — with two SHIP
+// HOSTS both of them took ownership, and each ran a private registry the other
+// could not see, so the fleet code minted on one page resolved to nothing on
+// the other.
+//
+// No page sends a frame before an owner exists. A socket does not "open" until
+// `registryLocated()` resolves — either this page won the lock, or it has heard
+// an owner announce itself — which is what makes the election race-free rather
+// than merely usually-fine: a frame posted into the bus a moment before the
+// owner's registry existed used to be dropped on the floor.
 //
 // It also carries the two things the whole suite is wired to, inherited from
 // the shim it replaced:
@@ -52,14 +63,51 @@
   const localSockets = new Map(); // connId → fake socket on THIS page
   let registryReady = null; // Promise<registry> on the owner page only
 
-  function becomeOwner() {
-    registryReady = (async () => {
-      const [{ createRegistry }, data] = await Promise.all([
-        import(REGISTRY_URL),
-        fetch(FORMAT_URL).then((r) => r.json()),
-      ]);
-      return createRegistry({ data });
-    })();
+  // ── Owner election ────────────────────────────────────────────────────────
+  //
+  // One lock, one owner, for as long as that page lives. Every page requests it
+  // — not only host pages — so a client-only page cannot wait forever for an
+  // owner that is never going to appear: it simply owns an empty registry, and
+  // its lookups get the same "unknown" a real service would give them.
+
+  const OWNER_LOCK = 'phoenix-rendezvous-owner';
+  let claimed = false;
+  let announceOwner = () => {};
+  let markLocated = () => {};
+  /** Resolves once SOME page (this one or another) owns the registry. */
+  const located = new Promise((resolve) => { markLocated = resolve; });
+
+  async function buildRegistry() {
+    const [{ createRegistry }, data] = await Promise.all([
+      import(REGISTRY_URL),
+      fetch(FORMAT_URL).then((r) => r.json()),
+    ]);
+    return createRegistry({ data });
+  }
+
+  function claimRegistry() {
+    if (claimed) return;
+    claimed = true;
+    navigator.locks.request(OWNER_LOCK, { mode: 'exclusive' }, async () => {
+      // Assigned before the await so a bus message arriving in the same task
+      // queues on the promise rather than finding `registryReady` still null.
+      registryReady = buildRegistry();
+      await registryReady;
+      announceOwner = () => bus.postMessage({ kind: 'owner' });
+      announceOwner();
+      markLocated();
+      // Held for this page's lifetime: releasing it would hand ownership to a
+      // page whose registry is empty, silently ending every live session.
+      return new Promise(() => {});
+    });
+  }
+
+  /** Wait until there is somebody to send frames to. */
+  function registryLocated() {
+    claimRegistry();
+    // Ask, in case the owner announced itself before this page was listening.
+    bus.postMessage({ kind: 'who' });
+    return located;
   }
 
   function deliver(frames) {
@@ -95,6 +143,9 @@
       const local = localSockets.get(msg.to);
       if (local && local.onmessage) local.onmessage({ data: JSON.stringify(msg.frame) });
     }
+    // A page that arrived after the owner did asks, and gets told.
+    if (msg.kind === 'who') announceOwner();
+    if (msg.kind === 'owner') markLocated();
   };
 
   function makeSocket(url) {
@@ -136,15 +187,18 @@
       return sock;
     }
 
-    if (role === 'host' && !registryReady) becomeOwner();
     localSockets.set(connId, sock);
-    setTimeout(() => {
+    // Not "next tick" but "once there is a registry to talk to". Same effect on
+    // the single-host path this suite has always run; on the two-host path it
+    // is what stops the second page's `host-open` racing the first page's
+    // election.
+    registryLocated().then(() => {
       if (sock.readyState === 3) return;
       sock.readyState = 1;
       if (sock.onopen) sock.onopen();
       callOwner({ op: 'connect', connId, role });
       if (role === 'host') { hostSocketOpen = true; maybeDispatchReady(); }
-    }, 0);
+    });
     return sock;
   }
 

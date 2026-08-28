@@ -142,6 +142,12 @@ const TERMINAL_REASONS = new Set([
   // statements about the FLEET rather than about the link, and re-offering
   // gets the same one: a full fleet does not empty because somebody retried,
   // and a launched mission does not un-launch.
+  //
+  // Neither reaches `fail()` today — they arrive as host-mesh `refused` frames
+  // on an already-open channel, and it is server.html's `leaveFleet` that stops
+  // the loop. They are listed anyway because this set is the project's one
+  // answer to "is this reason worth another attempt", and a future path that
+  // does route a fleet refusal through the joiner must not learn a second one.
   'fleet-full', 'recovery-only',
   // The host's own StampMismatch::code() values, relayed through JoinRefused.
   'protocol-mismatch', 'content-id-mismatch', 'content-epoch-mismatch',
@@ -789,18 +795,36 @@ export function createRendezvousJoiner(opts) {
     localise = true,
   } = opts;
 
-  const parsed = parseJoinCode(code, namespace, data);
-  if (!parsed.ok) {
-    onError(parsed.reason, reasonStringId(parsed.reason));
+  /**
+   * A joiner that never dialled: the code was refused before a socket was
+   * opened. Every method the live surface advertises is present and inert, so a
+   * caller holding a failed joiner gets a no-op rather than a TypeError —
+   * including `sendFrame`, which `createFleetMember.update()` calls
+   * unconditionally.
+   */
+  const refusedJoiner = (reason) => {
+    onError(reason, reasonStringId(reason));
     return {
       failed: true,
-      reason: parsed.reason,
+      reason,
       get connected() { return false; },
       send() {},
+      sendFrame() {},
       retryNow() {},
       close() {},
     };
-  }
+  };
+
+  const parsed = parseJoinCode(code, namespace, data);
+  if (!parsed.ok) return refusedJoiner(parsed.reason);
+  // A structured code names its OWN namespace, from the project GUID inside it
+  // — `namespace` above is only the fallback a bare five-letter suffix is
+  // composed under. So a full code pasted into the wrong field parses happily
+  // and disagrees with the field it was typed into, and that disagreement is
+  // exactly what "you typed the other kind of code" means. Refused here, before
+  // a socket is opened, the same judgement server.html makes on a fleet code
+  // arriving in this page's fragment.
+  if (parsed.namespace !== namespace) return refusedJoiner('wrong-type');
 
   let socket = null;
   let pc = null;
@@ -1004,11 +1028,19 @@ export function createRendezvousJoiner(opts) {
         // say and would only be relaying dead metadata.
         //
         // The NAMESPACE does travel, because it is a fact about the request
-        // rather than about either build: it names the typed field these five
-        // letters came out of, which is the only thing that makes "that is the
-        // other kind of code" answerable now that both namespaces are joinable
+        // rather than about either build: it names the typed FIELD this code
+        // came out of, which is the only thing that makes "that is the other
+        // kind of code" answerable now that both namespaces are joinable
         // (worker-rendezvous/src/registry.js, issue #1114).
-        socket.send(frame('join', { code: parsed.full, namespace: parsed.namespace }));
+        //
+        // `namespace`, never `parsed.namespace`. The parsed value is a fact
+        // about the CODE — for a structured one it is read out of the project
+        // GUID the code itself carries — so sending it would have the asker
+        // echo the record back at the service, which then always agrees and
+        // can never answer `wrong-type`. The check above already refuses the
+        // disagreeing case locally; this is the same fact stated to the one
+        // party that indexes on it.
+        socket.send(frame('join', { code: parsed.full, namespace }));
         break;
       case 'joined':
         onLog(`[rendezvous] resolved ${parsed.suffix}; offering`);

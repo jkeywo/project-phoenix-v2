@@ -345,6 +345,12 @@ describe('fleet joining (issue #1114)', () => {
     fleetJoin(h, 'ship-2', crew.suffix);
     expect(h.last('ship-2', 'error')).toMatchObject({ request: 'join', reason: 'wrong-type' });
     // And the same answer for a whole pasted crew code, not only five letters.
+    // The `namespace` on that frame is the FIELD's, which is what the shipped
+    // joiner sends for either form — it used to send the namespace read out of
+    // the code itself, so the asker echoed the record back at the service and
+    // this check could never fire for a full code. The joiner now also refuses
+    // the disagreement before dialling (tests/client/fleet-session.test.js);
+    // this is the service holding the same line for anything that reaches it.
     fleetJoin(h, 'ship-3', crew.full);
     expect(h.last('ship-3', 'error')).toMatchObject({ reason: 'wrong-type' });
   });

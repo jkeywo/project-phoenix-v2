@@ -325,20 +325,30 @@ fn open_slot_recovery(world: &mut World, local: HostSlot, interval: u64, delay: 
     else {
         return;
     };
-    let boundary = recovery_boundary(claim_tick, interval, delay);
-    let leader = {
-        let roster = world.resource::<FleetRoster>();
-        leader_for(roster, slot)
-    };
-    world.resource_mut::<PendingSlotClaims>().mark_opened(slot);
 
     let role = if local == slot {
         SlotRecoveryRole::Recovering
-    } else if local == leader {
+    } else if local == leader_for(world.resource::<FleetRoster>(), slot) {
         SlotRecoveryRole::Leader
     } else {
         SlotRecoveryRole::Bystander
     };
+
+    // AC1's "cannot displace a connected host", enforced on every survivor: a
+    // survivor opens a recovery only for a slot IT HAS DEPARTED (issue #1119's
+    // `depart`). A claim naming a slot this survivor still holds a live connection
+    // to is DEFERRED, not opened — never marked opened either, so if the slot does
+    // later depart (the host-loss simply arrived after the claim) the recovery
+    // still opens, while a claim for a genuinely-live slot never displaces it. The
+    // replacement itself (local == slot) is the one host for which this is a
+    // genuine recovery of its own identity, so it is exempt.
+    if role != SlotRecoveryRole::Recovering && !world.resource::<FleetLockstep>().has_departed(slot) {
+        return;
+    }
+
+    let boundary = recovery_boundary(claim_tick, interval, delay);
+    let leader = leader_for(world.resource::<FleetRoster>(), slot);
+    world.resource_mut::<PendingSlotClaims>().mark_opened(slot);
 
     match role {
         SlotRecoveryRole::Recovering => {

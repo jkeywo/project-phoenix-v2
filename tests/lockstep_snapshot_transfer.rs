@@ -587,11 +587,17 @@ fn a_record_from_a_different_build_is_refused_before_it_commits() {
 /// does not project one ship's private view to another crew.
 ///
 /// The projection layer, not the record, is what gates what a crew sees: the
-/// dossier and console builders run `With<LocalShip>`, and `LocalShip` is a
-/// host-local marker of "the ship this machine's crew is aboard" that is *never*
-/// captured or restored (it is not a field of `PhoenixSnapshot` or `EntityState`).
-/// So a restore cannot move which ship a host projects — the guarantee #1117
-/// makes is exactly "restore does not itself widen projection".
+/// dossier and console builders run `With<LocalShip>`, and the projection-SCOPE
+/// marker `LocalShip` — a host-local marker of "the ship this machine's crew is
+/// aboard" — is *never* in the record (not a field of `PhoenixSnapshot` or
+/// `EntityState`). The materialized dossier blackboard DOES cross, though:
+/// `publish_dossier_blackboard` writes the `dossiers` channel into
+/// `ShipSystemBlackboards`, which capture takes unfiltered. It is inert on the
+/// receiver all the same — restore is by-uuid, so that channel lands only on the
+/// same hull it left (which is not the receiver's local ship), the blackboards are
+/// not folded into `world_digest`, and only `LocalShip`'s blackboards render. So a
+/// restore cannot re-point what a crew sees — the guarantee #1117 makes is exactly
+/// "restore does not itself widen projection".
 ///
 /// The evidence STORE the transfer carries is world-global today (keyed by the
 /// observed subject, not the observing ship): `EvidenceLog` on

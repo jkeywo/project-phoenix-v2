@@ -30,6 +30,14 @@
 //! is up. The chunks only ever accumulate a buffer bounded by
 //! [`crate::lockstep::transfer::SNAPSHOT_MAX_TRANSFER_BYTES`]; nothing is
 //! committed until the whole record has arrived, gated and restored.
+//!
+//! That single-transfer bound is the pure [`SnapshotReceiver`]'s. This adapter
+//! adds one more slot on top of it: a completed record sits in `staged` until
+//! [`drain_mesh_restore`] consumes it next system, so if one drain accepts
+//! transfer A's final chunk (staging it) and then transfer B's first chunk, the
+//! receiver transiently holds up to ~2x `SNAPSHOT_MAX_TRANSFER_BYTES` — one staged
+//! record plus one fresh in-flight transfer. Still bounded, and back down to one
+//! the next time `drain_mesh_restore` runs.
 
 use bevy::prelude::*;
 
@@ -43,9 +51,23 @@ use crate::snapshot::{self, StoredRun};
 
 /// What a received transfer resolved to, once every chunk was in hand.
 ///
-/// Every refusal is a *clean* one — the receiver's world is untouched until a
-/// [`Self::Committed`] restore actually runs, so a rejected transfer leaves a host
-/// exactly where it was rather than half-adopting a record it is about to refuse.
+/// Refusals are NOT uniformly clean, and the boundary is load-bearing for a host
+/// deciding whether it can retry in place. The version/content gate runs BEFORE a
+/// single component is written, so a [`Self::RefusedGate`] on a build, rules or
+/// content mismatch leaves the receiving world byte-identical — that transfer is
+/// discarded and the host is exactly where it was. But [`Self::RefusedIntegrity`]
+/// and [`Self::Incomplete`] are decided AFTER `snapshot::restore` has already
+/// overwritten the world, and there is no rollback: the world is left holding the
+/// very record the check then judged bad. A host that hits one cannot simply retry
+/// against the same world — it must re-bootstrap the scenario to a clean state
+/// first. (A `RefusedGate` naming a world layer that could not be reconstructed is
+/// the one gate-side exception: `reconcile_world_layers` has already mutated layer
+/// state by the time it returns, so that sub-case is not byte-clean either.)
+///
+/// #1118 (divergence recovery) is expected to close this asymmetry: restore into a
+/// rollback-able checkpoint and swap the live world in only on a matching fold, so
+/// an integrity/incomplete outcome becomes a discarded checkpoint rather than a
+/// destroyed world.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MeshRestoreOutcome {
     /// The gate passed, the restore was complete, and the restored world folds to
@@ -359,10 +381,16 @@ pub fn register_snapshot_relay(app: &mut App) {
             "fleet-snapshot-transfer-state",
         );
     }
+    // `.after(MeshSet)` so a record completed by this frame's inbox drain is
+    // restored the same frame. No explicit `.before(advance_sim_tick)`: that
+    // system lives in `FixedLast`, a different schedule, so an ordering edge to it
+    // from `PreUpdate` resolves to zero systems and constrains nothing. It is not
+    // needed either — Bevy runs `PreUpdate` before `RunFixedMainLoop` by
+    // construction, so this restore already precedes this frame's fixed steps and
+    // the `FixedLast` digest sample; the ordering holds across schedules, not
+    // within one, and cannot be spelled as an edge.
     app.init_resource::<MeshSnapshotReceiver>().add_systems(
         PreUpdate,
-        drain_mesh_restore
-            .after(crate::lockstep::MeshSet)
-            .before(crate::sim_tick::advance_sim_tick),
+        drain_mesh_restore.after(crate::lockstep::MeshSet),
     );
 }

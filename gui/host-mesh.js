@@ -538,7 +538,9 @@ export const admissionFrame = (state) => hostFrame(HOST_FRAME_ADMISSION, { state
  * nothing more. What this module owns is the envelope, which is why the two
  * pass through it rather than round it.
  *
- * @param {string} type {@link HOST_FRAME_TICK} or {@link HOST_FRAME_DIGEST}
+ * @param {string} type a member of {@link HOST_SIMULATION_FRAME_TYPES} —
+ *   {@link HOST_FRAME_TICK}, {@link HOST_FRAME_DIGEST} or {@link HOST_FRAME_SNAPSHOT}
+ *   (#1117 added the third, built through this same envelope)
  * @param {object} body the body Rust encoded
  * @param {number|null} tick the tick this frame applies at — the field #1114
  *   put in the envelope for exactly this, finally set

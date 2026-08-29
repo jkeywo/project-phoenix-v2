@@ -41,6 +41,14 @@
 //! never completes or by sending oversized pieces. A chunk for a *different*
 //! transfer than the one in progress is refused rather than blindly adopted, so a
 //! second sender cannot displace the first either.
+//!
+//! That [`SNAPSHOT_MAX_TRANSFER_BYTES`] ceiling is per-transfer and belongs to
+//! this pure [`SnapshotReceiver`], which holds exactly one transfer's chunks and
+//! nothing more. The Bevy adapter that wraps it,
+//! [`crate::lockstep::snapshot_relay::MeshSnapshotReceiver`], can transiently hold
+//! more — a completed record staged for restore PLUS a fresh transfer already
+//! arriving — so its peak is up to ~2x this bound; that is documented on the
+//! adapter, not here.
 
 use std::collections::BTreeMap;
 

@@ -244,6 +244,39 @@ fn a_transfer_declaring_too_many_chunks_is_refused_up_front() {
     assert!(!rx.is_receiving(), "nothing was buffered");
 }
 
+/// The other side of that boundary: a transfer declaring EXACTLY
+/// [`SNAPSHOT_MAX_CHUNKS`] is the top of the valid range, not one over it, so the
+/// ceiling chunk is accepted rather than refused. This pins the accept-side
+/// comparison at `> SNAPSHOT_MAX_CHUNKS`; a slip to `>=` would refuse the largest
+/// legitimate transfer. No 64 MiB body is materialised — the single boundary chunk
+/// is constructed directly, and the transfer simply stays awaiting-more.
+#[test]
+fn a_transfer_declaring_exactly_the_chunk_ceiling_is_accepted() {
+    let base = &chunk(&body(10), FROM, TRANSFER, TICK)[0];
+    // `total` at the ceiling, `seq` at the top of the valid range for it. `text`
+    // and `crc` ride from `base` intact, so the chunk still checksums.
+    let ceiling = SnapshotChunk {
+        total: SNAPSHOT_MAX_CHUNKS,
+        seq: SNAPSHOT_MAX_CHUNKS - 1,
+        ..base.clone()
+    };
+    let mut rx = SnapshotReceiver::new();
+    let outcome = rx.accept(&ceiling);
+    assert!(
+        !matches!(outcome, Err(TransferError::TooManyChunks { .. })),
+        "total == SNAPSHOT_MAX_CHUNKS is the largest legal transfer, not one over \
+         the ceiling — the accept-side comparison must stay `> SNAPSHOT_MAX_CHUNKS`, \
+         never `>=`: {outcome:?}"
+    );
+    assert!(
+        matches!(
+            outcome,
+            Ok(Accepted::More { received: 1, total }) if total == SNAPSHOT_MAX_CHUNKS
+        ),
+        "the boundary chunk is taken as the first of many, awaiting the rest: {outcome:?}"
+    );
+}
+
 /// An oversized chunk is refused, so a sender cannot exceed the per-frame bound
 /// that keeps the total buffer bounded.
 #[test]

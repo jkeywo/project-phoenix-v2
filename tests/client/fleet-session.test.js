@@ -741,6 +741,48 @@ describe('the running mission rides the same link (issue #1116)', () => {
 
     expect(threeFrames).toEqual([sent]);
   });
+
+  it('reports a member host loss to the simulation once the mission has frozen (#1119)', async () => {
+    // A ship host closing mid-mission is not a lobby slot going dark — the
+    // simulation has to flip that ship to Backfill at an agreed tick. The owner
+    // sees the socket close and hands the SLOT ORDINAL to the simulation, which
+    // derives the tick and mints the host-loss frame the star relays onward.
+    const lost = [];
+    const { world, factories, lead } = await fleetOf({ onHostLost: (slot) => lost.push(slot) });
+    const two = await memberOn(world, factories, lead.code.suffix.toLowerCase());
+    expect(two.member.slot).toBe('slot-2');
+
+    lead.fleet.freeze();
+    await settle();
+
+    two.member.close();
+    await settle();
+
+    expect(lost).toEqual([2]);
+    // The slot is kept for #1120 recovery rather than removed, exactly as the
+    // lobby-drop path already does after a freeze.
+    expect(lastRoster(lead).slots.find((s) => s.id === 'slot-2')).toMatchObject({
+      id: 'slot-2',
+      connected: false,
+    });
+  });
+
+  it('does NOT report a host loss for a drop before the mission starts (#1119)', async () => {
+    // Before the freeze there is no running simulation to backfill anything in —
+    // a host dropping is an ordinary lobby departure, and reporting it would
+    // schedule a Backfill flip for a mission that has not begun.
+    const lost = [];
+    const { world, factories, lead } = await fleetOf({ onHostLost: (slot) => lost.push(slot) });
+    const two = await memberOn(world, factories, lead.code.suffix.toLowerCase());
+    expect(two.member.slot).toBe('slot-2');
+
+    two.member.close();
+    await settle();
+
+    expect(lost).toEqual([]);
+    // The slot is dropped from the lobby, as before the mission starts.
+    expect(lastRoster(lead).slots).toHaveLength(1);
+  });
 });
 
 describe('fleet capacity', () => {

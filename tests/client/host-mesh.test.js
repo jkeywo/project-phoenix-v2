@@ -17,8 +17,10 @@ import {
   HOST_FRAME_TICK,
   HOST_FRAME_DIGEST,
   HOST_FRAME_SNAPSHOT,
+  HOST_FRAME_HOST_LOSS,
   isSimulationFrame,
   simulationFrame,
+  hostSlotOrdinal,
   ADMISSION_CLOSED,
   ADMISSION_OPEN,
   REASON_ADMISSION_CLOSED,
@@ -145,6 +147,13 @@ describe('the envelope', () => {
     const chunkBack = decodeHostFrame(encodeHostFrame(chunk));
     expect(chunkBack).toEqual(chunk);
     expect(Number.isSafeInteger(parseInt(chunkBack.d.whole_hash, 16))).toBe(false);
+
+    // The host-loss frame (issue #1119) rides the same envelope: minted by
+    // `core::codec::encode_mesh_frame`, ferried here and relayed to siblings
+    // without this module reading it. Its body is the lost slot and the agreed
+    // disconnect tick.
+    const hostLoss = simulationFrame(HOST_FRAME_HOST_LOSS, { from: 1, lost: 3, tick: 418 }, 418);
+    expect(decodeHostFrame(encodeHostFrame(hostLoss)).d).toEqual({ from: 1, lost: 3, tick: 418 });
   });
 
   it('tells the simulation\'s frames from the lobby\'s, which is the routing rule', () => {
@@ -155,11 +164,23 @@ describe('the envelope', () => {
     expect(isSimulationFrame(simulationFrame(HOST_FRAME_TICK, {}))).toBe(true);
     expect(isSimulationFrame(simulationFrame(HOST_FRAME_DIGEST, {}))).toBe(true);
     expect(isSimulationFrame(simulationFrame(HOST_FRAME_SNAPSHOT, {}))).toBe(true);
+    expect(isSimulationFrame(simulationFrame(HOST_FRAME_HOST_LOSS, {}))).toBe(true);
     for (const frame of [rosterFrame(fleetOf()), admissionFrame(ADMISSION_CLOSED),
       helloFrame({}), refusedFrame('fleet-full')]) {
       expect(isSimulationFrame(frame), frame.t).toBe(false);
     }
     expect(isSimulationFrame(null)).toBe(false);
+  });
+
+  it('reduces a slot id to the ordinal the simulation routes on', () => {
+    // A host-loss report (issue #1119) crosses the wasm boundary as the ordinal
+    // `N` in `slot-N` — the number `command_admission::HostSlot` orders on. A
+    // malformed id is `null`, not a guess, mirroring `HostSlot::from_slot_id`.
+    expect(hostSlotOrdinal('slot-3')).toBe(3);
+    expect(hostSlotOrdinal('slot-1')).toBe(1);
+    expect(hostSlotOrdinal('slot-x')).toBeNull();
+    expect(hostSlotOrdinal('3')).toBeNull();
+    expect(hostSlotOrdinal(null)).toBeNull();
   });
 
   it('speaks the same revision as the Rust half', () => {
@@ -168,7 +189,7 @@ describe('the envelope', () => {
     // silently fails to agree a tick; refusing an unrecognised `m` is what
     // makes that fail loudly, and this pair of pins is what catches a
     // one-sided bump.
-    expect(HOST_MESH_PROTOCOL).toBe(2);
+    expect(HOST_MESH_PROTOCOL).toBe(3);
     const rust = readFileSync(
       path.join(path.dirname(fileURLToPath(import.meta.url)), '../../src/lockstep/frame.rs'),
       'utf8',

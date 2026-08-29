@@ -87,6 +87,7 @@ import {
   encodeHostFrame,
   freezeFleet,
   helloFrame,
+  hostSlotOrdinal,
   isSimulationFrame,
   openFleet,
   refusedFrame,
@@ -154,6 +155,7 @@ export function createFleetOwner(opts) {
     onCode = () => {},
     onRoster = () => {},
     onSimulationFrame = () => {},
+    onHostLost = () => {},
     onError = () => {},
     onLog = () => {},
     factories,
@@ -271,6 +273,22 @@ export function createFleetOwner(opts) {
       });
       conn.on('close', () => {
         if (!links.delete(conn.peer)) return;
+        // Before the mission starts, a host closing is just a lobby slot going
+        // dark. Once frozen it is a HOST LOSS (issue #1119): the simulation must
+        // flip that ship to Backfill at an agreed tick, so the slot is resolved
+        // and reported to the simulation BEFORE `dropHost` clears its peer. The
+        // simulation mints the tick-stamped host-loss frame from there and this
+        // page relays it to the rest of the fleet like any other simulation
+        // frame — so a member learns of a sibling's loss without seeing its
+        // socket.
+        if (fleet.frozen) {
+          const slot = slotForPeer(fleet, conn.peer);
+          const ordinal = slot ? hostSlotOrdinal(slot.id) : null;
+          if (ordinal != null) {
+            onLog(`[fleet] ${slot.id} left mid-mission — backfilling its ship`);
+            onHostLost(ordinal);
+          }
+        }
         fleet = dropHost(fleet, conn.peer);
         publish();
       });

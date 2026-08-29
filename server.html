@@ -2916,6 +2916,11 @@
         onCode: (code) => { fleetSuffix = code.suffix; paintFleetPanel(); },
         onRoster: (roster) => { fleetRoster = roster; paintFleetPanel(); },
         onSimulationFrame: receiveMeshFrame,
+        // A member host dropped mid-mission (issue #1119). Tell the simulation
+        // the slot; it agrees the disconnect tick from that host's own watermark
+        // and flips its ship to Backfill there, then mints a host-loss frame the
+        // egress loop below relays to the rest of the fleet.
+        onHostLost: (slot) => { if (window.wasm_host_departed) window.wasm_host_departed(slot); },
         onError: (reason) => console.warn(`[fleet] ${reason}`),
         onLog: (msg) => console.log(msg),
       }));
@@ -4424,12 +4429,15 @@ function finishInit() {
   window.wasm_is_paused = wasmBindings.wasm_is_paused;
   // The fleet's own seam (issue #1116): what a peer said, what this host wants
   // to say, the frozen roster it plays under, and what its link looks like from
-  // the simulation's side. Four exports and no more — every decision the
-  // lockstep makes is in Rust, and these are the wire.
+  // the simulation's side. Every decision the lockstep makes is in Rust, and
+  // these are the wire.
   window.wasm_receive_mesh_frame = wasmBindings.wasm_receive_mesh_frame;
   window.wasm_take_mesh_frames = wasmBindings.wasm_take_mesh_frames;
   window.wasm_join_fleet = wasmBindings.wasm_join_fleet;
   window.wasm_mesh_status = wasmBindings.wasm_mesh_status;
+  // A peer ship host left the fleet (issue #1119): report its slot so the
+  // simulation flips that ship to Backfill at an agreed tick.
+  window.wasm_host_departed = wasmBindings.wasm_host_departed;
   window.wasm_get_debug_state = wasmBindings.wasm_get_debug_state;
   window.wasm_get_damage_log = wasmBindings.wasm_get_damage_log;
   window.wasm_get_entity_debug_state = wasmBindings.wasm_get_entity_debug_state;

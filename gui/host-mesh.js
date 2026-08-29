@@ -82,11 +82,16 @@
  *
  * **Declared twice on purpose.** `lockstep::frame::HOST_MESH_PROTOCOL` carries
  * the same number in Rust, and each half has a test pinning it. A host whose JS
- * speaks 1 and whose Rust speaks 2 would assemble a fleet and then silently
+ * speaks 2 and whose Rust speaks 3 would assemble a fleet and then silently
  * fail to agree a tick; refusing an unrecognised `m` is what makes that fail
  * loudly instead, and the pair of pins is what catches a one-sided bump.
+ *
+ * `3` adds the `host-loss` frame (issue #1119). A revision-2 build that silently
+ * DROPPED it would keep waiting for a peer that will never speak again while the
+ * revision-3 hosts flipped its ship to Backfill — a split with no symptom, which
+ * is exactly why the revision refuses a whole fleet rather than a frame.
  */
-export const HOST_MESH_PROTOCOL = 2;
+export const HOST_MESH_PROTOCOL = 3;
 
 /** Frame types this revision speaks. */
 export const HOST_FRAME_HELLO = 'hello';
@@ -108,6 +113,12 @@ export const HOST_FRAME_DIGEST = 'digest';
  * to carry a chunk to `wasm_receive_mesh_frame` and relay it to any sibling.
  */
 export const HOST_FRAME_SNAPSHOT = 'snapshot';
+/**
+ * Revision 3 (issue #1119): a ship host has left. The body carries the lost
+ * slot and the tick its ship flips to Backfill on — the first tick past that
+ * host's own last watermark, so every survivor agrees it without arbitrating.
+ */
+export const HOST_FRAME_HOST_LOSS = 'host-loss';
 
 /** Every type a receiver will accept. Read by the coverage tests. */
 export const HOST_FRAME_TYPES = [
@@ -120,6 +131,7 @@ export const HOST_FRAME_TYPES = [
   HOST_FRAME_TICK,
   HOST_FRAME_DIGEST,
   HOST_FRAME_SNAPSHOT,
+  HOST_FRAME_HOST_LOSS,
 ];
 
 /**
@@ -137,6 +149,7 @@ export const HOST_SIMULATION_FRAME_TYPES = [
   HOST_FRAME_TICK,
   HOST_FRAME_DIGEST,
   HOST_FRAME_SNAPSHOT,
+  HOST_FRAME_HOST_LOSS,
 ];
 
 /** True when this frame belongs to the running simulation rather than the lobby. */
@@ -231,6 +244,22 @@ export const REASON_RECOVERY_ONLY = 'recovery-only';
 
 /** How a slot id is spelled. */
 const slotId = (seq) => `slot-${seq}`;
+
+/**
+ * The ordinal `N` in a `slot-N` id, or `null` for anything that is not one.
+ *
+ * The one number the simulation orders and routes on
+ * (`command_admission::log::HostSlot`), so a host-loss report (issue #1119) has
+ * to reduce a slot id to it before crossing the wasm boundary. `null` rather
+ * than a guess for a malformed id, for the same reason `HostSlot::from_slot_id`
+ * answers `None`: a slot this side cannot parse is a protocol disagreement, not
+ * a slot to invent.
+ */
+export function hostSlotOrdinal(id) {
+  if (typeof id !== 'string') return null;
+  const m = /^slot-(\d+)$/.exec(id);
+  return m ? Number(m[1]) : null;
+}
 
 /**
  * Fallback bounds on what a member may say about itself.
@@ -608,8 +637,10 @@ if (typeof window !== 'undefined') {
     HOST_FRAME_TICK,
     HOST_FRAME_DIGEST,
     HOST_FRAME_SNAPSHOT,
+    HOST_FRAME_HOST_LOSS,
     isSimulationFrame,
     simulationFrame,
+    hostSlotOrdinal,
     ADMISSION_OPEN,
     ADMISSION_CLOSED,
     REASON_ADMISSION_CLOSED,

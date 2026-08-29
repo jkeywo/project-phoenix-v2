@@ -676,87 +676,128 @@ fn a_star_lead_and_member_agree_the_same_tick_when_the_final_frame_co_arrives() 
     );
 }
 
-// ── Security: a forged loss cannot evict a live peer ─────────────────────────
+// ── Determinism under async relay watermark skew ─────────────────────────────
 
-/// **HIGH security containment (issue #1119).** A `HostLoss` is not
-/// authenticated (full reporter-auth is deferred to #1118/#1120), so a
-/// misbehaving peer could forge one for a LIVE victim and evict its ship
-/// fleet-wide. Containment refuses any report this host can PROVE is
-/// inconsistent — the named slot has declared a watermark at or beyond the tick
-/// the report claims it flips on, i.e. it was still producing frames past the
-/// claimed loss. The decision is on state identical across hosts, so it cannot
-/// itself diverge the fold.
+/// **HIGH determinism guard (issue #1119).** Honest survivors legitimately hold
+/// DIFFERENT watermarks for a slot at any instant — the relay lead sees a peer's
+/// frame before it forwards it, so `watermark_of(lost)` is skew-prone across
+/// survivors while the slot is live or its loss is still propagating. The first
+/// fix round decided accept/refuse AND derived the flip tick EAGERLY against that
+/// raw local watermark, so a `HostLoss` whose tick fell BETWEEN two survivors'
+/// watermarks made one survivor refuse it (`watermark >= tick`) and the other
+/// accept it (`watermark < tick`): one flipped slot 3's ship to Backfill and the
+/// other kept it human — a permanent fold divergence with no reconciliation path.
+/// The same flaw bit a genuine relayed departure: a survivor one frame ahead of
+/// the detector refused the real loss the detector agreed.
 ///
-/// Slot 3 stays alive and under way; a peer forges its loss at a tick it has
-/// demonstrably outlived. Every host refuses it, slot 3's ship stays human, and
-/// the fold never moves.
+/// The fix removes that skew-prone eager decision. A relayed report's tick is
+/// honoured VERBATIM (only the single self-observing connection holder derives a
+/// tick, from its own watermark), so both survivors adopt the identical tick
+/// whatever their own watermark, and both flip at exactly it. This asserts they
+/// reach the SAME decision AND fold bit-identically afterwards. On the pre-fix
+/// code they diverge — one refuses and stays human, the other flips to Backfill —
+/// and both the record and the per-tick digest assertions below fail.
+///
+/// The report is deliberately for a slot the survivors have NOT genuinely lost at
+/// that tick (its watermark straddles the claimed tick): rejecting such a report
+/// is a security question deferred to reporter authentication (#1118/#1120) and
+/// cannot be answered deterministically here. #1119's guarantee is the one this
+/// pins — whatever the survivors do with a report, they do it alike.
 #[test]
-fn a_forged_loss_for_a_live_slot_is_refused_and_the_fold_stays_identical() {
+fn a_relayed_loss_whose_tick_straddles_two_survivors_watermarks_converges() {
     const WARMUP: u64 = 80;
-    const AFTER: u64 = 120;
+    const AFTER: u64 = 160;
 
     let mut hosts = warmed_fleet(WARMUP);
 
-    // The watermark the survivors have already observed from the (live) slot 3.
-    let observed = {
-        let session = hosts[0].app.world().resource::<FleetLockstep>();
-        session
-            .watermark_of(SLOT_THREE)
-            .expect("host one heard slot 3")
-    };
-    assert!(observed > 2, "need an observed watermark to forge a loss below it");
-    // A tick slot 3 has plainly outlived — it declared frames well past this.
-    let forged_tick = observed / 2;
+    // Slot 3 stops ferrying so the two survivors are the only comparison; the
+    // report about it is therefore premature, not a genuine departure.
+    hosts[2].alive = false;
 
-    // A relayed report (from a survivor slot, NOT a self-observed close) naming
-    // the LIVE slot 3 lost at that past tick, delivered to both survivors.
-    let forged = MeshFrame::HostLoss(HostLossFrame {
-        from: SLOT_TWO,
+    // Survivor 1 (host index 1) holds slot 3 at its settled post-warmup
+    // watermark. Manufacture the async relay skew: survivor 0 (host index 0) has
+    // heard slot 3 through a much HIGHER watermark — exactly as a relay lead holds
+    // a higher watermark than a member it has not yet forwarded the frame to.
+    let w_low = hosts[1]
+        .app
+        .world()
+        .resource::<FleetLockstep>()
+        .watermark_of(SLOT_THREE)
+        .expect("survivor 1 heard slot 3");
+    // Comfortably past the whole run, so pre-fix survivor 0 (which refuses and so
+    // never departs slot 3) still never stalls waiting for it.
+    let w_high = w_low + (WARMUP + AFTER);
+    hosts[0]
+        .app
+        .world_mut()
+        .resource_mut::<FleetLockstep>()
+        .observe(SLOT_THREE, w_high);
+
+    // The straddling tick: above survivor 1's watermark (pre-fix it ACCEPTS) and
+    // at/below survivor 0's (pre-fix it REFUSES).
+    let straddle_tick = w_low + 2;
+    assert!(
+        straddle_tick > w_low && straddle_tick <= w_high,
+        "the report tick must straddle the survivors' watermarks: \
+         {w_low} < {straddle_tick} <= {w_high}"
+    );
+
+    // A relayed report (a survivor's re-broadcast, tick > 0 — NOT a tick-0
+    // self-observation), naming slot 3 lost at the straddling tick.
+    let relayed = MeshFrame::HostLoss(HostLossFrame {
+        from: SLOT_ONE,
         lost: SLOT_THREE,
-        tick: forged_tick,
+        tick: straddle_tick,
     });
-    hosts[0].deliver(std::slice::from_ref(&forged));
-    hosts[1].deliver(std::slice::from_ref(&forged));
+    hosts[0].deliver(std::slice::from_ref(&relayed));
+    hosts[1].deliver(std::slice::from_ref(&relayed));
 
-    // All three keep running — slot 3 is alive and never dropped.
-    let mut digests: [std::collections::BTreeMap<u64, u64>; 3] =
-        [Default::default(), Default::default(), Default::default()];
+    let mut digests: [std::collections::BTreeMap<u64, u64>; 2] =
+        [Default::default(), Default::default()];
     for _ in 0..AFTER {
         step(&mut hosts);
-        for (i, h) in hosts.iter().enumerate() {
-            digests[i].insert(h.tick(), h.digest());
-        }
+        digests[0].insert(hosts[0].tick(), hosts[0].digest());
+        digests[1].insert(hosts[1].tick(), hosts[1].digest());
     }
 
-    // The forged report is refused: no host-loss transition on any host…
-    for (i, h) in hosts.iter().enumerate() {
-        assert!(
-            h.host_loss_records().is_empty(),
-            "host {i} must refuse a forged loss for a live slot — one \
-             unauthenticated report must not evict a live peer's ship"
+    // Same decision: BOTH survivors flip slot 3 to Backfill at the identical
+    // carried tick — never one refusing and one accepting.
+    let one = HostLossRecord {
+        slot: SLOT_THREE,
+        tick: straddle_tick,
+    };
+    for (host, h) in hosts.iter().enumerate().take(2) {
+        assert_eq!(
+            h.host_loss_records(),
+            vec![one],
+            "survivor {host} must honour the relayed tick verbatim — a skew-prone \
+             refuse/accept split is exactly the divergence this guards"
         );
     }
-    // …and slot 3's ship stays under its live human crew everywhere.
-    for (i, h) in hosts.iter_mut().enumerate() {
-        assert!(
-            h.human_systems_of(SLOT_THREE).unwrap() > 0,
-            "host {i}: the forged victim's ship must stay human/live, not Backfill"
+    for (host, h) in hosts.iter_mut().enumerate().take(2) {
+        assert_eq!(
+            h.human_systems_of(SLOT_THREE),
+            Some(0),
+            "survivor {host}: slot 3's ship must be fully Backfill after the flip"
         );
     }
 
-    // And the refused report never perturbed the fold: every tick all three
-    // folded, they folded the same.
+    // Bit-identical folds: every tick both survivors folded, they folded the
+    // same. Pre-fix one keeps slot 3 human and the other flips it, so the two
+    // digests diverge from the flip tick on and this fails.
     let mut shared = 0usize;
     for (tick, a) in &digests[0] {
-        if let (Some(b), Some(c)) = (digests[1].get(tick), digests[2].get(tick)) {
+        if let Some(b) = digests[1].get(tick) {
             shared += 1;
-            assert_eq!(a, b, "hosts 0 and 1 diverged at tick {tick} after a refused report");
-            assert_eq!(a, c, "hosts 0 and 2 diverged at tick {tick} after a refused report");
+            assert_eq!(
+                a, b,
+                "survivors diverged at tick {tick}: {a:#018x} vs {b:#018x} — a \
+                 skew-prone accept/refuse split flipped Backfill on one host only"
+            );
         }
     }
     assert!(
-        shared > AFTER as usize / 2,
-        "too few shared ticks ({shared}) to prove the refused report left the \
-         fold identical"
+        digests[0].keys().any(|t| *t >= straddle_tick) && shared > AFTER as usize / 2,
+        "the run must cover the transition on both survivors ({shared} shared ticks)"
     );
 }

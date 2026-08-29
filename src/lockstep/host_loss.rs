@@ -13,19 +13,37 @@
 //!
 //! The disconnect tick is [`agreed_loss_tick`] of the lost host's own last
 //! declared watermark — the first tick past everything that host promised it
-//! would ever say. That watermark is not "whoever noticed first": it is the lost
-//! slot's [`TickFrame::ready_through`](crate::lockstep::frame::TickFrame::ready_through),
-//! delivered to every survivor identically by the reliable ordered channel the
-//! host mesh runs on. So the tick is a function of the OBSERVATION, computed the
-//! same on every survivor without any of them arbitrating — the same property
-//! [`CommandOrder`](crate::command_admission::log::CommandOrder) gives command
-//! ordering, and for the same reason.
+//! would ever say. That watermark is the lost slot's
+//! [`TickFrame::ready_through`](crate::lockstep::frame::TickFrame::ready_through).
 //!
-//! The fleet has already run the lost ship on real input right up to that
-//! watermark (every command it stamped for a tick at or below it is in hand), so
-//! flipping to Backfill at `watermark + 1` is seamless: the last real tick and
-//! the first AI tick are adjacent, with no gap to interpolate and nothing to
-//! roll back.
+//! But it is derived by exactly ONE authority per loss, not independently on
+//! every survivor, because a slot's watermark is shared identically only once
+//! that slot has genuinely departed and its final frame has preceded the loss
+//! report in the one reliable ordered stream. While the slot is still live — or
+//! its loss is still propagating — honest survivors legitimately hold DIFFERENT
+//! watermarks for it (the relay lead sees a frame before it forwards it), so a
+//! tick each survivor derived from its own watermark could disagree. The star
+//! relay (`p2p-delta-transport-is-a-star-today`) resolves this: exactly one host
+//! — the connection holder — sees the socket close, derives the tick from the
+//! lost slot's last watermark, and stamps that concrete tick into the report it
+//! re-broadcasts. Every other survivor adopts that carried tick VERBATIM rather
+//! than re-deriving from its own watermark, so all survivors converge on the
+//! identical tick under any frame-arrival interleaving. The
+//! [`apply_mesh_inbox`](crate::lockstep::apply_mesh_inbox) `HostLoss` arm is where
+//! that self-observer-derives / member-honours split lives.
+//!
+//! The fleet has already run the lost ship on real input right up to the
+//! authority's watermark (every command it stamped for a tick at or below it is
+//! in hand), so flipping to Backfill at `watermark + 1` is seamless: the last
+//! real tick and the first AI tick are adjacent, with no gap to interpolate and
+//! nothing to roll back.
+//!
+//! Rejecting a forged or unauthorised loss report is NOT part of this agreement:
+//! honouring a report convergently keeps the fold identical on every host that
+//! hears it, but an unauthenticated report for a live slot is still acted on.
+//! Full reporter authentication is deferred to #1118/#1120 (see the `HostLoss`
+//! arm's `TODO`), because it cannot be done deterministically without a
+//! ground-truth liveness signal only the connection holder has.
 //!
 //! # Convergence (AC5)
 //!

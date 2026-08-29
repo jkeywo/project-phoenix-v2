@@ -787,19 +787,12 @@ pub fn apply_mesh_inbox(
                 if pending_loss.is_applied(lost) {
                     continue;
                 }
-                // The agreed tick is a function of THIS host's OBSERVATION of the
-                // lost slot's own last watermark — the first tick past everything
-                // that host promised it would ever say — which reliable ordered
-                // delivery gave every survivor identically, so it is never a tick
-                // a reporter claims BEYOND that. `derived` wins whenever this host
-                // knows the watermark; only a relay member that has not yet seen
-                // it falls back to the reporter's figure as the sole one it has.
                 let observed = session.watermark_of(lost);
-                let derived = observed.map(host_loss::agreed_loss_tick);
-                if derived.is_none() && !pending_loss.is_known(lost) {
-                    // A report about a slot this host has never known as a peer:
-                    // there is nothing to lose, so it is dropped rather than
-                    // scheduling a flip for a ship that is not here.
+                if observed.is_none() && !pending_loss.is_known(lost) {
+                    // A report about a slot this host has never known as a peer,
+                    // and has no pending loss queued for: there is nothing to lose,
+                    // so it is dropped rather than scheduling a flip for a ship
+                    // that is not here.
                     crate::pwarn!(
                         log,
                         LogCat::Admit,
@@ -809,56 +802,61 @@ pub fn apply_mesh_inbox(
                     );
                     continue;
                 }
-                // CONTAINMENT (issue #1119, security): refuse a report this host
-                // can PROVE is inconsistent — the named slot declared a watermark
-                // at or beyond the tick the report says its ship flips on, i.e. it
-                // was still producing frames PAST the claimed loss, so it cannot
-                // have been lost then. Without this, one unilateral report evicts
-                // a LIVE peer's ship fleet-wide: `session.depart` drops the
-                // victim's future frames and its whole ship flips to Backfill. The
-                // decision is deterministic — with the bridge's frame-before-loss
-                // push order (`order_mesh_inbound`) the reliably-ordered watermark
-                // for `lost` up to this point is identical on every survivor, so
-                // every host accepts or refuses alike and the check cannot itself
-                // diverge the fold. A self-observed local socket close carries
-                // tick `0` (no claim to check) and derives its tick from the
-                // watermark above, so it is not caught here.
+                // The agreed disconnect tick, and why it is NEVER re-derived from a
+                // local watermark on a relayed report (issue #1119 determinism).
                 //
-                // TODO(#1118/#1120 mesh hardening): report authenticity is still
-                // unenforced. Containment closes the live-eviction hole (a report
-                // a slot demonstrably outlived is dropped), but it does not
-                // authenticate the REPORTER — a report timed at the slot's own
-                // next uncovered tick, or one forging the tick-`0` self-observed
-                // shape, is still honoured. Binding a reporter to the transport
-                // connection that actually held the lost peer is deferred for the
-                // same reason the Tick arm's `from` is unauthenticated (the star
-                // relay cannot supply an authenticated sender for a relayed
-                // sibling frame; see the TODO in that arm). Containment is
-                // #1119's defence; full reporter-auth is #1118/#1120's.
-                if hl.tick > 0 {
-                    if let Some(watermark) = observed {
-                        if watermark >= hl.tick {
-                            crate::pwarn!(
-                                log,
-                                LogCat::Admit,
-                                "refusing a host-loss report for {} at tick {}: \
-                                 this host has observed it through watermark {} — \
-                                 it was still producing frames past the claimed \
-                                 loss, so the report is inconsistent and dropped \
-                                 (issue #1119 containment)",
-                                lost.slot_id(),
-                                hl.tick,
-                                watermark,
-                            );
-                            continue;
-                        }
-                    }
-                }
-                // Never later than the first tick past what this host observed:
-                // a forged far-future tick cannot strand the ship with no input
-                // until it, because `derived` — not the reporter's claim — is
-                // used whenever the watermark is known.
-                let agreed = derived.unwrap_or(hl.tick);
+                // A lost slot's final watermark is shared across survivors only for
+                // a genuinely-departed slot whose last frame preceded the loss
+                // report in the one reliable ordered stream. A LIVE slot — or one
+                // whose loss is still propagating — has a skew-prone watermark: the
+                // relay lead sees a peer's frame before it forwards it, so at any
+                // instant honest survivors legitimately hold DIFFERENT
+                // `watermark_of(lost)` values for that slot. Deciding the tick — or
+                // an accept/refuse — against that raw local watermark let two
+                // honest survivors disagree whenever a report's tick fell between
+                // their watermarks: one flipped the ship to Backfill and the other
+                // did not, a permanent fold divergence with no reconciliation path.
+                //
+                // So the derivation has ONE authority per loss. In the star relay
+                // (`p2p-delta-transport-is-a-star-today`) exactly one host — the
+                // connection holder — sees a ship host's socket close; the bridge
+                // hands it a self-observation carrying tick `0`. THAT host derives
+                // the tick from the lost slot's own last watermark, which
+                // `order_mesh_inbound` guarantees already includes the co-arriving
+                // final frame, and stamps the concrete tick into the report it
+                // re-broadcasts. Every OTHER survivor receives that report with a
+                // non-zero carried tick and honours it VERBATIM — adopting the one
+                // authority's figure rather than re-deriving from its own skewed
+                // watermark — so all survivors converge on the identical tick under
+                // any frame-arrival interleaving.
+                //
+                // TODO(#1118/#1120 mesh hardening): a relayed report is honoured
+                // whether or not it is genuine. Honouring it is CONVERGENT — every
+                // survivor that receives it agrees the same tick, so the fold never
+                // diverges — but a forged or replayed `HostLoss` for a live slot is
+                // still acted on (its ship flips to Backfill on every host that
+                // hears it). REJECTING a forged report cannot be done
+                // deterministically here: the only ground-truth signal that a slot
+                // is alive is the transport connection this host does not hold (only
+                // the relay lead does), and a bounded liveness check against a raw
+                // watermark is exactly the skew-prone decision that diverged the
+                // fold. So reporter authenticity is deferred to sender
+                // authentication (#1118/#1120), parity with the Tick arm's
+                // unauthenticated `from`; until then an unauthenticated loss is
+                // honoured convergently.
+                let agreed = if hl.tick == 0 {
+                    // Self-observed local close: this host's own transport saw the
+                    // socket close, so it is the authority that derives the tick.
+                    // `map_or(0, …)` covers a close for a peer this host is already
+                    // departing (watermark cleared, loss still pending): `observe`
+                    // below keeps the higher tick already queued.
+                    observed.map_or(0, host_loss::agreed_loss_tick)
+                } else {
+                    // Relayed, already-agreed report: honour the carried tick
+                    // VERBATIM. Not re-derived, not merged with a local watermark —
+                    // that is the whole of the convergence argument above.
+                    hl.tick
+                };
                 let changed = pending_loss.observe(lost, agreed);
                 // Stop the barrier waiting for the departed host so the fleet
                 // resumes at once — the ship's Backfill flip is tick-stamped for

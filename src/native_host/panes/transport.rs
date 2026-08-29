@@ -41,6 +41,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use crate::core::codec::{self, JsonCodec, MessageCodec};
 use crate::core::messages::ClientMessage;
@@ -49,8 +50,8 @@ use crate::native_host::transport::{NativeTransport, TransportDispatch, Transpor
 
 use super::document::{mint_document_nonce, pane_document_path, pane_url};
 use super::identity::PaneIdentity;
-use super::recovery::PaneFault;
-use super::registry::{OutboundVerdict, PaneDispatch, PaneId, PaneRegistry};
+use super::recovery::{PaneFault, MAX_RECREATIONS_PER_WINDOW, RECREATION_WINDOW};
+use super::registry::{OutboundVerdict, PaneDispatch, PaneId, PaneLifecycle, PaneRegistry};
 use super::routing::pane_receives;
 
 /// Why something a page said was not passed on.
@@ -114,6 +115,13 @@ struct BusState {
     /// where a recreated pane's station simply stays on Backfill until the
     /// operator repairs it.
     pending_views: Vec<(PaneId, String)>,
+    /// When each identity — keyed by its session token, which SURVIVES across the
+    /// [`PaneId`] changes a recreation makes — was auto-recreated, most recent
+    /// last (issue #1125). Bounds a flapping view crash: a view that loads then
+    /// crashes would otherwise be rebuilt forever. See
+    /// [`record_recreation_within_budget`](PaneBus::record_recreation_within_budget)
+    /// and [`super::recovery::MAX_RECREATIONS_PER_WINDOW`].
+    recreations: BTreeMap<String, Vec<Instant>>,
 }
 
 /// The shared pane registry: cheap to clone, every clone the same panes.
@@ -238,6 +246,16 @@ impl PaneBus {
     /// Every open pane's handle, in the order they were opened.
     pub fn open_pane_ids(&self) -> Vec<PaneId> {
         self.lock().registry.open_panes().map(|p| p.id()).collect()
+    }
+
+    /// Whether a pane handle names a pane that is still open (issue #1125).
+    ///
+    /// A closed pane's record lingers so its id resolves to "gone" rather than to
+    /// nothing (see [`PaneRegistry`]); this answers `false` for it. The pane host
+    /// checks this before building a recreated pane's view, because a display loss
+    /// can close a just-recreated pane in the frame before its view is built.
+    pub fn is_open(&self, id: PaneId) -> bool {
+        self.lock().registry.open_panes().any(|p| p.id() == id)
     }
 
     /// How many panes are open.
@@ -382,10 +400,20 @@ impl PaneBus {
     /// queued in [`take_pending_views`](Self::take_pending_views) for the pane
     /// host to build a view for.
     ///
-    /// Returns `None` only if `closed_id` names no pane at all.
+    /// Returns `None` if `closed_id` names no pane at all, or if that pane is not
+    /// [`Closed`](PaneLifecycle::Closed) — see the same-token invariant below.
     pub fn recreate(&self, closed_id: PaneId) -> Option<(PaneId, String)> {
         let mut state = self.lock();
-        let identity = state.registry.get(closed_id)?.identity().clone();
+        let closed = state.registry.get(closed_id)?;
+        // The same-token invariant, enforced at the seam: recreation clones a
+        // CLOSED pane's identity onto a fresh pane. An OPEN pane still owns its
+        // token, so cloning it would put two live panes on one session token.
+        // `recreate` is only ever reached after `close`, so a non-`Closed` pane
+        // here is a caller bug — refuse rather than mint the duplicate.
+        if closed.lifecycle() != PaneLifecycle::Closed {
+            return None;
+        }
+        let identity = closed.identity().clone();
         let new_id = state.registry.open(identity.clone());
         let url = match state.recovery_template.clone() {
             Some((host_addr, body)) => {
@@ -401,6 +429,35 @@ impl PaneBus {
         };
         state.pending_views.push((new_id, url.clone()));
         Some((new_id, url))
+    }
+
+    /// Record one recreation of a (closed) pane's identity and report whether it
+    /// is within the flapping budget (issue #1125).
+    ///
+    /// Keyed on the session token, which survives the [`PaneId`] change a
+    /// recreation makes, so a view that loads-then-crashes is counted against ONE
+    /// identity across every rebuild. Timestamps older than
+    /// [`RECREATION_WINDOW`](super::recovery::RECREATION_WINDOW) are pruned first,
+    /// so a pane that crashed once, recovered and ran healthily is not denied a
+    /// fresh recreation an hour later. Returns `false` — and records nothing —
+    /// once the identity already has
+    /// [`MAX_RECREATIONS_PER_WINDOW`](super::recovery::MAX_RECREATIONS_PER_WINDOW)
+    /// recreations inside the window, so the caller leaves the pane closed for the
+    /// operator (the same conclusion a [`ReliableOverflow`](PaneFault::ReliableOverflow)
+    /// reaches at once). A pane the registry cannot resolve is refused.
+    pub fn record_recreation_within_budget(&self, closed_id: PaneId) -> bool {
+        let mut state = self.lock();
+        let Some(token) = state.registry.get(closed_id).map(|p| p.token().to_string()) else {
+            return false;
+        };
+        let now = Instant::now();
+        let history = state.recreations.entry(token).or_default();
+        history.retain(|t| now.duration_since(*t) < RECREATION_WINDOW);
+        if history.len() as u32 >= MAX_RECREATIONS_PER_WINDOW {
+            return false;
+        }
+        history.push(now);
+        true
     }
 
     /// Panes recreated since the last call, each with the URL its view should
@@ -645,6 +702,37 @@ mod tests {
             vec![TransportEvent::Disconnected { token }]
         );
         assert!(bus.transport().poll().is_empty(), "and only once");
+    }
+
+    #[test]
+    fn recreate_refuses_a_pane_that_is_not_closed() {
+        // The same-token invariant at the seam: an OPEN pane still owns its token,
+        // so recreation must never clone it into a second live pane. `recreate`
+        // only ever follows `close` in production; this proves it refuses the
+        // misuse rather than minting the duplicate.
+        let bus = PaneBus::default();
+        let open = bus.open(identity(1));
+        assert!(
+            bus.recreate(open).is_none(),
+            "an open pane cannot be recreated — that would duplicate its token"
+        );
+        assert_eq!(bus.open_count(), 1, "and nothing new was opened");
+
+        // After a close it is allowed, on the same identity.
+        let token = bus.token_of(open).unwrap();
+        bus.close(open);
+        let (recreated, _) = bus.recreate(open).expect("a closed pane recreates");
+        assert_eq!(bus.token_of(recreated).as_deref(), Some(token.as_str()));
+    }
+
+    #[test]
+    fn is_open_answers_true_for_live_panes_and_false_for_closed_ones() {
+        let bus = PaneBus::default();
+        let id = bus.open(identity(1));
+        assert!(bus.is_open(id));
+        bus.close(id);
+        assert!(!bus.is_open(id), "a closed pane's lingering record is not open");
+        assert!(!bus.is_open(PaneId(999)), "an unknown handle is not open");
     }
 
     #[test]

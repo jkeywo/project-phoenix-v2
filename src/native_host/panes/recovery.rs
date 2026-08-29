@@ -35,9 +35,46 @@
 //! blindly would risk a rebuild loop against a page that wedges again, so that
 //! one closes and stays closed — the operator decides. ([ai] decision:
 //! auto-recreate is scoped to the crash case for exactly this reason.)
+//!
+//! # The crash recreate is BOUNDED, or it flaps forever
+//!
+//! Auto-recreate for a view crash is not unconditional. A view that *loads then
+//! crashes* would otherwise be closed and rebuilt on every crash-detect cycle —
+//! flapping its station between a human and Backfill roughly every half second,
+//! forever, with no operator ever getting a stable console to repair. So
+//! recreation is rate-limited **per identity** (issue #1125): after
+//! [`MAX_RECREATIONS_PER_WINDOW`] rebuilds of one identity inside
+//! [`RECREATION_WINDOW`] the fault is no longer treated as transient, and the
+//! pane is left closed on Backfill for the operator — the same conclusion a
+//! [`ReliableOverflow`](PaneFault::ReliableOverflow) reaches immediately. The
+//! counter is keyed on the session token, which survives the [`PaneId`] change a
+//! recreation makes, so every rebuild of a flapping view counts against the one
+//! identity; a window rather than a lifetime cap so a pane that crashed once,
+//! recovered and ran healthily is not denied a fresh recreation much later.
+
+use std::time::Duration;
 
 use super::registry::PaneId;
 use super::transport::PaneBus;
+
+/// The most times one pane identity is auto-recreated within [`RECREATION_WINDOW`]
+/// before it is left closed for the operator (issue #1125).
+///
+/// See the [module note](self#the-crash-recreate-is-bounded-or-it-flaps-forever):
+/// past this many rebuilds of the same identity in the window, a view crash is
+/// not a transient worth rebuilding into — it flaps — so the pane stays closed on
+/// Backfill, matching the reasoning that makes a reliable overflow refuse to
+/// recreate at all. Not a gameplay tunable: a small fault-recovery bound.
+pub const MAX_RECREATIONS_PER_WINDOW: u32 = 3;
+
+/// The rolling window [`MAX_RECREATIONS_PER_WINDOW`] recreations are counted over
+/// (issue #1125).
+///
+/// Wide enough to catch a ~0.5 s crash-detect flap — several cycles land well
+/// inside it — but short enough that a pane which crashed once, recovered, and ran
+/// for the rest of a long mission is granted a fresh recreation if it crashes
+/// again later, its earlier crash having aged out of the window.
+pub const RECREATION_WINDOW: Duration = Duration::from_secs(10);
 
 /// Why a pane failed and its participant must disconnect.
 ///
@@ -78,7 +115,9 @@ impl PaneFault {
     ///
     /// True for a view crash (a transient — rebuild the view, the pane analogue
     /// of a network redial); false for a reliable overflow (a wedged page — leave
-    /// it closed rather than risk a rebuild loop).
+    /// it closed rather than risk a rebuild loop). A `true` here is *permission*
+    /// to recreate, not a guarantee: [`service_faults`] still rate-limits the
+    /// crash case per identity — see [`MAX_RECREATIONS_PER_WINDOW`].
     pub fn recreates(&self) -> bool {
         matches!(self, PaneFault::ViewCrashed)
     }
@@ -96,6 +135,11 @@ pub struct FaultOutcome {
     /// only closes, and `None` too when the bus was never armed for recreation
     /// (a test with no HTTP server — the new pane still opens, but with no URL).
     pub recreated: Option<(PaneId, String)>,
+    /// True when the fault *would* have recreated (a view crash) but the identity
+    /// has flapped past [`MAX_RECREATIONS_PER_WINDOW`], so it was deliberately left
+    /// closed on Backfill for the operator instead. Distinguishes that give-up
+    /// from an overflow (which never recreates) in the operator log.
+    pub recreation_exhausted: bool,
 }
 
 /// Close every pane the bus reported faulted, and recreate the ones whose fault
@@ -122,15 +166,24 @@ pub fn service_faults(bus: &PaneBus) -> Vec<FaultOutcome> {
         // order is preserved. `recreate` reads the failed pane's identity from
         // its (now `Closed`) record, which the registry keeps.
         bus.close(failed);
-        let recreated = if fault.recreates() {
-            bus.recreate(failed)
-        } else {
-            None
-        };
+        let mut recreated = None;
+        let mut recreation_exhausted = false;
+        if fault.recreates() {
+            // Bounded recreation (issue #1125): a view that loads-then-crashes
+            // would flap its station between human and Backfill forever. Past the
+            // per-identity budget, stop rebuilding into the same crash and leave
+            // the pane closed for the operator — the ReliableOverflow conclusion.
+            if bus.record_recreation_within_budget(failed) {
+                recreated = bus.recreate(failed);
+            } else {
+                recreation_exhausted = true;
+            }
+        }
         outcomes.push(FaultOutcome {
             failed,
             fault,
             recreated,
+            recreation_exhausted,
         });
     }
     outcomes
@@ -184,6 +237,60 @@ mod tests {
             bus.transport().poll(),
             vec![TransportEvent::Disconnected { token }]
         );
+    }
+
+    #[test]
+    fn a_flapping_view_crash_is_recreated_a_bounded_number_of_times_then_left_closed() {
+        // The finding: unbounded auto-recreate lets a load-then-crash view flap
+        // its station between human and Backfill forever. The bound recreates the
+        // same identity at most MAX_RECREATIONS_PER_WINDOW times in the window,
+        // then leaves the pane closed for the operator — the ReliableOverflow
+        // conclusion. Here every crash is consecutive (well inside the window).
+        let bus = PaneBus::default();
+        let mut current = bus.open(identity(1));
+        let token = bus.token_of(current).unwrap();
+        bus.mark_live(current);
+
+        let mut recreations = 0u32;
+        let mut left_closed = false;
+        // One more crash than the budget: the extra one must NOT recreate.
+        for _ in 0..(MAX_RECREATIONS_PER_WINDOW + 1) {
+            bus.fault(current, PaneFault::ViewCrashed);
+            let outcome = service_faults(&bus).pop().expect("one fault serviced");
+            match outcome.recreated {
+                Some((new_id, _)) => {
+                    assert!(
+                        !outcome.recreation_exhausted,
+                        "a recreation is not also an exhaustion"
+                    );
+                    recreations += 1;
+                    current = new_id;
+                    bus.mark_live(current);
+                    assert_eq!(
+                        bus.token_of(current).as_deref(),
+                        Some(token.as_str()),
+                        "each rebuild carries the SAME identity, so the count keys on it"
+                    );
+                }
+                None => {
+                    assert!(
+                        outcome.recreation_exhausted,
+                        "the crash gave up after the budget, not silently"
+                    );
+                    assert_eq!(
+                        bus.open_count(),
+                        0,
+                        "past the budget the pane is left closed on Backfill, not flapping"
+                    );
+                    left_closed = true;
+                }
+            }
+        }
+        assert_eq!(
+            recreations, MAX_RECREATIONS_PER_WINDOW,
+            "recreated exactly the budget's worth of times"
+        );
+        assert!(left_closed, "and then stopped, leaving the pane closed");
     }
 
     #[test]

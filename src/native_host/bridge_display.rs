@@ -40,8 +40,9 @@ use bevy::window::{Monitor, MonitorSelection, PrimaryMonitor, PrimaryWindow, Win
 use crate::logging::{LogCat, LogFilterConfig};
 
 use super::bridge_profile::{
-    identify, pane_rects, resolve, runtime_display_losses, runtime_display_returns, DisplayRole,
-    MonitorGeometry, MonitorIdentity, PaneRect, RawMonitor, ValidatedProfile,
+    identify, pane_rects, present_assigned_identities, resolve, runtime_display_losses,
+    runtime_display_returns, DisplayRole, MonitorGeometry, MonitorIdentity, PaneRect, RawMonitor,
+    RuntimeDisplayLoss, ValidatedProfile,
 };
 
 /// The validated bridge profile a native host applies to its displays.
@@ -309,6 +310,25 @@ pub fn apply_bridge_profile(world: &mut World) {
 
 // ── runtime display loss (issue #1125) ──────────────────────────────────────
 
+/// How many consecutive frames a configured monitor must be absent before its
+/// panes are disconnected (issue #1125).
+///
+/// `bevy_winit`'s `create_monitors` despawns a [`Monitor`](bevy::window::Monitor)
+/// entity on any event-loop iteration where winit's `available_monitors()` stops
+/// reporting it — and on Windows that set can blip for a frame or two during a
+/// GPU reset (TDR), a monitor waking from DPMS, or a dock/undock, then recover.
+/// Acting on a single change-frame would flip a live human's station to Backfill
+/// for a transient that never really disconnected. So a loss must persist this
+/// many consecutive observations first — the display-side echo of
+/// [`VIEW_CRASH_COPY_FAILURES`], deliberately shorter because a genuine unplug
+/// should still reach Backfill promptly, and a returning monitor before the
+/// window is up costs nothing but a cleared counter.
+///
+/// (The echoed threshold is the pane host's own `VIEW_CRASH_COPY_FAILURES`, a
+/// `ultralight`-gated const, so it is named in prose rather than intra-doc
+/// linked from this always-compiled module.)
+const DISPLAY_LOSS_DEBOUNCE_FRAMES: u32 = 10;
+
 /// Watch the live monitor set and react to a configured display lost — or
 /// returned — **mid-mission** (issue #1125).
 ///
@@ -347,6 +367,7 @@ fn watch_runtime_displays(
     bus: Option<Res<crate::native_host::panes::PaneBusResource>>,
     log: Option<Res<LogFilterConfig>>,
     mut baseline: Local<Option<std::collections::HashSet<MonitorIdentity>>>,
+    mut absent_streak: Local<std::collections::HashMap<MonitorIdentity, u32>>,
 ) {
     let raws: Vec<RawMonitor> = monitors
         .iter()
@@ -358,24 +379,50 @@ fn watch_runtime_displays(
         // display was lost" would be wrong, so wait for a frame that has some.
         return;
     }
-    let current: std::collections::HashSet<MonitorIdentity> =
-        identify(&raws).into_iter().map(|d| d.identity).collect();
 
-    // Establish the baseline on the first observed frame, then diff against it.
-    let previous = match baseline.take() {
-        Some(previous) => previous,
+    let assigned = config.profile.assigned_surfaces();
+    // The assigned monitors present THIS frame, matched STABLY against the raw
+    // monitors rather than re-derived with `identify` — so the survivor of two
+    // identical monitors keeps its own suffixed identity when its twin leaves,
+    // instead of shifting to the short key and being misread as also lost (issue
+    // #1125). See `present_assigned_identities`.
+    let current = present_assigned_identities(&assigned, &raws);
+
+    // Establish the committed baseline on the first observed frame, then diff.
+    let committed = match baseline.as_mut() {
+        Some(committed) => committed,
         None => {
             *baseline = Some(current);
             return;
         }
     };
-    if previous == current {
-        *baseline = Some(previous);
-        return;
+
+    // A returned monitor is reported immediately — it only logs, moves no pane —
+    // and clears any pending absence streak it had accumulated.
+    for returned in runtime_display_returns(&assigned, committed, &current) {
+        crate::pinfo!(log, LogCat::Lobby, "bridge display: {returned}");
+        absent_streak.remove(&returned.identity);
     }
 
-    let assigned = config.profile.assigned_surfaces();
-    for loss in runtime_display_losses(&assigned, &previous, &current) {
+    // A loss is DEBOUNCED before its panes are closed: a monitor absent this frame
+    // is only a *candidate*, and its streak must reach `DISPLAY_LOSS_DEBOUNCE_FRAMES`
+    // consecutive frames before we believe it — a one- or two-frame winit blip
+    // (a GPU reset, a monitor waking) then disconnects no station. Candidates that
+    // reappear before the window is up have their streak cleared below.
+    let candidates = runtime_display_losses(&assigned, committed, &current);
+    absent_streak.retain(|id, _| candidates.iter().any(|c| &c.identity == id));
+
+    let mut confirmed: Vec<RuntimeDisplayLoss> = Vec::new();
+    for loss in candidates {
+        let streak = absent_streak.entry(loss.identity.clone()).or_insert(0);
+        *streak += 1;
+        if *streak >= DISPLAY_LOSS_DEBOUNCE_FRAMES {
+            absent_streak.remove(&loss.identity);
+            confirmed.push(loss);
+        }
+    }
+
+    for loss in &confirmed {
         crate::pwarn!(log, LogCat::Lobby, "bridge display: {loss}");
         if let Some(bus) = &bus {
             for label in &loss.pane_labels {
@@ -390,11 +437,17 @@ fn watch_runtime_displays(
             }
         }
     }
-    for returned in runtime_display_returns(&assigned, &previous, &current) {
-        crate::pinfo!(log, LogCat::Lobby, "bridge display: {returned}");
-    }
 
-    *baseline = Some(current);
+    // Commit the new ground truth: monitors present this frame join the committed
+    // set (a return, or one still present); confirmed losses leave it. An
+    // UNconfirmed candidate stays committed so it keeps being detected next frame
+    // until it either returns or crosses the debounce.
+    for id in &current {
+        committed.insert(id.clone());
+    }
+    for loss in &confirmed {
+        committed.remove(&loss.identity);
+    }
 }
 
 // ── the --setup enumeration mode ──────────────────────────────────────────
@@ -688,14 +741,24 @@ mod tests {
         app.update();
         assert_eq!(bus.open_count(), 1, "the baseline frame closes no pane");
 
-        // The Station monitor is unplugged.
+        // The Station monitor is unplugged. The loss is debounced, so one missing
+        // frame is a blip and closes nothing.
         app.world_mut().entity_mut(benq).despawn();
         app.update();
+        assert_eq!(
+            bus.open_count(),
+            1,
+            "one missing frame is a winit blip, not a disconnect"
+        );
 
+        // Only a loss that persists the whole debounce window is believed.
+        for _ in 1..DISPLAY_LOSS_DEBOUNCE_FRAMES {
+            app.update();
+        }
         assert_eq!(
             bus.open_count(),
             0,
-            "the pane on the lost Station monitor is closed"
+            "the pane on the persistently-lost Station monitor is closed"
         );
         assert_eq!(
             bus.transport().poll(),
@@ -735,12 +798,113 @@ mod tests {
             .id();
         app.update();
         app.world_mut().entity_mut(dell).despawn();
-        app.update();
+        // Past the debounce window, so the viewscreen loss is confirmed — and
+        // still closes no pane, because the viewscreen carries no participant.
+        for _ in 0..DISPLAY_LOSS_DEBOUNCE_FRAMES + 1 {
+            app.update();
+        }
 
         assert_eq!(
             bus.open_count(),
             1,
             "losing the viewscreen touches no station's pane"
+        );
+    }
+
+    /// A validated profile of two IDENTICAL Station monitors, disambiguated by
+    /// position, each carrying its own participant pane.
+    fn two_identical_stations() -> ValidatedProfile {
+        use super::super::bridge_profile::{PaneSlot, ROLE_STATION};
+        BridgeProfile {
+            version: PROFILE_VERSION,
+            displays: vec![
+                DisplayEntry {
+                    id: "ACME 1080@1920x1080#0,0".to_string(),
+                    role: ROLE_STATION.to_string(),
+                    split: None,
+                    panes: vec![PaneSlot {
+                        label: "Ada".to_string(),
+                    }],
+                },
+                DisplayEntry {
+                    id: "ACME 1080@1920x1080#1920,0".to_string(),
+                    role: ROLE_STATION.to_string(),
+                    split: None,
+                    panes: vec![PaneSlot {
+                        label: "Grace".to_string(),
+                    }],
+                },
+            ],
+            touch: Vec::new(),
+        }
+        .validate()
+        .unwrap()
+    }
+
+    #[test]
+    fn losing_one_of_two_identical_monitors_closes_only_its_own_pane() {
+        // The finding-1 regression, at the adapter: two identical monitors are
+        // told apart only by a `#x,y` suffix, so when one leaves the survivor's
+        // live-computed identity must NOT shift and read as lost too. Exactly one
+        // pane — the removed monitor's — closes; the survivor's stays up.
+        use crate::native_host::panes::identity::PaneIdentity;
+        use crate::native_host::panes::transport::PaneBus;
+        use crate::native_host::panes::PaneBusResource;
+        use crate::native_host::transport::NativeTransport;
+
+        let mut app = App::new();
+        app.insert_resource(BridgeDisplayConfig {
+            profile: two_identical_stations(),
+        });
+        let bus = PaneBus::default();
+        let ada = bus.open(
+            PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000001", "Ada").unwrap(),
+        );
+        bus.mark_live(ada);
+        let ada_token = bus.token_of(ada).unwrap();
+        let grace = bus.open(
+            PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000002", "Grace").unwrap(),
+        );
+        bus.mark_live(grace);
+        app.insert_resource(PaneBusResource(bus.clone()));
+        app.add_systems(Update, watch_runtime_displays);
+
+        // Ada sits at (0,0), Grace at (1920,0) — same model, same mode.
+        let ada_monitor = app
+            .world_mut()
+            .spawn((monitor("ACME 1080", 1920, 1080, 0, 0), PrimaryMonitor))
+            .id();
+        let _grace_monitor = app
+            .world_mut()
+            .spawn(monitor("ACME 1080", 1920, 1080, 1920, 0))
+            .id();
+
+        app.update();
+        assert_eq!(bus.open_count(), 2, "the baseline frame closes no pane");
+
+        // Ada's monitor is unplugged; Grace's stays exactly where it was.
+        app.world_mut().entity_mut(ada_monitor).despawn();
+        for _ in 0..DISPLAY_LOSS_DEBOUNCE_FRAMES {
+            app.update();
+        }
+
+        assert_eq!(
+            bus.open_count(),
+            1,
+            "only the lost monitor's pane closes — the survivor's stays up"
+        );
+        assert!(
+            bus.open_pane_for_name("Grace").is_some(),
+            "Grace's pane on the surviving twin is untouched"
+        );
+        assert!(
+            bus.open_pane_for_name("Ada").is_none(),
+            "Ada's pane on the removed twin is closed"
+        );
+        assert_eq!(
+            bus.transport().poll(),
+            vec![crate::native_host::transport::TransportEvent::Disconnected { token: ada_token }],
+            "exactly Ada's token disconnects — Grace's never does"
         );
     }
 }

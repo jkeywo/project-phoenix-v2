@@ -252,6 +252,53 @@ fn a_single_viewscreen_profile_still_validates() {
 }
 
 #[test]
+fn two_panes_sharing_a_participant_label_across_the_profile_is_refused() {
+    // A lost monitor's panes are resolved to disconnect by participant NAME, with
+    // no monitor anchor, so the same label on two Station monitors could not be
+    // resolved to the right one. `validate` refuses it at author time (composing
+    // with #1123's other refusals) rather than mis-resolving it at runtime.
+    let dup = profile_with(vec![
+        station_entry("m1", &["Ada"]),
+        station_entry("m2", &["Ada"]),
+    ]);
+    let err = dup.validate().unwrap_err();
+    assert_eq!(
+        err,
+        ProfileError::DuplicatePaneLabel {
+            label: "Ada".to_string()
+        }
+    );
+    // The message names the offending label and the rule.
+    let msg = err.to_string();
+    assert!(msg.contains("Ada"), "{msg}");
+    assert!(msg.contains("unique"), "{msg}");
+}
+
+#[test]
+fn a_label_repeated_within_one_two_pane_station_is_also_refused() {
+    // The same hole, inside a single Station: two panes named for the same
+    // participant are two panes one name would resolve to.
+    let dup = profile_with(vec![station_entry("m1", &["Ada", "Ada"])]);
+    assert_eq!(
+        dup.validate().unwrap_err(),
+        ProfileError::DuplicatePaneLabel {
+            label: "Ada".to_string()
+        }
+    );
+}
+
+#[test]
+fn distinct_labels_across_stations_still_validate() {
+    // The refusal is only for a genuine collision — a bridge of many stations
+    // with distinct crew names is the ordinary case and must pass.
+    let ok = profile_with(vec![
+        station_entry("m1", &["Ada", "Grace"]),
+        station_entry("m2", &["Kay"]),
+    ]);
+    assert!(ok.validate().is_ok());
+}
+
+#[test]
 fn a_profile_from_another_schema_version_is_refused_rather_than_reinterpreted() {
     let mut p = profile_with(vec![]);
     p.version = PROFILE_VERSION + 1;
@@ -736,4 +783,53 @@ fn an_unassigned_monitor_appearing_is_neither_a_loss_nor_a_return() {
     let other = "Some Other@1280x1024";
     assert!(runtime_display_losses(&assigned, &present(&[DELL, BENQ, other]), &present(&[DELL, BENQ])).is_empty());
     assert!(runtime_display_returns(&assigned, &present(&[DELL, BENQ]), &present(&[DELL, BENQ, other])).is_empty());
+}
+
+// ── stable present-set for identical monitors (issue #1125) ──────────────────
+
+/// A profile of two identical Station monitors, disambiguated by position, each
+/// carrying one participant pane.
+fn two_identical_stations() -> ValidatedProfile {
+    profile_with(vec![
+        station_entry("ACME 1080@1920x1080#0,0", &["Ada"]),
+        station_entry("ACME 1080@1920x1080#1920,0", &["Grace"]),
+    ])
+    .validate()
+    .unwrap()
+}
+
+#[test]
+fn a_present_monitor_keeps_its_suffixed_identity_after_its_twin_leaves() {
+    // The bug fix at the pure seam. `identify` would give the lone survivor of a
+    // pair of identical monitors the SHORT key (no `#x,y` suffix), because it
+    // disambiguates against the live set. Matching assignments against the raw
+    // monitors directly keeps each present monitor's suffixed identity stable
+    // regardless of its twin — so the survivor is still recognised as present.
+    let assigned = two_identical_stations().assigned_surfaces();
+    let both = [
+        raw("ACME 1080", 1920, 1080, 0, 0),
+        raw("ACME 1080", 1920, 1080, 1920, 0),
+    ];
+    let present_both = present_assigned_identities(&assigned, &both);
+    assert_eq!(
+        present_both,
+        present(&["ACME 1080@1920x1080#0,0", "ACME 1080@1920x1080#1920,0"]),
+        "both twins are present under their suffixed identities"
+    );
+
+    // The monitor at (0,0) is unplugged; only the (1920,0) one remains.
+    let survivor = [raw("ACME 1080", 1920, 1080, 1920, 0)];
+    let present_survivor = present_assigned_identities(&assigned, &survivor);
+    assert_eq!(
+        present_survivor,
+        present(&["ACME 1080@1920x1080#1920,0"]),
+        "the survivor keeps its OWN suffixed identity — it is not misread as gone"
+    );
+
+    // So the diff names exactly the removed monitor's pane, and never the
+    // survivor's — the whole point of the fix.
+    let losses = runtime_display_losses(&assigned, &present_both, &present_survivor);
+    assert_eq!(losses.len(), 1, "exactly one monitor was lost");
+    assert_eq!(losses[0].identity.as_str(), "ACME 1080@1920x1080#0,0");
+    assert_eq!(losses[0].pane_labels, vec!["Ada".to_string()]);
 }

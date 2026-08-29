@@ -695,6 +695,15 @@ fn drive_panes(
                 outcome.fault.reason(),
                 new_id
             ),
+            None if outcome.recreation_exhausted => crate::pwarn!(
+                log,
+                LogCat::Lobby,
+                "pane host: {} {} — and it has crashed too many times in too short a window, so \
+                 it is left closed on AI control for the operator to repair rather than rebuilt \
+                 into the same crash",
+                outcome.failed,
+                outcome.fault.reason()
+            ),
             None => crate::pwarn!(
                 log,
                 LogCat::Lobby,
@@ -721,6 +730,21 @@ fn open_pending_views(
     log: &Option<Res<LogFilterConfig>>,
 ) {
     for (new_id, url) in bus.0.take_pending_views() {
+        // A display loss (issue #1125's other half) can close a just-recreated
+        // pane in the frame between `recreate` queuing it here and this build.
+        // `name_of`/the registry still resolve a closed pane's lingering record,
+        // so build a view only for a pane that is still open — otherwise this
+        // would leave an orphan surface nothing talks to. The pending entry is
+        // already drained, so skipping drops it.
+        if !bus.0.is_open(new_id) {
+            crate::pinfo!(
+                log,
+                LogCat::Lobby,
+                "pane host: recreated {new_id} was closed before its view was built (a display \
+                 loss in the interval); not rebuilding it"
+            );
+            continue;
+        }
         let Some(name) = bus.0.name_of(new_id) else {
             continue;
         };

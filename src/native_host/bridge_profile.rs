@@ -460,6 +460,13 @@ impl BridgeProfile {
         }
         let mut displays = Vec::with_capacity(self.displays.len());
         let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        // Every participant label already claimed by a Station pane. A label must
+        // be unique across the WHOLE profile: the runtime display-loss watcher
+        // maps a lost monitor's pane labels to the panes to disconnect by NAME
+        // (`open_pane_for_name`), with no monitor anchor, so the same label on two
+        // monitors could not be resolved to the right one. Refused at author time
+        // rather than mis-resolved at runtime.
+        let mut seen_labels: std::collections::HashSet<&str> = std::collections::HashSet::new();
         // Named as soon as a second one turns up, rather than accumulated and
         // reported at the end: a bridge has exactly one shared viewscreen, and
         // `apply_bridge_profile` has no "last one wins" rule to fall back on —
@@ -494,6 +501,13 @@ impl BridgeProfile {
                             id: entry.id.clone(),
                             count,
                         });
+                    }
+                    for pane in &entry.panes {
+                        if !seen_labels.insert(pane.label.as_str()) {
+                            return Err(ProfileError::DuplicatePaneLabel {
+                                label: pane.label.clone(),
+                            });
+                        }
                     }
                     DisplayRole::Station {
                         split: entry.split.unwrap_or_default(),
@@ -550,6 +564,11 @@ pub enum ProfileError {
     ViewscreenHasPanes { id: String },
     /// Two `[[display]]` entries name the same monitor id.
     DuplicateId { id: String },
+    /// Two Station panes across the profile carry the same participant label. A
+    /// lost monitor's panes are resolved to disconnect by name, so a label shared
+    /// by two panes could not be resolved to the right monitor — each participant
+    /// label is unique across the whole bridge.
+    DuplicatePaneLabel { label: String },
     /// Two or more `[[display]]` entries claim the `viewscreen` role. A bridge
     /// has exactly one shared viewscreen; without this refusal
     /// `apply_bridge_profile` would silently keep only the last one and leave
@@ -590,6 +609,12 @@ impl std::fmt::Display for ProfileError {
             ProfileError::DuplicateId { id } => write!(
                 f,
                 "two displays both claim monitor {id:?}; each monitor is assigned exactly once"
+            ),
+            ProfileError::DuplicatePaneLabel { label } => write!(
+                f,
+                "two Station panes both carry the participant label {label:?}; a lost monitor's \
+                 panes are resolved to disconnect by name, so each label must be unique across \
+                 the whole bridge"
             ),
             ProfileError::MultipleViewscreens { ids } => write!(
                 f,
@@ -894,6 +919,51 @@ pub fn runtime_display_returns(
             identity: a.identity.clone(),
             role: a.role.clone(),
         })
+        .collect()
+}
+
+/// Which of a profile's assigned monitors are present, matched **stably** against
+/// the raw monitors this frame (issue #1125).
+///
+/// This is the set the runtime watcher diffs frame to frame, and it must NOT be
+/// computed with [`identify`], for a subtle reason: `identify` gives a monitor a
+/// *context-dependent* identity. Two identical monitors (same name and mode) each
+/// get a `#x,y` position suffix while both are present, but the survivor alone
+/// gets the short, position-free key. So if one of two identical Station monitors
+/// is unplugged, the survivor's live-computed identity would shift from
+/// `base#x1,y1` to `base`, no longer match its profile assignment, and be misread
+/// as *also* lost — disconnecting a station that never moved.
+///
+/// So instead of re-deriving identities against the shrinking live set, this
+/// matches each assignment against the raw monitors directly. A present monitor
+/// satisfies *both* candidate forms of its identity — the bare `base` key and the
+/// position-suffixed `base#x,y` key — so:
+///
+/// * a bare assignment `base` is present iff some monitor carries that base;
+/// * a suffixed assignment `base#x,y` is present iff a monitor with that base
+///   sits at `(x,y)`.
+///
+/// An assignment's presence therefore never depends on whether its identical twin
+/// is still connected. Only assigned identities appear in the result — a present
+/// monitor the profile says nothing about is not part of the bridge and is not
+/// tracked here (its coming and going is neither a loss nor a return).
+pub fn present_assigned_identities(
+    assigned: &[AssignedSurface],
+    raws: &[RawMonitor],
+) -> std::collections::HashSet<MonitorIdentity> {
+    // Every identity form a present monitor could satisfy: its position-free base
+    // key AND its position-suffixed key. Matching an assignment against this set
+    // makes presence independent of the live disambiguation `identify` would do.
+    let mut present_forms: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for raw in raws {
+        let base = base_key(raw);
+        present_forms.insert(format!("{base}#{},{}", raw.position_x, raw.position_y));
+        present_forms.insert(base);
+    }
+    assigned
+        .iter()
+        .filter(|a| present_forms.contains(a.identity.as_str()))
+        .map(|a| a.identity.clone())
         .collect()
 }
 

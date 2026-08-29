@@ -77,7 +77,7 @@ pub use host_loss::{agreed_loss_tick, HostLossRecord, PendingHostLoss};
 pub use session::{LockstepSession, Stall};
 pub use snapshot_relay::{
     capture_run, drain_mesh_restore, frames_for, gate_and_restore, gate_and_restore_against,
-    send_snapshot, MeshRestoreOutcome, MeshSnapshotReceiver,
+    send_snapshot, MeshRestoreArm, MeshRestoreOutcome, MeshSnapshotReceiver,
 };
 pub use transfer::{Accepted, SnapshotChunk, SnapshotReceiver, TransferError};
 

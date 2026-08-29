@@ -40,8 +40,8 @@ use project_phoenix::headless::{build_headless_app, HeadlessArgs};
 use project_phoenix::lockstep::snapshot_relay::{drain_mesh_restore, frames_for};
 use project_phoenix::lockstep::transfer::{Accepted, SnapshotChunk, TransferError};
 use project_phoenix::lockstep::{
-    gate_and_restore_against, send_snapshot, MeshFrame, MeshOutbox, MeshRestoreOutcome,
-    MeshSnapshotReceiver,
+    gate_and_restore_against, send_snapshot, MeshFrame, MeshOutbox, MeshRestoreArm,
+    MeshRestoreOutcome, MeshSnapshotReceiver,
 };
 use project_phoenix::server_app::LocalShip;
 use project_phoenix::sim_digest::world_digest;
@@ -197,6 +197,16 @@ fn local_ship_uuid(app: &mut App) -> String {
     uuids.into_iter().next().unwrap()
 }
 
+/// Arm a receiving host to accept a restore from `leader` (issue #1118, AC2).
+///
+/// `drain_mesh_restore` commits a staged record only for an armed recovering host,
+/// and only from the leader the recovery plan named — so every test that expects a
+/// commit (or that expects the version/content gate to run at all) arms first, the
+/// way the recovery driver arms the real recovering host.
+fn arm_receiver(app: &mut App, leader: HostSlot) {
+    app.world_mut().resource_mut::<MeshRestoreArm>().arm(leader);
+}
+
 /// A jumbled-but-complete delivery order that still covers every chunk once.
 fn jumbled(len: usize) -> Vec<usize> {
     let mut order: Vec<usize> = (0..len).rev().collect();
@@ -258,7 +268,9 @@ fn a_record_transfers_between_hosts_and_the_two_agree_after_restore() {
     );
 
     // The real restore system commits it: gate, reconcile, restore, and the
-    // post-restore digest check.
+    // post-restore digest check. The receiver is armed for the sender, as the
+    // recovery driver arms a designated recovering host (issue #1118, AC2).
+    arm_receiver(&mut receiver, SLOT_SENDER);
     drain_mesh_restore(receiver.world_mut());
     let outcome = receiver
         .world()
@@ -554,6 +566,9 @@ fn a_record_from_a_different_build_is_refused_before_it_commits() {
         "the transfer itself is intact — only the gate refuses"
     );
 
+    // Armed for the sender, so the drop is the version/content gate's doing rather
+    // than the receiver arm's: this test is about the gate, not the arm.
+    arm_receiver(&mut receiver, SLOT_SENDER);
     drain_mesh_restore(receiver.world_mut());
     let outcome = receiver
         .world()
@@ -623,6 +638,7 @@ fn restoring_a_transferred_record_does_not_widen_which_crew_sees_what() {
         let mut rx = receiver.world_mut().resource_mut::<MeshSnapshotReceiver>();
         let _ = rx.accept_chunk(chunk);
     }
+    arm_receiver(&mut receiver, SLOT_SENDER);
     drain_mesh_restore(receiver.world_mut());
     assert!(matches!(
         receiver

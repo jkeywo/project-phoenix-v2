@@ -51,23 +51,26 @@ use crate::snapshot::{self, StoredRun};
 
 /// What a received transfer resolved to, once every chunk was in hand.
 ///
-/// Refusals are NOT uniformly clean, and the boundary is load-bearing for a host
-/// deciding whether it can retry in place. The version/content gate runs BEFORE a
-/// single component is written, so a [`Self::RefusedGate`] on a build, rules or
-/// content mismatch leaves the receiving world byte-identical — that transfer is
-/// discarded and the host is exactly where it was. But [`Self::RefusedIntegrity`]
-/// and [`Self::Incomplete`] are decided AFTER `snapshot::restore` has already
-/// overwritten the world, and there is no rollback: the world is left holding the
-/// very record the check then judged bad. A host that hits one cannot simply retry
-/// against the same world — it must re-bootstrap the scenario to a clean state
-/// first. (A `RefusedGate` naming a world layer that could not be reconstructed is
-/// the one gate-side exception: `reconcile_world_layers` has already mutated layer
-/// state by the time it returns, so that sub-case is not byte-clean either.)
+/// **Every refusal now leaves the receiving world byte-identical to what it was**
+/// — issue #1118 closed the asymmetry #1117 flagged here. The version/content gate
+/// still runs BEFORE a single component is written, so a [`Self::RefusedGate`] on a
+/// build, rules or content mismatch is untouched by construction. And
+/// [`Self::RefusedIntegrity`] and [`Self::Incomplete`], which are decided only
+/// AFTER `snapshot::restore` has walked the world, now restore into a
+/// **rollback-able checkpoint** ([`gate_and_restore_against`]): the world's live
+/// state is captured first, the record is written over it, and on a fold mismatch
+/// or an incomplete report the checkpoint is restored back — so a refused host is
+/// left exactly where it began rather than holding the very record the check judged
+/// bad. (A `RefusedGate` naming a world layer that could not be reconstructed
+/// remains the one gate-side exception: `reconcile_world_layers` mutates layer
+/// state before it returns, so that sub-case is not byte-clean; it is a gate
+/// refusal, not a half-restore.)
 ///
-/// #1118 (divergence recovery) is expected to close this asymmetry: restore into a
-/// rollback-able checkpoint and swap the live world in only on a matching fold, so
-/// an integrity/incomplete outcome becomes a discarded checkpoint rather than a
-/// destroyed world.
+/// The two arm refusals sit in front of all of the above: a completed record that
+/// arrives when this host is not the designated recovering host, or from a slot
+/// that is not the recovery leader, is DROPPED without touching the world at all.
+/// That is the receiver arm (issue #1118, AC2) — the transfer path may reassemble
+/// any peer's record, but only a recovery this host is party to may commit one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MeshRestoreOutcome {
     /// The gate passed, the restore was complete, and the restored world folds to
@@ -80,11 +83,25 @@ pub enum MeshRestoreOutcome {
     RefusedGate(String),
     /// The whole payload reassembled and passed the gate, but the restored world
     /// did not fold to the recorded digest: the state is intact enough to parse
-    /// and gate yet does not reproduce, which the corruption check names.
+    /// and gate yet does not reproduce, which the corruption check names. The
+    /// rollback checkpoint has been restored, so the world is back where it was.
     RefusedIntegrity { recorded: u64, restored: u64 },
-    /// The restore ran but the fresh world could not house every captured row
-    /// (missing entities, an unreconciled layer). Reported rather than hidden.
+    /// The restore ran but the world could not house every captured row (missing
+    /// entities, an unreconciled layer). Reported rather than hidden, and the
+    /// rollback checkpoint has been restored so the world is left clean.
     Incomplete { tick: u64, gaps: usize },
+    /// A completed record arrived, but this host is not armed to restore one — it
+    /// is not a designated recovering host (issue #1118, AC2). Dropped without
+    /// touching the world: a peer must never overwrite another host's whole world
+    /// simply by sending it a snapshot.
+    RefusedUnarmed,
+    /// This host is armed to restore, but the record came from a slot that is not
+    /// the recovery leader the plan named. Dropped, world untouched — a divergent
+    /// peer cannot inject its own state by racing the leader's transfer.
+    RefusedWrongSender {
+        armed_from: HostSlot,
+        from: Option<HostSlot>,
+    },
     /// The receiving world is not yet far enough along to restore into — its
     /// layers have not reconciled, or its authored entities do not exist yet. The
     /// caller should retry on a later frame; the reassembled record is retained.
@@ -102,6 +119,10 @@ pub struct MeshSnapshotReceiver {
     /// ready to restore into. Held here rather than restored inline because a
     /// restore needs exclusive world access and a chunk arrives in a query system.
     staged: Option<String>,
+    /// The slot that sent the staged record. The reassembled text does not name
+    /// its sender, so the receiver arm (issue #1118) remembers it here: a restore
+    /// is committed only when this matches the recovery leader the plan named.
+    staged_from: Option<HostSlot>,
     /// The most recent transfer's outcome, for the operator surface and the tests.
     last: Option<MeshRestoreOutcome>,
     /// The most recent chunk-level fault, if any — a corrupt or oversized piece.
@@ -122,6 +143,11 @@ impl MeshSnapshotReceiver {
     /// Whether a record has fully arrived and is waiting to be restored.
     pub fn has_staged_record(&self) -> bool {
         self.staged.is_some()
+    }
+
+    /// The slot that sent the staged record, if one is staged.
+    pub fn staged_from(&self) -> Option<HostSlot> {
+        self.staged_from
     }
 
     /// Whether a transfer is mid-flight.
@@ -145,11 +171,53 @@ impl MeshSnapshotReceiver {
             Ok(Accepted::Complete(text)) => {
                 self.last_fault = None;
                 self.staged = Some(text.clone());
+                self.staged_from = Some(chunk.from);
             }
             Ok(Accepted::More { .. }) => self.last_fault = None,
             Err(fault) => self.last_fault = Some(fault.clone()),
         }
         outcome
+    }
+}
+
+/// Whether this host will let a staged record overwrite its world, and from whom
+/// (issue #1118, AC2 — the receiver arm).
+///
+/// Absent-or-disarmed by default, which is the safe state: [`drain_mesh_restore`]
+/// drops a completed record rather than committing it. The divergence-recovery
+/// driver ([`crate::lockstep::recovery`]) arms this on the ONE host the shared
+/// recovery plan designates as recovering, naming the leader the same plan
+/// elected — so a record is only ever committed (a) during a recovery this host is
+/// party to and (b) from the deterministically-chosen leader. It is disarmed again
+/// the moment the recovery resolves.
+///
+/// A future join/slot-recovery path (issue #1120) is the other legitimate arm; it
+/// will set this for a joining host the same way. Until then the only armer is
+/// divergence recovery, and an unarmed host commits nothing.
+#[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
+pub struct MeshRestoreArm {
+    armed_from: Option<HostSlot>,
+}
+
+impl MeshRestoreArm {
+    /// Arm this host to restore a record from `leader`.
+    pub fn arm(&mut self, leader: HostSlot) {
+        self.armed_from = Some(leader);
+    }
+
+    /// Disarm: a staged record must not overwrite the world.
+    pub fn disarm(&mut self) {
+        self.armed_from = None;
+    }
+
+    /// The slot this host will accept a restore from, or `None` when disarmed.
+    pub fn armed_from(&self) -> Option<HostSlot> {
+        self.armed_from
+    }
+
+    /// Whether this host is expecting to restore a record at all.
+    pub fn is_armed(&self) -> bool {
+        self.armed_from.is_some()
     }
 }
 
@@ -273,8 +341,12 @@ pub fn send_snapshot(
 ///    before it can be overwritten; `reconcile_world_layers` + `ready_to_restore`
 ///    are the same preconditions `drain_snapshot_restore` waits on. Not ready ⇒
 ///    [`MeshRestoreOutcome::NotReady`], record retained for a later frame.
-/// 3. **Restore, then verify.** `snapshot::restore` overwrites by uuid, and the
-///    restored `world_digest` must equal the recorded one — the corruption check.
+/// 3. **Checkpoint, restore, verify, and roll back on failure.** The world's live
+///    state is captured first; `snapshot::restore` then overwrites by uuid; the
+///    restored `world_digest` must equal the recorded one — the corruption check —
+///    and the restore must be complete. On either failure the captured checkpoint
+///    is restored back, so a refused host is left byte-identical to where it began
+///    (issue #1118, AC3) rather than holding the record the check judged bad.
 pub fn gate_and_restore(world: &mut World, text: &str) -> MeshRestoreOutcome {
     let current = snapshot::versions(&crate::content_ledger::frozen_or_live());
     gate_and_restore_against(world, text, &current)
@@ -315,21 +387,39 @@ pub fn gate_and_restore_against(
         return MeshRestoreOutcome::NotReady;
     }
 
-    // 3. Restore, then verify the fold. `restore` overwrites by uuid; the recorded
-    //    digest is recomputed BY the restored simulation, so a tampered or
-    //    truncated record cannot restore to it.
+    // 3. Checkpoint the live world BEFORE overwriting it, so an integrity or
+    //    completeness failure can be rolled back cleanly (issue #1118, AC3). The
+    //    checkpoint is the same `snapshot::capture` a save takes and restores
+    //    through the same walk, so rolling back reconciles the world — despawning
+    //    anything the leader's record spawned, rebuilding anything it despawned —
+    //    exactly as a resume would. `pre_digest` lets the rollback verify it
+    //    actually returned the world to where it started.
+    let checkpoint = snapshot::capture(world);
+    let pre_digest = crate::sim_digest::world_digest(world);
+
+    // Restore, then verify the fold. `restore` overwrites by uuid; the recorded
+    // digest is recomputed BY the restored simulation, so a tampered or truncated
+    // record cannot restore to it.
     let report = snapshot::restore(world, &snap.state);
     let restored = crate::sim_digest::world_digest(world);
-    if restored != snap.digest {
-        return MeshRestoreOutcome::RefusedIntegrity {
-            recorded: snap.digest,
-            restored,
-        };
-    }
-    if report.is_complete() {
-        MeshRestoreOutcome::Committed {
+    if restored == snap.digest && report.is_complete() {
+        return MeshRestoreOutcome::Committed {
             tick: snap.tick,
             digest: snap.digest,
+        };
+    }
+
+    // A refused restore must not be left half-applied. Roll back to the checkpoint
+    // and report the refusal — the world is now exactly what it was.
+    let rollback = snapshot::restore(world, &checkpoint);
+    debug_assert!(
+        crate::sim_digest::world_digest(world) == pre_digest && rollback.is_complete(),
+        "the recovery rollback did not return the world to its pre-restore fold"
+    );
+    if restored != snap.digest {
+        MeshRestoreOutcome::RefusedIntegrity {
+            recorded: snap.digest,
+            restored,
         }
     } else {
         MeshRestoreOutcome::Incomplete {
@@ -339,7 +429,8 @@ pub fn gate_and_restore_against(
     }
 }
 
-/// Restore a staged record the moment the world is ready (issue #1117).
+/// Restore a staged record the moment the world is ready AND this host is armed
+/// to accept it (issues #1117, #1118).
 ///
 /// Exclusive, in `PreUpdate` after the mesh has drained its inbox, so a record
 /// that completed this frame is restored before this frame's fixed steps run and
@@ -347,6 +438,18 @@ pub fn gate_and_restore_against(
 /// the record staged and tries again next frame; anything else — committed or
 /// refused — clears it, because a refused record is not retried against the same
 /// unchanging world.
+///
+/// # The receiver arm (issue #1118, AC2)
+///
+/// Reassembling a record is not consent to install it. Before #1118 this committed
+/// any completed record unconditionally, so any peer could overwrite another host's
+/// whole world simply by sending it a snapshot. Now a staged record is committed
+/// only when [`MeshRestoreArm`] says this host is a designated recovering host
+/// **and** the record came from the leader that arm names. An unarmed host drops
+/// the record ([`MeshRestoreOutcome::RefusedUnarmed`]); an armed host presented a
+/// record from the wrong slot drops it too ([`MeshRestoreOutcome::RefusedWrongSender`]).
+/// Both leave the world untouched — the drop happens before [`gate_and_restore`] is
+/// even called.
 pub fn drain_mesh_restore(world: &mut World) {
     let staged = world
         .get_resource::<MeshSnapshotReceiver>()
@@ -354,12 +457,33 @@ pub fn drain_mesh_restore(world: &mut World) {
     let Some(text) = staged else {
         return;
     };
-    let outcome = gate_and_restore(world, &text);
+    let staged_from = world
+        .get_resource::<MeshSnapshotReceiver>()
+        .and_then(|r| r.staged_from);
+    let armed_from = world
+        .get_resource::<MeshRestoreArm>()
+        .and_then(|arm| arm.armed_from());
+
+    let outcome = match armed_from {
+        // Not a designated recovering host: a peer must never overwrite this
+        // world by sending it a snapshot. Drop it, world untouched.
+        None => MeshRestoreOutcome::RefusedUnarmed,
+        // Armed, but from a slot other than the leader the plan named: a divergent
+        // peer cannot inject its state by racing the leader's transfer.
+        Some(leader) if staged_from != Some(leader) => MeshRestoreOutcome::RefusedWrongSender {
+            armed_from: leader,
+            from: staged_from,
+        },
+        // Armed, and from the leader: run the rollback-able gate and restore.
+        Some(_leader) => gate_and_restore(world, &text),
+    };
+
     if matches!(outcome, MeshRestoreOutcome::NotReady) {
         return;
     }
     if let Some(mut receiver) = world.get_resource_mut::<MeshSnapshotReceiver>() {
         receiver.staged = None;
+        receiver.staged_from = None;
         receiver.last = Some(outcome);
     }
 }
@@ -380,6 +504,14 @@ pub fn register_snapshot_relay(app: &mut App) {
             StateClass::ClearedAtFold,
             "fleet-snapshot-transfer-state",
         );
+        // The receiver arm (issue #1118). `Timer` — it is transport/session
+        // bookkeeping about whether this host is mid-recovery, not state of the
+        // world: nothing it holds is folded, and every honest host derives it from
+        // the same shared recovery plan.
+        app.declare_state::<MeshRestoreArm>(
+            StateClass::Timer,
+            "fleet-snapshot-transfer-state",
+        );
     }
     // `.after(MeshSet)` so a record completed by this frame's inbox drain is
     // restored the same frame. No explicit `.before(advance_sim_tick)`: that
@@ -389,8 +521,10 @@ pub fn register_snapshot_relay(app: &mut App) {
     // construction, so this restore already precedes this frame's fixed steps and
     // the `FixedLast` digest sample; the ordering holds across schedules, not
     // within one, and cannot be spelled as an edge.
-    app.init_resource::<MeshSnapshotReceiver>().add_systems(
-        PreUpdate,
-        drain_mesh_restore.after(crate::lockstep::MeshSet),
-    );
+    app.init_resource::<MeshSnapshotReceiver>()
+        .init_resource::<MeshRestoreArm>()
+        .add_systems(
+            PreUpdate,
+            drain_mesh_restore.after(crate::lockstep::MeshSet),
+        );
 }

@@ -47,7 +47,9 @@
 
 use bevy::prelude::*;
 
-use crate::command_admission::log::{CommandDelay, CommandOrder, HostSlot, PendingCommands, ShipKey};
+use crate::command_admission::log::{
+    CommandDelay, CommandOrder, HostSlot, PendingCommands, ShipKey,
+};
 use crate::logging::LogCat;
 
 pub mod frame;
@@ -390,6 +392,44 @@ pub struct MeshSet;
 /// fleet of one, [`LockstepSession`] is absent until a fleet forms, and every
 /// system below is inert without one.
 pub fn register_lockstep(app: &mut App) {
+    // The #894 digest-boundary declarations (issue #1220's registry). Every type
+    // this module registers is a digest EXCLUSION, and each for a different
+    // reason — see `authoritative::StateClass` for the classes and
+    // `tests/authoritative_state_enumeration.rs` for the census that enforces
+    // them. Nothing here is folded, and nothing here is a second copy of
+    // anything that is.
+    {
+        use crate::authoritative::{DeclareState, StateClass};
+        app
+            // Who is in the fleet, which slot is this host's, and how far each
+            // peer has declared itself ready. `Timer` — it is transport
+            // bookkeeping about a SESSION, not state of the world: it says who
+            // is connected where, on which machine, which is exactly what
+            // `world_id`'s own docs exclude from simulation state. What crosses
+            // from it INTO the world is the ships it spawns and the ratings it
+            // seeds, and those are folded like anything else.
+            .declare_state::<FleetLockstep>(StateClass::Timer, "fleet-lockstep-state")
+            .declare_state::<FleetRoster>(StateClass::Timer, "fleet-lockstep-state")
+            // Which host flies this hull. `Timer` for the same reason and one
+            // more: it is written once at spawn from the frozen roster and never
+            // again, so it carries no run state to fold. Every host holds the
+            // identical value for the identical hull, which is the whole point
+            // of it.
+            .declare_state::<FleetSlotOf>(StateClass::Timer, "fleet-lockstep-state")
+            // What a transport has delivered and not yet handed over, and what
+            // the simulation has said and the transport has not yet sent.
+            // `ClearedAtFold`: `apply_mesh_inbox` empties the first every frame
+            // and a transport drains the second, so both are structurally empty
+            // at the fold point on any correctly-running host.
+            .declare_state::<MeshInbox>(StateClass::ClearedAtFold, "fleet-lockstep-state")
+            .declare_state::<MeshOutbox>(StateClass::ClearedAtFold, "fleet-lockstep-state")
+            // The digest exchange's own records. `Derived` — they are folds OF
+            // the authoritative state and a count of the barrier's decisions, so
+            // folding them would fold their inputs a second time, and a peer's
+            // reported digest is not this host's state at all.
+            .declare_state::<MeshAgreement>(StateClass::Derived, "fleet-agreement-state")
+            .declare_state::<MeshDiagnostics>(StateClass::Derived, "fleet-agreement-state");
+    }
     app.init_resource::<FleetRoster>()
         .init_resource::<MeshInbox>()
         .init_resource::<MeshOutbox>()
@@ -546,9 +586,7 @@ pub fn apply_mesh_inbox(
                 agreement
                     .peers
                     .entry(digest.from)
-                    .or_insert_with(|| {
-                        crate::sim_digest::DigestLedger::new(DIGEST_INTERVAL_TICKS)
-                    })
+                    .or_insert_with(|| crate::sim_digest::DigestLedger::new(DIGEST_INTERVAL_TICKS))
                     .record(digest.tick, digest.digest);
             }
         }
@@ -603,11 +641,7 @@ pub fn gate_lockstep_ticks(
         }
         None => {
             if virtual_time.is_paused() {
-                crate::pinfo!(
-                    log,
-                    LogCat::Admit,
-                    "host-mesh resumed at tick {next_tick}"
-                );
+                crate::pinfo!(log, LogCat::Admit, "host-mesh resumed at tick {next_tick}");
                 virtual_time.unpause();
             }
             diagnostics.running();

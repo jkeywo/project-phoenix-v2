@@ -785,10 +785,12 @@ mod tests {
         // the comparison below would be two zeroes agreeing. Give both the same
         // banking hull, which is what the precondition then checks.
         for entity in [local, remote] {
-            app.world_mut().entity_mut(entity).insert(BankConfigResource {
-                max_bank_deg: 30.0,
-                ..BankConfigResource::default()
-            });
+            app.world_mut()
+                .entity_mut(entity)
+                .insert(BankConfigResource {
+                    max_bank_deg: 30.0,
+                    ..BankConfigResource::default()
+                });
         }
 
         for _ in 0..5 {

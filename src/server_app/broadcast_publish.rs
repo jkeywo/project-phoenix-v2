@@ -348,18 +348,18 @@ pub(crate) fn publish_viewscreen_blackboard(
             .map(|o| o.0.scored_pool_with_boost(&conditions, captain_boost))
             .unwrap_or_default();
 
-    // Merge the hull's standing template doctrine into the scenario pool (see
-    // the "why this MERGES" note above). Score the doctrine with the same
-    // `attacked` signal the NPC path (`aggregate_doctrine_blackboards`) uses, so
-    // a backfilled player and a world-spawned copy of the same hull evaluate
-    // their identical doctrine identically (#842 AC4 symmetry). Both sites run
-    // the one `objectives::last_landed_hit_secs` fold into the one
-    // `objectives::attacked_recently` predicate (issue #1010) — a decaying
-    // recency window over the last hit that CONNECTED, shields or hull, not the
-    // `LastShipAttacker` latch — so the symmetry holds by construction rather
-    // than by two copies of the rule staying in step. The scenario pool keeps
-    // its own conditions (unchanged), so existing player-objective scoring is
-    // untouched.
+        // Merge the hull's standing template doctrine into the scenario pool (see
+        // the "why this MERGES" note above). Score the doctrine with the same
+        // `attacked` signal the NPC path (`aggregate_doctrine_blackboards`) uses, so
+        // a backfilled player and a world-spawned copy of the same hull evaluate
+        // their identical doctrine identically (#842 AC4 symmetry). Both sites run
+        // the one `objectives::last_landed_hit_secs` fold into the one
+        // `objectives::attacked_recently` predicate (issue #1010) — a decaying
+        // recency window over the last hit that CONNECTED, shields or hull, not the
+        // `LastShipAttacker` latch — so the symmetry holds by construction rather
+        // than by two copies of the rule staying in step. The scenario pool keeps
+        // its own conditions (unchanged), so existing player-objective scoring is
+        // untouched.
         if let Some(behaviour) = behaviour {
             // Sim seconds off the fixed clock (`Res<Time>` is `Time<Fixed>`
             // inside `FixedUpdate`), never a wall clock — AGENTS.md #7.

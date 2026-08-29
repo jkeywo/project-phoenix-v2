@@ -234,8 +234,7 @@ mod tests {
     /// diagnostic somebody can act on.
     #[test]
     fn a_stall_names_the_tick_and_the_peers_holding_it() {
-        let mut session =
-            LockstepSession::new(HostSlot(1), [HostSlot(2), HostSlot(3)], DELAY);
+        let mut session = LockstepSession::new(HostSlot(1), [HostSlot(2), HostSlot(3)], DELAY);
         session.observe(HostSlot(2), 30);
         session.observe(HostSlot(3), 12);
 

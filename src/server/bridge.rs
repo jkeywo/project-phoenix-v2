@@ -283,6 +283,12 @@ thread_local! {
     /// happened to seal it.
     static MESH_OUTBOUND: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 
+    /// The fleet status mirror `wasm_mesh_status` answers from, written each
+    /// frame by `publish_mesh_status`. A mirror rather than a `World` read for
+    /// the same reason `SIM_PAUSED` is one: the settings cog asks between
+    /// frames, when there is no world handle to ask.
+    static MESH_STATUS: RefCell<String> = const { RefCell::new(String::new()) };
+
     /// A fleet the page has joined but Bevy has not adopted yet: the encoded
     /// roster, applied once on the next frame. Deferred for the same reason
     /// every other JS→Bevy handoff here is — `wasm_join_fleet` is called from a
@@ -947,6 +953,7 @@ pub fn wasm_init() {
             // reason as its neighbours: it runs after the frame's fixed steps,
             // so everything those ticks sealed goes out in one batch.
             flush_mesh_outbound,
+            publish_mesh_status,
         ),
     );
 
@@ -1050,6 +1057,25 @@ pub fn wasm_join_fleet(roster_json: &str) -> String {
     }
 }
 
+/// What this host's fleet link looks like from the simulation's side (issue
+/// #1116), as JSON for the operator surface and the smoke tests.
+///
+/// ```json
+/// { "in_fleet": true, "slot": 1, "tick": 412, "delay": 6,
+///   "stalled": false, "stalled_frames": 0, "waiting_on": [2],
+///   "peers_heard": [2], "agreed": true }
+/// ```
+///
+/// Read-only and derived — it reports the barrier and the digest exchange, and
+/// changes neither. `waiting_on` is the diagnostic that turns "the mission
+/// froze" into "slot 2 is behind", which is the difference between a bug report
+/// and a fix.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_mesh_status() -> String {
+    MESH_STATUS.with(|s| s.borrow().clone())
+}
+
 /// Called by JS when a peer connection closes.
 ///
 /// Queues a disconnect lifecycle event that Bevy processes next frame,
@@ -1116,6 +1142,40 @@ fn flush_mesh_outbound(mut outbox: ResMut<crate::lockstep::MeshOutbox>) {
             }
         }
     });
+}
+
+/// Keep the fleet-status mirror honest, each frame.
+#[cfg(target_arch = "wasm32")]
+fn publish_mesh_status(
+    session: Option<Res<crate::lockstep::FleetLockstep>>,
+    roster: Option<Res<crate::lockstep::FleetRoster>>,
+    diagnostics: Res<crate::lockstep::MeshDiagnostics>,
+    agreement: Res<crate::lockstep::MeshAgreement>,
+    delay: Res<crate::command_admission::CommandDelay>,
+    sim_tick: Option<Res<crate::sim_tick::SimTick>>,
+) {
+    let tick = sim_tick.map_or(0, |t| t.0);
+    let status = match session {
+        Some(session) => crate::core::codec::encode_mesh_status(
+            true,
+            roster.map(|r| r.local().0),
+            tick,
+            delay.0,
+            &diagnostics,
+            &agreement,
+            &session.peers().map(|slot| slot.0).collect::<Vec<_>>(),
+        ),
+        None => crate::core::codec::encode_mesh_status(
+            false,
+            None,
+            tick,
+            delay.0,
+            &diagnostics,
+            &agreement,
+            &[],
+        ),
+    };
+    MESH_STATUS.with(|s| *s.borrow_mut() = status);
 }
 
 /// Called by JS to register the outbound message callback.

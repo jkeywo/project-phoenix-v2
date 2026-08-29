@@ -506,7 +506,7 @@ impl PendingCommands {
             .split_off(&(now.saturating_add(1), CommandOrder::default()));
         let due = std::mem::replace(&mut self.queue, later);
         due.into_values()
-            .map(|pending| {
+            .inspect(|pending| {
                 // Built here, from the command about to be applied, so the
                 // projection can never describe a different command from the
                 // one that lands. The token stays on the `AdmittedCommand`;
@@ -518,7 +518,6 @@ impl PendingCommands {
                     target: pending.command.target.clone(),
                     payload: pending.command.payload.clone(),
                 });
-                pending
             })
             .collect()
     }
@@ -1055,7 +1054,11 @@ mod tests {
             "the drain order must not depend on which host's traffic arrived \
              first — that is the whole of `peer-independent`"
         );
-        assert_eq!(drained(beta, alpha), vec![alpha, beta], "slot 1 sorts first");
+        assert_eq!(
+            drained(beta, alpha),
+            vec![alpha, beta],
+            "slot 1 sorts first"
+        );
     }
 
     /// A receiver never renumbers a sender: an order that arrived is the order

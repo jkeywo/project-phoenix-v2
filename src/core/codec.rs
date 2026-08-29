@@ -477,7 +477,8 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
     use crate::lockstep::{DigestFrame, MeshCommand, MeshFrame, TickFrame};
 
     let value: serde_json::Value = serde_json::from_str(raw).ok()?;
-    if value.get(MESH_ENVELOPE_PROTOCOL)?.as_u64()? != u64::from(crate::lockstep::HOST_MESH_PROTOCOL)
+    if value.get(MESH_ENVELOPE_PROTOCOL)?.as_u64()?
+        != u64::from(crate::lockstep::HOST_MESH_PROTOCOL)
     {
         return None;
     }
@@ -570,6 +571,59 @@ pub fn decode_fleet_roster(raw: &str) -> Option<(crate::lockstep::FleetRoster, O
         return None;
     }
     Some((FleetRoster::new(ships, local), delay))
+}
+
+/// Encode the fleet-link status the host page's operator surface reads.
+///
+/// Derived and read-only. `waiting_on` names the peers a stall is blocked on,
+/// which is what turns "the mission froze" into "slot 2 is eleven ticks behind"
+/// — the difference between a bug report and a fix.
+#[allow(clippy::too_many_arguments)]
+pub fn encode_mesh_status(
+    in_fleet: bool,
+    slot: Option<u32>,
+    tick: u64,
+    delay: u64,
+    diagnostics: &crate::lockstep::MeshDiagnostics,
+    agreement: &crate::lockstep::MeshAgreement,
+    peers: &[u32],
+) -> String {
+    let disagreement = agreement.first_disagreement().map(|found| {
+        serde_json::json!({
+            "tick": found.tick,
+            "peer": found.peer.0,
+            "local": format!("{:016x}", found.local_digest),
+            "peer_digest": format!("{:016x}", found.peer_digest),
+        })
+    });
+    serde_json::json!({
+        "in_fleet": in_fleet,
+        "slot": slot,
+        "tick": tick,
+        "delay": delay,
+        "stalled": diagnostics.is_stalled(),
+        "stalled_frames": diagnostics.stalled_frames,
+        "longest_stall": diagnostics.longest_stall,
+        // Only while it is actually waiting. `MeshDiagnostics` remembers the
+        // last stall for the operator log, but "who am I waiting for" has no
+        // answer when the answer is nobody — reporting the remembered one would
+        // have a running fleet permanently accusing a peer that is keeping up.
+        "waiting_on": if diagnostics.is_stalled() {
+            diagnostics
+                .last_stall
+                .as_ref()
+                .map(|stall| stall.waiting_on.iter().map(|(slot, _)| slot.0).collect::<Vec<_>>())
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        },
+        "peers": peers,
+        "peers_heard": agreement.peers.keys().map(|slot| slot.0).collect::<Vec<_>>(),
+        "samples": agreement.local.checkpoints.len(),
+        "agreed": agreement.agreed(),
+        "disagreement": disagreement,
+    })
+    .to_string()
 }
 
 #[cfg(test)]

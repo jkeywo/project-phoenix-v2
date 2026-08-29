@@ -1,9 +1,9 @@
 ---
 title: Game Loop
 type: concept
-tags: [loop, ticks, simulation, rates, determinism]
-sources: [src/server_app/registration.rs, src/sim_tick.rs, src/ai/cadence.rs, src/command_admission/log.rs, src/ship/physics.rs, src/server/bridge.rs, AGENTS.md]
-updated: 2026-08-27
+tags: [loop, ticks, simulation, rates, determinism, lockstep, fleet]
+sources: [src/server_app/registration.rs, src/sim_tick.rs, src/ai/cadence.rs, src/command_admission/log.rs, src/lockstep/mod.rs, src/lockstep/session.rs, src/ship/physics.rs, src/server/bridge.rs, AGENTS.md]
+updated: 2026-08-29
 ---
 
 # Game Loop
@@ -30,19 +30,27 @@ TOML-authored `[global] sim_tick_hz` (serde default 60 Hz). `SimTick`
 1. **Lobby handlers** (`LobbySystemSet`) consume inbound messages, mutate
    `SessionManager`, drive the countdown on tick time.
 2. **Command admission** — clears and refills every ship's `AdmittedCommands`
-   exactly once per tick, before `SimSet::Input`. The same pass records the
-   application tick
-   (`src/command_admission/log.rs`): an accepted command is stamped for the
-   tick it applies on (`SimTick` + `CommandDelay`), queued for that tick in
-   `PendingCommands`, and recorded in the run's `CommandLog` in one step, so
-   the record and the apply order cannot drift. `CommandDelay` is `0` on a
-   local host, so the queue drains inside the same pass that filled it. The log
-   records what crossed the *network boundary*
-   only — AI decisions emitted in-process by `emit_ai_command` are absent,
-   because a replay re-derives them from the seed. Both halves of the seam
-   are registered by one call (`register_admission_seam`), and the log is
-   cleared at the run boundary in `OnEnter(GamePhase::InProgress)` so a
-   second round starts fresh.
+   exactly once per tick, before `SimSet::Input`. The same pass stamps the
+   application tick (`src/command_admission/log.rs`): an accepted command is
+   stamped for the tick it applies on (`SimTick` + `CommandDelay`) and queued
+   for that tick in `PendingCommands`, ordered by `CommandOrder` — `(origin
+   fleet slot, that slot's own sequence)`. When the tick comes round the queue
+   drains into the routed ship and writes the run's `CommandLog` in one step,
+   so the record and the apply order cannot drift. The log records what crossed
+   the *network boundary* only — AI decisions emitted in-process by
+   `emit_ai_command` are absent, because a replay re-derives them from the seed.
+   Both halves of the seam are registered by one call
+   (`register_admission_seam`), and the log is cleared at the run boundary in
+   `OnEnter(GamePhase::InProgress)` so a second round starts fresh.
+
+   `CommandDelay` is `0` for a lone host, so the queue drains inside the same
+   pass that filled it and a command applies the tick it was admitted on. A host
+   in a **fleet** (issue #1116) runs at the mission's authored `[global]
+   command_delay_ticks` instead: a crew's command applies that many ticks later,
+   on the same tick on every host, which is what gives each host time to receive
+   every peer's input for a tick before it simulates it. A host that has not
+   received it withholds the tick — `Time<Virtual>` paused, so the tick never
+   begins — rather than speculating. See `src/lockstep/`.
 3. **The `SimSet` chain** — Input → Physics → Damage → Modifiers → Publish →
    PublishAggregate → Broadcast, gated on `GamePhase::InProgress`.
 4. **Phase transitions** — Bevy's `StateTransition` schedule is inserted into

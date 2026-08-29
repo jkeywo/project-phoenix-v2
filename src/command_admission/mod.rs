@@ -430,10 +430,7 @@ pub fn admit_system_commands(
         // The ship is named, not remembered: `ShipKey` is resolved against this
         // tick's world, and the `Entity` captured at acceptance is only the
         // fallback for a ship that never had a uuid to be named by.
-        let route = by_ship_key
-            .get(&due.ship.0)
-            .copied()
-            .unwrap_or(due.route);
+        let route = by_ship_key.get(&due.ship.0).copied().unwrap_or(due.route);
         let Ok((_, _, mut admitted, _, _, _, _)) = ship_query.get_mut(route) else {
             crate::pwarn!(
                 log,

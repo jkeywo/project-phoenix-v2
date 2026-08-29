@@ -431,7 +431,9 @@ pub(crate) fn spawn_game_start_entities(
         // ship and one NPC, exactly as it did before the fleet existed.
         let is_fleet_ship =
             player_ships_spawned < roster.len() && config.tags.iter().any(|t| t == "ship");
-        let fleet_ship = is_fleet_ship.then(|| roster.ship(player_ships_spawned)).flatten();
+        let fleet_ship = is_fleet_ship
+            .then(|| roster.ship(player_ships_spawned))
+            .flatten();
         // Which hull this slot flies: the roster's choice for a fleet member,
         // and this host's own lobby selection for a lone host (`ship_path` is
         // `None` there, which is what keeps the solo spawn byte-identical).

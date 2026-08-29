@@ -2074,6 +2074,13 @@
     // authoritatively, rather than a second notion of "we have launched".
     freezeFleetOnMissionStart(s.phase);
 
+    // …and, once a mission is running, carry this host's own lockstep traffic
+    // out to the fleet (issue #1116). Here rather than on its own timer because
+    // this is the page's one per-repaint pass and the traffic is per repaint:
+    // a second loop would be a second answer to "how often does this host
+    // speak".
+    pumpMeshFrames();
+
     // ── Show/hide panel + canvas based on phase ───────────────────────
     const panel = document.getElementById('lobby-panel');
     const qrOverlay = document.getElementById('overlay');
@@ -2908,6 +2915,7 @@
         ship: fleetShip(),
         onCode: (code) => { fleetSuffix = code.suffix; paintFleetPanel(); },
         onRoster: (roster) => { fleetRoster = roster; paintFleetPanel(); },
+        onSimulationFrame: receiveMeshFrame,
         onError: (reason) => console.warn(`[fleet] ${reason}`),
         onLog: (msg) => console.log(msg),
       }));
@@ -2944,6 +2952,7 @@
           paintFleetPanel();
         },
         onRoster: (roster) => { fleetRoster = roster; fleetNotice = null; paintFleetPanel(); },
+        onSimulationFrame: receiveMeshFrame,
         // The fleet declined a change this host asked for about its own slot.
         // It is still IN the fleet — reporting it is the whole answer, and
         // tearing the link down would evict a member for touching its loadout.
@@ -3013,6 +3022,70 @@
       if (!fleetHandle || !fleetHandle.isOwner || phase === 'Lobby') return;
       fleetHandle.freeze();
     }
+
+    // ── The running mission's own traffic (issue #1116) ────────────────────
+    //
+    // Two lines of plumbing between a socket this page owns and a simulation
+    // it does not read. Everything that decides anything — the order commands
+    // apply in, the tick a host may run, whether two hosts still agree — is in
+    // Rust; what is here is the wire.
+
+    /** Hand one peer's frame to this host's simulation. */
+    function receiveMeshFrame(raw) {
+      if (window.wasm_receive_mesh_frame) window.wasm_receive_mesh_frame(raw);
+    }
+
+    /**
+     * Send everything this host's simulation wants to say to its fleet.
+     *
+     * POLLED rather than pushed, and that is the load-bearing half: the
+     * simulation seals a tick frame inside a fixed step, which is the one place
+     * this page must not be re-entered from. Called once per repaint, so a
+     * frame that ran several fixed steps sends all of their traffic together —
+     * each frame carries its own tick, so nothing is lost by batching.
+     */
+    function pumpMeshFrames() {
+      if (!fleetHandle || !window.wasm_take_mesh_frames) return;
+      let frames;
+      try {
+        frames = JSON.parse(window.wasm_take_mesh_frames());
+      } catch (e) {
+        // Unreachable in practice — the producer is `core::codec` — but a
+        // parse failure here must not take the host page down with it.
+        console.warn("[fleet] could not read this host's own mesh frames", e);
+        return;
+      }
+      for (const frame of frames) fleetHandle.broadcast(JSON.stringify(frame));
+    }
+
+    /**
+     * What the fleet link looks like from the simulation's side: this host's
+     * slot, whether it is withholding a tick and which peer for, and whether
+     * the periodic digest exchange still agrees.
+     *
+     * Exposed for the operator surface and the smoke tests; `null` before the
+     * wasm module is up.
+     */
+    window.__hostMeshStatus = function() {
+      if (!window.wasm_mesh_status) return null;
+      try {
+        return JSON.parse(window.wasm_mesh_status());
+      } catch (e) {
+        return null;
+      }
+    };
+
+    /**
+     * Adopt a frozen fleet roster into the simulation.
+     *
+     * Called with the roster every host in the fleet received identically, so
+     * every host spawns the same ships with the same identities and seeds the
+     * same Station Ratings. Answers `''` on success or a machine reason.
+     */
+    window.__hostMeshJoin = function(roster) {
+      if (!window.wasm_join_fleet) return 'wasm-not-ready';
+      return window.wasm_join_fleet(JSON.stringify(roster));
+    };
 
     // ── ICE config latch (issue #1226) ─────────────────────────────────────
     // gui/connection-manager.js's fetchIceServers() is now the single source
@@ -4349,6 +4422,14 @@ function finishInit() {
   // export name and the paired read-back the menu paints from.
   window.wasm_toggle_pause = wasmBindings.wasm_toggle_pause;
   window.wasm_is_paused = wasmBindings.wasm_is_paused;
+  // The fleet's own seam (issue #1116): what a peer said, what this host wants
+  // to say, the frozen roster it plays under, and what its link looks like from
+  // the simulation's side. Four exports and no more — every decision the
+  // lockstep makes is in Rust, and these are the wire.
+  window.wasm_receive_mesh_frame = wasmBindings.wasm_receive_mesh_frame;
+  window.wasm_take_mesh_frames = wasmBindings.wasm_take_mesh_frames;
+  window.wasm_join_fleet = wasmBindings.wasm_join_fleet;
+  window.wasm_mesh_status = wasmBindings.wasm_mesh_status;
   window.wasm_get_debug_state = wasmBindings.wasm_get_debug_state;
   window.wasm_get_damage_log = wasmBindings.wasm_get_damage_log;
   window.wasm_get_entity_debug_state = wasmBindings.wasm_get_entity_debug_state;

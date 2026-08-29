@@ -23,14 +23,16 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/lockstep/session.rs, src/lockstep/mod.rs]
+      paths: [src/lockstep/session.rs, src/lockstep/mod.rs, src/server/bridge.rs, gui/fleet-session.js]
       symbols:
         - LockstepSession
         - FleetLockstep
         - Stall
         - gate_lockstep_ticks
         - join_fleet
-      tests: [cargo test, tests/lockstep_mesh.rs]
+        - wasm_join_fleet
+        - wasm_mesh_status
+      tests: [cargo test, tests/lockstep_mesh.rs, tests/smoke/fleet-lockstep.spec.js]
 
   - state: fleet-lockstep-state
     core:
@@ -39,19 +41,20 @@ entities:
       title: Fleet Lockstep State
       summary: >-
         This host's slot, its peers' input watermarks, the agreed CommandDelay, and the frozen
-        roster of which host flies which hull and who is crewing it.
+        roster of which host flies which hull and who is crewing it. Transport state: who is
+        connected where, on which machine — not state of the world.
       rationale:
         - "[ai] The roster's crewing is FROZEN and carries the Station Rating as well as the seat. Sessions describes only the local crew, so a host seeding a peer's ship from its own sessions would boot that hull fully AI-backfilled here and human-crewed on the machine its crew is sitting at — two hosts running different AI on one ship from tick zero. The Rating travels with the seat because it decides which systems the station automates."
-        - "[ai] Not folded into the authoritative digest and not snapshotted. It is a fact about the SESSION rather than about the world: who is connected where, on which machine. What crosses into the simulation from it is the ships it spawns and the ratings it seeds, and those are folded like anything else."
+        - "[ai] Not folded into the authoritative digest and not snapshotted. It is a fact about the SESSION rather than about the world: who is connected where, on which machine — which is the same reason `world_id` excludes session tokens and lobby identity. What crosses into the simulation from it is the ships it spawns and the ratings it seeds, and those are folded like anything else. Declared into the #894 census (issue #1220) as `StateClass::Timer` for the roster and the session, and `ClearedAtFold` for the two mesh queues, which `apply_mesh_inbox` and the transport empty every frame."
     architecture:
-      classification: authoritative
+      classification: transport
       owner: fleet-lockstep-session
       writers: [fleet-lockstep-session]
     implementation:
       status: declared
-      paths: [src/lockstep/mod.rs]
-      symbols: [FleetRoster, FleetShip, FleetSlotOf]
-      tests: [cargo test]
+      paths: [src/lockstep/mod.rs, src/lockstep/session.rs]
+      symbols: [FleetLockstep, FleetRoster, FleetShip, FleetSlotOf, MeshInbox, MeshOutbox]
+      tests: [cargo test, tests/authoritative_state_enumeration.rs]
 
   - message: lockstep-tick-frame
     core:
@@ -76,9 +79,18 @@ entities:
       payload: MeshFrame
     implementation:
       status: declared
-      paths: [src/lockstep/frame.rs, gui/host-mesh.js]
-      symbols: [MeshFrame, TickFrame, DigestFrame, MeshCommand, HOST_MESH_PROTOCOL]
-      tests: [cargo test, tests/lockstep_mesh.rs, tests/client/host-mesh.test.js]
+      paths: [src/lockstep/frame.rs, src/core/codec.rs, gui/host-mesh.js, gui/fleet-session.js]
+      symbols:
+        - MeshFrame
+        - TickFrame
+        - DigestFrame
+        - MeshCommand
+        - HOST_MESH_PROTOCOL
+        - encode_mesh_frame
+        - decode_mesh_frame
+        - wasm_receive_mesh_frame
+        - wasm_take_mesh_frames
+      tests: [cargo test, tests/lockstep_mesh.rs, tests/client/host-mesh.test.js, tests/smoke/fleet-lockstep.spec.js]
 
   - component: peer-independent-command-order
     core:
@@ -182,5 +194,5 @@ entities:
     implementation:
       status: declared
       paths: [src/lockstep/mod.rs]
-      symbols: [MeshAgreement]
-      tests: [cargo test]
+      symbols: [MeshAgreement, MeshDisagreement, MeshDiagnostics]
+      tests: [cargo test, tests/authoritative_state_enumeration.rs]

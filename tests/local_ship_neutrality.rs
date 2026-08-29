@@ -131,7 +131,9 @@ fn census(local: HostSlot) -> (usize, usize, Option<HostSlot>) {
         q.iter(app.world()).count()
     };
     let local_ships = {
-        let mut q = app.world_mut().query_filtered::<(), bevy::prelude::With<LocalShip>>();
+        let mut q = app
+            .world_mut()
+            .query_filtered::<(), bevy::prelude::With<LocalShip>>();
         q.iter(app.world()).count()
     };
     let tagged = {

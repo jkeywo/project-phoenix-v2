@@ -1,9 +1,9 @@
 ---
 title: Networking
 type: concept
-tags: [networking, webrtc, rendezvous, join-code, session-token, star-topology, datachannel, snapshot, fleet, host-mesh, ws-relay, diagnostics]
-sources: [server.html, client.html, gui/rendezvous-transport.js, gui/rendezvous-relay.js, gui/rendezvous-protocol.js, gui/transport-levers.js, gui/connection-diagnostics.js, gui/join-code.js, gui/host-mesh.js, gui/fleet-session.js, gui/connection-manager.js, gui/host-peer-routing.js, worker-rendezvous/src/registry.js, worker-rendezvous/src/relay.js, worker-rendezvous/src/index.js, gui/session-token.js, src/core/rendezvous.rs, src/native_host/relay_transport.rs, src/native_host/relay_socket.rs, src/core/broadcast/sim.rs, src/core/broadcast/lifecycle.rs, src/server/bridge.rs, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/console/repair/visibility.rs, src/console/weapons/blackboard.rs, src/delivery/mod.rs, AGENTS.md]
-updated: 2026-08-28
+tags: [networking, webrtc, rendezvous, join-code, session-token, star-topology, datachannel, snapshot, fleet, host-mesh, lockstep, ws-relay, diagnostics]
+sources: [server.html, client.html, gui/rendezvous-transport.js, gui/rendezvous-relay.js, gui/rendezvous-protocol.js, gui/transport-levers.js, gui/connection-diagnostics.js, gui/join-code.js, gui/host-mesh.js, gui/fleet-session.js, src/lockstep/frame.rs, src/core/codec.rs, gui/connection-manager.js, gui/host-peer-routing.js, worker-rendezvous/src/registry.js, worker-rendezvous/src/relay.js, worker-rendezvous/src/index.js, gui/session-token.js, src/core/rendezvous.rs, src/native_host/relay_transport.rs, src/native_host/relay_socket.rs, src/core/broadcast/sim.rs, src/core/broadcast/lifecycle.rs, src/server/bridge.rs, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/console/repair/visibility.rs, src/console/weapons/blackboard.rs, src/delivery/mod.rs, AGENTS.md]
+updated: 2026-08-29
 ---
 
 # Networking
@@ -17,6 +17,7 @@ Issue #1113 added a **third rung** under it. Some networks build no direct link 
 - The server page (`server.html`) registers with the rendezvous service on every load and is issued a **private five-letter code** in the client namespace. The join panel prints those five letters and a QR of `https://…/client/index.html#<PROJECT_GUID>_<VERSION_GUID>_<CODE>` — the same code, so scanning and typing are one join by two routes.
 - Client pages either read that structured code out of `location.hash` or take five typed letters; `gui/join-code.js` decides which a given string is. Both resolve through the service to the same host record and open the same channels.
 - **Clients never talk to each other.** All messages flow through the host.
+- **Ship hosts talk to ship hosts, on a different wire.** A fleet (issues #1114, #1116) is a second star: each host registers a *second* record in the `server` namespace, and a host that types that fleet code opens its own DataChannel to the lead. That link carries the **host-mesh vocabulary** (`gui/host-mesh.js`) and nothing else — a fleet member never sends `Identify`, never holds a station, and nothing it says reaches `wasm_receive_message`. Each crew star stays attached to its own host because the fleet link is a different socket, in a different namespace, carrying a different vocabulary; not because anything downstream filters it.
 
 ```
 client #1 ──┐
@@ -26,6 +27,12 @@ client #3 ──┘                   │               └── unordered Data
                                 │                   (SimState, etc.)
                                 └── reliable DataChannel
                                     (commands, lobby messages)
+
+        …and, when the host is in a fleet, one more link per peer:
+
+   host (slot 1) ◀──── host-mesh frames ────▶ host (slot 2)
+        │                (m/t/tick/d)               │
+   its own crew                              its own crew
 ```
 
 ## Joining: code, signalling, handshake

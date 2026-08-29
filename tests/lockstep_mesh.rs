@@ -34,9 +34,7 @@
 use bevy::prelude::*;
 
 use project_phoenix::command_admission::{CommandDelay, CommandLog, HostSlot};
-use project_phoenix::core::messages::{
-    ClientMessage, StationId, SystemControlPayload, SystemId,
-};
+use project_phoenix::core::messages::{ClientMessage, StationId, SystemControlPayload, SystemId};
 use project_phoenix::entities::spawner::EntityUuid;
 use project_phoenix::headless::{build_headless_app, run, world_digest, HeadlessArgs};
 use project_phoenix::lobby::{InboundMessage, Sessions};
@@ -87,10 +85,7 @@ fn roster(local: HostSlot) -> FleetRoster {
     let crewed = |host| FleetShip {
         host,
         ship_path: Some(SHIP.into()),
-        crew: vec![(
-            StationId(CREWED_STATION.into()),
-            CREWED_RATING.to_string(),
-        )],
+        crew: vec![(StationId(CREWED_STATION.into()), CREWED_RATING.to_string())],
     };
     FleetRoster::new(vec![crewed(SLOT_ONE), crewed(SLOT_TWO)], local)
 }
@@ -247,7 +242,10 @@ fn thrust(value: f32) -> SystemControlPayload {
 /// the ticks named in `orders`.
 ///
 /// Returns the two hosts and the per-tick digests each folded.
-fn run_mission(ticks: u64, orders: &[(u64, HostSlot, &str, SystemControlPayload)]) -> (Vec<Host>, Vec<Vec<(u64, u64)>>) {
+fn run_mission(
+    ticks: u64,
+    orders: &[(u64, HostSlot, &str, SystemControlPayload)],
+) -> (Vec<Host>, Vec<Vec<(u64, u64)>>) {
     let mut hosts = vec![Host::new(SLOT_ONE), Host::new(SLOT_TWO)];
     let mut digests: Vec<Vec<(u64, u64)>> = vec![Vec::new(), Vec::new()];
 
@@ -498,8 +496,7 @@ fn both_hosts_write_the_same_command_log() {
     let fleet = ships[0].fleet_ships();
     for entry in ships[0].log().entries() {
         assert_eq!(
-            entry.ship.0,
-            fleet[&entry.order.origin],
+            entry.ship.0, fleet[&entry.order.origin],
             "an order from {:?} applied to a ship that is not that slot's — a \
              fleet in which one crew can fly another's hull is not a fleet",
             entry.order.origin
@@ -731,7 +728,10 @@ fn a_fleet_of_one_never_waits() {
         "a host with no peers must never withhold a tick"
     );
     assert!(
-        app.world().resource::<MeshOutbox>().pending_frames().is_empty(),
+        app.world()
+            .resource::<MeshOutbox>()
+            .pending_frames()
+            .is_empty(),
         "…and must say nothing to a fleet that does not exist"
     );
 }

@@ -1,0 +1,137 @@
+entities:
+  - decision: gm-t2-peer-and-admission-contract
+    core:
+      status: accepted
+      confidence: confirmed
+      title: T2 GM Peer, Admission, and Readiness Contract
+      summary: "A browser GM runs the same headless authoritative simulation as every other host-class peer and joins through T1's Phoenix transport. The privileged server code admits either an open player-ship slot or the GM role after rendezvous; a GM consumes no ship slot and a crew code cannot request GM. Connected GMs are mechanically equal, each has a ready state, and each counts toward collective autostart; spectators do not. Any GM may force-start past readiness only, never past validation. A GM-only roster starts when all connected GMs are ready or one force-starts."
+      rationale:
+        - "This keeps one deterministic simulation and command protocol instead of building a privileged state-streaming server for the GM surface."
+        - "Role presets filter presentation only. They never create permission tiers, locks, a leader, or ownership of GM actions."
+        - "T2 is designed against the final T1 host-admission, deterministic multi-host, record-transfer, and divergence-recovery contracts; it does not ship a temporary single-host compatibility topology."
+        - "PRD #930 was decomposed on 2026-08-29 into tracer-bullet issues #1289-#1320. M1 is #1289-#1300, M2 is #1301-#1316 (including shared confirmation tracer #1315 under PRD #1273), and M3 is #1317-#1320. The exits are evidence-producing issues #1300 (AFK), #1316 (AFK), and #1320 (HITL), not horizontal milestone trackers."
+    architecture:
+      kind: session-policy
+      authority: authoritative
+      coordinates: [gm-milestone-peer-tracer, roadmap-band-a2-native-network-foundation]
+      runs_in: [host-browser-runtime, headless-runtime]
+
+  - decision: gm-t2-join-pause-and-projection-contract
+    core:
+      status: accepted
+      confidence: confirmed
+      title: GM Join, Pause, and Local Projection Contract
+      summary: "A first-time mid-session GM join requires visible acceptance by an existing host or GM, then schedules one synchronized pause for snapshot/history transfer and roster admission. The session remains paused until an explicit attributed SetSessionPaused { active: false }; reconnecting the same GM may auto-accept but still surfaces the pause. Joining never silently pauses. GM maps, feeds, dossiers, knowledge views, and authentic Station interfaces read local deterministic projections over the Host Channel; only typed GM commands cross lockstep, and there is no privileged omniscient streaming API."
+      rationale:
+        - "SetSessionPaused is an idempotent state-setting command rather than a toggle, so simultaneous equal GMs converge under deterministic command ordering. It is separate from debug controls and the local host pause surface even when all three present the same authoritative pause state."
+        - "A synchronized paused transfer makes drop-in visible and safe without granting a joining browser a special replication path."
+        - "Issue #1292 makes SetSessionPaused the first complete typed GM action tracer, after shared semantic action and feedback issues #1274/#1276, so M1 does not grow temporary plumbing that M2 later replaces. First-time join #1293 depends on record transfer #1117; known-GM divergence-safe reconnect #1294 separately depends on #1118."
+    architecture:
+      kind: session-policy
+      authority: authoritative
+      coordinates: [gm-milestone-peer-tracer]
+      runs_in: [host-browser-runtime, headless-runtime]
+
+  - component: gm-t2-map-feed-and-inspector-shell
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Omniscient Map, Activity Feed, and Reusable Inspector Shell
+      summary: "M1 shows every player ship, NPC, structure, authored hazard and authored Region with stable identity, position, faction, broad health/status, and current target. Asteroid fields render as aggregate Regions, never as individual asteroids unless authored as named selectable entities. Selection opens a minimal reusable inspector shell. One bounded tick-stamped activity stream projects existing structured balance/scenario sources: damage, destruction, Objectives, trigger fires, Red Alert, connections, and GM actions, with category/ship filters and selection links. Detailed doctrine, damage, Comms, knowledge, and attention scoring wait for the milestones that own them."
+      rationale:
+        - "The map, selection, inspector, panels, capability adapters, and action adapters are T2 components designed for M6 reuse, not a disposable GM page."
+        - "The feed consumes existing structured events rather than creating a parallel GM-only event bus; M4 later derives attention assistance from this evidence."
+    architecture:
+      kind: gm-presentation
+      authority: non-authoritative
+      coordinates: [gm-milestone-peer-tracer, gm-milestone-integrated-workshop]
+      runs_in: [host-browser-runtime]
+
+  - decision: gm-t2-action-result-contract
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Typed, Attributed, Idempotent GM Actions
+      summary: "Every GM mutation is a named typed command carrying operator identity, idempotency key, stable target identities, and a structured applied/no-op/refused result. Targets and preconditions are revalidated at the agreed apply tick and simultaneous equal-GM actions use deterministic ordering. GM actions use the same scenario-authorable vocabulary where one exists and never expose raw ECS mutation, arbitrary components, teleportation, arbitrary asset paths, or a generic expected-version transaction in T2."
+      rationale:
+        - "The command log and GM activity feed always preserve attribution and exact result. Crew normally see only the fictional consequence; operational pause, force-start, and Station takeover identify the GM explicitly."
+        - "M6 may add optimistic-concurrency adapters for safe Live inspection; T2 commands need not pre-invent that broader transaction model."
+    architecture:
+      kind: command-admission-policy
+      authority: authoritative
+      coordinates: [gm-milestone-directing, gm-milestone-integrated-workshop]
+      runs_in: [host-browser-runtime, headless-runtime]
+
+  - mechanic: gm-t2-event-control-contract
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Explicit Fire, Pause, and Skip-Next Event Controls
+      summary: "An automatic authored event is GM-controllable only when it declares gm_controls metadata with a stable qualified id, String Table label/description, and any explicit subset of fire, pause, and skip. Missing controls are invisible and unavailable. Pause is a persistent manual toggle: while paused the automatic condition is not evaluated and no missed edge is captured; unpause resumes ordinary evaluation, so a GM must use Fire if the opportunity passed. Fire bypasses condition and pause and executes the ordinary handler/lifecycle. Skip arms only the next matching occurrence and advances lifecycle as if it fired: a repeating event enters cooldown and a once-only event is spent. An armed skip survives Pause; Fire does not consume it."
+      rationale:
+        - "gm_event(id, label, handler) is the manual-only shorthand and implies Fire without a redundant gm_controls declaration. It is one-shot by default; repeatable() makes it a reusable quick tool."
+        - "A scenario can therefore expose a pure GM control with only a Fire trigger, while authors retain complete control over which automatic events are operable."
+        - "Trigger identity and control state are layer-qualified and represented in snapshots, deterministic digests, history, and the command log."
+    architecture:
+      kind: scenario-trigger-policy
+      authority: authoritative
+      coordinates: [gm-milestone-directing]
+      runs_in: [host-browser-runtime, headless-runtime]
+
+  - mechanic: gm-t2-directed-world-actions
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Bounded Directing Vocabulary
+      summary: "M2 exposes typed scenario-authorable actions for palette spawn, safe despawn, authored doctrine/directive changes, authored Objective activation and active Objective completion/failure, reveal/conceal/normal knowledge overrides, direct damage, healing, System disable/restore, and Station puppeting. Spawn uses only scenario/mod palette templates; the GM always picks position on the map and drags for heading, and the command carries resolved world coordinates and heading rather than pixels. Safe despawn covers removable NPCs, structures, and spawned hazards while excluding player ships, GM peers, and foundational entities and clearing references."
+      rationale:
+        - "Objective activation can select only authored palette entries with String Table text, directive, scoring, and targets. T2 has no free-text Objective authoring, arbitrary score editing, deletion, or reopen."
+        - "Reveal and conceal are persistent per observing player ship and target. Reveal guarantees a basic contact but not protected classification; conceal suppresses normal sensors; Normal clears the override. Overrides survive reconnect/snapshot and disappear with either referenced entity. False contacts, delay, and degradation wait for M7."
+        - "Damage and healing accept arbitrary absolute HP amounts scoped to an Entity, Station, or System. They are direct/internal and bypass shields: Entity uses the existing deterministic weighted hull distribution (or an NPC scalar path), Station restricts that distribution to its owned damageable Systems, and System targets one System. Healing mirrors scope, clamps at maxima, and reports discarded overflow. Normal damage tiers, destruction, repair, events, and triggers still apply."
+        - "System disable is an explicit GM-disabled latch independent of HP. Restore removes only the latch and does not heal, so an otherwise damaged or destroyed System may remain offline."
+    architecture:
+      kind: scenario-action-vocabulary
+      authority: authoritative
+      coordinates: [gm-milestone-directing]
+      runs_in: [host-browser-runtime, headless-runtime]
+
+  - mechanic: gm-t2-station-puppeting
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Station-Scoped GM Puppeting Alongside Players
+      summary: "A GM may open an authentic Station interface and puppet a player or NPC ship when that ship defines the interface and corresponding command consumers. Takeover is Station-scoped: it suppresses AI/Backfill emissions for that Station but does not change seat ownership. Human commands and GM commands remain accepted together and resolve through deterministic Admission ordering. Releasing takeover restores AI only where the Station would ordinarily receive it. Multiple GMs remain equal and every command is attributed."
+      rationale:
+        - "The GM takes over AI and acts alongside players; puppeting is not exclusive possession of a human Station and does not create a second downstream human-versus-GM authority branch."
+    architecture:
+      kind: station-control-policy
+      authority: authoritative
+      coordinates: [gm-milestone-directing]
+      runs_in: [host-browser-runtime, headless-runtime]
+
+  - component: gm-t2-performing-surface
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Comms Studio, Crew-Knowledge Comparison, and Role Presets
+      summary: "M3 lets a GM send bounded free-form in-character text through the normal Comms path using an existing sender identity, selected recipient ships, and authored routing visibility; exact text is logged. Template quick picks and scripted hail initiation are optional accelerators, and T2 neither invents identities nor drafts replies. Per-ship knowledge panes show the contact picture, Objectives, and Comms from the same projections the crew receives, with local Truth, Crew Knowledge, and Difference views; Station-private detail remains protected unless the GM opens its authentic Station interface. Each GM chooses and may live-switch a scenario-authored role preset that filters contacts, panels, quick actions, and later attention, defaults to All, permits duplicates, and persists only with that reconnectable GM identity."
+      rationale:
+        - "Role presets are personal presentation, not authority. All GMs remain peers and simultaneous actions keep the same attributed deterministic result contract."
+    architecture:
+      kind: gm-presentation
+      authority: non-authoritative
+      coordinates: [gm-milestone-performing]
+      runs_in: [host-browser-runtime]
+
+  - decision: gm-t2-device-and-milestone-boundaries
+    core:
+      status: accepted
+      confidence: confirmed
+      title: T2 Device Floor and T3/T4 Boundary
+      summary: "T2 supports desktop keyboard/mouse and large landscape tablets with touch, zoom, scalable text, visible focus, and non-colour state; phone portrait is out of scope. T3 owns M4 attention assistance and M5 safety/recovery, including live-session restore and undo. T4 M6 owns native integration and the integrated Workshop/Live Inspector. At M6 one native simulation instance may carry one fixed player-ship slot alongside local GM operator identities, advertises both ship and gm capabilities, and contributes once to deterministic NPC ownership; browser GM remains GM-only. M7 owns false/ghost/degraded/delayed information and M8 owns in-sim presentation controls."
+      rationale:
+        - "The combined native instance is one simulation peer with multiple local operator roles, never two duplicate simulations. T2 browser delivery stays focused while its reusable map, selection, inspector, panel, capability, and action components become the M6 foundation."
+    architecture:
+      kind: scope-boundary
+      authority: non-authoritative
+      coordinates: [gm-milestone-performing, gm-milestone-integrated-workshop, gm-milestone-information-control, gm-milestone-presentation]

@@ -88,7 +88,6 @@ fn the_supported_extremes_match_the_client() {
     // reasons over the range the page can actually produce.
     assert_eq!(SUPPORTED_TEXT_SCALE_MIN, 1.0);
     assert_eq!(SUPPORTED_TEXT_SCALE_MAX, 1.5);
-    assert!(SUPPORTED_TEXT_SCALE_MAX > SUPPORTED_TEXT_SCALE_MIN);
 }
 
 // ── reflow headroom (acceptance criterion 1) ─────────────────────────────────

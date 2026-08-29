@@ -41,11 +41,11 @@ use project_phoenix::native_host::bridge_profile::{
     identify, resolve, BridgeProfile, DisplayEntry, PaneSlot, PaneSplit, RawMonitor, ROLE_STATION,
     ROLE_VIEWSCREEN,
 };
+use project_phoenix::native_host::panes::os_prefs::query_os_accessibility_prefs;
 use project_phoenix::native_host::setup_accessibility::{
     bridge_focus_order, bridge_preserves_all_consoles, render_accessibility_setup_report,
     SUPPORTED_TEXT_SCALE_MAX, SUPPORTED_TEXT_SCALE_MIN,
 };
-use project_phoenix::native_host::panes::os_prefs::query_os_accessibility_prefs;
 
 /// Frames to give winit to report the monitors. Generous; the test finishes the
 /// instant the list is non-empty, so the ceiling only bites on a genuine failure.
@@ -189,7 +189,9 @@ fn drive(
             finish(
                 &outcome,
                 &mut exit,
-                Err(format!("a profile built from real monitors did not validate: {e}")),
+                Err(format!(
+                    "a profile built from real monitors did not validate: {e}"
+                )),
             );
             return;
         }
@@ -222,10 +224,7 @@ fn drive(
                         "pane {} on {} ({}x{} logical) does not preserve its console at text \
                          scale {scale}x — this monitor is too small for a two-pane split; use one \
                          pane or a larger display",
-                        pane.label,
-                        pane.monitor,
-                        b.logical_width as u32,
-                        b.logical_height as u32,
+                        pane.label, pane.monitor, b.logical_width as u32, b.logical_height as u32,
                     )),
                 );
                 return;
@@ -254,7 +253,8 @@ fn drive(
     }
 
     // The report an operator would read on this machine, for the --nocapture log.
-    let report = render_accessibility_setup_report(Some(&resolved), &query_os_accessibility_prefs());
+    let report =
+        render_accessibility_setup_report(Some(&resolved), &query_os_accessibility_prefs());
     finish(
         &outcome,
         &mut exit,

@@ -114,8 +114,9 @@ enum ActiveRecovery {
     InProgress {
         plan: recovery_plan::RecoveryPlan,
         role: RecoveryRole,
-        /// The leader has captured and queued its record.
-        transfer_sent: bool,
+        /// The tick the leader captured and queued its record at, once it has —
+        /// the same tick the recovering host restores to. `None` until sent.
+        record_tick: Option<u64>,
         /// This host has done its part and lifted its boundary hold.
         resolved: bool,
     },
@@ -304,7 +305,7 @@ fn begin_recovery(world: &mut World, local: HostSlot, delay: u64) {
             world.resource_mut::<RecoveryState>().active = Some(ActiveRecovery::InProgress {
                 plan,
                 role,
-                transfer_sent: false,
+                record_tick: None,
                 resolved: false,
             });
         }
@@ -333,7 +334,7 @@ fn advance_recovery(world: &mut World, local: HostSlot, delay: u64, sim_tick: u6
     let ActiveRecovery::InProgress {
         plan,
         role,
-        mut transfer_sent,
+        mut record_tick,
         mut resolved,
     } = active
     else {
@@ -350,14 +351,14 @@ fn advance_recovery(world: &mut World, local: HostSlot, delay: u64, sim_tick: u6
 
     match role {
         RecoveryRole::Leader => {
-            if reached && !transfer_sent {
-                transfer_sent = try_send_record(world, local, &plan);
+            if reached && record_tick.is_none() {
+                record_tick = try_send_record(world, local, &plan);
             }
-            if transfer_sent && recovering_all_resumed(world, &plan, boundary, delay) {
-                resolved = true;
-                resolution = Some(RecoveryResult::Led {
-                    record_tick: sim_tick,
-                });
+            if let Some(tick) = record_tick {
+                if recovering_all_resumed(world, &plan, boundary, delay) {
+                    resolved = true;
+                    resolution = Some(RecoveryResult::Led { record_tick: tick });
+                }
             }
         }
         RecoveryRole::Bystander => {
@@ -393,17 +394,24 @@ fn advance_recovery(world: &mut World, local: HostSlot, delay: u64, sim_tick: u6
     world.resource_mut::<RecoveryState>().active = Some(ActiveRecovery::InProgress {
         plan,
         role,
-        transfer_sent,
+        record_tick,
         resolved,
     });
 }
 
-/// Capture and queue this leader's canonical record. Returns whether it went out.
-fn try_send_record(world: &mut World, local: HostSlot, plan: &recovery_plan::RecoveryPlan) -> bool {
+/// Capture and queue this leader's canonical record. Returns the tick it was
+/// captured at (the tick the recovering host restores to), or `None` if the
+/// capture could not be framed.
+fn try_send_record(
+    world: &mut World,
+    local: HostSlot,
+    plan: &recovery_plan::RecoveryPlan,
+) -> Option<u64> {
     let scenario = world
         .get_resource::<BridgeWorldSource>()
         .map(|source| source.path.clone())
         .unwrap_or_default();
+    let captured_at = world.get_resource::<SimTick>().map_or(0, |t| t.0);
     let transfer_id = recovery_transfer_id(plan);
     match send_snapshot(world, local, transfer_id, scenario) {
         Ok(chunks) => {
@@ -412,10 +420,10 @@ fn try_send_record(world: &mut World, local: HostSlot, plan: &recovery_plan::Rec
                 log,
                 LogCat::Admit,
                 "host-mesh recovery leader {} transferred its canonical record in {chunks} \
-                 chunk(s) at the boundary",
+                 chunk(s) at tick {captured_at}",
                 local.slot_id(),
             );
-            true
+            Some(captured_at)
         }
         Err(why) => {
             let log = world.get_resource::<crate::logging::LogFilterConfig>().cloned();
@@ -425,7 +433,7 @@ fn try_send_record(world: &mut World, local: HostSlot, plan: &recovery_plan::Rec
                 "host-mesh recovery leader {} could not capture its record: {why}",
                 local.slot_id(),
             );
-            false
+            None
         }
     }
 }

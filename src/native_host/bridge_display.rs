@@ -536,9 +536,22 @@ fn setup_enumerate(
     }
     let discovered = identify(&raws);
     let report = super::bridge_profile::render_setup_report(&discovered, profile.0.as_ref());
+    // The accessibility half of the report (issue #1128): per-pane reflow
+    // headroom at the supported scaling extremes, the keyboard-focus order across
+    // monitors, and the OS accessibility preferences the panes and reticle start
+    // from. Resolved here (not inside `render_setup_report`) because it is the
+    // adapter that reads the machine's OS preferences.
+    let prefs = super::panes::os_prefs::query_os_accessibility_prefs();
+    let resolved = profile.0.as_ref().and_then(|p| {
+        p.validate()
+            .ok()
+            .map(|v| super::bridge_profile::resolve(&v, &discovered))
+    });
+    let accessibility =
+        super::setup_accessibility::render_accessibility_setup_report(resolved.as_ref(), &prefs);
     // Operator output, on the same footing as `phoenix-host`'s other CLI prints:
     // stdout, not the `plog!` family.
-    print!("{report}");
+    print!("{report}{accessibility}");
     if discovered.is_empty() {
         eprintln!(
             "phoenix-host --setup: no monitors were reported after {} frames",

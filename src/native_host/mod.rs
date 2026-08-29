@@ -68,6 +68,14 @@ pub mod panes;
 #[cfg(feature = "host")]
 pub mod relay_socket;
 pub mod relay_transport;
+/// The setup/layout accessibility model (issue #1128) — pure, Bevy-free. The
+/// reflow-headroom check that keeps one- and two-pane layouts operable at the
+/// supported text-scale extremes, the keyboard-focus order across monitors and
+/// split panes, the non-colour focus-reticle geometry (and its contrast/
+/// reduced-motion response), and the setup-action reachability invariant all live
+/// here and are CI-tested. The winit/Ultralight adapter that draws the reticle
+/// from [`setup_accessibility::FocusReticle`] is [`panes::ultralight`].
+pub mod setup_accessibility;
 pub mod transport;
 
 pub use app::{

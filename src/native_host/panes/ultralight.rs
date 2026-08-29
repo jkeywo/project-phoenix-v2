@@ -88,41 +88,36 @@ use crate::native_host::input_routing::{
     pointer_follow_focus, ContactCaptureMap, FocusRing, MouseCapture, PaneHit, PanePlacement,
     PaneRouter, PointerMotion, WindowKey,
 };
+use crate::native_host::setup_accessibility::{FocusReticle, FocusReticleStyle};
 
 use super::document::pane_drain_script;
+use super::os_prefs;
 use super::recovery::{service_faults, PaneFault};
 use super::registry::PaneId;
 use super::surface::{pump_pane, PaneSurface, PaneSurfaceError};
 use super::PaneBusResource;
 
-// ── focus-indicator geometry (issue #1124, acceptance criterion 2) ───────────
+// ── focus-indicator geometry (issue #1124 AC2; issue #1128 AC3/AC4) ──────────
 //
-// Not gameplay values and not designer tunables: these are the dimensions of the
-// keyboard-focus indicator, an accessibility affordance, expressed in a pane's
-// own LOGICAL pixels so they read the same at any monitor scale. The indicator is
-// a full ring PLUS four corner brackets, and it is drawn on exactly the focused
-// pane and on no other — so focus is shown by the PRESENCE of that shape, not by
-// a colour change. That is what makes it independent of colour (WCAG 1.4.1): a
-// colour-blind operator, or one reading a washed-out bridge display, sees a
-// bracketed frame appear, not one border changing hue.
+// The keyboard-focus indicator is a full ring PLUS four corner brackets, drawn on
+// exactly the focused pane and on no other — so focus is shown by the PRESENCE of
+// that shape, not by a colour change (WCAG 1.4.1): a colour-blind operator, or
+// one reading a washed-out bridge display, sees a bracketed frame appear, not one
+// border changing hue.
+//
+// Its geometry and its contrast/reduced-motion response are the pure
+// `setup_accessibility::{FocusReticle, FocusReticleStyle}` (issue #1128), so the
+// shape and the accessibility behaviour are CI-tested rather than only provable
+// under the ignored GPU test; this adapter turns the descriptor into Bevy UI
+// nodes. High contrast bolds and fully opaques the frame; the reticle never
+// animates, which is the reduced-motion guarantee for host-drawn setup chrome.
 
-/// The thickness of the focus ring and its corner brackets, logical pixels.
-const FOCUS_RING_THICKNESS_PX: f32 = 3.0;
-/// The arm length of each corner bracket, logical pixels — long enough to read as
-/// a deliberate reticle rather than a rounded corner.
-const FOCUS_RING_BRACKET_PX: f32 = 26.0;
-/// How far the ring is inset from the pane edge, logical pixels, so the frame
-/// sits just inside the console rather than being clipped at the window edge.
-const FOCUS_RING_INSET_PX: f32 = 2.0;
-
-/// The focus indicator's colour. A colour is still needed to draw it; the
-/// accessibility guarantee is that focus is conveyed by the ring's PRESENCE and
-/// its bracket shape, not by this value — an unfocused pane has no ring at all,
-/// so no colour discrimination is required to tell focused from unfocused. A
-/// near-opaque white reads on the dark console chrome the same way the viewscreen
-/// HUD text does (`server::renderer`).
-fn focus_ring_color() -> Color {
-    Color::srgba(1.0, 1.0, 1.0, 0.92)
+/// The near-opaque white the reticle is drawn in, at `alpha` from the style. The
+/// hue is never load-bearing — an unfocused pane has no ring at all, so no colour
+/// discrimination is required to tell focused from unfocused; white reads on the
+/// dark console chrome the same way the viewscreen HUD text does.
+fn focus_ring_color(alpha: f32) -> Color {
+    Color::srgba(1.0, 1.0, 1.0, alpha)
 }
 
 /// Marks an entity that is part of the keyboard-focus indicator, so the whole
@@ -1220,24 +1215,36 @@ fn update_focus_indicator(host: Option<NonSendMut<PaneHost>>, mut commands: Comm
 
 /// Spawn the focus reticle over one pane: a full ring and four corner brackets,
 /// on the pane's own window camera.
+///
+/// The geometry and the accessibility response come from the pure
+/// [`FocusReticle`] (issue #1128): the pane's physical origin/size are turned
+/// into a logical box, and [`FocusReticleStyle::for_os_prefs`] bolds and opaques
+/// the frame under `prefers-contrast: more`. The read is machine-wide and
+/// best-effort, matching the pane document's OS accessibility injection.
 fn spawn_focus_ring(commands: &mut Commands, window: &PaneWindow) -> Entity {
     let scale = window.scale as f32;
-    let left = window.origin.0 as f32 / scale + FOCUS_RING_INSET_PX;
-    let top = window.origin.1 as f32 / scale + FOCUS_RING_INSET_PX;
-    let width = (window.size.0 as f32 / scale - 2.0 * FOCUS_RING_INSET_PX).max(0.0);
-    let height = (window.size.1 as f32 / scale - 2.0 * FOCUS_RING_INSET_PX).max(0.0);
-    let color = focus_ring_color();
+    let style = FocusReticleStyle::for_os_prefs(&os_prefs::query_os_accessibility_prefs());
+    let reticle = FocusReticle::for_pane(
+        window.origin.0 as f32 / scale,
+        window.origin.1 as f32 / scale,
+        window.size.0 as f32 / scale,
+        window.size.1 as f32 / scale,
+        &style,
+    );
+    let thickness = reticle.thickness_px;
+    let bracket = reticle.bracket_px;
+    let color = focus_ring_color(reticle.alpha);
 
     let ring = commands
         .spawn((
             FocusRingNode,
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(left),
-                top: Val::Px(top),
-                width: Val::Px(width),
-                height: Val::Px(height),
-                border: UiRect::all(Val::Px(FOCUS_RING_THICKNESS_PX)),
+                left: Val::Px(reticle.frame.left),
+                top: Val::Px(reticle.frame.top),
+                width: Val::Px(reticle.frame.width),
+                height: Val::Px(reticle.frame.height),
+                border: UiRect::all(Val::Px(thickness)),
                 ..default()
             },
             BorderColor::all(color),
@@ -1257,30 +1264,30 @@ fn spawn_focus_ring(commands: &mut Commands, window: &PaneWindow) -> Entity {
     ] {
         let mut node = Node {
             position_type: PositionType::Absolute,
-            width: Val::Px(FOCUS_RING_BRACKET_PX),
-            height: Val::Px(FOCUS_RING_BRACKET_PX),
+            width: Val::Px(bracket),
+            height: Val::Px(bracket),
             ..default()
         };
         let mut border = UiRect::default();
         if v_side {
             node.top = Val::Px(0.0);
-            border.top = Val::Px(FOCUS_RING_THICKNESS_PX);
+            border.top = Val::Px(thickness);
         } else {
             node.bottom = Val::Px(0.0);
-            border.bottom = Val::Px(FOCUS_RING_THICKNESS_PX);
+            border.bottom = Val::Px(thickness);
         }
         if h_side {
             node.left = Val::Px(0.0);
-            border.left = Val::Px(FOCUS_RING_THICKNESS_PX);
+            border.left = Val::Px(thickness);
         } else {
             node.right = Val::Px(0.0);
-            border.right = Val::Px(FOCUS_RING_THICKNESS_PX);
+            border.right = Val::Px(thickness);
         }
         node.border = border;
-        let bracket = commands
+        let bracket_entity = commands
             .spawn((FocusRingNode, node, BorderColor::all(color), ZIndex(51)))
             .id();
-        commands.entity(ring).add_child(bracket);
+        commands.entity(ring).add_child(bracket_entity);
     }
 
     if let Some(cam) = window.station_camera {

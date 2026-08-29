@@ -1,8 +1,8 @@
 ---
 title: Native Host
 type: concept
-tags: [native, viewscreen, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile]
-sources: [src/native_host/mod.rs, src/native_host/app.rs, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_display.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/recovery.rs, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs]
+tags: [native, viewscreen, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile, media-devices, camera, microphone]
+sources: [src/native_host/mod.rs, src/native_host/app.rs, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_display.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/recovery.rs, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs]
 updated: 2026-08-29
 ---
 
@@ -509,6 +509,96 @@ pane the profile names a Station slot for is rendered on that Station window by 
 per-Station 2-D camera; a pane the profile leaves unseated still falls back to
 viewscreen tiling, so a mixed launch never leaves a pane with nowhere to draw.
 
+## Bridge media profiles (issue #1126)
+
+A bridge is a room of media devices as well as monitors: the cameras,
+microphones and speakers the crew talks to the rest of the fleet through. Issue
+#1126 is the **media-device analogue of the display profile** — each bridge
+*surface* (the shared viewscreen, and each named Station, Comms above all) is
+assigned a camera, microphone(s) and audio output(s), written in the **same**
+`BridgeProfile` TOML the `[[display]]` roles live in.
+
+```toml
+version = 1
+
+[[media]]
+surface = "viewscreen"
+camera = "camera:Logitech BRIO"
+microphone = ["mic:Blue Yeti"]
+output = ["output:Bridge Speakers"]
+
+[[media]]
+surface = "comms"
+microphone = ["mic:Headset Boom"]
+output = ["output:Comms Headset"]
+allow_shared = []          # a device on two surfaces must be listed here on both
+```
+
+| Piece | File |
+|---|---|
+| The pure model — kinds, identity, validate, resolve, default, report | `src/native_host/bridge_media.rs` |
+| The `[[media]]` field + the folded validation | `src/native_host/bridge_profile.rs` (`BridgeProfile::media`, `ProfileError::Media`) |
+| The `--setup` media section | `src/native_host/bridge_profile.rs` (`render_setup_report_with_media`) → `bridge_media::render_media_setup_report` |
+| The acceptance kit | `docs/acceptance/1126-media.md` |
+
+The **pure model is Bevy-free** (`bridge_media`), exactly as `bridge_profile` is,
+and is tested by the ordinary `cargo test` CI runs. Media assignments validate in
+the **same pass** as display roles (`BridgeProfile::validate`), so a bad
+assignment fails at the prompt just as a bad display role does —
+`ProfileError::Media` wraps the `MediaError` taxonomy.
+
+### Device identity, and its limit
+
+A device's stable identity is `kind:name` (`identify_media`) — the kind tag
+(`camera` / `mic` / `output`) and the OS device name — so an operator reads it and
+knows what it is, exactly as `name@WxH` does for a monitor. **Encoding the kind
+into the identity is load-bearing:** it is what lets validation reject a
+microphone dropped into the camera slot as a pure string check, before any device
+is opened. Two devices of the same kind and name are indistinguishable by name and
+fall back to a suffix — `kind:name#<hardware-id>` when the OS gives one, else
+`kind:name#<ordinal>` in enumeration order — the same honest limit the display
+scheme has.
+
+### Validation, sharing and resolution
+
+`validate_media` is the failure taxonomy: a wrong-kind device in a slot
+(`WrongKind`), an id with no kind tag (`MalformedId`), the same device twice on
+one surface (`DuplicateDevice`), two surfaces of one name (`DuplicateSurface`),
+and — acceptance criterion 2 — a device assigned to two surfaces without **every**
+surface consenting via `allow_shared` (`SharedWithoutConsent`). A *consented*
+share is allowed and returns a `MediaWarning::Contention`, because one device
+rarely captures or plays for two surfaces at once and the OS may refuse the second
+open. `resolve_media` matches assignments against the devices actually present:
+a **missing** device (`MediaProblem::DeviceMissing`) or a present-but-**denied**
+one (`DeviceDenied`) is named and its slot left empty, and the surface keeps every
+device it *does* have — a missing, removed or denied device never makes the
+Station unusable (acceptance criterion 4). A present device assigned to no surface
+is not a problem; a bridge need not use every device it can see.
+`default_media_assignment` is the deterministic default when the operator has not
+chosen: the OS default (else first) of each kind per surface, consenting to the
+forced share on a one-device box so the generated default validates.
+
+### The setup surface, and the backend gap
+
+`--setup` gains a media section (`render_media_setup_report`): it lists devices by
+kind and validates the profile's assignments, reporting missing/denied devices and
+contention. But **there is no OS media backend in the tree.** The display profile
+gets its real enumeration free from Bevy's `Monitor`; there is no equivalent
+already-present source for cameras, microphones and outputs, and no native media
+crate is a dependency here. So `--setup`'s media half validates hand-authored
+assignments and prints that no backend is compiled in (`enumerate_note`). Wiring a
+real backend — `cpal` for microphones/outputs, a camera crate such as `nokhwa` (or
+Windows Media Foundation) for cameras — behind the `host`/`ultralight` feature
+seam is the winit-adapter analogue, out of the CI default build exactly as the
+real-monitor surface is. Live enumeration, camera preview, mic metering, output
+tone-test and real capture/play are the acceptance kit's Part B — deferred until
+that backend lands, so acceptance criterion 3 stays parked there, the way #1124's
+touch criterion 6 stays parked on real touch hardware.
+
+This profile is **still not** the private per-player Accessibility profile
+(#1127): it is shared operator configuration of the physical room, carrying
+nothing about any one player.
+
 ## Input routing (issue #1124)
 
 Across a configured multi-monitor bridge, one mouse must traverse every surface,
@@ -635,7 +725,7 @@ token's projection again, and that is the reconnect, not a leak.
 |---|---|
 | `src/native_host/bridge_profile.rs` | The pure model: stable identity across a simulated OS-settings rearrange, identical-monitor disambiguation (including a TOML round-trip of a position-suffixed id), the one/two-pane geometry math (even and odd, side-by-side and stacked), the >2 density refusal, the one-viewscreen refusal (`ProfileError::MultipleViewscreens`, naming both monitors), the TOML round-trip (Windows backslash ids included), the missing/unassigned/changed-display reporting, and (#1125) the runtime loss/return detection — a lost Station names its panes, a lost viewscreen names none, a return is for explicit repair only. All feature-agnostic, run by the ordinary `cargo test` |
 | `src/native_host/bridge_display.rs` | A Bevy `Monitor` lifts into a `RawMonitor` and carries the documented identity; `--setup`'s exit code is clean only when a supplied profile both validates and resolves with no problems against the connected displays (`setup_profile_is_clean`); and (#1125) `watch_runtime_displays` itself — driven with *fake* `Monitor` entities spawned and despawned as bevy_winit does on hot-plug, so it runs in CI without a display — closes a lost Station's pane (→ Backfill) and no pane for a lost viewscreen |
-| `src/native_host/panes/recovery.rs` | `PaneFault`'s two kinds and `service_faults`: a view crash closes the pane and recreates it on the same token; a reliable overflow closes and does not; the recreated pane receives its own token's projection while the failed handle and a bystander receive nothing; and the recreated pane re-identifies on that token as a reconnecting phone does. All feature-off |
+| `src/native_host/bridge_media.rs` + `bridge_media_tests.rs` | The pure media model (#1126): stable `kind:name` identity (recovered to its kind, stable across a re-enumeration, kind keeps a same-named camera/mic distinct, identical devices disambiguated by hardware id or ordinal); the validate failure taxonomy (wrong-kind, malformed id, duplicate-on-surface, duplicate-surface, shared-without-consent); the consented-share warning; resolve naming a missing vs a denied device while the surface stays usable; the deterministic default (OS-default/first per kind, denied skipped, forced share consented); and the setup report. Also the `[[media]]` TOML round-trip in `bridge_profile_tests.rs`. All feature-agnostic, run by the ordinary `cargo test` |
 | `tests/native_bridge_displays.rs` | On the real machine's monitors, a profile opens one borderless-fullscreen surface per monitor at the monitor's geometry — the viewscreen on the primary window, a Station on its own. `#[ignore]`d: it opens real winit windows, which CI has no display for. Verified once locally |
 | `src/delivery/args.rs` | `--setup` is a standalone diagnostic needing no world and refuses every simulation/crew flag (`--world`, `--ship`, `--seed`, `--solo`, `--pane`, `--log`, `--log-entity`, `--rendezvous`, `--origin`) rather than silently discarding them; `--profile` applies with a world or validates with `--setup`, and is refused alone |
 | `src/boot/tests.rs` | Four-profile parity; only the render-stack profiles take that path; a native host refuses a configless boot, including a hull declared only by a static child |
@@ -661,6 +751,6 @@ shared binary is a claim about whoever won that race.
 ## Related
 
 - [Build & Deployment](./build-and-deployment.md) · [Networking](./networking.md) · [Architecture](./architecture.md)
-- Issue #1121 — the host. Issue #1122 — local Ultralight panes. Issue #1123 — bridge display profiles (above). Issue #1125 — recovering a failed pane and a lost display (above). Issue #1112 — the transport. Issue #1124 — input routing between displays + pane→Station-window compositing (above).
+- Issue #1121 — the host. Issue #1122 — local Ultralight panes. Issue #1123 — bridge display profiles (above). Issue #1125 — recovering a failed pane and a lost display (above). Issue #1112 — the transport. Issue #1124 — input routing between displays + pane→Station-window compositing (above). Issue #1126 — bridge media profiles: per-surface camera/microphone/output assignment (above).
 - [vellum](https://github.com/jkeywo/vellum) `crates/vellum-ultralight` — the extracted plumbing; `docs/handbook/dependencies.md` records why `ul-next` stopped being a per-game exception
 - `pasm/spec/architecture/native-delivery.yaml` — PRD #855's delivery declarations

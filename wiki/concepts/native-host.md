@@ -2,7 +2,7 @@
 title: Native Host
 type: concept
 tags: [native, viewscreen, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile]
-sources: [src/native_host/mod.rs, src/native_host/app.rs, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_display.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/recovery.rs, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs]
+sources: [src/native_host/mod.rs, src/native_host/app.rs, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_display.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/recovery.rs, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs]
 updated: 2026-08-29
 ---
 
@@ -395,13 +395,13 @@ non-required job.
   network transport and changes nothing else, which is what `PairedTransport`
   was built for.
 - **Bridge display profiles** (which monitor is which) are issue #1123's — see
-  the section below. What that issue leaves for the follow-on is **compositing a
-  pane onto its assigned Station window**: #1123 opens the Station windows and
-  computes each pane's rectangle, but the Ultralight pane host still tiles panes
-  on the viewscreen window as it always did (`panes::ultralight`), and
-  `bridge_display::BridgeStationSurfaces` is the seam that rehoming reads.
-- **Independent input routing** between panes is issue #1124's. Today it is one
-  pointer, one focused pane, the left button, the wheel and text.
+  the section below. It opened the Station windows and computed each pane's
+  rectangle; **compositing a pane onto its assigned Station window** and routing
+  input to it landed in issue #1124 (see "Input routing" below).
+- **Independent input routing** between panes landed in issue #1124: one mouse
+  traverses every surface, keyboard focus moves between panes with a visible
+  non-colour indicator, and each touch contact is captured by the pane it began
+  on. See the section below.
 
 ## Bridge display profiles (issue #1123)
 
@@ -496,19 +496,94 @@ geometry and current assignment (validating `--profile` against them if given),
 and exits. Its whole *content* is the pure `render_setup_report`, so it is tested
 without a display; the winit window is the one part that needs the machine.
 
-### What is deferred
+### Pane compositing onto Station windows (landed in #1124)
 
-Compositing an Ultralight pane onto its assigned Station window is the
-continuation, sharing #1124's input-routing concern: this slice opens the Station
-windows and lays out the pane rectangles, and leaves the pane rendering pointed
-at those windows through `BridgeStationSurfaces`. Until then a host launched with
-both `--profile` and `--pane` opens the Station windows **and** tiles the panes on
-the viewscreen window as #1122 always did — nothing regresses.
+Compositing an Ultralight pane onto its assigned Station window was #1123's
+deferred continuation, and it landed with #1124's input routing (below). This
+slice's contribution is the seam: `BridgeStationSurface` now carries the
+monitor's `MonitorGeometry` (scale and desktop position) alongside its window
+entity and pane rectangles, which is what the pane host needs to composite each
+pane at the right physical size and route input in the monitor's own coordinate
+space. A `--profile` launch no longer tiles its panes on the viewscreen — each
+pane the profile names a Station slot for is rendered on that Station window by a
+per-Station 2-D camera; a pane the profile leaves unseated still falls back to
+viewscreen tiling, so a mixed launch never leaves a pane with nowhere to draw.
 
-Station windows are borderless-fullscreen but visually **empty** until #1124
-lands pane compositing: nothing renders into one on its own (no camera targets
-it), so an operator seeing a blank Station display before then is seeing the
-disclosed, correct state — not a broken render.
+## Input routing (issue #1124)
+
+Across a configured multi-monitor bridge, one mouse must traverse every surface,
+keyboard focus must be explicit and visibly indicated, and independent
+touchscreen contacts must land on — and stay captured by — the pane where each
+gesture began. The **routing logic is pure** and lives in
+`src/native_host/input_routing.rs`, Bevy-free and CI-tested; the winit/Ultralight
+adapter that feeds it real events is the feature-gated
+`panes::ultralight` (`--features ultralight`).
+
+| Piece | File |
+|---|---|
+| The pure model — router, focus order, contact capture | `src/native_host/input_routing.rs` |
+| The winit/Ultralight adapter — per-window events → the model → the views | `src/native_host/panes/ultralight.rs` (feature `ultralight`) |
+| The acceptance kit (mouse/keyboard now; touch when hardware exists) | `docs/acceptance/1124-input.md` |
+
+### The three pure models
+
+- **`PaneRouter`** — a flat list of `PanePlacement`s (a pane, the window it is
+  composited on, its rectangle in that window's physical pixels, the window's
+  desktop origin, and the scale factor). `resolve_in_window` routes an event a
+  window delivered in its own coordinates; `resolve_desktop` routes a
+  device-global physical point (a touchscreen the profile maps to a monitor by
+  position). Both return the pane and the pointer position in that pane's **own
+  logical (page CSS) pixels** — `(physical − pane_origin) / scale`, which is the
+  whole of "display scaling". `project_into_pane` is the capture path's
+  projection: it maps a point into a *specific* pane without the containment test,
+  so a pinned contact's drift past the pane edge is a legitimate drag, not lost.
+- **`FocusRing`** — the keyboard-focus order over the panes and which one holds
+  focus. Traversal cycles; `sync_order` reconciles the order when a pane opens or
+  closes and **clears** focus if the focused pane went, never carrying one
+  participant's keystrokes onto whoever inherits its slot.
+- **`ContactCaptureMap`** — a touch pinned to the pane its first point resolved
+  to, routed there for its whole life however far the finger drifts; simultaneous
+  contacts are independent because each is one entry keyed by its own id.
+
+### The adapter, and its decisions
+
+- **One mouse, every window.** The OS moves the cursor across the extended
+  desktop; exactly one window reports a `cursor_position` at a time. The adapter
+  converts it to physical, asks the router which pane it is over, focuses that
+  pane, and injects the move, buttons and wheel into its view — one pointer
+  operating every surface with no test-only mode.
+- **Keyboard focus is Ctrl+Tab / Ctrl+Shift+Tab**, deliberately not plain Tab: a
+  console has real form fields and plain Tab must stay the page's own
+  field-to-field traversal. Ctrl+Tab is the convention for moving between panes
+  and no console binds it. A bare Tab is forwarded to the page as text; Ctrl+Tab
+  is consumed as a focus command.
+- **The focus indicator is a ring plus four corner brackets** drawn on exactly
+  the focused pane. Focus is shown by the *presence* of that shape, not by a
+  colour change — so it does not rely on colour alone (WCAG 1.4.1): an unfocused
+  pane has no ring at all, so no colour discrimination is needed to tell focused
+  from unfocused. Its geometry is documented `FOCUS_RING_*` constants (thickness,
+  bracket length, inset), not tunables. The reticle is re-homed onto the right
+  window's camera by despawn-and-respawn when focus crosses windows.
+- **Touch maps to pointer events per contact.** Ultralight has no multi-touch
+  surface, so each contact is expressed as a down / drag / up on its pinned
+  pane's view. Two contacts on *different* panes are genuinely independent; two on
+  the *same* pane share the one pointer — the honest limit of this mapping, and
+  why the kit's simultaneous-touch part is the hardware acceptance. The adapter
+  treats `TouchInput.position` as window-logical (the same space as
+  `cursor_position`) and converts to physical for the router; the id-stability
+  assumption is that winit carries one stable contact id from down to up, which
+  the kit verifies on real hardware.
+
+### MVP vs. full
+
+The pane→Station-window **compositing is the honest MVP** the issue sanctioned:
+each pane is drawn on its Station window via a per-Station 2-D camera and receives
+that window's input, and the pure routing model handles arbitrary multi-monitor
+geometry. What is **not** verified in code on the dev machine is multi-monitor and
+multi-touch behaviour — the box has one monitor and no touch — so those are the
+acceptance kit's, and the pure tests carry the logic. A Station window whose panes
+have all closed has its camera despawned; the window itself stays
+`bridge_display`'s to own.
 
 ## Recovering a failed pane and a lost display (issue #1125)
 
@@ -574,6 +649,8 @@ token's projection again, and that is the reconnect, not a leak.
 | `src/delivery/serve.rs` | A hosted document is served to a loopback peer and to nothing else, while the bundle and the version-pin endpoints stay LAN-open; `peer_origin` classifies IPv4, IPv6, IPv4-mapped and "the OS would not say" |
 | `tests/client/pane-scripts.test.js` | The two injected scripts, in jsdom, **driven through the real seam**: the boot script reads the identity out of the fragment, leaves a fragment `joinRouteFromLocation`/`parseJoinCode` accept (the literal is read out of `document.rs`, so the cross-language pin is checked), and caps the page's inbox; then the repository's own `createRendezvousJoiner` is run over the link's factories and asserted to produce the host-minted `Identify` on the page→host queue, to keep `JoinHandshake` off it, and to hand `onData` a `localiseTree`d message |
 | `tests/native_host_panes.rs` | A pane joins/claims/readies through the ordinary contracts; it is admitted for its own Station and refused another's by the real policy; it cannot read another pane's projection; a pane and a transport participant hold different Stations on the same running ship; a closed pane hands the lobby the disconnect a dropped phone would; and a pane's identity is in its URL, its document unenumerable, LAN-refused, and withdrawn on close. **#1125:** on a running ship, a view crash flips the seat to Backfill through the ordinary session path; no surviving pane inherits the failed pane's projection; recreating the pane reconnects on the same token and restores its held station out of Backfill with a Welcome; and a lost Station display disconnects its pane without recreating it |
+| `src/native_host/input_routing.rs` + `input_routing_tests.rs` | The pure input-routing model (issue #1124): coordinate transforms at scale 1.0/1.5/2.0 and at a non-zero monitor origin, the pane-boundary hit test (the shared seam belongs to one pane; side-by-side and stacked splits), mouse traversal across a boundary, per-window isolation, keyboard-focus cycling and the closed-focused-pane clear, and touch contact capture (pinned through drift, per-screen independence, duplicate-Started ignored, a closing pane releasing its contacts). All feature-agnostic, run by the ordinary `cargo test` |
+| `tests/native_host_input.rs` | The pane input adapter builds a router over the real primary window's geometry and scale, resolves a synthetic point to the correct tiled pane, and runs its whole input + draw pipeline for many frames against a live Ultralight runtime without panic. `#[ignore]`d: needs the SDK, a real window and a GPU. Multi-monitor and multi-touch are the kit's — one monitor, no touch, on the dev box |
 | `tests/native_host_pane_ultralight.rs` | The real built `client/index.html` loads in a real Ultralight view over this process's own HTTP, joins on the identity it read from the fragment, paints, answers a real click + keystroke on `#name-input` with a `SetName`, then claims a Station and operates its console: the iframe mounts with `__updateConsole` installed and a click on the Captain's Red Alert button inside it produces the expected `ControlSystem`. A second test proves two panes' `localStorage` are separate. Both `#[ignore]`d: they need the SDK and a built bundle, which CI has neither of |
 
 Each of the two digest binaries stands alone on purpose: pinning the scheduler
@@ -584,6 +661,6 @@ shared binary is a claim about whoever won that race.
 ## Related
 
 - [Build & Deployment](./build-and-deployment.md) · [Networking](./networking.md) · [Architecture](./architecture.md)
-- Issue #1121 — the host. Issue #1122 — local Ultralight panes. Issue #1123 — bridge display profiles (above). Issue #1125 — recovering a failed pane and a lost display (above). Issue #1112 — the transport. Issue #1124 — input routing between displays.
+- Issue #1121 — the host. Issue #1122 — local Ultralight panes. Issue #1123 — bridge display profiles (above). Issue #1125 — recovering a failed pane and a lost display (above). Issue #1112 — the transport. Issue #1124 — input routing between displays + pane→Station-window compositing (above).
 - [vellum](https://github.com/jkeywo/vellum) `crates/vellum-ultralight` — the extracted plumbing; `docs/handbook/dependencies.md` records why `ul-next` stopped being a per-game exception
 - `pasm/spec/architecture/native-delivery.yaml` — PRD #855's delivery declarations

@@ -46,6 +46,12 @@ pub mod bridge_display;
 /// the ordinary `cargo test` CI runs. The winit adapter that opens real
 /// borderless-fullscreen windows from a resolved profile is [`bridge_display`].
 pub mod bridge_profile;
+/// The pure input-routing model (issue #1124) — the coordinate transforms, the
+/// pane-boundary hit test, the keyboard-focus order and the touch
+/// contact-capture map. Bevy-free and CI-tested; the winit/Ultralight adapter
+/// that feeds it real events is [`panes::ultralight`] behind `--features
+/// ultralight`.
+pub mod input_routing;
 pub mod panes;
 /// The real WebSocket behind [`relay_transport`]. Behind the `host` feature
 /// because it is the only thing here that needs `tungstenite`; the protocol it

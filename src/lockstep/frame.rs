@@ -53,14 +53,16 @@ use crate::lockstep::transfer::SnapshotChunk;
 /// `1` was #1114's fleet lobby (hello / welcome / refused / slot / roster /
 /// admission). `2` added the running-mission frames below (tick / digest). `3`
 /// adds [`HostLossFrame`] — one host telling the fleet that a ship host has
-/// vanished (issue #1119). Bumped rather than extended-in-place because #1114's
-/// decoder refuses a frame whose `m` it does not recognise, which is precisely
-/// the behaviour that makes a mixed-build fleet fail loudly instead of
-/// half-understanding each other: a revision-2 build that silently DROPPED a
-/// host-loss frame would keep waiting for a peer that will never speak again,
-/// while the revision-3 hosts flipped its ship to Backfill — a split with no
-/// symptom but a stall on one side and a divergence on the other.
-pub const HOST_MESH_PROTOCOL: u32 = 3;
+/// vanished (issue #1119). `4` adds [`SlotClaimFrame`] — the owner announcing
+/// that a replacement machine has claimed a disconnected fixed slot, so the whole
+/// fleet resolves the same recovery (issue #1120). Bumped rather than
+/// extended-in-place because #1114's decoder refuses a frame whose `m` it does
+/// not recognise, which is precisely the behaviour that makes a mixed-build fleet
+/// fail loudly instead of half-understanding each other: a revision-3 build that
+/// silently DROPPED a slot-claim frame would keep the recovered ship on Backfill
+/// while the revision-4 hosts handed it back to the replacement — a split with no
+/// symptom but a divergence.
+pub const HOST_MESH_PROTOCOL: u32 = 4;
 
 /// One command a host admitted from its own crew, as it crosses to the fleet.
 ///
@@ -192,6 +194,46 @@ pub struct HostLossFrame {
     pub tick: u64,
 }
 
+/// One machine's granted claim on a disconnected fixed slot (issue #1120).
+///
+/// After the mission has frozen, a member host's socket close leaves its slot in
+/// the roster marked disconnected rather than removed (`gui/host-mesh.js`'s
+/// `dropHost`), because that disconnected slot is exactly what a replacement
+/// machine recovers. When a replacement types the fleet code and claims that
+/// slot, the owner — the one machine every claim passes through, the star centre
+/// (`p2p-delta-transport-is-a-star-today`) — stamps the claim with a monotonic
+/// `claim_seq` in the order it received it and broadcasts THIS frame to the whole
+/// fleet. Every host records it and derives the same recovery from it:
+///
+/// * the winner of a race between two claims for one slot is the LOWEST
+///   `claim_seq` — the first the owner minted, so every host that hears both
+///   agrees the same winner from the shared value rather than from arrival order;
+/// * the recovery boundary and the leader that transfers the canonical record are
+///   pure functions of `slot`, `tick` and the frozen roster, identical everywhere.
+///
+/// It carries no snapshot and no crew: the recovery restores the whole
+/// authoritative record through #1117's transfer, and the replacement's own crew
+/// reconnects through their ordinary Session identities. Like every other
+/// running-mission frame this is minted and read only by Rust; `gui/host-mesh.js`
+/// ferries it opaquely.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SlotClaimFrame {
+    /// The slot that announced the granted claim — always the fleet owner (the
+    /// star centre), which is the sole minter of `claim_seq`. Authenticated at the
+    /// mesh boundary like every other frame's `from`.
+    pub from: HostSlot,
+    /// The disconnected fixed slot being reclaimed — the identity the replacement
+    /// machine assumes, and the ship whose canonical record it restores.
+    pub slot: HostSlot,
+    /// The owner-minted monotonic order of this claim among all claims for `slot`.
+    /// The deterministic tiebreak: the lowest wins, so a race resolves the same on
+    /// every host without depending on who processed a claim first.
+    pub claim_seq: u64,
+    /// The owner's `SimTick` when it stamped the claim — the recovery boundary is
+    /// derived from it (the same on every host), and it dates the claim.
+    pub tick: u64,
+}
+
 /// Everything the running half of the host mesh says.
 ///
 /// A closed enum rather than a string tag, so a receiver that compiles has
@@ -210,6 +252,9 @@ pub enum MeshFrame {
     /// A ship host has left; its ship flips to Backfill at the agreed tick
     /// (issue #1119).
     HostLoss(HostLossFrame),
+    /// A replacement machine has claimed a disconnected fixed slot; the fleet
+    /// resolves the same recovery from it (issue #1120).
+    SlotClaim(SlotClaimFrame),
 }
 
 impl MeshFrame {
@@ -220,6 +265,7 @@ impl MeshFrame {
             MeshFrame::Digest(f) => f.from,
             MeshFrame::Snapshot(f) => f.from,
             MeshFrame::HostLoss(f) => f.from,
+            MeshFrame::SlotClaim(f) => f.from,
         }
     }
 
@@ -230,6 +276,7 @@ impl MeshFrame {
             MeshFrame::Digest(_) => TYPE_DIGEST,
             MeshFrame::Snapshot(_) => TYPE_SNAPSHOT,
             MeshFrame::HostLoss(_) => TYPE_HOST_LOSS,
+            MeshFrame::SlotClaim(_) => TYPE_SLOT_CLAIM,
         }
     }
 }
@@ -242,6 +289,8 @@ pub const TYPE_DIGEST: &str = "digest";
 pub const TYPE_SNAPSHOT: &str = "snapshot";
 /// The `t` value a [`MeshFrame::HostLoss`] carries on the JS wire.
 pub const TYPE_HOST_LOSS: &str = "host-loss";
+/// The `t` value a [`MeshFrame::SlotClaim`] carries on the JS wire (issue #1120).
+pub const TYPE_SLOT_CLAIM: &str = "slot-claim";
 
 #[cfg(test)]
 mod tests {
@@ -303,6 +352,12 @@ mod tests {
                 lost: HostSlot(3),
                 tick: 418,
             }),
+            MeshFrame::SlotClaim(SlotClaimFrame {
+                from: HostSlot(1),
+                slot: HostSlot(3),
+                claim_seq: 7,
+                tick: 512,
+            }),
         ];
         for frame in frames {
             let text = ron::ser::to_string(&frame).expect("a frame serialises");
@@ -323,7 +378,7 @@ mod tests {
     #[test]
     fn the_protocol_revision_is_pinned() {
         assert_eq!(
-            HOST_MESH_PROTOCOL, 3,
+            HOST_MESH_PROTOCOL, 4,
             "bumping this is a fleet-wide incompatible change: gui/host-mesh.js \
              refuses a frame whose `m` it does not know, so both halves and the \
              Vitest pin move together or a mixed fleet fails to agree a tick"

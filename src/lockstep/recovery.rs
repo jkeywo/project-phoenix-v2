@@ -263,6 +263,17 @@ pub fn drive_recovery(world: &mut World) {
 
 /// Ask the shared exchange whether a recovery is due, and if so, open it.
 fn begin_recovery(world: &mut World, local: HostSlot, delay: u64) {
+    // One recovery at a time: a slot recovery (#1120) in flight defers divergence
+    // detection, so the two never arm the same host at once. `drive_recovery` runs
+    // before `drive_slot_recovery`, so it checks the slot-recovery state as it
+    // stood at the end of the previous frame — enough to keep them exclusive, since
+    // a slot recovery spans many frames.
+    if world
+        .get_resource::<super::slot_recovery::SlotRecoveryState>()
+        .is_some_and(super::slot_recovery::SlotRecoveryState::is_active)
+    {
+        return;
+    }
     let fleet: Vec<HostSlot> = world
         .resource::<FleetRoster>()
         .ships()

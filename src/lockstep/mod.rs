@@ -31,12 +31,14 @@
 //!   companion frame-consistency rule (a frame's `from` and its commands' order
 //!   origin agree).
 //!
-//!   The one authority dimension NOT yet enforced is that a frame's declared
-//!   `from` slot is the connection that actually delivered it — see the
-//!   `TODO(#1118/#1120 mesh hardening)` in [`apply_mesh_inbox`]. That needs a
-//!   transport-authenticated sender slot, which the star topology cannot supply
-//!   for a relayed sibling frame without the lead tagging it; it is deferred
-//!   rather than half-built.
+//!   The frame's declared `from` slot IS now authenticated to the connection
+//!   that delivered it (issue #1120): [`MeshInbox`] carries a [`MeshOrigin`]
+//!   beside each frame, and [`apply_mesh_inbox`] drops one whose declared origin
+//!   disagrees with the connection's authenticated slot or names a non-roster
+//!   peer. The star's own accommodation — a member trusts the lead's verbatim
+//!   relay of a sibling frame it cannot itself re-authenticate — is documented on
+//!   [`MeshOrigin`], along with the byzantine-lead residue the rendezvous cutover
+//!   would close.
 //! * **It does not ship AI decisions.** Every host derives every NPC from the
 //!   same ticks, the same seeded streams and the same authored policies
 //!   (AGENTS.md rule 6, `p2p-delta-ai-output-is-not-logged`). Only what crosses
@@ -68,13 +70,19 @@ pub mod host_loss;
 pub mod recovery;
 pub mod recovery_plan;
 pub mod session;
+pub mod slot_recovery;
 pub mod snapshot_relay;
 pub mod transfer;
 
 pub use frame::{
-    DigestFrame, HostLossFrame, MeshCommand, MeshFrame, TickFrame, HOST_MESH_PROTOCOL,
+    DigestFrame, HostLossFrame, MeshCommand, MeshFrame, SlotClaimFrame, TickFrame,
+    HOST_MESH_PROTOCOL,
 };
 pub use host_loss::{agreed_loss_tick, HostLossRecord, PendingHostLoss};
+pub use slot_recovery::{
+    leader_for, PendingSlotClaims, SlotRecoveryHold, SlotRecoveryLog, SlotRecoveryRecord,
+    SlotRecoveryResult, SlotRecoveryState,
+};
 pub use session::{LockstepSession, Stall};
 pub use snapshot_relay::{
     capture_run, drain_mesh_restore, frames_for, gate_and_restore, gate_and_restore_against,
@@ -249,18 +257,121 @@ impl FleetRoster {
     pub fn is_solo(&self) -> bool {
         self.ships.len() <= 1
     }
+
+    /// The fleet lead: the lowest slot, which `gui/host-mesh.js` always mints as
+    /// the owner (`slot-1`) — the star centre through which every member frame
+    /// passes (issue #1120). Used by [`apply_mesh_inbox`]'s sender-auth check as
+    /// the one slot allowed to relay a sibling's frame. `SOLO` for a solo roster,
+    /// which has no peers to authenticate.
+    pub fn lead(&self) -> HostSlot {
+        self.ships
+            .iter()
+            .map(|ship| ship.host)
+            .min()
+            .unwrap_or(HostSlot::SOLO)
+    }
+
+    /// Whether `host` is a slot in this frozen roster — a member of the fleet,
+    /// whether currently connected, departed, or being recovered (issue #1120).
+    ///
+    /// Read off the frozen roster rather than the live barrier wait-set on
+    /// purpose: a departed or recovering slot (#1119/#1120) is no longer a peer
+    /// the barrier waits for, yet it is still a roster member whose frames the
+    /// sender-auth check must recognise.
+    pub fn is_member(&self, host: HostSlot) -> bool {
+        self.ships.iter().any(|ship| ship.host == host)
+    }
 }
 
-/// Frames a transport has received and this host has not applied yet.
+/// Who a transport says delivered a frame — the mesh-boundary authentication
+/// this issue (#1120) owns, deferred here by #1117/#1118/#1119.
+///
+/// Every mesh frame declares its own `from` slot, but that field is peer-supplied
+/// and forgeable. A transport that binds each connection to the fleet slot it was
+/// admitted as (JS: `conn -> slot` at join, `gui/fleet-session.js`) can hand the
+/// simulation the AUTHENTICATED delivering slot beside the frame, and
+/// [`apply_mesh_inbox`] rejects a frame whose declared `from` disagrees with it.
+///
+/// # Why the check is a pure function of the frame and this origin — determinism
+///
+/// The rejection is at ingress and is identical on every honest host, because the
+/// authenticated origin is a stable transport fact (which connection carried the
+/// frame), never an arrival-order or watermark value that skews across peers — the
+/// #1119 lesson that two fix rounds failed for by deciding against a raw local
+/// watermark. Every honest host that receives a given frame sees the same
+/// authenticated origin over the reliable relay, so all make the same accept/reject
+/// call and the fold cannot diverge from the check.
+///
+/// # The star accommodation, and its honest limit
+///
+/// The transport is a star with the fleet lead (the owner, always the lowest slot)
+/// at the centre (`p2p-delta-transport-is-a-star-today`). The lead authenticates
+/// every member frame directly against the connection it arrived on. A member,
+/// though, has ONE connection — to the lead — over which BOTH the lead's own frames
+/// and the lead's verbatim relay of a sibling's frame arrive; it cannot itself
+/// re-authenticate a relayed sibling. So the rule [`Self::refuses`] enforces is
+/// `from == authenticated` OR `authenticated == lead`: a peer may speak only for
+/// itself, and the lead may relay for any roster peer (it caught a forged `from` at
+/// its own ingress and never relays it). A byzantine LEAD is still trusted, exactly
+/// as the star already trusts it to relay verbatim; removing that trust needs
+/// per-hop authentication the Phoenix rendezvous worker would carry, which is the
+/// real cutover this flags.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MeshOrigin {
+    /// A connection authenticated to this fleet slot delivered the frame.
+    Peer(HostSlot),
+    /// This host's OWN local observation — a socket close it saw itself — injected
+    /// by the bridge, authentic by construction and never received from a peer.
+    /// The one legitimate source of a `tick == 0` self-reported [`HostLossFrame`].
+    LocalObservation,
+    /// No transport authentication is available: a native fixture, or a caller that
+    /// used [`MeshInbox::push`]. The frame's declared `from` is trusted, preserving
+    /// pre-#1120 behaviour so every existing determinism guard is unaffected.
+    Unauthenticated,
+}
+
+impl MeshOrigin {
+    /// Whether a frame whose declared origin is `from` must be REFUSED at ingress,
+    /// given the star `lead` and whether a slot is a known roster peer.
+    ///
+    /// See the type docs for the determinism argument and the star `== lead`
+    /// accommodation. [`Self::Unauthenticated`] and [`Self::LocalObservation`] never
+    /// refuse here (the former trusts `from`; the latter is a self-observation
+    /// judged by its own guard in [`apply_mesh_inbox`]).
+    pub fn refuses(&self, from: HostSlot, lead: HostSlot, is_roster_peer: impl Fn(HostSlot) -> bool) -> bool {
+        match self {
+            MeshOrigin::Unauthenticated | MeshOrigin::LocalObservation => false,
+            MeshOrigin::Peer(authenticated) => {
+                if !is_roster_peer(*authenticated) || !is_roster_peer(from) {
+                    return true;
+                }
+                !(from == *authenticated || *authenticated == lead)
+            }
+        }
+    }
+}
+
+/// Frames a transport has received and this host has not applied yet, each with
+/// the slot the delivering connection authenticated it to (issue #1120).
 #[derive(Resource, Default, Debug)]
 pub struct MeshInbox {
-    frames: Vec<MeshFrame>,
+    frames: Vec<(MeshFrame, MeshOrigin)>,
 }
 
 impl MeshInbox {
-    /// Hand one received frame to the simulation.
+    /// Hand one received frame to the simulation with no transport authentication.
+    ///
+    /// Kept for native fixtures and every pre-#1120 caller: the frame's declared
+    /// `from` is trusted ([`MeshOrigin::Unauthenticated`]), so the auth check is a
+    /// no-op and existing behaviour is unchanged.
     pub fn push(&mut self, frame: MeshFrame) {
-        self.frames.push(frame);
+        self.frames.push((frame, MeshOrigin::Unauthenticated));
+    }
+
+    /// Hand one received frame over with the origin the transport authenticated it
+    /// to (issue #1120) — the bridge's path, and the sender-auth tests'.
+    pub fn push_from(&mut self, frame: MeshFrame, origin: MeshOrigin) {
+        self.frames.push((frame, origin));
     }
 
     pub fn len(&self) -> usize {
@@ -271,7 +382,7 @@ impl MeshInbox {
         self.frames.is_empty()
     }
 
-    fn take(&mut self) -> Vec<MeshFrame> {
+    fn take(&mut self) -> Vec<(MeshFrame, MeshOrigin)> {
         std::mem::take(&mut self.frames)
     }
 }
@@ -549,6 +660,7 @@ pub fn register_lockstep(app: &mut App) {
             (
                 apply_mesh_inbox,
                 recovery::drive_recovery,
+                slot_recovery::drive_slot_recovery,
                 gate_lockstep_ticks,
             )
                 .chain()
@@ -595,6 +707,10 @@ pub fn register_lockstep(app: &mut App) {
     // Divergence recovery (issue #1118): the recovery resources and the diagnostic
     // log. The `drive_recovery` system itself is wired into the mesh chain above.
     recovery::register_recovery(app);
+    // Slot recovery (issue #1120): the claim resolver, the recovery bookkeeping and
+    // its hold. `drive_slot_recovery` is wired into the mesh chain above, beside
+    // `drive_recovery` and before the barrier.
+    slot_recovery::register_slot_recovery(app);
 }
 
 /// Join a fleet: adopt the slot, the peers and the agreed delay.
@@ -654,9 +770,11 @@ pub fn apply_mesh_inbox(
     mut session: Option<ResMut<FleetLockstep>>,
     mut pending: ResMut<PendingCommands>,
     mut pending_loss: ResMut<host_loss::PendingHostLoss>,
+    mut pending_claims: ResMut<slot_recovery::PendingSlotClaims>,
     mut agreement: ResMut<MeshAgreement>,
     mut snapshot_rx: ResMut<MeshSnapshotReceiver>,
     mut outbox: ResMut<MeshOutbox>,
+    roster: Option<Res<FleetRoster>>,
     fleet_ships: Query<(&FleetSlotOf, &crate::entities::spawner::EntityUuid)>,
     log: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
@@ -664,6 +782,14 @@ pub fn apply_mesh_inbox(
         return;
     }
     let frames = inbox.take();
+    // The mesh-boundary sender authentication (issue #1120). `lead` is the star
+    // centre (the owner, lowest slot); `is_member` recognises any roster slot,
+    // departed or recovering ones included, since those are still fleet members
+    // whose frames are legitimate even when the barrier no longer waits for them.
+    // Absent roster ⇒ no fleet: nothing to authenticate against, so trust the
+    // frame exactly as the pre-#1120 path did (a bare fixture).
+    let lead = roster.as_deref().map_or(HostSlot::SOLO, FleetRoster::lead);
+    let is_member = |slot: HostSlot| roster.as_deref().is_none_or(|r| r.is_member(slot));
     // Snapshot chunks (issue #1117) are handled whether or not this host is a
     // lockstep participant: RECEIVING the record is how a host becomes one (a
     // join, a #1120 slot recovery), so a chunk must not be dropped by the
@@ -671,12 +797,29 @@ pub fn apply_mesh_inbox(
     // bounded, and nothing is committed until the whole record has arrived, gated
     // and restored. `snapshot_relay::drain_mesh_restore` does the committing.
     let mut sim_frames = Vec::with_capacity(frames.len());
-    for frame in frames {
+    for (frame, origin) in frames {
+        // Reject a frame whose declared origin disagrees with the connection that
+        // delivered it, or that names a slot no roster peer owns (issue #1120).
+        // Identical on every honest host, so it cannot diverge the fold — see
+        // `MeshOrigin`'s docs. A `LocalObservation` and an `Unauthenticated` push
+        // are trusted here; the former is judged by the self-observation guard in
+        // the HostLoss arm below.
+        if origin.refuses(frame.from(), lead, &is_member) {
+            crate::pwarn!(
+                log,
+                LogCat::Admit,
+                "host-mesh: dropping a {} frame whose declared origin {} is not \
+                 authenticated by the delivering connection ({origin:?})",
+                frame.type_name(),
+                frame.from().slot_id(),
+            );
+            continue;
+        }
         match frame {
             MeshFrame::Snapshot(chunk) => {
                 snapshot_relay::receive_chunk(&mut snapshot_rx, &chunk, &log);
             }
-            other => sim_frames.push(other),
+            other => sim_frames.push((other, origin)),
         }
     }
     // The hull each fleet slot actually flies, keyed by slot. A host may speak
@@ -705,22 +848,18 @@ pub fn apply_mesh_inbox(
         }
         return;
     };
-    for frame in sim_frames {
+    for (frame, origin) in sim_frames {
         match frame {
             MeshFrame::Tick(tick) => {
                 if tick.from == session.local() {
                     continue;
                 }
-                // TODO(#1118/#1120 mesh hardening): `tick.from` is trusted from
-                // the frame, not authenticated to the connection that delivered
-                // it. A transport-authenticated sender slot (JS binds conn->slot
-                // and passes it across `wasm_receive_mesh_frame`) would let this
-                // reject a frame whose `from` disagrees with its origin. It is
-                // deferred because the star relay means a member cannot
-                // authenticate a sibling frame the lead forwarded without the
-                // lead tagging it — a change to #1114's verbatim-relay envelope.
-                // The ship-ownership check below still holds regardless: a
-                // spoofed `from` can only speak for the hull that slot owns.
+                // `tick.from` is now authenticated to the delivering connection at
+                // ingress above (issue #1120 closed the #1118 `TODO`): a frame
+                // whose declared origin disagrees with its connection's slot, or
+                // whose origin is not a roster peer, never reaches this loop. The
+                // ship-ownership check below is the second, orthogonal authority a
+                // receiver enforces — a slot may speak only for the hull it flies.
                 for command in tick.commands {
                     if !command.is_from(tick.from) {
                         crate::pwarn!(
@@ -810,6 +949,27 @@ pub fn apply_mesh_inbox(
                 if lost == session.local() {
                     continue;
                 }
+                // The #1119 self-observation guard, carried into #1120. A `tick ==
+                // 0` report is a SELF-observation — "my own transport saw this
+                // socket close" — and the tick is then derived from THIS host's own
+                // watermark. That derivation is only sound for a loss this host
+                // genuinely observed locally; a peer that forged a tick-0 report
+                // over the mesh would make this host derive a flip tick from a
+                // watermark other survivors do not share, the exact skew-derive
+                // divergence #1119 fought. So a tick-0 report is honoured only from
+                // a local observation (or an unauthenticated fixture); one that
+                // arrived over an authenticated peer connection is dropped.
+                if hl.tick == 0 && matches!(origin, MeshOrigin::Peer(_)) {
+                    crate::pwarn!(
+                        log,
+                        LogCat::Admit,
+                        "host-mesh: dropping a forged self-observed loss for {} — a \
+                         tick-0 report may only originate from a local socket close, \
+                         never over a peer connection",
+                        lost.slot_id(),
+                    );
+                    continue;
+                }
                 // The flip has already applied; it cannot be re-agreed, so a late
                 // duplicate report is inert (AC5).
                 if pending_loss.is_applied(lost) {
@@ -858,20 +1018,24 @@ pub fn apply_mesh_inbox(
                 // watermark — so all survivors converge on the identical tick under
                 // any frame-arrival interleaving.
                 //
-                // TODO(#1118/#1120 mesh hardening): a relayed report is honoured
-                // whether or not it is genuine. Honouring it is CONVERGENT — every
-                // survivor that receives it agrees the same tick, so the fold never
-                // diverges — but a forged or replayed `HostLoss` for a live slot is
-                // still acted on (its ship flips to Backfill on every host that
-                // hears it). REJECTING a forged report cannot be done
-                // deterministically here: the only ground-truth signal that a slot
-                // is alive is the transport connection this host does not hold (only
-                // the relay lead does), and a bounded liveness check against a raw
+                // Sender authentication (issue #1120) now closes two of the three
+                // gaps this arm once carried a `TODO` for. The `from` of a relayed
+                // report is authenticated to the connection that delivered it, so a
+                // survivor can no longer forge a report UNDER ANOTHER SURVIVOR'S
+                // slot, and the tick-0 self-observation guard above rejects a forged
+                // self-observation injected over a peer connection. What is NOT
+                // closed, and is deliberately left, is reporter TRUTHFULNESS: a
+                // survivor can still honestly send (under its own authenticated
+                // slot) a loss report for a slot that is in fact still LIVE.
+                // Honouring it stays CONVERGENT — every survivor that receives it
+                // agrees the same carried tick, so the fold never diverges — and
+                // rejecting it cannot be done deterministically here, because the
+                // only ground-truth liveness signal is the transport connection this
+                // host does not hold, and a bounded liveness check against a raw
                 // watermark is exactly the skew-prone decision that diverged the
-                // fold. So reporter authenticity is deferred to sender
-                // authentication (#1118/#1120), parity with the Tick arm's
-                // unauthenticated `from`; until then an unauthenticated loss is
-                // honoured convergently.
+                // fold. That residue is a transport-trust question (a byzantine peer
+                // asserting a false fact under its real identity), for the Phoenix
+                // rendezvous cutover, not a forged-origin one.
                 let agreed = if hl.tick == 0 {
                     // Self-observed local close: this host's own transport saw the
                     // socket close, so it is the authority that derives the tick.
@@ -911,6 +1075,16 @@ pub fn apply_mesh_inbox(
                     );
                 }
             }
+            MeshFrame::SlotClaim(claim) => {
+                // A replacement machine's granted claim on a disconnected fixed
+                // slot (issue #1120). The owner (star centre) resolved any race and
+                // stamped `claim_seq` in arrival order; every host records it, and
+                // the deterministic winner for a slot is the lowest seq — so two
+                // hosts that hear two claims agree the same winner from the shared
+                // value, never from who-processed-first locally. `drive_slot_recovery`
+                // reads this and opens the recovery.
+                pending_claims.observe(claim.slot, claim.claim_seq, claim.tick);
+            }
             // Peeled off above, before the fleet-session gate, so it never reaches
             // this loop — but the match stays exhaustive rather than resting on
             // that being remembered.
@@ -937,6 +1111,7 @@ pub fn gate_lockstep_ticks(
     virtual_time: Option<ResMut<Time<Virtual>>>,
     mut diagnostics: ResMut<MeshDiagnostics>,
     recovery_hold: Option<Res<recovery::RecoveryHold>>,
+    slot_recovery_hold: Option<Res<slot_recovery::SlotRecoveryHold>>,
     log: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
     let Some(session) = session else {
@@ -971,9 +1146,16 @@ pub fn gate_lockstep_ticks(
         Some(stall) => diagnostics.stalled(stall.clone()),
         None => diagnostics.running(),
     }
+    // A slot-recovery boundary hold (issue #1120, this host must not run past the
+    // tick a disconnected slot is being recovered at) is a third withhold reason,
+    // read from its own `SlotRecoveryHold` beside the peer-stall and the #1118 hold
+    // for the same clearly-separable reason. All three pause the same clock.
     let held = recovery_hold
         .and_then(|hold| hold.withhold_beyond)
-        .is_some_and(|boundary| next_tick > boundary);
+        .is_some_and(|boundary| next_tick > boundary)
+        || slot_recovery_hold
+            .and_then(|hold| hold.withhold_beyond)
+            .is_some_and(|boundary| next_tick > boundary);
 
     if stall.is_some() || held {
         if !virtual_time.is_paused() {
@@ -1005,6 +1187,7 @@ pub fn gate_lockstep_ticks(
 pub fn seal_tick_frame(
     session: Option<Res<FleetLockstep>>,
     sim_tick: Res<crate::sim_tick::SimTick>,
+    slot_recovery: Option<Res<slot_recovery::SlotRecoveryState>>,
     mut outbox: ResMut<MeshOutbox>,
 ) {
     let Some(session) = session else {
@@ -1012,6 +1195,14 @@ pub fn seal_tick_frame(
         return;
     };
     if session.is_alone() {
+        outbox.staged.clear();
+        return;
+    }
+    // A replacement bootstrapping and awaiting the transfer (issue #1120) must not
+    // seal a frame: its throwaway pre-restore world would declare a premature
+    // watermark that walks the survivors past the boundary. Drop the staged
+    // commands with it — they are pre-restore noise that must never cross.
+    if slot_recovery.is_some_and(|s| s.suppresses_egress()) {
         outbox.staged.clear();
         return;
     }
@@ -1057,6 +1248,16 @@ pub fn sample_and_publish_digest(world: &mut World) {
         return;
     };
     if session.is_alone() {
+        return;
+    }
+    // A replacement bootstrapping toward the transfer (issue #1120) neither samples
+    // nor publishes: its throwaway pre-restore fold is not the fleet's state, and a
+    // survivor that compared against it would report a divergence recovery must not
+    // chase. Its canonical digests resume the moment it commits the restore.
+    if world
+        .get_resource::<slot_recovery::SlotRecoveryState>()
+        .is_some_and(slot_recovery::SlotRecoveryState::suppresses_egress)
+    {
         return;
     }
     let from = session.local();

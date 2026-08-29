@@ -484,6 +484,19 @@ pub fn encode_mesh_frame(frame: &crate::lockstep::MeshFrame) -> Result<String, s
                 "tick": f.tick,
             }),
         ),
+        // A slot-claim announcement (issue #1120). `slot`, both ordinals, the
+        // owner-minted `claim_seq` and the tick are all small counters that cannot
+        // reach 2^53 in any run a human sits through, so — like `HostLoss` and
+        // unlike a `u64` digest — they cross as numbers rather than as hex.
+        MeshFrame::SlotClaim(f) => (
+            f.tick,
+            serde_json::json!({
+                "from": f.from.0,
+                "slot": f.slot.0,
+                "claim_seq": f.claim_seq,
+                "tick": f.tick,
+            }),
+        ),
     };
     Ok(serde_json::json!({
         MESH_ENVELOPE_PROTOCOL: crate::lockstep::HOST_MESH_PROTOCOL,
@@ -560,6 +573,14 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
             lost: HostSlot(u32::try_from(body.get("lost")?.as_u64()?).ok()?),
             tick,
         })),
+        crate::lockstep::frame::TYPE_SLOT_CLAIM => {
+            Some(MeshFrame::SlotClaim(crate::lockstep::SlotClaimFrame {
+                from,
+                slot: HostSlot(u32::try_from(body.get("slot")?.as_u64()?).ok()?),
+                claim_seq: body.get("claim_seq")?.as_u64()?,
+                tick,
+            }))
+        }
         _ => None,
     }
 }
@@ -710,7 +731,7 @@ mod mesh_frame_tests {
     fn a_tick_frame_round_trips_through_the_shared_envelope() {
         let frame = tick_frame();
         let text = super::encode_mesh_frame(&frame).expect("encodes");
-        assert!(text.contains("\"m\":3"), "the revision travels: {text}");
+        assert!(text.contains("\"m\":4"), "the revision travels: {text}");
         assert!(text.contains("\"t\":\"tick\""), "{text}");
         assert!(
             text.contains("\"tick\":412"),
@@ -791,13 +812,15 @@ mod mesh_frame_tests {
             // A superseded revision — refused whole rather than half-read.
             r#"{"m":2,"t":"tick","tick":1,"d":{"from":1,"tick":1,"ready_through":1,"commands":[]}}"#,
             // A lobby frame on the simulation decoder.
-            r#"{"m":3,"t":"hello","tick":null,"d":{}}"#,
+            r#"{"m":4,"t":"hello","tick":null,"d":{}}"#,
             // A tick frame missing its watermark and commands.
-            r#"{"m":3,"t":"tick","tick":1,"d":{"from":1,"tick":1}}"#,
+            r#"{"m":4,"t":"tick","tick":1,"d":{"from":1,"tick":1}}"#,
             // A digest as a JSON number, which loses the top bits — refused.
-            r#"{"m":3,"t":"digest","tick":1,"d":{"from":1,"tick":1,"digest":12345}}"#,
+            r#"{"m":4,"t":"digest","tick":1,"d":{"from":1,"tick":1,"digest":12345}}"#,
             // A host-loss frame missing the slot it names.
-            r#"{"m":3,"t":"host-loss","tick":1,"d":{"from":1,"tick":1}}"#,
+            r#"{"m":4,"t":"host-loss","tick":1,"d":{"from":1,"tick":1}}"#,
+            // A slot-claim missing the slot it reclaims (issue #1120).
+            r#"{"m":4,"t":"slot-claim","tick":1,"d":{"from":1,"claim_seq":1}}"#,
         ] {
             assert_eq!(
                 super::decode_mesh_frame(raw),
@@ -817,7 +840,7 @@ mod mesh_frame_tests {
             tick: 418,
         });
         let text = super::encode_mesh_frame(&frame).expect("encodes");
-        assert!(text.contains("\"m\":3"), "the revision travels: {text}");
+        assert!(text.contains("\"m\":4"), "the revision travels: {text}");
         assert!(text.contains("\"t\":\"host-loss\""), "{text}");
         assert!(
             text.contains("\"lost\":3"),
@@ -826,6 +849,30 @@ mod mesh_frame_tests {
         assert!(
             text.contains("\"tick\":418"),
             "the agreed disconnect tick must survive the wire: {text}"
+        );
+        assert_eq!(super::decode_mesh_frame(&text), Some(frame));
+    }
+
+    /// A slot-claim announcement (issue #1120) survives the shared envelope: the
+    /// slot it reclaims, the owner that stamped it, the deterministic claim
+    /// sequence and the tick all come back unchanged.
+    #[test]
+    fn a_slot_claim_frame_round_trips_through_the_shared_envelope() {
+        let frame = MeshFrame::SlotClaim(crate::lockstep::SlotClaimFrame {
+            from: crate::command_admission::HostSlot(1),
+            slot: crate::command_admission::HostSlot(3),
+            claim_seq: 7,
+            tick: 512,
+        });
+        let text = super::encode_mesh_frame(&frame).expect("encodes");
+        assert!(text.contains("\"t\":\"slot-claim\""), "{text}");
+        assert!(
+            text.contains("\"slot\":3"),
+            "the slot being reclaimed must survive the wire: {text}"
+        );
+        assert!(
+            text.contains("\"claim_seq\":7"),
+            "the deterministic tiebreak must survive the wire: {text}"
         );
         assert_eq!(super::decode_mesh_frame(&text), Some(frame));
     }

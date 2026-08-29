@@ -274,7 +274,11 @@ thread_local! {
     /// socket: a fleet member never identifies, holds no station, and nothing it
     /// says is a `ClientMessage`. Mixing them would make "each crew star belongs
     /// to one host" a filtering rule rather than a fact about the wires.
-    static MESH_INBOUND: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    /// Each entry is `(authenticated_slot, json_payload)`: the fleet slot the
+    /// delivering connection was bound to at join (issue #1120), and the encoded
+    /// frame. `0` (never a real fleet slot, which start at `slot-1`) means the page
+    /// could not authenticate the connection, so the frame is trusted as before.
+    static MESH_INBOUND: RefCell<Vec<(u32, String)>> = const { RefCell::new(Vec::new()) };
 
     /// Host-mesh frames this host has produced and JS has not sent yet.
     /// Drained by `wasm_take_mesh_frames` rather than pushed through a callback,
@@ -292,6 +296,20 @@ thread_local! {
     /// agreed tick the simulation derives from the lost host's own watermark, so
     /// the page never has to know a tick.
     static HOST_LOSS_QUEUE: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
+
+    /// Disconnected fixed slots a replacement machine has validly claimed, queued
+    /// by the OWNER page for the next frame (issue #1120). The owner is the only
+    /// host that admits claims (the star centre), so it is the only minter of the
+    /// monotonic `claim_seq` — `SLOT_CLAIM_SEQ` — that makes the race resolution
+    /// deterministic. `drain_mesh_inbound` turns each into a granted
+    /// `SlotClaimFrame` stamped with the owner's own slot, the next seq and the
+    /// current tick, records it in this host's own resolver, and broadcasts it.
+    static SLOT_CLAIM_QUEUE: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
+
+    /// The owner's monotonic claim sequence — the deterministic tiebreak between
+    /// racing claims (issue #1120). Minted here, in the arrival order the owner
+    /// received the claims, so the first claim gets the lowest seq and wins.
+    static SLOT_CLAIM_SEQ: RefCell<u64> = const { RefCell::new(0) };
 
     /// The fleet status mirror `wasm_mesh_status` answers from, written each
     /// frame by `publish_mesh_status`. A mirror rather than a `World` read for
@@ -1015,19 +1033,42 @@ pub fn wasm_receive_message(sender_token: &str, json: &str) {
     });
 }
 
-/// Called by JS with one host-mesh frame from another ship host (issue #1116).
+/// Called by JS with one host-mesh frame from another ship host (issue #1116),
+/// tagged with the fleet slot the delivering connection was authenticated to
+/// (issue #1120).
+///
+/// `authenticated_slot` is the `N` in the `slot-N` the page bound this connection
+/// to at join — the transport-level proof of who is speaking, which the simulation
+/// checks the frame's own declared `from` against at the mesh boundary
+/// (`lockstep::apply_mesh_inbox`). `0` (never a real fleet slot, which start at
+/// `slot-1`) means the page could not resolve it, so the frame is trusted as it
+/// was before this authentication existed.
 ///
 /// `json` is the `{ m, t, tick, d }` envelope `gui/host-mesh.js` decoded and
-/// recognised as the simulation's — a `tick` or a `digest`. The page never
-/// reads the body; this is where it is understood.
-///
-/// A frame that is not one of those, or is of a revision this build does not
-/// speak, is dropped here rather than guessed at, exactly as the JS decoder
-/// drops one it does not recognise.
+/// recognised as the simulation's. The page never reads the body; this is where it
+/// is understood. A frame that is not one of those, or is of a revision this build
+/// does not speak, is dropped here rather than guessed at, exactly as the JS
+/// decoder drops one it does not recognise.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn wasm_receive_mesh_frame(json: &str) {
-    MESH_INBOUND.with(|q| q.borrow_mut().push(json.to_string()));
+pub fn wasm_receive_mesh_frame(authenticated_slot: u32, json: &str) {
+    MESH_INBOUND.with(|q| q.borrow_mut().push((authenticated_slot, json.to_string())));
+}
+
+/// Called by the OWNER page when a replacement machine has validly claimed a
+/// disconnected fixed slot (issue #1120).
+///
+/// `slot` is the `N` in the `slot-N` being reclaimed. The page has already checked
+/// — in `gui/host-mesh.js`'s `admitHost` claim path — that the slot exists, is
+/// frozen (post-mission-start), is currently disconnected, and that this is the
+/// FIRST claim to reach the owner for it; this call is what turns that admission
+/// into the fleet-wide, deterministic `SlotClaimFrame`. Queued for the next frame,
+/// where `drain_mesh_inbound` mints the owner's next `claim_seq`, stamps the
+/// current tick, records it in this host's own resolver and broadcasts it.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_claim_slot(slot: u32) {
+    SLOT_CLAIM_QUEUE.with(|q| q.borrow_mut().push(slot));
 }
 
 /// Everything this host wants to say to its fleet, as a JSON array of encoded
@@ -1135,30 +1176,90 @@ fn drain_mesh_inbound(world: &mut World) {
             crate::lockstep::join_fleet(world, roster, delay);
         }
     }
+    // A granted slot claim the owner admitted (issue #1120): mint the next
+    // deterministic `claim_seq`, stamp the current tick, and build the fleet-wide
+    // `SlotClaimFrame`. Done here — not in `wasm_claim_slot` — because it needs the
+    // world's `SimTick` and this host's own slot, which a socket callback has no
+    // handle to.
+    let claimed = SLOT_CLAIM_QUEUE.with(|q| std::mem::take(&mut *q.borrow_mut()));
     let frames = MESH_INBOUND.with(|q| std::mem::take(&mut *q.borrow_mut()));
     // Slots whose HOST link closed on this machine. Each becomes a self-reported
     // `HostLoss` with tick 0; `apply_mesh_inbox` derives the real agreed tick
     // from the lost host's own last watermark, so the page hands over only the
     // fact of the loss, never a tick it has no way to know.
     let departed = HOST_LOSS_QUEUE.with(|q| std::mem::take(&mut *q.borrow_mut()));
-    if frames.is_empty() && departed.is_empty() {
+    if frames.is_empty() && departed.is_empty() && claimed.is_empty() {
         return;
     }
-    let decoded: Vec<crate::lockstep::MeshFrame> = frames
+
+    // The owner's own granted claims become `SlotClaimFrame`s: recorded in this
+    // host's own resolver (a `LocalObservation`, authentic by construction) and
+    // broadcast to the fleet through the ordinary outbox.
+    if !claimed.is_empty() {
+        let owner = world
+            .get_resource::<crate::lockstep::FleetRoster>()
+            .map(|r| r.local())
+            .unwrap_or(crate::command_admission::HostSlot::SOLO);
+        let tick = world
+            .get_resource::<crate::sim_tick::SimTick>()
+            .map_or(0, |t| t.0);
+        for slot in claimed {
+            let claim_seq = SLOT_CLAIM_SEQ.with(|s| {
+                let mut s = s.borrow_mut();
+                *s += 1;
+                *s
+            });
+            let frame = crate::lockstep::MeshFrame::SlotClaim(crate::lockstep::SlotClaimFrame {
+                from: owner,
+                slot: crate::command_admission::HostSlot(slot),
+                claim_seq,
+                tick,
+            });
+            if let Some(mut inbox) = world.get_resource_mut::<crate::lockstep::MeshInbox>() {
+                inbox.push_from(frame.clone(), crate::lockstep::MeshOrigin::LocalObservation);
+            }
+            if let Some(mut outbox) = world.get_resource_mut::<crate::lockstep::MeshOutbox>() {
+                outbox.push(frame);
+            }
+        }
+    }
+
+    let decoded: Vec<(crate::lockstep::MeshFrame, u32)> = frames
         .iter()
-        .filter_map(|raw| crate::core::codec::decode_mesh_frame(raw))
+        .filter_map(|(slot, raw)| {
+            crate::core::codec::decode_mesh_frame(raw).map(|frame| (frame, *slot))
+        })
         .collect();
     if let Some(mut inbox) = world.get_resource_mut::<crate::lockstep::MeshInbox>() {
         // Decoded tick/digest frames BEFORE the self-reported host-loss frames,
         // so a departing host's final watermark is observed before the loss tick
         // is derived from it — the same order every survivor sees over the
-        // reliable relay. `order_mesh_inbound` owns and documents that ordering
-        // (issue #1119); reversing it flips Backfill one tick early here and
-        // diverges the fold, which `tests/lockstep_backfill.rs`'s star-topology
-        // case guards.
-        let departed = departed.into_iter().map(crate::command_admission::HostSlot);
-        for frame in crate::lockstep::order_mesh_inbound(decoded, departed) {
-            inbox.push(frame);
+        // reliable relay. `order_mesh_inbound` (issue #1119) owns and documents
+        // that ordering; this authenticated path mirrors it — decoded frames
+        // tagged with the slot the delivering connection was bound to (issue
+        // #1120), then the local self-observations tagged `LocalObservation` —
+        // rather than routing through it, because it carries no origin. Reversing
+        // the order flips Backfill one tick early, which `tests/lockstep_backfill.
+        // rs`'s star-topology case guards.
+        for (frame, slot) in decoded {
+            // `slot == 0` (never a real fleet slot) is the page saying it could
+            // not authenticate the connection: trust the frame as before.
+            let origin = if slot == 0 {
+                crate::lockstep::MeshOrigin::Unauthenticated
+            } else {
+                crate::lockstep::MeshOrigin::Peer(crate::command_admission::HostSlot(slot))
+            };
+            inbox.push_from(frame, origin);
+        }
+        for slot in departed {
+            inbox.push_from(
+                crate::lockstep::MeshFrame::HostLoss(crate::lockstep::HostLossFrame {
+                    from: crate::command_admission::HostSlot(slot),
+                    lost: crate::command_admission::HostSlot(slot),
+                    tick: 0,
+                }),
+                crate::lockstep::MeshOrigin::LocalObservation,
+            );
         }
     }
 }

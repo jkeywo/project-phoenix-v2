@@ -185,6 +185,25 @@ impl LockstepSession {
         self.departed.contains(&slot)
     }
 
+    /// Re-admit a departed slot a replacement machine has claimed (issue #1120).
+    ///
+    /// The inverse of [`Self::depart`]: it clears the departed mark and re-inserts
+    /// the slot into the wait-set at `watermark`, so the barrier waits for it again
+    /// and [`Self::observe`] will once more advance its watermark (a departed slot's
+    /// observations are otherwise ignored). Seeding it at the recovery `watermark`
+    /// — the boundary the whole fleet holds at — lets every survivor run UP TO the
+    /// boundary but no further under the barrier alone, which is the same tick the
+    /// recovery leader captures its canonical record at; the replacement's genuine
+    /// post-restore frames then advance the watermark and the fleet resumes in true
+    /// lockstep. Idempotent for the local slot (a host never waits for itself).
+    pub fn rejoin(&mut self, slot: HostSlot, watermark: u64) {
+        if slot == self.local {
+            return;
+        }
+        self.departed.remove(&slot);
+        self.ready_through.insert(slot, watermark);
+    }
+
     /// The watermark this host declares having reached `tick`.
     pub fn ready_through(&self, tick: u64) -> u64 {
         tick.saturating_add(self.delay)
@@ -357,6 +376,36 @@ mod tests {
             session.stall_at(31).is_some(),
             "…but slot 2 still holds tick 31"
         );
+    }
+
+    /// A departed slot a replacement reclaims (issue #1120) is re-admitted to the
+    /// wait-set at the recovery watermark, so the barrier waits for it again and
+    /// its watermark advances once more — the inverse of `depart`.
+    #[test]
+    fn a_reclaimed_slot_is_waited_for_again_from_the_recovery_watermark() {
+        let mut session = LockstepSession::new(HostSlot(1), [HostSlot(2), HostSlot(3)], DELAY);
+        // Slot 2 is kept well ahead throughout, so the barrier below is a test of
+        // slot 3's re-admission alone rather than of the other peer.
+        session.observe(HostSlot(2), u64::MAX);
+        session.observe(HostSlot(3), 12);
+        session.depart(HostSlot(3));
+        assert!(session.has_departed(HostSlot(3)));
+        // A departed slot's frames are ignored — the barrier does not wait for it.
+        session.observe(HostSlot(3), 50);
+        assert_eq!(session.watermark_of(HostSlot(3)), None);
+
+        // Reclaimed at the boundary: waited for again from there.
+        session.rejoin(HostSlot(3), 100);
+        assert!(!session.has_departed(HostSlot(3)));
+        assert_eq!(session.watermark_of(HostSlot(3)), Some(100));
+        assert!(
+            session.may_simulate(100) && !session.may_simulate(101),
+            "the fleet runs up to the recovery boundary but no further until the \
+             replacement's genuine post-restore frames advance it"
+        );
+        // …and now its observations advance the watermark once more.
+        session.observe(HostSlot(3), 106);
+        assert_eq!(session.watermark_of(HostSlot(3)), Some(106));
     }
 
     /// The watermark a host declares is its own clock plus the agreed delay —

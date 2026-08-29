@@ -140,8 +140,8 @@ entities:
       rationale:
         - "No simulation path branches on human-versus-AI downstream of admission, so fallback is a change of control source, not a change of code path."
         - "Reclaiming stations after a reconnect (#620 story 10) now means re-acquiring named stations at their prior ratings, which the crew lobby already models per ship."
-    game_design:
-      must_not_be: [a ship-level AI toggle, applied at different ticks on different peers]
+        - "[ai] IMPLEMENTED by issue #1119, exactly as this delta required. The transition is a tick-stamped mesh event (lockstep::frame::MeshFrame::HostLoss), not a ship-level toggle: lockstep::host_loss::apply_host_loss_backfill runs in SimSet::Input before resolve_human_seeking_hosts and calls the SAME ship::rating::apply_rating(BACKFILL) the single-host disconnect uses, per station, on the lost ship — reuse, not a fork — while FleetRoster::depart_slot empties that slot's frozen crewing so the human-seeking resolver re-seeks it to AI. The lost ship keeps its complete authoritative state; only its control source flips."
+        - "[ai] The agreed tick is peer-independent by construction: host_loss::agreed_loss_tick(lost_watermark) is the first tick past the departed host's own last ready_through, which reliable ordered delivery gave every survivor identically — never a function of who noticed first. Convergence (reordered/duplicate/delayed reports) is the max-merge in PendingHostLoss plus LockstepSession::depart remembering the gone slot so a late frame from it cannot re-stall the fleet. Proven in tests/lockstep_backfill.rs across a three-host fleet dropped to two survivors."
 
   - decision: p2p-delta-per-ship-epistemics
     core:

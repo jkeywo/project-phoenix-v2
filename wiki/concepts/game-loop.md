@@ -51,6 +51,21 @@ TOML-authored `[global] sim_tick_hz` (serde default 60 Hz). `SimTick`
    every peer's input for a tick before it simulates it. A host that has not
    received it withholds the tick — `Time<Virtual>` paused, so the tick never
    begins — rather than speculating. See `src/lockstep/`.
+
+   **When a ship host vanishes (issue #1119)** the fleet keeps running: its ship
+   is not removed and not replaced by a simplified sim — it keeps its complete
+   authoritative state, and only its control *source* flips to ordinary Backfill,
+   through the same `ship::rating::apply_rating` a single-host disconnect uses.
+   The *when* is a tick-stamped mesh event (`MeshFrame::HostLoss`) applied at one
+   agreed tick on every survivor: `host_loss::agreed_loss_tick`, the first tick
+   past the lost host's own last watermark, derived identically on every survivor
+   from reliable-delivered frames rather than from who noticed the close first —
+   so the flip lands on the same tick everywhere and the digest stays equal.
+   `FleetRoster::depart_slot` empties the lost slot's frozen crewing so
+   `resolve_human_seeking_hosts` re-seeks its Comms/Nav to AI the same tick.
+   Reordered, duplicate and delayed reports converge on one transition (the
+   `PendingHostLoss` max-merge plus a departed-slot guard in the barrier). See
+   `src/lockstep/host_loss.rs` and `tests/lockstep_backfill.rs`.
 3. **The `SimSet` chain** — Input → Physics → Damage → Modifiers → Publish →
    PublishAggregate → Broadcast, gated on `GamePhase::InProgress`.
 4. **Phase transitions** — Bevy's `StateTransition` schedule is inserted into

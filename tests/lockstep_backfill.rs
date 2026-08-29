@@ -322,9 +322,9 @@ fn three_hosts_fly_three_ships_and_slot_three_is_crewed() {
     assert_eq!(ships_one, ships_two, "AC-shared identity across hosts");
     assert_eq!(ships_two, ships_three);
 
-    for host in 0..3 {
+    for (host, h) in hosts.iter_mut().enumerate() {
         assert!(
-            hosts[host].human_systems_of(SLOT_THREE).unwrap() > 0,
+            h.human_systems_of(SLOT_THREE).unwrap() > 0,
             "slot 3's ship must have a live human crew before the drop, or \
              flipping it to Backfill proves nothing (host {host})"
         );
@@ -386,10 +386,9 @@ fn a_dropped_host_backfills_at_an_agreed_tick_and_survivors_stay_in_lockstep() {
     }
 
     // AC1 + AC3: exactly one host-loss transition, at the agreed tick, on both.
-    for host in 0..2 {
-        let records = hosts[host].host_loss_records();
+    for (host, h) in hosts.iter().enumerate().take(2) {
         assert_eq!(
-            records,
+            h.host_loss_records(),
             vec![HostLossRecord {
                 slot: SLOT_THREE,
                 tick: expected_loss_tick,
@@ -402,9 +401,9 @@ fn a_dropped_host_backfills_at_an_agreed_tick_and_survivors_stay_in_lockstep() {
     // AC2 + AC3: slot 3's ship still exists, keeps a full crew of systems, and
     // every one of them is now AI — its human-seeking systems re-resolved away
     // from the crew that vanished, the rest flipped by ordinary Backfill.
-    for host in 0..2 {
+    for (host, h) in hosts.iter_mut().enumerate().take(2) {
         assert_eq!(
-            hosts[host].human_systems_of(SLOT_THREE),
+            h.human_systems_of(SLOT_THREE),
             Some(0),
             "survivor {host}: every system on the lost ship must be AI after \
              Backfill — a human system would mean a console nobody is at"
@@ -452,8 +451,8 @@ fn a_dropped_host_backfills_at_an_agreed_tick_and_survivors_stay_in_lockstep() {
     );
 
     // AC6's exchange half: the survivors' periodic digest exchange still agrees.
-    for host in 0..2 {
-        let agreement = hosts[host].app.world().resource::<MeshAgreement>();
+    for (host, h) in hosts.iter().enumerate().take(2) {
+        let agreement = h.app.world().resource::<MeshAgreement>();
         assert!(
             agreement.agreed(),
             "survivor {host} reported a divergence after the drop: {:?}",
@@ -527,9 +526,9 @@ fn reordered_duplicate_and_delayed_loss_reports_converge() {
     }
 
     // One transition, same tick, on both — whatever the report history.
-    for host in 0..2 {
+    for (host, h) in hosts.iter().enumerate().take(2) {
         assert_eq!(
-            hosts[host].host_loss_records(),
+            h.host_loss_records(),
             vec![HostLossRecord {
                 slot: SLOT_THREE,
                 tick: expected_loss_tick,

@@ -731,7 +731,10 @@ mod tests {
         let id = bus.open(identity(1));
         assert!(bus.is_open(id));
         bus.close(id);
-        assert!(!bus.is_open(id), "a closed pane's lingering record is not open");
+        assert!(
+            !bus.is_open(id),
+            "a closed pane's lingering record is not open"
+        );
         assert!(!bus.is_open(PaneId(999)), "an unknown handle is not open");
     }
 

@@ -896,7 +896,9 @@ pub fn runtime_display_losses(
 ) -> Vec<RuntimeDisplayLoss> {
     assigned
         .iter()
-        .filter(|a| previous_present.contains(&a.identity) && !current_present.contains(&a.identity))
+        .filter(|a| {
+            previous_present.contains(&a.identity) && !current_present.contains(&a.identity)
+        })
         .map(|a| RuntimeDisplayLoss {
             identity: a.identity.clone(),
             role: a.role.clone(),
@@ -914,7 +916,9 @@ pub fn runtime_display_returns(
 ) -> Vec<RuntimeDisplayReturn> {
     assigned
         .iter()
-        .filter(|a| !previous_present.contains(&a.identity) && current_present.contains(&a.identity))
+        .filter(|a| {
+            !previous_present.contains(&a.identity) && current_present.contains(&a.identity)
+        })
         .map(|a| RuntimeDisplayReturn {
             identity: a.identity.clone(),
             role: a.role.clone(),

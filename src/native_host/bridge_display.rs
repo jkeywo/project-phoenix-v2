@@ -722,7 +722,8 @@ mod tests {
             profile: viewscreen_and_station("Ada"),
         });
         let bus = PaneBus::default();
-        let pane = bus.open(PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000001", "Ada").unwrap());
+        let pane =
+            bus.open(PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000001", "Ada").unwrap());
         bus.mark_live(pane);
         let token = bus.token_of(pane).unwrap();
         app.insert_resource(PaneBusResource(bus.clone()));
@@ -783,7 +784,8 @@ mod tests {
             profile: viewscreen_and_station("Ada"),
         });
         let bus = PaneBus::default();
-        let pane = bus.open(PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000001", "Ada").unwrap());
+        let pane =
+            bus.open(PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000001", "Ada").unwrap());
         bus.mark_live(pane);
         app.insert_resource(PaneBusResource(bus.clone()));
         app.add_systems(Update, watch_runtime_displays);
@@ -857,14 +859,12 @@ mod tests {
             profile: two_identical_stations(),
         });
         let bus = PaneBus::default();
-        let ada = bus.open(
-            PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000001", "Ada").unwrap(),
-        );
+        let ada =
+            bus.open(PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000001", "Ada").unwrap());
         bus.mark_live(ada);
         let ada_token = bus.token_of(ada).unwrap();
-        let grace = bus.open(
-            PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000002", "Grace").unwrap(),
-        );
+        let grace =
+            bus.open(PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000002", "Grace").unwrap());
         bus.mark_live(grace);
         app.insert_resource(PaneBusResource(bus.clone()));
         app.add_systems(Update, watch_runtime_displays);

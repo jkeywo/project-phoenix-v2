@@ -715,9 +715,18 @@ const BENQ: &str = "BenQ EX@1920x1080";
 #[test]
 fn assigned_surfaces_carry_each_stations_pane_labels_and_the_viewscreen_none() {
     let assigned = matching_profile().assigned_surfaces();
-    let dell = assigned.iter().find(|a| a.identity.as_str() == DELL).unwrap();
-    let benq = assigned.iter().find(|a| a.identity.as_str() == BENQ).unwrap();
-    assert!(dell.pane_labels.is_empty(), "the viewscreen carries no panes");
+    let dell = assigned
+        .iter()
+        .find(|a| a.identity.as_str() == DELL)
+        .unwrap();
+    let benq = assigned
+        .iter()
+        .find(|a| a.identity.as_str() == BENQ)
+        .unwrap();
+    assert!(
+        dell.pane_labels.is_empty(),
+        "the viewscreen carries no panes"
+    );
     assert_eq!(benq.pane_labels, vec!["Ada".to_string()]);
 }
 
@@ -736,7 +745,10 @@ fn losing_a_station_monitor_names_it_and_the_panes_that_must_disconnect() {
     assert!(text.contains(BENQ), "{text}");
     assert!(text.contains("Ada"), "{text}");
     assert!(text.contains("AI control"), "{text}");
-    assert!(text.contains("not moved to another display") || text.contains("rather than moved"), "{text}");
+    assert!(
+        text.contains("not moved to another display") || text.contains("rather than moved"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -781,8 +793,18 @@ fn an_unassigned_monitor_appearing_is_neither_a_loss_nor_a_return() {
     // coming or going is not a runtime loss/return of a configured surface.
     let assigned = matching_profile().assigned_surfaces();
     let other = "Some Other@1280x1024";
-    assert!(runtime_display_losses(&assigned, &present(&[DELL, BENQ, other]), &present(&[DELL, BENQ])).is_empty());
-    assert!(runtime_display_returns(&assigned, &present(&[DELL, BENQ]), &present(&[DELL, BENQ, other])).is_empty());
+    assert!(runtime_display_losses(
+        &assigned,
+        &present(&[DELL, BENQ, other]),
+        &present(&[DELL, BENQ])
+    )
+    .is_empty());
+    assert!(runtime_display_returns(
+        &assigned,
+        &present(&[DELL, BENQ]),
+        &present(&[DELL, BENQ, other])
+    )
+    .is_empty());
 }
 
 // ── stable present-set for identical monitors (issue #1125) ──────────────────

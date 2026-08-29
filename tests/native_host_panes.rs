@@ -752,7 +752,10 @@ fn a_view_crash_disconnects_the_pane_and_flips_its_station_to_backfill() {
         .iter()
         .find(|p| p.token == player_token)
         .expect("a crashed pane keeps its session");
-    assert!(!player.connected, "the crashed pane's participant disconnected");
+    assert!(
+        !player.connected,
+        "the crashed pane's participant disconnected"
+    );
     assert_eq!(
         player.station.as_ref().map(|s| s.0.clone()),
         Some(station.clone()),
@@ -791,11 +794,33 @@ fn no_surviving_pane_inherits_a_failed_panes_projection() {
     bus.mark_live(grace);
     {
         let send = |id: PaneId, msg: ClientMessage| bus.submit(id, msg).expect("allowed");
-        send(ada, ClientMessage::Identify { token: ada_token.clone(), name: "Ada".to_string() });
-        send(grace, ClientMessage::Identify { token: grace_token.clone(), name: "Grace".to_string() });
+        send(
+            ada,
+            ClientMessage::Identify {
+                token: ada_token.clone(),
+                name: "Ada".to_string(),
+            },
+        );
+        send(
+            grace,
+            ClientMessage::Identify {
+                token: grace_token.clone(),
+                name: "Grace".to_string(),
+            },
+        );
         pump(&mut app, 4);
-        send(ada, ClientMessage::SelectStation { station: station_a.clone() });
-        send(grace, ClientMessage::SelectStation { station: station_b.clone() });
+        send(
+            ada,
+            ClientMessage::SelectStation {
+                station: station_a.clone(),
+            },
+        );
+        send(
+            grace,
+            ClientMessage::SelectStation {
+                station: station_b.clone(),
+            },
+        );
         pump(&mut app, 4);
     }
 
@@ -811,7 +836,9 @@ fn no_surviving_pane_inherits_a_failed_panes_projection() {
     assert!(
         sessions
             .0
-            .holder_for_station(&project_phoenix::core::messages::StationId(station_a.clone()))
+            .holder_for_station(&project_phoenix::core::messages::StationId(
+                station_a.clone()
+            ))
             .is_none(),
         "the failed pane's station resolves to no connected holder — the projection is cleaned up"
     );
@@ -944,7 +971,10 @@ fn a_lost_station_display_disconnects_its_pane_without_recreating_it() {
         .iter()
         .find(|p| p.token == disconnected_token)
         .expect("the participant on the lost display keeps its session");
-    assert!(!player.connected, "the pane on the lost display disconnected");
+    assert!(
+        !player.connected,
+        "the pane on the lost display disconnected"
+    );
     assert_eq!(
         station_rating(&mut app, &station).as_deref(),
         Some(project_phoenix::ship::rating::BACKFILL_RATING),

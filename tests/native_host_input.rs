@@ -221,12 +221,19 @@ fn check(
         return;
     }
 
-    // Nothing has pointed at a pane yet, so nothing holds focus.
-    if host.focused_pane().is_some() {
+    // Keyboard focus is seeded onto the first pane the moment panes exist, so a
+    // pure-keyboard operator has a visible focus indicator and a defined target
+    // for the first keystroke (acceptance criterion 2). It must be the first
+    // pane in placement order, not left unset.
+    if host.focused_pane() != Some(order[0]) {
         finish(
             &outcome,
             &mut exit,
-            Err("a pane holds focus before any pointer or key input".into()),
+            Err(format!(
+                "expected initial focus seeded onto the first pane {:?}, but focus was {:?}",
+                order[0],
+                host.focused_pane()
+            )),
         );
         return;
     }

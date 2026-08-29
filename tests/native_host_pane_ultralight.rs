@@ -84,7 +84,7 @@ use project_phoenix::delivery::args::{ClientSource, HostArgs};
 use project_phoenix::delivery::serve::{HostServer, ShutdownSignal};
 use project_phoenix::native_host::panes::surface::{pump_pane, PaneSurface};
 use project_phoenix::native_host::panes::ultralight::{stage_sdk, UltralightPaneSurface};
-use project_phoenix::native_host::panes::{LocalPanes, PaneId};
+use project_phoenix::native_host::panes::{service_faults, LocalPanes, PaneFault, PaneId};
 use project_phoenix::native_host::transport::{
     NativeTransport, NativeTransportLink, TransportDispatch, TransportEvent,
 };
@@ -723,6 +723,84 @@ fn two_panes_load_real_console_pages_join_operate_a_station_and_share_no_storage
          participants sharing nothing but an HTTP origin"
     );
     println!("[pane] two panes, two stores");
+
+    // ── 7: a crashed pane recovers as an ordinary reconnect (issue #1125) ─────
+    //
+    // Ada holds the captain's chair (section 5). Injecting a view crash at the
+    // seam — the same signal `drive_panes`' frame-copy watchdog raises for a real
+    // crashed view — disconnects her through the ordinary session path (the chair
+    // falls to Backfill) and recreates her pane on the SAME token. A fresh real
+    // view loads the same console, rejoins by itself, and reconnect-yield hands
+    // the chair back to the human. This is the real-view half of #1125's
+    // recreation criterion; the SDK-free half is `tests/native_host_panes.rs`.
+    let captain = project_phoenix::core::messages::StationId(STATION.to_string());
+    let holder = |app: &App| {
+        app.world()
+            .resource::<project_phoenix::lobby::Sessions>()
+            .0
+            .holder_for_station(&captain)
+            .map(str::to_string)
+    };
+    assert_eq!(
+        holder(&app).as_deref(),
+        Some(ada_token.as_str()),
+        "Ada holds the captain's chair before the crash"
+    );
+
+    bus.fault(ada, PaneFault::ViewCrashed);
+    let outcomes = service_faults(&bus);
+    let (recreated, recreated_url) = outcomes
+        .iter()
+        .find(|o| o.failed == ada)
+        .and_then(|o| o.recreated.clone())
+        .expect("a view crash recreates Ada's pane on the same identity");
+    assert_eq!(
+        bus.token_of(recreated).as_deref(),
+        Some(ada_token.as_str()),
+        "the recreated pane carries Ada's own token"
+    );
+
+    // Drop the crashed view and drive frames so the disconnect reaches the lobby:
+    // the chair falls to Backfill and resolves to no connected holder.
+    surfaces.retain(|(id, _)| *id != ada);
+    for _ in 0..8 {
+        frame(&mut app, &mut surfaces);
+    }
+    assert!(
+        holder(&app).is_none(),
+        "while Ada's pane is gone, the captain's chair is on Backfill"
+    );
+
+    // Build the recreated view — the in-process analogue of a phone reloading —
+    // and let it rejoin on its own from the fresh document `recreate` published.
+    let recreated_view = runtime
+        .create_pane(&PaneSpec {
+            width: PANE_SIZE.0,
+            height: PANE_SIZE.1,
+            device_scale: 1.0,
+            transparent: false,
+            session: Some(PaneSession::ephemeral(recreated.to_string())),
+        })
+        .expect("the recreated pane's view is created");
+    let mut recreated_surface = UltralightPaneSurface::new(recreated_view);
+    println!("[pane] {recreated} reloading {recreated_url} to reconnect as Ada");
+    recreated_surface
+        .load(&recreated_url)
+        .expect("the recreated pane navigates");
+    surfaces.push((recreated, recreated_surface));
+
+    let deadline = Instant::now() + PATIENCE;
+    let mut reconnected = false;
+    while Instant::now() < deadline && !reconnected {
+        frame(&mut app, &mut surfaces);
+        reconnected = holder(&app).as_deref() == Some(ada_token.as_str());
+    }
+    assert!(
+        reconnected,
+        "the recreated pane must rejoin on Ada's token and reclaim the captain's chair — \
+         the pane analogue of a phone reconnecting on its saved session"
+    );
+    println!("[pane] a crashed pane recovered and reconnected on the same identity");
 }
 
 /// Pump `app` for `frames` frames of fixed virtual time, as the headless

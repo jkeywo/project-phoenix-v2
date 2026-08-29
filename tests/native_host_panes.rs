@@ -49,7 +49,7 @@ use project_phoenix::delivery::serve::{load_content, route, HostedDocuments, Pee
 use project_phoenix::entities::template_preload::TemplatePreload;
 use project_phoenix::lobby::handler::Target;
 use project_phoenix::native_host::panes::identity::PaneIdentity;
-use project_phoenix::native_host::panes::{LocalPanes, PaneId};
+use project_phoenix::native_host::panes::{service_faults, LocalPanes, PaneBus, PaneFault, PaneId};
 use project_phoenix::native_host::transport::{
     LoopbackHandle, NativeTransport, NativeTransportLink, PairedTransport, TransportDispatch,
 };
@@ -660,5 +660,298 @@ fn a_pane_that_closes_hands_the_lobby_the_disconnect_a_dropped_phone_would() {
         player.station.as_ref().map(|s| s.0.clone()),
         Some(station),
         "and keeps the Station it held, which is what flips it to Backfill"
+    );
+}
+
+// ── recovering a failed pane as an ordinary disconnect (issue #1125) ─────────
+
+/// The AI/Backfill rating a station currently carries, read off the ship
+/// component the lobby writes on disconnect. `None` when there is no ship yet
+/// (the lobby) or the station has no rating entry.
+fn station_rating(app: &mut App, station: &str) -> Option<String> {
+    let sid = project_phoenix::core::messages::StationId(station.to_string());
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&project_phoenix::ship_plugin::ActiveStationRatings, With<project_phoenix::server_app::LocalShip>>();
+    q.iter(app.world())
+        .next()
+        .and_then(|r| r.0.get(&sid).cloned())
+}
+
+/// A solo host already flying the mission, with one pane seated at a station
+/// under human control. This is the running-ship state the Backfill assertions
+/// need: a station's rating only exists once a `LocalShip` has spawned at
+/// `InProgress`, and a mid-game claim stays on Backfill until `SetReady(true)`
+/// hands the seat to the human (`handle_select_station`'s pending-join rule).
+/// Returns the app, the shared bus, the pane handle, its token, and the station
+/// it holds.
+fn solo_running_with_pane(name: &str) -> (App, PaneBus, PaneId, String, String) {
+    let preload = preload();
+    let mut cfg = crewed_config();
+    cfg.solo = true;
+    let panes = LocalPanes::open(&[name.to_string()], "127.0.0.1:0");
+    let bus = panes.bus.clone();
+    let pane = panes.opened[0].id;
+    let token = panes.opened[0].identity.token().to_string();
+    cfg.panes = Some(panes);
+    let mut app = build_native_host_app(&cfg, &preload).expect("the native host assembles");
+
+    // Read the roster BEFORE the mission starts: `PendingShipConfig` is consumed
+    // when the ship spawns at InProgress.
+    let config = ship_config(&app);
+    let (station, system, _, _) = two_stations_with_systems(&config);
+
+    // The solo mission is running before anyone joins — every station on Backfill.
+    pump(&mut app, 8);
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::InProgress,
+        "a solo host is flying the mission before the pane joins"
+    );
+
+    bus.mark_live(pane);
+    {
+        let mut send = |msg: ClientMessage| bus.submit(pane, msg).expect("the pane may say this");
+        join_claim_ready(&mut app, &mut send, &token, name, &station);
+    }
+    // Readying mid-game is what hands the seat to the human — proved through the
+    // real admission policy, not assumed.
+    assert!(
+        admits(&mut app, &token, &system),
+        "the pane holds its station under human control"
+    );
+    assert_ne!(
+        station_rating(&mut app, &station).as_deref(),
+        Some(project_phoenix::ship::rating::BACKFILL_RATING),
+        "so its station is not on Backfill while the human is at it"
+    );
+    (app, bus, pane, token, station)
+}
+
+#[test]
+fn a_view_crash_disconnects_the_pane_and_flips_its_station_to_backfill() {
+    // Acceptance criterion 2, the view-crash trigger. A crash is injected at the
+    // seam (`fault(ViewCrashed)`) — the SDK-free half of what `drive_panes`'
+    // frame-copy watchdog does with a real crashed view — and serviced exactly
+    // as the pane host services it. The failed participant disconnects through
+    // the ORDINARY session path and its station invokes ordinary Backfill, with
+    // no pane-shaped special case in the sim.
+    let (mut app, bus, pane, token, station) = solo_running_with_pane("Ada");
+
+    bus.fault(pane, PaneFault::ViewCrashed);
+    let outcomes = service_faults(&bus);
+    assert_eq!(outcomes.len(), 1);
+    assert_eq!(outcomes[0].fault, PaneFault::ViewCrashed);
+    pump(&mut app, 8);
+
+    let player_token = token.clone();
+    let sessions = app.world().resource::<project_phoenix::lobby::Sessions>();
+    let player = sessions
+        .0
+        .players()
+        .iter()
+        .find(|p| p.token == player_token)
+        .expect("a crashed pane keeps its session");
+    assert!(!player.connected, "the crashed pane's participant disconnected");
+    assert_eq!(
+        player.station.as_ref().map(|s| s.0.clone()),
+        Some(station.clone()),
+        "and keeps the Station it held, which is what flips it to Backfill"
+    );
+    assert_eq!(
+        station_rating(&mut app, &station).as_deref(),
+        Some(project_phoenix::ship::rating::BACKFILL_RATING),
+        "the station flips to Backfill — the same rating a dropped phone leaves"
+    );
+}
+
+#[test]
+fn no_surviving_pane_inherits_a_failed_panes_projection() {
+    // Acceptance criterion 3. When a pane fails, its audience projection is
+    // cleaned up by the ordinary disconnect: `holder_for_station` gates on
+    // `connected`, so the moment the token disconnects nothing resolves to it,
+    // and a neighbouring pane never inherits it. The recreated pane carries the
+    // same token and legitimately DOES receive that token's projection — which is
+    // AC4, not a leak — so the leak claim is specifically about Grace and about
+    // the failed (closed) handle. Run in the lobby: the routing this proves is
+    // the pane bus's, and needs no running ship.
+    let preload = preload();
+    let mut cfg = crewed_config();
+    let panes = LocalPanes::open(&["Ada".to_string(), "Grace".to_string()], "127.0.0.1:0");
+    let bus = panes.bus.clone();
+    let (ada, grace) = (panes.opened[0].id, panes.opened[1].id);
+    let ada_token = panes.opened[0].identity.token().to_string();
+    let grace_token = panes.opened[1].identity.token().to_string();
+    cfg.panes = Some(panes);
+    let mut app = build_native_host_app(&cfg, &preload).expect("the native host assembles");
+
+    let config = ship_config(&app);
+    let (station_a, _, station_b, _) = two_stations_with_systems(&config);
+    bus.mark_live(ada);
+    bus.mark_live(grace);
+    {
+        let send = |id: PaneId, msg: ClientMessage| bus.submit(id, msg).expect("allowed");
+        send(ada, ClientMessage::Identify { token: ada_token.clone(), name: "Ada".to_string() });
+        send(grace, ClientMessage::Identify { token: grace_token.clone(), name: "Grace".to_string() });
+        pump(&mut app, 4);
+        send(ada, ClientMessage::SelectStation { station: station_a.clone() });
+        send(grace, ClientMessage::SelectStation { station: station_b.clone() });
+        pump(&mut app, 4);
+    }
+
+    // Ada's pane crashes; it disconnects and its station is no longer held.
+    bus.fault(ada, PaneFault::ViewCrashed);
+    let recreated = service_faults(&bus)[0].recreated.clone().map(|(id, _)| id);
+    // The recreated pane's view has loaded (its page is back), so it drains.
+    if let Some(r) = recreated {
+        bus.mark_live(r);
+    }
+    pump(&mut app, 8);
+    let sessions = app.world().resource::<project_phoenix::lobby::Sessions>();
+    assert!(
+        sessions
+            .0
+            .holder_for_station(&project_phoenix::core::messages::StationId(station_a.clone()))
+            .is_none(),
+        "the failed pane's station resolves to no connected holder — the projection is cleaned up"
+    );
+
+    // Clear every queue of the legitimate broadcasts the disconnect produced
+    // (`PlayerLeft` is `Target::All` and reaches Grace — that is not a leak).
+    let _ = bus.take_outbound(ada);
+    let _ = bus.take_outbound(grace);
+    if let Some(recreated) = recreated {
+        let _ = bus.take_outbound(recreated);
+    }
+
+    // A projection addressed to Ada's token reaches only Ada's own (recreated)
+    // pane. Grace — the surviving neighbour — never sees it, and the failed
+    // handle receives nothing at all.
+    let mut transport = bus.transport();
+    transport.dispatch(TransportDispatch {
+        target: &Target::Token(ada_token.clone()),
+        msg: &ServerMessage::GameStarted,
+        delivery: project_phoenix::core::messages::DeliveryClass::Reliable,
+    });
+    assert!(
+        bus.take_outbound(ada).is_empty(),
+        "the failed pane handle inherits nothing"
+    );
+    assert!(
+        bus.take_outbound(grace).is_empty(),
+        "a surviving neighbour never inherits the failed pane's private projection"
+    );
+    if let Some(recreated) = recreated {
+        assert_eq!(
+            bus.take_outbound(recreated).len(),
+            1,
+            "only the pane carrying the same token — Ada's own recreated pane — receives it"
+        );
+    }
+}
+
+#[test]
+fn a_recreated_pane_reconnects_on_the_same_identity_and_regains_its_station() {
+    // Acceptance criterion 4, end to end through the lobby. A crashed pane is
+    // recreated on the same session token; its page re-identifies, and that is a
+    // reconnect the lobby answers with reconnect-yield — the held station comes
+    // back to the human and the rating leaves Backfill.
+    let (mut app, bus, pane, token, station) = solo_running_with_pane("Ada");
+
+    // Crash → close → recreate. The disconnect drains and Backfill takes over.
+    bus.fault(pane, PaneFault::ViewCrashed);
+    let (recreated, _url) = service_faults(&bus)[0]
+        .recreated
+        .clone()
+        .expect("a view crash recreates the pane");
+    pump(&mut app, 8);
+    assert_eq!(
+        station_rating(&mut app, &station).as_deref(),
+        Some(project_phoenix::ship::rating::BACKFILL_RATING),
+        "while the pane is gone, its station is on Backfill"
+    );
+
+    // The recreated pane's page loads and re-identifies on the SAME token — the
+    // ordinary reconnect path a phone uses.
+    bus.mark_live(recreated);
+    bus.submit(
+        recreated,
+        ClientMessage::Identify {
+            token: token.clone(),
+            name: "Ada".to_string(),
+        },
+    )
+    .expect("a recreated pane identifies as its own token");
+    pump(&mut app, 8);
+
+    let reconnected_token = token.clone();
+    let sessions = app.world().resource::<project_phoenix::lobby::Sessions>();
+    let player = sessions
+        .0
+        .players()
+        .iter()
+        .find(|p| p.token == reconnected_token)
+        .expect("the reconnected participant");
+    assert!(player.connected, "the recreated pane is connected again");
+    assert_eq!(
+        player.station.as_ref().map(|s| s.0.clone()),
+        Some(station.clone()),
+        "and its held Station is restored to the human"
+    );
+    assert_eq!(
+        sessions
+            .0
+            .holder_for_station(&project_phoenix::core::messages::StationId(station.clone())),
+        Some(token.as_str()),
+        "the station now resolves back to the recreated pane's token — its projection returns"
+    );
+    assert_ne!(
+        station_rating(&mut app, &station).as_deref(),
+        Some(project_phoenix::ship::rating::BACKFILL_RATING),
+        "and the station has left Backfill, back under human control"
+    );
+
+    // The reconnect was answered on the recreated pane's own token: a Welcome.
+    let welcomed = bus
+        .take_outbound(recreated)
+        .iter()
+        .any(|d| d.json.contains("\"Welcome\""));
+    assert!(welcomed, "the recreated pane is Welcomed on reconnect");
+}
+
+#[test]
+fn a_lost_station_display_disconnects_its_pane_without_recreating_it() {
+    // Acceptance criterion 1 (pane-failing half) and 5. When a Station monitor is
+    // lost mid-mission the runtime watcher closes the panes it carried — found by
+    // participant name, exactly as `open_pane_for_name` does — so their stations
+    // flip to Backfill. Unlike a view crash, a display loss does NOT recreate:
+    // there is nowhere to rebuild the view, and bringing the display back is an
+    // explicit repair, never a silent re-home.
+    let (mut app, bus, pane, token, station) = solo_running_with_pane("Ada");
+
+    // The watcher's action for a lost Station monitor carrying "Ada": resolve the
+    // pane by name and close it (NOT fault it — no recreate).
+    let doomed = bus.open_pane_for_name("Ada").expect("Ada's pane is open");
+    assert_eq!(doomed, pane);
+    bus.close(doomed);
+    pump(&mut app, 8);
+
+    let disconnected_token = token.clone();
+    let sessions = app.world().resource::<project_phoenix::lobby::Sessions>();
+    let player = sessions
+        .0
+        .players()
+        .iter()
+        .find(|p| p.token == disconnected_token)
+        .expect("the participant on the lost display keeps its session");
+    assert!(!player.connected, "the pane on the lost display disconnected");
+    assert_eq!(
+        station_rating(&mut app, &station).as_deref(),
+        Some(project_phoenix::ship::rating::BACKFILL_RATING),
+        "its station fell back to AI control"
+    );
+    assert!(
+        bus.take_pending_views().is_empty(),
+        "a display loss does not recreate the pane — that would be a silent re-home"
     );
 }

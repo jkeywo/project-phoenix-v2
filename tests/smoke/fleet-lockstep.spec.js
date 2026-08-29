@@ -124,9 +124,19 @@ const meshStatus = (page) => page.evaluate(() => window.__hostMeshStatus());
 async function waitForMesh(page, predicate, what) {
   await page
     .waitForFunction(
-      (source) =>
-        // eslint-disable-next-line no-new-func
-        new Function('s', `return (${source})`)(window.__hostMeshStatus()),
+      // `new Function('s', 'return (' + source + ')')(status)` (the previous
+      // shape here) never calls the reconstructed predicate at all: binding
+      // `status` to an unused parameter named `s` and then evaluating the
+      // arrow-function EXPRESSION as the return value hands back a function
+      // OBJECT — always truthy — so `waitForFunction` resolved on its first
+      // poll no matter what the predicate said. That raced the slower
+      // (throttled, backgrounded) host's own join every time this file ran,
+      // which is why `status.slot` sometimes came back null downstream: the
+      // wait had already returned before the join was applied. Rebuilding the
+      // predicate as a value first and then calling it is what makes this an
+      // actual wait.
+      // eslint-disable-next-line no-new-func
+      (source) => new Function(`return (${source})`)()(window.__hostMeshStatus()),
       predicate.toString(),
       { timeout: 30_000 },
     )

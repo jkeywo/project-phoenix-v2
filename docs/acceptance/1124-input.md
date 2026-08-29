@@ -163,8 +163,19 @@ acceptance criteria 1 and 2, and the mouse/scaling half of criterion 3.
 > adapter expects.
 
 Set up as in A1 with the Station monitor being (or being driven by) a multi-touch
-display. If the touchscreen is a separate panel over a monitor, record its
-device→monitor mapping under `[[touch]]` in the profile.
+display.
+
+> **Assumption this routing makes, stated plainly:** touch routing assumes **one
+> borderless-fullscreen Station window per touch display**. Under that assumption
+> a contact is routed purely by the window the OS reports it against — the router
+> resolves it among that window's panes and needs no device→monitor mapping. The
+> profile's `[[touch]]` table is **recorded for issue #1123's persistence, not
+> consulted by #1124's router**: it exists so a future revision can support a
+> touch panel *decoupled* from its monitor (mapping device-global coordinates to
+> a display, then to a pane). So for the setup below you do **not** need a
+> `[[touch]]` entry, and adding one changes nothing about where a tap lands.
+> Wiring `[[touch]]` into routing for genuinely decoupled panels is a future
+> item, not part of #1124.
 
 - [ ] **A single tap operates the pane under it.** Tap a control on the left pane;
       it responds. Tap one on the right pane; it responds. Each tap lands on the

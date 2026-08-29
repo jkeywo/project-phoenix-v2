@@ -85,7 +85,8 @@ use crate::logging::{LogCat, LogFilterConfig};
 use crate::native_host::bridge_display::BridgeStationSurfaces;
 use crate::native_host::bridge_profile::PaneRect;
 use crate::native_host::input_routing::{
-    ContactCaptureMap, FocusRing, PaneHit, PanePlacement, PaneRouter, WindowKey,
+    pointer_follow_focus, ContactCaptureMap, FocusRing, MouseCapture, PaneHit, PanePlacement,
+    PaneRouter, PointerMotion, WindowKey,
 };
 
 use super::document::pane_drain_script;
@@ -371,6 +372,14 @@ pub struct PaneHost {
     focus: FocusRing,
     /// Touch contacts pinned to the pane each began on (acceptance criterion 4).
     contacts: ContactCaptureMap,
+    /// The left mouse button's capture — the pane a held drag began on, so its
+    /// move and release route there wherever the cursor drifts (acceptance
+    /// criterion 4, the mouse mirror of [`contacts`](Self::contacts)).
+    mouse_capture: MouseCapture,
+    /// Where the pointer was last seen per window, so focus follows genuine
+    /// pointer motion and not the mere presence of a resting cursor (acceptance
+    /// criterion 2).
+    pointer_motion: PointerMotion,
     /// The spatial map from a physical coordinate to the pane under it. Rebuilt
     /// whenever a pane opens or closes.
     router: PaneRouter,
@@ -774,7 +783,18 @@ fn init_pane_host(world: &mut World) {
     }
 
     let router = build_router(&windows);
-    let focus = FocusRing::from_order(router.focus_order());
+    // Seed focus onto the first pane so a pure-keyboard operator sees the reticle
+    // and has a defined keyboard target the instant panes exist, rather than a
+    // blank ring in which keys go nowhere until the first Ctrl+Tab (issue #1124,
+    // acceptance criterion 2). The Ultralight view is told to focus to match, so
+    // the first keystroke lands without a preceding click or Ctrl+Tab —
+    // Ultralight drops input into an unfocused view.
+    let focus = FocusRing::focused_on_first(router.focus_order());
+    if let Some(first) = focus.focused() {
+        if let Some(window) = windows.iter().find(|w| w.id == first) {
+            window.surface.view.focus();
+        }
+    }
     world.insert_non_send_resource(PaneHost {
         runtime,
         windows,
@@ -783,20 +803,35 @@ fn init_pane_host(world: &mut World) {
         scale: primary_scale,
         focus,
         contacts: ContactCaptureMap::new(),
+        mouse_capture: MouseCapture::new(),
+        pointer_motion: PointerMotion::new(),
         router,
         ring: None,
         station_cameras,
     });
 }
 
-/// Route this frame's pointer into the pane under the cursor, and let focus
-/// follow it.
+/// Route this frame's pointer into the pane it belongs to, and let focus follow
+/// it on genuine motion.
 ///
 /// One pointer, every window: the OS moves the cursor across the extended
 /// desktop, and exactly one window reports a `cursor_position` at a time. The
 /// pure router says which pane on that window the physical point lands in, and
 /// the same pane takes the buttons and the wheel — one mouse operating every
 /// configured surface with no mode switch (acceptance criterion 1).
+///
+/// Two rules from the pure model make this predictable:
+///
+/// * **Focus follows the pointer only on motion** (acceptance criterion 2, via
+///   [`pointer_follow_focus`]). A resting cursor reports the same position every
+///   frame; re-asserting focus on it would revert a Ctrl+Tab selection the next
+///   frame. So focus moves only when the pointer actually moved.
+/// * **The left button is captured to the pane it went down on** (acceptance
+///   criterion 4, via [`MouseCapture`], mirroring the touch contact capture). A
+///   drag that leaves the pane still delivers its moves and its release THERE —
+///   projected past the pane edge with `project_into_pane` when the cursor has
+///   drifted off it — so a cross-pane drag never sends a down to one pane and an
+///   unmatched up to another.
 fn route_pointer_input(
     host: Option<NonSendMut<PaneHost>>,
     windows: Query<(Entity, &Window)>,
@@ -806,56 +841,107 @@ fn route_pointer_input(
     let Some(mut host) = host else {
         return;
     };
-    // The window under the cursor, and the pane the cursor is over.
-    let mut hit: Option<PaneHit> = None;
+    // The window the cursor is in, its physical position there, and the pane it
+    // is over (None over a gap between panes). Exactly one window reports the
+    // cursor at a time on an extended desktop.
+    let mut cursor: Option<(WindowKey, f64, f64, Option<PaneHit>)> = None;
     for (entity, window) in windows.iter() {
-        let Some(cursor) = window.cursor_position() else {
+        let Some(pos) = window.cursor_position() else {
             continue;
         };
         let scale = window.scale_factor() as f64;
         // Logical → physical, then the router divides back to page logical: the
         // round trip keeps the transform in one place (the pure model) and
         // matches how a pane's device scale is set.
-        let phys = (cursor.x as f64 * scale, cursor.y as f64 * scale);
-        if let Some(resolved) =
-            host.router
-                .resolve_in_window(WindowKey(entity.to_bits()), phys.0, phys.1)
-        {
-            hit = Some(resolved);
-            break;
+        let phys = (pos.x as f64 * scale, pos.y as f64 * scale);
+        let key = WindowKey(entity.to_bits());
+        let hit = host.router.resolve_in_window(key, phys.0, phys.1);
+        cursor = Some((key, phys.0, phys.1, hit));
+        break;
+    }
+
+    // Focus follows the pointer, but only on genuine motion into a pane — never
+    // on the mere presence of a resting cursor, which would revert a Ctrl+Tab
+    // selection every frame.
+    if let Some((key, x, y, Some(hit))) = cursor {
+        let previous = host.focus.focused();
+        let host = &mut *host;
+        if pointer_follow_focus(&mut host.focus, &mut host.pointer_motion, key, x, y, hit.pane) {
+            host.focus_view(previous, Some(hit.pane));
         }
     }
-    let Some(hit) = hit else {
-        return;
-    };
 
-    // Focus follows the pointer, keeping the view's focus in step with the model.
-    let previous = host.focus.focused();
-    if host.focus.focus(hit.pane) {
-        host.focus_view(previous, Some(hit.pane));
-    }
-
-    let Some(index) = host.index_of(hit.pane) else {
-        return;
-    };
-    let pane = &mut host.windows[index];
-    // Ultralight decides what is under the pointer from the MOVE, so a press
-    // with no preceding move lands on whatever was hovered last.
-    pane.surface.view.mouse_move(hit.local_x, hit.local_y);
+    // Press: capture the left button to the pane it went down on. Ultralight
+    // decides what is under the pointer from the MOVE, so a press is preceded by
+    // a move in the same frame.
     if mouse.just_pressed(MouseButton::Left) {
-        pane.surface
-            .view
-            .mouse_down(hit.local_x, hit.local_y, UlMouseButton::Left);
+        if let Some((_, _, _, Some(hit))) = cursor {
+            if let Some(index) = host.index_of(hit.pane) {
+                let view = &mut host.windows[index].surface.view;
+                view.mouse_move(hit.local_x, hit.local_y);
+                view.mouse_down(hit.local_x, hit.local_y, UlMouseButton::Left);
+            }
+            host.mouse_capture.press(hit.pane);
+        }
     }
+
+    // Move: while the button is captured, the move goes to the CAPTURED pane
+    // wherever the cursor has drifted (projected past the pane edge as needed);
+    // otherwise it is an ordinary hover over the pane under the cursor.
+    if let Some(captured) = host.mouse_capture.captured() {
+        if let Some((key, x, y, _)) = cursor {
+            // The captured pane may be on a different window than the cursor now
+            // sits in (a drag onto another monitor); project only when the cursor
+            // is still in the pane's own window, where a within-window drag past
+            // the edge resolves correctly.
+            if host.router.placement(captured).map(|p| p.window) == Some(key) {
+                if let Some((lx, ly)) = host.router.project_into_pane(captured, x, y) {
+                    if let Some(index) = host.index_of(captured) {
+                        host.windows[index].surface.view.mouse_move(lx, ly);
+                    }
+                }
+            }
+        }
+    } else if let Some((_, _, _, Some(hit))) = cursor {
+        if let Some(index) = host.index_of(hit.pane) {
+            host.windows[index]
+                .surface
+                .view
+                .mouse_move(hit.local_x, hit.local_y);
+        }
+    }
+
+    // Release: the captured pane gets the mouse_up, and the capture is released
+    // no matter where the cursor is. The up is placed at the drift position when
+    // the cursor is still in the pane's window, else at the pane's own origin —
+    // an in-pane coordinate that ends the press cleanly.
     if mouse.just_released(MouseButton::Left) {
-        pane.surface
-            .view
-            .mouse_up(hit.local_x, hit.local_y, UlMouseButton::Left);
+        if let Some(captured) = host.mouse_capture.release() {
+            let (lx, ly) = cursor
+                .filter(|(key, ..)| {
+                    host.router.placement(captured).map(|p| p.window) == Some(*key)
+                })
+                .and_then(|(_, x, y, _)| host.router.project_into_pane(captured, x, y))
+                .unwrap_or((0, 0));
+            if let Some(index) = host.index_of(captured) {
+                host.windows[index]
+                    .surface
+                    .view
+                    .mouse_up(lx, ly, UlMouseButton::Left);
+            }
+        }
     }
+
+    // Scroll goes to the pane under the cursor.
     if scroll.delta != Vec2::ZERO {
-        pane.surface
-            .view
-            .scroll(scroll.delta.x as i32, scroll.delta.y as i32);
+        if let Some((_, _, _, Some(hit))) = cursor {
+            if let Some(index) = host.index_of(hit.pane) {
+                host.windows[index]
+                    .surface
+                    .view
+                    .scroll(scroll.delta.x as i32, scroll.delta.y as i32);
+            }
+        }
     }
 }
 
@@ -877,6 +963,24 @@ fn route_pointer_input(
 /// up. Two contacts on the *same* pane share that one pointer — the honest limit
 /// of this mapping, disclosed in the acceptance kit; two on *different* panes are
 /// genuinely independent.
+///
+/// # What this routes by, and what it does NOT consult
+///
+/// Touch routing here assumes **one borderless-fullscreen Station window per
+/// touch display**: a contact is routed purely by the window winit reports it
+/// against (`touch.window`), resolved among that window's panes with
+/// [`PaneRouter::resolve_in_window`]. It does **not** consult the profile's
+/// `[[touch]]` [`TouchMapping`](crate::native_host::bridge_profile::TouchMapping)
+/// tables, and it does not use [`PaneRouter::resolve_desktop`]. `[[touch]]` is
+/// recorded for issue #1123's persistence (which physical touchscreen drives
+/// which display, so a setup survives a reboot) and is not read by #1124's
+/// router; `resolve_desktop` exists for the future case this defers — a touch
+/// panel *decoupled* from its monitor, whose device-global coordinates would be
+/// mapped to a display by `[[touch]]` and then to a pane. Wiring that for real
+/// decoupled panels is a future item; with the one-window-per-display assumption
+/// above, winit already delivers the contact against the right window and no
+/// mapping is needed. This is honest about a HITL-parked path (Part B of
+/// `docs/acceptance/1124-input.md`), not a silent gap.
 fn route_touch_input(
     host: Option<NonSendMut<PaneHost>>,
     windows: Query<(Entity, &Window)>,
@@ -968,13 +1072,17 @@ fn traverse_focus_keys(host: Option<NonSendMut<PaneHost>>, keys: Res<ButtonInput
     host.focus_view(previous, next);
 }
 
-/// Deliver typed text to the focused pane, wherever the pointer has since moved.
+/// Deliver typed text and caret/navigation keys to the focused pane, wherever
+/// the pointer has since moved.
 ///
-/// A console has real form fields — a comms reply, a waypoint name — and
-/// `key_char` is the event that actually puts a character into one; a raw
-/// key-down alone does not. Ctrl+Tab is the focus-traversal command
-/// ([`traverse_focus_keys`]), so a Tab is forwarded to the page only when Ctrl is
-/// not held.
+/// A console has real form fields — a comms reply, a waypoint name — so the
+/// operator must be able to type into one, move the caret within it and delete in
+/// either direction. `key_char` is the event that actually puts a character into
+/// a field; a raw key-down alone does not, which is why text is forwarded as
+/// `key_char` and the editing keys (Backspace, Delete, the arrows, Home/End,
+/// Enter, Tab) are forwarded as raw key-downs. Ctrl+Tab is the focus-traversal
+/// command ([`traverse_focus_keys`]), so a Tab is forwarded to the page only when
+/// Ctrl is not held.
 fn forward_keyboard_text(
     host: Option<NonSendMut<PaneHost>>,
     keycodes: Res<ButtonInput<KeyCode>>,
@@ -1008,6 +1116,53 @@ fn forward_keyboard_text(
             Key::Enter => view.key(
                 KeyEventType::RawKeyDown,
                 VirtualKeyCode::Return,
+                0,
+                Modifiers::default(),
+            ),
+            // Caret movement and forward-delete: without these the caret cannot
+            // move within a field and forward-delete is unavailable, so a comms
+            // reply or a waypoint name can only be typed and back-spaced. Each
+            // maps cleanly to an Ultralight virtual key and is forwarded as a raw
+            // key-down like the arms above (issue #1124).
+            Key::ArrowLeft => view.key(
+                KeyEventType::RawKeyDown,
+                VirtualKeyCode::Left,
+                0,
+                Modifiers::default(),
+            ),
+            Key::ArrowRight => view.key(
+                KeyEventType::RawKeyDown,
+                VirtualKeyCode::Right,
+                0,
+                Modifiers::default(),
+            ),
+            Key::ArrowUp => view.key(
+                KeyEventType::RawKeyDown,
+                VirtualKeyCode::Up,
+                0,
+                Modifiers::default(),
+            ),
+            Key::ArrowDown => view.key(
+                KeyEventType::RawKeyDown,
+                VirtualKeyCode::Down,
+                0,
+                Modifiers::default(),
+            ),
+            Key::Home => view.key(
+                KeyEventType::RawKeyDown,
+                VirtualKeyCode::Home,
+                0,
+                Modifiers::default(),
+            ),
+            Key::End => view.key(
+                KeyEventType::RawKeyDown,
+                VirtualKeyCode::End,
+                0,
+                Modifiers::default(),
+            ),
+            Key::Delete => view.key(
+                KeyEventType::RawKeyDown,
+                VirtualKeyCode::Delete,
                 0,
                 Modifiers::default(),
             ),

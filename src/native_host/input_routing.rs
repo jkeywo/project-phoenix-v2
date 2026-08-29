@@ -254,6 +254,17 @@ impl FocusRing {
         }
     }
 
+    /// A ring over `order` with its **first** pane already focused — the initial
+    /// state a freshly-built pane host wants (issue #1124, acceptance criterion
+    /// 2). Seeding focus means a pure-keyboard operator sees the visible reticle
+    /// and has a defined target for the first keystroke the moment panes exist,
+    /// rather than a blank ring in which keys go nowhere until the first Ctrl+Tab.
+    /// An empty order focuses nothing.
+    pub fn focused_on_first(order: Vec<PaneId>) -> Self {
+        let focused = order.first().copied();
+        Self { order, focused }
+    }
+
     /// The pane that currently holds keyboard focus, if any.
     pub fn focused(&self) -> Option<PaneId> {
         self.focused
@@ -332,6 +343,115 @@ impl FocusRing {
         };
         self.focused = Some(self.order[next_index as usize]);
         self.focused
+    }
+}
+
+/// Remembers where the pointer was last seen in each window, so the adapter can
+/// tell genuine pointer **motion** from mere **presence** (issue #1124,
+/// acceptance criterion 2).
+///
+/// A cursor resting inside a window reports the same position every frame. If
+/// focus-follows-pointer fired on that presence, it would re-assert focus on the
+/// pane under the cursor every frame — reverting an explicit Ctrl+Tab selection
+/// the very next frame whenever the mouse happens to rest over another pane. This
+/// records the position and reports whether it actually changed, so focus follows
+/// the pointer only when the pointer really moved.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PointerMotion {
+    last: BTreeMap<WindowKey, (f64, f64)>,
+}
+
+impl PointerMotion {
+    /// An empty tracker — no window has reported a pointer yet.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record the pointer's physical position in `window` and report whether it
+    /// **moved** since the last sample there. A window's first-ever sample counts
+    /// as motion, so the pointer's first appearance focuses the pane under it.
+    pub fn moved(&mut self, window: WindowKey, wx: f64, wy: f64) -> bool {
+        match self.last.insert(window, (wx, wy)) {
+            // Any change at all is motion; a repeated identical sample is the
+            // resting cursor and must not move focus. `> 0.0` rather than `==`
+            // keeps clippy's float-comparison lint quiet and says the same thing.
+            Some((px, py)) => (px - wx).abs() > 0.0 || (py - wy).abs() > 0.0,
+            None => true,
+        }
+    }
+}
+
+/// Focus-follows-pointer, gated on genuine motion (issue #1124, acceptance
+/// criterion 2).
+///
+/// The production rule the pointer adapter applies for every sample: record the
+/// pointer's position through `motion`, and move keyboard `focus` to the pane
+/// under it **only** when the pointer actually moved since the last sample —
+/// never on mere presence, which would otherwise revert a Ctrl+Tab selection the
+/// next frame. Returns whether focus moved, so the adapter can keep Ultralight's
+/// focused view in step (and skip the work when it did not).
+///
+/// This lives in the pure model, not the feature-gated adapter, precisely so the
+/// regression it fixes is covered by the ordinary `cargo test` CI runs.
+pub fn pointer_follow_focus(
+    focus: &mut FocusRing,
+    motion: &mut PointerMotion,
+    window: WindowKey,
+    wx: f64,
+    wy: f64,
+    pane: PaneId,
+) -> bool {
+    if motion.moved(window, wx, wy) {
+        focus.focus(pane)
+    } else {
+        false
+    }
+}
+
+/// The single-button capture for the left mouse button — the mouse mirror of
+/// [`ContactCaptureMap`] (issue #1124, acceptance criterion 4).
+///
+/// A drag can begin in one pane and end in another, or in the gap between them.
+/// Without capture the press lands on the pane under the cursor at press time and
+/// the release lands on whatever the cursor is over at release time, so a
+/// cross-pane drag sends a `mouse_down` to one pane and a `mouse_up` to another —
+/// leaving the first stuck in a pressed/selecting state and giving the second a
+/// stray, unmatched release. This pins the button to the pane it went down on:
+/// while it is held, moves and the eventual release route to the **captured**
+/// pane (projected past its edge with [`PaneRouter::project_into_pane`] when the
+/// cursor has drifted off it), and the capture is dropped on release wherever the
+/// cursor then is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MouseCapture {
+    pane: Option<PaneId>,
+}
+
+impl MouseCapture {
+    /// No button held, nothing captured.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Capture the button to the pane it went down on. Returns whether a capture
+    /// actually started (it does unless one is somehow already live, which a
+    /// press with no intervening release should not produce).
+    pub fn press(&mut self, pane: PaneId) -> bool {
+        if self.pane.is_some() {
+            return false;
+        }
+        self.pane = Some(pane);
+        true
+    }
+
+    /// The pane the held button is captured by, for routing a drag move.
+    pub fn captured(&self) -> Option<PaneId> {
+        self.pane
+    }
+
+    /// Release the button on button-up, returning the pane it was captured by so
+    /// its final `mouse_up` can be routed there no matter where the cursor is.
+    pub fn release(&mut self) -> Option<PaneId> {
+        self.pane.take()
     }
 }
 

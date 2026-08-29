@@ -358,6 +358,69 @@ fn a_desktop_point_honours_a_scaled_monitor_at_a_nonzero_origin() {
 }
 
 #[test]
+fn a_desktop_point_resolves_a_monitor_left_of_the_primary_at_a_negative_origin() {
+    // Windows numbers a secondary monitor to the LEFT of the primary with a
+    // negative desktop x: its top-left is at x=-1920. A desktop point at x=-1000
+    // is 920 physical pixels into that monitor, so it must resolve to its pane at
+    // local x 920 — resolve_desktop's subtraction handles the negative origin
+    // with no special case (issue #1124, finding: negative-origin coverage).
+    let router = PaneRouter::new(vec![
+        PanePlacement {
+            pane: pane(0),
+            window: WindowKey(10),
+            window_origin_x: -1920,
+            window_origin_y: 0,
+            rect: rect(0, 0, 1920, 1080),
+            scale_factor: 1.0,
+        },
+        PanePlacement {
+            pane: pane(1),
+            window: WindowKey(20),
+            window_origin_x: 0,
+            window_origin_y: 0,
+            rect: rect(0, 0, 1920, 1080),
+            scale_factor: 1.0,
+        },
+    ]);
+    assert_eq!(
+        router.resolve_desktop(-1000.0, 100.0),
+        Some(PaneHit {
+            pane: pane(0),
+            local_x: 920, // -1000 − (−1920)
+            local_y: 100,
+        })
+    );
+    // The primary at the origin still resolves for a positive point.
+    assert_eq!(router.resolve_desktop(100.0, 100.0).unwrap().pane, pane(1));
+    // The seam between the two monitors is the primary's low edge (inclusive).
+    assert_eq!(router.resolve_desktop(0.0, 100.0).unwrap().pane, pane(1));
+    assert_eq!(router.resolve_desktop(-1.0, 100.0).unwrap().pane, pane(0));
+}
+
+#[test]
+fn a_desktop_point_resolves_a_monitor_above_the_primary_at_a_negative_y() {
+    // A monitor stacked ABOVE the primary has a negative desktop y: its top-left
+    // is at y=-1080. A point at y=-800 is 280 down into it, so it resolves to its
+    // pane at local y 280.
+    let router = PaneRouter::new(vec![PanePlacement {
+        pane: pane(0),
+        window: WindowKey(30),
+        window_origin_x: 0,
+        window_origin_y: -1080,
+        rect: rect(0, 0, 1920, 1080),
+        scale_factor: 1.0,
+    }]);
+    assert_eq!(
+        router.resolve_desktop(500.0, -800.0),
+        Some(PaneHit {
+            pane: pane(0),
+            local_x: 500,
+            local_y: 280, // -800 − (−1080)
+        })
+    );
+}
+
+#[test]
 fn focus_order_is_placement_order() {
     let router = single_window(
         &[
@@ -439,6 +502,95 @@ fn an_empty_ring_traverses_to_nothing() {
     assert_eq!(ring.focused(), None);
 }
 
+#[test]
+fn a_freshly_built_ring_seeds_focus_onto_its_first_pane() {
+    // Finding: a freshly-built pane host must start with a focused pane, so a
+    // pure-keyboard operator sees the reticle and has a defined target the moment
+    // panes exist — not a blank ring in which keys go nowhere until the first
+    // Ctrl+Tab. `from_order` (nothing focused) was the defect; `focused_on_first`
+    // is the seed.
+    let ring = FocusRing::focused_on_first(vec![pane(3), pane(7)]);
+    assert_eq!(
+        ring.focused(),
+        Some(pane(3)),
+        "the first pane holds focus the instant the host is built"
+    );
+    assert_eq!(ring.order(), &[pane(3), pane(7)]);
+}
+
+#[test]
+fn a_freshly_built_ring_with_no_panes_focuses_nothing() {
+    let ring = FocusRing::focused_on_first(vec![]);
+    assert_eq!(ring.focused(), None);
+}
+
+#[test]
+fn a_resting_pointer_does_not_revert_a_keyboard_focus_change() {
+    // Finding (HIGH): focus-follows-pointer must fire on genuine pointer MOTION,
+    // not on the cursor merely being present over a pane every frame — otherwise
+    // a Ctrl+Tab selection is reverted the next frame whenever the mouse rests
+    // over another pane, defeating AC2's predictable keyboard traversal. This
+    // exercises `pointer_follow_focus`, the exact rule the adapter applies, so
+    // reverting the fix (following on presence) fails here.
+    let router = single_window(
+        &[
+            (pane(0), rect(0, 0, 960, 1080)),
+            (pane(1), rect(960, 0, 960, 1080)),
+        ],
+        1.0,
+    );
+    let mut focus = FocusRing::from_order(router.focus_order());
+    let mut motion = PointerMotion::new();
+    let win = WindowKey(1);
+
+    // One pointer sample, exactly as route_pointer_input performs it: resolve the
+    // pane under the physical point, then let focus follow only on motion.
+    let sample = |focus: &mut FocusRing, motion: &mut PointerMotion, x: f64, y: f64| {
+        let hit = router.resolve_in_window(win, x, y).unwrap();
+        pointer_follow_focus(focus, motion, win, x, y, hit.pane)
+    };
+
+    // The pointer first appears over pane 0 → focus follows to it.
+    assert!(sample(&mut focus, &mut motion, 100.0, 100.0));
+    assert_eq!(focus.focused(), Some(pane(0)));
+
+    // Ctrl+Tab moves focus to pane 1 (keyboard traversal, not the pointer).
+    focus.focus_next();
+    assert_eq!(focus.focused(), Some(pane(1)));
+
+    // A frame in which the cursor RESTS over pane 0 (same position, no motion):
+    // the presence must NOT steal focus back to pane 0.
+    assert!(!sample(&mut focus, &mut motion, 100.0, 100.0));
+    assert_eq!(
+        focus.focused(),
+        Some(pane(1)),
+        "a resting pointer must not revert the keyboard's focus selection"
+    );
+
+    // A genuine move into pane 0 DOES pull focus back — focus follows real motion.
+    assert!(sample(&mut focus, &mut motion, 130.0, 140.0));
+    assert_eq!(
+        focus.focused(),
+        Some(pane(0)),
+        "a real pointer move into a pane follows the pointer to it"
+    );
+}
+
+#[test]
+fn pointer_motion_reports_presence_versus_movement_per_window() {
+    // The primitive under the focus rule: a first sample and any change are
+    // motion; a repeated identical sample is the resting cursor. Tracked per
+    // window, so the cursor moving between two windows is motion in each.
+    let mut motion = PointerMotion::new();
+    let a = WindowKey(1);
+    let b = WindowKey(2);
+    assert!(motion.moved(a, 10.0, 10.0), "first sample in a window is motion");
+    assert!(!motion.moved(a, 10.0, 10.0), "the same position is presence");
+    assert!(motion.moved(a, 11.0, 10.0), "a changed position is motion");
+    assert!(motion.moved(b, 10.0, 10.0), "a different window is its own first sample");
+    assert!(!motion.moved(b, 10.0, 10.0));
+}
+
 // ── touch contact capture (AC4) ──────────────────────────────────────────────
 
 #[test]
@@ -500,6 +652,66 @@ fn a_drifted_contact_projects_past_its_pinned_panes_edge() {
     );
     // A pane that is not placed projects to nothing.
     assert_eq!(router.project_into_pane(pane(9), 10.0, 10.0), None);
+}
+
+#[test]
+fn a_left_drag_keeps_its_down_and_up_on_the_pane_it_began_on() {
+    // Finding (MEDIUM): the mouse mirror of touch capture. A left press in pane 0
+    // that drifts into pane 1's region and releases there must deliver BOTH its
+    // down and its up to pane 0 — never a down to pane 0 and an unmatched up to
+    // pane 1, which leaves pane 0 stuck in a pressed/selecting state and gives
+    // pane 1 a stray release. Exercises `MouseCapture` + `project_into_pane`, the
+    // exact pieces the adapter uses, so reverting the capture fails here.
+    let router = single_window(
+        &[
+            (pane(0), rect(0, 0, 960, 1080)),
+            (pane(1), rect(960, 0, 960, 1080)),
+        ],
+        1.0,
+    );
+    let mut capture = MouseCapture::new();
+
+    // Press in pane 0: the button captures the pane it went down on.
+    let down = router
+        .resolve_in_window(WindowKey(1), 100.0, 100.0)
+        .unwrap();
+    assert_eq!(down.pane, pane(0));
+    assert!(capture.press(down.pane), "the left button captures the pressed pane");
+    assert_eq!(capture.captured(), Some(pane(0)));
+
+    // The cursor drifts into pane 1's region. The router alone would say pane 1…
+    assert_eq!(
+        router
+            .resolve_in_window(WindowKey(1), 1400.0, 120.0)
+            .unwrap()
+            .pane,
+        pane(1)
+    );
+    // …but the capture pins the drag to pane 0, and the move projects PAST pane
+    // 0's edge rather than crossing to pane 1 — a legitimate drag-beyond-edge.
+    assert_eq!(capture.captured(), Some(pane(0)));
+    assert_eq!(
+        router.project_into_pane(pane(0), 1400.0, 120.0),
+        Some((1400, 120))
+    );
+
+    // Release: the up routes to pane 0 and the capture clears. Pane 1 never saw a
+    // down and never sees an up.
+    assert_eq!(capture.release(), Some(pane(0)));
+    assert_eq!(capture.captured(), None);
+}
+
+#[test]
+fn a_second_press_does_not_rehome_a_live_mouse_capture() {
+    // A press with no intervening release is a driver quirk, not a reason to move
+    // the capture off the pane the drag began on — the same rule the touch map
+    // enforces for a duplicate `Started`.
+    let mut capture = MouseCapture::new();
+    assert!(capture.press(pane(0)));
+    assert!(!capture.press(pane(1)), "a live capture keeps its original pane");
+    assert_eq!(capture.captured(), Some(pane(0)));
+    assert_eq!(capture.release(), Some(pane(0)));
+    assert_eq!(capture.release(), None, "releasing again captures nothing");
 }
 
 #[test]

@@ -358,13 +358,20 @@ pub const ROLE_VIEWSCREEN: &str = "viewscreen";
 /// The role string a [`DisplayEntry`] carries for a crew Station.
 pub const ROLE_STATION: &str = "station";
 
-/// A touch input device mapped to a monitor (issue #1123 persists it; issue
-/// #1124 routes it).
+/// A touch input device mapped to a monitor (issue #1123 persists it).
 ///
 /// #1123 owns making the mapping *reload*: which physical touchscreen drives
-/// which display is part of a bridge's setup and must survive a reboot. Actually
-/// dispatching a touch on that device into the pane under the finger is #1124's
-/// subject, so this is deliberately just the recorded input, not a router.
+/// which display is part of a bridge's setup and must survive a reboot, so this
+/// is deliberately just the recorded input, not a router.
+///
+/// #1124's router does **not** consult this mapping. With one borderless
+/// -fullscreen Station window per touch display, winit already delivers a touch
+/// against the right window and `native_host::panes::ultralight::route_touch_input`
+/// routes by `touch.window` alone — see that function's note. This table is
+/// therefore recorded for the future case it is actually needed: a touch panel
+/// *decoupled* from its monitor, whose device-global coordinates a later revision
+/// would map to a display through here and then to a pane via
+/// `PaneRouter::resolve_desktop`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TouchMapping {
     /// The OS-reported name of the touch input device.

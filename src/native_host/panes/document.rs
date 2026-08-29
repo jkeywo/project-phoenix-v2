@@ -391,6 +391,44 @@ pub fn build_pane_document(client_index_html: &str) -> Result<String, DocumentEr
     Ok(out)
 }
 
+/// Seed a pane document's OS accessibility default layer (issue #1127).
+///
+/// A browser reads the machine's accessibility preferences through `matchMedia`;
+/// an Ultralight pane has no OS-backed `matchMedia`, so the host reads them
+/// natively and injects them here as a `window.PhoenixOsAccessibilityDefaults`
+/// assignment ([`super::os_prefs::os_defaults_script`]) that
+/// `gui/accessibility-profile.js`'s `osAccessibilityDefaults` overlays.
+///
+/// The script goes in a classic `<script>` right after `<head>`, so it runs
+/// before any `gui/` module evaluates — the profile then initialises from the OS
+/// exactly as a browser's does. An explicit player choice still overrides it,
+/// and the profile itself stays client-local; nothing here rides the transport
+/// seam (see the module note on `os_prefs`).
+///
+/// Takes an already-built pane document. Idempotent in the sense that matters:
+/// the assignment simply re-runs if injected twice, so a caller need not track
+/// whether it has run. Returns the input unchanged if there is no `<head>` — the
+/// same "nowhere to inject" a browser tolerates by falling back to no OS layer,
+/// rather than an error that would fail a pane over a default it could live
+/// without.
+pub fn inject_os_accessibility_defaults(
+    document: &str,
+    prefs: &super::os_prefs::OsAccessibilityPrefs,
+) -> String {
+    let Some(head_end) = find_tag_end(document, "<head") else {
+        return document.to_string();
+    };
+    let script = format!(
+        "\n<script>\n{}\n</script>\n",
+        super::os_prefs::os_defaults_script(prefs),
+    );
+    let mut out = String::with_capacity(document.len() + script.len());
+    out.push_str(&document[..head_end]);
+    out.push_str(&script);
+    out.push_str(&document[head_end..]);
+    out
+}
+
 /// Byte index just past the first `<head…>` tag, or `None`.
 fn find_tag_end(html: &str, open: &str) -> Option<usize> {
     let start = html.find(open)?;
@@ -824,5 +862,95 @@ mod tests {
              reason for this strip"
         );
         assert!(!build_pane_document(&client).unwrap().contains("<audio"));
+    }
+
+    // ── OS accessibility default injection (issue #1127) ─────────────────────
+
+    #[test]
+    fn os_accessibility_defaults_are_injected_before_the_pages_own_scripts() {
+        use super::super::os_prefs::OsAccessibilityPrefs;
+        // The page reads them at resolve time through `osAccessibilityDefaults`,
+        // which runs inside the boot the first `gui/` module drives — so the
+        // assignment has to be in <head>, before any gui/ script.
+        let html = build_pane_document(CLIENT).unwrap();
+        let seeded = inject_os_accessibility_defaults(
+            &html,
+            &OsAccessibilityPrefs {
+                reduced_motion: true,
+                high_contrast: true,
+                text_scale: 1.25,
+            },
+        );
+        let assign = seeded
+            .find("window.PhoenixOsAccessibilityDefaults =")
+            .expect("the OS default layer is injected");
+        let first_gui = seeded
+            .find("src=\"gui/")
+            .expect("the page still loads its gui/ modules");
+        assert!(
+            assign < first_gui,
+            "the OS defaults must be seeded before any gui/ module reads them"
+        );
+        assert!(seeded.find("<head>").unwrap() < assign);
+        // The exact values the page overlays: reducedMotion + contrast (from
+        // high-contrast) true, and the imported text scale.
+        assert!(seeded.contains("\"reducedMotion\":true"));
+        assert!(seeded.contains("\"contrast\":true"));
+        assert!(seeded.contains("\"textScale\":1.25"));
+        // Injection adds only the one script; nothing the page owns is lost.
+        assert!(seeded.contains("<div id=\"app\"></div>"));
+        assert!(seeded.contains("var myName = 'x';"));
+    }
+
+    #[test]
+    fn os_accessibility_defaults_of_a_quiet_machine_match_a_silent_browser() {
+        use super::super::os_prefs::OsAccessibilityPrefs;
+        // A machine with nothing set injects the SAME default layer a browser
+        // computes from a silent matchMedia, so a pane and a phone on that
+        // machine start from the identical baseline (AC2/AC5 equivalence).
+        let seeded = inject_os_accessibility_defaults(CLIENT, &OsAccessibilityPrefs::default());
+        assert!(seeded.contains("\"reducedMotion\":false"));
+        assert!(seeded.contains("\"contrast\":false"));
+        assert!(seeded.contains("\"textScale\":1"));
+    }
+
+    #[test]
+    fn a_document_with_no_head_keeps_its_os_layer_absent_rather_than_failing() {
+        use super::super::os_prefs::OsAccessibilityPrefs;
+        // No <head> means no OS layer, which is exactly a browser with no
+        // matchMedia — the page falls back to "no preference", not an error.
+        let no_head = "<html><body></body></html>";
+        assert_eq!(
+            inject_os_accessibility_defaults(no_head, &OsAccessibilityPrefs::default()),
+            no_head
+        );
+    }
+
+    #[test]
+    fn the_injected_os_layer_never_carries_a_setting_the_seam_could_leak() {
+        use super::super::os_prefs::OsAccessibilityPrefs;
+        // AC4 at the document: the injected layer is machine OS defaults, not a
+        // player's private profile. It names the three matchMedia-shaped keys
+        // and nothing resembling a stored setting, diagnosis or assistance
+        // request — the page keeps the profile client-local and only the
+        // anonymous ineligible-station set ever crosses the seam.
+        let seeded = inject_os_accessibility_defaults(
+            CLIENT,
+            &OsAccessibilityPrefs {
+                reduced_motion: true,
+                high_contrast: true,
+                text_scale: 1.5,
+            },
+        );
+        let line = seeded
+            .lines()
+            .find(|l| l.contains("PhoenixOsAccessibilityDefaults"))
+            .unwrap();
+        for forbidden in ["assistance", "diagnos", "presentation", "request", "token"] {
+            assert!(
+                !line.contains(forbidden),
+                "the OS default layer must not carry `{forbidden}`: {line}"
+            );
+        }
     }
 }

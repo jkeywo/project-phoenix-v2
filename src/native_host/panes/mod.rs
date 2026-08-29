@@ -74,6 +74,7 @@
 
 pub mod document;
 pub mod identity;
+pub mod os_prefs;
 pub mod recovery;
 pub mod registry;
 pub mod routing;
@@ -194,7 +195,19 @@ impl LocalPanes {
         client_index_html: &str,
         documents: &HostedDocuments,
     ) -> Result<(), DocumentError> {
-        let body = build_pane_document(client_index_html)?;
+        // Read the host machine's OS accessibility preferences ONCE and seed
+        // every pane's document with them (issue #1127), so a pane's private
+        // profile initialises from the OS exactly as a browser's does from
+        // matchMedia. The read is best-effort and machine-wide, not per-pane;
+        // an explicit player choice in a pane still overrides it, and it never
+        // rides the transport seam. Baked into `body` here so both the published
+        // documents AND the recreation arming below carry it — a pane brought
+        // back after a crash (#1125) sees the same OS layer it first loaded.
+        let os_prefs = os_prefs::query_os_accessibility_prefs();
+        let body = document::inject_os_accessibility_defaults(
+            &build_pane_document(client_index_html)?,
+            &os_prefs,
+        );
         self.bus.attach_documents(documents.clone());
         // Arm recreation with the same body and host address every pane loaded
         // from, so a pane brought back after a crash (issue #1125) rebuilds an

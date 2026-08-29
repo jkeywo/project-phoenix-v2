@@ -266,12 +266,54 @@ export function computeIneligibleStations(profile, allStationGaps, ratingFor, st
 // ── OS-default resolver (matchMedia) ─────────────────────────────────────────
 
 /**
+ * A host-injected OS default layer, when one is present.
+ *
+ * A browser reads its OS accessibility preferences through `matchMedia`. A
+ * native Ultralight pane (issue #1127) loads the SAME page but has no OS-backed
+ * `matchMedia`, so its host reads the machine's real preferences natively and
+ * injects them as `window.PhoenixOsAccessibilityDefaults` — the documented seam,
+ * exactly the way `gui/rendezvous-transport.js` reads
+ * `window.PhoenixTransportFactories`. In an ordinary browser the global is
+ * absent and this returns `{}`, so nothing about the matchMedia path changes.
+ *
+ * Only well-typed fields are honoured, so a malformed injection degrades to "no
+ * preference" per field rather than breaking resolution. It is the DEFAULT layer
+ * ONLY: an explicit player choice still overrides it in both directions (see
+ * `resolveEffects`). Text scale is clamped to the safe absolute range here too,
+ * so a hand-poked global cannot push a console's root font-size somewhere
+ * unusable.
+ *
+ * @param {Window|object|null} w
+ * @returns {{ reducedMotion?: boolean, contrast?: boolean, darkColorScheme?: boolean, textScale?: number }}
+ */
+export function readInjectedOsDefaults(w) {
+  let raw = null;
+  try {
+    raw = w && w.PhoenixOsAccessibilityDefaults;
+  } catch (_) {
+    raw = null; // a getter that throws must not cost us the matchMedia layer
+  }
+  if (!raw || typeof raw !== 'object') return {};
+  const out = {};
+  for (const key of ['reducedMotion', 'contrast', 'darkColorScheme']) {
+    if (typeof raw[key] === 'boolean') out[key] = raw[key];
+  }
+  if (typeof raw.textScale === 'number' && Number.isFinite(raw.textScale)) {
+    out.textScale = clampTextScale(raw.textScale);
+  }
+  return out;
+}
+
+/**
  * The OS-derived DEFAULT layer. Reads the browser's accessibility media queries
  * where they exist; a host without `matchMedia` (or a query that throws) simply
- * yields `false`, i.e. "the OS states no preference". Never throws.
+ * yields `false`, i.e. "the OS states no preference". A native host may inject
+ * `window.PhoenixOsAccessibilityDefaults`, which overlays the matchMedia result
+ * per field (issue #1127) and is the ONLY source of a `textScale` default —
+ * matchMedia has no text-scale query. Never throws.
  *
  * @param {Window|null} [win]
- * @returns {{ reducedMotion: boolean, contrast: boolean, darkColorScheme: boolean }}
+ * @returns {{ reducedMotion: boolean, contrast: boolean, darkColorScheme: boolean, textScale?: number }}
  */
 export function osAccessibilityDefaults(win) {
   const w = win || (typeof window !== 'undefined' ? window : null);
@@ -286,6 +328,9 @@ export function osAccessibilityDefaults(win) {
     reducedMotion: query('(prefers-reduced-motion: reduce)'),
     contrast: query('(prefers-contrast: more)'),
     darkColorScheme: query('(prefers-color-scheme: dark)'),
+    // A native pane's OS preferences, where the host injected them. Absent in a
+    // browser, so this spread is a no-op there and the shape is unchanged.
+    ...readInjectedOsDefaults(w),
   };
 }
 
@@ -296,25 +341,37 @@ export function resolveTriState(explicit, osDefault) {
   return !!osDefault;
 }
 
-/** Resolve the stored text-scale value to a concrete multiplier. */
-export function resolveTextScale(value) {
-  if (value === FOLLOW_OS || value == null) return TEXT_SCALE_DEFAULT;
+/**
+ * Resolve the stored text-scale value to a concrete multiplier. An unset
+ * (follow-OS) value takes the OS default where one is supplied — a native pane
+ * imports the Windows text-size setting this way (issue #1127) — and otherwise
+ * the identity. An explicit numeric choice always wins.
+ *
+ * @param {number|string} value
+ * @param {number} [osTextScale]  the OS default multiplier, when supplied
+ */
+export function resolveTextScale(value, osTextScale) {
+  if (value === FOLLOW_OS || value == null) {
+    return osTextScale == null ? TEXT_SCALE_DEFAULT : clampTextScale(osTextScale);
+  }
   return clampTextScale(value);
 }
 
 /**
  * The concrete effects to apply, folding the explicit profile over the OS
- * defaults.
+ * defaults. A native pane's `osDefaults` may carry a `textScale` (imported from
+ * the Windows text-size setting, issue #1127); a browser's never does, so an
+ * unset text scale stays the identity there.
  *
  * @param {object} profile
- * @param {{ reducedMotion?: boolean, contrast?: boolean }} [osDefaults]
+ * @param {{ reducedMotion?: boolean, contrast?: boolean, textScale?: number }} [osDefaults]
  * @returns {{ textScale: number, contrast: boolean, reducedMotion: boolean }}
  */
 export function resolveEffects(profile, osDefaults) {
   const p = normalizeAccessibilityProfile(profile);
   const os = osDefaults || {};
   return {
-    textScale: resolveTextScale(p.presentation.textScale),
+    textScale: resolveTextScale(p.presentation.textScale, os.textScale),
     contrast: resolveTriState(p.presentation.contrast, os.contrast),
     reducedMotion: resolveTriState(p.presentation.reducedMotion, os.reducedMotion),
   };

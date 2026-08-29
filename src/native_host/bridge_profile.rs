@@ -9,13 +9,14 @@
 //!
 //! Everything here is a plain data transform with no Bevy, no winit and no
 //! display — which is the point. The acceptance criteria that actually have
-//! *logic* in them — a monitor keeps its identity across a replug, a Station
-//! refuses a third pane, a profile reloads to the same roles, a vanished monitor
-//! is named rather than silently re-homed — are all decided in this file and
-//! checked by the ordinary `cargo test` CI runs. The winit adapter that
-//! enumerates real monitors and opens borderless-fullscreen windows from a
-//! resolved profile is [`super::bridge_display`], and it is provable only under
-//! the `#[ignore]`d integration test on a machine with real displays.
+//! *logic* in them — a monitor keeps its identity across an OS-settings
+//! rearrange, a Station refuses a third pane, a profile reloads to the same
+//! roles, a vanished monitor is named rather than silently re-homed — are all
+//! decided in this file and checked by the ordinary `cargo test` CI runs. The
+//! winit adapter that enumerates real monitors and opens borderless-fullscreen
+//! windows from a resolved profile is [`super::bridge_display`], and it is
+//! provable only under the `#[ignore]`d integration test on a machine with
+//! real displays.
 //!
 //! # It is NOT the player Accessibility profile
 //!
@@ -26,21 +27,28 @@
 //! deliberately separate so that packing a bridge for transport and setting a
 //! player's comfort options never touch the same file.
 //!
-//! # The stable-identity scheme, and its limit
+//! # The stable-identity scheme, and its limits
 //!
 //! winit (and so Bevy's [`Monitor`](bevy::window::Monitor)) exposes no serial
 //! number or EDID — nothing a display carries in hardware. What it does report
-//! that does not change when displays are re-ordered in the OS settings or
-//! re-plugged into a different port is the **name** and the **native
-//! resolution**. So a monitor's stable identity here is `name@WxH`
-//! ([`identify`]), deliberately excluding position (which changes on every
-//! rearrange — surviving that is the whole job) and scale factor (which a user
-//! can change). Two *identical* monitors — same model, same mode — report the
-//! same name and size and are genuinely indistinguishable to winit; those, and
-//! only those, are told apart by appending their physical position (`#x,y`), and
-//! that one case does not survive physically swapping the two. This limit is
-//! inherent to what the OS exposes, not to this scheme, and it is documented on
-//! [`identify`] where the code lives.
+//! that does not change when displays are re-ordered or repositioned in the OS
+//! settings is the **name** and the **native resolution**. So a monitor's
+//! stable identity here is `name@WxH` ([`identify`]), deliberately excluding
+//! position (which changes on every rearrange — surviving that is the whole
+//! job) and scale factor (which a user can change). That survives the
+//! rearrange an operator does most often, but it has two inherent limits —
+//! inherent to what the OS exposes, not to this scheme — both documented on
+//! [`identify`] where the code lives:
+//!
+//! - Two *identical* monitors — same model, same mode — report the same name
+//!   and size and are genuinely indistinguishable to winit; those, and only
+//!   those, are told apart by appending their physical position (`#x,y`), and
+//!   that one case does not survive physically swapping the two.
+//! - On Windows, the reported `name` is typically the GDI **device/slot name**
+//!   (`\\.\DISPLAY5`), which is tied to the port a monitor is plugged into —
+//!   so the identity does **not** necessarily survive re-plugging a monitor
+//!   into a *different* port, only re-ordering or repositioning it in the OS
+//!   settings while it stays connected where it is.
 
 use serde::{Deserialize, Serialize};
 
@@ -153,21 +161,30 @@ const UNNAMED_DISPLAY: &str = "unnamed-display";
 /// Assign each raw monitor a stable identity, preserving input order.
 ///
 /// The identity is `name@WxH` — the OS name and the native resolution — which
-/// survives the two changes an operator makes most: re-ordering displays in the
-/// OS settings, and re-plugging a monitor into a different port. Position and
-/// scale factor are deliberately excluded: both change under an ordinary
-/// rearrange, and an identity that changed with them would defeat the whole
-/// purpose of a reusable profile.
+/// survives the rearrange an operator makes most often: re-ordering or
+/// repositioning displays in the OS settings while they stay plugged into the
+/// same ports. Position and scale factor are deliberately excluded: both
+/// change under an ordinary rearrange, and an identity that changed with them
+/// would defeat the whole purpose of a reusable profile.
 ///
-/// **The one case this cannot survive:** two monitors of the same model in the
-/// same mode report the same name and size and are indistinguishable to winit,
-/// which exposes no per-unit serial. Those — and *only* those — are
-/// disambiguated by appending their physical position (`name@WxH#x,y`), so a
-/// profile referencing them is stable while the physical arrangement holds but
-/// swaps the two if they are physically swapped. A single monitor of a given
-/// name+size keeps the short, position-free key and is fully stable. The return
-/// order matches the input so a caller can zip it back against the Bevy monitor
-/// entities it came from.
+/// **Two cases this cannot survive**, both inherent to what winit exposes
+/// rather than a flaw in this scheme:
+///
+/// - Two monitors of the same model in the same mode report the same name and
+///   size and are indistinguishable to winit, which exposes no per-unit
+///   serial. Those — and *only* those — are disambiguated by appending their
+///   physical position (`name@WxH#x,y`), so a profile referencing them is
+///   stable while the physical arrangement holds but swaps the two if they are
+///   physically swapped. A single monitor of a given name+size keeps the
+///   short, position-free key and is fully stable.
+/// - On Windows, `name` is typically the GDI device/slot name
+///   (`\\.\DISPLAY5`), which is tied to the port the monitor is plugged into —
+///   so re-plugging a monitor into a *different* port can change its reported
+///   name, and so its identity here, even though the monitor itself did not
+///   change.
+///
+/// The return order matches the input so a caller can zip it back against the
+/// Bevy monitor entities it came from.
 pub fn identify(raws: &[RawMonitor]) -> Vec<DiscoveredMonitor> {
     // Count base keys so a unique monitor keeps the short, position-free key and
     // only genuine collisions pay the position suffix.
@@ -426,13 +443,15 @@ impl BridgeProfile {
         toml::from_str(text).map_err(|e| ProfileError::Parse(e.to_string()))
     }
 
-    /// Check the schema version, the role vocabulary, the pane-density rule and
-    /// identity uniqueness, producing the strongly-typed [`ValidatedProfile`].
+    /// Check the schema version, the role vocabulary, the pane-density rule,
+    /// identity uniqueness and the one-viewscreen rule, producing the
+    /// strongly-typed [`ValidatedProfile`].
     ///
     /// This is where the "refused with a clear explanation" acceptance criterion
     /// lives: a Station with three panes, an unknown role word, a viewscreen that
-    /// carries panes, or two displays claiming one monitor are each rejected here
-    /// with an authored message, before any window is opened.
+    /// carries panes, two displays claiming one monitor, or two displays both
+    /// claiming the viewscreen role are each rejected here with an authored
+    /// message, before any window is opened.
     pub fn validate(&self) -> Result<ValidatedProfile, ProfileError> {
         if self.version != PROFILE_VERSION {
             return Err(ProfileError::Version {
@@ -441,6 +460,12 @@ impl BridgeProfile {
         }
         let mut displays = Vec::with_capacity(self.displays.len());
         let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        // Named as soon as a second one turns up, rather than accumulated and
+        // reported at the end: a bridge has exactly one shared viewscreen, and
+        // `apply_bridge_profile` has no "last one wins" rule to fall back on —
+        // it would just silently keep the last surface it saw and leave every
+        // other configured monitor black with no diagnostic at all.
+        let mut viewscreen_id: Option<&str> = None;
         for entry in &self.displays {
             if !seen.insert(entry.id.as_str()) {
                 return Err(ProfileError::DuplicateId {
@@ -454,6 +479,12 @@ impl BridgeProfile {
                             id: entry.id.clone(),
                         });
                     }
+                    if let Some(first) = viewscreen_id {
+                        return Err(ProfileError::MultipleViewscreens {
+                            ids: vec![first.to_string(), entry.id.clone()],
+                        });
+                    }
+                    viewscreen_id = Some(entry.id.as_str());
                     DisplayRole::Viewscreen
                 }
                 ROLE_STATION => {
@@ -519,6 +550,11 @@ pub enum ProfileError {
     ViewscreenHasPanes { id: String },
     /// Two `[[display]]` entries name the same monitor id.
     DuplicateId { id: String },
+    /// Two or more `[[display]]` entries claim the `viewscreen` role. A bridge
+    /// has exactly one shared viewscreen; without this refusal
+    /// `apply_bridge_profile` would silently keep only the last one and leave
+    /// every other configured monitor black with no diagnostic.
+    MultipleViewscreens { ids: Vec<String> },
     /// The TOML did not parse.
     Parse(String),
     /// The profile could not be serialised to TOML.
@@ -554,6 +590,16 @@ impl std::fmt::Display for ProfileError {
             ProfileError::DuplicateId { id } => write!(
                 f,
                 "two displays both claim monitor {id:?}; each monitor is assigned exactly once"
+            ),
+            ProfileError::MultipleViewscreens { ids } => write!(
+                f,
+                "monitors {} are both configured as the {ROLE_VIEWSCREEN:?} role, but a bridge \
+                 has exactly one shared viewscreen; give every monitor but one a \
+                 {ROLE_STATION:?} role instead",
+                ids.iter()
+                    .map(|id| format!("{id:?}"))
+                    .collect::<Vec<_>>()
+                    .join(" and ")
             ),
             ProfileError::Parse(detail) => write!(f, "bridge profile did not parse: {detail}"),
             ProfileError::Serialize(detail) => {

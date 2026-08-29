@@ -158,7 +158,11 @@ BRIDGE DISPLAYS (issue #1123)
     --setup               Enumerate the connected monitors, print their stable
                           hardware identities, geometry and current assignment,
                           then exit. Validates --profile against them if given.
-                          A standalone diagnostic — needs no --world.
+                          A standalone diagnostic — needs no --world, and
+                          refuses every simulation/crew flag (--world, --ship,
+                          --seed, --solo, --pane, --log, --log-entity,
+                          --rendezvous, --origin) rather than silently
+                          discarding them.
     --profile <PATH>      A bridge-display profile (TOML). With --world the host
                           covers every configured monitor with one borderless
                           full-screen surface — the viewscreen, or a Station
@@ -267,6 +271,35 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
         }
     }
 
+    // `--setup` is a standalone enumerate-and-exit diagnostic (issue #1123): it
+    // opens a hidden window purely to list monitors and exits before a world
+    // or a crew transport is ever touched (see phoenix_host.rs, where --setup
+    // short-circuits before the world is even read). Given alongside a
+    // simulation/crew flag it would otherwise silently discard whatever the
+    // operator asked for rather than run it — the exact silent-ignore failure
+    // mode the "needs --world" refusals below exist to close for the
+    // no-`--world` case. `--profile` is deliberately NOT in this list: it is
+    // the one flag `--setup` itself consumes, to validate against the
+    // connected displays.
+    if setup {
+        for (flag, given) in [
+            ("--world", world.is_some()),
+            ("--ship", ship.is_some()),
+            ("--seed", seed.is_some()),
+            ("--log", !log_spec.is_empty()),
+            ("--log-entity", !log_entity.is_empty()),
+            ("--solo", solo),
+            ("--pane", !panes.is_empty()),
+            ("--rendezvous", rendezvous.is_some()),
+            ("--origin", origin.is_some()),
+        ] {
+            if given {
+                return Err(format!(
+                    "--setup is a standalone enumerate-and-exit diagnostic and refuses {flag}"
+                ));
+            }
+        }
+    }
     // The simulation flags are meaningless without a world, and silently
     // ignoring them would be the worst answer: an operator who wrote `--solo`
     // and no `--world` asked for a mission and would get a file server.
@@ -531,6 +564,36 @@ mod tests {
         assert!(a.setup);
         assert_eq!(a.sim, None);
         assert_eq!(a.profile, None);
+    }
+
+    #[test]
+    fn setup_refuses_every_simulation_and_crew_flag_rather_than_ignoring_them() {
+        // `--setup` short-circuits before a world or a crew transport is ever
+        // touched (phoenix_host.rs). Silently accepting these alongside it
+        // would mean an operator who wrote `--setup --world w.toml --solo`
+        // gets a monitor list with no acknowledgement their mission never ran.
+        for bad in [
+            vec!["--setup", "--world", "w.toml"],
+            vec!["--setup", "--ship", "assets/entities/x.toml"],
+            vec!["--setup", "--seed", "1"],
+            vec!["--setup", "--log", "info"],
+            vec!["--setup", "--log-entity", "Ironveil"],
+            vec!["--setup", "--solo"],
+            vec!["--setup", "--pane", "Ada"],
+            vec!["--setup", "--rendezvous", "https://x.test"],
+            vec!["--setup", "--origin", "https://x.test"],
+        ] {
+            let err = parse(&bad).unwrap_err();
+            assert!(err.contains("--setup"), "{bad:?}: {err}");
+        }
+    }
+
+    #[test]
+    fn setup_still_allows_profile_alongside_it() {
+        // --profile is the one flag --setup itself consumes.
+        let a = run(&["--setup", "--profile", "bridge.toml"]);
+        assert!(a.setup);
+        assert_eq!(a.profile.as_deref(), Some("bridge.toml"));
     }
 
     #[test]

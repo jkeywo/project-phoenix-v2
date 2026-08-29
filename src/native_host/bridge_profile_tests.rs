@@ -2,9 +2,9 @@
 //!
 //! No display, no window, no GPU — these run in the ordinary `cargo test` CI
 //! job. They cover the acceptance criteria that have logic in them: stable
-//! identity across a simulated replug, the one/two-pane geometry math, the
-//! more-than-two refusal, the serialisation round-trip, and the naming of a
-//! monitor that is gone or unassigned.
+//! identity across a simulated OS-settings rearrange, the one/two-pane
+//! geometry math, the more-than-two refusal, the serialisation round-trip, and
+//! the naming of a monitor that is gone or unassigned.
 
 use super::*;
 
@@ -205,6 +205,53 @@ fn two_displays_claiming_one_monitor_is_refused() {
 }
 
 #[test]
+fn two_viewscreens_is_refused() {
+    // AC2 and the module's "unsupported config is refused visibly" philosophy:
+    // a bridge has exactly one shared viewscreen, so `validate` must catch this
+    // rather than let `apply_bridge_profile` silently keep only the last one
+    // and leave the other configured monitor black with no diagnostic.
+    let two = profile_with(vec![
+        DisplayEntry {
+            id: "m1".to_string(),
+            role: ROLE_VIEWSCREEN.to_string(),
+            split: None,
+            panes: Vec::new(),
+        },
+        DisplayEntry {
+            id: "m2".to_string(),
+            role: ROLE_VIEWSCREEN.to_string(),
+            split: None,
+            panes: Vec::new(),
+        },
+    ]);
+    let err = two.validate().unwrap_err();
+    assert_eq!(
+        err,
+        ProfileError::MultipleViewscreens {
+            ids: vec!["m1".to_string(), "m2".to_string()]
+        }
+    );
+    // The message names both monitors.
+    let msg = err.to_string();
+    assert!(msg.contains("m1"), "{msg}");
+    assert!(msg.contains("m2"), "{msg}");
+}
+
+#[test]
+fn a_single_viewscreen_profile_still_validates() {
+    let one = profile_with(vec![
+        DisplayEntry {
+            id: "m1".to_string(),
+            role: ROLE_VIEWSCREEN.to_string(),
+            split: None,
+            panes: Vec::new(),
+        },
+        station_entry("m2", &["Ada"]),
+    ]);
+    assert!(one.validate().is_ok());
+}
+
+#[test]
 fn a_profile_from_another_schema_version_is_refused_rather_than_reinterpreted() {
     let mut p = profile_with(vec![]);
     p.version = PROFILE_VERSION + 1;
@@ -379,6 +426,26 @@ fn a_windows_device_name_identity_round_trips_through_toml() {
         panes: Vec::new(),
     }]);
     let reparsed = BridgeProfile::from_toml(&p.to_toml().unwrap()).unwrap();
+    assert_eq!(reparsed.displays[0].id, id);
+    assert_eq!(reparsed, p);
+}
+
+#[test]
+fn a_position_suffixed_identical_monitor_id_round_trips_through_toml() {
+    // `identify`'s fallback for two identical monitors appends a `#x,y`
+    // suffix (see `identical_monitors_are_disambiguated_by_position` above).
+    // The `#` sits inside a quoted TOML string, so it is ordinary text to the
+    // parser rather than a comment starter — this pins that a profile
+    // referencing such an id survives the round-trip unchanged.
+    let id = "ACME 1080@1920x1080#1920,0";
+    let p = profile_with(vec![DisplayEntry {
+        id: id.to_string(),
+        role: ROLE_VIEWSCREEN.to_string(),
+        split: None,
+        panes: Vec::new(),
+    }]);
+    let text = p.to_toml().expect("serialises");
+    let reparsed = BridgeProfile::from_toml(&text).expect("parses");
     assert_eq!(reparsed.displays[0].id, id);
     assert_eq!(reparsed, p);
 }

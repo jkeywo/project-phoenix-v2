@@ -504,14 +504,19 @@ at those windows through `BridgeStationSurfaces`. Until then a host launched wit
 both `--profile` and `--pane` opens the Station windows **and** tiles the panes on
 the viewscreen window as #1122 always did — nothing regresses.
 
+Station windows are borderless-fullscreen but visually **empty** until #1124
+lands pane compositing: nothing renders into one on its own (no camera targets
+it), so an operator seeing a blank Station display before then is seeing the
+disclosed, correct state — not a broken render.
+
 ## Tests
 
 | File | Claim |
 |---|---|
-| `src/native_host/bridge_profile.rs` | The pure model: stable identity across a simulated replug, identical-monitor disambiguation, the one/two-pane geometry math (even and odd, side-by-side and stacked), the >2 density refusal, the TOML round-trip (Windows backslash ids included), and the missing/unassigned/changed-display reporting. All feature-agnostic, run by the ordinary `cargo test` |
-| `src/native_host/bridge_display.rs` | A Bevy `Monitor` lifts into a `RawMonitor` and carries the documented identity |
+| `src/native_host/bridge_profile.rs` | The pure model: stable identity across a simulated OS-settings rearrange, identical-monitor disambiguation (including a TOML round-trip of a position-suffixed id), the one/two-pane geometry math (even and odd, side-by-side and stacked), the >2 density refusal, the one-viewscreen refusal (`ProfileError::MultipleViewscreens`, naming both monitors), the TOML round-trip (Windows backslash ids included), and the missing/unassigned/changed-display reporting. All feature-agnostic, run by the ordinary `cargo test` |
+| `src/native_host/bridge_display.rs` | A Bevy `Monitor` lifts into a `RawMonitor` and carries the documented identity; `--setup`'s exit code is clean only when a supplied profile both validates and resolves with no problems against the connected displays (`setup_profile_is_clean`) |
 | `tests/native_bridge_displays.rs` | On the real machine's monitors, a profile opens one borderless-fullscreen surface per monitor at the monitor's geometry — the viewscreen on the primary window, a Station on its own. `#[ignore]`d: it opens real winit windows, which CI has no display for. Verified once locally |
-| `src/delivery/args.rs` | `--setup` is a standalone diagnostic needing no world; `--profile` applies with a world or validates with `--setup`, and is refused alone |
+| `src/delivery/args.rs` | `--setup` is a standalone diagnostic needing no world and refuses every simulation/crew flag (`--world`, `--ship`, `--seed`, `--solo`, `--pane`, `--log`, `--log-entity`, `--rendezvous`, `--origin`) rather than silently discarding them; `--profile` applies with a world or validates with `--setup`, and is refused alone |
 | `src/boot/tests.rs` | Four-profile parity; only the render-stack profiles take that path; a native host refuses a configless boot, including a hull declared only by a static child |
 | `src/native_host/transport.rs` | The seam's ingress/egress and the reserved-token refusal |
 | `tests/native_host_sim.rs` | Shipped content boots and runs; the hull's own config reaches the client config; an uncached `--ship` is refused; a curating manifest narrows the default hull; a participant joins through the seam |

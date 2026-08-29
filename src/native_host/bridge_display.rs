@@ -322,8 +322,14 @@ struct SetupFrames(u32);
 ///
 /// Needs a real display and a GPU adapter, like every winit path here, so it is
 /// never run in CI; it is the local half of the acceptance criteria. Returns a
-/// process exit code: 0 once monitors were reported, 1 if none were after
-/// [`SETUP_FRAME_BUDGET`] frames.
+/// process exit code: 0 once monitors were reported and (when a profile was
+/// given) it checks out; 1 if none were reported after [`SETUP_FRAME_BUDGET`]
+/// frames, or if a supplied `--profile` is invalid or does not match the
+/// connected displays — see [`setup_profile_is_clean`]. `from_toml` upstream
+/// only parses, so this is what makes a script or CI gating on `--setup`'s
+/// exit status get an honest verdict instead of always seeing success; the
+/// authoritative `--world` path already refuses to boot on an invalid profile
+/// (`phoenix_host.rs`), and this brings `--setup` to the same standard.
 pub fn run_setup(profile: Option<super::bridge_profile::BridgeProfile>) -> i32 {
     let mut app = App::new();
     app.add_plugins(
@@ -378,8 +384,38 @@ fn setup_enumerate(
             frames.0
         );
         exit.write(AppExit::error());
+    } else if !setup_profile_is_clean(profile.0.as_ref(), &discovered) {
+        // The report above already printed *why* — an invalid profile, or one
+        // naming a monitor that is not connected. A non-zero exit here is what
+        // makes that a verdict a script can gate on, rather than something only
+        // visible to a human reading stdout.
+        eprintln!("phoenix-host --setup: --profile does not check out; see the report above");
+        exit.write(AppExit::error());
     } else {
         exit.write(AppExit::Success);
+    }
+}
+
+/// Whether a supplied `--profile` is fit to gate `--setup`'s exit code on: it
+/// parses, validates (schema version, role vocabulary, pane density, the
+/// one-viewscreen rule), and resolves against `discovered` with no
+/// [`ProfileProblem`](super::bridge_profile::ProfileProblem) — no monitor the
+/// profile assigns is missing, and none of `discovered` is left unassigned.
+///
+/// `None` (no profile was given — a bare `phoenix-host --setup`) is always
+/// clean: with nothing to check, there is nothing to fail. Pure and
+/// display-free, unlike [`run_setup`]/[`setup_enumerate`], so it is directly
+/// unit-testable without a winit window.
+fn setup_profile_is_clean(
+    profile: Option<&super::bridge_profile::BridgeProfile>,
+    discovered: &[super::bridge_profile::DiscoveredMonitor],
+) -> bool {
+    let Some(profile) = profile else {
+        return true;
+    };
+    match profile.validate() {
+        Ok(validated) => !resolve(&validated, discovered).has_problems(),
+        Err(_) => false,
     }
 }
 
@@ -407,5 +443,65 @@ mod tests {
         // And its identity comes out as the documented scheme.
         let discovered = identify(std::slice::from_ref(&raw));
         assert_eq!(discovered[0].identity.as_str(), "DELL U2720Q@3840x2160");
+    }
+
+    use super::super::bridge_profile::{
+        BridgeProfile, DisplayEntry, PROFILE_VERSION, ROLE_VIEWSCREEN,
+    };
+
+    fn dell_raw() -> RawMonitor {
+        RawMonitor {
+            name: Some("DELL U2720Q".to_string()),
+            physical_width: 3840,
+            physical_height: 2160,
+            position_x: 0,
+            position_y: 0,
+            scale_factor: 1.0,
+            primary: true,
+        }
+    }
+
+    fn viewscreen_profile(id: &str) -> BridgeProfile {
+        BridgeProfile {
+            version: PROFILE_VERSION,
+            displays: vec![DisplayEntry {
+                id: id.to_string(),
+                role: ROLE_VIEWSCREEN.to_string(),
+                split: None,
+                panes: Vec::new(),
+            }],
+            touch: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn setup_exit_is_clean_with_no_profile() {
+        assert!(setup_profile_is_clean(None, &[]));
+    }
+
+    #[test]
+    fn setup_exit_is_clean_with_a_matching_profile() {
+        let discovered = identify(&[dell_raw()]);
+        let profile = viewscreen_profile("DELL U2720Q@3840x2160");
+        assert!(setup_profile_is_clean(Some(&profile), &discovered));
+    }
+
+    #[test]
+    fn setup_exit_is_dirty_for_an_invalid_profile() {
+        // `from_toml` only parses; a bad schema version (or an unknown role, or
+        // a Station of three panes) must fail `--setup`'s exit code exactly as
+        // it fails the authoritative `--world` path at the prompt.
+        let mut profile = viewscreen_profile("DELL U2720Q@3840x2160");
+        profile.version = PROFILE_VERSION + 1;
+        assert!(!setup_profile_is_clean(Some(&profile), &[]));
+    }
+
+    #[test]
+    fn setup_exit_is_dirty_when_the_profile_does_not_match_the_connected_displays() {
+        // The profile validates fine on its own, but the monitor it assigns is
+        // not actually connected — exactly what `--setup --profile` exists to
+        // catch, so it must not report success.
+        let profile = viewscreen_profile("DELL U2720Q@3840x2160");
+        assert!(!setup_profile_is_clean(Some(&profile), &[]));
     }
 }

@@ -51,11 +51,16 @@ use crate::lockstep::transfer::SnapshotChunk;
 /// Host-mesh vocabulary revision.
 ///
 /// `1` was #1114's fleet lobby (hello / welcome / refused / slot / roster /
-/// admission). `2` adds the running-mission frames below. Bumped rather than
-/// extended-in-place because #1114's decoder refuses a frame whose `m` it does
-/// not recognise, which is precisely the behaviour that makes a mixed-build
-/// fleet fail loudly instead of half-understanding each other.
-pub const HOST_MESH_PROTOCOL: u32 = 2;
+/// admission). `2` added the running-mission frames below (tick / digest). `3`
+/// adds [`HostLossFrame`] — one host telling the fleet that a ship host has
+/// vanished (issue #1119). Bumped rather than extended-in-place because #1114's
+/// decoder refuses a frame whose `m` it does not recognise, which is precisely
+/// the behaviour that makes a mixed-build fleet fail loudly instead of
+/// half-understanding each other: a revision-2 build that silently DROPPED a
+/// host-loss frame would keep waiting for a peer that will never speak again,
+/// while the revision-3 hosts flipped its ship to Backfill — a split with no
+/// symptom but a stall on one side and a divergence on the other.
+pub const HOST_MESH_PROTOCOL: u32 = 3;
 
 /// One command a host admitted from its own crew, as it crosses to the fleet.
 ///
@@ -149,6 +154,38 @@ pub struct DigestFrame {
     pub digest: u64,
 }
 
+/// One host's report that a ship host has left the fleet (issue #1119).
+///
+/// This is the observation, not the transition. It names the slot whose host
+/// vanished and the tick the fleet agrees that ship's crew stops speaking —
+/// `agreed_loss_tick`, the first tick past the lost host's last declared
+/// watermark. Every survivor derives that tick from the SAME input (the lost
+/// slot's own last [`TickFrame::ready_through`], which reliable delivery gave
+/// every survivor identically), so the tick is a function of the observation
+/// and not of who noticed first — which is what makes two survivors' reports,
+/// or one survivor's repeated report, converge on one transition at one tick
+/// (`p2p-delta-backfill-replaces-auto-crew`, #1119 AC5).
+///
+/// `tick` is carried as well as derived so a survivor that has not itself seen
+/// the close — a member behind the star relay — adopts the highest tick anyone
+/// derived rather than acting on a stale watermark; the receiver takes the max
+/// of its own derivation and this field, so a duplicate or reordered report can
+/// only ever agree or raise, never walk the transition backwards.
+///
+/// It carries no crew, no session token and no ship state: the lost ship keeps
+/// its complete authoritative state on every surviving host, and only its
+/// control SOURCE flips, through the ordinary Station Rating machinery, at the
+/// agreed tick (#1119 AC2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostLossFrame {
+    /// The slot reporting the loss — a survivor, never the lost host.
+    pub from: HostSlot,
+    /// The slot whose host has vanished.
+    pub lost: HostSlot,
+    /// The tick the reporter agrees the lost ship flips to Backfill on.
+    pub tick: u64,
+}
+
 /// Everything the running half of the host mesh says.
 ///
 /// A closed enum rather than a string tag, so a receiver that compiles has
@@ -164,6 +201,9 @@ pub enum MeshFrame {
     /// chunking and integrity are [`crate::lockstep::transfer`]'s; this variant
     /// only carries a piece across the mesh.
     Snapshot(SnapshotChunk),
+    /// A ship host has left; its ship flips to Backfill at the agreed tick
+    /// (issue #1119).
+    HostLoss(HostLossFrame),
 }
 
 impl MeshFrame {
@@ -173,6 +213,7 @@ impl MeshFrame {
             MeshFrame::Tick(f) => f.from,
             MeshFrame::Digest(f) => f.from,
             MeshFrame::Snapshot(f) => f.from,
+            MeshFrame::HostLoss(f) => f.from,
         }
     }
 
@@ -182,6 +223,7 @@ impl MeshFrame {
             MeshFrame::Tick(_) => TYPE_TICK,
             MeshFrame::Digest(_) => TYPE_DIGEST,
             MeshFrame::Snapshot(_) => TYPE_SNAPSHOT,
+            MeshFrame::HostLoss(_) => TYPE_HOST_LOSS,
         }
     }
 }
@@ -192,6 +234,8 @@ pub const TYPE_TICK: &str = "tick";
 pub const TYPE_DIGEST: &str = "digest";
 /// The `t` value a [`MeshFrame::Snapshot`] carries on the JS wire (issue #1117).
 pub const TYPE_SNAPSHOT: &str = "snapshot";
+/// The `t` value a [`MeshFrame::HostLoss`] carries on the JS wire.
+pub const TYPE_HOST_LOSS: &str = "host-loss";
 
 #[cfg(test)]
 mod tests {
@@ -248,6 +292,11 @@ mod tests {
                 crc: 0xabad_1dea,
                 text: "portable-record-slice".to_string(),
             }),
+            MeshFrame::HostLoss(HostLossFrame {
+                from: HostSlot(1),
+                lost: HostSlot(3),
+                tick: 418,
+            }),
         ];
         for frame in frames {
             let text = ron::ser::to_string(&frame).expect("a frame serialises");
@@ -268,7 +317,7 @@ mod tests {
     #[test]
     fn the_protocol_revision_is_pinned() {
         assert_eq!(
-            HOST_MESH_PROTOCOL, 2,
+            HOST_MESH_PROTOCOL, 3,
             "bumping this is a fleet-wide incompatible change: gui/host-mesh.js \
              refuses a frame whose `m` it does not know, so both halves and the \
              Vitest pin move together or a mixed fleet fails to agree a tick"

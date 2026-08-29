@@ -283,6 +283,16 @@ thread_local! {
     /// happened to seal it.
     static MESH_OUTBOUND: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 
+    /// Fleet slots whose ship HOST closed its link, queued by JS for the next
+    /// frame (issue #1119). The twin of `DISCONNECT_QUEUE`, but for a peer HOST
+    /// rather than a crew member: a crew disconnect flips one station on this
+    /// host's own ship, while a host loss flips a whole PEER ship to Backfill at
+    /// an agreed tick every survivor derives the same. Kept as bare slot ordinals
+    /// — `drain_mesh_inbound` turns each into a `HostLoss` observation whose
+    /// agreed tick the simulation derives from the lost host's own watermark, so
+    /// the page never has to know a tick.
+    static HOST_LOSS_QUEUE: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
+
     /// The fleet status mirror `wasm_mesh_status` answers from, written each
     /// frame by `publish_mesh_status`. A mirror rather than a `World` read for
     /// the same reason `SIM_PAUSED` is one: the settings cog asks between
@@ -1088,6 +1098,25 @@ pub fn wasm_player_disconnected(token: &str) {
     });
 }
 
+/// Called by JS when a peer SHIP HOST's link closes, or when a survivor relays a
+/// host-loss report (issue #1119).
+///
+/// `slot` is the fleet slot ordinal (the `N` in `slot-N`) whose host vanished.
+/// Queued for the next frame, where `drain_mesh_inbound` turns it into a
+/// `HostLoss` observation: the simulation agrees the disconnect tick from that
+/// host's own last watermark — the same on every survivor — and flips its ship
+/// to Backfill there. Idempotent from the page's side too: reporting the same
+/// slot twice, or a slot already backfilled, converges on the one transition.
+///
+/// Deliberately separate from [`wasm_player_disconnected`]: a crew member
+/// leaving flips one station on THIS host's own ship, while a host leaving flips
+/// a whole PEER ship, at an agreed tick, on every surviving host at once.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_host_departed(slot: u32) {
+    HOST_LOSS_QUEUE.with(|q| q.borrow_mut().push(slot));
+}
+
 /// Adopt a fleet the page joined, and hand the simulation everything its peers
 /// have said since the last frame (issue #1116).
 ///
@@ -1107,7 +1136,12 @@ fn drain_mesh_inbound(world: &mut World) {
         }
     }
     let frames = MESH_INBOUND.with(|q| std::mem::take(&mut *q.borrow_mut()));
-    if frames.is_empty() {
+    // Slots whose HOST link closed on this machine. Each becomes a self-reported
+    // `HostLoss` with tick 0; `apply_mesh_inbox` derives the real agreed tick
+    // from the lost host's own watermark (max with this 0), so the page hands
+    // over only the fact of the loss, never a tick it has no way to know.
+    let departed = HOST_LOSS_QUEUE.with(|q| std::mem::take(&mut *q.borrow_mut()));
+    if frames.is_empty() && departed.is_empty() {
         return;
     }
     let decoded: Vec<crate::lockstep::MeshFrame> = frames
@@ -1115,6 +1149,16 @@ fn drain_mesh_inbound(world: &mut World) {
         .filter_map(|raw| crate::core::codec::decode_mesh_frame(raw))
         .collect();
     if let Some(mut inbox) = world.get_resource_mut::<crate::lockstep::MeshInbox>() {
+        for slot in departed {
+            let slot = crate::command_admission::HostSlot(slot);
+            inbox.push(crate::lockstep::MeshFrame::HostLoss(
+                crate::lockstep::HostLossFrame {
+                    from: slot,
+                    lost: slot,
+                    tick: 0,
+                },
+            ));
+        }
         for frame in decoded {
             inbox.push(frame);
         }

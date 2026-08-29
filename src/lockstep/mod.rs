@@ -64,11 +64,15 @@ use crate::command_admission::log::{
 use crate::logging::LogCat;
 
 pub mod frame;
+pub mod host_loss;
 pub mod session;
 pub mod snapshot_relay;
 pub mod transfer;
 
-pub use frame::{DigestFrame, MeshCommand, MeshFrame, TickFrame, HOST_MESH_PROTOCOL};
+pub use frame::{
+    DigestFrame, HostLossFrame, MeshCommand, MeshFrame, TickFrame, HOST_MESH_PROTOCOL,
+};
+pub use host_loss::{agreed_loss_tick, HostLossRecord, PendingHostLoss};
 pub use session::{LockstepSession, Stall};
 pub use snapshot_relay::{
     capture_run, drain_mesh_restore, frames_for, gate_and_restore, gate_and_restore_against,
@@ -218,6 +222,24 @@ impl FleetRoster {
             .find(|ship| ship.host == host)
             .map(|ship| ship.crew.as_slice())
             .unwrap_or_default()
+    }
+
+    /// Empty one slot's frozen crewing because its host has left (issue #1119).
+    ///
+    /// The ship STAYS in the roster — the fleet is not one host smaller, it is
+    /// one crew short — so `is_solo` is unchanged and the survivors keep
+    /// answering every ship from the frozen roster rather than falling back to
+    /// their own local `Sessions`. What changes is that `crew_of(host)` is now
+    /// empty, so [`resolve_human_seeking_hosts`] finds no holder for any of that
+    /// ship's seats and keeps its human-seeking systems on AI. Applied at the
+    /// agreed tick by [`host_loss::apply_host_loss_backfill`], so every survivor
+    /// empties the same crewing on the same tick. Idempotent.
+    ///
+    /// [`resolve_human_seeking_hosts`]: crate::ship::coordination_systems::resolve_human_seeking_hosts
+    pub fn depart_slot(&mut self, host: HostSlot) {
+        if let Some(ship) = self.ships.iter_mut().find(|ship| ship.host == host) {
+            ship.crew.clear();
+        }
     }
 
     /// Whether this roster describes a lone host — the shipped single-player
@@ -446,13 +468,25 @@ pub fn register_lockstep(app: &mut App) {
             // folding them would fold their inputs a second time, and a peer's
             // reported digest is not this host's state at all.
             .declare_state::<MeshAgreement>(StateClass::Derived, "fleet-agreement-state")
-            .declare_state::<MeshDiagnostics>(StateClass::Derived, "fleet-agreement-state");
+            .declare_state::<MeshDiagnostics>(StateClass::Derived, "fleet-agreement-state")
+            // The host-loss queue and its log (issue #1119). `Timer` — like the
+            // roster it drives, it is transport bookkeeping about who is
+            // connected where, not state of the world: what crosses from it INTO
+            // the world is the Backfill flip it triggers, and the control sources
+            // and ratings that flip are classified where they already live. The
+            // queue is empty on any host that has lost nobody, which is every
+            // host in a healthy fleet and every solo run.
+            .declare_state::<host_loss::PendingHostLoss>(
+                StateClass::Timer,
+                "fleet-lockstep-state",
+            );
     }
     app.init_resource::<FleetRoster>()
         .init_resource::<MeshInbox>()
         .init_resource::<MeshOutbox>()
         .init_resource::<MeshDiagnostics>()
         .init_resource::<MeshAgreement>()
+        .init_resource::<host_loss::PendingHostLoss>()
         .add_systems(
             PreUpdate,
             (apply_mesh_inbox, gate_lockstep_ticks)
@@ -474,6 +508,24 @@ pub fn register_lockstep(app: &mut App) {
             sample_and_publish_digest
                 .before(crate::sim_tick::advance_sim_tick)
                 .run_if(fleet_is_running),
+        )
+        // The host-loss Backfill flip (issue #1119). In `SimSet::Input`, at the
+        // agreed tick, on the lost ship — the same phase the ordinary rating
+        // change and the human-seeking resolver run in. Ordered
+        // `.after(handle_station_rating_change)` and
+        // `.before(resolve_human_seeking_hosts)`: all three write
+        // `ShipSystemControlSources`, and the flip must land before the resolver
+        // re-reads the (now uncrewed) roster and keeps the lost ship's
+        // human-seeking systems on AI. In an app without `ShipPlugin` — a bare
+        // fixture — both edges are vacuous and the flip is a no-op with an empty
+        // ship query.
+        .add_systems(
+            FixedUpdate,
+            host_loss::apply_host_loss_backfill
+                .in_set(crate::sim_sets::SimSet::Input)
+                .after(crate::lobby::LobbySystemSet)
+                .after(crate::ship_plugin::handle_station_rating_change)
+                .before(crate::ship_plugin::resolve_human_seeking_hosts),
         );
     // The portable-record transfer (issue #1117): the receiver resource and the
     // frame-driven restore that commits a fully-arrived record. Kept in its own
@@ -537,8 +589,10 @@ pub fn apply_mesh_inbox(
     mut inbox: ResMut<MeshInbox>,
     mut session: Option<ResMut<FleetLockstep>>,
     mut pending: ResMut<PendingCommands>,
+    mut pending_loss: ResMut<host_loss::PendingHostLoss>,
     mut agreement: ResMut<MeshAgreement>,
     mut snapshot_rx: ResMut<MeshSnapshotReceiver>,
+    mut outbox: ResMut<MeshOutbox>,
     fleet_ships: Query<(&FleetSlotOf, &crate::entities::spawner::EntityUuid)>,
     log: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
@@ -684,6 +738,66 @@ pub fn apply_mesh_inbox(
                     .entry(digest.from)
                     .or_insert_with(|| crate::sim_digest::DigestLedger::new(DIGEST_INTERVAL_TICKS))
                     .record(digest.tick, digest.digest);
+            }
+            MeshFrame::HostLoss(hl) => {
+                let lost = hl.lost;
+                // This host cannot be told it is itself lost, and a host does not
+                // report its own loss — either is somebody else's confusion.
+                if lost == session.local() {
+                    continue;
+                }
+                // The flip has already applied; it cannot be re-agreed, so a late
+                // duplicate report is inert (AC5).
+                if pending_loss.is_applied(lost) {
+                    continue;
+                }
+                // The agreed tick is a function of the OBSERVATION — the lost
+                // host's own last watermark, which reliable delivery gave every
+                // survivor identically — never of when this host noticed. A
+                // survivor behind the star relay may not have the watermark yet;
+                // it adopts the reporter's tick, and the max of the two keeps a
+                // reordered or lower report from walking the agreement back.
+                let derived = session.watermark_of(lost).map(host_loss::agreed_loss_tick);
+                if derived.is_none() && !pending_loss.is_known(lost) {
+                    // A report about a slot this host has never known as a peer:
+                    // there is nothing to lose, so it is dropped rather than
+                    // scheduling a flip for a ship that is not here.
+                    crate::pwarn!(
+                        log,
+                        LogCat::Admit,
+                        "dropping a host-loss report for {}: this host has no \
+                         such peer",
+                        lost.slot_id(),
+                    );
+                    continue;
+                }
+                let agreed = derived.map_or(hl.tick, |d| d.max(hl.tick));
+                let changed = pending_loss.observe(lost, agreed);
+                // Stop the barrier waiting for the departed host so the fleet
+                // resumes at once — the ship's Backfill flip is tick-stamped for
+                // `agreed` and applied in the fixed schedule, so this frame-driven
+                // half moves no folded state.
+                session.depart(lost);
+                if changed {
+                    // Re-broadcast so the rest of the fleet converges on the
+                    // highest tick anyone derived — the propagation that lets a
+                    // relay member learn a loss it did not see the socket close
+                    // for, and that carries a raised agreement to survivors that
+                    // agreed a lower one.
+                    outbox.push(MeshFrame::HostLoss(frame::HostLossFrame {
+                        from: session.local(),
+                        lost,
+                        tick: agreed,
+                    }));
+                    crate::pinfo!(
+                        log,
+                        LogCat::Admit,
+                        "host-mesh: {} left; agreeing its ship flips to Backfill \
+                         at tick {}",
+                        lost.slot_id(),
+                        agreed,
+                    );
+                }
             }
             // Peeled off above, before the fleet-session gate, so it never reaches
             // this loop — but the match stays exhaustive rather than resting on

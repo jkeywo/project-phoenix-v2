@@ -472,6 +472,18 @@ pub fn encode_mesh_frame(frame: &crate::lockstep::MeshFrame) -> Result<String, s
                 "text": c.text,
             }),
         ),
+        // A host-loss report (issue #1119). `lost` and both slot ordinals are
+        // small, and the tick — like `tick` above and unlike `digest` — cannot
+        // reach 2^53 in any run a human sits through, so all three cross as
+        // numbers rather than as the hex a `u64` digest needs.
+        MeshFrame::HostLoss(f) => (
+            f.tick,
+            serde_json::json!({
+                "from": f.from.0,
+                "lost": f.lost.0,
+                "tick": f.tick,
+            }),
+        ),
     };
     Ok(serde_json::json!({
         MESH_ENVELOPE_PROTOCOL: crate::lockstep::HOST_MESH_PROTOCOL,
@@ -493,7 +505,7 @@ pub fn encode_mesh_frame(frame: &crate::lockstep::MeshFrame) -> Result<String, s
 pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
     use crate::command_admission::{CommandOrder, HostSlot, ShipKey};
     use crate::core::messages::SystemId;
-    use crate::lockstep::{DigestFrame, MeshCommand, MeshFrame, TickFrame};
+    use crate::lockstep::{DigestFrame, HostLossFrame, MeshCommand, MeshFrame, TickFrame};
 
     let value: serde_json::Value = serde_json::from_str(raw).ok()?;
     if value.get(MESH_ENVELOPE_PROTOCOL)?.as_u64()?
@@ -543,6 +555,11 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
                 text: body.get("text")?.as_str()?.to_string(),
             }))
         }
+        crate::lockstep::frame::TYPE_HOST_LOSS => Some(MeshFrame::HostLoss(HostLossFrame {
+            from,
+            lost: HostSlot(u32::try_from(body.get("lost")?.as_u64()?).ok()?),
+            tick,
+        })),
         _ => None,
     }
 }
@@ -661,7 +678,7 @@ pub fn encode_mesh_status(
 mod mesh_frame_tests {
     use crate::command_admission::{CommandOrder, HostSlot, ShipKey};
     use crate::core::messages::{SystemControlPayload, SystemId};
-    use crate::lockstep::{DigestFrame, MeshCommand, MeshFrame, TickFrame};
+    use crate::lockstep::{DigestFrame, HostLossFrame, MeshCommand, MeshFrame, TickFrame};
 
     fn tick_frame() -> MeshFrame {
         MeshFrame::Tick(TickFrame {
@@ -693,7 +710,7 @@ mod mesh_frame_tests {
     fn a_tick_frame_round_trips_through_the_shared_envelope() {
         let frame = tick_frame();
         let text = super::encode_mesh_frame(&frame).expect("encodes");
-        assert!(text.contains("\"m\":2"), "the revision travels: {text}");
+        assert!(text.contains("\"m\":3"), "the revision travels: {text}");
         assert!(text.contains("\"t\":\"tick\""), "{text}");
         assert!(
             text.contains("\"tick\":412"),
@@ -771,10 +788,16 @@ mod mesh_frame_tests {
         for raw in [
             "not json at all",
             r#"{"type":"Identify","token":"abc"}"#,
-            r#"{"m":1,"t":"tick","tick":1,"d":{"from":1,"tick":1,"ready_through":1,"commands":[]}}"#,
-            r#"{"m":2,"t":"hello","tick":null,"d":{}}"#,
-            r#"{"m":2,"t":"tick","tick":1,"d":{"from":1,"tick":1}}"#,
-            r#"{"m":2,"t":"digest","tick":1,"d":{"from":1,"tick":1,"digest":12345}}"#,
+            // A superseded revision — refused whole rather than half-read.
+            r#"{"m":2,"t":"tick","tick":1,"d":{"from":1,"tick":1,"ready_through":1,"commands":[]}}"#,
+            // A lobby frame on the simulation decoder.
+            r#"{"m":3,"t":"hello","tick":null,"d":{}}"#,
+            // A tick frame missing its watermark and commands.
+            r#"{"m":3,"t":"tick","tick":1,"d":{"from":1,"tick":1}}"#,
+            // A digest as a JSON number, which loses the top bits — refused.
+            r#"{"m":3,"t":"digest","tick":1,"d":{"from":1,"tick":1,"digest":12345}}"#,
+            // A host-loss frame missing the slot it names.
+            r#"{"m":3,"t":"host-loss","tick":1,"d":{"from":1,"tick":1}}"#,
         ] {
             assert_eq!(
                 super::decode_mesh_frame(raw),
@@ -782,6 +805,29 @@ mod mesh_frame_tests {
                 "must be refused rather than half understood: {raw}"
             );
         }
+    }
+
+    /// A host-loss report (issue #1119) survives the shared envelope: the slot
+    /// it names, the reporter, and the agreed tick all come back unchanged.
+    #[test]
+    fn a_host_loss_frame_round_trips_through_the_shared_envelope() {
+        let frame = MeshFrame::HostLoss(HostLossFrame {
+            from: HostSlot(1),
+            lost: HostSlot(3),
+            tick: 418,
+        });
+        let text = super::encode_mesh_frame(&frame).expect("encodes");
+        assert!(text.contains("\"m\":3"), "the revision travels: {text}");
+        assert!(text.contains("\"t\":\"host-loss\""), "{text}");
+        assert!(
+            text.contains("\"lost\":3"),
+            "the slot whose host left must survive the wire: {text}"
+        );
+        assert!(
+            text.contains("\"tick\":418"),
+            "the agreed disconnect tick must survive the wire: {text}"
+        );
+        assert_eq!(super::decode_mesh_frame(&text), Some(frame));
     }
 
     /// No session token can reach this wire, because the type it projects from

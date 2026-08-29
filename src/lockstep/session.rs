@@ -37,7 +37,7 @@
 //! merged history: an entry says which host issued it and where it sat, rather
 //! than depending on a receiver's memory of what arrived when.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::command_admission::log::HostSlot;
 
@@ -72,6 +72,13 @@ pub struct LockstepSession {
     /// never waits for itself, and an entry for it would be a second copy of
     /// `SimTick` that could disagree with the real one.
     ready_through: BTreeMap<HostSlot, u64>,
+    /// Peers whose host has left (issue #1119). A departed slot is removed from
+    /// `ready_through` and remembered here so a `TickFrame` from it that was in
+    /// flight when the socket closed — delivered late or out of order — cannot
+    /// re-insert it as something to wait for again. This is the barrier half of
+    /// "reordered, delayed and duplicate disconnect observations converge on the
+    /// same single transition" (AC5).
+    departed: BTreeSet<HostSlot>,
 }
 
 impl LockstepSession {
@@ -93,6 +100,7 @@ impl LockstepSession {
             local,
             delay,
             ready_through,
+            departed: BTreeSet::new(),
         }
     }
 
@@ -129,13 +137,52 @@ impl LockstepSession {
     /// the property #1119 needs of every mesh observation and is cheaper to
     /// build in here than to bolt on there.
     pub fn observe(&mut self, from: HostSlot, ready_through: u64) {
-        if from == self.local {
+        if from == self.local || self.departed.contains(&from) {
             return;
         }
         let entry = self.ready_through.entry(from).or_insert(0);
         if ready_through > *entry {
             *entry = ready_through;
         }
+    }
+
+    /// The last watermark this host heard from `slot`, or `None` for a slot it
+    /// does not wait for (its own, or one that has already departed).
+    ///
+    /// This is the observation issue #1119's disconnect tick is a function of:
+    /// the lost host's own last declared `ready_through`, which reliable
+    /// delivery gave every survivor identically, so every survivor derives the
+    /// same [`agreed_loss_tick`](crate::lockstep::host_loss::agreed_loss_tick)
+    /// from it without asking anybody when they noticed.
+    pub fn watermark_of(&self, slot: HostSlot) -> Option<u64> {
+        self.ready_through.get(&slot).copied()
+    }
+
+    /// Stop waiting for a departed host (issue #1119).
+    ///
+    /// Removing the slot from the wait-set is what lets the barrier resume: a
+    /// fleet stalled at the first tick a vanished host never covered
+    /// (`watermark + 1`) runs again the instant that host stops being one it
+    /// waits for. It is deliberately only the barrier half of the transition —
+    /// the ship's flip to Backfill is a tick-stamped event applied at
+    /// `agreed_loss_tick`, so this may run frame-driven the moment the loss is
+    /// observed without moving any folded state. Idempotent: departing a slot
+    /// already gone, or one that was never a peer, changes nothing.
+    ///
+    /// A departed slot's watermark is forgotten and the slot is remembered as
+    /// gone, so a duplicate or reordered report — or a `TickFrame` from the lost
+    /// host still in flight — cannot resurrect it as something to wait for again.
+    pub fn depart(&mut self, slot: HostSlot) {
+        if slot == self.local {
+            return;
+        }
+        self.ready_through.remove(&slot);
+        self.departed.insert(slot);
+    }
+
+    /// Whether `slot`'s host has left this fleet.
+    pub fn has_departed(&self, slot: HostSlot) -> bool {
+        self.departed.contains(&slot)
     }
 
     /// The watermark this host declares having reached `tick`.
@@ -252,6 +299,48 @@ mod tests {
             vec![(HostSlot(2), 30), (HostSlot(3), 12)],
             "sorted by slot, so two hosts report the same stall identically"
         );
+    }
+
+    /// A departed peer stops being one this host waits for, so the barrier that
+    /// was withholding the tick past its watermark runs again — and a repeated
+    /// or reordered departure report is inert rather than a resurrection.
+    #[test]
+    fn a_departed_peer_is_no_longer_waited_for() {
+        let mut session = LockstepSession::new(HostSlot(1), [HostSlot(2), HostSlot(3)], DELAY);
+        session.observe(HostSlot(2), 30);
+        session.observe(HostSlot(3), 12);
+
+        // The lost host's last watermark is the observation the disconnect tick
+        // is derived from — read the same on every survivor.
+        assert_eq!(session.watermark_of(HostSlot(3)), Some(12));
+        // Stalled at tick 13 waiting on slot 3.
+        assert!(session.stall_at(13).is_some());
+
+        session.depart(HostSlot(3));
+        assert_eq!(session.watermark_of(HostSlot(3)), None);
+        assert!(
+            session.stall_at(13).is_none(),
+            "once slot 3 has departed, the fleet no longer waits for the ticks \
+             it never covered"
+        );
+        // Slot 2 is still a peer, so the fleet is not alone and still stalls for
+        // it beyond its own watermark.
+        assert!(!session.is_alone());
+        assert!(session.stall_at(31).is_some());
+
+        // A duplicate departure, and a `TickFrame` from the lost host that was
+        // in flight when it closed, both change nothing: a departed peer stays
+        // departed rather than being resurrected as something to wait for.
+        session.depart(HostSlot(3));
+        session.observe(HostSlot(3), 99);
+        assert!(session.has_departed(HostSlot(3)));
+        assert_eq!(
+            session.watermark_of(HostSlot(3)),
+            None,
+            "a late frame from a departed host must not re-insert it — that \
+             would re-stall the fleet on a peer that will never speak again"
+        );
+        assert!(session.stall_at(31).is_some(), "…but slot 2 still holds tick 31");
     }
 
     /// The watermark a host declares is its own clock plus the agreed delay —

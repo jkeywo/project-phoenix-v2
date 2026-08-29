@@ -203,10 +203,11 @@ impl Host {
     /// when this host has no ship for that slot. A crewed ship has at least one;
     /// a fully backfilled one has zero.
     fn human_systems_of(&mut self, slot: HostSlot) -> Option<usize> {
-        let mut q = self
-            .app
-            .world_mut()
-            .query::<(&ShipConfigComponent, &ShipSystemControlSources, &FleetSlotOf)>();
+        let mut q = self.app.world_mut().query::<(
+            &ShipConfigComponent,
+            &ShipSystemControlSources,
+            &FleetSlotOf,
+        )>();
         for (config, sources, slot_of) in q.iter(self.app.world()) {
             if slot_of.0 != slot {
                 continue;
@@ -278,7 +279,11 @@ fn thrust(value: f32) -> SystemControlPayload {
 /// crew steering and throttling its own ship, so all three ships are genuinely
 /// under way — and slot 3's under a HUMAN — before it is dropped.
 fn warmed_fleet(warmup: u64) -> Vec<Host> {
-    let mut hosts = vec![Host::new(SLOT_ONE), Host::new(SLOT_TWO), Host::new(SLOT_THREE)];
+    let mut hosts = vec![
+        Host::new(SLOT_ONE),
+        Host::new(SLOT_TWO),
+        Host::new(SLOT_THREE),
+    ];
     let orders: &[(u64, HostSlot, &str, SystemControlPayload)] = &[
         (10, SLOT_ONE, "helm-thrust", thrust(0.8)),
         (10, SLOT_TWO, "helm-thrust", thrust(0.6)),
@@ -360,7 +365,11 @@ fn a_dropped_host_backfills_at_an_agreed_tick_and_survivors_stay_in_lockstep() {
         expected_loss_tick,
         {
             let session = hosts[1].app.world().resource::<FleetLockstep>();
-            agreed_loss_tick(session.watermark_of(SLOT_THREE).expect("host two heard slot 3"))
+            agreed_loss_tick(
+                session
+                    .watermark_of(SLOT_THREE)
+                    .expect("host two heard slot 3"),
+            )
         },
         "both survivors must derive the SAME disconnect tick from slot 3's own \
          watermark — the agreement is peer-independent"
@@ -462,8 +471,7 @@ fn a_dropped_host_backfills_at_an_agreed_tick_and_survivors_stay_in_lockstep() {
     }
 
     // Anti-vacuity: the run actually simulated something worth agreeing about.
-    let distinct: std::collections::BTreeSet<u64> =
-        digests[0].iter().map(|(_, d)| *d).collect();
+    let distinct: std::collections::BTreeSet<u64> = digests[0].iter().map(|(_, d)| *d).collect();
     assert!(
         distinct.len() > AFTER as usize / 2,
         "only {} distinct digests — the mission is coasting, not simulating",

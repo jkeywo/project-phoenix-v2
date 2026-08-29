@@ -340,7 +340,10 @@ mod tests {
             "a late frame from a departed host must not re-insert it — that \
              would re-stall the fleet on a peer that will never speak again"
         );
-        assert!(session.stall_at(31).is_some(), "…but slot 2 still holds tick 31");
+        assert!(
+            session.stall_at(31).is_some(),
+            "…but slot 2 still holds tick 31"
+        );
     }
 
     /// The watermark a host declares is its own clock plus the agreed delay —

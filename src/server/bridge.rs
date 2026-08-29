@@ -1156,9 +1156,7 @@ fn drain_mesh_inbound(world: &mut World) {
         // (issue #1119); reversing it flips Backfill one tick early here and
         // diverges the fold, which `tests/lockstep_backfill.rs`'s star-topology
         // case guards.
-        let departed = departed
-            .into_iter()
-            .map(crate::command_admission::HostSlot);
+        let departed = departed.into_iter().map(crate::command_admission::HostSlot);
         for frame in crate::lockstep::order_mesh_inbound(decoded, departed) {
             inbox.push(frame);
         }

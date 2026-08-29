@@ -322,7 +322,10 @@ mod tests {
     fn reports_converge_on_one_transition_at_one_tick() {
         let mut pending = PendingHostLoss::default();
         // First report from one survivor.
-        assert!(pending.observe(HostSlot(3), 100), "a first report changes the picture");
+        assert!(
+            pending.observe(HostSlot(3), 100),
+            "a first report changes the picture"
+        );
         // A duplicate at the same tick changes nothing and asks for no re-broadcast.
         assert!(!pending.observe(HostSlot(3), 100));
         // A second survivor's report derived a higher tick (it had heard one more

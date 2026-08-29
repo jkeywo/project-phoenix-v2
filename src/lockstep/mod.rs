@@ -512,10 +512,7 @@ pub fn register_lockstep(app: &mut App) {
             // and ratings that flip are classified where they already live. The
             // queue is empty on any host that has lost nobody, which is every
             // host in a healthy fleet and every solo run.
-            .declare_state::<host_loss::PendingHostLoss>(
-                StateClass::Timer,
-                "fleet-lockstep-state",
-            );
+            .declare_state::<host_loss::PendingHostLoss>(StateClass::Timer, "fleet-lockstep-state");
     }
     app.init_resource::<FleetRoster>()
         .init_resource::<MeshInbox>()

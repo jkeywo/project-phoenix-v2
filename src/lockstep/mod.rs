@@ -65,6 +65,7 @@ use crate::logging::LogCat;
 
 pub mod frame;
 pub mod host_loss;
+pub mod recovery_plan;
 pub mod session;
 pub mod snapshot_relay;
 pub mod transfer;

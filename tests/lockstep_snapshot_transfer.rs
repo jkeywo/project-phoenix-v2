@@ -73,7 +73,6 @@ const CAPTURE_AT: u64 = 400;
 const CONTINUE_FOR: u64 = 120;
 
 const SLOT_SENDER: HostSlot = HostSlot(1);
-const SLOT_RECEIVER: HostSlot = HostSlot(2);
 const TRANSFER_ID: u64 = 0x1117_0000_0000_0001;
 
 fn args() -> HeadlessArgs {

@@ -52,6 +52,12 @@ use crate::lobby::{InboundMessage, OutboundMessage, PlayerDisconnected};
 use crate::logging::{LogCat, LogFilterConfig};
 
 /// Something a transport observed and is handing the simulation.
+///
+/// `Received` is larger than `Disconnected` (it carries a whole
+/// `ClientMessage`), but this is a low-frequency control event on the ingress
+/// seam — not a hot-loop value — so the size difference costs nothing and
+/// boxing would only add indirection to the common path.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum TransportEvent {
     /// A decoded client message from `token`. Decoded, not raw JSON: a network

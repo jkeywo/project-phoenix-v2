@@ -337,7 +337,7 @@ fn a_chunk_from_another_transfer_is_refused() {
     );
     // The original transfer is intact and still completes.
     rx.accept(&a[1]).expect("A continues");
-    assert!(matches!(rx.accept(&a[0]), Ok(_)), "A still live");
+    assert!(rx.accept(&a[0]).is_ok(), "A still live");
 }
 
 /// The same sequence resent identically is inert; resent with different bytes is
@@ -375,7 +375,9 @@ fn the_bounds_are_internally_consistent() {
         SNAPSHOT_MAX_CHUNKS as usize,
         SNAPSHOT_MAX_TRANSFER_BYTES / SNAPSHOT_CHUNK_BYTES
     );
-    assert!(
+    // A compile-time invariant, not a runtime one: a chunk must fit any single
+    // codepoint (up to 4 bytes) so the UTF-8-boundary split can always progress.
+    const _: () = assert!(
         SNAPSHOT_CHUNK_BYTES >= 4,
         "a chunk must fit any single codepoint"
     );

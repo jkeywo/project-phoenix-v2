@@ -74,6 +74,7 @@
 
 pub mod document;
 pub mod identity;
+pub mod recovery;
 pub mod registry;
 pub mod routing;
 pub mod surface;
@@ -195,6 +196,12 @@ impl LocalPanes {
     ) -> Result<(), DocumentError> {
         let body = build_pane_document(client_index_html)?;
         self.bus.attach_documents(documents.clone());
+        // Arm recreation with the same body and host address every pane loaded
+        // from, so a pane brought back after a crash (issue #1125) rebuilds an
+        // identical document at a fresh nonce — the in-process analogue of a
+        // reconnecting phone reloading the same client page.
+        self.bus
+            .arm_recreation(self.host_addr.clone(), body.clone());
         for pane in &self.opened {
             self.bus.publish_document(
                 pane.id,
@@ -219,6 +226,7 @@ impl LocalPanes {
 pub struct PaneBusResource(pub PaneBus);
 
 pub use identity::{IdentityRefusal, PaneIdentity};
+pub use recovery::{service_faults, FaultOutcome, PaneFault};
 pub use registry::{PaneDispatch, PaneId, PaneLifecycle, PaneRegistry};
 pub use routing::pane_receives;
 pub use surface::{pump_pane, PanePumpReport, PaneSurface, PaneSurfaceError, RecordingSurface};

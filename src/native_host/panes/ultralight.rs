@@ -65,6 +65,7 @@ use vellum_ultralight::staging;
 use crate::logging::{LogCat, LogFilterConfig};
 
 use super::document::pane_drain_script;
+use super::recovery::{service_faults, PaneFault};
 use super::registry::PaneId;
 use super::surface::{pump_pane, PaneSurface, PaneSurfaceError};
 use super::PaneBusResource;
@@ -227,6 +228,17 @@ impl PaneSurface for UltralightPaneSurface {
     }
 }
 
+/// How many consecutive frames a pane's frame copy may fail before the view is
+/// treated as crashed (issue #1125).
+///
+/// A `copy_frame` error is ordinarily transient — a repaint mid-flight, a buffer
+/// not ready — so a single one is not a crash. A view that has genuinely died
+/// (a lost surface, a renderer that stopped answering) fails *every* frame, so a
+/// short run of consecutive failures is the honest crash signal. Sized to about
+/// half a second at 60 fps: long enough not to fire on a blip, short enough that
+/// a dead console flips its station to Backfill promptly.
+const VIEW_CRASH_COPY_FAILURES: u32 = 30;
+
 /// One pane on screen: its view, its texture, and where it sits.
 struct PaneWindow {
     id: PaneId,
@@ -236,6 +248,19 @@ struct PaneWindow {
     /// be despawned rather than left on screen showing a page nothing talks to.
     canvas: Entity,
     /// Top-left corner in physical pixels, within the primary window.
+    origin: (u32, u32),
+    size: (u32, u32),
+    /// Consecutive frames whose copy failed. Reset on any success; a run past
+    /// [`VIEW_CRASH_COPY_FAILURES`] faults the pane as a crashed view (#1125).
+    copy_failures: u32,
+}
+
+/// Where a named pane's view sits, kept so a pane recreated after a crash
+/// (issue #1125) rebuilds in the same place — its participant name is stable
+/// across the recreation, its [`PaneId`] is not.
+#[derive(Clone)]
+struct PaneSlotGeometry {
+    name: String,
     origin: (u32, u32),
     size: (u32, u32),
 }
@@ -251,6 +276,13 @@ pub struct PaneHost {
     /// Which pane last had the pointer over it. Ultralight drops input into an
     /// unfocused view, so exactly one pane holds focus at a time.
     focused: Option<usize>,
+    /// Each named pane's on-screen slot, so a recreated pane rebuilds where its
+    /// predecessor sat. Built once at init from the tiling; a name that is not
+    /// here has no home and its recreated view is skipped with a warning.
+    layout: Vec<PaneSlotGeometry>,
+    /// The primary window's device scale, captured at init for building a
+    /// recreated pane's spec and node.
+    scale: f64,
 }
 
 /// Set once initialisation has hard-failed, so it stops retrying every frame.
@@ -345,15 +377,25 @@ fn init_pane_host(world: &mut World) {
         }
     };
 
+    // The bus, for resolving each pane's participant name into the layout that a
+    // recreated pane (issue #1125) rebuilds against.
+    let bus = world.resource::<PaneBusResource>().clone();
+
     // Even left-to-right tiles. Issue #1123 owns real bridge display profiles;
     // this is enough to operate one station and to see two side by side.
     let count = config.panes.len() as u32;
     let tile_width = (window_width / count).max(1);
     let mut windows = Vec::new();
+    let mut layout: Vec<PaneSlotGeometry> = Vec::new();
     for (index, (id, url)) in config.panes.iter().enumerate() {
         let (id, url) = (*id, url.as_str());
         let origin = (tile_width * index as u32, 0);
         let size = (tile_width, window_height);
+        // Record this pane's slot by its stable participant name, so a pane
+        // recreated after a view crash reopens in the same place.
+        if let Some(name) = bus.0.name_of(id) {
+            layout.push(PaneSlotGeometry { name, origin, size });
+        }
         let spec = PaneSpec {
             width: size.0,
             height: size.1,
@@ -421,6 +463,7 @@ fn init_pane_host(world: &mut World) {
             canvas,
             origin,
             size,
+            copy_failures: 0,
         });
         // The URL is NOT logged: it carries this pane's session token in its
         // fragment, and an operator log is a file, a scrollback and a
@@ -439,6 +482,8 @@ fn init_pane_host(world: &mut World) {
         runtime,
         windows,
         focused: None,
+        layout,
+        scale,
     });
 }
 
@@ -566,6 +611,10 @@ fn drive_panes(
     // live page's records into a registry that refuses them, once per frame,
     // for the rest of the run.
     retire_closed_panes(&mut host, &bus, &mut commands, &log);
+    // Panes recreated after a fault (issue #1125) get a fresh view here, BEFORE
+    // the frame drives them, so a pane brought back on the same identity reloads
+    // its console and reconnects — the in-process analogue of a phone redialling.
+    open_pending_views(&mut host, &bus, &mut images, &mut commands, &log);
     host.runtime.update();
 
     let mut pushed_this_frame = vec![false; host.windows.len()];
@@ -602,40 +651,195 @@ fn drive_panes(
         // changed and Ultralight's dirty-bounds tracking does not always flag
         // it.
         match pane.surface.view.copy_frame(data, pushed_this_frame[index]) {
-            Ok(_) => {}
-            Err(e) => crate::pwarn!(log, LogCat::Lobby, "pane host: {}: {e}", pane.id),
+            Ok(_) => pane.copy_failures = 0,
+            Err(e) => {
+                pane.copy_failures += 1;
+                crate::pwarn!(
+                    log,
+                    LogCat::Lobby,
+                    "pane host: {} frame copy failed ({}/{}): {e}",
+                    pane.id,
+                    pane.copy_failures,
+                    VIEW_CRASH_COPY_FAILURES
+                );
+                // A view that fails EVERY frame has crashed — a lost surface, a
+                // renderer that stopped answering — where a one-off failure is a
+                // transient. A run past the threshold is the honest crash signal
+                // (issue #1125): fault it so it rides the same close → Backfill →
+                // recreate path an inbox overflow does.
+                if pane.copy_failures >= VIEW_CRASH_COPY_FAILURES {
+                    bus.0.fault(pane.id, PaneFault::ViewCrashed);
+                }
+            }
         }
     }
 
-    // A pane whose page stopped draining has lost state it cannot recover by
-    // waiting. Closing it hands the lobby the same disconnect a dropped phone
-    // produces, and the station flips to Backfill rather than sitting in front
-    // of a page that has quietly stopped agreeing with the simulation.
+    // Service every faulted pane — a page that stopped draining (inbox overflow)
+    // or a view that crashed (issue #1125). Each is closed, which hands the lobby
+    // the same disconnect a dropped phone produces so its station flips to
+    // Backfill; a crash also recreates the pane on the same identity, whose view
+    // `open_pending_views` builds next frame so the human reconnects.
     //
     // `PaneBus::close` also withdraws the pane's document, so its path stops
     // resolving. The VIEW goes at the top of the next frame, through
-    // `retire_closed_panes` — one path for every way a pane can be closed
-    // rather than a teardown that only the fault route remembers to do.
-    for id in bus.0.take_faulted() {
-        crate::pwarn!(
-            log,
-            LogCat::Lobby,
-            "pane host: {id} stopped draining its console and overflowed its reliable \
-             backlog — closing it, so its station falls back to AI control"
-        );
-        bus.0.close(id);
+    // `retire_closed_panes` — one path for every way a pane can be closed rather
+    // than a teardown that only the fault route remembers to do.
+    for outcome in service_faults(&bus.0) {
+        match &outcome.recreated {
+            Some((new_id, _)) => crate::pwarn!(
+                log,
+                LogCat::Lobby,
+                "pane host: {} {} — closing it (its station falls back to AI control) and \
+                 reopening it as {} on the same identity so the console reconnects",
+                outcome.failed,
+                outcome.fault.reason(),
+                new_id
+            ),
+            None => crate::pwarn!(
+                log,
+                LogCat::Lobby,
+                "pane host: {} {} — closing it, so its station falls back to AI control",
+                outcome.failed,
+                outcome.fault.reason()
+            ),
+        }
     }
+}
+
+/// Build an Ultralight view for every pane recreated after a fault (issue #1125).
+///
+/// A recreated pane carries the same participant identity as the one it replaces,
+/// so it rebuilds in that name's stored [`PaneSlotGeometry`] — the same tile on
+/// screen — and reloads the same console. A name with no stored slot (which
+/// should not happen for a recreation) is skipped with a warning rather than
+/// guessed at.
+fn open_pending_views(
+    host: &mut PaneHost,
+    bus: &PaneBusResource,
+    images: &mut Assets<Image>,
+    commands: &mut Commands,
+    log: &Option<Res<LogFilterConfig>>,
+) {
+    for (new_id, url) in bus.0.take_pending_views() {
+        let Some(name) = bus.0.name_of(new_id) else {
+            continue;
+        };
+        let Some(slot) = host.layout.iter().find(|s| s.name == name).cloned() else {
+            crate::pwarn!(
+                log,
+                LogCat::Lobby,
+                "pane host: recreated {new_id} ({name}) has no stored layout slot; its view is \
+                 not rebuilt — its station stays on AI control"
+            );
+            continue;
+        };
+        match make_pane_view(
+            &host.runtime,
+            images,
+            commands,
+            new_id,
+            &url,
+            slot.origin,
+            slot.size,
+            host.scale,
+        ) {
+            Ok(window) => {
+                host.windows.push(window);
+                crate::pinfo!(
+                    log,
+                    LogCat::Lobby,
+                    "pane host: {new_id} ({name}) recreated after a fault — reloading its \
+                     console to reconnect on the same identity"
+                );
+            }
+            Err(e) => crate::pwarn!(
+                log,
+                LogCat::Lobby,
+                "pane host: could not rebuild the view for {new_id} ({name}): {e}"
+            ),
+        }
+    }
+}
+
+/// Create one pane's Ultralight view, its texture and its on-screen canvas, at
+/// `origin`/`size` (issue #1125's recreation path).
+///
+/// The same construction `init_pane_host` does inline, but against
+/// `Assets<Image>`/`Commands` rather than an exclusive `&mut World`, because
+/// `drive_panes` is an ordinary system. A creation or load failure here fails
+/// only THIS pane — its station simply stays on Backfill — rather than the whole
+/// host, which is right for a recovery path.
+fn make_pane_view(
+    runtime: &UltralightRuntime,
+    images: &mut Assets<Image>,
+    commands: &mut Commands,
+    id: PaneId,
+    url: &str,
+    origin: (u32, u32),
+    size: (u32, u32),
+    scale: f64,
+) -> Result<PaneWindow, PaneSurfaceError> {
+    let spec = PaneSpec {
+        width: size.0,
+        height: size.1,
+        device_scale: scale,
+        transparent: false,
+        session: Some(PaneSession::ephemeral(id.to_string())),
+    };
+    let view = runtime
+        .create_pane(&spec)
+        .map_err(|e| PaneSurfaceError::Load(e.to_string()))?;
+    let mut surface = UltralightPaneSurface::new(view);
+    surface.load(url)?;
+    let image = Image::new_fill(
+        Extent3d {
+            width: size.0,
+            height: size.1,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        &[0, 0, 0, 255],
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+    );
+    let handle = images.add(image);
+    let canvas = commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(origin.0 as f32 / scale as f32),
+                top: Val::Px(origin.1 as f32 / scale as f32),
+                width: Val::Px(size.0 as f32 / scale as f32),
+                height: Val::Px(size.1 as f32 / scale as f32),
+                ..default()
+            },
+            ImageNode::new(handle.clone()),
+            PaneCanvas,
+        ))
+        .id();
+    Ok(PaneWindow {
+        id,
+        surface,
+        image: handle,
+        canvas,
+        origin,
+        size,
+        copy_failures: 0,
+    })
 }
 
 /// Tear down the view of every pane the bus no longer lists as open.
 ///
-/// **Reopening is out of scope**, and deliberately: a pane's identity is minted
-/// once and its `PaneId` is never reissued (`super::registry::PaneRegistry`),
-/// so "reopen" would mean a fresh participant taking the seat rather than the
-/// same one coming back. A closed pane's station is held and flipped to
-/// `Backfill`, exactly as a dropped phone's is, and the mission carries on with
-/// AI at that console. Restoring a human there is the ordinary reconnect the
-/// browser client already has, and it needs issue #1112's transport.
+/// A closed pane's station is held and flipped to `Backfill`, exactly as a
+/// dropped phone's is, and the mission carries on with AI at that console.
+///
+/// **Recreation is a separate step, and a separate identity question** (issue
+/// #1125). This only tears down; [`open_pending_views`] builds a *new* view for a
+/// pane the bus recreated after a crash. That recreated pane keeps the same
+/// participant *token* (so its page's `Identify` is a reconnect the lobby answers
+/// by restoring the held station) but gets a new `PaneId` — ids are never
+/// reissued (`super::registry::PaneRegistry`) — so the two steps never collide:
+/// this retires the old handle's view, `open_pending_views` opens the new one's.
 ///
 /// Each closure is logged **once**, because the window is gone afterwards.
 fn retire_closed_panes(

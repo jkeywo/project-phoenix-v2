@@ -47,7 +47,9 @@ use crate::core::messages::ClientMessage;
 use crate::delivery::serve::HostedDocuments;
 use crate::native_host::transport::{NativeTransport, TransportDispatch, TransportEvent};
 
+use super::document::{mint_document_nonce, pane_document_path, pane_url};
 use super::identity::PaneIdentity;
+use super::recovery::PaneFault;
 use super::registry::{OutboundVerdict, PaneDispatch, PaneId, PaneRegistry};
 use super::routing::pane_receives;
 
@@ -89,15 +91,29 @@ struct BusState {
     /// which is what keeps the station held and flips it to `Backfill`, the same
     /// treatment a phone that walked out of range gets.
     departing: Vec<TransportEvent>,
-    /// Panes that overflowed their reliable budget. A Bevy system reports and
-    /// closes them; see [`PaneBus::take_faulted`].
-    faulted: Vec<PaneId>,
+    /// Panes that failed since the last poll, each with why (issue #1125). A
+    /// Bevy system reports and closes them — and, for a view crash, recreates
+    /// them; see [`PaneBus::take_faulted`] and [`super::recovery::service_faults`].
+    faulted: Vec<(PaneId, PaneFault)>,
     /// The host's in-memory HTTP publications, so a closed pane's document can
     /// be withdrawn. `None` in a test that never published one.
     documents: Option<HostedDocuments>,
     /// Where each pane's document is published. Keyed by pane, because that is
     /// what closing knows about.
     document_paths: BTreeMap<PaneId, String>,
+    /// What a recreated pane's document is rebuilt from (issue #1125): the
+    /// connectable host address and the pane document body, armed once by
+    /// [`LocalPanes::publish`](super::LocalPanes::publish). `None` in a test that
+    /// never published a document — a recreated pane then opens with no URL and
+    /// no served page, which is fine, because the session token a reconnect needs
+    /// is minted regardless.
+    recovery_template: Option<(String, String)>,
+    /// Panes opened by [`PaneBus::recreate`] whose Ultralight view has not been
+    /// built yet, each with the URL its view should navigate to. Drained once per
+    /// frame by the pane host; empty on a host with no `ultralight` feature,
+    /// where a recreated pane's station simply stays on Backfill until the
+    /// operator repairs it.
+    pending_views: Vec<(PaneId, String)>,
 }
 
 /// The shared pane registry: cheap to clone, every clone the same panes.
@@ -313,8 +329,108 @@ impl PaneBus {
     /// The two caps divide the same problem the way the two sides can each see
     /// it: the page knows it is not draining, and only the host knows which
     /// messages may be dropped to make room.
-    pub fn take_faulted(&self) -> Vec<PaneId> {
+    ///
+    /// Since issue #1125 the list carries a [`PaneFault`] per pane, because a
+    /// reliable overflow and a crashed view are both faults but recover
+    /// differently — see [`super::recovery::service_faults`].
+    pub fn take_faulted(&self) -> Vec<(PaneId, PaneFault)> {
         std::mem::take(&mut self.lock().faulted)
+    }
+
+    /// Report that an open pane has failed for `reason` (issue #1125).
+    ///
+    /// The other end of [`take_faulted`](Self::take_faulted): the pane host calls
+    /// this when it *notices* a fault the queue cannot — an Ultralight view that
+    /// stopped answering, a lost surface — so that fault rides the same
+    /// close → Backfill (→ recreate) path a reliable overflow does. Idempotent
+    /// per pane: a view that fails every frame is reported once until serviced.
+    /// A closed or unknown pane is ignored — there is nothing left to fail.
+    pub fn fault(&self, id: PaneId, reason: PaneFault) {
+        let mut state = self.lock();
+        if state.registry.get_mut(id).is_none() {
+            return;
+        }
+        if !state.faulted.iter().any(|(existing, _)| *existing == id) {
+            state.faulted.push((id, reason));
+        }
+    }
+
+    /// Arm the bus to rebuild a recreated pane's document (issue #1125).
+    ///
+    /// Called once by [`LocalPanes::publish`](super::LocalPanes::publish) with
+    /// the connectable host address and the pane document body — the two things
+    /// [`recreate`](Self::recreate) needs to publish a fresh document and build a
+    /// URL for a pane brought back on the same identity.
+    pub fn arm_recreation(&self, host_addr: String, document_body: String) {
+        self.lock().recovery_template = Some((host_addr, document_body));
+    }
+
+    /// Reopen a (closed) pane on the **same identity**, so the human reconnects
+    /// as the same participant (issue #1125).
+    ///
+    /// The in-process analogue of a browser client's automatic redial: a fresh
+    /// pane with a new [`PaneId`] but the *same session token*, so its page's
+    /// `Identify` is a reconnect the lobby answers by restoring the held station
+    /// (reconnect-yield) and pushing the current projection. The old pane's
+    /// record — kept `Closed`, never reissued — is where the identity is read
+    /// from, so this is safe to call after [`close`](Self::close).
+    ///
+    /// When the bus was armed ([`arm_recreation`](Self::arm_recreation)) the new
+    /// pane's document is published at a fresh nonce'd path and a URL is returned
+    /// for its view to navigate to; otherwise the pane opens with an empty URL
+    /// (all a seam-level reconnect needs is the token). The new pane is also
+    /// queued in [`take_pending_views`](Self::take_pending_views) for the pane
+    /// host to build a view for.
+    ///
+    /// Returns `None` only if `closed_id` names no pane at all.
+    pub fn recreate(&self, closed_id: PaneId) -> Option<(PaneId, String)> {
+        let mut state = self.lock();
+        let identity = state.registry.get(closed_id)?.identity().clone();
+        let new_id = state.registry.open(identity.clone());
+        let url = match state.recovery_template.clone() {
+            Some((host_addr, body)) => {
+                let nonce = mint_document_nonce();
+                let path = pane_document_path(new_id, &nonce);
+                if let Some(documents) = &state.documents {
+                    documents.publish(path.clone(), body);
+                    state.document_paths.insert(new_id, path);
+                }
+                pane_url(&host_addr, new_id, &nonce, &identity)
+            }
+            None => String::new(),
+        };
+        state.pending_views.push((new_id, url.clone()));
+        Some((new_id, url))
+    }
+
+    /// Panes recreated since the last call, each with the URL its view should
+    /// navigate to (issue #1125). Drained by the pane host, which builds one
+    /// Ultralight view per entry.
+    pub fn take_pending_views(&self) -> Vec<(PaneId, String)> {
+        std::mem::take(&mut self.lock().pending_views)
+    }
+
+    /// The participant name of an open pane, if any. The pane host looks a
+    /// recreated pane's stored geometry up by name (issue #1125), and the runtime
+    /// display watcher maps a lost monitor's pane labels to the panes to fail.
+    pub fn name_of(&self, id: PaneId) -> Option<String> {
+        self.lock()
+            .registry
+            .get(id)
+            .map(|p| p.identity().name().to_string())
+    }
+
+    /// The first open pane joining under `name`, if any (issue #1125).
+    ///
+    /// The runtime display watcher uses this to turn a lost Station monitor's
+    /// pane labels (participant names, from the bridge profile) into the pane
+    /// handles whose tokens must disconnect.
+    pub fn open_pane_for_name(&self, name: &str) -> Option<PaneId> {
+        self.lock()
+            .registry
+            .open_panes()
+            .find(|p| p.identity().name() == name)
+            .map(|p| p.id())
     }
 
     /// A [`NativeTransport`] over these panes.
@@ -383,8 +499,8 @@ impl NativeTransport for PaneTransport {
         // overflows on every dispatch, and the caller's answer is to close it
         // once.
         for id in faulted {
-            if !state.faulted.contains(&id) {
-                state.faulted.push(id);
+            if !state.faulted.iter().any(|(existing, _)| *existing == id) {
+                state.faulted.push((id, PaneFault::ReliableOverflow));
             }
         }
     }
@@ -611,7 +727,7 @@ mod tests {
                 delivery: DeliveryClass::Reliable,
             });
         }
-        assert_eq!(bus.take_faulted(), vec![id]);
+        assert_eq!(bus.take_faulted(), vec![(id, PaneFault::ReliableOverflow)]);
         assert!(bus.take_faulted().is_empty(), "reported once per overflow");
     }
 }

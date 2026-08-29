@@ -143,6 +143,11 @@ impl Delivery {
             content_dir: ".".to_string(),
             skip_bundle_check: true,
             sim: None,
+            // Issue #1123's bridge-display flags. Neither claim in this file is
+            // about them; `src/delivery/args.rs`'s own tests and
+            // `src/native_host/bridge_profile.rs`'s cover `--setup`/`--profile`.
+            setup: false,
+            profile: None,
         };
         let server = HostServer::bind(&args).expect("the delivery host binds");
         let addr = server.local_addr();

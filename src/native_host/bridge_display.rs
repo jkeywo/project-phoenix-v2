@@ -40,8 +40,8 @@ use bevy::window::{Monitor, MonitorSelection, PrimaryMonitor, PrimaryWindow, Win
 use crate::logging::{LogCat, LogFilterConfig};
 
 use super::bridge_profile::{
-    identify, pane_rects, resolve, DisplayRole, MonitorGeometry, PaneRect, RawMonitor,
-    ValidatedProfile,
+    identify, pane_rects, resolve, runtime_display_losses, runtime_display_returns, DisplayRole,
+    MonitorGeometry, MonitorIdentity, PaneRect, RawMonitor, ValidatedProfile,
 };
 
 /// The validated bridge profile a native host applies to its displays.
@@ -116,6 +116,15 @@ impl Plugin for BridgeDisplayPlugin {
         app.add_systems(
             Update,
             apply_bridge_profile.run_if(resource_exists::<BridgeDisplayConfig>),
+        )
+        .add_systems(
+            Update,
+            // Only after the profile has been applied, so the watcher's first
+            // observation is the baseline it diffs against — see the system's
+            // own note. A no-op until then, and on a host with no profile.
+            watch_runtime_displays
+                .run_if(resource_exists::<BridgeDisplayConfig>)
+                .run_if(resource_exists::<BridgeDisplayApplied>),
         );
     }
 }
@@ -296,6 +305,96 @@ pub fn apply_bridge_profile(world: &mut World) {
 
     world.insert_resource(BridgeStationSurfaces(station_surfaces));
     world.insert_resource(BridgeDisplayApplied);
+}
+
+// ── runtime display loss (issue #1125) ──────────────────────────────────────
+
+/// Watch the live monitor set and react to a configured display lost — or
+/// returned — **mid-mission** (issue #1125).
+///
+/// [`apply_bridge_profile`] runs once, at setup, and reports a profile-vs-hardware
+/// mismatch it finds then ([`super::bridge_profile::ProfileProblem`]). This is its
+/// runtime companion: a monitor that *was* present and driving panes and is
+/// unplugged while the mission runs. `bevy_winit` despawns a [`Monitor`] entity
+/// when its display disconnects, so this diffs the identities present this frame
+/// against the previous frame's and, on a change:
+///
+/// * names each lost configured monitor exactly (an authored
+///   [`RuntimeDisplayLoss`](super::bridge_profile::RuntimeDisplayLoss)), never
+///   re-homing its role — the same doctrine [`resolve`] holds at setup;
+/// * closes the panes a lost **Station** carried, so their tokens disconnect and
+///   their stations flip to Backfill through the ordinary dropped-participant
+///   path — *not* a fault, so there is no auto-recreate: the display is gone,
+///   there is nowhere to rebuild a view, and bringing it back is an explicit
+///   repair (see below);
+/// * reports a **returned** monitor for that explicit repair, and does nothing
+///   automatic — re-applying the profile is the deliberate act that places a
+///   surface, so no pane is ever silently moved onto reappeared hardware (AC5).
+///
+/// The `Local` baseline starts unset and is filled on the first frame that sees
+/// any monitor, so the very first observation establishes the ground truth
+/// rather than reporting every present monitor as "new". Gated on
+/// [`BridgeDisplayApplied`] so that baseline is the applied state.
+///
+/// Its pure half — which monitors were lost or returned, and which panes a loss
+/// names — is [`runtime_display_losses`]/[`runtime_display_returns`], tested by
+/// the ordinary `cargo test` runs; this adapter only reads the live monitors and
+/// closes the named panes on the bus. The unplug-and-replug proof itself needs
+/// real hardware and is the `#[ignore]`d `tests/native_bridge_displays.rs`.
+fn watch_runtime_displays(
+    monitors: Query<(&Monitor, Has<PrimaryMonitor>)>,
+    config: Res<BridgeDisplayConfig>,
+    bus: Option<Res<crate::native_host::panes::PaneBusResource>>,
+    log: Option<Res<LogFilterConfig>>,
+    mut baseline: Local<Option<std::collections::HashSet<MonitorIdentity>>>,
+) {
+    let raws: Vec<RawMonitor> = monitors
+        .iter()
+        .map(|(m, primary)| raw_from_monitor(m, primary))
+        .collect();
+    if raws.is_empty() {
+        // No monitors reported this frame — winit has not populated them yet, or
+        // a transient empty frame during a hot-plug. Treating that as "every
+        // display was lost" would be wrong, so wait for a frame that has some.
+        return;
+    }
+    let current: std::collections::HashSet<MonitorIdentity> =
+        identify(&raws).into_iter().map(|d| d.identity).collect();
+
+    // Establish the baseline on the first observed frame, then diff against it.
+    let previous = match baseline.take() {
+        Some(previous) => previous,
+        None => {
+            *baseline = Some(current);
+            return;
+        }
+    };
+    if previous == current {
+        *baseline = Some(previous);
+        return;
+    }
+
+    let assigned = config.profile.assigned_surfaces();
+    for loss in runtime_display_losses(&assigned, &previous, &current) {
+        crate::pwarn!(log, LogCat::Lobby, "bridge display: {loss}");
+        if let Some(bus) = &bus {
+            for label in &loss.pane_labels {
+                if let Some(id) = bus.0.open_pane_for_name(label) {
+                    // The dropped-phone path, deliberately: a plain `close`, which
+                    // owes the lobby one `PlayerDisconnected` and flips the
+                    // station to Backfill. NOT `fault` — a fault would ask the
+                    // pane host to rebuild the view, and there is no display to
+                    // rebuild it on.
+                    bus.0.close(id);
+                }
+            }
+        }
+    }
+    for returned in runtime_display_returns(&assigned, &previous, &current) {
+        crate::pinfo!(log, LogCat::Lobby, "bridge display: {returned}");
+    }
+
+    *baseline = Some(current);
 }
 
 // ── the --setup enumeration mode ──────────────────────────────────────────
@@ -503,5 +602,145 @@ mod tests {
         // catch, so it must not report success.
         let profile = viewscreen_profile("DELL U2720Q@3840x2160");
         assert!(!setup_profile_is_clean(Some(&profile), &[]));
+    }
+
+    // ── runtime display loss watcher (issue #1125) ──────────────────────────
+
+    /// A Bevy [`Monitor`] component as winit would report it. Built by hand — no
+    /// display needed — so the runtime-loss watcher can be driven in CI by
+    /// spawning and despawning these, which is exactly what `bevy_winit` does to
+    /// the entities when a monitor is plugged in or unplugged.
+    fn monitor(name: &str, w: u32, h: u32, x: i32, y: i32) -> Monitor {
+        Monitor {
+            name: Some(name.to_string()),
+            physical_width: w,
+            physical_height: h,
+            physical_position: IVec2::new(x, y),
+            refresh_rate_millihertz: Some(60_000),
+            scale_factor: 1.0,
+            video_modes: Vec::new(),
+        }
+    }
+
+    /// A validated profile: the Dell is the viewscreen (primary), the BenQ a
+    /// Station carrying a pane for `station_label`.
+    fn viewscreen_and_station(station_label: &str) -> ValidatedProfile {
+        use super::super::bridge_profile::{PaneSlot, ROLE_STATION};
+        BridgeProfile {
+            version: PROFILE_VERSION,
+            displays: vec![
+                DisplayEntry {
+                    id: "DELL U2720Q@3840x2160".to_string(),
+                    role: ROLE_VIEWSCREEN.to_string(),
+                    split: None,
+                    panes: Vec::new(),
+                },
+                DisplayEntry {
+                    id: "BenQ EX@1920x1080".to_string(),
+                    role: ROLE_STATION.to_string(),
+                    split: None,
+                    panes: vec![PaneSlot {
+                        label: station_label.to_string(),
+                    }],
+                },
+            ],
+            touch: Vec::new(),
+        }
+        .validate()
+        .unwrap()
+    }
+
+    #[test]
+    fn losing_a_station_monitor_at_runtime_closes_the_pane_it_carried() {
+        // The runtime extension of the #1123 missing-display report, tested
+        // against the ACTUAL adapter system rather than only its pure core: a
+        // Station monitor that was present and driving a pane is unplugged
+        // mid-run (its `Monitor` entity despawned, as bevy_winit does), and the
+        // watcher closes the pane it carried — the ordinary dropped-participant
+        // path, its station flipping to Backfill. No physical display is
+        // involved: the fake monitors ARE the hardware here.
+        use crate::native_host::panes::identity::PaneIdentity;
+        use crate::native_host::panes::transport::PaneBus;
+        use crate::native_host::panes::PaneBusResource;
+        use crate::native_host::transport::NativeTransport;
+
+        let mut app = App::new();
+        app.insert_resource(BridgeDisplayConfig {
+            profile: viewscreen_and_station("Ada"),
+        });
+        let bus = PaneBus::default();
+        let pane = bus.open(PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000001", "Ada").unwrap());
+        bus.mark_live(pane);
+        let token = bus.token_of(pane).unwrap();
+        app.insert_resource(PaneBusResource(bus.clone()));
+        app.add_systems(Update, watch_runtime_displays);
+
+        let _dell = app
+            .world_mut()
+            .spawn((monitor("DELL U2720Q", 3840, 2160, 0, 0), PrimaryMonitor))
+            .id();
+        let benq = app
+            .world_mut()
+            .spawn(monitor("BenQ EX", 1920, 1080, 3840, 0))
+            .id();
+
+        // First frame establishes the baseline; nothing is lost yet.
+        app.update();
+        assert_eq!(bus.open_count(), 1, "the baseline frame closes no pane");
+
+        // The Station monitor is unplugged.
+        app.world_mut().entity_mut(benq).despawn();
+        app.update();
+
+        assert_eq!(
+            bus.open_count(),
+            0,
+            "the pane on the lost Station monitor is closed"
+        );
+        assert_eq!(
+            bus.transport().poll(),
+            vec![crate::native_host::transport::TransportEvent::Disconnected { token }],
+            "and the lobby is owed exactly the disconnect a dropped phone would produce"
+        );
+        // A display loss never recreates — that would be a silent re-home.
+        assert!(bus.take_pending_views().is_empty());
+    }
+
+    #[test]
+    fn losing_the_viewscreen_monitor_at_runtime_closes_no_pane() {
+        // The viewscreen carries no participant, so unplugging it leaves the
+        // shared 3-D view nowhere to draw and touches no station — the mission
+        // and every pane carry on.
+        use crate::native_host::panes::identity::PaneIdentity;
+        use crate::native_host::panes::transport::PaneBus;
+        use crate::native_host::panes::PaneBusResource;
+
+        let mut app = App::new();
+        app.insert_resource(BridgeDisplayConfig {
+            profile: viewscreen_and_station("Ada"),
+        });
+        let bus = PaneBus::default();
+        let pane = bus.open(PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000001", "Ada").unwrap());
+        bus.mark_live(pane);
+        app.insert_resource(PaneBusResource(bus.clone()));
+        app.add_systems(Update, watch_runtime_displays);
+
+        let dell = app
+            .world_mut()
+            .spawn((monitor("DELL U2720Q", 3840, 2160, 0, 0), PrimaryMonitor))
+            .id();
+        let _benq = app
+            .world_mut()
+            .spawn(monitor("BenQ EX", 1920, 1080, 3840, 0))
+            .id();
+        app.update();
+        app.world_mut().entity_mut(dell).despawn();
+        app.update();
+
+        assert_eq!(
+            bus.open_count(),
+            1,
+            "losing the viewscreen touches no station's pane"
+        );
     }
 }

@@ -742,6 +742,161 @@ pub fn resolve(profile: &ValidatedProfile, discovered: &[DiscoveredMonitor]) -> 
     ResolvedBridge { surfaces, problems }
 }
 
+// ── runtime display loss (issue #1125) ──────────────────────────────────────
+
+/// One monitor the profile assigns a role, and the participant panes that ride
+/// on it (issue #1125).
+///
+/// Derived from a [`ValidatedProfile`] by [`ValidatedProfile::assigned_surfaces`].
+/// It is the bridge between "which monitor went away" and "which panes must
+/// therefore disconnect": the labels are the `--pane <NAME>` participant names a
+/// Station carries, so a lost Station monitor names exactly the panes whose
+/// tokens flip to Backfill.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AssignedSurface {
+    /// The stable identity of the monitor this role is assigned to.
+    pub identity: MonitorIdentity,
+    /// A one-line role summary, for the operator report.
+    pub role: String,
+    /// The participant labels whose panes live on this monitor — empty for the
+    /// viewscreen, one or two for a Station.
+    pub pane_labels: Vec<String>,
+}
+
+impl ValidatedProfile {
+    /// The monitors this profile assigns, each with its role summary and the
+    /// participant panes it carries (issue #1125).
+    ///
+    /// The runtime display watcher diffs this against the monitors actually
+    /// present, so a monitor that was driving panes and is unplugged mid-mission
+    /// names both its role (to report) and its panes (to fail).
+    pub fn assigned_surfaces(&self) -> Vec<AssignedSurface> {
+        self.displays
+            .iter()
+            .map(|d| AssignedSurface {
+                identity: d.identity.clone(),
+                role: d.role.summary(),
+                pane_labels: match &d.role {
+                    DisplayRole::Viewscreen => Vec::new(),
+                    DisplayRole::Station { panes, .. } => {
+                        panes.iter().map(|p| p.label.clone()).collect()
+                    }
+                },
+            })
+            .collect()
+    }
+}
+
+/// A configured display that was present and driving panes, and has been lost
+/// **mid-mission** (issue #1125).
+///
+/// The runtime companion to [`ProfileProblem::MonitorMissing`]. That one is the
+/// setup-time report — a profile naming a monitor that was never connected, found
+/// when a host boots. This is a monitor that *was* connected and has been
+/// unplugged or lost while the mission ran; the doctrine is identical (name it
+/// exactly, never re-home its role), but the consequence is new: the panes it
+/// carried disconnect and their stations flip to Backfill, and the mission and
+/// every other display carry on.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RuntimeDisplayLoss {
+    pub identity: MonitorIdentity,
+    pub role: String,
+    /// The participant labels whose panes must disconnect. Empty when the
+    /// viewscreen monitor is the one lost — the shared 3-D view simply has
+    /// nowhere to draw until the display returns, and no participant is affected.
+    pub pane_labels: Vec<String>,
+}
+
+impl std::fmt::Display for RuntimeDisplayLoss {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.pane_labels.is_empty() {
+            write!(
+                f,
+                "the {} monitor {} was connected and has been lost mid-mission; the shared 3-D \
+                 view it carried now has nowhere to draw until it returns, but no station is \
+                 affected — the simulation and every other surface keep running, and its role is \
+                 left unfilled rather than moved to another display",
+                self.role, self.identity
+            )
+        } else {
+            write!(
+                f,
+                "the {} monitor {} was connected and has been lost mid-mission; the panes it \
+                 carried ({}) disconnect and their stations fall back to AI control, exactly as a \
+                 dropped phone's would — its role is left unfilled rather than moved to another \
+                 display",
+                self.role,
+                self.identity,
+                self.pane_labels.join(", ")
+            )
+        }
+    }
+}
+
+/// A configured display that had been missing and is present again (issue #1125).
+///
+/// Reported, and nothing more: bringing a returned display back into use is an
+/// **explicit** repair (re-apply the profile), never something the host does
+/// silently — the same no-silent-rehome doctrine [`resolve`] holds at setup. A
+/// pane is never moved onto a monitor without a deliberate act.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RuntimeDisplayReturn {
+    pub identity: MonitorIdentity,
+    pub role: String,
+}
+
+impl std::fmt::Display for RuntimeDisplayReturn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "the {} monitor {} is connected again; it is not brought back into use automatically, \
+             so re-apply the bridge profile to place its surface — no pane is moved onto it \
+             without an explicit repair",
+            self.role, self.identity
+        )
+    }
+}
+
+/// The configured monitors that were present and are now gone (issue #1125).
+///
+/// A loss is an assigned monitor that `previous_present` held and `current_present`
+/// does not. Pure and display-free — the winit adapter reads the live monitor set
+/// and calls this, so the "named exactly, never re-homed" judgement is checked by
+/// the ordinary `cargo test` runs rather than only on a machine you can unplug a
+/// monitor from.
+pub fn runtime_display_losses(
+    assigned: &[AssignedSurface],
+    previous_present: &std::collections::HashSet<MonitorIdentity>,
+    current_present: &std::collections::HashSet<MonitorIdentity>,
+) -> Vec<RuntimeDisplayLoss> {
+    assigned
+        .iter()
+        .filter(|a| previous_present.contains(&a.identity) && !current_present.contains(&a.identity))
+        .map(|a| RuntimeDisplayLoss {
+            identity: a.identity.clone(),
+            role: a.role.clone(),
+            pane_labels: a.pane_labels.clone(),
+        })
+        .collect()
+}
+
+/// The configured monitors that had been missing and are present again
+/// (issue #1125) — see [`RuntimeDisplayReturn`].
+pub fn runtime_display_returns(
+    assigned: &[AssignedSurface],
+    previous_present: &std::collections::HashSet<MonitorIdentity>,
+    current_present: &std::collections::HashSet<MonitorIdentity>,
+) -> Vec<RuntimeDisplayReturn> {
+    assigned
+        .iter()
+        .filter(|a| !previous_present.contains(&a.identity) && current_present.contains(&a.identity))
+        .map(|a| RuntimeDisplayReturn {
+            identity: a.identity.clone(),
+            role: a.role.clone(),
+        })
+        .collect()
+}
+
 // ── setup report ────────────────────────────────────────────────────────────
 
 /// Render the human-readable monitor-discovery report the `--setup` mode prints.

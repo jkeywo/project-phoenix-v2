@@ -654,3 +654,86 @@ fn the_setup_report_surfaces_an_invalid_profile() {
     let report = render_setup_report(&[], Some(&profile));
     assert!(report.contains("Profile is invalid"), "{report}");
 }
+
+// ── runtime display loss (issue #1125) ──────────────────────────────────────
+
+/// A present-set of monitor identities, as the runtime watcher tracks.
+fn present(ids: &[&str]) -> std::collections::HashSet<MonitorIdentity> {
+    ids.iter().map(|id| MonitorIdentity::new(*id)).collect()
+}
+
+const DELL: &str = "DELL U2720Q@3840x2160";
+const BENQ: &str = "BenQ EX@1920x1080";
+
+#[test]
+fn assigned_surfaces_carry_each_stations_pane_labels_and_the_viewscreen_none() {
+    let assigned = matching_profile().assigned_surfaces();
+    let dell = assigned.iter().find(|a| a.identity.as_str() == DELL).unwrap();
+    let benq = assigned.iter().find(|a| a.identity.as_str() == BENQ).unwrap();
+    assert!(dell.pane_labels.is_empty(), "the viewscreen carries no panes");
+    assert_eq!(benq.pane_labels, vec!["Ada".to_string()]);
+}
+
+#[test]
+fn losing_a_station_monitor_names_it_and_the_panes_that_must_disconnect() {
+    // The runtime extension of the #1123 missing-display report: a monitor that
+    // WAS present and driving a pane is unplugged mid-mission. It is named
+    // exactly, and its pane is named so its token can disconnect → Backfill.
+    let assigned = matching_profile().assigned_surfaces();
+    let losses = runtime_display_losses(&assigned, &present(&[DELL, BENQ]), &present(&[DELL]));
+    assert_eq!(losses.len(), 1);
+    assert_eq!(losses[0].identity.as_str(), BENQ);
+    assert_eq!(losses[0].pane_labels, vec!["Ada".to_string()]);
+    // The report names the monitor and the fall-back, and promises no re-home.
+    let text = losses[0].to_string();
+    assert!(text.contains(BENQ), "{text}");
+    assert!(text.contains("Ada"), "{text}");
+    assert!(text.contains("AI control"), "{text}");
+    assert!(text.contains("not moved to another display") || text.contains("rather than moved"), "{text}");
+}
+
+#[test]
+fn losing_the_viewscreen_monitor_names_it_but_fails_no_pane() {
+    // The viewscreen carries no participant, so losing it leaves the shared 3-D
+    // view nowhere to draw and touches no station — the mission carries on.
+    let assigned = matching_profile().assigned_surfaces();
+    let losses = runtime_display_losses(&assigned, &present(&[DELL, BENQ]), &present(&[BENQ]));
+    assert_eq!(losses.len(), 1);
+    assert_eq!(losses[0].identity.as_str(), DELL);
+    assert!(losses[0].pane_labels.is_empty());
+    assert!(losses[0].to_string().contains("nowhere to draw"));
+}
+
+#[test]
+fn a_monitor_that_was_never_present_is_not_a_runtime_loss() {
+    // A profile naming a monitor that never connected is the SETUP-time report's
+    // job (`resolve` → `MonitorMissing`), not a runtime loss: nothing was lost.
+    let assigned = matching_profile().assigned_surfaces();
+    let losses = runtime_display_losses(&assigned, &present(&[DELL]), &present(&[DELL]));
+    assert!(losses.is_empty(), "no change means no loss");
+    let never = runtime_display_losses(&assigned, &present(&[]), &present(&[DELL]));
+    assert!(never.is_empty(), "a monitor appearing is not a loss");
+}
+
+#[test]
+fn a_returned_monitor_is_reported_for_explicit_repair_and_not_rehomed() {
+    // AC5: a display coming back is reported, never silently used. Bringing it
+    // back into service is an explicit re-apply of the profile.
+    let assigned = matching_profile().assigned_surfaces();
+    let returns = runtime_display_returns(&assigned, &present(&[DELL]), &present(&[DELL, BENQ]));
+    assert_eq!(returns.len(), 1);
+    assert_eq!(returns[0].identity.as_str(), BENQ);
+    let text = returns[0].to_string();
+    assert!(text.contains("re-apply"), "{text}");
+    assert!(text.contains("explicit repair"), "{text}");
+}
+
+#[test]
+fn an_unassigned_monitor_appearing_is_neither_a_loss_nor_a_return() {
+    // A monitor the profile assigns no role is not part of the bridge; its
+    // coming or going is not a runtime loss/return of a configured surface.
+    let assigned = matching_profile().assigned_surfaces();
+    let other = "Some Other@1280x1024";
+    assert!(runtime_display_losses(&assigned, &present(&[DELL, BENQ, other]), &present(&[DELL, BENQ])).is_empty());
+    assert!(runtime_display_returns(&assigned, &present(&[DELL, BENQ]), &present(&[DELL, BENQ, other])).is_empty());
+}

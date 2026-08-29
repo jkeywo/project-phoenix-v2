@@ -584,10 +584,19 @@ fn pointer_motion_reports_presence_versus_movement_per_window() {
     let mut motion = PointerMotion::new();
     let a = WindowKey(1);
     let b = WindowKey(2);
-    assert!(motion.moved(a, 10.0, 10.0), "first sample in a window is motion");
-    assert!(!motion.moved(a, 10.0, 10.0), "the same position is presence");
+    assert!(
+        motion.moved(a, 10.0, 10.0),
+        "first sample in a window is motion"
+    );
+    assert!(
+        !motion.moved(a, 10.0, 10.0),
+        "the same position is presence"
+    );
     assert!(motion.moved(a, 11.0, 10.0), "a changed position is motion");
-    assert!(motion.moved(b, 10.0, 10.0), "a different window is its own first sample");
+    assert!(
+        motion.moved(b, 10.0, 10.0),
+        "a different window is its own first sample"
+    );
     assert!(!motion.moved(b, 10.0, 10.0));
 }
 
@@ -676,7 +685,10 @@ fn a_left_drag_keeps_its_down_and_up_on_the_pane_it_began_on() {
         .resolve_in_window(WindowKey(1), 100.0, 100.0)
         .unwrap();
     assert_eq!(down.pane, pane(0));
-    assert!(capture.press(down.pane), "the left button captures the pressed pane");
+    assert!(
+        capture.press(down.pane),
+        "the left button captures the pressed pane"
+    );
     assert_eq!(capture.captured(), Some(pane(0)));
 
     // The cursor drifts into pane 1's region. The router alone would say pane 1…
@@ -708,7 +720,10 @@ fn a_second_press_does_not_rehome_a_live_mouse_capture() {
     // enforces for a duplicate `Started`.
     let mut capture = MouseCapture::new();
     assert!(capture.press(pane(0)));
-    assert!(!capture.press(pane(1)), "a live capture keeps its original pane");
+    assert!(
+        !capture.press(pane(1)),
+        "a live capture keeps its original pane"
+    );
     assert_eq!(capture.captured(), Some(pane(0)));
     assert_eq!(capture.release(), Some(pane(0)));
     assert_eq!(capture.release(), None, "releasing again captures nothing");

@@ -870,7 +870,14 @@ fn route_pointer_input(
         if let Some((key, x, y, Some(hit))) = cursor {
             let previous = host.focus.focused();
             let host = &mut *host;
-            if pointer_follow_focus(&mut host.focus, &mut host.pointer_motion, key, x, y, hit.pane) {
+            if pointer_follow_focus(
+                &mut host.focus,
+                &mut host.pointer_motion,
+                key,
+                x,
+                y,
+                hit.pane,
+            ) {
                 host.focus_view(previous, Some(hit.pane));
             }
         }
@@ -923,9 +930,7 @@ fn route_pointer_input(
     if mouse.just_released(MouseButton::Left) {
         if let Some(captured) = host.mouse_capture.release() {
             let (lx, ly) = cursor
-                .filter(|(key, ..)| {
-                    host.router.placement(captured).map(|p| p.window) == Some(*key)
-                })
+                .filter(|(key, ..)| host.router.placement(captured).map(|p| p.window) == Some(*key))
                 .and_then(|(_, x, y, _)| host.router.project_into_pane(captured, x, y))
                 .unwrap_or((0, 0));
             if let Some(index) = host.index_of(captured) {

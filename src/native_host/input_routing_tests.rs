@@ -482,6 +482,27 @@ fn a_contact_stays_pinned_to_its_starting_pane_when_the_finger_drifts_away() {
 }
 
 #[test]
+fn a_drifted_contact_projects_past_its_pinned_panes_edge() {
+    // The capture path's coordinate: a finger pinned to the left pane that has
+    // slid into the right pane's region projects to a local x PAST the left
+    // pane's width — a legitimate drag beyond the edge, not clamped and not lost.
+    let router = single_window(
+        &[
+            (pane(0), rect(0, 0, 960, 1080)),
+            (pane(1), rect(960, 0, 960, 1080)),
+        ],
+        1.0,
+    );
+    // Pinned to pane 0, finger now at window x=1400.
+    assert_eq!(
+        router.project_into_pane(pane(0), 1400.0, 100.0),
+        Some((1400, 100))
+    );
+    // A pane that is not placed projects to nothing.
+    assert_eq!(router.project_into_pane(pane(9), 10.0, 10.0), None);
+}
+
+#[test]
 fn simultaneous_contacts_on_different_screens_are_independent() {
     // Two fingers, two contact ids, two panes on two windows. Each routes to its
     // own pane and neither interferes with the other — the acceptance criterion's

@@ -216,6 +216,28 @@ impl LocalPanes {
     pub fn urls(&self) -> Vec<String> {
         self.views().into_iter().map(|(_, url)| url).collect()
     }
+
+    /// Every pane's handle, the URL its view navigates to, and the participant
+    /// **label** it was opened under (the `--pane <NAME>` name).
+    ///
+    /// The label is what ties a pane to a bridge profile's Station pane slot,
+    /// whose `label` is that same participant name (issue #1124): the pane host
+    /// composites a `--pane Ada` onto whichever Station monitor the profile gives
+    /// a pane labelled `Ada`. It is deliberately kept out of the URL — the URL
+    /// carries the session token — so the association is made in-process, never
+    /// served.
+    pub fn display_entries(&self) -> Vec<(PaneId, String, String)> {
+        self.opened
+            .iter()
+            .map(|p| {
+                (
+                    p.id,
+                    document::pane_url(&self.host_addr, p.id, &p.nonce, &p.identity),
+                    p.identity.name().to_string(),
+                )
+            })
+            .collect()
+    }
 }
 
 /// The pane bus, as a Bevy resource.

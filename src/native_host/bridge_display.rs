@@ -78,11 +78,17 @@ pub struct StationPane {
 }
 
 /// A Station surface this adapter opened: its monitor identity, the window
-/// entity, and the pane rectangles laid out across it.
+/// entity, the monitor geometry it covers, and the pane rectangles laid out
+/// across it.
 #[derive(Clone, Debug)]
 pub struct BridgeStationSurface {
     pub identity: String,
     pub window: Entity,
+    /// The monitor's live geometry — its scale factor and its top-left on the
+    /// virtual desktop. Carried so the pane host (issue #1124) can composite each
+    /// pane at the right physical size and route input in the monitor's own
+    /// coordinate space without re-querying the winit monitor.
+    pub geometry: MonitorGeometry,
     pub panes: Vec<StationPane>,
 }
 
@@ -207,6 +213,7 @@ pub fn apply_bridge_profile(world: &mut World) {
         monitor: Entity,
         identity: String,
         role: String,
+        geometry: MonitorGeometry,
         panes: Vec<StationPane>,
     }
     let mut station_spawns: Vec<StationSpawn> = Vec::new();
@@ -237,6 +244,7 @@ pub fn apply_bridge_profile(world: &mut World) {
                     monitor: *monitor_entity,
                     identity: surface.identity.as_str().to_string(),
                     role: surface.role.summary(),
+                    geometry: geometry.clone(),
                     panes: laid_out,
                 });
             }
@@ -300,6 +308,7 @@ pub fn apply_bridge_profile(world: &mut World) {
         station_surfaces.push(BridgeStationSurface {
             identity: spawn.identity,
             window,
+            geometry: spawn.geometry,
             panes: spawn.panes,
         });
     }

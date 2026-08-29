@@ -443,8 +443,13 @@ pub fn build_native_host_app(
         ));
         #[cfg(feature = "ultralight")]
         {
-            app.insert_resource(crate::native_host::panes::ultralight::PaneDisplayConfig {
-                panes: panes.views(),
+            use crate::native_host::panes::ultralight::{PaneDisplayConfig, PaneDisplayEntry};
+            app.insert_resource(PaneDisplayConfig {
+                panes: panes
+                    .display_entries()
+                    .into_iter()
+                    .map(|(id, url, label)| PaneDisplayEntry { id, url, label })
+                    .collect(),
             });
             app.add_plugins(crate::native_host::panes::ultralight::PaneDisplayPlugin);
         }

@@ -202,6 +202,29 @@ impl PaneRouter {
             .find(|p| p.desktop_contains(x, y))
             .map(|p| p.local_of_window(x - p.window_origin_x as f64, y - p.window_origin_y as f64))
     }
+
+    /// Project a **window-local** physical point into a **specific pane's** own
+    /// logical coordinate, WITHOUT the containment test.
+    ///
+    /// This is the capture path (acceptance criterion 4): once a touch contact is
+    /// pinned to a pane, its subsequent moves are routed to that pane wherever the
+    /// finger has drifted — so the coordinate must be projected into the pinned
+    /// pane even when it now lies outside the pane's rectangle. The result can be
+    /// negative or past the pane's size, which is a legitimate drag beyond the
+    /// pane edge and exactly what a page expects to see for one.
+    pub fn project_into_pane(&self, pane: PaneId, wx: f64, wy: f64) -> Option<(i32, i32)> {
+        self.placement(pane).map(|p| {
+            let scale = if p.scale_factor > 0.0 {
+                p.scale_factor
+            } else {
+                1.0
+            };
+            (
+                ((wx - p.rect.x as f64) / scale) as i32,
+                ((wy - p.rect.y as f64) / scale) as i32,
+            )
+        })
+    }
 }
 
 /// The keyboard-focus order over the panes, and which one currently has focus.

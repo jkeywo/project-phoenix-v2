@@ -109,6 +109,17 @@ impl OsAccessibilityPrefs {
 /// a three-field, fixed-shape object, and `serde_json` is confined to
 /// `core::codec` by the crate's first rule. Booleans render as JS `true`/`false`
 /// and the clamped scale as a plain JS number literal.
+///
+/// # Injection-safety invariant
+///
+/// This string is interpolated verbatim into a `<script>` inside the pane's
+/// HTML, so it is injection-safe *only because every field is a `bool` or a
+/// finite, clamped number* — none can contain a quote, backslash, newline,
+/// `</script>`, or `${`. If a live OS read ever adds a **string** field (a
+/// locale label, a raw registry value, a mode name), it MUST be routed through
+/// a JSON string escaper (and keep the `</script>` split-guard the
+/// `the_script_is_a_single_well_formed_assignment` test pins) before it reaches
+/// this `format!` — an unescaped string field here is an HTML/JS injection sink.
 pub fn os_defaults_script(prefs: &OsAccessibilityPrefs) -> String {
     format!(
         "window.PhoenixOsAccessibilityDefaults = \

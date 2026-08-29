@@ -1,9 +1,9 @@
 ---
 title: Native Host
 type: concept
-tags: [native, viewscreen, boot-profile, wgpu, winit, transport, delivery, ultralight, panes]
-sources: [src/native_host/mod.rs, src/native_host/app.rs, src/native_host/transport.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs]
-updated: 2026-08-28
+tags: [native, viewscreen, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile]
+sources: [src/native_host/mod.rs, src/native_host/app.rs, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_display.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs]
+updated: 2026-08-29
 ---
 
 # Native Host
@@ -395,15 +395,123 @@ non-required job.
   carried on #1112 instead: the same test swaps `LoopbackTransport` for the real
   network transport and changes nothing else, which is what `PairedTransport`
   was built for.
-- **Bridge display profiles** (which pane on which monitor) are issue #1123's.
-  Panes are currently tiled evenly left to right across one window.
+- **Bridge display profiles** (which monitor is which) are issue #1123's — see
+  the section below. What that issue leaves for the follow-on is **compositing a
+  pane onto its assigned Station window**: #1123 opens the Station windows and
+  computes each pane's rectangle, but the Ultralight pane host still tiles panes
+  on the viewscreen window as it always did (`panes::ultralight`), and
+  `bridge_display::BridgeStationSurfaces` is the seam that rehoming reads.
 - **Independent input routing** between panes is issue #1124's. Today it is one
   pointer, one focused pane, the left button, the wheel and text.
+
+## Bridge display profiles (issue #1123)
+
+A bridge is a room of monitors: one shared viewscreen, the rest crew Stations.
+A **bridge profile** writes down which is which so it survives a reboot, and the
+host covers every configured monitor with one borderless-fullscreen surface.
+
+```bash
+# See the connected monitors, their stable identities and geometry:
+phoenix-host --setup
+# Validate a profile against them (nothing is opened):
+phoenix-host --setup --profile bridge.toml
+# Run the authoritative host with the profile applied:
+phoenix-host --world assets/worlds/combat_test.toml --profile bridge.toml
+```
+
+| Piece | File |
+|---|---|
+| The pure model — identity, density, geometry, round-trip, resolution | `src/native_host/bridge_profile.rs` |
+| The winit adapter — enumerate, resolve, open surfaces, `--setup` | `src/native_host/bridge_display.rs` |
+| The `--setup`/`--profile` flags | `src/delivery/args.rs`, `src/bin/phoenix_host.rs` |
+
+The **pure model is Bevy-free** (`bridge_profile`): stable monitor identities,
+the one/two-pane density rule, the pane geometry, the TOML round-trip and the
+missing-display resolution are all decided there and tested by the ordinary
+`cargo test` CI runs. The **winit adapter** (`bridge_display`) reads real
+`Monitor` components and opens windows, and is provable only under the
+`#[ignore]`d `tests/native_bridge_displays.rs` on a machine with displays.
+
+### The stable identity scheme, and its limit
+
+winit (and so Bevy's `Monitor`) exposes **no serial number or EDID** — nothing a
+display carries in hardware. So a monitor's stable identity is `name@WxH`
+([`identify`](../../src/native_host/bridge_profile.rs)) — the OS-reported name
+and the native resolution — deliberately **excluding position and scale
+factor**, both of which change under an ordinary rearrange that the identity must
+survive. Two *identical* monitors (same model, same mode) report the same name
+and size and are indistinguishable to winit; those, and only those, get a
+position suffix (`name@WxH#x,y`), which does not survive physically swapping the
+two. On Windows the name is often the GDI **device name** (`\\.\DISPLAY5`, as the
+dev machine reports), so the identity is only as stable as that slot name across
+a re-plug — the honest limit of what the platform gives. (When hand-authoring a
+profile, write a Windows identity as a TOML **literal** string with single quotes
+— `id = '\\.\DISPLAY5@1920x1080'` — so the backslashes need no escaping; the
+serializer escapes them for you when it writes a basic string.)
+
+### Roles, the density rule, and geometry
+
+A profile is an **ordered** list of `[[display]]` assignments plus a `[[touch]]`
+mapping. Each display is `viewscreen` or `station`; a Station carries one or two
+`[[display.pane]]` slots. **Three or more is refused** at validation
+(`MAX_PANES_PER_STATION`, the PRD's pane-density rule) with an authored
+explanation naming the monitor — a console is authored to be read one, or
+side-by-side two, to a screen, and three at bridge distance is unreadable. The
+one/two-pane geometry is computed by `pane_rects`: one pane is the whole monitor,
+two divide it side-by-side (default) or stacked, tiling exactly with the odd
+pixel absorbed by the last pane.
+
+The profile is **not** the private player Accessibility profile (#1127): this is
+shared operator configuration of the physical room, carrying nothing about any
+one player, and the two are kept in separate files.
+
+### The winit adapter, and missing displays
+
+Once winit reports the monitors, `BridgeDisplayPlugin` resolves the profile
+against them and covers each configured monitor:
+
+- the **viewscreen** goes on the process's **primary window** — the one #1121
+  already opened and the game cameras already target — put into
+  `WindowMode::BorderlessFullscreen` on its monitor, so no camera retargeting is
+  needed;
+- each **Station** spawns its own borderless-fullscreen window, tagged
+  `BridgeSurface`, its pane rectangles published in `BridgeStationSurfaces`.
+
+A monitor the profile assigns but that is **not present** is named and reported
+(`ProfileProblem::MonitorMissing`) and its role is **left unfilled — never
+re-homed onto another display**; a present monitor with no assignment is reported
+too. A display whose *resolution* changed has a different identity, so it
+surfaces as one missing (the old id) and one unassigned (the new id) — both
+named, nothing moved. That is the whole of "missing or changed displays are
+reported explicitly and are not silently replaced or rearranged".
+
+### The setup surface ([ai] decision)
+
+The setup surface for #1123 is the **hand-editable profile file plus the
+`--setup` enumeration mode** — not an interactive on-screen UI; the
+touch/keyboard-operable setup screen is #1124/#1128's. `--setup` opens a hidden
+winit window purely to enumerate the monitors, prints each one's identity,
+geometry and current assignment (validating `--profile` against them if given),
+and exits. Its whole *content* is the pure `render_setup_report`, so it is tested
+without a display; the winit window is the one part that needs the machine.
+
+### What is deferred
+
+Compositing an Ultralight pane onto its assigned Station window is the
+continuation, sharing #1124's input-routing concern: this slice opens the Station
+windows and lays out the pane rectangles, and leaves the pane rendering pointed
+at those windows through `BridgeStationSurfaces`. Until then a host launched with
+both `--profile` and `--pane` opens the Station windows **and** tiles the panes on
+the viewscreen window as #1122 always did — nothing regresses.
 
 ## Tests
 
 | File | Claim |
 |---|---|
+| `src/native_host/bridge_profile.rs` | The pure model: stable identity across a simulated replug, identical-monitor disambiguation, the one/two-pane geometry math (even and odd, side-by-side and stacked), the >2 density refusal, the TOML round-trip (Windows backslash ids included), and the missing/unassigned/changed-display reporting. All feature-agnostic, run by the ordinary `cargo test` |
+| `src/native_host/bridge_display.rs` | A Bevy `Monitor` lifts into a `RawMonitor` and carries the documented identity |
+| `tests/native_bridge_displays.rs` | On the real machine's monitors, a profile opens one borderless-fullscreen surface per monitor at the monitor's geometry — the viewscreen on the primary window, a Station on its own. `#[ignore]`d: it opens real winit windows, which CI has no display for. Verified once locally |
+| `src/delivery/args.rs` | `--setup` is a standalone diagnostic needing no world; `--profile` applies with a world or validates with `--setup`, and is refused alone |
 | `src/boot/tests.rs` | Four-profile parity; only the render-stack profiles take that path; a native host refuses a configless boot, including a hull declared only by a static child |
 | `src/native_host/transport.rs` | The seam's ingress/egress and the reserved-token refusal |
 | `tests/native_host_sim.rs` | Shipped content boots and runs; the hull's own config reaches the client config; an uncached `--ship` is refused; a curating manifest narrows the default hull; a participant joins through the seam |
@@ -425,6 +533,6 @@ shared binary is a claim about whoever won that race.
 ## Related
 
 - [Build & Deployment](./build-and-deployment.md) · [Networking](./networking.md) · [Architecture](./architecture.md)
-- Issue #1121 — the host. Issue #1122 — local Ultralight panes. Issue #1112 — the transport. Issues #1123/#1124 — display profiles and input routing.
+- Issue #1121 — the host. Issue #1122 — local Ultralight panes. Issue #1123 — bridge display profiles (above). Issue #1112 — the transport. Issue #1124 — input routing between displays.
 - [vellum](https://github.com/jkeywo/vellum) `crates/vellum-ultralight` — the extracted plumbing; `docs/handbook/dependencies.md` records why `ul-next` stopped being a per-game exception
 - `pasm/spec/architecture/native-delivery.yaml` — PRD #855's delivery declarations

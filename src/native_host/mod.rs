@@ -36,6 +36,16 @@
 //! they must be made to agree — see [`pin_content_root`].
 
 pub mod app;
+/// The winit/Bevy adapter (issue #1123) that reads real monitors and opens one
+/// borderless-fullscreen surface per configured monitor from a resolved
+/// [`bridge_profile`]. Provable only under the ignored integration test.
+pub mod bridge_display;
+/// The bridge-display profile model (issue #1123) — pure, Bevy-free. Stable
+/// monitor identities, the one/two-pane density rule, pane geometry, the TOML
+/// round-trip and the missing-display resolution all live here and are tested by
+/// the ordinary `cargo test` CI runs. The winit adapter that opens real
+/// borderless-fullscreen windows from a resolved profile is [`bridge_display`].
+pub mod bridge_profile;
 pub mod panes;
 /// The real WebSocket behind [`relay_transport`]. Behind the `host` feature
 /// because it is the only thing here that needs `tungstenite`; the protocol it

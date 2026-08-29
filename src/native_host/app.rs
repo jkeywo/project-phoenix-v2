@@ -149,6 +149,17 @@ pub struct NativeHostConfig {
     /// through the same `NativeTransportPlugin` seam issue #1121 built and is
     /// subject to the same reserved-token refusal.
     pub panes: Option<crate::native_host::panes::LocalPanes>,
+    /// A validated bridge-display profile (issue #1123), or `None` for the
+    /// single-window #1121 behaviour.
+    ///
+    /// Already **validated** by the caller — a bad profile (an unknown role, a
+    /// Station with three panes) fails at the prompt, so by the time it reaches
+    /// here its roles and density are sound and the density rule need not be
+    /// re-checked. When present, [`build_native_host_app`] installs
+    /// [`BridgeDisplayPlugin`](crate::native_host::bridge_display::BridgeDisplayPlugin),
+    /// which opens one borderless-fullscreen surface per configured monitor:
+    /// the viewscreen on the primary window, each Station on its own window.
+    pub bridge_profile: Option<crate::native_host::bridge_profile::ValidatedProfile>,
 }
 
 impl NativeHostConfig {
@@ -167,6 +178,7 @@ impl NativeHostConfig {
             curated_ships: Vec::new(),
             deterministic: false,
             panes: None,
+            bridge_profile: None,
         }
     }
 }
@@ -436,6 +448,19 @@ pub fn build_native_host_app(
             });
             app.add_plugins(crate::native_host::panes::ultralight::PaneDisplayPlugin);
         }
+    }
+
+    // Bridge-display profile (issue #1123). Installed unconditionally — the
+    // plugin is a no-op with no `BridgeDisplayConfig` — and the config is
+    // inserted only when a validated profile was given, so the single-window
+    // #1121 host is byte-for-byte unchanged when no `--profile` is passed. When
+    // present it opens one borderless-fullscreen surface per configured monitor:
+    // the viewscreen on the primary window, each Station on its own window.
+    app.add_plugins(crate::native_host::bridge_display::BridgeDisplayPlugin);
+    if let Some(profile) = &cfg.bridge_profile {
+        app.insert_resource(crate::native_host::bridge_display::BridgeDisplayConfig {
+            profile: profile.clone(),
+        });
     }
 
     // An unfocused bridge machine must keep simulating: the browser host

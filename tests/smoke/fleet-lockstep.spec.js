@@ -15,6 +15,21 @@
 // RTCPeerConnection are faked (tests/smoke/rendezvous-shim.js), because CI has
 // no WebRTC and no deployed worker.
 //
+// # AC6's "matching state", and where this file stops (issue #1116 review)
+//
+// AC6 asks that the multi-instance and browser tests "finish with matching
+// state". The cross-instance STATE-MATCHING is the native test's: it folds two
+// differently-crewed hosts after every tick and asserts the digests agree — the
+// strong claim. This file does NOT fold and compare the two pages' digests, and
+// that is a deliberate, recorded split rather than an oversight. Two reasons:
+// per-slot crewing is not published yet (see `joinLockstep` below — both pages
+// adopt the identical empty-crew roster, so a browser compare would be identical
+// inputs agreeing, a weaker claim than the native one), and the digest exchange
+// runs on a 300-tick diagnostic interval that the barrier gates to the throttled
+// background tab's pace, which is not reliably reachable inside a smoke timeout.
+// So the browser proves the WIRE and the native test proves the AGREEMENT; the
+// pasm slice `host-mesh-lockstep.yaml`'s fleet-digest-exchange records the same.
+//
 // # What makes the claim non-vacuous
 //
 // The barrier is its own control. A host in a fleet may run `delay` ticks past

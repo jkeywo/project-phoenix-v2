@@ -21,11 +21,22 @@
 //!   pushes into [`MeshInbox`] and drains [`MeshOutbox`]. Every decision that
 //!   matters is therefore testable on native with no networking at all, which
 //!   is what `tests/lockstep_mesh.rs` does.
-//! * **It does not re-check a peer's authority.** The sending host's
-//!   `Sessions` made that call, and a session token is a bearer credential that
-//!   never leaves the host holding it. What a receiver checks is the one thing
-//!   it can: a host may only speak for the ship its own slot flies
-//!   ([`frame::MeshCommand::is_from`]).
+//! * **It does not re-run the sending host's own authority check.** That host's
+//!   `Sessions` made the human-vs-AI, station-tenure call, and a session token
+//!   is a bearer credential that never leaves the host holding it. What a
+//!   receiver DOES enforce for itself is ship ownership: a host may drive only
+//!   the ship its own fleet slot flies, so [`apply_mesh_inbox`] drops any peer
+//!   command whose target `ShipKey` is not the hull the sending slot owns
+//!   (another player's, or an NPC's). [`frame::MeshCommand::is_from`] checks the
+//!   companion frame-consistency rule (a frame's `from` and its commands' order
+//!   origin agree).
+//!
+//!   The one authority dimension NOT yet enforced is that a frame's declared
+//!   `from` slot is the connection that actually delivered it — see the
+//!   `TODO(#1118/#1120 mesh hardening)` in [`apply_mesh_inbox`]. That needs a
+//!   transport-authenticated sender slot, which the star topology cannot supply
+//!   for a relayed sibling frame without the lead tagging it; it is deferred
+//!   rather than half-built.
 //! * **It does not ship AI decisions.** Every host derives every NPC from the
 //!   same ticks, the same seeded streams and the same authored policies
 //!   (AGENTS.md rule 6, `p2p-delta-ai-output-is-not-logged`). Only what crosses
@@ -445,7 +456,18 @@ pub fn register_lockstep(app: &mut App) {
             FixedLast,
             seal_tick_frame.before(crate::sim_tick::advance_sim_tick),
         )
-        .add_systems(Last, sample_and_publish_digest);
+        // Sampled from INSIDE the fixed schedule, once per fixed step, so a
+        // frame that runs several steps across a checkpoint boundary cannot skip
+        // the checkpoint (issue #1116). `.before(advance_sim_tick)` so `SimTick`
+        // still reads the step that just committed. Gated to a running fleet so a
+        // solo host takes no per-step exclusive sync point for a digest exchange
+        // it has no peer to hold.
+        .add_systems(
+            FixedLast,
+            sample_and_publish_digest
+                .before(crate::sim_tick::advance_sim_tick)
+                .run_if(fleet_is_running),
+        );
 }
 
 /// Join a fleet: adopt the slot, the peers and the agreed delay.
@@ -505,12 +527,23 @@ pub fn apply_mesh_inbox(
     mut session: Option<ResMut<FleetLockstep>>,
     mut pending: ResMut<PendingCommands>,
     mut agreement: ResMut<MeshAgreement>,
+    fleet_ships: Query<(&FleetSlotOf, &crate::entities::spawner::EntityUuid)>,
     log: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
     if inbox.is_empty() {
         return;
     }
     let frames = inbox.take();
+    // The hull each fleet slot actually flies, keyed by slot. A host may speak
+    // only for the ship ITS OWN slot owns (`frame::MeshCommand`'s contract), so
+    // a peer command naming any other hull — another player's, or an NPC's — is
+    // refused before it is queued. The roster froze which slot flies which hull;
+    // this is that same fact read off the spawned ships, where the minted uuid
+    // (the `ShipKey` a command routes by) actually lives.
+    let owned_ship: std::collections::HashMap<HostSlot, String> = fleet_ships
+        .iter()
+        .map(|(slot, uuid)| (slot.0, uuid.0.clone()))
+        .collect();
     let Some(session) = session.as_deref_mut() else {
         // No fleet: a frame that arrives before this host has joined one is
         // dropped rather than queued, because there is no agreed order to put
@@ -530,6 +563,16 @@ pub fn apply_mesh_inbox(
                 if tick.from == session.local() {
                     continue;
                 }
+                // TODO(#1118/#1120 mesh hardening): `tick.from` is trusted from
+                // the frame, not authenticated to the connection that delivered
+                // it. A transport-authenticated sender slot (JS binds conn->slot
+                // and passes it across `wasm_receive_mesh_frame`) would let this
+                // reject a frame whose `from` disagrees with its origin. It is
+                // deferred because the star relay means a member cannot
+                // authenticate a sibling frame the lead forwarded without the
+                // lead tagging it — a change to #1114's verbatim-relay envelope.
+                // The ship-ownership check below still holds regardless: a
+                // spoofed `from` can only speak for the hull that slot owns.
                 for command in tick.commands {
                     if !command.is_from(tick.from) {
                         crate::pwarn!(
@@ -538,6 +581,29 @@ pub fn apply_mesh_inbox(
                             "{} sent a command ordered under {} — dropped",
                             tick.from.slot_id(),
                             command.order.origin.slot_id(),
+                        );
+                        continue;
+                    }
+                    // A host may drive only the ship its own slot flies. Without
+                    // this a peer at slot 2 could order a command under slot 2
+                    // (passing `is_from`) yet name slot 1's hull — or an NPC — in
+                    // `command.ship`, and the `ShipKey` apply route would deliver
+                    // it there on every host. The command is dropped unless the
+                    // ship it targets is the one the sending slot owns. A slot
+                    // whose ship this host has not spawned (or has despawned) owns
+                    // nothing here, so its claim cannot be verified and is
+                    // refused — the fleet's player ships are all spawned at
+                    // GameStart, before any crew command can be issued for them.
+                    if owned_ship.get(&tick.from).map(String::as_str)
+                        != Some(command.ship.0.as_str())
+                    {
+                        crate::pwarn!(
+                            log,
+                            LogCat::Admit,
+                            "{} sent a command for ship {:?}, which its slot does \
+                             not fly — dropped",
+                            tick.from.slot_id(),
+                            command.ship.0,
                         );
                         continue;
                     }
@@ -680,18 +746,33 @@ pub fn seal_tick_frame(
     }));
 }
 
+/// Whether this host is in a fleet with at least one peer — the only state in
+/// which the digest exchange has anybody to compare with. A solo host (no
+/// session, or a fleet of one) skips it, so it takes no per-step exclusive sync
+/// point for an exchange that would fold nothing anyone receives.
+fn fleet_is_running(session: Option<Res<FleetLockstep>>) -> bool {
+    session.is_some_and(|s| !s.is_alone())
+}
+
 /// Fold this host's authoritative state at a sampled tick and publish it.
 ///
-/// In `Last`, which is the end of a frame: every fixed step the frame was going
-/// to run has run and committed, and nothing between here and the next
-/// `App::update()` touches folded state. `sim_digest`'s fold-point rule — after
-/// `SimSet` has fully committed a tick, before frame-time interpolation — is
-/// about *simulation* state, and render interpolation writes `Transform`, which
-/// the fold does not read.
+/// In `FixedLast`, **before** `advance_sim_tick` — the same fold point
+/// `seal_tick_frame` uses: `SimSet` has fully committed this step's tick (and
+/// so has the fixed-schedule `StateTransition` that follows it), and `SimTick`
+/// still reads the tick that just ran. `sim_digest`'s fold-point rule — after a
+/// tick has committed, before frame-time interpolation — holds here for the
+/// same reason it held in `Last`: render interpolation writes `Transform` in
+/// the frame schedules, which no fixed step touches and the fold does not read.
 ///
-/// A frame may run zero or several fixed steps, so this samples on the tick
-/// value rather than once per frame; [`crate::sim_digest::DigestLedger::record`]
-/// already refuses a duplicate for the same tick.
+/// Sampling **per fixed step** rather than once per frame is what closes the
+/// mid-frame-checkpoint hole (issue #1116): a frame that catches up several
+/// fixed steps can advance `SimTick` past a checkpoint multiple (e.g. 299 → 301
+/// across interval 300), and a once-per-frame sampler that only saw the final
+/// `SimTick` would never fold or publish that checkpoint — so a real divergence
+/// at exactly that tick would go undetected. Driven from inside the fixed loop,
+/// every checkpoint tick the frame crosses is observed.
+/// [`crate::sim_digest::DigestLedger::record`] still refuses a duplicate for a
+/// tick already at the head of the ledger.
 pub fn sample_and_publish_digest(world: &mut World) {
     let Some(session) = world.get_resource::<FleetLockstep>() else {
         return;
@@ -864,6 +945,102 @@ mod tests {
             !format!("{crossed:?}").contains("session-token"),
             "the token is a bearer credential and the wire is exactly where it \
              must not go"
+        );
+    }
+
+    /// A frame that catches up several fixed steps across a checkpoint boundary
+    /// still folds AND publishes that checkpoint (issue #1116).
+    ///
+    /// The digest exchange samples from inside the fixed schedule, so a
+    /// `SimTick` that jumps past a checkpoint multiple mid-frame — a browser
+    /// under load, a post-stall unpause — cannot skip it. A once-per-frame
+    /// sampler that only read the end-of-frame `SimTick` would never observe
+    /// tick 5 here, and a real divergence at exactly that tick would then go
+    /// unreported until a later checkpoint, if ever.
+    #[test]
+    fn a_multi_step_frame_samples_every_checkpoint_it_crosses() {
+        use crate::command_admission::log::PendingCommands;
+        use crate::sim_tick::{register_sim_tick, SimTick};
+
+        const INTERVAL: u64 = 5;
+        let period = std::time::Duration::from_millis(10);
+
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin);
+        app.init_resource::<PendingCommands>();
+        register_sim_tick(&mut app);
+        // The PRODUCTION wiring: `register_lockstep` is what places the sampler
+        // in the fixed schedule, so this guards that registration, not a stand-in.
+        register_lockstep(&mut app);
+
+        // A running two-host fleet whose peer is already known to be ready far
+        // ahead, so the barrier never withholds a step and this stays a test of
+        // the sampler rather than of the wait.
+        let roster = FleetRoster::new(
+            vec![FleetShip::new(HostSlot(1)), FleetShip::new(HostSlot(2))],
+            HostSlot(1),
+        );
+        join_fleet(app.world_mut(), roster, 0);
+        app.insert_resource(MeshAgreement::new(INTERVAL));
+        app.world_mut()
+            .resource_mut::<FleetLockstep>()
+            .observe(HostSlot(2), u64::MAX);
+        app.world_mut()
+            .resource_mut::<Time<Fixed>>()
+            .set_timestep(period);
+
+        // A single fixed step per frame up to just below the checkpoint: the
+        // first update carries a zero delta and steps nothing, then four one-step
+        // frames leave `SimTick` at 4 with only tick 0 sampled.
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(period));
+        app.update();
+        for _ in 0..4 {
+            app.update();
+        }
+        assert_eq!(
+            app.world().resource::<SimTick>().0,
+            4,
+            "precondition: at tick 4"
+        );
+        assert!(
+            app.world()
+                .resource::<MeshAgreement>()
+                .local
+                .digest_at(INTERVAL)
+                .is_none(),
+            "precondition: the checkpoint tick has not been reached yet"
+        );
+
+        // One frame worth two fixed steps: `SimTick` 4 -> 6, crossing checkpoint
+        // 5 in the MIDDLE of the frame. A sampler reading only the end-of-frame
+        // `SimTick` (6) would never see 5.
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(period * 2));
+        app.update();
+        assert_eq!(
+            app.world().resource::<SimTick>().0,
+            6,
+            "the frame ran two steps"
+        );
+
+        assert!(
+            app.world()
+                .resource::<MeshAgreement>()
+                .local
+                .digest_at(INTERVAL)
+                .is_some(),
+            "the mid-frame checkpoint at tick {INTERVAL} was skipped — the \
+             sampler is not folding every checkpoint the frame crosses"
+        );
+        let published = app
+            .world()
+            .resource::<MeshOutbox>()
+            .pending_frames()
+            .iter()
+            .any(|f| matches!(f, MeshFrame::Digest(d) if d.tick == INTERVAL));
+        assert!(
+            published,
+            "the crossed checkpoint must be PUBLISHED to the fleet, not just \
+             recorded — a peer that never hears it cannot compare against it"
         );
     }
 }

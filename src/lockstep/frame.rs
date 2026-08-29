@@ -83,11 +83,20 @@ pub struct MeshCommand {
 impl MeshCommand {
     /// Whether this command claims to come from `slot`.
     ///
-    /// The receiver's whole authority check over peer traffic, and it is a
-    /// check about the *frame*, not about the command: a `tick` frame from slot
-    /// 2 carrying a command ordered under slot 3 is a host speaking for
-    /// somebody else, and the answer is to drop it rather than to guess which
-    /// half is true.
+    /// One of the two authority checks a receiver runs over peer traffic — the
+    /// frame-consistency half. It is a check about the *frame*, not the command:
+    /// a `tick` frame from slot 2 carrying a command ordered under slot 3 is a
+    /// host speaking for somebody else, and the answer is to drop it rather than
+    /// to guess which half is true.
+    ///
+    /// It does **not** on its own establish that the command targets a ship the
+    /// slot is entitled to drive — `apply_mesh_inbox` enforces that separately,
+    /// dropping a command whose `ship` is not the hull the sending slot owns.
+    /// And it trusts the frame's declared `from`: binding that to the connection
+    /// that delivered it is deferred (see `apply_mesh_inbox`'s
+    /// `TODO(#1118/#1120 mesh hardening)`), so a receiver currently verifies
+    /// origin-slot *consistency* and ship *ownership*, not transport-level
+    /// origin authenticity.
     pub fn is_from(&self, slot: HostSlot) -> bool {
         self.order.origin == slot
     }

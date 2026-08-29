@@ -33,14 +33,15 @@
 
 use bevy::prelude::*;
 
+use project_phoenix::command_admission::log::{CommandOrder, ShipKey};
 use project_phoenix::command_admission::{CommandDelay, CommandLog, HostSlot};
 use project_phoenix::core::messages::{ClientMessage, StationId, SystemControlPayload, SystemId};
 use project_phoenix::entities::spawner::EntityUuid;
 use project_phoenix::headless::{build_headless_app, run, world_digest, HeadlessArgs};
 use project_phoenix::lobby::{InboundMessage, Sessions};
 use project_phoenix::lockstep::{
-    join_fleet, FleetLockstep, FleetRoster, FleetShip, FleetSlotOf, MeshAgreement, MeshDiagnostics,
-    MeshFrame, MeshInbox, MeshOutbox,
+    join_fleet, FleetLockstep, FleetRoster, FleetShip, FleetSlotOf, MeshAgreement, MeshCommand,
+    MeshDiagnostics, MeshFrame, MeshInbox, MeshOutbox, TickFrame,
 };
 use project_phoenix::server_app::LocalShip;
 use project_phoenix::sim_tick::SimTick;
@@ -49,8 +50,11 @@ use project_phoenix::sim_tick::SimTick;
 /// RNG draws, mid-run projectile mints, and helm decisions that answer to input.
 const WORLD: &str = "assets/worlds/probe_fleet_duel.toml";
 
-/// The world's authored fleet delay. Read back from the loaded config rather
-/// than repeated here, so the test cannot quietly disagree with the content.
+/// The hull every host in the fleet flies. A single template path, so both
+/// slots take the same ship and the only variable between the hosts is which
+/// one each projects. (The authored fleet delay is NOT a constant here — it is
+/// read back from the loaded config via `authored_delay()` so the test cannot
+/// quietly disagree with the world's `[global] command_delay_ticks`.)
 const SHIP: &str = "assets/entities/alliance_cruiser.toml";
 
 const SEED: u64 = 1_116_116;
@@ -733,5 +737,68 @@ fn a_fleet_of_one_never_waits() {
             .pending_frames()
             .is_empty(),
         "…and must say nothing to a fleet that does not exist"
+    );
+}
+
+// ── Receiver authority ─────────────────────────────────────────────────────────
+
+/// **The ship-ownership check (issue #1116).** A host may drive only the ship
+/// its own fleet slot flies. A peer frame ordered honestly under its own slot,
+/// but naming ANOTHER slot's hull — or an NPC — in its `ShipKey`, is DROPPED,
+/// not applied.
+///
+/// Without it a peer could inject authoritative commands onto another player's
+/// ship or onto any NPC: `is_from` passes (the frame's `from` and its command's
+/// order origin agree), and the `ShipKey` apply route would then deliver the
+/// command to whatever hull that uuid names — identically, and wrongly, on every
+/// host. The forged commands here are the only ones the fleet ever admits; no
+/// crew presses a key, so an empty log is proof they were refused rather than
+/// merely lost in the noise of legitimate traffic.
+#[test]
+fn a_peer_may_not_drive_a_ship_its_slot_does_not_fly() {
+    let mut hosts = vec![Host::new(SLOT_ONE), Host::new(SLOT_TWO)];
+    // Spawn the fleet and let it settle. No crew order is ever issued.
+    for _ in 0..30 {
+        step(&mut hosts);
+    }
+
+    let fleet = hosts[0].fleet_ships();
+    let slot_one_hull = fleet
+        .get(&SLOT_ONE)
+        .expect("slot 1's ship exists on host one")
+        .clone();
+
+    // Two forged slot-2 frames delivered to host ONE (which applies slot 2's
+    // traffic): one names host one's OWN hull, one names a hull no slot flies.
+    // Both are ordered honestly under slot 2, so only the ownership check can
+    // stop them.
+    let apply_tick = hosts[0].tick() + 20;
+    let forge = |ship: &str, seq: u64| {
+        MeshFrame::Tick(TickFrame {
+            from: SLOT_TWO,
+            tick: apply_tick,
+            ready_through: apply_tick,
+            commands: vec![MeshCommand {
+                tick: apply_tick,
+                order: CommandOrder::new(SLOT_TWO, seq),
+                ship: ShipKey(ship.to_string()),
+                target: SystemId("helm-steering".into()),
+                payload: steer(0.5),
+            }],
+        })
+    };
+    hosts[0].deliver(&[forge(&slot_one_hull, 0), forge("npc-no-slot-flies-this", 1)]);
+
+    // Run well past the forged apply tick, so a command that WAS queued would
+    // have drained into the log by now.
+    for _ in 0..80 {
+        step(&mut hosts);
+    }
+
+    assert!(
+        hosts[0].log().entries().is_empty(),
+        "a forged peer command for a ship slot 2 does not fly reached the log — \
+         the receiver must drop a command whose ShipKey is not the sending \
+         slot's own hull, or one host can drive another's ship or an NPC"
     );
 }

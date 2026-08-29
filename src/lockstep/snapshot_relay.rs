@@ -196,9 +196,41 @@ impl MeshSnapshotReceiver {
 /// drops a completed record rather than committing it. The divergence-recovery
 /// driver ([`crate::lockstep::recovery`]) arms this on the ONE host the shared
 /// recovery plan designates as recovering, naming the leader the same plan
-/// elected — so a record is only ever committed (a) during a recovery this host is
-/// party to and (b) from the deterministically-chosen leader. It is disarmed again
-/// the moment the recovery resolves.
+/// elected. It is disarmed again the moment the recovery resolves.
+///
+/// # What the two conditions actually guarantee — and what condition (b) does not
+///
+/// A staged record is committed only when (a) this host is armed as a designated
+/// recovering host AND (b) [`drain_mesh_restore`] does not refuse it as
+/// [`MeshRestoreOutcome::RefusedWrongSender`] — i.e. its `from` slot equals the
+/// leader the arm names. These two are NOT equally strong:
+///
+/// * **Condition (a) is the primary unbidden-overwrite protection, and it has ZERO
+///   dependence on `from`.** The arm is set LOCALLY, from the shared recovery plan
+///   every honest host computes identically — never from anything a peer sends. A
+///   host that is not the plan's designated recovering host is never armed, so no
+///   record any peer transmits can overwrite its world. This is what fully covers
+///   the honest-but-diverged threat model issue #1118 targets: a peer cannot
+///   overwrite another host's whole world simply by sending it a snapshot.
+/// * **Condition (b) refuses an HONEST non-leader's record, but does NOT
+///   authenticate the sender.** [`MeshRestoreOutcome::RefusedWrongSender`] stops a
+///   divergent peer from injecting its state by racing the leader's transfer — but
+///   only for honest peers. The `from` it checks is `staged_from`, copied from
+///   `chunk.from` (an ordinary serialized wire field — see
+///   [`crate::lockstep::transfer::SnapshotChunk::from`]), NOT an authenticated
+///   delivering connection. This is the same honest-`from` trust the whole mesh
+///   already rests on (see the `TODO(#1118/#1120 mesh hardening)` in
+///   [`crate::lockstep::apply_mesh_inbox`]). So a BYZANTINE peer that forges
+///   `from = leader` DURING an active recovery already targeting this host could
+///   get a record past the arm. It would still have to pass the version/content
+///   gate and fold to its OWN recorded digest — a self-consistent record, not
+///   arbitrary bytes — but the arm alone does not prove the record came from the
+///   elected leader.
+///
+/// Transport-authenticated sender identity (JS binding conn->slot so a forged
+/// `from` can be rejected at the mesh boundary) is the deferred issue #1120 work.
+/// Until then condition (b) is an honest-peer guard, not a byzantine one; condition
+/// (a) is what makes an unarmed host uncommittable regardless of `from`.
 ///
 /// A future join/slot-recovery path (issue #1120) is the other legitimate arm; it
 /// will set this for a joining host the same way. Until then the only armer is
@@ -380,9 +412,31 @@ pub fn gate_and_restore_against(
         );
     };
 
-    // 2. Readiness. Reconcile the captured layer topology, then check the roster
+    // 2. Checkpoint the live world BEFORE anything below can mutate it, so an
+    //    integrity or completeness failure can be rolled back to the TRUE pre-gate
+    //    original (issue #1118, AC3). This is captured ahead of
+    //    `reconcile_world_layers` deliberately: reconcile can spawn or despawn layer
+    //    entities, so capturing after it would let a later rollback return to a
+    //    post-reconcile intermediate rather than to where this host actually began.
+    //    Capture is a pure read of the current world state — nothing below needs to
+    //    have run first for it to be correct — so moving it here changes nothing on
+    //    the common (folded-value) path where reconcile is a no-op, and closes the
+    //    topology-divergence case where reconcile makes real changes yet returns
+    //    `Ready`. The checkpoint is the same `snapshot::capture` a save takes and
+    //    restores through the same walk, so rolling back reconciles the world —
+    //    despawning anything reconcile or the leader's record spawned, rebuilding
+    //    anything they despawned — exactly as a resume would. `pre_digest` is the
+    //    fold of THIS captured state, so the rollback can verify it actually
+    //    returned the world to where it started.
+    let checkpoint = snapshot::capture(world);
+    let pre_digest = crate::sim_digest::world_digest(world);
+
+    // 3. Readiness. Reconcile the captured layer topology, then check the roster
     //    is far enough along to overwrite — exactly `drain_snapshot_restore`'s
-    //    preconditions.
+    //    preconditions. A not-ready or failed-layer return simply discards the
+    //    checkpoint above (a pure read); as before #1118's reorder, neither path
+    //    rolls back reconcile's own partial layer work — a `Failed` return is a
+    //    gate refusal, not a half-restore.
     match snapshot::reconcile_world_layers(world, &snap.state) {
         snapshot::LayerReconcileStatus::Ready => {}
         snapshot::LayerReconcileStatus::Waiting => return MeshRestoreOutcome::NotReady,
@@ -395,16 +449,6 @@ pub fn gate_and_restore_against(
     if !snapshot::ready_to_restore(world, &snap.state) {
         return MeshRestoreOutcome::NotReady;
     }
-
-    // 3. Checkpoint the live world BEFORE overwriting it, so an integrity or
-    //    completeness failure can be rolled back cleanly (issue #1118, AC3). The
-    //    checkpoint is the same `snapshot::capture` a save takes and restores
-    //    through the same walk, so rolling back reconciles the world — despawning
-    //    anything the leader's record spawned, rebuilding anything it despawned —
-    //    exactly as a resume would. `pre_digest` lets the rollback verify it
-    //    actually returned the world to where it started.
-    let checkpoint = snapshot::capture(world);
-    let pre_digest = crate::sim_digest::world_digest(world);
 
     // Restore, then verify the fold. `restore` overwrites by uuid; the recorded
     // digest is recomputed BY the restored simulation, so a tampered or truncated
@@ -420,6 +464,13 @@ pub fn gate_and_restore_against(
 
     // A refused restore must not be left half-applied. Roll back to the checkpoint
     // and report the refusal — the world is now exactly what it was.
+    //
+    // The `rollback.is_complete()` half of the guard below is a `debug_assert`, so
+    // it fires only in test/debug builds, never in release — and its partial-
+    // rollback case cannot even arise in a same-roster recovery: the checkpoint is
+    // this host's OWN live world, so restoring it back is a by-uuid overwrite of
+    // entities that already exist, always complete for the homogeneous fleet this
+    // path recovers. It stays asserted to catch a heterogeneous-roster regression.
     let rollback = snapshot::restore(world, &checkpoint);
     debug_assert!(
         crate::sim_digest::world_digest(world) == pre_digest && rollback.is_complete(),

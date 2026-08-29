@@ -519,6 +519,88 @@ fn a_snapshot_is_refused_outside_a_recovery_and_from_a_non_leader() {
     );
 }
 
+// ── AC3: a post-write refusal rolls the world back byte-identical ─────────────
+
+/// **AC3, the headline safety property, exercised.** A restore that WRITES the
+/// world and is only then refused for integrity leaves the world BYTE-IDENTICAL to
+/// where it began — the rollback checkpoint is restored.
+///
+/// This is the one refusal that actually runs the rollback: the arm refusals
+/// ([`MeshRestoreOutcome::RefusedUnarmed`]/[`MeshRestoreOutcome::RefusedWrongSender`])
+/// and the version/content gate all decline BEFORE a single component is written,
+/// so none of them ever reach the checkpoint-and-restore-back code. `RefusedIntegrity`
+/// does — the fold is checked only AFTER `snapshot::restore` has walked the world —
+/// and until now the byte-clean rollback it performs was asserted only by a
+/// `debug_assert!` inside `gate_and_restore_against` and covered by no test. This
+/// proves it against the real fold.
+#[test]
+fn a_failed_integrity_restore_rolls_the_world_back_byte_identical() {
+    let slots = [SLOT_ONE, SLOT_TWO];
+    let mut hosts = vec![Host::new(SLOT_ONE, &slots), Host::new(SLOT_TWO, &slots)];
+    for _ in 0..25 {
+        step(&mut hosts);
+    }
+
+    // A genuine, gate-passing record captured from host 1's own live world — but
+    // with its RECORDED digest corrupted, so the restored world's actual fold
+    // cannot equal it. That forces `MeshRestoreOutcome::RefusedIntegrity` AFTER the
+    // restore has written the world, the only path that runs the rollback.
+    let mut record = capture_run(hosts[0].app.world(), WORLD);
+    let snap = record
+        .snapshot
+        .as_mut()
+        .expect("the capture carries a snapshot");
+    let honest_digest = snap.digest;
+    snap.digest ^= 0xffff_ffff_ffff_ffff;
+    assert_ne!(
+        snap.digest, honest_digest,
+        "the corruption must actually change the recorded fold"
+    );
+
+    // Move host 1's live world OFF the captured state, so the restore is a REAL
+    // write the rollback must undo. Otherwise a no-op restore would leave the world
+    // unchanged whether or not the rollback ran, and the byte-identical assertion
+    // (and its revert-verify) could not tell the difference. The nudge is
+    // physics-only, so entity topology is untouched and the record still restores
+    // by uuid.
+    hosts[0].inject_position_divergence(37.0);
+    let before = hosts[0].digest();
+    assert_ne!(
+        before, honest_digest,
+        "the nudge must move the live world off the captured state, or the restore \
+         would be a no-op and prove nothing about the rollback"
+    );
+
+    // Arm host 1 for a restore from slot 1 (the record's `from`), as the recovery
+    // driver arms a designated recovering host, and drive the staged restore
+    // WITHOUT advancing a sim tick — so any digest change is the restore's alone.
+    hosts[0]
+        .app
+        .world_mut()
+        .resource_mut::<MeshRestoreArm>()
+        .arm(SLOT_ONE);
+    let frames = frames_for(&record, SLOT_ONE, 0x1118_0003).expect("frames");
+    stage_and_drain(&mut hosts[0], &frames);
+
+    // The restore wrote the world, recomputed the fold, found it disagreed with the
+    // corrupted recorded digest, refused — and rolled the checkpoint back.
+    assert!(
+        matches!(
+            hosts[0].last_restore(),
+            Some(MeshRestoreOutcome::RefusedIntegrity { .. })
+        ),
+        "a record whose fold cannot match its recorded digest must be refused for \
+         integrity, got {:?}",
+        hosts[0].last_restore()
+    );
+    assert_eq!(
+        hosts[0].digest(),
+        before,
+        "a RefusedIntegrity restore must roll back to a BYTE-IDENTICAL world — the \
+         checkpoint captured before the write must have been restored"
+    );
+}
+
 /// Feed a record's chunks straight into a host's receiver and drive the restore,
 /// without advancing a sim tick — so a digest change can only be the restore's.
 fn stage_and_drain(host: &mut Host, frames: &[MeshFrame]) {

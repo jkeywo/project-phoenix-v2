@@ -632,6 +632,7 @@ mod tests {
                 panes: Vec::new(),
             }],
             touch: Vec::new(),
+            media: Vec::new(),
         }
     }
 
@@ -707,6 +708,7 @@ mod tests {
                 },
             ],
             touch: Vec::new(),
+            media: Vec::new(),
         }
         .validate()
         .unwrap()
@@ -847,6 +849,7 @@ mod tests {
                 },
             ],
             touch: Vec::new(),
+            media: Vec::new(),
         }
         .validate()
         .unwrap()

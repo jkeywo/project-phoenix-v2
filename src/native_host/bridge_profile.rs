@@ -420,6 +420,12 @@ pub struct BridgeProfile {
     /// Touch device → monitor mappings. `[[touch]]` tables.
     #[serde(default, rename = "touch", skip_serializing_if = "Vec::is_empty")]
     pub touch: Vec<TouchMapping>,
+    /// Per-surface media-device assignments (issue #1126). `[[media]]` tables in
+    /// the same file — a bridge profile records the physical room's cameras,
+    /// microphones and speakers beside its monitors. Absent (and skipped) for a
+    /// display-only profile; the model lives in [`super::bridge_media`].
+    #[serde(default, rename = "media", skip_serializing_if = "Vec::is_empty")]
+    pub media: Vec<super::bridge_media::MediaSurfaceEntry>,
 }
 
 impl BridgeProfile {
@@ -429,6 +435,7 @@ impl BridgeProfile {
             version: PROFILE_VERSION,
             displays: Vec::new(),
             touch: Vec::new(),
+            media: Vec::new(),
         }
     }
 
@@ -533,9 +540,16 @@ impl BridgeProfile {
                 role,
             });
         }
+        // The media assignments (issue #1126) are validated in the same pass, so
+        // a wrong-kind device, a duplicate or an unconsented share fails at the
+        // prompt exactly as a bad display role does — see `bridge_media`.
+        let media =
+            super::bridge_media::validate_media(&self.media).map_err(ProfileError::Media)?;
+
         Ok(ValidatedProfile {
             displays,
             touch: self.touch.clone(),
+            media,
         })
     }
 }
@@ -546,6 +560,9 @@ impl BridgeProfile {
 pub struct ValidatedProfile {
     pub displays: Vec<ValidatedDisplay>,
     pub touch: Vec<TouchMapping>,
+    /// The validated media-device assignments (issue #1126). Empty for a
+    /// display-only profile.
+    pub media: super::bridge_media::ValidatedMedia,
 }
 
 /// One validated monitor assignment.
@@ -581,6 +598,10 @@ pub enum ProfileError {
     /// `apply_bridge_profile` would silently keep only the last one and leave
     /// every other configured monitor black with no diagnostic.
     MultipleViewscreens { ids: Vec<String> },
+    /// A `[[media]]` assignment is invalid (issue #1126): a wrong-kind device in
+    /// a slot, a duplicate, an unconsented share, and so on. The wrapped
+    /// [`MediaError`](super::bridge_media::MediaError) carries the detail.
+    Media(super::bridge_media::MediaError),
     /// The TOML did not parse.
     Parse(String),
     /// The profile could not be serialised to TOML.
@@ -633,6 +654,7 @@ impl std::fmt::Display for ProfileError {
                     .collect::<Vec<_>>()
                     .join(" and ")
             ),
+            ProfileError::Media(e) => write!(f, "bridge profile media assignment: {e}"),
             ProfileError::Parse(detail) => write!(f, "bridge profile did not parse: {detail}"),
             ProfileError::Serialize(detail) => {
                 write!(f, "bridge profile could not be written: {detail}")
@@ -987,7 +1009,38 @@ pub fn present_assigned_identities(
 /// them here. Lists every discovered monitor with its identity, geometry and
 /// current assignment; when a profile is supplied it also validates it (surfacing
 /// a density or role error) and reports any missing or unassigned monitors.
+///
+/// The media half of the report (issue #1126) is appended by
+/// [`render_setup_report_with_media`], which this delegates to with no discovered
+/// devices — the default when no OS media backend is compiled in. A caller that
+/// has enumerated real devices calls that function directly.
 pub fn render_setup_report(
+    discovered: &[DiscoveredMonitor],
+    profile: Option<&BridgeProfile>,
+) -> String {
+    render_setup_report_with_media(discovered, &[], profile)
+}
+
+/// [`render_setup_report`] plus the media-device half (issue #1126): the display
+/// report, then [`super::bridge_media::render_media_setup_report`] over
+/// `media_devices`. Split out so the display half stays exactly what #1123 tests
+/// assert, and so a `--setup` path that has enumerated real media devices can
+/// pass them here while the default path passes none.
+pub fn render_setup_report_with_media(
+    discovered: &[DiscoveredMonitor],
+    media_devices: &[super::bridge_media::DiscoveredMediaDevice],
+    profile: Option<&BridgeProfile>,
+) -> String {
+    let mut out = render_display_setup_report(discovered, profile);
+    out.push_str(&super::bridge_media::render_media_setup_report(
+        media_devices,
+        profile,
+    ));
+    out
+}
+
+/// The display half of the `--setup` report — the original #1123 body.
+fn render_display_setup_report(
     discovered: &[DiscoveredMonitor],
     profile: Option<&BridgeProfile>,
 ) -> String {

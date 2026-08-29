@@ -109,6 +109,7 @@ fn profile_with(entries: Vec<DisplayEntry>) -> BridgeProfile {
         version: PROFILE_VERSION,
         displays: entries,
         touch: Vec::new(),
+        media: Vec::new(),
     }
 }
 
@@ -422,6 +423,22 @@ fn round_trip_fixture() -> BridgeProfile {
             device: "ELAN Touchscreen".to_string(),
             monitor: "BenQ EX@1920x1080".to_string(),
         }],
+        media: vec![
+            super::super::bridge_media::MediaSurfaceEntry {
+                surface: "viewscreen".to_string(),
+                camera: Some("camera:Logitech BRIO".to_string()),
+                microphones: vec!["mic:Blue Yeti".to_string()],
+                outputs: vec!["output:Bridge Speakers".to_string()],
+                allow_shared: Vec::new(),
+            },
+            super::super::bridge_media::MediaSurfaceEntry {
+                surface: "comms".to_string(),
+                camera: None,
+                microphones: vec!["mic:Comms Headset".to_string()],
+                outputs: vec!["output:Comms Headset".to_string()],
+                allow_shared: Vec::new(),
+            },
+        ],
     }
 }
 
@@ -449,6 +466,14 @@ fn the_serialised_form_is_human_readable_toml() {
     assert!(text.contains("role = \"station\""), "{text}");
     assert!(text.contains("[[touch]]"), "{text}");
     assert!(text.contains("ELAN Touchscreen"), "{text}");
+    // The media half (issue #1126) rides in the same file.
+    assert!(text.contains("[[media]]"), "{text}");
+    assert!(text.contains("surface = \"viewscreen\""), "{text}");
+    assert!(text.contains("camera = \"camera:Logitech BRIO\""), "{text}");
+    // The array's exact spacing is the pretty-printer's; assert on the field name
+    // and the value rather than the bracket layout.
+    assert!(text.contains("microphone = ["), "{text}");
+    assert!(text.contains("mic:Blue Yeti"), "{text}");
 }
 
 #[test]

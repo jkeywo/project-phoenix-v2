@@ -40,6 +40,15 @@ pub mod app;
 /// borderless-fullscreen surface per configured monitor from a resolved
 /// [`bridge_profile`]. Provable only under the ignored integration test.
 pub mod bridge_display;
+/// The bridge-media profile model (issue #1126) — pure, Bevy-free. Media-device
+/// kinds and stable identities, the per-surface camera/microphone/output
+/// assignment, the parse/validate failure taxonomy (wrong-kind, duplicate,
+/// unconsented share), the deterministic default and the missing/denied-device
+/// resolution all live here and are tested by the ordinary `cargo test` CI runs.
+/// Its assignments ride in the same [`bridge_profile::BridgeProfile`] TOML. The
+/// real OS enumeration/preview/test backend is not yet in the tree — see
+/// [`bridge_media::enumerate_note`].
+pub mod bridge_media;
 /// The bridge-display profile model (issue #1123) — pure, Bevy-free. Stable
 /// monitor identities, the one/two-pane density rule, pane geometry, the TOML
 /// round-trip and the missing-display resolution all live here and are tested by

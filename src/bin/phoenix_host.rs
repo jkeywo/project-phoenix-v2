@@ -263,10 +263,18 @@ fn main() {
         match profile.validate() {
             Ok(validated) => {
                 eprintln!(
-                    "phoenix-host: bridge display profile — {} display(s), {} touch mapping(s)",
+                    "phoenix-host: bridge display profile — {} display(s), {} touch mapping(s), \
+                     {} media surface(s)",
                     validated.displays.len(),
-                    validated.touch.len()
+                    validated.touch.len(),
+                    validated.media.surfaces.len(),
                 );
+                // A consented device share (issue #1126) is not an error, but it
+                // is worth a line so the operator sees the contention they asked
+                // for before relying on it.
+                for warning in &validated.media.warnings {
+                    eprintln!("phoenix-host: --profile media: {warning}");
+                }
                 cfg.bridge_profile = Some(validated);
             }
             Err(e) => {

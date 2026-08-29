@@ -36,12 +36,17 @@
 //!   logged, and an AI decision never crosses one. Every host derives every NPC
 //!   from the same ticks and the same RNG streams, so shipping AI output would
 //!   double-apply it.
-//! * **A snapshot.** Transferring the portable record is #1117's.
+//! * **A snapshot chunk.** Transferring the portable record is #1117's, and it
+//!   rides here as [`MeshFrame::Snapshot`] — one framed piece of the whole-payload
+//!   RON export. The framing, chunking and integrity live in
+//!   [`crate::lockstep::transfer`], which is pure; this enum only carries a chunk
+//!   across the wire beside the tick and digest frames.
 
 use serde::{Deserialize, Serialize};
 
 use crate::command_admission::log::{CommandOrder, HostSlot, ShipKey};
 use crate::core::messages::{SystemControlPayload, SystemId};
+use crate::lockstep::transfer::SnapshotChunk;
 
 /// Host-mesh vocabulary revision.
 ///
@@ -155,6 +160,10 @@ pub enum MeshFrame {
     Tick(TickFrame),
     /// A sampled digest, for agreement checking.
     Digest(DigestFrame),
+    /// One framed piece of a portable snapshot in transit (issue #1117). The
+    /// chunking and integrity are [`crate::lockstep::transfer`]'s; this variant
+    /// only carries a piece across the mesh.
+    Snapshot(SnapshotChunk),
 }
 
 impl MeshFrame {
@@ -163,6 +172,7 @@ impl MeshFrame {
         match self {
             MeshFrame::Tick(f) => f.from,
             MeshFrame::Digest(f) => f.from,
+            MeshFrame::Snapshot(f) => f.from,
         }
     }
 
@@ -171,6 +181,7 @@ impl MeshFrame {
         match self {
             MeshFrame::Tick(_) => TYPE_TICK,
             MeshFrame::Digest(_) => TYPE_DIGEST,
+            MeshFrame::Snapshot(_) => TYPE_SNAPSHOT,
         }
     }
 }
@@ -179,6 +190,8 @@ impl MeshFrame {
 pub const TYPE_TICK: &str = "tick";
 /// The `t` value a [`MeshFrame::Digest`] carries on the JS wire.
 pub const TYPE_DIGEST: &str = "digest";
+/// The `t` value a [`MeshFrame::Snapshot`] carries on the JS wire (issue #1117).
+pub const TYPE_SNAPSHOT: &str = "snapshot";
 
 #[cfg(test)]
 mod tests {
@@ -224,6 +237,16 @@ mod tests {
                 from: HostSlot(2),
                 tick: 400,
                 digest: 0xdead_beef,
+            }),
+            MeshFrame::Snapshot(SnapshotChunk {
+                from: HostSlot(2),
+                transfer_id: 0x1117,
+                tick: 400,
+                seq: 1,
+                total: 4,
+                whole_hash: 0xfeed_face,
+                crc: 0xabad_1dea,
+                text: "portable-record-slice".to_string(),
             }),
         ];
         for frame in frames {

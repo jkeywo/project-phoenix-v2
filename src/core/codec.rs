@@ -453,6 +453,25 @@ pub fn encode_mesh_frame(frame: &crate::lockstep::MeshFrame) -> Result<String, s
                 "digest": format!("{:016x}", f.digest),
             }),
         ),
+        // A snapshot chunk (issue #1117). `transfer_id` and `whole_hash` are u64s,
+        // so they cross as hex STRINGS for the same reason `digest` does — a JSON
+        // number would silently round them above 2^53, and the whole-hash is the
+        // value a receiver checks the reassembled record against. `seq`, `total`
+        // and `crc` are u32s and stay numbers; none can reach 2^53. `text` is a
+        // slice of the RON export, JSON-escaped like any string.
+        MeshFrame::Snapshot(c) => (
+            c.tick,
+            serde_json::json!({
+                "from": c.from.0,
+                "transfer_id": format!("{:016x}", c.transfer_id),
+                "tick": c.tick,
+                "seq": c.seq,
+                "total": c.total,
+                "whole_hash": format!("{:016x}", c.whole_hash),
+                "crc": c.crc,
+                "text": c.text,
+            }),
+        ),
     };
     Ok(serde_json::json!({
         MESH_ENVELOPE_PROTOCOL: crate::lockstep::HOST_MESH_PROTOCOL,
@@ -512,6 +531,18 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
             tick,
             digest: u64::from_str_radix(body.get("digest")?.as_str()?, 16).ok()?,
         })),
+        crate::lockstep::frame::TYPE_SNAPSHOT => {
+            Some(MeshFrame::Snapshot(crate::lockstep::SnapshotChunk {
+                from,
+                transfer_id: u64::from_str_radix(body.get("transfer_id")?.as_str()?, 16).ok()?,
+                tick,
+                seq: u32::try_from(body.get("seq")?.as_u64()?).ok()?,
+                total: u32::try_from(body.get("total")?.as_u64()?).ok()?,
+                whole_hash: u64::from_str_radix(body.get("whole_hash")?.as_str()?, 16).ok()?,
+                crc: u32::try_from(body.get("crc")?.as_u64()?).ok()?,
+                text: body.get("text")?.as_str()?.to_string(),
+            }))
+        }
         _ => None,
     }
 }
@@ -695,6 +726,39 @@ mod mesh_frame_tests {
         assert!(
             text.contains("\"digest\":\"deadbeefdeadbeef\""),
             "the digest must be a hex string: {text}"
+        );
+        assert_eq!(super::decode_mesh_frame(&text), Some(frame));
+    }
+
+    /// A snapshot chunk round-trips through the shared envelope (issue #1117),
+    /// and its two u64 fields — `transfer_id` and `whole_hash` — cross as hex
+    /// strings for the same reason a digest does: a JSON number rounds above 2^53,
+    /// and the whole-hash is the value a receiver verifies the record against.
+    #[test]
+    fn a_snapshot_chunk_round_trips_and_keeps_its_u64_fields_exact() {
+        use crate::lockstep::SnapshotChunk;
+        let whole_hash = 0xfeed_face_dead_beef_u64;
+        let transfer_id = 0x0123_4567_89ab_cdef_u64;
+        assert!(whole_hash > (1_u64 << 53) && transfer_id > (1_u64 << 53));
+        let frame = MeshFrame::Snapshot(SnapshotChunk {
+            from: HostSlot(2),
+            transfer_id,
+            tick: 400,
+            seq: 3,
+            total: 9,
+            whole_hash,
+            crc: 0xdead_beef,
+            text: "a RON slice with \"quotes\" and \n a newline".to_string(),
+        });
+        let text = super::encode_mesh_frame(&frame).expect("encodes");
+        assert!(text.contains("\"t\":\"snapshot\""), "{text}");
+        assert!(
+            text.contains("\"whole_hash\":\"feedfacedeadbeef\""),
+            "{text}"
+        );
+        assert!(
+            text.contains("\"transfer_id\":\"0123456789abcdef\""),
+            "{text}"
         );
         assert_eq!(super::decode_mesh_frame(&text), Some(frame));
     }

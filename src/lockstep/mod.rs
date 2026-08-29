@@ -65,9 +65,16 @@ use crate::logging::LogCat;
 
 pub mod frame;
 pub mod session;
+pub mod snapshot_relay;
+pub mod transfer;
 
 pub use frame::{DigestFrame, MeshCommand, MeshFrame, TickFrame, HOST_MESH_PROTOCOL};
 pub use session::{LockstepSession, Stall};
+pub use snapshot_relay::{
+    capture_run, drain_mesh_restore, frames_for, gate_and_restore, gate_and_restore_against,
+    send_snapshot, MeshRestoreOutcome, MeshSnapshotReceiver,
+};
+pub use transfer::{Accepted, SnapshotChunk, SnapshotReceiver, TransferError};
 
 /// The Bevy adapter for the pure [`LockstepSession`] (AGENTS.md rule 10: the
 /// decision module stays Bevy-free and its adapter is a sibling).
@@ -468,6 +475,10 @@ pub fn register_lockstep(app: &mut App) {
                 .before(crate::sim_tick::advance_sim_tick)
                 .run_if(fleet_is_running),
         );
+    // The portable-record transfer (issue #1117): the receiver resource and the
+    // frame-driven restore that commits a fully-arrived record. Kept in its own
+    // sibling so #1119's parallel work on this module does not collide with it.
+    snapshot_relay::register_snapshot_relay(app);
 }
 
 /// Join a fleet: adopt the slot, the peers and the agreed delay.
@@ -527,6 +538,7 @@ pub fn apply_mesh_inbox(
     mut session: Option<ResMut<FleetLockstep>>,
     mut pending: ResMut<PendingCommands>,
     mut agreement: ResMut<MeshAgreement>,
+    mut snapshot_rx: ResMut<MeshSnapshotReceiver>,
     fleet_ships: Query<(&FleetSlotOf, &crate::entities::spawner::EntityUuid)>,
     log: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
@@ -534,6 +546,21 @@ pub fn apply_mesh_inbox(
         return;
     }
     let frames = inbox.take();
+    // Snapshot chunks (issue #1117) are handled whether or not this host is a
+    // lockstep participant: RECEIVING the record is how a host becomes one (a
+    // join, a #1120 slot recovery), so a chunk must not be dropped by the
+    // fleet-session gate below. Peeled off first; the buffer they accumulate is
+    // bounded, and nothing is committed until the whole record has arrived, gated
+    // and restored. `snapshot_relay::drain_mesh_restore` does the committing.
+    let mut sim_frames = Vec::with_capacity(frames.len());
+    for frame in frames {
+        match frame {
+            MeshFrame::Snapshot(chunk) => {
+                snapshot_relay::receive_chunk(&mut snapshot_rx, &chunk, &log);
+            }
+            other => sim_frames.push(other),
+        }
+    }
     // The hull each fleet slot actually flies, keyed by slot. A host may speak
     // only for the ship ITS OWN slot owns (`frame::MeshCommand`'s contract), so
     // a peer command naming any other hull — another player's, or an NPC's — is
@@ -545,19 +572,22 @@ pub fn apply_mesh_inbox(
         .map(|(slot, uuid)| (slot.0, uuid.0.clone()))
         .collect();
     let Some(session) = session.as_deref_mut() else {
-        // No fleet: a frame that arrives before this host has joined one is
-        // dropped rather than queued, because there is no agreed order to put
-        // it in and applying it would be exactly the unilateral admission
-        // lockstep exists to prevent.
-        crate::pwarn!(
-            log,
-            LogCat::Admit,
-            "dropping {} host-mesh frame(s): this host is not in a fleet",
-            frames.len()
-        );
+        // No fleet: a tick or digest frame that arrives before this host has
+        // joined one is dropped rather than queued, because there is no agreed
+        // order to put it in and applying it would be exactly the unilateral
+        // admission lockstep exists to prevent. Snapshot chunks were already
+        // handled above — they are how a host joins in the first place.
+        if !sim_frames.is_empty() {
+            crate::pwarn!(
+                log,
+                LogCat::Admit,
+                "dropping {} host-mesh frame(s): this host is not in a fleet",
+                sim_frames.len()
+            );
+        }
         return;
     };
-    for frame in frames {
+    for frame in sim_frames {
         match frame {
             MeshFrame::Tick(tick) => {
                 if tick.from == session.local() {
@@ -655,6 +685,10 @@ pub fn apply_mesh_inbox(
                     .or_insert_with(|| crate::sim_digest::DigestLedger::new(DIGEST_INTERVAL_TICKS))
                     .record(digest.tick, digest.digest);
             }
+            // Peeled off above, before the fleet-session gate, so it never reaches
+            // this loop — but the match stays exhaustive rather than resting on
+            // that being remembered.
+            MeshFrame::Snapshot(_) => {}
         }
     }
 }

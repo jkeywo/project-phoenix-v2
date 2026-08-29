@@ -302,7 +302,11 @@ fn a_replacement_recovers_a_disconnected_slot_and_the_fleet_reconverges() {
     // A FRESH MACHINE boots as slot 3, with the slot uncrewed — the same picture the
     // survivors hold — and takes the vanished host's place in the ferry.
     hosts[2] = Host::new(SLOT_THREE, &all, &[SLOT_THREE]);
-    assert_eq!(hosts[2].tick(), 0, "the replacement starts from a fresh world");
+    assert_eq!(
+        hosts[2].tick(),
+        0,
+        "the replacement starts from a fresh world"
+    );
 
     // The owner (slot 1) grants the claim: it stamps the current tick and the first
     // sequence and broadcasts one SlotClaimFrame to the whole fleet.
@@ -328,7 +332,8 @@ fn a_replacement_recovers_a_disconnected_slot_and_the_fleet_reconverges() {
         }
         let resolved = hosts.iter().all(|h| !h.slot_recovery_active())
             && hosts.iter().all(|h| !h.slot_recovery_log().is_empty());
-        if resolved && committed_tick.is_some() && hosts.iter().all(|h| h.tick() > claim_tick + 80) {
+        if resolved && committed_tick.is_some() && hosts.iter().all(|h| h.tick() > claim_tick + 80)
+        {
             break;
         }
     }
@@ -456,10 +461,10 @@ fn a_forged_sender_is_refused_at_the_mesh_boundary() {
     let apply_tick = lead.tick() + 20;
 
     let ships: std::collections::BTreeMap<HostSlot, String> = {
-        let mut q = lead
-            .app
-            .world_mut()
-            .query::<(&project_phoenix::entities::spawner::EntityUuid, &project_phoenix::lockstep::FleetSlotOf)>();
+        let mut q = lead.app.world_mut().query::<(
+            &project_phoenix::entities::spawner::EntityUuid,
+            &project_phoenix::lockstep::FleetSlotOf,
+        )>();
         q.iter(lead.app.world())
             .map(|(uuid, slot)| (slot.0, uuid.0.clone()))
             .collect()
@@ -482,10 +487,16 @@ fn a_forged_sender_is_refused_at_the_mesh_boundary() {
     // A FORGED frame: slot 2's connection carries a frame claiming to be from slot
     // 3 (impersonation). from(3) != authenticated(2), and 2 is not the lead, so it
     // is dropped at ingress before a command can be queued.
-    lead.deliver_from(&[command(SLOT_THREE, SLOT_THREE, 0)], MeshOrigin::Peer(SLOT_TWO));
+    lead.deliver_from(
+        &[command(SLOT_THREE, SLOT_THREE, 0)],
+        MeshOrigin::Peer(SLOT_TWO),
+    );
     // An HONEST frame: slot 2's connection carries slot 2's own command for its own
     // ship. from(2) == authenticated(2), so it is admitted.
-    lead.deliver_from(&[command(SLOT_TWO, SLOT_TWO, 1)], MeshOrigin::Peer(SLOT_TWO));
+    lead.deliver_from(
+        &[command(SLOT_TWO, SLOT_TWO, 1)],
+        MeshOrigin::Peer(SLOT_TWO),
+    );
 
     for _ in 0..(apply_tick + 40) {
         step(&mut hosts);
@@ -610,5 +621,8 @@ fn a_survivor_will_not_recover_a_still_connected_slot() {
     );
     // The fleet is still whole and agreeing.
     let d: Vec<u64> = hosts.iter().map(|h| h.digest()).collect();
-    assert!(d[0] == d[1] && d[1] == d[2], "the fleet stayed in agreement: {d:?}");
+    assert!(
+        d[0] == d[1] && d[1] == d[2],
+        "the fleet stayed in agreement: {d:?}"
+    );
 }

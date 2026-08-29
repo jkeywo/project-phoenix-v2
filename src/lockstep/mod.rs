@@ -79,11 +79,11 @@ pub use frame::{
     HOST_MESH_PROTOCOL,
 };
 pub use host_loss::{agreed_loss_tick, HostLossRecord, PendingHostLoss};
+pub use session::{LockstepSession, Stall};
 pub use slot_recovery::{
     leader_for, PendingSlotClaims, SlotRecoveryHold, SlotRecoveryLog, SlotRecoveryRecord,
     SlotRecoveryResult, SlotRecoveryState,
 };
-pub use session::{LockstepSession, Stall};
 pub use snapshot_relay::{
     capture_run, drain_mesh_restore, frames_for, gate_and_restore, gate_and_restore_against,
     send_snapshot, MeshRestoreArm, MeshRestoreOutcome, MeshSnapshotReceiver,
@@ -338,7 +338,12 @@ impl MeshOrigin {
     /// accommodation. [`Self::Unauthenticated`] and [`Self::LocalObservation`] never
     /// refuse here (the former trusts `from`; the latter is a self-observation
     /// judged by its own guard in [`apply_mesh_inbox`]).
-    pub fn refuses(&self, from: HostSlot, lead: HostSlot, is_roster_peer: impl Fn(HostSlot) -> bool) -> bool {
+    pub fn refuses(
+        &self,
+        from: HostSlot,
+        lead: HostSlot,
+        is_roster_peer: impl Fn(HostSlot) -> bool,
+    ) -> bool {
         match self {
             MeshOrigin::Unauthenticated | MeshOrigin::LocalObservation => false,
             MeshOrigin::Peer(authenticated) => {
@@ -804,7 +809,7 @@ pub fn apply_mesh_inbox(
         // `MeshOrigin`'s docs. A `LocalObservation` and an `Unauthenticated` push
         // are trusted here; the former is judged by the self-observation guard in
         // the HostLoss arm below.
-        if origin.refuses(frame.from(), lead, &is_member) {
+        if origin.refuses(frame.from(), lead, is_member) {
             crate::pwarn!(
                 log,
                 LogCat::Admit,

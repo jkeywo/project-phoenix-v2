@@ -269,3 +269,67 @@ entities:
       paths: [src/lockstep/recovery.rs, src/lockstep/snapshot_relay.rs]
       symbols: [RecoveryState, RecoveryHold, RecoveryLog, MeshRestoreArm]
       tests: [cargo test, tests/authoritative_state_enumeration.rs]
+
+  - component: fleet-slot-recovery
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Fleet Slot Recovery
+      summary: >-
+        The privileged server code on a REPLACEMENT machine reclaiming one disconnected fixed ship
+        slot during an active mission (the final piece of PRD #1093). The fleet resolves racing claims
+        deterministically, the elected leader transfers #1117's whole-payload record, the replacement
+        arms as the joining host and restores it, proves agreement, and takes over the slot — while a
+        transport-authenticated sender slot closes the mesh boundary the three prior issues deferred.
+      rationale:
+        - "[ai] AC2's claim resolution is deterministic from SHARED state, the same discipline #1118's leader election keeps. Every claim passes through the fleet owner — the star centre (p2p-delta-transport-is-a-star-today) — which stamps it with a monotonic claim_seq in arrival order and broadcasts one SlotClaimFrame; PendingSlotClaims elects the LOWEST claim_seq as the winner, a function of the shared value and not of who-processed-first locally (the skew-prone mistake #1119's two failed fix rounds are the cautionary tale for). The recovery boundary (recovery_boundary, reused from #1118) and the leader (the lowest roster slot that is not the recovering one) are pure functions of the winning claim and the frozen roster, identical on every host."
+        - "[ai] AC3 REUSES #1118 rather than re-inventing it — MeshRestoreArm's own docs named this issue as 'the other legitimate arm; it will set this for a joining host the same way'. drive_slot_recovery arms the replacement naming the elected leader, the leader captures at the boundary and transfers through #1117, and gate_and_restore commits only when the restored world folds to the record's own digest — the post-restore agreement — rolling back a bad record so a failed restore leaves the world clean. The boundary hold is a separate SlotRecoveryHold the barrier reads BESIDE its peer-stall and the #1118 hold, so the #1116 barrier decision is unchanged. The replacement suppresses its own mesh egress while it bootstraps toward the transfer, so its throwaway pre-restore world publishes neither a divergent digest (which would false-trigger #1118 on a survivor) nor a premature watermark. A slot recovery and a divergence recovery are mutually exclusive — each defers to the other in flight — so at most one arms a host at a time."
+        - "[ai] AC1 — server-code entry can select ONLY a disconnected fixed slot and cannot add a ship, change a loadout or displace a connected host — is the JS lobby layer's (host-mesh.js's claimSlot): a post-freeze hello naming a slot to CLAIM is judged against whether that slot exists, is currently disconnected, and is not the owner's; the frozen ship and crew are kept verbatim (the claim carries no loadout), and a later slot patch is refused by updateSlot's freeze. The Rust half enforces 'cannot displace a connected host' a second time — a survivor opens a recovery only for a slot IT HAS DEPARTED (#1119's depart), deferring a claim for a slot it still holds a live connection to."
+        - "[ai] The CARRIED sender authentication (owned here, deferred by #1117/#1118/#1119): MeshInbox carries a MeshOrigin beside each frame, and apply_mesh_inbox refuses a frame whose declared from disagrees with the connection's authenticated slot or names a non-roster peer. It is a REJECTION at ingress, identical on every honest host — the authenticated origin is a stable transport fact, never an arrival-order or watermark value — so it cannot diverge the fold. The star accommodation: the lead authenticates every member frame against the connection it arrived on and drops a forged origin before relaying it (JS binds conn->slot at join, wasm_mesh_frame_from lets the opaque body's from be checked); a member cannot re-authenticate a relayed sibling, so it tags every frame with the lead's slot and the rule from==authenticated OR authenticated==lead accepts it. This closes #1118's F1 (the RefusedWrongSender condition becomes real) and the #1119 forged-loss gap — a tick-0 self-observation is honoured only from a LocalObservation, never over a peer connection, so a forged self-loss cannot make this host derive a skewed flip tick. The residue — a byzantine lead, or a peer asserting a false fact under its real identity — is a transport-trust question for the Phoenix rendezvous cutover, not a forged-origin one."
+        - "[ai] AC4/AC5 land at the fleet level here: claimSlot rebinds the disconnected slot's peer to the replacement and keeps its frozen ship, so the recovered ship resumes the same loadout and its slot identity is unchanged. The crew-console rebind — the recovered ship's private client bundle reconnecting to the replacement host — rides the existing Session/rendezvous reconnect (SessionManager restores a station to a returning session token), and the crew-facing rendezvous takeover (the replacement re-registering the ship's crew join code so the crew's phones resolve to IT) is the one capability the CURRENT PeerJS-style relay does not provide: it is named as the real rendezvous-worker cutover rather than half-built against the current transport."
+    architecture:
+      kind: pure-module
+      authority: authoritative
+      owns: [fleet-slot-recovery-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/lockstep/slot_recovery.rs
+        - src/lockstep/mod.rs
+        - src/lockstep/frame.rs
+        - src/lockstep/session.rs
+        - src/server/bridge.rs
+        - gui/host-mesh.js
+        - gui/fleet-session.js
+      symbols:
+        - drive_slot_recovery
+        - PendingSlotClaims
+        - leader_for
+        - SlotClaimFrame
+        - MeshOrigin
+        - claimSlot
+        - wasm_mesh_frame_from
+        - wasm_claim_slot
+      tests: [cargo test, tests/lockstep_slot_recovery.rs, tests/client/fleet-session.test.js, tests/client/host-mesh.test.js]
+
+  - state: fleet-slot-recovery-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Fleet Slot Recovery State
+      summary: >-
+        The claims each host has heard and the deterministic winner of each, this host's view of a slot
+        recovery in flight and how far to withhold, and the event log. Session bookkeeping derived from
+        the shared claim frames, never folded into the authoritative digest.
+      rationale:
+        - "[ai] Declared into the #894 census as StateClass::Timer for PendingSlotClaims, SlotRecoveryState and SlotRecoveryHold (session state about which claims won and whether a recovery is in flight — every honest host derives it from the same shared SlotClaimFrames) and StateClass::Derived for SlotRecoveryLog (a report ABOUT the event). Nothing here crosses into the fold; what crosses IN is the restored snapshot and the barrier hold, classified where they already live."
+    architecture:
+      classification: derived
+      owner: fleet-slot-recovery
+      writers: [fleet-slot-recovery]
+    implementation:
+      status: declared
+      paths: [src/lockstep/slot_recovery.rs]
+      symbols: [PendingSlotClaims, SlotRecoveryState, SlotRecoveryHold, SlotRecoveryLog]
+      tests: [cargo test, tests/authoritative_state_enumeration.rs]

@@ -1055,6 +1055,24 @@ pub fn wasm_receive_mesh_frame(authenticated_slot: u32, json: &str) {
     MESH_INBOUND.with(|q| q.borrow_mut().push((authenticated_slot, json.to_string())));
 }
 
+/// The fleet slot a host-mesh frame declares it came from, for the OWNER to
+/// authenticate a member's frame before relaying it (issue #1120).
+///
+/// The frame body is opaque to `gui/host-mesh.js` — it is Rust-minted — so the page
+/// cannot read the declared `from` itself. This decodes it and returns the `N` in
+/// `slot-N`, or `-1` for a frame this build cannot decode. The owner compares it to
+/// the slot it bound the delivering connection to at join: a mismatch is a forged
+/// origin, dropped at the star centre before it can reach a sibling, which is what
+/// makes the mesh-boundary authentication real for members who cannot themselves
+/// re-authenticate a relayed frame.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_mesh_frame_from(json: &str) -> i32 {
+    crate::core::codec::decode_mesh_frame(json)
+        .map(|frame| i32::try_from(frame.from().0).unwrap_or(-1))
+        .unwrap_or(-1)
+}
+
 /// Called by the OWNER page when a replacement machine has validly claimed a
 /// disconnected fixed slot (issue #1120).
 ///

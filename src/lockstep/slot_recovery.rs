@@ -68,7 +68,9 @@ use crate::sim_tick::SimTick;
 use crate::world::server::BridgeWorldSource;
 
 use super::recovery_plan::recovery_boundary;
-use super::snapshot_relay::{send_snapshot, MeshRestoreArm, MeshRestoreOutcome, MeshSnapshotReceiver};
+use super::snapshot_relay::{
+    send_snapshot, MeshRestoreArm, MeshRestoreOutcome, MeshSnapshotReceiver,
+};
 use super::{FleetLockstep, FleetRoster, MeshAgreement};
 
 /// Every replacement claim on a disconnected slot this host has heard, and the
@@ -317,11 +319,13 @@ fn open_slot_recovery(world: &mut World, local: HostSlot, interval: u64, delay: 
     // One recovery at a time: a divergence recovery (#1118) in flight defers this,
     // and #1118's own begin defers to a slot recovery in flight — so the two never
     // arm the same host at once.
-    if world.resource::<super::recovery::RecoveryState>().is_active() {
+    if world
+        .resource::<super::recovery::RecoveryState>()
+        .is_active()
+    {
         return;
     }
-    let Some((slot, claim_seq, claim_tick)) =
-        world.resource::<PendingSlotClaims>().next_unopened()
+    let Some((slot, claim_seq, claim_tick)) = world.resource::<PendingSlotClaims>().next_unopened()
     else {
         return;
     };
@@ -342,7 +346,8 @@ fn open_slot_recovery(world: &mut World, local: HostSlot, interval: u64, delay: 
     // still opens, while a claim for a genuinely-live slot never displaces it. The
     // replacement itself (local == slot) is the one host for which this is a
     // genuine recovery of its own identity, so it is exempt.
-    if role != SlotRecoveryRole::Recovering && !world.resource::<FleetLockstep>().has_departed(slot) {
+    if role != SlotRecoveryRole::Recovering && !world.resource::<FleetLockstep>().has_departed(slot)
+    {
         return;
     }
 
@@ -446,7 +451,12 @@ fn advance_slot_recovery(world: &mut World, local: HostSlot, delay: u64, sim_tic
 /// Capture and queue the leader's canonical record for the replacement. Returns the
 /// tick captured (the tick the replacement restores to), or `None` if it could not
 /// be framed.
-fn try_send_record(world: &mut World, local: HostSlot, slot: HostSlot, boundary: u64) -> Option<u64> {
+fn try_send_record(
+    world: &mut World,
+    local: HostSlot,
+    slot: HostSlot,
+    boundary: u64,
+) -> Option<u64> {
     let scenario = world
         .get_resource::<BridgeWorldSource>()
         .map(|source| source.path.clone())

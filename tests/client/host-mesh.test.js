@@ -16,6 +16,7 @@ import {
   HOST_SIMULATION_FRAME_TYPES,
   HOST_FRAME_TICK,
   HOST_FRAME_DIGEST,
+  HOST_FRAME_SNAPSHOT,
   isSimulationFrame,
   simulationFrame,
   ADMISSION_CLOSED,
@@ -84,14 +85,14 @@ describe('the envelope', () => {
       expect(decodeHostFrame(encodeHostFrame(frame))).toEqual(frame);
     }
     // Every declared LOBBY type is exercised above, so one added without a
-    // round-trip here fails rather than shipping untested. The simulation's two
-    // are covered by their own case below — this module never builds their
+    // round-trip here fails rather than shipping untested. The simulation's
+    // frames are covered by their own case below — this module never builds their
     // bodies, so it cannot round-trip them from a builder it does not have.
     expect(new Set(frames.map((f) => f.t)))
       .toEqual(new Set(HOST_FRAME_TYPES.filter((t) => !HOST_SIMULATION_FRAME_TYPES.includes(t))));
   });
 
-  it('carries the simulation\'s two frames without reading them', () => {
+  it('carries the simulation\'s frames without reading them', () => {
     // Issue #1116. A `tick` body is minted by `core::codec::encode_mesh_frame`
     // and read by `decode_mesh_frame`; this module owns the envelope around it
     // and nothing else. So what is under test is the ferrying: the envelope
@@ -126,6 +127,24 @@ describe('the envelope', () => {
     const back = decodeHostFrame(encodeHostFrame(digest));
     expect(back.d.digest).toBe('deadbeefdeadbeef');
     expect(Number.isSafeInteger(parseInt(back.d.digest, 16))).toBe(false);
+
+    // Issue #1117. A snapshot chunk's body is likewise minted by
+    // `core::codec::encode_mesh_frame` and read by `decode_mesh_frame`; this
+    // module ferries it unread. Its `whole_hash` and `transfer_id` are u64s and
+    // cross as hex strings for the same reason the digest does.
+    const chunk = simulationFrame(HOST_FRAME_SNAPSHOT, {
+      from: 2,
+      transfer_id: '0123456789abcdef',
+      tick: 400,
+      seq: 3,
+      total: 9,
+      whole_hash: 'feedfacedeadbeef',
+      crc: 3735928559,
+      text: 'a RON slice with "quotes"',
+    }, 400);
+    const chunkBack = decodeHostFrame(encodeHostFrame(chunk));
+    expect(chunkBack).toEqual(chunk);
+    expect(Number.isSafeInteger(parseInt(chunkBack.d.whole_hash, 16))).toBe(false);
   });
 
   it('tells the simulation\'s frames from the lobby\'s, which is the routing rule', () => {
@@ -135,6 +154,7 @@ describe('the envelope', () => {
     // silently dropped and the fleet would stall on the peer that sent it.
     expect(isSimulationFrame(simulationFrame(HOST_FRAME_TICK, {}))).toBe(true);
     expect(isSimulationFrame(simulationFrame(HOST_FRAME_DIGEST, {}))).toBe(true);
+    expect(isSimulationFrame(simulationFrame(HOST_FRAME_SNAPSHOT, {}))).toBe(true);
     for (const frame of [rosterFrame(fleetOf()), admissionFrame(ADMISSION_CLOSED),
       helloFrame({}), refusedFrame('fleet-full')]) {
       expect(isSimulationFrame(frame), frame.t).toBe(false);

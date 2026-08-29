@@ -99,6 +99,15 @@ export const HOST_FRAME_ADMISSION = 'admission';
 export const HOST_FRAME_TICK = 'tick';
 /** Revision 2 (issue #1116): a sampled authoritative fold, for agreement. */
 export const HOST_FRAME_DIGEST = 'digest';
+/**
+ * Revision 2 (issue #1117): one framed piece of a portable snapshot in transit.
+ *
+ * Like `tick` and `digest`, its body is minted and read only by Rust — this
+ * module never inspects a chunk's `d`, it only ferries it. The chunking,
+ * reassembly and integrity live in `src/lockstep/transfer.rs`; the page's job is
+ * to carry a chunk to `wasm_receive_mesh_frame` and relay it to any sibling.
+ */
+export const HOST_FRAME_SNAPSHOT = 'snapshot';
 
 /** Every type a receiver will accept. Read by the coverage tests. */
 export const HOST_FRAME_TYPES = [
@@ -110,6 +119,7 @@ export const HOST_FRAME_TYPES = [
   HOST_FRAME_ADMISSION,
   HOST_FRAME_TICK,
   HOST_FRAME_DIGEST,
+  HOST_FRAME_SNAPSHOT,
 ];
 
 /**
@@ -123,7 +133,11 @@ export const HOST_FRAME_TYPES = [
  * that reached the fleet model would be silently dropped and the fleet would
  * stall on the peer that sent it.
  */
-export const HOST_SIMULATION_FRAME_TYPES = [HOST_FRAME_TICK, HOST_FRAME_DIGEST];
+export const HOST_SIMULATION_FRAME_TYPES = [
+  HOST_FRAME_TICK,
+  HOST_FRAME_DIGEST,
+  HOST_FRAME_SNAPSHOT,
+];
 
 /** True when this frame belongs to the running simulation rather than the lobby. */
 export function isSimulationFrame(frame) {
@@ -591,6 +605,7 @@ if (typeof window !== 'undefined') {
     HOST_SIMULATION_FRAME_TYPES,
     HOST_FRAME_TICK,
     HOST_FRAME_DIGEST,
+    HOST_FRAME_SNAPSHOT,
     isSimulationFrame,
     simulationFrame,
     ADMISSION_OPEN,

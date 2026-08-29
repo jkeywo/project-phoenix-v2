@@ -452,4 +452,5 @@ describe('reason reporting', () => {
     for (const reason of knownReasons()) {
       expect(reasonStringId(reason), reason).toBe(reasonStringId(reason, SURFACE_CLIENT));
     }
+  });
 });

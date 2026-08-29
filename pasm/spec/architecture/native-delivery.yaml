@@ -326,6 +326,54 @@ entities:
         ]
       tests: [cargo test, tests/native_bridge_displays.rs]
 
+  - component: bridge-media-profile
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Bridge Media Profile
+      summary: The media-device analogue of the bridge display profile (issue #1126). Each bridge surface — the shared viewscreen, and each named Station, Comms above all — is assigned a camera, microphone(s) and audio output(s) in the SAME hand-editable BridgeProfile TOML the display roles live in. The pure model (stable kind:name device identity, the per-surface assignment, the parse/validate failure taxonomy, the explicit-consent sharing rule, the deterministic default and the missing/denied-device resolution) is Bevy-free and CI-tested; the real OS enumeration/preview/test backend is the winit-adapter analogue and is not yet in the tree.
+      rationale:
+        - "[ai] It is the same shape as bridge-display-profile on purpose, and rides in the SAME file: a bridge profile is one operator's record of the physical room, and camera/mic/speaker layout belongs beside monitor layout, not in a second file. Media assignments are a [[media]] table on BridgeProfile, validated in the same pass as the [[display]] roles (BridgeProfile::validate), so a bad assignment fails at the prompt exactly as a bad display role does — ProfileError::Media wraps the MediaError taxonomy. It is still NOT the private per-player Accessibility profile (#1127): it carries nothing about any one player."
+        - "[ai] A device's stable identity is kind:name — the kind tag (camera/mic/output) and the OS device name — so an operator reads it and knows what it is, exactly as name@WxH does for a monitor. Encoding the kind INTO the identity is load-bearing: it is what lets validate_media reject a microphone dropped into the camera slot as a pure string check, before any device is opened. Two devices of one kind and name are indistinguishable by name and fall back to a suffix (kind:name#<hardware-id> when the OS gives one, else #<ordinal> in enumeration order) — the same honest limit the display scheme carries."
+        - "[ai] The layout/profile model is PURE and lives apart from any device I/O, because that is where every acceptance criterion with logic in it lives: a wrong-kind device in a slot, a malformed id, a duplicate, two surfaces of one name, and a device shared between two surfaces WITHOUT every surface consenting are each refused at validation with an authored message. A device shared WITH every using surface's consent (allow_shared) is allowed and returns a MediaWarning::Contention, because one device rarely captures or plays for two surfaces at once and the OS may refuse the second open — acceptance criterion 2's explicit-choice-plus-warning, decided in this file."
+        - "[ai] A missing, removed or denied device is REPORTED, never fatal (acceptance criterion 4). resolve_media names a missing device (MediaProblem::DeviceMissing) or a present-but-denied one (DeviceDenied) and leaves its slot empty; the surface keeps every device it DOES have, so no media failure makes the Station unusable. A present device the profile assigns to no surface is not a problem — a bridge need not use every device it can see, unlike a monitor which should be covered. default_media_assignment is the deterministic default when the operator has not chosen: the OS default (else first) of each kind per surface, consenting to the forced share on a one-device box so the generated default validates."
+        - "[ai] The setup surface is the SAME --setup enumeration mode #1123's is: render_setup_report_with_media appends a media section (render_media_setup_report) that lists devices by kind and validates/resolves the profile's assignments. But there is NO OS media backend in the tree — the display profile gets its real enumeration free from Bevy's Monitor component, and there is no equivalent already-present source for cameras, microphones and outputs. So --setup validates hand-authored assignments and prints that no backend is compiled in (enumerate_note). Wiring one — cpal for microphones/outputs, a camera crate such as nokhwa (or Windows Media Foundation) for cameras — behind the host/ultralight feature seam is the winit-adapter analogue, out of the CI default build exactly as the real-monitor surface is behind the ignored display integration test."
+        - "[ai] Acceptance criterion 3 (camera preview, mic level/test, output test on the selected surface before play) and the live half of 1/2/4 are DEFERRED to the acceptance kit's Part B, verified-when-the-backend-exists, exactly as #1124's touch criterion 6 is parked on real touch hardware. The pure model — assignment, validation, sharing, resolution, default — is complete and CI-tested; only real device enumeration, preview/metering/tone-test and actual capture/play need the backend crate and the hardware. Criterion 5 (Comms and viewscreen retain separate future media endpoints; no ship-to-ship call, recording or Discord) is structural: the model keeps the two surfaces' assignments independent and this issue adds no inter-ship media, no recording and no third-party integration."
+    architecture:
+      kind: service
+      authority: non-authoritative
+      coordinates: [native-delivery-host, bridge-display-profile]
+      runs_in: [native-host-runtime]
+    implementation:
+      status: declared
+      paths:
+        [
+          src/native_host/bridge_media.rs,
+          src/native_host/bridge_profile.rs,
+          src/bin/phoenix_host.rs,
+          docs/acceptance/1126-media.md,
+        ]
+      symbols:
+        [
+          MediaKind,
+          MediaDeviceIdentity,
+          RawMediaDevice,
+          DiscoveredMediaDevice,
+          DeviceAvailability,
+          identify_media,
+          MediaSurfaceEntry,
+          validate_media,
+          MediaError,
+          MediaWarning,
+          ValidatedMedia,
+          resolve_media,
+          MediaProblem,
+          default_media_assignment,
+          render_media_setup_report,
+          enumerate_note,
+        ]
+      tests: [cargo test]
+
   - component: native-pane-recovery
     core:
       status: implemented

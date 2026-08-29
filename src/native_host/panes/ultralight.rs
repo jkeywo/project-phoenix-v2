@@ -899,6 +899,13 @@ fn route_touch_input(
             TouchPhase::Started => {
                 if let Some(hit) = host.router.resolve_in_window(window_key, phys.0, phys.1) {
                     if host.contacts.start(touch.id, hit.pane) {
+                        // A tap gives its pane keyboard focus, exactly as a click
+                        // does — so an on-screen keyboard or a physical one types
+                        // into the console the operator just touched.
+                        let previous = host.focus.focused();
+                        if host.focus.focus(hit.pane) {
+                            host.focus_view(previous, Some(hit.pane));
+                        }
                         if let Some(index) = host.index_of(hit.pane) {
                             let view = &mut host.windows[index].surface.view;
                             view.mouse_move(hit.local_x, hit.local_y);

@@ -862,12 +862,17 @@ fn route_pointer_input(
 
     // Focus follows the pointer, but only on genuine motion into a pane — never
     // on the mere presence of a resting cursor, which would revert a Ctrl+Tab
-    // selection every frame.
-    if let Some((key, x, y, Some(hit))) = cursor {
-        let previous = host.focus.focused();
-        let host = &mut *host;
-        if pointer_follow_focus(&mut host.focus, &mut host.pointer_motion, key, x, y, hit.pane) {
-            host.focus_view(previous, Some(hit.pane));
+    // selection every frame, and never while the left button is captured: a
+    // cross-pane drag must operate the pane it began on, so focus stays there
+    // rather than chasing the pane the cursor happens to end over (a pointer
+    // grab, as conventional focus-follows-mouse does).
+    if host.mouse_capture.captured().is_none() {
+        if let Some((key, x, y, Some(hit))) = cursor {
+            let previous = host.focus.focused();
+            let host = &mut *host;
+            if pointer_follow_focus(&mut host.focus, &mut host.pointer_motion, key, x, y, hit.pane) {
+                host.focus_view(previous, Some(hit.pane));
+            }
         }
     }
 

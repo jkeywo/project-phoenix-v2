@@ -55,6 +55,40 @@ fn main() {
         }
     };
 
+    // The bridge-display profile (issue #1123). Read here, BEFORE
+    // `pin_content_root` re-roots the process at `--content-dir`, because the
+    // profile is operator configuration resolved against the launch directory,
+    // not content resolved against the content tree — reading it after the chdir
+    // would look for it in the wrong place. Parsed now so a broken profile fails
+    // at the prompt whether the run is `--setup` or authoritative.
+    let bridge_profile = match &args.profile {
+        Some(path) => match std::fs::read_to_string(path) {
+            Ok(text) => {
+                match project_phoenix::native_host::bridge_profile::BridgeProfile::from_toml(&text)
+                {
+                    Ok(profile) => Some(profile),
+                    Err(e) => {
+                        eprintln!("phoenix-host: --profile {path:?}: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("phoenix-host: --profile {path:?}: {e}");
+                std::process::exit(1);
+            }
+        },
+        None => None,
+    };
+
+    // `--setup` (issue #1123): enumerate the connected monitors, print their
+    // stable identities and geometry, validate the profile against them if one
+    // was given, and exit. A standalone diagnostic — it opens no HTTP listener
+    // and runs no world, so it short-circuits here before any content is read.
+    if args.setup {
+        std::process::exit(native_host::bridge_display::run_setup(bridge_profile));
+    }
+
     // Content roots first, before anything reads a file. An authoritative host
     // resolves content two independent ways — Bevy's asset root and the process
     // CWD — and half-loading is silent, so they are pinned together from the one
@@ -218,6 +252,28 @@ fn main() {
     };
     if !sim.log_entity.is_empty() {
         cfg.log.entity_filter = project_phoenix::logging::parse_log_entities(&sim.log_entity);
+    }
+
+    // The bridge-display profile (issue #1123), validated here so a bad one — an
+    // unknown role, a Station of three panes — fails at the prompt rather than
+    // after a window and a listener are up. The density rule and role vocabulary
+    // are checked in `validate`; the missing/changed-display reporting happens
+    // once real monitors are known, inside `BridgeDisplayPlugin`.
+    if let Some(profile) = &bridge_profile {
+        match profile.validate() {
+            Ok(validated) => {
+                eprintln!(
+                    "phoenix-host: bridge display profile — {} display(s), {} touch mapping(s)",
+                    validated.displays.len(),
+                    validated.touch.len()
+                );
+                cfg.bridge_profile = Some(validated);
+            }
+            Err(e) => {
+                eprintln!("phoenix-host: --profile: {e}");
+                std::process::exit(1);
+            }
+        }
     }
 
     // Local Station panes (issue #1122). Opened AFTER the bind, because a pane's

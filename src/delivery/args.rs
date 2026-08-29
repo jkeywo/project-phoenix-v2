@@ -44,6 +44,18 @@ pub struct HostArgs {
     /// same code either way, and a second binary would have had to either fork
     /// them or link them anyway.
     pub sim: Option<SimArgs>,
+    /// `--setup`: enumerate the connected monitors, print their stable
+    /// identities and geometry, validate `--profile` against them if one was
+    /// given, and exit (issue #1123). A standalone diagnostic — it needs no
+    /// `--world`, and when present it short-circuits the run.
+    pub setup: bool,
+    /// `--profile <PATH>`: a bridge-display profile (issue #1123), relative to
+    /// the working directory. With `--world` the authoritative host applies it
+    /// (viewscreen and Station monitors as borderless-fullscreen surfaces); with
+    /// `--setup` it is validated against the connected displays. `None` keeps the
+    /// single-window #1121 behaviour. Kept at the top level rather than in
+    /// [`SimArgs`] because `--setup` reads it without a world.
+    pub profile: Option<String>,
 }
 
 /// The authoritative simulation's arguments, present only when `--world` was
@@ -142,6 +154,18 @@ LOCAL STATIONS (requires a build with --features ultralight)
                           own minted session token. Needs --client-dir: a pane
                           loads the client bundle this host serves.
 
+BRIDGE DISPLAYS (issue #1123)
+    --setup               Enumerate the connected monitors, print their stable
+                          hardware identities, geometry and current assignment,
+                          then exit. Validates --profile against them if given.
+                          A standalone diagnostic — needs no --world.
+    --profile <PATH>      A bridge-display profile (TOML). With --world the host
+                          covers every configured monitor with one borderless
+                          full-screen surface — the viewscreen, or a Station
+                          hosting one or two panes. With --setup it is validated
+                          against the connected displays. A missing or changed
+                          monitor is reported, never silently re-homed.
+
 CREW (issue #1113)
     --rendezvous <URL>    Register with this rendezvous service so browser
                           clients can join, e.g.
@@ -210,6 +234,8 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
     let mut log_entity = String::new();
     let mut solo = false;
     let mut panes: Vec<String> = Vec::new();
+    let mut setup = false;
+    let mut profile: Option<String> = None;
 
     let mut it = args.into_iter();
     while let Some(arg) = it.next() {
@@ -220,6 +246,8 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
             "--manifest" => manifest = value_for(&arg, &mut it)?,
             "--content-dir" => content_dir = value_for(&arg, &mut it)?,
             "--skip-bundle-check" => skip_bundle_check = true,
+            "--setup" => setup = true,
+            "--profile" => profile = Some(value_for(&arg, &mut it)?),
             "--world" => world = Some(value_for(&arg, &mut it)?),
             "--ship" => ship = Some(value_for(&arg, &mut it)?),
             "--seed" => {
@@ -266,6 +294,16 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
     if origin.is_some() && rendezvous.is_none() {
         return Err("--origin only means anything with --rendezvous".to_string());
     }
+    // A bridge-display profile is applied by a running host (`--world`) or
+    // validated by `--setup`; on its own it has nothing to act on. Refuse at the
+    // prompt rather than reading a file nothing will use.
+    if profile.is_some() && world.is_none() && !setup {
+        return Err(
+            "--profile needs --world (to apply the bridge display profile) or --setup (to \
+             validate it against the connected displays)"
+                .to_string(),
+        );
+    }
 
     let sim = match world {
         Some(world) => Some(SimArgs {
@@ -308,6 +346,8 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
         content_dir,
         skip_bundle_check,
         sim,
+        setup,
+        profile,
     })))
 }
 
@@ -482,6 +522,45 @@ mod tests {
         assert!(parse(&["--client-dir", "dist", "--pane", "Ada"])
             .unwrap_err()
             .contains("--world"));
+    }
+
+    #[test]
+    fn setup_is_a_standalone_diagnostic_that_needs_no_world() {
+        // Enumerate-and-exit; no simulation, no bundle required.
+        let a = run(&["--setup"]);
+        assert!(a.setup);
+        assert_eq!(a.sim, None);
+        assert_eq!(a.profile, None);
+    }
+
+    #[test]
+    fn setup_validates_a_profile_without_a_world() {
+        let a = run(&["--setup", "--profile", "bridge.toml"]);
+        assert!(a.setup);
+        assert_eq!(a.profile.as_deref(), Some("bridge.toml"));
+        assert_eq!(a.sim, None);
+    }
+
+    #[test]
+    fn a_world_applies_a_bridge_profile() {
+        let a = run(&[
+            "--world",
+            "assets/worlds/combat_test.toml",
+            "--profile",
+            "bridge.toml",
+        ]);
+        assert!(a.sim.is_some());
+        assert_eq!(a.profile.as_deref(), Some("bridge.toml"));
+        assert!(!a.setup);
+    }
+
+    #[test]
+    fn a_profile_without_a_world_or_setup_is_refused() {
+        // On its own a profile has nothing to apply to or validate against.
+        let err = parse(&["--profile", "bridge.toml"]).unwrap_err();
+        assert!(err.contains("--profile"), "{err}");
+        assert!(err.contains("--world"), "{err}");
+        assert!(err.contains("--setup"), "{err}");
     }
 
     #[test]

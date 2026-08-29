@@ -17,9 +17,11 @@ import { createRegistry, ROLE_HOST, ROLE_CLIENT } from '../../worker-rendezvous/
 import {
   ADMISSION_CLOSED,
   ADMISSION_OPEN,
+  HOST_FRAME_HOST_LOSS,
   HOST_FRAME_TICK,
   asHostFrame,
   encodeHostFrame,
+  helloFrame,
   simulationFrame,
 } from '../../gui/host-mesh.js';
 import {
@@ -913,6 +915,142 @@ describe('sender authentication and slot recovery (issue #1120)', () => {
     expect(lastRoster(lead).slots.find((s) => s.id === 'slot-2')).toMatchObject({
       connected: true,
     });
+  });
+});
+
+describe('unbound-connection ingress (issue #1120 adversarial)', () => {
+  // Every OTHER test in this file drives a connection that completes
+  // hello/welcome and is therefore BOUND — `connSlots` holds its slot. The hole
+  // an adversarial review found is the connection that clears the transport
+  // compat handshake (build stamp only) but never sends `hello`: `authSlot` is
+  // `undefined`, and a "trust what I cannot judge" guard used to let ITS
+  // simulation frames through — handed to the lead's own sim as slot 0
+  // (MeshOrigin::Unauthenticated → trusted) AND relayed verbatim to every member,
+  // who accept a lead relay wholesale. So any machine with the fleet code and a
+  // compatible build could inject forged frames under any slot's identity,
+  // fleet-wide. These tests drive that exact production path — `authSlot == null`
+  // — which the bound-connection tests all miss.
+
+  const tickFrame = (from, tick) =>
+    encodeHostFrame(simulationFrame(HOST_FRAME_TICK, {
+      from,
+      tick,
+      ready_through: tick + 2,
+      commands: [],
+    }, tick));
+
+  /**
+   * A ship-host connection that completes the transport compat handshake but is
+   * told, per test, what (if anything) to send in its OWN vocabulary — so a test
+   * can leave it UNBOUND (never `hello`) or bind it (send `hello`). It is the raw
+   * joiner `createFleetMember` wraps, with the hello suppressed.
+   */
+  function rawServerJoiner(world, factories, code, { onAccepted } = {}) {
+    const frames = [];
+    const errors = [];
+    let joiner = null;
+    joiner = createRendezvousJoiner({
+      base: 'https://rendezvous.test',
+      data: DATA,
+      code,
+      namespace: NAMESPACE_SERVER,
+      stamp: STAMP,
+      factories,
+      localise: false,
+      onAccepted: () => { if (onAccepted) onAccepted(joiner); },
+      onData: (frame) => frames.push(frame),
+      onError: (reason, detail) => errors.push({ reason, detail }),
+    });
+    return { joiner, frames, errors };
+  }
+
+  it('refuses a simulation frame from an unbound connection — not to the sim, not to a sibling', async () => {
+    const delivered = [];
+    const world = makeWorld();
+    const factories = { socket: world.socket, peer: makePeerFactory() };
+    const lead = await leadOn(world, factories, {
+      onSimulationFrame: (raw, authSlot) => delivered.push({ raw, authSlot }),
+    });
+    // A BOUND sibling that any errant relay would reach.
+    const sibling = [];
+    const bound = await memberOn(world, factories, lead.code.suffix, {
+      onSimulationFrame: (raw) => sibling.push(raw),
+    });
+    expect(bound.member.slot).toBe('slot-2');
+
+    // The attacker: compat-passed, never `hello`'d → no `connSlots` entry.
+    const attacker = rawServerJoiner(world, factories, lead.code.suffix);
+    await settle();
+    // Exploit 1: a forged Tick under slot 2's identity.
+    attacker.joiner.sendFrame(tickFrame(2, 412));
+    await settle();
+
+    expect(delivered).toEqual([]); // the lead's own sim never saw it
+    expect(sibling).toEqual([]); // and it was never relayed to a member
+  });
+
+  it('still binds an unbound connection that sends hello, and its bound frame then flows', async () => {
+    // The control path is INTACT: a `hello` from an unbound connection is how a
+    // connection gets bound in the first place, so it must still be processed —
+    // only SIMULATION frames require a prior binding. And once bound, the
+    // connection's own simulation frame flows, tagged with its authenticated slot.
+    const delivered = [];
+    const world = makeWorld();
+    const factories = { socket: world.socket, peer: makePeerFactory() };
+    const lead = await leadOn(world, factories, {
+      onSimulationFrame: (raw, authSlot) => delivered.push({ raw, authSlot }),
+    });
+
+    const joined = rawServerJoiner(world, factories, lead.code.suffix, {
+      onAccepted: (j) => j.sendFrame(encodeHostFrame(helloFrame({ name: 'Two' }))),
+    });
+    await settle();
+
+    // The control frame bound it: the roster grew and a welcome came back.
+    expect(lastRoster(lead).slots.map((s) => s.id)).toEqual(['slot-1', 'slot-2']);
+    const welcome = joined.frames.find((f) => f.t === 'welcome');
+    expect(welcome && welcome.d.slot).toBe('slot-2');
+
+    // Now BOUND, its legitimate simulation frame is delivered, tagged slot 2.
+    joined.joiner.sendFrame(tickFrame(2, 500));
+    await settle();
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0].authSlot).toBe(2);
+  });
+
+  it('refuses an unbound tick-0 host-loss for a LIVE slot — no divergent loss (amplification 3)', async () => {
+    // Forged HostLoss{from: victim, lost: victim, tick: 0} on an unbound
+    // connection. Delivered to the owner's own sim it would arrive as slot 0
+    // (MeshOrigin::Unauthenticated), whose tick-0 self-observation guard
+    // (src/lockstep/mod.rs) fires only for MeshOrigin::Peer(_) — so the owner
+    // would derive a loss for a LIVE slot while members (tagged Peer(lead)) drop
+    // it, diverging. That divergence is reachable ONLY through this JS bridge
+    // (Rust deliberately keeps Unauthenticated tick-0 for native fixtures), so it
+    // is closed here: the unbound frame never crosses the wasm boundary or gets
+    // relayed.
+    const delivered = [];
+    const world = makeWorld();
+    const factories = { socket: world.socket, peer: makePeerFactory() };
+    const lead = await leadOn(world, factories, {
+      onSimulationFrame: (raw, authSlot) => delivered.push({ raw, authSlot }),
+    });
+    const victim = [];
+    const bound = await memberOn(world, factories, lead.code.suffix, {
+      onSimulationFrame: (raw) => victim.push(raw),
+    });
+    expect(bound.member.slot).toBe('slot-2'); // a LIVE slot
+
+    const attacker = rawServerJoiner(world, factories, lead.code.suffix);
+    await settle();
+    attacker.joiner.sendFrame(encodeHostFrame(simulationFrame(HOST_FRAME_HOST_LOSS, {
+      from: 2,
+      lost: 2,
+      tick: 0,
+    }, 0)));
+    await settle();
+
+    expect(delivered).toEqual([]); // never crosses the wasm boundary
+    expect(victim).toEqual([]); // never relayed to the live slot's sibling
   });
 });
 

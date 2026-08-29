@@ -126,10 +126,12 @@ const REFUSE_UNCHECKED = () => ({
  * The frame body is minted and read only by Rust, so the page cannot read the
  * declared `from` itself; `wasm_mesh_frame_from` decodes it and returns the slot
  * ordinal, or `-1` for a frame this build cannot decode. A mismatch is a forged
- * origin. The default trusts a frame it cannot judge — an undecodable one (the sim
- * drops it anyway) or a connection with no known binding — and rejects only a
- * clearly-forged one, so this can never silently starve honest traffic. Injectable
- * so the tests can drive it without the wasm module.
+ * origin. The default trusts a frame it cannot DECODE — an undecodable one, which
+ * the sim drops anyway — and rejects only a clearly-forged one, so this never
+ * starves honest DECODABLE traffic. It is reached only for a BOUND connection: an
+ * unbound one (no `connSlots` entry) is refused at the call site before this runs,
+ * so the `authSlot == null` arm below is a belt-and-braces guard, not a trust of an
+ * unbound sender. Injectable so the tests can drive it without the wasm module.
  */
 function defaultAuthenticateFrame(raw, authSlot) {
   const from =
@@ -323,13 +325,30 @@ export function createFleetOwner(opts) {
         if (isSimulationFrame(frame)) {
           // The slot this connection was authenticated as at join (issue #1120).
           const authSlot = connSlots.get(conn.peer);
+          // An UNBOUND connection — one that cleared the transport compatibility
+          // handshake (build stamp only) but never sent `hello`, so nothing seated
+          // it and `connSlots` has no entry for it — speaks for no slot. A
+          // simulation frame from it is REFUSED outright: not handed to this host's
+          // own sim, and not relayed to a sibling. "Unbound" is a refusal, not a
+          // "cannot judge → trust": a machine could otherwise inject a forged frame
+          // under any slot's identity, fleet-wide, purely by connecting and never
+          // announcing itself (issue #1120). The module's "never silently starve
+          // honest traffic" rationale (~129-136) does NOT apply here — it is about
+          // a frame this build cannot DECODE, whereas a legitimate member always
+          // completes hello/welcome (and is bound) BEFORE it emits any simulation
+          // frame, so no honest traffic is unbound. CONTROL frames stay exempt
+          // below: they are how an unbound connection gets bound in the first place.
+          if (authSlot == null) {
+            onLog(`[fleet] dropping an unbound simulation frame from ${conn.peer}`);
+            return;
+          }
           // A member cannot speak under another slot's identity. The lead is the
           // one host that can authenticate a member frame — against the connection
           // it arrived on — so a frame whose declared origin disagrees is DROPPED
           // here, before it is delivered to this host's own sim OR relayed to a
           // sibling. That is what makes the boundary authentication real for the
           // siblings, which cannot re-authenticate a relayed frame themselves.
-          if (authSlot != null && !authenticateFrame(raw, authSlot)) {
+          if (!authenticateFrame(raw, authSlot)) {
             onLog(`[fleet] dropping a forged frame from ${conn.peer}: not slot ${authSlot}`);
             return;
           }

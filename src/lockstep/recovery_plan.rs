@@ -543,8 +543,14 @@ mod tests {
         let interval = 10;
         let delay = 2;
         let b = recovery_boundary(20, interval, delay);
-        assert!(b >= 20 + delay + 2, "the boundary must clear detection: {b}");
-        assert!(b >= 20 + interval, "…and be at least an interval ahead: {b}");
+        assert!(
+            b >= 20 + delay + 2,
+            "the boundary must clear detection: {b}"
+        );
+        assert!(
+            b >= 20 + interval,
+            "…and be at least an interval ahead: {b}"
+        );
         assert_eq!(b % interval, 0, "…and land on a sampling checkpoint: {b}");
         // A larger delay pushes the boundary out deterministically.
         assert!(recovery_boundary(20, interval, 25) > b);

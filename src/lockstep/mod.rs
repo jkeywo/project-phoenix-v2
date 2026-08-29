@@ -546,7 +546,11 @@ pub fn register_lockstep(app: &mut App) {
             // publishes the boundary hold `gate_lockstep_ticks` then honours this
             // same frame. It is a clearly-separable addition beside the barrier
             // rather than a change to it.
-            (apply_mesh_inbox, recovery::drive_recovery, gate_lockstep_ticks)
+            (
+                apply_mesh_inbox,
+                recovery::drive_recovery,
+                gate_lockstep_ticks,
+            )
                 .chain()
                 .in_set(MeshSet),
         )

@@ -264,7 +264,10 @@ fn a_diverged_host_is_healed_and_the_whole_fleet_reconverges() {
     for _ in 0..400 {
         step(&mut hosts);
         if slot3_tick_at_commit.is_none()
-            && matches!(hosts[2].last_restore(), Some(MeshRestoreOutcome::Committed { .. }))
+            && matches!(
+                hosts[2].last_restore(),
+                Some(MeshRestoreOutcome::Committed { .. })
+            )
         {
             slot3_tick_at_commit = Some(hosts[2].tick());
         }
@@ -329,7 +332,10 @@ fn a_diverged_host_is_healed_and_the_whole_fleet_reconverges() {
     //    so WHILE held at the boundary, so it never ran its divergent world onward
     //    (AC3: resume only after the transfer).
     assert!(
-        matches!(hosts[2].last_restore(), Some(MeshRestoreOutcome::Committed { .. })),
+        matches!(
+            hosts[2].last_restore(),
+            Some(MeshRestoreOutcome::Committed { .. })
+        ),
         "slot 3 must have committed the leader's record, got {:?}",
         hosts[2].last_restore()
     );
@@ -360,15 +366,17 @@ fn a_diverged_host_is_healed_and_the_whole_fleet_reconverges() {
 
     // Anti-vacuity: the run was doing something worth agreeing about, and the
     // boundary was a real number past the divergence.
-    assert!(boundary > diags[0].divergence_tick, "boundary past divergence");
+    assert!(
+        boundary > diags[0].divergence_tick,
+        "boundary past divergence"
+    );
     assert!(
         !hosts[0].app.world().resource::<CommandLog>().is_empty(),
         "the crews gave orders — the recovery healed a live mission, not an idle one"
     );
     // The command window in the artifact is the input a replay reads.
     assert_eq!(
-        diags[2].last_agreed_tick,
-        diags[0].last_agreed_tick,
+        diags[2].last_agreed_tick, diags[0].last_agreed_tick,
         "every host names the same last-agreed edge for the command window"
     );
     let _ = delay;

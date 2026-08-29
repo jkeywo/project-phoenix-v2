@@ -517,10 +517,7 @@ pub fn register_snapshot_relay(app: &mut App) {
         // bookkeeping about whether this host is mid-recovery, not state of the
         // world: nothing it holds is folded, and every honest host derives it from
         // the same shared recovery plan.
-        app.declare_state::<MeshRestoreArm>(
-            StateClass::Timer,
-            "fleet-snapshot-transfer-state",
-        );
+        app.declare_state::<MeshRestoreArm>(StateClass::Timer, "fleet-snapshot-transfer-state");
     }
     // `.after(MeshSet)` so a record completed by this frame's inbox drain is
     // restored the same frame. No explicit `.before(advance_sim_tick)`: that

@@ -28,7 +28,7 @@
 //!    host resumes the same mission, ship topology, scenario memory and crew.
 //! 5. **Diagnostic artifact** — [`RecoveryDiagnostic`], one per host per event,
 //!    holding the command window, the per-slot digests, the leader choice and the
-//!    result, retained in [`RecoveryLog`] and exportable as RON.
+//!    result, retained in [`RecoveryLog`] and exportable as JSON.
 //! 6. **Clean failure** — no strict majority (a two-host split) is refused with a
 //!    diagnostic and no transfer; a leader record that will not gate is rolled back
 //!    (#1117's checkpoint) and recorded as [`RecoveryResult::NoValidRecord`],
@@ -99,9 +99,9 @@ impl RecoveryState {
     /// The tick this host must not run past yet, or `None` if it is free.
     fn hold_boundary(&self) -> Option<u64> {
         match &self.active {
-            Some(ActiveRecovery::InProgress {
-                plan, resolved, ..
-            }) if !*resolved => Some(plan.boundary_tick),
+            Some(ActiveRecovery::InProgress { plan, resolved, .. }) if !*resolved => {
+                Some(plan.boundary_tick)
+            }
             _ => None,
         }
     }
@@ -149,8 +149,8 @@ impl RecoveryLog {
 ///
 /// One per host per event: it records the command window the divergence fell in,
 /// every fleet slot's fold at the divergence tick, the leader the fleet elected,
-/// the recovery boundary, and how the event resolved. Serialisable to RON so it can
-/// be exported and replayed, guarded by [`RECOVERY_ARTIFACT_VERSION`].
+/// the recovery boundary, and how the event resolved. Serialisable to JSON so it
+/// can be exported and replayed, guarded by [`RECOVERY_ARTIFACT_VERSION`].
 ///
 /// Not `Eq`: the command window carries `LoggedCommand`s whose payloads hold
 /// floats, so equality is `PartialEq` only — enough for the tests, and a diagnostic
@@ -201,15 +201,19 @@ pub enum RecoveryResult {
     NoValidRecord { refusal: String },
 }
 
-/// Serialise a diagnostic to RON for export (issue #1118, AC5).
+/// Serialise a diagnostic to JSON for export (issue #1118, AC5).
+///
+/// JSON rather than RON because this module compiles for the wasm `server` host
+/// too, where `ron` is not linked but `serde_json` — the host-mesh wire codec's
+/// own serializer — is.
 pub fn export_recovery_artifact(diagnostic: &RecoveryDiagnostic) -> Result<String, String> {
-    ron::ser::to_string(diagnostic).map_err(|e| e.to_string())
+    serde_json::to_string(diagnostic).map_err(|e| e.to_string())
 }
 
-/// Parse a diagnostic from RON, refusing one whose format revision this build does
-/// not speak.
+/// Parse a diagnostic from JSON, refusing one whose format revision this build
+/// does not speak.
 pub fn parse_recovery_artifact(text: &str) -> Result<RecoveryDiagnostic, String> {
-    let diagnostic: RecoveryDiagnostic = ron::from_str(text).map_err(|e| e.to_string())?;
+    let diagnostic: RecoveryDiagnostic = serde_json::from_str(text).map_err(|e| e.to_string())?;
     if diagnostic.version != RECOVERY_ARTIFACT_VERSION {
         return Err(format!(
             "recovery artifact is version {}, this build speaks {RECOVERY_ARTIFACT_VERSION}",
@@ -290,7 +294,9 @@ fn begin_recovery(world: &mut World, local: HostSlot, delay: u64) {
                     rx.clear_outcome();
                 }
             }
-            let log = world.get_resource::<crate::logging::LogFilterConfig>().cloned();
+            let log = world
+                .get_resource::<crate::logging::LogFilterConfig>()
+                .cloned();
             crate::pwarn!(
                 log,
                 LogCat::Admit,
@@ -311,7 +317,9 @@ fn begin_recovery(world: &mut World, local: HostSlot, delay: u64) {
         }
         RecoveryDecision::Unrecoverable { window, reason } => {
             let diagnostic = failure_diagnostic(world, local, &window, &reason);
-            let log = world.get_resource::<crate::logging::LogFilterConfig>().cloned();
+            let log = world
+                .get_resource::<crate::logging::LogFilterConfig>()
+                .cloned();
             crate::perror!(
                 log,
                 LogCat::Admit,
@@ -367,22 +375,20 @@ fn advance_recovery(world: &mut World, local: HostSlot, delay: u64, sim_tick: u6
                 resolution = Some(RecoveryResult::Witnessed);
             }
         }
-        RecoveryRole::Recovering => {
-            match restore_result(world) {
-                RestoreResolution::Pending => {}
-                RestoreResolution::Recovered { tick, digest } => {
-                    resolved = true;
-                    resolution = Some(RecoveryResult::Recovered {
-                        record_tick: tick,
-                        digest,
-                    });
-                }
-                RestoreResolution::Failed(refusal) => {
-                    resolved = true;
-                    resolution = Some(RecoveryResult::NoValidRecord { refusal });
-                }
+        RecoveryRole::Recovering => match restore_result(world) {
+            RestoreResolution::Pending => {}
+            RestoreResolution::Recovered { tick, digest } => {
+                resolved = true;
+                resolution = Some(RecoveryResult::Recovered {
+                    record_tick: tick,
+                    digest,
+                });
             }
-        }
+            RestoreResolution::Failed(refusal) => {
+                resolved = true;
+                resolution = Some(RecoveryResult::NoValidRecord { refusal });
+            }
+        },
     }
 
     if let Some(result) = resolution {
@@ -415,7 +421,9 @@ fn try_send_record(
     let transfer_id = recovery_transfer_id(plan);
     match send_snapshot(world, local, transfer_id, scenario) {
         Ok(chunks) => {
-            let log = world.get_resource::<crate::logging::LogFilterConfig>().cloned();
+            let log = world
+                .get_resource::<crate::logging::LogFilterConfig>()
+                .cloned();
             crate::pinfo!(
                 log,
                 LogCat::Admit,
@@ -426,7 +434,9 @@ fn try_send_record(
             Some(captured_at)
         }
         Err(why) => {
-            let log = world.get_resource::<crate::logging::LogFilterConfig>().cloned();
+            let log = world
+                .get_resource::<crate::logging::LogFilterConfig>()
+                .cloned();
             crate::perror!(
                 log,
                 LogCat::Admit,
@@ -468,9 +478,9 @@ fn restore_result(world: &World) -> RestoreResolution {
                  record recorded"
             ))
         }
-        MeshRestoreOutcome::Incomplete { tick, gaps } => RestoreResolution::Failed(format!(
-            "the restore left {gaps} gap(s) at tick {tick}"
-        )),
+        MeshRestoreOutcome::Incomplete { tick, gaps } => {
+            RestoreResolution::Failed(format!("the restore left {gaps} gap(s) at tick {tick}"))
+        }
         MeshRestoreOutcome::RefusedWrongSender { armed_from, from } => {
             RestoreResolution::Failed(format!(
                 "the record came from {from:?}, not the leader {}",
@@ -507,10 +517,14 @@ fn finish_recovery(
 
     // A resolved success: forget the divergent samples the recovery healed so the
     // same stale split cannot re-trigger, and clear the tracking.
-    world.resource_mut::<MeshAgreement>().forget_through(boundary);
+    world
+        .resource_mut::<MeshAgreement>()
+        .forget_through(boundary);
     world.resource_mut::<RecoveryState>().active = None;
 
-    let log = world.get_resource::<crate::logging::LogFilterConfig>().cloned();
+    let log = world
+        .get_resource::<crate::logging::LogFilterConfig>()
+        .cloned();
     crate::pinfo!(
         log,
         LogCat::Admit,
@@ -537,9 +551,11 @@ fn recovering_all_resumed(
         return false;
     };
     let threshold = boundary.saturating_add(delay);
-    plan.recovering
-        .iter()
-        .all(|slot| session.observed(*slot).is_some_and(|watermark| watermark > threshold))
+    plan.recovering.iter().all(|slot| {
+        session
+            .observed(*slot)
+            .is_some_and(|watermark| watermark > threshold)
+    })
 }
 
 /// A stable transfer id for a recovery, so a re-sent chunk is never mistaken for a
@@ -654,7 +670,11 @@ mod tests {
             divergence_tick: 240,
             last_agreed_tick: Some(180),
             boundary_tick: 360,
-            digests: vec![(HostSlot(1), 0xAA), (HostSlot(2), 0xBB), (HostSlot(3), 0xAA)],
+            digests: vec![
+                (HostSlot(1), 0xAA),
+                (HostSlot(2), 0xBB),
+                (HostSlot(3), 0xAA),
+            ],
             leader: Some(HostSlot(1)),
             canonical_digest: Some(0xAA),
             recovering: vec![HostSlot(2)],
@@ -689,7 +709,11 @@ mod tests {
             digests: BTreeMap::new(),
         };
         let id = recovery_transfer_id(&plan);
-        assert_eq!(id, recovery_transfer_id(&plan.clone()), "same plan, same id");
+        assert_eq!(
+            id,
+            recovery_transfer_id(&plan.clone()),
+            "same plan, same id"
+        );
         let mut other = plan;
         other.divergence_tick = 250;
         assert_ne!(

@@ -44,8 +44,9 @@ use project_phoenix::entities::spawner::EntityUuid;
 use project_phoenix::headless::{build_headless_app, run, world_digest, HeadlessArgs};
 use project_phoenix::lobby::{InboundMessage, Sessions};
 use project_phoenix::lockstep::{
-    agreed_loss_tick, join_fleet, FleetLockstep, FleetRoster, FleetShip, FleetSlotOf, HostLossFrame,
-    HostLossRecord, MeshAgreement, MeshFrame, MeshInbox, MeshOutbox, PendingHostLoss,
+    agreed_loss_tick, join_fleet, order_mesh_inbound, FleetLockstep, FleetRoster, FleetShip,
+    FleetSlotOf, HostLossFrame, HostLossRecord, MeshAgreement, MeshFrame, MeshInbox, MeshOutbox,
+    PendingHostLoss,
 };
 use project_phoenix::ship::control_source::ControlSource;
 use project_phoenix::ship::state::ShipPhysics;
@@ -560,5 +561,202 @@ fn reordered_duplicate_and_delayed_loss_reports_converge() {
     assert!(
         digests[1].keys().any(|t| *t >= expected_loss_tick),
         "survivor 2 must have caught up past the disconnect tick"
+    );
+}
+
+// ── The production STAR, not a symmetric mesh ────────────────────────────────
+
+/// **HIGH determinism guard (issue #1119).** The other cases model a symmetric
+/// mesh: every survivor both directly observes slot 3's frames and self-reports
+/// the loss, and slot 3's frames are all processed *before* the loss. Production
+/// is a STAR — only the connection-holder (here the "lead", slot 1) sees the
+/// socket close, and it sees slot 3's FINAL tick frame in the very same inbox
+/// batch as that close; every other host (the "member", slot 2) learns the loss
+/// only from the lead's relayed report, which the reliable ordered relay
+/// delivers *after* slot 3's relayed final frame.
+///
+/// The lead must therefore observe slot 3's final watermark BEFORE it derives
+/// the loss tick, or it flips the ship to Backfill one tick earlier than the
+/// member does and the two folds diverge. `order_mesh_inbound` is where the
+/// bridge guarantees that order (decoded frames before the self-loss); this test
+/// drives the lead's batch through it, so reversing that order — the pre-fix
+/// bug — makes the lead derive `watermark_prev + 1` while the member derives
+/// `watermark_final + 1`, the asserts below fail, and the divergence surfaces.
+#[test]
+fn a_star_lead_and_member_agree_the_same_tick_when_the_final_frame_co_arrives() {
+    const WARMUP: u64 = 80;
+    const AFTER: u64 = 220;
+
+    let mut hosts = warmed_fleet(WARMUP);
+
+    // Slot 3's un-ferried FINAL batch: produced by its last step in
+    // `warmed_fleet` and not yet delivered (there is no trailing ferry). This is
+    // the frame that co-arrives with the socket close on the lead and is relayed
+    // to the member ahead of the loss report.
+    let slot3_final = hosts[2].drain_outbox();
+    let slot3_final_watermark = slot3_final
+        .iter()
+        .find_map(|f| match f {
+            MeshFrame::Tick(t) => Some(t.ready_through),
+            _ => None,
+        })
+        .expect("slot 3's final batch must carry a tick frame with its watermark");
+    // The one true agreed tick: the first tick past slot 3's LAST watermark —
+    // the one that includes the co-arriving final frame. The pre-fix lead would
+    // derive one lower (from the watermark before that frame).
+    let expected_loss_tick = agreed_loss_tick(slot3_final_watermark);
+
+    hosts[2].alive = false;
+
+    // LEAD (slot 1): the self-observer. Its relay of slot 3's final frame and its
+    // own socket close land in ONE inbox batch, in the bridge's push order.
+    {
+        let mut inbox = hosts[0].app.world_mut().resource_mut::<MeshInbox>();
+        for frame in order_mesh_inbound(slot3_final.clone(), [SLOT_THREE]) {
+            inbox.push(frame);
+        }
+    }
+
+    // MEMBER (slot 2): sees slot 3's final frame first (reliable-ordered relay);
+    // it will learn the loss only from the lead's re-broadcast, which reaches it
+    // through the ordinary ferry below — strictly after this frame.
+    hosts[1].deliver(&slot3_final);
+
+    let mut digests: [std::collections::BTreeMap<u64, u64>; 2] =
+        [Default::default(), Default::default()];
+    for _ in 0..AFTER {
+        step(&mut hosts);
+        digests[0].insert(hosts[0].tick(), hosts[0].digest());
+        digests[1].insert(hosts[1].tick(), hosts[1].digest());
+    }
+
+    // Both derive the SAME agreed tick — the one past slot 3's final watermark.
+    let one = HostLossRecord {
+        slot: SLOT_THREE,
+        tick: expected_loss_tick,
+    };
+    assert_eq!(
+        hosts[0].host_loss_records(),
+        vec![one],
+        "the LEAD must derive the tick past slot 3's FINAL watermark — observing \
+         the co-arriving frame before deriving the loss, not one tick early"
+    );
+    assert_eq!(
+        hosts[1].host_loss_records(),
+        vec![one],
+        "the MEMBER, learning the loss from the lead's relayed report, must derive \
+         the identical tick"
+    );
+
+    // Slot 3's ship is Backfill on both, and folds bit-identically every shared
+    // tick through the transition — a one-tick-early flip on the lead would show
+    // here as the first divergence.
+    for (host, h) in hosts.iter_mut().enumerate().take(2) {
+        assert_eq!(
+            h.human_systems_of(SLOT_THREE),
+            Some(0),
+            "host {host}: slot 3's ship must be fully Backfill after the flip"
+        );
+    }
+    let mut shared = 0usize;
+    for (tick, a) in &digests[0] {
+        if let Some(b) = digests[1].get(tick) {
+            shared += 1;
+            assert_eq!(
+                a, b,
+                "lead and member diverged at tick {tick}: {a:#018x} vs {b:#018x} \
+                 — the star's asymmetric observation flipped Backfill on different \
+                 ticks"
+            );
+        }
+    }
+    assert!(
+        digests[0].keys().any(|t| *t >= expected_loss_tick) && shared > 40,
+        "the run must cover the transition on both hosts ({shared} shared ticks)"
+    );
+}
+
+// ── Security: a forged loss cannot evict a live peer ─────────────────────────
+
+/// **HIGH security containment (issue #1119).** A `HostLoss` is not
+/// authenticated (full reporter-auth is deferred to #1118/#1120), so a
+/// misbehaving peer could forge one for a LIVE victim and evict its ship
+/// fleet-wide. Containment refuses any report this host can PROVE is
+/// inconsistent — the named slot has declared a watermark at or beyond the tick
+/// the report claims it flips on, i.e. it was still producing frames past the
+/// claimed loss. The decision is on state identical across hosts, so it cannot
+/// itself diverge the fold.
+///
+/// Slot 3 stays alive and under way; a peer forges its loss at a tick it has
+/// demonstrably outlived. Every host refuses it, slot 3's ship stays human, and
+/// the fold never moves.
+#[test]
+fn a_forged_loss_for_a_live_slot_is_refused_and_the_fold_stays_identical() {
+    const WARMUP: u64 = 80;
+    const AFTER: u64 = 120;
+
+    let mut hosts = warmed_fleet(WARMUP);
+
+    // The watermark the survivors have already observed from the (live) slot 3.
+    let observed = {
+        let session = hosts[0].app.world().resource::<FleetLockstep>();
+        session
+            .watermark_of(SLOT_THREE)
+            .expect("host one heard slot 3")
+    };
+    assert!(observed > 2, "need an observed watermark to forge a loss below it");
+    // A tick slot 3 has plainly outlived — it declared frames well past this.
+    let forged_tick = observed / 2;
+
+    // A relayed report (from a survivor slot, NOT a self-observed close) naming
+    // the LIVE slot 3 lost at that past tick, delivered to both survivors.
+    let forged = MeshFrame::HostLoss(HostLossFrame {
+        from: SLOT_TWO,
+        lost: SLOT_THREE,
+        tick: forged_tick,
+    });
+    hosts[0].deliver(std::slice::from_ref(&forged));
+    hosts[1].deliver(std::slice::from_ref(&forged));
+
+    // All three keep running — slot 3 is alive and never dropped.
+    let mut digests: [std::collections::BTreeMap<u64, u64>; 3] =
+        [Default::default(), Default::default(), Default::default()];
+    for _ in 0..AFTER {
+        step(&mut hosts);
+        for (i, h) in hosts.iter().enumerate() {
+            digests[i].insert(h.tick(), h.digest());
+        }
+    }
+
+    // The forged report is refused: no host-loss transition on any host…
+    for (i, h) in hosts.iter().enumerate() {
+        assert!(
+            h.host_loss_records().is_empty(),
+            "host {i} must refuse a forged loss for a live slot — one \
+             unauthenticated report must not evict a live peer's ship"
+        );
+    }
+    // …and slot 3's ship stays under its live human crew everywhere.
+    for (i, h) in hosts.iter_mut().enumerate() {
+        assert!(
+            h.human_systems_of(SLOT_THREE).unwrap() > 0,
+            "host {i}: the forged victim's ship must stay human/live, not Backfill"
+        );
+    }
+
+    // And the refused report never perturbed the fold: every tick all three
+    // folded, they folded the same.
+    let mut shared = 0usize;
+    for (tick, a) in &digests[0] {
+        if let (Some(b), Some(c)) = (digests[1].get(tick), digests[2].get(tick)) {
+            shared += 1;
+            assert_eq!(a, b, "hosts 0 and 1 diverged at tick {tick} after a refused report");
+            assert_eq!(a, c, "hosts 0 and 2 diverged at tick {tick} after a refused report");
+        }
+    }
+    assert!(
+        shared > AFTER as usize / 2,
+        "too few shared ticks ({shared}) to prove the refused report left the \
+         fold identical"
     );
 }

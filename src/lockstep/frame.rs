@@ -178,7 +178,13 @@ pub struct DigestFrame {
 /// agreed tick (#1119 AC2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostLossFrame {
-    /// The slot reporting the loss — a survivor, never the lost host.
+    /// The slot reporting the loss. **Advisory**, not authenticated: the handler
+    /// ([`apply_mesh_inbox`](crate::lockstep::apply_mesh_inbox)) ignores it when
+    /// deriving the agreed tick and normalises it to the local observer on
+    /// re-broadcast. On a self-observed local socket close the bridge injects it
+    /// EQUAL to `lost` (with tick `0`) — the frame is the fact of the loss, not a
+    /// claim about who noticed — so a survivor is the usual reporter but the field
+    /// may name the lost slot itself on that first, self-reported observation.
     pub from: HostSlot,
     /// The slot whose host has vanished.
     pub lost: HostSlot,

@@ -1138,8 +1138,8 @@ fn drain_mesh_inbound(world: &mut World) {
     let frames = MESH_INBOUND.with(|q| std::mem::take(&mut *q.borrow_mut()));
     // Slots whose HOST link closed on this machine. Each becomes a self-reported
     // `HostLoss` with tick 0; `apply_mesh_inbox` derives the real agreed tick
-    // from the lost host's own watermark (max with this 0), so the page hands
-    // over only the fact of the loss, never a tick it has no way to know.
+    // from the lost host's own last watermark, so the page hands over only the
+    // fact of the loss, never a tick it has no way to know.
     let departed = HOST_LOSS_QUEUE.with(|q| std::mem::take(&mut *q.borrow_mut()));
     if frames.is_empty() && departed.is_empty() {
         return;
@@ -1149,17 +1149,17 @@ fn drain_mesh_inbound(world: &mut World) {
         .filter_map(|raw| crate::core::codec::decode_mesh_frame(raw))
         .collect();
     if let Some(mut inbox) = world.get_resource_mut::<crate::lockstep::MeshInbox>() {
-        for slot in departed {
-            let slot = crate::command_admission::HostSlot(slot);
-            inbox.push(crate::lockstep::MeshFrame::HostLoss(
-                crate::lockstep::HostLossFrame {
-                    from: slot,
-                    lost: slot,
-                    tick: 0,
-                },
-            ));
-        }
-        for frame in decoded {
+        // Decoded tick/digest frames BEFORE the self-reported host-loss frames,
+        // so a departing host's final watermark is observed before the loss tick
+        // is derived from it — the same order every survivor sees over the
+        // reliable relay. `order_mesh_inbound` owns and documents that ordering
+        // (issue #1119); reversing it flips Backfill one tick early here and
+        // diverges the fold, which `tests/lockstep_backfill.rs`'s star-topology
+        // case guards.
+        let departed = departed
+            .into_iter()
+            .map(crate::command_admission::HostSlot);
+        for frame in crate::lockstep::order_mesh_inbound(decoded, departed) {
             inbox.push(frame);
         }
     }

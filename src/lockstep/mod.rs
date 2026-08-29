@@ -274,6 +274,42 @@ impl MeshInbox {
     }
 }
 
+/// Order one frame's worth of host-mesh input for [`MeshInbox`] (issue #1119).
+///
+/// The decoded tick/digest frames go in **before** the self-reported host-loss
+/// frames, so a departing host's final watermark is OBSERVED before the loss
+/// tick is derived from it. That order is load-bearing for determinism, not
+/// cosmetic: when a lost host's last tick frame and its socket close arrive in
+/// the same animation frame — the common case, since a host receives roughly one
+/// peer frame per drain — [`apply_mesh_inbox`] must see the final frame first,
+/// exactly as every OTHER survivor does over the reliable ordered relay (which
+/// delivers the relayed final frame before the relayed loss report). Injecting
+/// the loss first would derive [`agreed_loss_tick`] from a watermark that omits
+/// the co-arriving frame, so the self-observing host would flip its peer's ship
+/// to Backfill one tick EARLIER than the members do — and the two folds diverge
+/// from that tick on.
+///
+/// A departed slot is self-reported as a [`HostLossFrame`] with the departing
+/// slot as both `from` and `lost` and tick `0`: the bridge cannot know the
+/// agreed tick (it never sees the watermark), so it hands over only the fact of
+/// the loss and the handler derives the tick. The `from == lost` shape is an
+/// advisory marker of a local self-observation; the handler re-broadcasts a
+/// normalised report naming the local observer.
+pub fn order_mesh_inbound(
+    decoded: impl IntoIterator<Item = MeshFrame>,
+    departed: impl IntoIterator<Item = HostSlot>,
+) -> Vec<MeshFrame> {
+    let mut ordered: Vec<MeshFrame> = decoded.into_iter().collect();
+    for slot in departed {
+        ordered.push(MeshFrame::HostLoss(frame::HostLossFrame {
+            from: slot,
+            lost: slot,
+            tick: 0,
+        }));
+    }
+    ordered
+}
+
 /// Frames this host has produced and a transport has not sent yet.
 ///
 /// Also holds the commands admitted since the last tick frame was sealed, so
@@ -751,13 +787,15 @@ pub fn apply_mesh_inbox(
                 if pending_loss.is_applied(lost) {
                     continue;
                 }
-                // The agreed tick is a function of the OBSERVATION — the lost
-                // host's own last watermark, which reliable delivery gave every
-                // survivor identically — never of when this host noticed. A
-                // survivor behind the star relay may not have the watermark yet;
-                // it adopts the reporter's tick, and the max of the two keeps a
-                // reordered or lower report from walking the agreement back.
-                let derived = session.watermark_of(lost).map(host_loss::agreed_loss_tick);
+                // The agreed tick is a function of THIS host's OBSERVATION of the
+                // lost slot's own last watermark — the first tick past everything
+                // that host promised it would ever say — which reliable ordered
+                // delivery gave every survivor identically, so it is never a tick
+                // a reporter claims BEYOND that. `derived` wins whenever this host
+                // knows the watermark; only a relay member that has not yet seen
+                // it falls back to the reporter's figure as the sole one it has.
+                let observed = session.watermark_of(lost);
+                let derived = observed.map(host_loss::agreed_loss_tick);
                 if derived.is_none() && !pending_loss.is_known(lost) {
                     // A report about a slot this host has never known as a peer:
                     // there is nothing to lose, so it is dropped rather than
@@ -771,7 +809,56 @@ pub fn apply_mesh_inbox(
                     );
                     continue;
                 }
-                let agreed = derived.map_or(hl.tick, |d| d.max(hl.tick));
+                // CONTAINMENT (issue #1119, security): refuse a report this host
+                // can PROVE is inconsistent — the named slot declared a watermark
+                // at or beyond the tick the report says its ship flips on, i.e. it
+                // was still producing frames PAST the claimed loss, so it cannot
+                // have been lost then. Without this, one unilateral report evicts
+                // a LIVE peer's ship fleet-wide: `session.depart` drops the
+                // victim's future frames and its whole ship flips to Backfill. The
+                // decision is deterministic — with the bridge's frame-before-loss
+                // push order (`order_mesh_inbound`) the reliably-ordered watermark
+                // for `lost` up to this point is identical on every survivor, so
+                // every host accepts or refuses alike and the check cannot itself
+                // diverge the fold. A self-observed local socket close carries
+                // tick `0` (no claim to check) and derives its tick from the
+                // watermark above, so it is not caught here.
+                //
+                // TODO(#1118/#1120 mesh hardening): report authenticity is still
+                // unenforced. Containment closes the live-eviction hole (a report
+                // a slot demonstrably outlived is dropped), but it does not
+                // authenticate the REPORTER — a report timed at the slot's own
+                // next uncovered tick, or one forging the tick-`0` self-observed
+                // shape, is still honoured. Binding a reporter to the transport
+                // connection that actually held the lost peer is deferred for the
+                // same reason the Tick arm's `from` is unauthenticated (the star
+                // relay cannot supply an authenticated sender for a relayed
+                // sibling frame; see the TODO in that arm). Containment is
+                // #1119's defence; full reporter-auth is #1118/#1120's.
+                if hl.tick > 0 {
+                    if let Some(watermark) = observed {
+                        if watermark >= hl.tick {
+                            crate::pwarn!(
+                                log,
+                                LogCat::Admit,
+                                "refusing a host-loss report for {} at tick {}: \
+                                 this host has observed it through watermark {} — \
+                                 it was still producing frames past the claimed \
+                                 loss, so the report is inconsistent and dropped \
+                                 (issue #1119 containment)",
+                                lost.slot_id(),
+                                hl.tick,
+                                watermark,
+                            );
+                            continue;
+                        }
+                    }
+                }
+                // Never later than the first tick past what this host observed:
+                // a forged far-future tick cannot strand the ship with no input
+                // until it, because `derived` — not the reporter's claim — is
+                // used whenever the watermark is known.
+                let agreed = derived.unwrap_or(hl.tick);
                 let changed = pending_loss.observe(lost, agreed);
                 // Stop the barrier waiting for the departed host so the fleet
                 // resumes at once — the ship's Backfill flip is tick-stamped for
@@ -779,11 +866,10 @@ pub fn apply_mesh_inbox(
                 // half moves no folded state.
                 session.depart(lost);
                 if changed {
-                    // Re-broadcast so the rest of the fleet converges on the
-                    // highest tick anyone derived — the propagation that lets a
-                    // relay member learn a loss it did not see the socket close
-                    // for, and that carries a raised agreement to survivors that
-                    // agreed a lower one.
+                    // Re-broadcast so the rest of the fleet converges — the
+                    // propagation that lets a relay member learn a loss it did not
+                    // see the socket close for. The report is normalised to name
+                    // THIS host as the observer and to carry the agreed tick.
                     outbox.push(MeshFrame::HostLoss(frame::HostLossFrame {
                         from: session.local(),
                         lost,

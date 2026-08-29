@@ -47,6 +47,19 @@
 //! keeps them there — is authoritative and applied at the agreed tick, in the
 //! fixed schedule, identically on every survivor. This module owns only the
 //! authoritative half.
+//!
+//! # Why the pure math and the Bevy adapter share this file (AGENTS.md rule 10)
+//!
+//! [`session`](crate::lockstep::session) and [`frame`](crate::lockstep::frame)
+//! keep their pure decision Bevy-free with the adapter as a sibling. This file
+//! deliberately co-locates the two: the agreement math ([`agreed_loss_tick`] and
+//! all of [`PendingHostLoss`]) is pure and total and is unit-tested below with no
+//! `World` at all, so rule 10's actual objective — the decision is testable
+//! without booting Bevy — is already met. The only Bevy in the file is the thin
+//! [`apply_host_loss_backfill`] adapter and the `Resource`/`Query` types it
+//! needs; the queue it drives is a plain map. Splitting it into a `_systems.rs`
+//! sibling is a valid tidy but buys no extra testability, so it is left as one
+//! module on purpose rather than by oversight.
 
 use bevy::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};

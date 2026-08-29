@@ -65,6 +65,7 @@ use crate::logging::LogCat;
 
 pub mod frame;
 pub mod host_loss;
+pub mod recovery;
 pub mod recovery_plan;
 pub mod session;
 pub mod snapshot_relay;
@@ -406,6 +407,23 @@ impl MeshAgreement {
     pub fn first_disagreement(&self) -> Option<MeshDisagreement> {
         self.disagreements.first().copied()
     }
+
+    /// Forget every sampled checkpoint at or before `tick`, across this host's own
+    /// ledger and every peer's, and clear the recorded disagreements at or before
+    /// it (issue #1118).
+    ///
+    /// Called on every host when a recovery resolves at the boundary `tick`: the
+    /// divergent samples the recovery just healed are dropped so the same stale
+    /// split cannot re-trigger recovery, while later samples — which now agree —
+    /// are kept. A disagreement past the boundary (there should be none) is
+    /// retained rather than hidden.
+    pub fn forget_through(&mut self, tick: u64) {
+        self.local.forget_through(tick);
+        for ledger in self.peers.values_mut() {
+            ledger.forget_through(tick);
+        }
+        self.disagreements.retain(|d| d.tick > tick);
+    }
 }
 
 impl Default for MeshAgreement {
@@ -523,7 +541,12 @@ pub fn register_lockstep(app: &mut App) {
         .init_resource::<host_loss::PendingHostLoss>()
         .add_systems(
             PreUpdate,
-            (apply_mesh_inbox, gate_lockstep_ticks)
+            // `drive_recovery` (issue #1118) sits between applying the inbox and
+            // the barrier: it reads the freshest peer digests and watermarks, and
+            // publishes the boundary hold `gate_lockstep_ticks` then honours this
+            // same frame. It is a clearly-separable addition beside the barrier
+            // rather than a change to it.
+            (apply_mesh_inbox, recovery::drive_recovery, gate_lockstep_ticks)
                 .chain()
                 .in_set(MeshSet),
         )
@@ -565,6 +588,9 @@ pub fn register_lockstep(app: &mut App) {
     // frame-driven restore that commits a fully-arrived record. Kept in its own
     // sibling so #1119's parallel work on this module does not collide with it.
     snapshot_relay::register_snapshot_relay(app);
+    // Divergence recovery (issue #1118): the recovery resources and the diagnostic
+    // log. The `drive_recovery` system itself is wired into the mesh chain above.
+    recovery::register_recovery(app);
 }
 
 /// Join a fleet: adopt the slot, the peers and the agreed delay.
@@ -906,6 +932,7 @@ pub fn gate_lockstep_ticks(
     paused: Option<Res<crate::debug_overlay::SimulationPaused>>,
     virtual_time: Option<ResMut<Time<Virtual>>>,
     mut diagnostics: ResMut<MeshDiagnostics>,
+    recovery_hold: Option<Res<recovery::RecoveryHold>>,
     log: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
     let Some(session) = session else {
@@ -927,21 +954,39 @@ pub fn gate_lockstep_ticks(
         return;
     }
     let next_tick = sim_tick.map_or(0, |t| t.0);
-    match session.stall_at(next_tick) {
-        Some(stall) => {
-            if !virtual_time.is_paused() {
-                crate::pwarn!(log, LogCat::Admit, "host-mesh stall: {stall}");
-                virtual_time.pause();
+
+    // A peer stall (this host is ahead of the fleet) and a recovery boundary hold
+    // (issue #1118, this host must not run past the tick a divergence is being
+    // healed at) are two reasons to withhold the same tick. Both pause the same
+    // clock, so one system owns it: the barrier's own peer-stall decision is
+    // exactly #1116's, and the recovery hold is an additional withhold reason read
+    // from `RecoveryHold` beside it. The stall diagnostics track only the peer
+    // stall, so a boundary hold with no peer behind it is not miscounted as one.
+    let stall = session.stall_at(next_tick);
+    match &stall {
+        Some(stall) => diagnostics.stalled(stall.clone()),
+        None => diagnostics.running(),
+    }
+    let held = recovery_hold
+        .and_then(|hold| hold.withhold_beyond)
+        .is_some_and(|boundary| next_tick > boundary);
+
+    if stall.is_some() || held {
+        if !virtual_time.is_paused() {
+            match &stall {
+                Some(stall) => crate::pwarn!(log, LogCat::Admit, "host-mesh stall: {stall}"),
+                None => crate::pinfo!(
+                    log,
+                    LogCat::Admit,
+                    "host-mesh recovery hold at tick {next_tick}: withholding until the \
+                     divergence is healed"
+                ),
             }
-            diagnostics.stalled(stall);
+            virtual_time.pause();
         }
-        None => {
-            if virtual_time.is_paused() {
-                crate::pinfo!(log, LogCat::Admit, "host-mesh resumed at tick {next_tick}");
-                virtual_time.unpause();
-            }
-            diagnostics.running();
-        }
+    } else if virtual_time.is_paused() {
+        crate::pinfo!(log, LogCat::Admit, "host-mesh resumed at tick {next_tick}");
+        virtual_time.unpause();
     }
 }
 

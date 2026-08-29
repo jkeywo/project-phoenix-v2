@@ -190,6 +190,19 @@ impl LockstepSession {
         tick.saturating_add(self.delay)
     }
 
+    /// The most recent watermark this host has observed from `slot`, or `None`
+    /// for the local slot (which is never tracked — a host does not wait for
+    /// itself) or an unknown one.
+    ///
+    /// Divergence recovery (#1118) reads this to tell a recovering peer has
+    /// RESUMED past the recovery boundary: a paused host's last watermark sits at
+    /// `boundary + delay`, and the first tick it runs after restoring pushes it to
+    /// `boundary + delay + 1`. It is a monotone liveness signal, never a
+    /// simulation decision — the barrier still governs which ticks actually run.
+    pub fn observed(&self, slot: HostSlot) -> Option<u64> {
+        self.ready_through.get(&slot).copied()
+    }
+
     /// Whether every peer's input for `tick` is in hand.
     pub fn may_simulate(&self, tick: u64) -> bool {
         self.ready_through.values().all(|ready| *ready >= tick)

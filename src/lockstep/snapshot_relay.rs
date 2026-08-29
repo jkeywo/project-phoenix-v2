@@ -135,6 +135,15 @@ impl MeshSnapshotReceiver {
         self.last.as_ref()
     }
 
+    /// Forget the last transfer's outcome.
+    ///
+    /// The recovery driver (#1118) calls this when it arms a recovering host, so
+    /// the host acts on THIS recovery's restore result and never on a stale one
+    /// left over from an earlier transfer (a join, a prior recovery).
+    pub fn clear_outcome(&mut self) {
+        self.last = None;
+    }
+
     /// The most recent chunk-level fault, if the last chunk was refused.
     pub fn last_fault(&self) -> Option<&TransferError> {
         self.last_fault.as_ref()

@@ -2110,6 +2110,17 @@ impl DigestLedger {
             .map(|c| c.digest)
     }
 
+    /// Drop every sampled checkpoint at or before `tick`, keeping only later ones.
+    ///
+    /// Divergence recovery (#1118) calls this on every host's ledger once a
+    /// recovery resolves: the samples at and before the recovery boundary are the
+    /// divergent history the restore has just healed, so forgetting them keeps the
+    /// same stale disagreement from re-triggering recovery while the post-boundary
+    /// samples (which now agree) are retained.
+    pub fn forget_through(&mut self, tick: u64) {
+        self.checkpoints.retain(|c| c.tick > tick);
+    }
+
     /// The first tick at which this ledger and `other` disagree.
     ///
     /// Pairs samples by *tick*, not by index, so two runs that sampled

@@ -61,6 +61,15 @@ use project_phoenix::sim_tick::SimTick;
 /// why a probe with combat in it is the one worth comparing.
 const WORLD: &str = "assets/worlds/probe_fleet_duel.toml";
 
+/// A two-ship world with a streaming ASTEROID field. The class
+/// `probe_fleet_duel` cannot cover: asteroid streaming was the last
+/// `LocalShip`-gated write folded into the digest, so a host that centred its
+/// window on the single local ship loaded a different belt than its peer and
+/// the two diverged on any asteroid world (issue #1116). Its two hulls sit 12
+/// lattice cells apart so a per-ship window and a fleet-wide one load visibly
+/// different cell sets — the reason a revert of the fix fails this test.
+const ASTEROID_WORLD: &str = "assets/worlds/probe_fleet_asteroids.toml";
+
 /// Long enough that both fleet ships have acquired the hostile, manoeuvred and
 /// traded fire, so the comparison covers per-victim RNG draws and mid-run
 /// projectile mints rather than two hulls coasting.
@@ -72,15 +81,19 @@ const SEED: u64 = 1_116_026;
 const SLOT_ONE: HostSlot = HostSlot(1);
 const SLOT_TWO: HostSlot = HostSlot(2);
 
-fn args() -> HeadlessArgs {
+fn args_for(world: &str) -> HeadlessArgs {
     HeadlessArgs {
-        world_path: WORLD.into(),
+        world_path: world.into(),
         ship_path: "assets/entities/alliance_cruiser.toml".into(),
         max_ticks: TICKS,
         seed: Some(SEED),
         deterministic: true,
         ..Default::default()
     }
+}
+
+fn args() -> HeadlessArgs {
+    args_for(WORLD)
 }
 
 /// A two-ship roster in which `local` is the slot this host projects.
@@ -103,7 +116,11 @@ fn roster(local: HostSlot) -> FleetRoster {
 /// The roster alone is what `spawn_game_start_entities` reads to decide how
 /// many player ships to build and which of them to tag.
 fn run_host(local: HostSlot) -> Vec<(u64, u64)> {
-    let args = args();
+    run_host_on(WORLD, local)
+}
+
+fn run_host_on(world: &str, local: HostSlot) -> Vec<(u64, u64)> {
+    let args = args_for(world);
     let mut app = build_headless_app(&args).expect("app should build");
     // Before the first update: `headless_auto_start` enters `InProgress` on the
     // first fixed step, and the ships are spawned by that transition.
@@ -218,6 +235,72 @@ fn the_digest_does_not_care_which_ship_a_host_projects() {
         distinct.len() > TICKS as usize / 2,
         "only {} distinct digests over {TICKS} ticks — the probe world is not \
          simulating anything worth comparing",
+        distinct.len()
+    );
+}
+
+/// **The asteroid class.** The same neutrality claim, on a world with a
+/// streaming belt — the site the headline test above cannot reach, because
+/// `probe_fleet_duel` has no asteroids (issue #1116).
+///
+/// Asteroid streaming used to centre its ring-buffer window on the single
+/// `LocalShip`, and a rock's position folds into `sim_digest` (it is what a
+/// collision resolves against). `LocalShip` is a different ship on each host of
+/// a fleet, so the two hosts loaded different belts and diverged from tick zero
+/// on ANY asteroid world — `combat_test.toml`, the demo, included. The fix
+/// drives the window off `fleet_stream_centre` (the mean over every
+/// `FleetSlotOf` ship), identical on every host. Revert it and this test fails.
+#[test]
+fn the_digest_does_not_care_which_ship_a_host_projects_on_an_asteroid_world() {
+    // Precondition: the belt actually streams. A field that failed to load would
+    // make this two empty windows agreeing about nothing.
+    let rocks = {
+        let mut app = build_headless_app(&args_for(ASTEROID_WORLD)).expect("app should build");
+        app.insert_resource(roster(SLOT_ONE));
+        run(&mut app, 120);
+        let mut q = app
+            .world_mut()
+            .query::<&project_phoenix::server_app::Asteroid>();
+        q.iter(app.world()).count()
+    };
+    assert!(
+        rocks > 50,
+        "the probe belt must stream rocks around the fleet — got {rocks}, so the \
+         comparison below would be about two empty windows"
+    );
+
+    let first = run_host_on(ASTEROID_WORLD, SLOT_ONE);
+    let second = run_host_on(ASTEROID_WORLD, SLOT_TWO);
+
+    assert_eq!(
+        first.len(),
+        TICKS as usize,
+        "precondition: the run must reach the end rather than stopping early"
+    );
+    if let Some((tick, mine, theirs)) = first
+        .iter()
+        .zip(second.iter())
+        .find(|((_, a), (_, b))| a != b)
+        .map(|((tick, a), (_, b))| (*tick, *a, *b))
+    {
+        panic!(
+            "the authoritative digest diverged at tick {tick} on an ASTEROID \
+             world: the host projecting slot 1 folds {mine:#018x}, the host \
+             projecting slot 2 folds {theirs:#018x}.\n\n\
+             Asteroid streaming must be driven by FLEET-WIDE geometry — \
+             `asteroids::lifecycle::fleet_stream_centre` over every \
+             `FleetSlotOf` ship — not the single `LocalShip`. A window centred \
+             on the local ship loads a different belt on each host, and rock \
+             positions fold into `sim_digest`, so the two hosts split from tick \
+             zero. See `update_asteroid_window`."
+        );
+    }
+
+    let distinct: std::collections::BTreeSet<u64> = first.iter().map(|(_, d)| *d).collect();
+    assert!(
+        distinct.len() > TICKS as usize / 2,
+        "only {} distinct digests over {TICKS} ticks — the asteroid probe world \
+         is not simulating anything worth comparing",
         distinct.len()
     );
 }

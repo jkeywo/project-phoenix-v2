@@ -197,6 +197,7 @@ fn drive(
             version: project_phoenix::native_host::bridge_profile::PROFILE_VERSION,
             displays: entries,
             touch: Vec::new(),
+            media: Vec::new(),
         };
         let validated = profile
             .validate()

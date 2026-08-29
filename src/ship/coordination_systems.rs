@@ -272,14 +272,23 @@ pub fn write_scenario_detail_floor(
 /// at, while the host that crew is connected to writes `Human`. The two hosts
 /// then run different AI on the same hull, and diverge.
 ///
-/// So the holder lookup is per ship: this host's own ship answers from live
-/// `Sessions`, exactly as before; a peer's ship answers from the roster's
-/// frozen crewing, which every host received identically. A frozen answer
-/// cannot re-seek mid-mission — that is #1119's tick-stamped host-loss event,
-/// and it is deliberately not approximated here, because a re-seek each host
-/// performed on its own view of who is connected is precisely the
-/// "applied at different ticks on different peers" failure
-/// `p2p-delta-backfill-replaces-auto-crew` rules out.
+/// In a **fleet**, every ship — this host's own included — answers from the
+/// roster's frozen crewing, which every host received identically, so both
+/// hosts derive identical control sources from tick zero. A **solo** host has
+/// no peer to diverge from, so it keeps answering from live `Sessions`, which
+/// is what lets a reconnecting single-player pilot re-take a seat within a tick.
+///
+/// The freeze is why `is_afk` / `is_eligible` / the Station Rating — live
+/// per-session flags an ordinary in-mission player message can flip
+/// (`handle_set_afk_system`, `SetStationRating`) — do not move a fleet ship's
+/// control sources. They are read only on the solo path. Were the local ship
+/// resolved live while peers were resolved frozen, a crew member toggling AFK
+/// mid-mission would re-seek the station on their own host alone, and the two
+/// hosts would run different AI on that hull — the exact "applied at different
+/// ticks on different peers" divergence `p2p-delta-backfill-replaces-auto-crew`
+/// rules out. A proper tick-stamped AFK/rating fleet event, applied identically
+/// on every host, belongs to #1119 alongside its host-loss transitions; it is
+/// deliberately deferred rather than approximated here.
 ///
 /// A system may author its own walk (`seek_order`), which this adapter hands
 /// straight through to [`coordination::seek_human_host_in`]. It is one more
@@ -335,12 +344,20 @@ pub fn resolve_human_seeking_hosts(
         slot,
     ) in ships.iter_mut()
     {
-        // Whose crew this hull answers to. A lone host, and a fleet host's own
-        // ship, answer from live `Sessions` — so a reconnecting player still
-        // re-takes a seat within a tick, which `tests/headless_runner.rs`
-        // pins. A peer's ship answers from the frozen roster, because this host
-        // has no sessions for that crew and never will.
-        let local_crew = roster.is_solo() || roster.is_local(slot.0);
+        // Whose crew this hull answers to. A SOLO host answers from live
+        // `Sessions` — so a reconnecting player re-takes a seat within a tick,
+        // which `tests/headless_runner.rs` pins, and with no peers there is
+        // nothing to diverge from. In a FLEET, EVERY ship — this host's own
+        // included — answers from the frozen roster, so both hosts derive the
+        // identical control sources from the identical frozen crewing. A live
+        // AFK / eligibility / rating toggle mid-mission is a fleet event that
+        // must apply on the same tick on every peer; that is #1119's
+        // tick-stamped host-loss transition, and freezing the local branch here
+        // is deliberately NOT an approximation of it — a re-seek each host
+        // performed on its own view of who is connected is precisely the
+        // "applied at different ticks on different peers" failure
+        // `p2p-delta-backfill-replaces-auto-crew` rules out (issue #1116).
+        let local_crew = roster.is_solo();
         let frozen_crew = roster.crew_of(slot.0);
         let holder_of = |station: &crate::core::messages::StationId| -> Option<String> {
             if local_crew {
@@ -349,11 +366,12 @@ pub fn resolve_human_seeking_hosts(
                 frozen_crew
                     .iter()
                     .find(|(id, _)| id == station)
-                    // A synthetic name, never a token: the real one is a bearer
-                    // credential on another machine. Nothing downstream reads it
-                    // — the seek asks whether a seat HAS a holder — and it is
-                    // never broadcast, because projection is `LocalShip`'s and
-                    // this ship is not the local one.
+                    // A synthetic name, never a token: a real token is a bearer
+                    // credential and for a peer's crew it lives on another
+                    // machine. Nothing downstream reads it — the seek asks only
+                    // whether a seat HAS a holder — and it is never stored or
+                    // broadcast, so a fleet ship (this host's own included) uses
+                    // it purely to answer that yes/no from the frozen roster.
                     .map(|(id, _)| format!("fleet:{}:{}", slot.0.slot_id(), id.0))
             }
         };
@@ -368,9 +386,10 @@ pub fn resolve_human_seeking_hosts(
                     !sessions.0.is_afk(tok) && sessions.0.is_eligible(tok, visiting)
                 })
             } else {
-                // AFK and eligibility are live local facts about a live local
-                // player. A peer's seat is exactly as crewed as the roster
-                // froze it; anything finer is #1119's tick-stamped event.
+                // AFK and eligibility are live per-session facts. In a fleet no
+                // ship reads them — every seat is exactly as crewed as the
+                // roster froze it, this host's own included, so two hosts cannot
+                // disagree; anything finer is #1119's tick-stamped fleet event.
                 frozen_crew.iter().any(|(id, _)| id == candidate)
             }
         };

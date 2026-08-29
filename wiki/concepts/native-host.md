@@ -2,7 +2,7 @@
 title: Native Host
 type: concept
 tags: [native, viewscreen, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile]
-sources: [src/native_host/mod.rs, src/native_host/app.rs, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_display.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs]
+sources: [src/native_host/mod.rs, src/native_host/app.rs, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_display.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/recovery.rs, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs]
 updated: 2026-08-29
 ---
 
@@ -313,11 +313,10 @@ Reaching that state at all takes **both** caps — the host's outbound queue onl
 holds what it has not handed over, so `pane_boot.js` caps the page's own inbox
 and throws past it, which `pump_pane` requeues as an ordinary failed push.
 
-**Reopening is out of scope.** A `PaneId` is never reissued and a pane's identity
-is minted once, so "reopen" would mean a fresh participant taking the seat. The
-closed pane's station is held and flipped to `Backfill`, exactly as a dropped
-phone's is; restoring a human there is the ordinary reconnect, and that needs
-#1112's transport.
+The closed pane's station is held and flipped to `Backfill`, exactly as a dropped
+phone's is. **Restoring a human there — recreating the pane on the same identity
+— is issue #1125's, and does not need #1112's transport** because a pane's
+reconnect is in-process; see the recovery section below.
 
 Each pane's view is created in its **own Ultralight `Session`**, named after the
 pane and never written to disk. Ultralight keys cookies, `localStorage` and
@@ -483,7 +482,9 @@ re-homed onto another display**; a present monitor with no assignment is reporte
 too. A display whose *resolution* changed has a different identity, so it
 surfaces as one missing (the old id) and one unassigned (the new id) — both
 named, nothing moved. That is the whole of "missing or changed displays are
-reported explicitly and are not silently replaced or rearranged".
+reported explicitly and are not silently replaced or rearranged" **at setup**;
+losing one *mid-mission* is the runtime companion, issue #1125's — see the
+recovery section below.
 
 ### The setup surface ([ai] decision)
 
@@ -509,12 +510,57 @@ lands pane compositing: nothing renders into one on its own (no camera targets
 it), so an operator seeing a blank Station display before then is seeing the
 disclosed, correct state — not a broken render.
 
+## Recovering a failed pane and a lost display (issue #1125)
+
+A local pane is "just another logical client", so a pane *failing* must ride the
+same disconnect → Backfill → reconnect machinery a dropped phone does — never a
+native-only fatal error. #1125 routes three new triggers into that path and
+recreates a crashed pane on the same identity. Nothing in the simulation gains a
+pane-shaped branch: the whole of it is `PaneBus::close`/`recreate` and the
+runtime display watcher, and the sim sees only the ordinary `PlayerDisconnected`
+and reconnect `Identify`.
+
+- **A view crash.** `drive_panes` counts a pane's consecutive frame-copy
+  failures; a run past `VIEW_CRASH_COPY_FAILURES` (a lost surface, a renderer
+  that stopped answering — where a one-off is a transient) faults the pane
+  `PaneFault::ViewCrashed`. The pre-existing inbox-overflow trigger becomes
+  `PaneFault::ReliableOverflow`; both are serviced by `recovery::service_faults`,
+  which **closes** each faulted pane (its token disconnects, its station flips to
+  Backfill) and, for a crash only, **recreates** it.
+- **A display lost mid-mission.** `watch_runtime_displays` (in `bridge_display`)
+  diffs the live `Monitor` set frame to frame; when a configured monitor that was
+  present goes away, the pure `runtime_display_losses` names it exactly (a
+  `RuntimeDisplayLoss`, the runtime companion to `ProfileProblem::MonitorMissing`)
+  and the watcher closes the panes that Station carried — resolved by participant
+  name through `PaneBus::open_pane_for_name`. A lost **viewscreen** monitor is
+  named but fails no pane (nobody sits there). Nothing is re-homed.
+- **Recreation, on the same identity.** A crash's `PaneBus::recreate` opens a
+  fresh pane carrying the **same session token** (a new `PaneId`, ids are never
+  reissued), republishes its document at a fresh nonce, and enqueues its view for
+  `open_pending_views` to build next frame in the crashed pane's stored slot. The
+  page reloads and its `Identify` is a *reconnect* — `handle_identify`'s
+  reconnect-yield restores the held station (still Backfill, still unclaimed) to
+  the human and pushes the current projection. This is the in-process analogue of
+  a phone redialling on its saved token; a pane's reconnect needs **no** #1112
+  transport.
+
+Two lines keep the boundaries honest. A **display loss does not recreate** — the
+display is gone, there is nowhere to rebuild the view, and bringing it back is an
+**explicit** repair (re-apply the profile), reported by `runtime_display_returns`
+and never done silently; that is #1123's no-silent-rehome doctrine, held at
+runtime. And **no surviving pane inherits a failed one's projection**: audience
+projection resolves through `SessionManager::holder_for_station`, which gates on
+`connected`, so the instant a token disconnects nothing resolves to it — the
+recreated pane, carrying the same token, is the only thing that receives that
+token's projection again, and that is the reconnect, not a leak.
+
 ## Tests
 
 | File | Claim |
 |---|---|
-| `src/native_host/bridge_profile.rs` | The pure model: stable identity across a simulated OS-settings rearrange, identical-monitor disambiguation (including a TOML round-trip of a position-suffixed id), the one/two-pane geometry math (even and odd, side-by-side and stacked), the >2 density refusal, the one-viewscreen refusal (`ProfileError::MultipleViewscreens`, naming both monitors), the TOML round-trip (Windows backslash ids included), and the missing/unassigned/changed-display reporting. All feature-agnostic, run by the ordinary `cargo test` |
-| `src/native_host/bridge_display.rs` | A Bevy `Monitor` lifts into a `RawMonitor` and carries the documented identity; `--setup`'s exit code is clean only when a supplied profile both validates and resolves with no problems against the connected displays (`setup_profile_is_clean`) |
+| `src/native_host/bridge_profile.rs` | The pure model: stable identity across a simulated OS-settings rearrange, identical-monitor disambiguation (including a TOML round-trip of a position-suffixed id), the one/two-pane geometry math (even and odd, side-by-side and stacked), the >2 density refusal, the one-viewscreen refusal (`ProfileError::MultipleViewscreens`, naming both monitors), the TOML round-trip (Windows backslash ids included), the missing/unassigned/changed-display reporting, and (#1125) the runtime loss/return detection — a lost Station names its panes, a lost viewscreen names none, a return is for explicit repair only. All feature-agnostic, run by the ordinary `cargo test` |
+| `src/native_host/bridge_display.rs` | A Bevy `Monitor` lifts into a `RawMonitor` and carries the documented identity; `--setup`'s exit code is clean only when a supplied profile both validates and resolves with no problems against the connected displays (`setup_profile_is_clean`); and (#1125) `watch_runtime_displays` itself — driven with *fake* `Monitor` entities spawned and despawned as bevy_winit does on hot-plug, so it runs in CI without a display — closes a lost Station's pane (→ Backfill) and no pane for a lost viewscreen |
+| `src/native_host/panes/recovery.rs` | `PaneFault`'s two kinds and `service_faults`: a view crash closes the pane and recreates it on the same token; a reliable overflow closes and does not; the recreated pane receives its own token's projection while the failed handle and a bystander receive nothing; and the recreated pane re-identifies on that token as a reconnecting phone does. All feature-off |
 | `tests/native_bridge_displays.rs` | On the real machine's monitors, a profile opens one borderless-fullscreen surface per monitor at the monitor's geometry — the viewscreen on the primary window, a Station on its own. `#[ignore]`d: it opens real winit windows, which CI has no display for. Verified once locally |
 | `src/delivery/args.rs` | `--setup` is a standalone diagnostic needing no world and refuses every simulation/crew flag (`--world`, `--ship`, `--seed`, `--solo`, `--pane`, `--log`, `--log-entity`, `--rendezvous`, `--origin`) rather than silently discarding them; `--profile` applies with a world or validates with `--setup`, and is refused alone |
 | `src/boot/tests.rs` | Four-profile parity; only the render-stack profiles take that path; a native host refuses a configless boot, including a hull declared only by a static child |
@@ -527,7 +573,7 @@ disclosed, correct state — not a broken render.
 | `src/native_host/panes/*` | Identity's three refusals, the projection boundary, the outbound cap's reliable/snapshot split, the document assembly (against the repository's own `client.html`, not only a stub), the identity's absence from the served body, the wildcard-bind normalisation, and the per-frame loop's push budget and deferral of a failed push. All feature-**off**, so the ordinary `cargo test` CI runs them |
 | `src/delivery/serve.rs` | A hosted document is served to a loopback peer and to nothing else, while the bundle and the version-pin endpoints stay LAN-open; `peer_origin` classifies IPv4, IPv6, IPv4-mapped and "the OS would not say" |
 | `tests/client/pane-scripts.test.js` | The two injected scripts, in jsdom, **driven through the real seam**: the boot script reads the identity out of the fragment, leaves a fragment `joinRouteFromLocation`/`parseJoinCode` accept (the literal is read out of `document.rs`, so the cross-language pin is checked), and caps the page's inbox; then the repository's own `createRendezvousJoiner` is run over the link's factories and asserted to produce the host-minted `Identify` on the page→host queue, to keep `JoinHandshake` off it, and to hand `onData` a `localiseTree`d message |
-| `tests/native_host_panes.rs` | A pane joins/claims/readies through the ordinary contracts; it is admitted for its own Station and refused another's by the real policy; it cannot read another pane's projection; a pane and a transport participant hold different Stations on the same running ship; a closed pane hands the lobby the disconnect a dropped phone would; and a pane's identity is in its URL, its document unenumerable, LAN-refused, and withdrawn on close |
+| `tests/native_host_panes.rs` | A pane joins/claims/readies through the ordinary contracts; it is admitted for its own Station and refused another's by the real policy; it cannot read another pane's projection; a pane and a transport participant hold different Stations on the same running ship; a closed pane hands the lobby the disconnect a dropped phone would; and a pane's identity is in its URL, its document unenumerable, LAN-refused, and withdrawn on close. **#1125:** on a running ship, a view crash flips the seat to Backfill through the ordinary session path; no surviving pane inherits the failed pane's projection; recreating the pane reconnects on the same token and restores its held station out of Backfill with a Welcome; and a lost Station display disconnects its pane without recreating it |
 | `tests/native_host_pane_ultralight.rs` | The real built `client/index.html` loads in a real Ultralight view over this process's own HTTP, joins on the identity it read from the fragment, paints, answers a real click + keystroke on `#name-input` with a `SetName`, then claims a Station and operates its console: the iframe mounts with `__updateConsole` installed and a click on the Captain's Red Alert button inside it produces the expected `ControlSystem`. A second test proves two panes' `localStorage` are separate. Both `#[ignore]`d: they need the SDK and a built bundle, which CI has neither of |
 
 Each of the two digest binaries stands alone on purpose: pinning the scheduler
@@ -538,6 +584,6 @@ shared binary is a claim about whoever won that race.
 ## Related
 
 - [Build & Deployment](./build-and-deployment.md) · [Networking](./networking.md) · [Architecture](./architecture.md)
-- Issue #1121 — the host. Issue #1122 — local Ultralight panes. Issue #1123 — bridge display profiles (above). Issue #1112 — the transport. Issue #1124 — input routing between displays.
+- Issue #1121 — the host. Issue #1122 — local Ultralight panes. Issue #1123 — bridge display profiles (above). Issue #1125 — recovering a failed pane and a lost display (above). Issue #1112 — the transport. Issue #1124 — input routing between displays.
 - [vellum](https://github.com/jkeywo/vellum) `crates/vellum-ultralight` — the extracted plumbing; `docs/handbook/dependencies.md` records why `ul-next` stopped being a per-game exception
 - `pasm/spec/architecture/native-delivery.yaml` — PRD #855's delivery declarations

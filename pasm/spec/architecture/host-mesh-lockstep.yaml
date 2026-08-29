@@ -165,7 +165,8 @@ entities:
       summary: >-
         Each host periodically folds its authoritative state and publishes the sample; a peer's
         sample for a tick this host also sampled is compared, and a mismatch is reported with its
-        tick and the slot that disagreed. Detection only — recovery is #1118's.
+        tick and the slot that disagreed. Detection only — electing a recovery leader and healing
+        the split is fleet-divergence-recovery's (issue #1118), which reads this exchange's ledgers.
       rationale:
         - "The comparator is not re-invented: DigestLedger already pairs samples BY TICK and already answers \"they agreed at tick 240 and disagreed by 250\", which is what #1118's affected-tick report needs. This holds one ledger per peer and lets that code answer."
         - "[ai] sim_digest::digest_stages was added alongside it: the running accumulator after each named scope of the fold. \"Two hosts disagree at tick 240\" is where an investigation starts and not where it can usefully stop; comparing the two lists says which SCOPE they disagree in, which is the difference between a bisection and a look. It is not a second digest — the last stage is always world_digest's own answer, pinned by a test."
@@ -201,4 +202,70 @@ entities:
       status: declared
       paths: [src/lockstep/mod.rs]
       symbols: [MeshAgreement, MeshDisagreement, MeshDiagnostics]
+      tests: [cargo test, tests/authoritative_state_enumeration.rs]
+
+  - component: fleet-divergence-recovery
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Fleet Divergence Recovery
+      summary: >-
+        When the digest exchange names a real fold divergence, every host derives the same recovery
+        plan from the shared ledgers — the divergence tick, the majority-canonical leader, and the
+        boundary tick — holds the fleet at that boundary, has the leader transfer #1117's whole-payload
+        record, restores the divergent host, and resumes only after the restore folds to the leader's
+        state, retaining a diagnostic artifact of the whole event.
+      rationale:
+        - "[ai] Every recovery DECISION is a deterministic function of the digest exchange, which is state the lockstep barrier guarantees all hosts share — never a local-only, arrival-ordered, skew-prone value. The divergence tick is the earliest checkpoint the whole fleet has sampled and NOT agreed on; the leader is the lowest slot in the group whose fold commands a STRICT MAJORITY at that tick; the boundary is pure arithmetic on the divergence tick, the digest interval and the agreed delay. Same shared input, same plan on every host — the property a sibling issue (#1119) failed review twice for violating, pinned here by recovery_plan's every_host_computes_the_identical_plan and by the integration suite asserting all three hosts elect the same leader."
+        - "[ai] A divergent peer is never eligible to lead and cannot overwrite the fleet blindly. Leadership is a function of the fold VALUES at the divergence tick, not of who noticed first, so a peer in the minority is never chosen. And the receiver is ARMED (MeshRestoreArm): drain_mesh_restore commits a staged record only when this host is the designated recovering host AND the record came from the elected leader — an unarmed host, or an armed host presented a record from any other slot, DROPS it without touching the world. Before #1118 that drain committed any completed record unconditionally, so any peer could overwrite another host's whole world by sending it a snapshot; the arm closes that (#1117 review carried this to #1118)."
+        - "[ai] The boundary is placed PAST the detection horizon — a peer's fold for tick T is in hand before any host runs tick T+delay+1 on the reliable-ordered channel — and at least one interval ahead, so every host has set its boundary before it would run that tick and all pause at the same tick. The hold is a separate RecoveryHold resource the barrier reads BESIDE its own peer-stall (gate_lockstep_ticks), so the #1116 barrier decision is unchanged and the recovery withhold is a clearly-separable addition — which also keeps it out of #1119's way in host_loss.rs."
+        - "[ai] The rollback-able checkpoint closes the other half of the #1117 review. gate_and_restore_against captures the live world BEFORE overwriting it and, on a fold mismatch or an incomplete restore, restores that checkpoint back — so a refused host is left byte-identical, never half-restored. A committed restore folds to exactly the leader's transferred state, which IS the post-restore agreement AC3 requires; the divergent host resumes only on that, and never runs its divergent world past the boundary."
+        - "[ai] Resume: the recovering host lifts its hold on a FOLDED value (its restored fold equals the leader's record). Canonical hosts lift theirs on a monotone LIVENESS signal — the recovering host's watermark advancing past the boundary — which is deliberately not a simulation decision: which ticks actually run is still governed by the shared barrier, so a canonical host lifting a frame early or late cannot make the fold diverge, it can only wait for the peer it must wait for anyway. On resolve every host forgets the divergent samples through the boundary so the same stale split cannot re-trigger."
+        - "[ai] Clean failure is honest, not hidden (AC6). Two hosts that disagree have no majority and therefore no safe canonical record: recovery refuses with a diagnostic and transfers nothing rather than overwrite one half from the other on a coin-flip, and neither world is touched. A leader record that will not gate is rolled back and recorded as NoValidRecord. Both are terminal — recorded once, holding nothing, not re-decided — so a persistent unrecoverable split is reported without a re-attempt storm."
+        - "[ai] The diagnostic artifact (RecoveryDiagnostic, one per host per event) records the command window between the last agreement and the divergence, every slot's fold at the divergence tick, the leader choice, the boundary and the result, retained in RecoveryLog and serialised to JSON (not RON — this module compiles for the wasm server host, where serde_json is linked and ron is not), version-guarded by RECOVERY_ARTIFACT_VERSION the way headless::replay's ARTIFACT_VERSION guards the replay artifact."
+    architecture:
+      kind: pure-module
+      authority: authoritative
+      owns: [fleet-recovery-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/lockstep/recovery.rs
+        - src/lockstep/recovery_plan.rs
+        - src/lockstep/snapshot_relay.rs
+        - src/lockstep/mod.rs
+      symbols:
+        - drive_recovery
+        - RecoveryPlan
+        - decide
+        - elect
+        - earliest_divergence
+        - recovery_boundary
+        - RecoveryDiagnostic
+        - RECOVERY_ARTIFACT_VERSION
+        - MeshRestoreArm
+        - gate_and_restore_against
+        - drain_mesh_restore
+      tests: [cargo test, tests/lockstep_recovery.rs, tests/lockstep_snapshot_transfer.rs]
+
+  - state: fleet-recovery-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Fleet Recovery State
+      summary: >-
+        This host's view of the recovery in flight — the shared plan, its role, and how far past the
+        boundary to withhold — plus the receiver arm and the diagnostic log. Session bookkeeping and a
+        report about folds, never folded into the authoritative digest.
+      rationale:
+        - "[ai] Declared into the #894 census as StateClass::Timer for RecoveryState/RecoveryHold and the MeshRestoreArm (session state about whether a recovery is in flight and whom to accept a record from) and StateClass::Derived for RecoveryLog (a report ABOUT folds and the barrier's decisions). Every honest host derives all of it from the same shared plan, so none of it crosses into the fold."
+    architecture:
+      classification: derived
+      owner: fleet-divergence-recovery
+      writers: [fleet-divergence-recovery]
+    implementation:
+      status: declared
+      paths: [src/lockstep/recovery.rs, src/lockstep/snapshot_relay.rs]
+      symbols: [RecoveryState, RecoveryHold, RecoveryLog, MeshRestoreArm]
       tests: [cargo test, tests/authoritative_state_enumeration.rs]

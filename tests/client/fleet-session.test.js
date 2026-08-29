@@ -785,6 +785,137 @@ describe('the running mission rides the same link (issue #1116)', () => {
   });
 });
 
+describe('sender authentication and slot recovery (issue #1120)', () => {
+  const tickFrame = (from, tick) =>
+    encodeHostFrame(simulationFrame(HOST_FRAME_TICK, {
+      from,
+      tick,
+      ready_through: tick + 2,
+      commands: [],
+    }, tick));
+
+  it('tags a member\'s frame with the slot the connection was authenticated as', async () => {
+    // The lead binds each admitted connection to its slot and hands that
+    // authenticated slot to the wasm boundary beside the frame — the transport
+    // half of the mesh-boundary authentication.
+    const tagged = [];
+    const { world, factories, lead } = await fleetOf({
+      onSimulationFrame: (raw, authSlot) => tagged.push({ raw, authSlot }),
+    });
+    const two = await memberOn(world, factories, lead.code.suffix);
+    expect(two.member.slot).toBe('slot-2');
+
+    two.member.broadcast(tickFrame(2, 412));
+    await settle();
+
+    expect(tagged).toHaveLength(1);
+    expect(tagged[0].authSlot).toBe(2);
+  });
+
+  it('a member tags every frame on its link with the LEAD\'s slot', async () => {
+    // A member's single connection is to the lead, which delivers its own frames
+    // and its relay of a sibling's; the member cannot re-authenticate a relayed
+    // frame, so it tags every one with the lead's slot and Rust accepts it because
+    // the lead already authenticated the origin at its ingress.
+    const tagged = [];
+    const { world, factories, lead } = await fleetOf();
+    await memberOn(world, factories, lead.code.suffix, {
+      onSimulationFrame: (raw, authSlot) => tagged.push({ raw, authSlot }),
+    });
+
+    lead.fleet.broadcast(tickFrame(1, 400));
+    await settle();
+
+    expect(tagged).toHaveLength(1);
+    expect(tagged[0].authSlot).toBe(1);
+  });
+
+  it('drops a forged frame at the star centre — not to the sim, not to a sibling', async () => {
+    // A member frame whose declared origin disagrees with its connection is a
+    // forgery. The lead is the one host that can catch it — against the connection
+    // it arrived on — so it drops it before delivering it to its own sim OR relaying
+    // it to a sibling, which is what makes the boundary real for the siblings.
+    const delivered = [];
+    const world = makeWorld();
+    const factories = { socket: world.socket, peer: makePeerFactory() };
+    const lead = await leadOn(world, factories, {
+      authenticateFrame: () => false, // every frame reads as forged
+      onSimulationFrame: (raw) => delivered.push(raw),
+    });
+    const two = await memberOn(world, factories, lead.code.suffix);
+    const siblingFrames = [];
+    const three = await memberOn(world, factories, lead.code.suffix, {
+      onSimulationFrame: (raw) => siblingFrames.push(raw),
+    });
+    expect(three.member.slot).toBe('slot-3');
+
+    two.member.broadcast(tickFrame(2, 412));
+    await settle();
+
+    expect(delivered).toEqual([]);
+    expect(siblingFrames).toEqual([]);
+  });
+
+  it('lets a replacement reclaim a disconnected slot, and the owner announces it', async () => {
+    // The whole recovery path from the lobby's side: a member drops mid-mission,
+    // its slot is kept disconnected, and a replacement typing the code with a claim
+    // is seated AS that slot — keeping its frozen ship — while the owner broadcasts
+    // the grant the simulation recovers from.
+    const claimed = [];
+    const { world, factories, lead } = await fleetOf({
+      onSlotClaimed: (slot) => claimed.push(slot),
+    });
+    const two = await memberOn(world, factories, lead.code.suffix, {
+      ship: { template_path: 'cruiser.toml' },
+    });
+    expect(two.member.slot).toBe('slot-2');
+    lead.fleet.freeze();
+    await settle();
+    two.member.close();
+    await settle();
+    expect(lastRoster(lead).slots.find((s) => s.id === 'slot-2')).toMatchObject({
+      connected: false,
+    });
+
+    // The replacement machine claims slot 2.
+    const replacement = await memberOn(world, factories, lead.code.suffix, {
+      claim: 'slot-2',
+    });
+    await settle();
+
+    // AC1/AC4: seated as slot 2, its frozen ship preserved (no loadout change), and
+    // the slot is connected again — rebound to the replacement.
+    expect(replacement.member.slot).toBe('slot-2');
+    expect(replacement.refusals).toEqual([]);
+    const slotTwo = lastRoster(lead).slots.find((s) => s.id === 'slot-2');
+    expect(slotTwo).toMatchObject({ connected: true, ship: { template_path: 'cruiser.toml' } });
+    // AC2: the owner announced the grant for the simulation to recover from.
+    expect(claimed).toEqual([2]);
+  });
+
+  it('refuses a replacement that claims a still-connected slot', async () => {
+    // AC1: cannot displace a connected host. The claim is refused and the
+    // replacement is never seated.
+    const { world, factories, lead } = await fleetOf();
+    const two = await memberOn(world, factories, lead.code.suffix);
+    expect(two.member.slot).toBe('slot-2');
+    lead.fleet.freeze();
+    await settle();
+
+    const replacement = await memberOn(world, factories, lead.code.suffix, {
+      claim: 'slot-2',
+    });
+    await settle();
+
+    expect(replacement.member.slot).toBeNull();
+    expect(replacement.refusals.map((r) => r.reason)).toContain('slot-taken');
+    // The live slot 2 is untouched.
+    expect(lastRoster(lead).slots.find((s) => s.id === 'slot-2')).toMatchObject({
+      connected: true,
+    });
+  });
+});
+
 describe('fleet capacity', () => {
   it('refuses past the authored number of ships', async () => {
     const { factories, world, lead } = await fleetOf();

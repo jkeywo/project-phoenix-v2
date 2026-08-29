@@ -90,8 +90,13 @@
  * DROPPED it would keep waiting for a peer that will never speak again while the
  * revision-3 hosts flipped its ship to Backfill — a split with no symptom, which
  * is exactly why the revision refuses a whole fleet rather than a frame.
+ *
+ * `4` adds the `slot-claim` frame (issue #1120): the owner announcing that a
+ * replacement machine has reclaimed a disconnected fixed slot, so the whole fleet
+ * recovers the same one. A revision-3 build that dropped it would keep the ship on
+ * Backfill while the revision-4 hosts handed it back — the same silent split.
  */
-export const HOST_MESH_PROTOCOL = 3;
+export const HOST_MESH_PROTOCOL = 4;
 
 /** Frame types this revision speaks. */
 export const HOST_FRAME_HELLO = 'hello';
@@ -119,6 +124,13 @@ export const HOST_FRAME_SNAPSHOT = 'snapshot';
  * host's own last watermark, so every survivor agrees it without arbitrating.
  */
 export const HOST_FRAME_HOST_LOSS = 'host-loss';
+/**
+ * Revision 4 (issue #1120): the owner announcing that a replacement machine has
+ * claimed a disconnected fixed slot, so every host recovers the same one. Like the
+ * other running-mission frames its body is minted and read only by Rust; this
+ * module ferries it opaquely.
+ */
+export const HOST_FRAME_SLOT_CLAIM = 'slot-claim';
 
 /** Every type a receiver will accept. Read by the coverage tests. */
 export const HOST_FRAME_TYPES = [
@@ -132,6 +144,7 @@ export const HOST_FRAME_TYPES = [
   HOST_FRAME_DIGEST,
   HOST_FRAME_SNAPSHOT,
   HOST_FRAME_HOST_LOSS,
+  HOST_FRAME_SLOT_CLAIM,
 ];
 
 /**
@@ -150,6 +163,7 @@ export const HOST_SIMULATION_FRAME_TYPES = [
   HOST_FRAME_DIGEST,
   HOST_FRAME_SNAPSHOT,
   HOST_FRAME_HOST_LOSS,
+  HOST_FRAME_SLOT_CLAIM,
 ];
 
 /** True when this frame belongs to the running simulation rather than the lobby. */
@@ -241,6 +255,14 @@ export const REASON_FLEET_FULL = 'fleet-full';
  * what lets #1120 land as a change of answer rather than a change of protocol.
  */
 export const REASON_RECOVERY_ONLY = 'recovery-only';
+/**
+ * A claim on a slot that cannot be recovered on another machine (issue #1120):
+ * it does not exist, its host is still connected, or it is the owner's own slot.
+ * Distinct from `recovery-only` — that answers a host asking for a NEW slot after
+ * the freeze; this answers a host asking to reclaim a specific one it may not.
+ * "Cannot displace a connected host" is exactly this reason for a live slot.
+ */
+export const REASON_SLOT_TAKEN = 'slot-taken';
 
 /** How a slot id is spelled. */
 const slotId = (seq) => `slot-${seq}`;
@@ -489,6 +511,47 @@ export function dropHost(fleet, peer) {
 }
 
 /**
+ * A replacement machine reclaiming ONE disconnected fixed slot (issue #1120).
+ *
+ * The recovery half of `admitHost`: where a post-freeze `hello` for a NEW slot is
+ * answered `recovery-only`, a `hello` that names a specific slot to CLAIM is judged
+ * here. It is the whole of AC1's "server-code entry can select ONLY a disconnected
+ * fixed ship slot and cannot add a ship, change its loadout or displace a connected
+ * host":
+ *
+ * * it applies only after the freeze — before it, a reconnecting host is admitted
+ *   the ordinary way and there is no fixed slot to recover;
+ * * the slot must EXIST and must be currently disconnected — a claim on a live slot
+ *   is refused `slot-taken`, so a connected host is never displaced;
+ * * the owner's own slot is never reclaimable here (host migration is out of scope),
+ *   also `slot-taken`;
+ * * the frozen ship and crew are KEPT verbatim — the claim carries no loadout, so a
+ *   replacement resumes the same ship it is recovering and cannot change it, and a
+ *   later `slot` patch is refused by `updateSlot`'s freeze exactly as any member's is.
+ *
+ * On success the slot's `peer` is rebound to the claiming connection and it is
+ * marked connected again; the caller (`gui/fleet-session.js`) welcomes the
+ * replacement as that slot and broadcasts the fleet-wide grant.
+ *
+ * @returns {{ok: true, fleet: object, slot: object}
+ *          |{ok: false, reason: string}}
+ */
+export function claimSlot(fleet, { peer, slotId }) {
+  if (!fleet.frozen) return { ok: false, reason: REASON_RECOVERY_ONLY };
+  const slot = slotById(fleet, slotId);
+  if (!slot) return { ok: false, reason: 'unknown' };
+  // The owner's own slot is never recovered on another machine, and a slot whose
+  // host is still connected is never displaced.
+  if (slot.owner || slot.connected) return { ok: false, reason: REASON_SLOT_TAKEN };
+  const next = { ...slot, peer, connected: true };
+  return {
+    ok: true,
+    slot: next,
+    fleet: { ...fleet, slots: fleet.slots.map((s) => (s.id === slotId ? next : s)) },
+  };
+}
+
+/**
  * The roster body carried by a `roster`/`welcome` frame: everything a member
  * needs to draw the shared fleet lobby, and nothing about the transport.
  *
@@ -528,8 +591,11 @@ export function rosterOf(fleet) {
  * unvalidated, sitting in the frame a future reader reaches for first — is
  * precisely how a second, weaker check gets written by accident.
  */
-export const helloFrame = ({ ship = null, name = '' }) =>
-  hostFrame(HOST_FRAME_HELLO, { ship, name });
+export const helloFrame = ({ ship = null, name = '', claim = null }) =>
+  // `claim` (issue #1120) is the slot id a replacement machine is reclaiming; it
+  // is absent for an ordinary join and only acted on after the freeze. Kept off
+  // the body entirely when null, so a pre-#1120 lead sees an unchanged hello.
+  hostFrame(HOST_FRAME_HELLO, claim ? { ship, name, claim } : { ship, name });
 
 export const welcomeFrame = (slotIdent, roster) =>
   hostFrame(HOST_FRAME_WELCOME, { slot: slotIdent, roster });
@@ -638,6 +704,7 @@ if (typeof window !== 'undefined') {
     HOST_FRAME_DIGEST,
     HOST_FRAME_SNAPSHOT,
     HOST_FRAME_HOST_LOSS,
+    HOST_FRAME_SLOT_CLAIM,
     isSimulationFrame,
     simulationFrame,
     hostSlotOrdinal,
@@ -646,6 +713,8 @@ if (typeof window !== 'undefined') {
     REASON_ADMISSION_CLOSED,
     REASON_FLEET_FULL,
     REASON_RECOVERY_ONLY,
+    REASON_SLOT_TAKEN,
+    claimSlot,
     hostFrame,
     encodeHostFrame,
     decodeHostFrame,

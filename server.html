@@ -2921,13 +2921,25 @@
         // and flips its ship to Backfill there, then mints a host-loss frame the
         // egress loop below relays to the rest of the fleet.
         onHostLost: (slot) => { if (window.wasm_host_departed) window.wasm_host_departed(slot); },
+        // A replacement machine validly claimed a disconnected slot (issue #1120).
+        // The simulation mints one deterministic slot-claim frame the fleet
+        // recovers the same slot from, and the egress loop relays it onward.
+        onSlotClaimed: (slot) => { if (window.wasm_claim_slot) window.wasm_claim_slot(slot); },
         onError: (reason) => console.warn(`[fleet] ${reason}`),
         onLog: (msg) => console.log(msg),
       }));
     };
 
-    /** Join the fleet behind a typed (or scanned) server code. */
-    window.__hostFleetJoin = async function(code) {
+    /**
+     * Join the fleet behind a typed (or scanned) server code.
+     *
+     * `claim` (issue #1120) is the disconnected slot id this host is reclaiming —
+     * the replacement path. Omitted, this is an ordinary join; supplied, the lead
+     * judges it against `claimSlot` and, if valid, seats this host AS that slot and
+     * broadcasts the fleet-wide recovery. A frozen fleet answers an ordinary join
+     * `recovery-only`, so a replacement must pass the slot it means to recover.
+     */
+    window.__hostFleetJoin = async function(code, claim = null) {
       if (fleetHandle || !window.fleetSession || !rendezvousBase) return false;
       // This host presents its own stamp below, so its content identity must be
       // established first — otherwise it declares an empty one and is refused
@@ -2943,6 +2955,7 @@
         base: rendezvousBase,
         data,
         code,
+        claim,
         stamp: hostStampField(),
         iceServers: fleetIceServers,
         ship: fleetShip(),
@@ -3035,9 +3048,14 @@
     // apply in, the tick a host may run, whether two hosts still agree — is in
     // Rust; what is here is the wire.
 
-    /** Hand one peer's frame to this host's simulation. */
-    function receiveMeshFrame(raw) {
-      if (window.wasm_receive_mesh_frame) window.wasm_receive_mesh_frame(raw);
+    /**
+     * Hand one peer's frame to this host's simulation, with the fleet slot the
+     * delivering connection was authenticated as (issue #1120). Rust rejects a
+     * frame whose declared origin disagrees with it. `authSlot` is `0` (never a
+     * real slot) when the page could not resolve one, which the sim trusts.
+     */
+    function receiveMeshFrame(raw, authSlot) {
+      if (window.wasm_receive_mesh_frame) window.wasm_receive_mesh_frame(authSlot || 0, raw);
     }
 
     /**
@@ -4438,6 +4456,11 @@ function finishInit() {
   // A peer ship host left the fleet (issue #1119): report its slot so the
   // simulation flips that ship to Backfill at an agreed tick.
   window.wasm_host_departed = wasmBindings.wasm_host_departed;
+  // Slot recovery (issue #1120): the owner announces a granted claim on a
+  // disconnected slot; `wasm_mesh_frame_from` decodes a frame's declared origin so
+  // the owner can authenticate a member's frame before relaying it.
+  window.wasm_claim_slot = wasmBindings.wasm_claim_slot;
+  window.wasm_mesh_frame_from = wasmBindings.wasm_mesh_frame_from;
   window.wasm_get_debug_state = wasmBindings.wasm_get_debug_state;
   window.wasm_get_damage_log = wasmBindings.wasm_get_damage_log;
   window.wasm_get_entity_debug_state = wasmBindings.wasm_get_entity_debug_state;

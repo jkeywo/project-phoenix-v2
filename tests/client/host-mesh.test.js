@@ -18,6 +18,7 @@ import {
   HOST_FRAME_DIGEST,
   HOST_FRAME_SNAPSHOT,
   HOST_FRAME_HOST_LOSS,
+  HOST_FRAME_SLOT_CLAIM,
   isSimulationFrame,
   simulationFrame,
   hostSlotOrdinal,
@@ -26,6 +27,8 @@ import {
   REASON_ADMISSION_CLOSED,
   REASON_FLEET_FULL,
   REASON_RECOVERY_ONLY,
+  REASON_SLOT_TAKEN,
+  claimSlot,
   hostFrame,
   encodeHostFrame,
   decodeHostFrame,
@@ -165,6 +168,7 @@ describe('the envelope', () => {
     expect(isSimulationFrame(simulationFrame(HOST_FRAME_DIGEST, {}))).toBe(true);
     expect(isSimulationFrame(simulationFrame(HOST_FRAME_SNAPSHOT, {}))).toBe(true);
     expect(isSimulationFrame(simulationFrame(HOST_FRAME_HOST_LOSS, {}))).toBe(true);
+    expect(isSimulationFrame(simulationFrame(HOST_FRAME_SLOT_CLAIM, {}))).toBe(true);
     for (const frame of [rosterFrame(fleetOf()), admissionFrame(ADMISSION_CLOSED),
       helloFrame({}), refusedFrame('fleet-full')]) {
       expect(isSimulationFrame(frame), frame.t).toBe(false);
@@ -189,7 +193,7 @@ describe('the envelope', () => {
     // silently fails to agree a tick; refusing an unrecognised `m` is what
     // makes that fail loudly, and this pair of pins is what catches a
     // one-sided bump.
-    expect(HOST_MESH_PROTOCOL).toBe(3);
+    expect(HOST_MESH_PROTOCOL).toBe(4);
     const rust = readFileSync(
       path.join(path.dirname(fileURLToPath(import.meta.url)), '../../src/lockstep/frame.rs'),
       'utf8',
@@ -367,6 +371,67 @@ describe('mission start freezes the topology', () => {
     const fleet = fleetOf();
     expect(dropHost(fleet, null).slots).toHaveLength(1);
     expect(dropHost(freezeFleet(fleet), null).slots).toHaveLength(1);
+  });
+});
+
+describe('claiming a disconnected slot on another machine (issue #1120)', () => {
+  // AC1: server-code entry can select ONLY a disconnected fixed slot, and cannot
+  // add a ship, change its loadout or displace a connected host.
+
+  /** A frozen two-host fleet whose slot 2 has disconnected. */
+  const withDisconnectedSlotTwo = () => {
+    const frozen = freezeFleet(
+      admitHost(fleetOf(), { peer: 'p2', ship: { template_path: 'cruiser.toml' } }).fleet,
+    );
+    return dropHost(frozen, 'p2');
+  };
+
+  it('reclaims a disconnected slot, KEEPING its frozen ship — no loadout change', () => {
+    const fleet = withDisconnectedSlotTwo();
+    const result = claimSlot(fleet, { peer: 'p9', slotId: 'slot-2' });
+    expect(result.ok).toBe(true);
+    expect(result.slot).toMatchObject({
+      id: 'slot-2',
+      connected: true,
+      peer: 'p9',
+      // The frozen ship is preserved verbatim: the claim carries no loadout, so a
+      // replacement resumes the same ship and cannot change it.
+      ship: { template_path: 'cruiser.toml' },
+    });
+  });
+
+  it('refuses to displace a still-CONNECTED host', () => {
+    const fleet = freezeFleet(admitHost(fleetOf(), { peer: 'p2' }).fleet);
+    // slot 2 is still connected — a claim on it is refused, never a takeover.
+    expect(claimSlot(fleet, { peer: 'p9', slotId: 'slot-2' })).toEqual({
+      ok: false,
+      reason: REASON_SLOT_TAKEN,
+    });
+  });
+
+  it('refuses to claim the owner\'s own slot', () => {
+    const fleet = withDisconnectedSlotTwo();
+    expect(claimSlot(fleet, { peer: 'p9', slotId: 'slot-1' }).reason).toBe(REASON_SLOT_TAKEN);
+  });
+
+  it('refuses a claim on a slot that does not exist', () => {
+    const fleet = withDisconnectedSlotTwo();
+    expect(claimSlot(fleet, { peer: 'p9', slotId: 'slot-7' }).reason).toBe('unknown');
+  });
+
+  it('only recovers after the freeze — before it, there is no fixed slot to reclaim', () => {
+    const fleet = admitHost(fleetOf(), { peer: 'p2' }).fleet; // not frozen
+    expect(claimSlot(fleet, { peer: 'p9', slotId: 'slot-2' }).reason).toBe(REASON_RECOVERY_ONLY);
+  });
+
+  it('cannot add a NEW ship — a claim only ever names an existing slot', () => {
+    // There is no path by which a claim creates a slot: `claimSlot` looks the id
+    // up and refuses `unknown` when it is not already in the frozen roster, so
+    // server-code entry can never grow the fleet.
+    const fleet = withDisconnectedSlotTwo();
+    expect(fleet.slots).toHaveLength(2);
+    const after = claimSlot(fleet, { peer: 'p9', slotId: 'slot-2' }).fleet;
+    expect(after.slots).toHaveLength(2);
   });
 });
 

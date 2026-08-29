@@ -82,6 +82,7 @@ import {
   admissionFrame,
   admitHost,
   asHostFrame,
+  claimSlot,
   decodeHostFrame,
   dropHost,
   encodeHostFrame,
@@ -118,6 +119,27 @@ const REFUSE_UNCHECKED = () => ({
   detail: 'this host could not check the joining build',
 });
 
+/**
+ * Whether a simulation frame's declared origin agrees with the slot the delivering
+ * connection was authenticated to (issue #1120).
+ *
+ * The frame body is minted and read only by Rust, so the page cannot read the
+ * declared `from` itself; `wasm_mesh_frame_from` decodes it and returns the slot
+ * ordinal, or `-1` for a frame this build cannot decode. A mismatch is a forged
+ * origin. The default trusts a frame it cannot judge — an undecodable one (the sim
+ * drops it anyway) or a connection with no known binding — and rejects only a
+ * clearly-forged one, so this can never silently starve honest traffic. Injectable
+ * so the tests can drive it without the wasm module.
+ */
+function defaultAuthenticateFrame(raw, authSlot) {
+  const from =
+    typeof window !== 'undefined' && window.wasm_mesh_frame_from
+      ? window.wasm_mesh_frame_from(raw)
+      : -1;
+  if (from < 0 || authSlot == null || authSlot < 0) return true;
+  return from === authSlot;
+}
+
 // ── Owner ───────────────────────────────────────────────────────────────────
 
 /**
@@ -137,8 +159,15 @@ const REFUSE_UNCHECKED = () => ({
  * @param {(code:object)=>void} [opts.onCode] the issued fleet code; fires again
  *   with a NEW one if the service was lost and this host re-registered.
  * @param {(roster:object)=>void} [opts.onRoster] every change, owner included.
- * @param {(raw:string)=>void} [opts.onSimulationFrame] a `tick` or `digest`
- *   frame from a member, still encoded — hand it to `wasm_receive_mesh_frame`.
+ * @param {(raw:string, authSlot:number)=>void} [opts.onSimulationFrame] a
+ *   simulation frame from a member, still encoded, with the fleet slot the
+ *   delivering connection was authenticated as (issue #1120) — hand both to
+ *   `wasm_receive_mesh_frame(authSlot, raw)`.
+ * @param {(slot:number)=>void} [opts.onSlotClaimed] a replacement validly claimed
+ *   a disconnected slot (issue #1120): the ordinal, for `wasm_claim_slot`.
+ * @param {(raw:string, authSlot:number)=>boolean} [opts.authenticateFrame]
+ *   whether a frame's declared origin matches the connection it arrived on; the
+ *   default reads `window.wasm_mesh_frame_from`. Injectable for tests.
  * @param {(reason:string, detail?:string)=>void} [opts.onError]
  * @param {(msg:string)=>void} [opts.onLog]
  */
@@ -156,14 +185,25 @@ export function createFleetOwner(opts) {
     onRoster = () => {},
     onSimulationFrame = () => {},
     onHostLost = () => {},
+    onSlotClaimed = () => {},
     onError = () => {},
     onLog = () => {},
+    authenticateFrame = defaultAuthenticateFrame,
     factories,
   } = opts;
 
   let fleet = openFleet({ ship, name, maxSlots, maxNameLength, maxShipPathLength });
   /** rendezvous peer id → the admitted connection adapter. */
   const links = new Map();
+  /**
+   * rendezvous peer id → the fleet slot ordinal that connection was ADMITTED as
+   * (issue #1120). This is the transport-authenticated identity of a member: a
+   * frame that arrives on a connection speaks for the slot the connection was
+   * bound to at join, whatever the (Rust-minted, opaque-here) frame body declares.
+   * It is what closes the mesh boundary — a forged origin is dropped at this star
+   * centre before it can be relayed to a sibling.
+   */
+  const connSlots = new Map();
   let code = null;
 
   const publish = () => {
@@ -174,6 +214,32 @@ export function createFleetOwner(opts) {
   };
 
   function onHello(conn, body) {
+    // A replacement machine reclaiming a specific disconnected slot (issue #1120)
+    // is judged by `claimSlot`, not `admitHost`: it names the slot in `body.claim`,
+    // and the answer turns on whether that slot is a recoverable disconnected one
+    // rather than on whether a new slot can be created. Only after the freeze — a
+    // pre-freeze reconnect is an ordinary join.
+    if (fleet.frozen && body.claim) {
+      const result = claimSlot(fleet, { peer: conn.peer, slotId: body.claim });
+      if (!result.ok) {
+        onLog(`[fleet] refusing claim on ${body.claim}: ${result.reason}`);
+        conn.send(encodeHostFrame(refusedFrame(result.reason, { of: HOST_FRAME_HELLO })));
+        setTimeout(() => conn.close(), 250);
+        return;
+      }
+      fleet = result.fleet;
+      links.set(conn.peer, conn);
+      connSlots.set(conn.peer, hostSlotOrdinal(result.slot.id));
+      conn.send(encodeHostFrame(welcomeFrame(result.slot.id, rosterOf(fleet))));
+      // Broadcast the granted claim to the fleet: the simulation mints one
+      // deterministic SlotClaimFrame from it, and every host recovers the same
+      // slot. The rebind of the recovered ship's own crew to this host is a
+      // separate, crew-plane concern (see the module notes on rendezvous rebind).
+      onSlotClaimed(hostSlotOrdinal(result.slot.id));
+      onLog(`[fleet] ${result.slot.id} reclaimed on another machine — recovering`);
+      publish();
+      return;
+    }
     const verdict = admitHost(fleet, {
       peer: conn.peer,
       ship: body.ship || null,
@@ -190,6 +256,7 @@ export function createFleetOwner(opts) {
     }
     fleet = verdict.fleet;
     links.set(conn.peer, conn);
+    connSlots.set(conn.peer, hostSlotOrdinal(verdict.slot.id));
     conn.send(encodeHostFrame(welcomeFrame(verdict.slot.id, rosterOf(fleet))));
     publish();
   }
@@ -254,8 +321,21 @@ export function createFleetOwner(opts) {
         const frame = decodeHostFrame(raw);
         if (!frame) return;
         if (isSimulationFrame(frame)) {
-          // This host's own simulation needs it…
-          onSimulationFrame(raw);
+          // The slot this connection was authenticated as at join (issue #1120).
+          const authSlot = connSlots.get(conn.peer);
+          // A member cannot speak under another slot's identity. The lead is the
+          // one host that can authenticate a member frame — against the connection
+          // it arrived on — so a frame whose declared origin disagrees is DROPPED
+          // here, before it is delivered to this host's own sim OR relayed to a
+          // sibling. That is what makes the boundary authentication real for the
+          // siblings, which cannot re-authenticate a relayed frame themselves.
+          if (authSlot != null && !authenticateFrame(raw, authSlot)) {
+            onLog(`[fleet] dropping a forged frame from ${conn.peer}: not slot ${authSlot}`);
+            return;
+          }
+          // This host's own simulation needs it, tagged with the authenticated
+          // slot so Rust can enforce the same at the mesh boundary…
+          onSimulationFrame(raw, authSlot);
           // …and so does every OTHER member. The transport is a star with the
           // fleet lead at the centre (#1114), so a member's tick frame reaches
           // its siblings only if the lead passes it on. Relayed VERBATIM and
@@ -272,6 +352,7 @@ export function createFleetOwner(opts) {
         // Everything else is owner-to-member and is noise arriving upstream.
       });
       conn.on('close', () => {
+        connSlots.delete(conn.peer);
         if (!links.delete(conn.peer)) return;
         // Before the mission starts, a host closing is just a lobby slot going
         // dark. Once frozen it is a HOST LOSS (issue #1119): the simulation must
@@ -406,6 +487,8 @@ export function createFleetOwner(opts) {
  * @param {string|null} opts.stamp this host's own `p/id/epoch` field
  * @param {{template_path: string|null, name?: string}|null} [opts.ship]
  * @param {string} [opts.name]
+ * @param {string|null} [opts.claim] the disconnected slot id this host is
+ *   reclaiming (issue #1120); null for an ordinary join.
  * @param {(roster:object)=>void} [opts.onRoster]
  * @param {(slotId:string, roster:object)=>void} [opts.onWelcome]
  * @param {(reason:string, detail?:string)=>void} [opts.onError] a TERMINAL
@@ -414,9 +497,9 @@ export function createFleetOwner(opts) {
  * @param {(reason:string, detail?:string)=>void} [opts.onRefusedSlot] the fleet
  *   declined a change this host asked for about its OWN slot. Not terminal:
  *   this host is still in the fleet, and the roster that follows is the truth.
- * @param {(raw:string)=>void} [opts.onSimulationFrame] a `tick` or `digest`
- *   frame from another host, still encoded — hand it to
- *   `wasm_receive_mesh_frame`.
+ * @param {(raw:string, authSlot:number)=>void} [opts.onSimulationFrame] a
+ *   simulation frame from another host, still encoded, tagged with the lead's
+ *   slot (issue #1120) — hand both to `wasm_receive_mesh_frame(authSlot, raw)`.
  * @param {(status:string)=>void} [opts.onStatus]
  * @param {(msg:string)=>void} [opts.onLog]
  */
@@ -429,6 +512,7 @@ export function createFleetMember(opts) {
     iceServers = [],
     ship = null,
     name = '',
+    claim = null,
     onRoster = () => {},
     onWelcome = () => {},
     onSimulationFrame = () => {},
@@ -467,6 +551,9 @@ export function createFleetMember(opts) {
       joiner.sendFrame(encodeHostFrame(helloFrame({
         ship: announced.ship,
         name: announced.name,
+        // A replacement machine names the disconnected slot it is reclaiming
+        // (issue #1120); a plain join leaves this null.
+        claim,
       })));
     },
     onData: (frame) => {
@@ -478,7 +565,16 @@ export function createFleetMember(opts) {
         // text. Encoding the decoded frame (not the raw input) is what makes
         // the envelope that reaches the simulation the one this module
         // recognised, rather than whatever arrived.
-        onSimulationFrame(encodeHostFrame(decoded));
+        //
+        // A member's single connection is to the lead, which delivers both its
+        // own frames and its verbatim relay of a sibling's (issue #1120). A
+        // member cannot itself re-authenticate a relayed sibling, so it tags
+        // every frame on this link with the LEAD's slot — the roster owner — and
+        // Rust accepts it because the lead is the star centre that already
+        // authenticated the origin at ITS ingress. `0` (never a real slot) before
+        // the welcome names the owner is a "cannot judge" the sim trusts.
+        const leadSlot = roster && roster.owner ? hostSlotOrdinal(roster.owner) : 0;
+        onSimulationFrame(encodeHostFrame(decoded), leadSlot || 0);
         return;
       }
       if (decoded.t === HOST_FRAME_WELCOME) {

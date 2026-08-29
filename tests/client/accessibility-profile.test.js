@@ -27,6 +27,7 @@ import {
   profileWithPresentation,
   profileWithAssistance,
   osAccessibilityDefaults,
+  readInjectedOsDefaults,
   resolveTriState,
   resolveTextScale,
   resolveEffects,
@@ -174,6 +175,60 @@ describe('osAccessibilityDefaults', () => {
   });
 });
 
+// ── The host-injected OS layer for a native pane (issue #1127, AC2) ──────────
+
+describe('readInjectedOsDefaults — a native pane\'s OS layer', () => {
+  it('is empty when the host injected nothing (an ordinary browser)', () => {
+    expect(readInjectedOsDefaults({})).toEqual({});
+    expect(readInjectedOsDefaults(null)).toEqual({});
+    expect(readInjectedOsDefaults(undefined)).toEqual({});
+  });
+
+  it('reads the three matchMedia-shaped keys the host injects', () => {
+    const w = { PhoenixOsAccessibilityDefaults: { reducedMotion: true, contrast: false, textScale: 1.25 } };
+    expect(readInjectedOsDefaults(w)).toEqual({ reducedMotion: true, contrast: false, textScale: 1.25 });
+  });
+
+  it('clamps an injected text scale and ignores malformed fields', () => {
+    const w = {
+      PhoenixOsAccessibilityDefaults: {
+        reducedMotion: 'yes',   // wrong type → dropped
+        contrast: true,
+        textScale: 9,           // out of range → clamped
+        darkColorScheme: true,
+      },
+    };
+    // Only the well-typed fields survive; the bad boolean falls back to matchMedia.
+    expect(readInjectedOsDefaults(w)).toEqual({ contrast: true, darkColorScheme: true, textScale: 2.0 });
+  });
+
+  it('survives a global whose getter throws', () => {
+    const w = { get PhoenixOsAccessibilityDefaults() { throw new Error('nope'); } };
+    expect(readInjectedOsDefaults(w)).toEqual({});
+  });
+});
+
+describe('osAccessibilityDefaults overlays the injected native layer (AC2)', () => {
+  it('a browser (no injection) is unchanged — only the three media queries', () => {
+    const win = fakeWin({ '(prefers-reduced-motion: reduce)': true });
+    expect(osAccessibilityDefaults(win)).toEqual({
+      reducedMotion: true, contrast: false, darkColorScheme: false,
+    });
+  });
+
+  it('a pane\'s injected OS preferences overlay the (silent) matchMedia layer', () => {
+    // Ultralight's matchMedia answers nothing, so the injected layer IS the OS
+    // layer — including a text scale matchMedia has no query for.
+    const win = {
+      matchMedia: () => ({ matches: false }),
+      PhoenixOsAccessibilityDefaults: { reducedMotion: true, contrast: true, textScale: 1.3 },
+    };
+    expect(osAccessibilityDefaults(win)).toEqual({
+      reducedMotion: true, contrast: true, darkColorScheme: false, textScale: 1.3,
+    });
+  });
+});
+
 // ── Resolution: explicit overrides the OS default in BOTH directions (AC2) ───
 
 describe('resolution folds explicit choice over the OS default', () => {
@@ -195,6 +250,31 @@ describe('resolution folds explicit choice over the OS default', () => {
     expect(resolveTextScale(9)).toBe(2.0);
   });
 
+  it('takes the OS text-scale default when the scale is unset (issue #1127, AC2)', () => {
+    // A native pane imports the Windows text-size setting as this OS default;
+    // matchMedia has no text-scale query, so on a browser it is simply absent
+    // and the identity stands. Unset means both FOLLOW_OS and a null field.
+    expect(resolveTextScale(FOLLOW_OS, 1.3)).toBeCloseTo(1.3);
+    expect(resolveTextScale(null, 1.25)).toBeCloseTo(1.25);
+    // No OS default supplied → still the identity, unchanged from a browser.
+    expect(resolveTextScale(FOLLOW_OS, undefined)).toBe(TEXT_SCALE_DEFAULT);
+    expect(resolveTextScale(FOLLOW_OS, null)).toBe(TEXT_SCALE_DEFAULT);
+  });
+
+  it('lets an explicit text scale override the OS default, both ways (AC2)', () => {
+    // The explicit choice wins whether it is larger or smaller than the OS's.
+    expect(resolveTextScale(1.2, 1.5)).toBeCloseTo(1.2); // explicit smaller wins
+    expect(resolveTextScale(1.45, 1.1)).toBeCloseTo(1.45); // explicit larger wins
+  });
+
+  it('clamps a resolved OS text-scale default to the safe range', () => {
+    // A hand-poked or unexpected OS value cannot push the root font-size out of
+    // the range the page enforces for an explicit choice.
+    expect(resolveTextScale(FOLLOW_OS, 9)).toBe(2.0);
+    expect(resolveTextScale(FOLLOW_OS, 0.01)).toBe(0.5);
+    expect(resolveTextScale(FOLLOW_OS, 9)).toBe(clampTextScale(9));
+  });
+
   it('resolveEffects combines the profile with the OS defaults', () => {
     const profile = normalizeAccessibilityProfile({
       presentation: { textScale: 1.2, contrast: EXPLICIT_ON, reducedMotion: EXPLICIT_OFF },
@@ -209,6 +289,17 @@ describe('resolution folds explicit choice over the OS default', () => {
     expect(resolveEffects(emptyAccessibilityProfile(), os)).toEqual({
       textScale: TEXT_SCALE_DEFAULT, contrast: false, reducedMotion: true,
     });
+  });
+
+  it('resolveEffects folds an OS text-scale default and yields to an explicit one (issue #1127)', () => {
+    // A pane's OS layer may carry a textScale (a browser's never does). Unset →
+    // the OS default flows through; an explicit choice still overrides it.
+    const os = { textScale: 1.3 };
+    expect(resolveEffects(emptyAccessibilityProfile(), os)).toEqual({
+      textScale: 1.3, contrast: false, reducedMotion: false,
+    });
+    const explicit = normalizeAccessibilityProfile({ presentation: { textScale: 1.2 } });
+    expect(resolveEffects(explicit, os).textScale).toBeCloseTo(1.2);
   });
 });
 

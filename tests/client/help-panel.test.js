@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { t } from '../../gui/strings.js';
 import { helpSections, hasHelp, renderStationHelp } from '../../gui/help-panel.js';
+import { createCaptainActionRegistry } from '../../gui/stations/captain-actions.js';
 
 function makeEl(doc, tag) {
   const el = {
@@ -55,5 +56,21 @@ describe('renderStationHelp', () => {
     const root = doc.createElement('div');
     expect(renderStationHelp(root, 'bogus')).toBe(false);
     expect(root.children).toHaveLength(0);
+  });
+
+  it('shows the Captain action metadata and both current binding slots', () => {
+    const doc = makeDoc();
+    const root = doc.createElement('div');
+    const registry = createCaptainActionRegistry();
+    registry.setBinding('captain.red-alert', 0, { code: 'KeyY', shiftKey: true });
+    expect(renderStationHelp(root, 'captain', registry.list())).toBe(true);
+    const flatten = (el) => [el.textContent]
+      .concat(...(el.children || []).map(flatten));
+    const text = flatten(root).join('\n');
+    expect(text).toContain(t('help.bindings.heading'));
+    expect(text).toContain(t('semantic_action.captain.red_alert.label'));
+    expect(text).toContain(t('semantic_action.captain.red_alert.accessibility'));
+    expect(text).toContain('Shift + Y');
+    expect(text).toContain(t('input.binding.unassigned'));
   });
 });

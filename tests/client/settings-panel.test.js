@@ -27,8 +27,17 @@ import {
   GOD_MODE_SYSTEM_ID,
 } from '../../gui/settings-panel.js';
 import { setBuildFlags, isDemoBuild } from '../../gui/build-flags.js';
-import { TABS, CLIENT_ACCESSIBILITY_TABS, CLIENT_DOCUMENTATION_TABS } from '../../gui/settings-tabs.js';
+import {
+  TABS,
+  CLIENT_INPUT_TABS,
+  CLIENT_ACCESSIBILITY_TABS,
+  CLIENT_DOCUMENTATION_TABS,
+} from '../../gui/settings-tabs.js';
 import { ClientSimState } from '../../gui/sim-state.js';
+import {
+  CAPTAIN_RED_ALERT_ACTION_ID,
+  createCaptainActionRegistry,
+} from '../../gui/stations/captain-actions.js';
 
 const repoFile = (rel) =>
   fs.readFileSync(
@@ -192,7 +201,7 @@ describe('mountSettings — cog and overlay', () => {
     const inst = mount(doc);
     inst.open();
     const labels = tabBarOf(doc).children.map((c) => c.getAttribute('data-tab'));
-    expect(labels).toEqual(['audio', 'gameplay', 'debug', 'accessibility', 'station-help', 'ship-manual']);
+    expect(labels).toEqual(['audio', 'gameplay', 'debug', 'controls', 'accessibility', 'station-help', 'ship-manual']);
     expect(tabBarOf(doc).children[0].classList.contains('active')).toBe(true);
   });
 
@@ -422,9 +431,9 @@ describe('the demo build gate', () => {
   it('hides exactly the Debug/Cheat tab in a demo build and nothing in a dev build', () => {
     const dev = buildSettingsState({ demo: false }).tabs.map((tb) => tb.id);
     const demo = buildSettingsState({ demo: true }).tabs.map((tb) => tb.id);
-    expect(dev).toEqual(TABS.concat(CLIENT_ACCESSIBILITY_TABS, CLIENT_DOCUMENTATION_TABS).map((tb) => tb.id));
+    expect(dev).toEqual(TABS.concat(CLIENT_INPUT_TABS, CLIENT_ACCESSIBILITY_TABS, CLIENT_DOCUMENTATION_TABS).map((tb) => tb.id));
     expect(demo).toEqual(
-      TABS.filter((tb) => !tb.gated).concat(CLIENT_ACCESSIBILITY_TABS, CLIENT_DOCUMENTATION_TABS).map((tb) => tb.id),
+      TABS.filter((tb) => !tb.gated).concat(CLIENT_INPUT_TABS, CLIENT_ACCESSIBILITY_TABS, CLIENT_DOCUMENTATION_TABS).map((tb) => tb.id),
     );
     expect(dev).toContain('debug');
     expect(demo).not.toContain('debug');
@@ -463,7 +472,7 @@ describe('the demo build gate', () => {
     const inst = mount(doc, { isDemo: () => true });
     inst.open();
     expect(tabBarOf(doc).children.map((c) => c.getAttribute('data-tab')))
-      .toEqual(['audio', 'gameplay', 'accessibility', 'station-help', 'ship-manual']);
+      .toEqual(['audio', 'gameplay', 'controls', 'accessibility', 'station-help', 'ship-manual']);
     // …and nothing in the body offers a debug control.
     for (const entry of CLIENT_DEBUG_FLAGS) {
       expect(bodyButtons(doc).some((b) => b.getAttribute('data-control') === entry.id))
@@ -997,6 +1006,74 @@ describe('gameplay tab — rating, QR and leave station', () => {
 // host: a presentation choice is client-local (AC5). Every control writes on
 // the dedicated `onAccessibility` path, never `send`, and this pins that so a
 // later refactor cannot quietly route a setting onto the wire.
+
+describe('semantic controls tab', () => {
+  const descendants = (root) => {
+    const out = [];
+    for (const child of root.children || []) {
+      out.push(child, ...descendants(child));
+    }
+    return out;
+  };
+
+  function openControls() {
+    const doc = makeDoc();
+    const registry = createCaptainActionRegistry();
+    const sent = [];
+    const inst = mount(doc, {
+      send: (type, data) => sent.push({ type, data }),
+      getSemanticActions: () => registry.list(),
+      onSemanticBinding: (actionId, slot, binding) => {
+        registry.setBinding(actionId, slot, binding);
+      },
+    });
+    inst.open();
+    inst.selectTab('controls');
+    return { doc, registry, sent };
+  }
+
+  it('shows both binding slots and their display/accessibility metadata', () => {
+    const { doc } = openControls();
+    const text = allText(bodyOf(doc));
+    expect(text).toContain(t('semantic_action.captain.red_alert.label'));
+    expect(text).toContain(t('semantic_action.captain.red_alert.accessibility'));
+    const captures = descendants(bodyOf(doc)).filter((el) =>
+      el.getAttribute && String(el.getAttribute('data-control') || '')
+        .startsWith('semantic-binding-captain.red-alert-'));
+    expect(captures).toHaveLength(2);
+    expect(captures.map((el) => el.value)).toEqual(['R', t('input.binding.unassigned')]);
+    expect(captures.every((el) => el.getAttribute('aria-label'))).toBe(true);
+  });
+
+  it('captures a remap in memory without sending a ClientMessage', () => {
+    const { doc, registry, sent } = openControls();
+    const capture = descendants(bodyOf(doc)).find((el) =>
+      el.getAttribute && el.getAttribute('data-control')
+        === 'semantic-binding-captain.red-alert-0');
+    let prevented = false;
+    let stopped = false;
+    capture.dispatch('keydown', {
+      code: 'KeyY', ctrlKey: false, shiftKey: false, altKey: false, metaKey: false,
+      repeat: false,
+      preventDefault() { prevented = true; },
+      stopPropagation() { stopped = true; },
+    });
+    expect(prevented).toBe(true);
+    expect(stopped).toBe(true);
+    expect(registry.action(CAPTAIN_RED_ALERT_ACTION_ID).bindings[0].code).toBe('KeyY');
+    expect(sent).toEqual([]);
+    const repainted = descendants(bodyOf(doc)).find((el) =>
+      el.getAttribute && el.getAttribute('data-control')
+        === 'semantic-binding-captain.red-alert-0');
+    expect(repainted.value).toBe('Y');
+  });
+
+  it('wires the parent-owned profile to the explicit iframe update seam', () => {
+    expect(CLIENT_HTML).toContain('createCaptainActionRegistry');
+    expect(CLIENT_HTML).toContain('__updateSemanticActionBindings');
+    expect(CLIENT_HTML).toContain('pushSemanticBindingsToIframe');
+  });
+});
 
 describe('accessibility tab', () => {
   const profileState = (accessibilityProfile) => ({

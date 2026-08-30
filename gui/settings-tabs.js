@@ -47,6 +47,11 @@ export const CLIENT_ACCESSIBILITY_TABS = [
   { id: 'accessibility', labelId: 'settings.tab.accessibility', gated: false },
 ];
 
+/** Client-local semantic input bindings, before presentation/accessibility. */
+export const CLIENT_INPUT_TABS = [
+  { id: 'controls', labelId: 'settings.tab.controls', gated: false },
+];
+
 /** Client-only documentation tabs, always available including in demo builds. */
 export const CLIENT_DOCUMENTATION_TABS = [
   { id: 'station-help', labelId: 'settings.tab.station_help', gated: false },
@@ -71,6 +76,7 @@ export function visibleTabs(demo) {
  */
 export function visibleClientTabs(demo) {
   return visibleTabs(demo)
+    .concat(CLIENT_INPUT_TABS)
     .concat(CLIENT_ACCESSIBILITY_TABS)
     .concat(CLIENT_DOCUMENTATION_TABS);
 }

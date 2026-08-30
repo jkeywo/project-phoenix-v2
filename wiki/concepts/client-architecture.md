@@ -2,8 +2,8 @@
 title: Client Architecture
 type: concept
 tags: [client, javascript, iframe, console, console-family, state, accessibility, keyboard, vitest]
-sources: [client.html, server.html, gui/mount-plan.js, gui/hero-bar.js, gui/reducer-result.js, gui/lobby-state.js, gui/sim-state.js, gui/comms-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/action-map.js, gui/iframe-bridge.js, gui/client-router.js, gui/coordination-popup.js, gui/accessibility-profile.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
-updated: 2026-08-27
+sources: [client.html, server.html, gui/mount-plan.js, gui/hero-bar.js, gui/reducer-result.js, gui/lobby-state.js, gui/sim-state.js, gui/comms-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/semantic-action-registry.js, gui/stations/captain-actions.js, gui/action-map.js, gui/console-core.js, gui/iframe-bridge.js, gui/client-router.js, gui/coordination-popup.js, gui/accessibility-profile.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
+updated: 2026-08-30
 ---
 
 ## Summary
@@ -52,7 +52,19 @@ snapshots have been published, `client-router.js` consumes the effect array,
 mirrors the already-reduced lobby store and applies local render/bezel guards.
 Neither router receives or inspects the original `ServerMessage`.
 
-Outbound: each console iframe posts `console_action` messages; `gui/action-map.js` is the table-driven dispatcher mapping `action.action` values to `ClientMessage`s (mostly `ControlSystem { target, payload }`) via `send(type, data?)`.
+Outbound: context-scoped operator input first resolves through
+`gui/semantic-action-registry.js`, whose stable identities, two local binding
+slots and presentation metadata sit above transport and carry no Station or
+session authority. Each console iframe owns an isolated registry instance;
+`client.html` owns the current in-memory binding choices and copies them into
+iframes through `__updateSemanticActionBindings` on load and remap. The first
+real adapter is `captain.red-alert`: its visible control and default/remapped
+keyboard bindings all invoke the same adapter, which derives an explicit
+boolean from the latest authoritative Captain view and emits the legacy
+`set_red_alert` action. Each console iframe then posts its `console_action`, and
+`gui/action-map.js` remains the table-driven dispatcher mapping `action.action`
+values to `ClientMessage`s (mostly `ControlSystem { target, payload }`) via
+`send(type, data?)`.
 
 ## Module inventory (`gui/`)
 
@@ -67,6 +79,7 @@ Outbound: each console iframe posts `console_action` messages; `gui/action-map.j
 | `console-state.js` | Pure view-model builders. One family registry contains all builders, including Command, Tractor and Umbilical; flat and composed consoles carry actual owned `SystemId`s and projected families, while typed blackboard discriminants select semantic data independently of id spelling. |
 | `console-payload.js` | Metadata-driven flat/keyed normalization plus `familyView`: mirrors flat views only under actual projected ids and selects composite views by Console Family, with no inverse id census. |
 | `action-map.js` | Table-driven `console_action` → `ClientMessage` dispatch |
+| `semantic-action-registry.js`, `stations/captain-actions.js` | Non-authoritative context/input identity, exactly two binding slots, keyboard matching and the real Captain Red Alert adapter above `action-map.js` |
 | `iframe-bridge.js` | `push()` / `wireLoad()` state-push into console iframes (ADR-0001 §2) |
 | `content-switcher.js` | Section visibility over the ship's mounted stations; one human directly holds one station |
 | `station-roster.js` | Pure fold: players + station defs → lobby roster rows + aggregates |

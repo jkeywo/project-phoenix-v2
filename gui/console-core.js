@@ -62,6 +62,11 @@ import { phAdoptConsoleStyles } from './components/ph-console-styles.js';
 // passes through, before `render` ever sees it. See normalizeConsolePayload's
 // own doc comment for the full contract.
 import { normalizeConsolePayload } from './console-payload.js';
+import { createSemanticActionRegistry } from './semantic-action-registry.js';
+import {
+  CAPTAIN_ACTION_CONTEXT,
+  registerCaptainActions,
+} from './stations/captain-actions.js';
 // Console input-to-feedback latency (issue #1169, PRD #1144). `sendAction` is
 // the ONE place in a console document where a control's handler turns into an
 // outbound action, so it is the only honest place to stamp "the input event
@@ -72,6 +77,21 @@ export function initConsole({ name, render }) {
   // Resolve the global object: `window` in browsers, `globalThis` in Node/tests.
   // Evaluated at call-time so tests can set global.window before calling initConsole.
   var _root = (typeof window !== 'undefined') ? window : globalThis;
+  var _actionContext = String(name || '').toLowerCase();
+  var _latestState = null;
+
+  // One registry per console document. The parent page owns the mutable
+  // in-memory binding choices and explicitly copies them into each iframe;
+  // module instances in separate realms are never treated as shared state.
+  var _semanticActions = createSemanticActionRegistry();
+  if (_actionContext === CAPTAIN_ACTION_CONTEXT) {
+    registerCaptainActions(_semanticActions, {
+      getState: function() { return _latestState; },
+      // This is the existing console action transport. The Captain adapter
+      // emits `set_red_alert`; action-map.js remains the sole wire builder.
+      sendAction: sendAction,
+    });
+  }
 
   // The control family reaches this DOCUMENT, not only its components.
   //
@@ -144,6 +164,7 @@ export function initConsole({ name, render }) {
       return;
     }
     s = normalizeConsolePayload(s);
+    _latestState = s;
     render(s);
     _updateTutorialOverlay(s);
   };
@@ -210,6 +231,28 @@ export function initConsole({ name, render }) {
   // comment) made that repair pass unnecessary; see issue #1237.)
   _root.sendAction = sendAction;
 
+  // Semantic activation is a live document seam just like sendAction. Both a
+  // visible component and the keyboard matcher call this same identity.
+  _root.activateSemanticAction = function(actionId, options) {
+    return _semanticActions.activate(actionId, Object.assign({}, options || {}, {
+      context: _actionContext,
+    }));
+  };
+
+  // Explicit parent → iframe binding update. This intentionally carries only
+  // local presentation data; no profile or binding becomes a ClientMessage.
+  _root.__updateSemanticActionBindings = function(profile) {
+    return _semanticActions.updateBindings(profile);
+  };
+
+  var _semanticKeyHandler = null;
+  if (typeof document !== 'undefined' && document.addEventListener) {
+    _semanticKeyHandler = function(event) {
+      _semanticActions.dispatchKeyboardEvent(event, _actionContext);
+    };
+    document.addEventListener('keydown', _semanticKeyHandler);
+  }
+
   // ── Static text (localisation) ─────────────────────────────────────────
   // Substitute every data-i18n / data-i18n-attr node in the page. Console
   // markup carries string ids, not English — this is the pass that turns
@@ -223,7 +266,17 @@ export function initConsole({ name, render }) {
     }
   }
 
-  return { sendAction: sendAction };
+  return {
+    sendAction: sendAction,
+    semanticActions: _semanticActions,
+    disposeSemanticActions: function() {
+      if (_semanticKeyHandler && typeof document !== 'undefined'
+          && document.removeEventListener) {
+        document.removeEventListener('keydown', _semanticKeyHandler);
+        _semanticKeyHandler = null;
+      }
+    },
+  };
 }
 
 // Expose for non-module HTML scripts (fallback path only — prefer the import).

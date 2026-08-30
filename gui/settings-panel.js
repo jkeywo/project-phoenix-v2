@@ -51,6 +51,10 @@ import { visibleClientTabs, resolveClientActiveTab } from './settings-tabs.js';
 import { controlSystemEnvelope } from './command-gateway.js';
 import { renderStationHelp } from './help-panel.js';
 import { renderManual } from './manual-panel.js';
+import {
+  formatKeyboardBinding,
+  keyboardBindingFromEvent,
+} from './semantic-action-registry.js';
 import { TEXT_SCALE_MIN, TEXT_SCALE_MAX, TEXT_SCALE_STEP } from './accessibility-profile.js';
 import {
   mountOverlayShell,
@@ -195,6 +199,7 @@ export function godModeMessage() {
  *   myToken?: string|null,
  *   demo?: boolean,
  *   activeTab?: string|null,
+ *   semanticActions?: Array<object>,
  * }} opts
  * @returns {{
  *   tabs: Array<{id: string, labelId: string}>,
@@ -245,6 +250,7 @@ export function buildSettingsState(opts = {}) {
   return {
     tabs: visibleClientTabs(demo).map((tab) => ({ id: tab.id, labelId: tab.labelId })),
     activeTab: resolveClientActiveTab(opts.activeTab || null, demo),
+    semanticActions: Array.isArray(opts.semanticActions) ? opts.semanticActions : [],
     stationId,
     afk,
     ratings,
@@ -371,6 +377,8 @@ function persistMasterVolume(value) {
  *   audioEl?: object|null,       // legacy single-channel argument
  *   audioEls?: Array,            // every audio channel master volume scales
  *   myToken?: string|null,
+ *   getSemanticActions?: () => Array<object>,
+ *   onSemanticBinding?: (actionId: string, slot: number, binding: object) => void,
  *   doc?: Document,
  *   isDemo?: () => boolean,
  * }} opts
@@ -385,6 +393,8 @@ export function mountSettings({
   getManual,
   myToken,
   onAccessibility: _onAccessibility,
+  getSemanticActions: _getSemanticActions,
+  onSemanticBinding: _onSemanticBinding,
   doc: _doc,
   isDemo: _isDemo,
 } = {}) {
@@ -434,6 +444,15 @@ export function mountSettings({
   // re-apply to the shell + console iframes); absent, it is a harmless no-op.
   const setAccessibility = (effect, value) => {
     if (typeof _onAccessibility === 'function') _onAccessibility(effect, value);
+  };
+
+  // The binding profile is parent-owned and in-memory for this tracer. The
+  // callback updates that registry and explicitly fans it into iframe realms;
+  // this Settings module never assumes module instances share mutable state.
+  const setSemanticBinding = (actionId, slot, binding) => {
+    if (typeof _onSemanticBinding === 'function') {
+      _onSemanticBinding(actionId, slot, binding);
+    }
   };
 
   // ── Gear button + overlay ────────────────────────────────────────────────
@@ -649,6 +668,61 @@ export function mountSettings({
     body.appendChild(motionSec);
   }
 
+  function buildControlsTab(body, view) {
+    const intro = section('settings.controls.heading');
+    intro.appendChild(hint('settings.controls.hint'));
+    body.appendChild(intro);
+
+    for (const semanticAction of view.semanticActions) {
+      const actionSection = section(semanticAction.labelId);
+      actionSection.appendChild(hint(semanticAction.accessibilityLabelId));
+
+      const slots = Array.isArray(semanticAction.bindings) ? semanticAction.bindings : [];
+      for (let slot = 0; slot < 2; slot++) {
+        const binding = slots[slot] || null;
+        const bindingRow = row('settings-binding-row');
+
+        const label = doc.createElement('label');
+        label.className = 'settings-binding-label';
+        label.textContent = t('settings.controls.slot', { slot: String(slot + 1) });
+
+        const capture = doc.createElement('input');
+        capture.type = 'text';
+        capture.readOnly = true;
+        capture.value = formatKeyboardBinding(binding, t);
+        capture.className = 'settings-binding-capture';
+        capture.setAttribute('data-control', `semantic-binding-${semanticAction.id}-${slot}`);
+        capture.setAttribute('data-semantic-binding-capture', 'true');
+        capture.setAttribute('aria-label', t('settings.controls.capture_label', {
+          action: t(semanticAction.labelId),
+          slot: String(slot + 1),
+        }));
+        label.appendChild(capture);
+
+        capture.addEventListener('focus', () => {
+          capture.value = t('settings.controls.press_key');
+        });
+        capture.addEventListener('blur', () => {
+          capture.value = formatKeyboardBinding(binding, t);
+        });
+        capture.addEventListener('keydown', (event) => {
+          if (event.repeat) return;
+          const next = keyboardBindingFromEvent(event);
+          if (!next) return;
+          if (typeof event.preventDefault === 'function') event.preventDefault();
+          if (typeof event.stopPropagation === 'function') event.stopPropagation();
+          setSemanticBinding(semanticAction.id, slot, next);
+          if (typeof capture.blur === 'function') capture.blur();
+          buildContent();
+        });
+
+        bindingRow.appendChild(label);
+        actionSection.appendChild(bindingRow);
+      }
+      body.appendChild(actionSection);
+    }
+  }
+
   function buildGameplayTab(body, view) {
     // Dev builds only — see the module doc. The whole section goes, not just
     // the button: a "Simulation" heading over nothing reads as a bug.
@@ -729,7 +803,7 @@ export function mountSettings({
   function buildStationHelpTab(body, view) {
     const host = doc.createElement('div');
     host.className = 'settings-documentation';
-    if (!view.stationId || !renderStationHelp(host, view.stationId)) {
+    if (!view.stationId || !renderStationHelp(host, view.stationId, view.semanticActions)) {
       const unavailable = doc.createElement('div');
       unavailable.className = 'settings-section-hint';
       unavailable.textContent = t('settings.station_help.unavailable');
@@ -759,6 +833,9 @@ export function mountSettings({
       myToken,
       demo: !!isDemo(),
       activeTab,
+      semanticActions: typeof _getSemanticActions === 'function'
+        ? _getSemanticActions()
+        : [],
     });
     activeTab = view.activeTab;
 
@@ -780,6 +857,7 @@ export function mountSettings({
 
     if (activeTab === 'debug') buildDebugTab(body, view);
     else if (activeTab === 'audio') buildAudioTab(body);
+    else if (activeTab === 'controls') buildControlsTab(body, view);
     else if (activeTab === 'accessibility') buildAccessibilityTab(body, view);
     else if (activeTab === 'gameplay') buildGameplayTab(body, view);
     else if (activeTab === 'station-help') buildStationHelpTab(body, view);

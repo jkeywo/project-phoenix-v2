@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { CAPTAIN_RED_ALERT_ACTION_ID } from '../../gui/stations/captain-actions.js';
 import '../../gui/components/ph-red-alert.js';
 
 function setup(opts) {
-  const sendAction = opts && opts.sendAction;
-  if (sendAction) {
-    window.sendAction = sendAction;
+  const activateSemanticAction = opts && opts.activateSemanticAction;
+  if (activateSemanticAction) {
+    window.activateSemanticAction = activateSemanticAction;
   }
   document.body.innerHTML = '<ph-red-alert id="test-el"></ph-red-alert>';
   const el = document.getElementById('test-el');
@@ -17,11 +18,13 @@ describe('PhRedAlert', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
     delete window.sendAction;
+    delete window.activateSemanticAction;
   });
 
   afterEach(() => {
     document.body.innerHTML = '';
     delete window.sendAction;
+    delete window.activateSemanticAction;
   });
 
   it('is defined and registered as a custom element', () => {
@@ -62,33 +65,34 @@ describe('PhRedAlert', () => {
   });
 
   it('clicking while inactive requests the explicit active state', () => {
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
     el.state = { system_id: 'red-alert', active: false, auto: false };
     const btn = el.shadowRoot.getElementById('alert-btn');
     btn.click();
-    expect(sendAction).toHaveBeenCalledTimes(1);
-    expect(sendAction).toHaveBeenCalledWith('set_red_alert', { active: true });
+    expect(activateSemanticAction).toHaveBeenCalledTimes(1);
+    expect(activateSemanticAction).toHaveBeenCalledWith(
+      CAPTAIN_RED_ALERT_ACTION_ID,
+      expect.objectContaining({ context: 'captain', source: 'control' }),
+    );
   });
 
   it('clicking while active requests the explicit inactive state', () => {
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
     el.state = { system_id: 'red-alert', active: true, auto: false };
     const btn = el.shadowRoot.getElementById('alert-btn');
     btn.click();
-    expect(sendAction).toHaveBeenCalledTimes(1);
-    // Desired = opposite of displayed; the host assigns, so a stale/duplicate
-    // click stays idempotent rather than flipping.
-    expect(sendAction).toHaveBeenCalledWith('set_red_alert', { active: false });
+    expect(activateSemanticAction).toHaveBeenCalledTimes(1);
+    expect(activateSemanticAction.mock.calls[0][0]).toBe(CAPTAIN_RED_ALERT_ACTION_ID);
   });
 
   it('clicking button when auto=true does not dispatch action', () => {
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
     el.state = { system_id: 'red-alert', active: false, auto: true };
     const btn = el.shadowRoot.getElementById('alert-btn');
     btn.click();
-    expect(sendAction).not.toHaveBeenCalled();
+    expect(activateSemanticAction).not.toHaveBeenCalled();
   });
 });

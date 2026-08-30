@@ -94,6 +94,10 @@
        THIS device, so no cross-clock arithmetic is involved. -->
   <script type="module" src="gui/console-latency.js"></script>
   <script type="module" src="gui/action-map.js"></script>
+  <!-- Parent-realm semantic action metadata + in-memory binding profile. The
+       active console iframe owns its own registry instance and receives this
+       profile through an explicit update seam. -->
+  <script type="module" src="gui/stations/captain-actions.js"></script>
   <!-- Pure JS client-state modules (issue #460). Each exposes a singleton
        (window.lobbyState / simState / commsState) with an apply(serverMessage)
        method returning a fresh semantic result; handleMessage() feeds every
@@ -965,6 +969,22 @@
       color: var(--signal);
     }
     .settings-rating-btn:active { background: var(--cyan-dim); }
+    .settings-binding-row { display: flex; gap: 0.5rem; }
+    .settings-binding-label {
+      display: grid; grid-template-columns: minmax(4.5rem, auto) minmax(8rem, 1fr);
+      align-items: center; gap: 0.6rem; width: 100%;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: var(--text-sm); color: var(--ink-faint);
+    }
+    .settings-binding-capture {
+      min-height: var(--control-hit-min); width: 100%; box-sizing: border-box;
+      border: 1px solid var(--edge); border-radius: 3px;
+      background: var(--surface-panel-up); color: var(--ink);
+      font: inherit; text-align: center; cursor: pointer;
+    }
+    .settings-binding-capture:focus {
+      border-color: var(--signal); outline: 2px solid var(--signal); outline-offset: 2px;
+    }
     .settings-vol-row {
       display: flex; align-items: center; gap: 0.6rem;
     }
@@ -1548,6 +1568,10 @@
     /// The mounted settings panel (issue #940), or null before the connection
     /// bootstrap runs. handleMessage repaints it when `DebugState` arrives.
     let settingsPanel = null;
+    /// Parent-owned, client-local semantic binding profile. Console iframe
+    /// module instances are separate realms, so updates are explicitly copied
+    /// through __updateSemanticActionBindings instead of relying on a singleton.
+    let semanticActionRegistry = null;
     let pendingMidGameClaim = false;
     // #771 AC3: a mid-round station release is a two-step arm→confirm (imitates
     // ph-comms-current-message). First click arms + swaps the button to a
@@ -2647,6 +2671,32 @@
       return $(consoleIframeId(activeConsole));
     }
 
+    function pushSemanticBindingsToIframe(iframeEl) {
+      if (!iframeEl || !semanticActionRegistry) return;
+      try {
+        const update = iframeEl.contentWindow
+          && iframeEl.contentWindow.__updateSemanticActionBindings;
+        if (typeof update === 'function') {
+          update(semanticActionRegistry.bindingProfile());
+        }
+      } catch (_) { /* a cross-origin or not-yet-loaded frame is retried on load */ }
+    }
+
+    function pushSemanticBindingsToConsoles() {
+      const stations = (uiState.shipStations && uiState.shipStations.stations) || [];
+      for (const station of stations) {
+        if (station && station.id) {
+          pushSemanticBindingsToIframe($(consoleIframeId(station.id)));
+        }
+      }
+    }
+
+    function updateSemanticBinding(actionId, slot, binding) {
+      if (!semanticActionRegistry) return;
+      semanticActionRegistry.setBinding(actionId, slot, binding);
+      pushSemanticBindingsToConsoles();
+    }
+
     // Send the host's key events to the active console, so helm's WASD/arrows,
     // Ctrl impulse and Shift boost keep working after a click on the tab bar or
     // any other host chrome moved focus out of the console iframe. Called from
@@ -2714,6 +2764,7 @@
         if (typeof window.applyAccessibilityProfile === 'function') {
           window.applyAccessibilityProfile({ iframes: [iframeEl] });
         }
+        pushSemanticBindingsToIframe(iframeEl);
       });
     }
 
@@ -3093,6 +3144,10 @@
           })();
       console.log(`[client] session token ${myToken.slice(0, 8)}`);
 
+      semanticActionRegistry = typeof window.createCaptainActionRegistry === 'function'
+        ? window.createCaptainActionRegistry()
+        : null;
+
       installConsoleKeyRelay();
 
       // Mount the settings panel (gear button + overlay) once state is ready.
@@ -3119,6 +3174,12 @@
             if (typeof window.setAccessibilityPresentation === 'function') {
               window.setAccessibilityPresentation(effect, value);
             }
+          },
+          getSemanticActions: () => semanticActionRegistry
+            ? semanticActionRegistry.list()
+            : [],
+          onSemanticBinding: (actionId, slot, binding) => {
+            updateSemanticBinding(actionId, slot, binding);
           },
           // Every audio channel this page owns. Master volume scales each
           // element's own authored level rather than replacing it, so adding

@@ -4,6 +4,10 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import {
+  CAPTAIN_ACTION_CONTEXT,
+  CAPTAIN_RED_ALERT_ACTION_ID,
+} from '../stations/captain-actions.js';
 import { PhElement, phDefine } from './ph-element.js';
 
 export class PhRedAlert extends PhElement {
@@ -42,12 +46,13 @@ export class PhRedAlert extends PhElement {
     super.connectedCallback();
     const btn = this.shadowRoot.getElementById('alert-btn');
     btn.addEventListener('click', () => {
-      if (this.sendAction && !btn.disabled) {
-        // Send the explicit desired state (issue #748): the opposite of what
-        // is currently displayed. Assigning (not toggling) on the host makes a
-        // stale / duplicated / retried command idempotent.
-        const currentlyActive = !!(this.state && this.state.active);
-        this.sendAction('set_red_alert', { active: !currentlyActive });
+      if (btn.disabled) return;
+      const activate = typeof window !== 'undefined' && window.activateSemanticAction;
+      if (typeof activate === 'function') {
+        activate(CAPTAIN_RED_ALERT_ACTION_ID, {
+          context: CAPTAIN_ACTION_CONTEXT,
+          source: 'control',
+        });
       }
     });
     // The weapons hold (issue #1041). Its own button beside the alert, not a

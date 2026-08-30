@@ -65,9 +65,6 @@ test('captain console: camera-select and red alert call __sendAction with correc
   await page.evaluate(() => {
     window.__sent = [];
     window.__sendAction = (json) => window.__sent.push(json);
-    window.sendAction = (action, payload) => {
-      window.__sendAction(JSON.stringify(Object.assign({ action, console: 'captain' }, payload)));
-    };
   });
 
   await page.evaluate((s) => window.__updateConsole('captain', JSON.stringify(s)), {
@@ -84,12 +81,18 @@ test('captain console: camera-select and red alert call __sendAction with correc
   await camBtns.nth(0).click();
   await page.locator('ph-red-alert').locator('#alert-btn').click();
 
-  const sent = await page.evaluate(() => window.__sent);
+  const sent = (await page.evaluate(() => window.__sent)).map(JSON.parse);
   expect(sent).toHaveLength(4);
-  expect(JSON.parse(sent[0])).toEqual({ action: 'set_view', console: 'captain', direction: 'Port' });
-  expect(JSON.parse(sent[1])).toEqual({ action: 'set_view', console: 'captain', direction: 'Starboard' });
-  expect(JSON.parse(sent[2])).toEqual({ action: 'set_view', console: 'captain', direction: 'Fore' });
-  expect(JSON.parse(sent[3])).toEqual({ action: 'set_red_alert', console: 'captain', active: true });
+  for (const envelope of sent) {
+    expect(Number.isFinite(envelope.__input_ms)).toBe(true);
+    delete envelope.__input_ms;
+  }
+  expect(sent).toEqual([
+    { action: 'set_view', console: 'captain', direction: 'Port' },
+    { action: 'set_view', console: 'captain', direction: 'Starboard' },
+    { action: 'set_view', console: 'captain', direction: 'Fore' },
+    { action: 'set_red_alert', console: 'captain', active: true },
+  ]);
 });
 
 test('captain console: AI-run Red Alert renders read-only with AUTO badge', async ({ page }) => {

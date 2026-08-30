@@ -70,7 +70,10 @@ describe('renderStationHelp', () => {
     expect(text).toContain(t('help.bindings.heading'));
     expect(text).toContain(t('semantic_action.captain.red_alert.label'));
     expect(text).toContain(t('semantic_action.captain.red_alert.accessibility'));
+    expect(text).toContain(t('semantic_action.captain.weapons_hold.label'));
+    expect(text).toContain(t('semantic_action.captain.weapons_hold.accessibility'));
     expect(text).toContain('Shift + Y');
+    expect(text).toContain('H');
     expect(text).toContain(t('input.binding.unassigned'));
   });
 });

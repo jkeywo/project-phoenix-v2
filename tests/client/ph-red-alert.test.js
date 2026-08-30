@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { CAPTAIN_RED_ALERT_ACTION_ID } from '../../gui/stations/captain-actions.js';
+import {
+  CAPTAIN_RED_ALERT_ACTION_ID,
+  CAPTAIN_WEAPONS_HOLD_ACTION_ID,
+} from '../../gui/stations/captain-actions.js';
 import '../../gui/components/ph-red-alert.js';
 
 function setup(opts) {
@@ -85,6 +88,17 @@ describe('PhRedAlert', () => {
     btn.click();
     expect(activateSemanticAction).toHaveBeenCalledTimes(1);
     expect(activateSemanticAction.mock.calls[0][0]).toBe(CAPTAIN_RED_ALERT_ACTION_ID);
+  });
+
+  it('routes the visible Weapons Hold button through its semantic identity', () => {
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
+    el.state = { active: false, hold: false, auto: false };
+    el.shadowRoot.getElementById('hold-btn').click();
+    expect(activateSemanticAction).toHaveBeenCalledWith(
+      CAPTAIN_WEAPONS_HOLD_ACTION_ID,
+      expect.objectContaining({ context: 'captain', source: 'control' }),
+    );
   });
 
   it('clicking button when auto=true does not dispatch action', () => {

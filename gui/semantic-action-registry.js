@@ -15,6 +15,47 @@ export const SEMANTIC_BINDING_SLOT_COUNT = 2;
 
 const MODIFIER_KEYS = ['ctrlKey', 'shiftKey', 'altKey', 'metaKey'];
 const EDITABLE_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
+const RESERVED_UNMODIFIED_CODES = new Set([
+  'Escape', 'Tab',
+  'F1', 'F3', 'F5', 'F6', 'F7', 'F10', 'F11', 'F12',
+]);
+const RESERVED_DEDICATED_BROWSER_CODES = new Set([
+  'PrintScreen',
+  'BrowserBack', 'BrowserForward', 'BrowserRefresh', 'BrowserHome',
+  'BrowserSearch', 'BrowserFavorites', 'BrowserStop',
+]);
+const RESERVED_CTRL_CODES = new Set([
+  // Tabs, windows, reload, location, find, print, save, open and zoom.
+  'KeyR', 'KeyW', 'KeyT', 'KeyN', 'KeyL', 'KeyF', 'KeyP', 'KeyS', 'KeyO',
+  'Equal', 'Minus', 'Digit0',
+  // Direct tab selection.
+  'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5',
+  'Digit6', 'Digit7', 'Digit8', 'Digit9',
+  // Bookmarks, history, downloads, source and browser search.
+  'KeyD', 'KeyH', 'KeyJ', 'KeyU', 'KeyK', 'KeyE', 'KeyG',
+]);
+const RESERVED_CTRL_NAVIGATION_CODES = new Set(['F4', 'PageUp', 'PageDown']);
+const RESERVED_CTRL_SHIFT_CODES = new Set([
+  'KeyA',   // Search open tabs.
+  'Delete', // Clear browsing data.
+  'KeyB',   // Bookmark bar / manager.
+  'KeyC',   // Browser inspector element picker.
+  'KeyI',   // Browser developer tools.
+  'KeyJ',   // Browser developer tools.
+  'KeyM',   // Browser profile/window command.
+  'KeyQ',   // Browser/window quit command.
+]);
+const RESERVED_ALT_CODES = new Set([
+  // Browser menus, address/location, window switching and navigation.
+  'KeyD', 'KeyE', 'KeyF', 'F4', 'Tab', 'Home', 'Space', 'Enter',
+  'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
+]);
+const RESERVED_ALT_SHIFT_CODES = new Set(['KeyB', 'KeyI', 'KeyT']);
+const RESERVED_STANDALONE_MODIFIER_CODES = new Set([
+  // These leave the application for browser/OS menus or window management.
+  // Standalone Control and Shift intentionally remain available.
+  'AltLeft', 'AltRight', 'MetaLeft', 'MetaRight',
+]);
 
 /** Normalize one keyboard binding, or the empty-slot sentinel `null`. */
 export function normalizeKeyboardBinding(value) {
@@ -62,6 +103,41 @@ export function keyboardBindingFromEvent(event) {
     altKey: event.altKey,
     metaKey: event.metaKey,
   });
+}
+
+/** True when two canonical keyboard bindings identify the same chord. */
+export function keyboardBindingsEqual(left, right) {
+  if (!left || !right || left.type !== 'keyboard' || right.type !== 'keyboard') return false;
+  return left.code === right.code
+    && MODIFIER_KEYS.every((key) => left[key] === right[key]);
+}
+
+/**
+ * Browser/OS chords that a Station must not capture from its surrounding UI.
+ *
+ * `KeyboardEvent.code` is used deliberately: it is the same physical-key
+ * identity as ordinary semantic bindings. Shift is intentionally ignored by
+ * the policy checks below, so adding it cannot turn Ctrl+R or Alt+F4 into a
+ * capturable chord.
+ */
+export function isReservedKeyboardBinding(value) {
+  const binding = normalizeKeyboardBinding(value);
+  if (!binding) return false;
+  const { code, ctrlKey, shiftKey, altKey, metaKey } = binding;
+  if (RESERVED_UNMODIFIED_CODES.has(code)) return true;
+  if (RESERVED_DEDICATED_BROWSER_CODES.has(code)) return true;
+  if (RESERVED_STANDALONE_MODIFIER_CODES.has(code)) return true;
+  // Meta is browser/OS chrome on macOS and the Windows/Super boundary on other
+  // platforms. Treat every Meta chord as unavailable rather than maintaining
+  // a necessarily incomplete platform-specific command list.
+  if (metaKey) return true;
+  if (ctrlKey && RESERVED_CTRL_CODES.has(code)) return true;
+  if (ctrlKey && RESERVED_CTRL_NAVIGATION_CODES.has(code)) return true;
+  if (ctrlKey && shiftKey && RESERVED_CTRL_SHIFT_CODES.has(code)) return true;
+  if (ctrlKey && altKey && code === 'Delete') return true;
+  if (altKey && RESERVED_ALT_CODES.has(code)) return true;
+  if (altKey && shiftKey && RESERVED_ALT_SHIFT_CODES.has(code)) return true;
+  return false;
 }
 
 /** True when an event target is editable or is actively capturing a remap. */
@@ -152,7 +228,58 @@ function copySlots(slots) {
 export function createSemanticActionRegistry() {
   const definitions = new Map();
   const adapters = new Map();
+  const authoredDefaults = new Map();
   const bindings = new Map();
+
+  function assertActionAndSlot(id, slot) {
+    if (!definitions.has(id)) throw new Error('unknown semantic action: ' + id);
+    if (!Number.isInteger(slot) || slot < 0 || slot >= SEMANTIC_BINDING_SLOT_COUNT) {
+      throw new RangeError('semantic action binding slot must be zero or one');
+    }
+  }
+
+  function contextsOverlap(left, right) {
+    return left.contexts.some((context) => right.contexts.includes(context));
+  }
+
+  function conflictsFor(id, slot, binding, source = bindings) {
+    if (!binding) return [];
+    const target = definitions.get(id);
+    const conflicts = [];
+    for (const [otherId, otherDefinition] of definitions) {
+      if (!contextsOverlap(target, otherDefinition)) continue;
+      const otherSlots = source.get(otherId) || [];
+      for (let otherSlot = 0; otherSlot < SEMANTIC_BINDING_SLOT_COUNT; otherSlot++) {
+        if (otherId === id && otherSlot === slot) continue;
+        if (keyboardBindingsEqual(binding, otherSlots[otherSlot])) {
+          conflicts.push({
+            actionId: otherId,
+            slot: otherSlot,
+            labelId: otherDefinition.labelId,
+            binding: copyBinding(otherSlots[otherSlot]),
+          });
+        }
+      }
+    }
+    return conflicts;
+  }
+
+  function commitBinding(id, slot, binding, conflicts) {
+    const nextByAction = new Map();
+    const mutableSlots = (actionId) => {
+      if (!nextByAction.has(actionId)) {
+        nextByAction.set(actionId, copySlots(bindings.get(actionId)));
+      }
+      return nextByAction.get(actionId);
+    };
+    for (const conflict of conflicts) {
+      mutableSlots(conflict.actionId)[conflict.slot] = null;
+    }
+    mutableSlots(id)[slot] = copyBinding(binding);
+    for (const [actionId, slots] of nextByAction) {
+      bindings.set(actionId, normalizeBindingSlots(slots));
+    }
+  }
 
   function register(definition, adapter) {
     const normalized = normalizeDefinition(definition);
@@ -163,7 +290,23 @@ export function createSemanticActionRegistry() {
       throw new TypeError('semantic action adapter must be a function');
     }
     definitions.set(normalized.id, normalized);
-    bindings.set(normalized.id, normalized.bindings);
+    authoredDefaults.set(normalized.id, normalizeBindingSlots(normalized.bindings));
+    bindings.set(normalized.id, normalizeBindingSlots(normalized.bindings));
+    for (let slot = 0; slot < SEMANTIC_BINDING_SLOT_COUNT; slot++) {
+      const binding = normalized.bindings[slot];
+      if (isReservedKeyboardBinding(binding)) {
+        definitions.delete(normalized.id);
+        authoredDefaults.delete(normalized.id);
+        bindings.delete(normalized.id);
+        throw new Error('semantic action authored default is reserved: ' + normalized.id);
+      }
+      if (conflictsFor(normalized.id, slot, binding).length > 0) {
+        definitions.delete(normalized.id);
+        authoredDefaults.delete(normalized.id);
+        bindings.delete(normalized.id);
+        throw new Error('semantic action authored default binding conflicts: ' + normalized.id);
+      }
+    }
     if (adapter) adapters.set(normalized.id, adapter);
     return action(normalized.id);
   }
@@ -184,15 +327,53 @@ export function createSemanticActionRegistry() {
       .filter((entry) => !context || entry.contexts.includes(context));
   }
 
-  function setBinding(id, slot, binding) {
-    if (!definitions.has(id)) throw new Error('unknown semantic action: ' + id);
-    if (!Number.isInteger(slot) || slot < 0 || slot >= SEMANTIC_BINDING_SLOT_COUNT) {
-      throw new RangeError('semantic action binding slot must be zero or one');
+  function setBinding(id, slot, value, options = {}) {
+    assertActionAndSlot(id, slot);
+    const binding = normalizeKeyboardBinding(value);
+    if (isReservedKeyboardBinding(binding)) {
+      return { status: 'reserved', actionId: id, slot, binding: copyBinding(binding) };
     }
-    const next = copySlots(bindings.get(id));
-    next[slot] = normalizeKeyboardBinding(binding);
-    bindings.set(id, normalizeBindingSlots(next));
-    return action(id);
+    const conflicts = conflictsFor(id, slot, binding);
+    if (conflicts.length > 0 && options.replace !== true) {
+      return {
+        status: 'conflict', actionId: id, slot,
+        binding: copyBinding(binding), conflicts,
+      };
+    }
+    commitBinding(id, slot, binding, conflicts);
+    return {
+      status: 'applied', actionId: id, slot, action: action(id),
+      cleared: conflicts,
+    };
+  }
+
+  /** Restore both authored slots for one action, clearing overlapping remaps. */
+  function resetAction(id) {
+    if (!definitions.has(id)) throw new Error('unknown semantic action: ' + id);
+    const defaults = copySlots(authoredDefaults.get(id));
+    const next = new Map([...bindings].map(([actionId, slots]) => [actionId, copySlots(slots)]));
+    next.set(id, copySlots(defaults));
+    const cleared = [];
+    for (let slot = 0; slot < SEMANTIC_BINDING_SLOT_COUNT; slot++) {
+      const binding = defaults[slot];
+      if (!binding) continue;
+      for (const conflict of conflictsFor(id, slot, binding, next)) {
+        // The target's two authored defaults were validated at registration.
+        if (conflict.actionId === id) continue;
+        next.get(conflict.actionId)[conflict.slot] = null;
+        cleared.push(conflict);
+      }
+    }
+    for (const [actionId, slots] of next) bindings.set(actionId, normalizeBindingSlots(slots));
+    return { status: 'applied', actionId: id, action: action(id), cleared };
+  }
+
+  /** Restore the complete conflict-free authored profile atomically. */
+  function resetAllBindings() {
+    for (const [id, slots] of authoredDefaults) {
+      bindings.set(id, normalizeBindingSlots(copySlots(slots)));
+    }
+    return { status: 'applied', profile: bindingProfile() };
   }
 
   /** Plain serialisable binding map for the explicit parent→iframe seam. */
@@ -253,6 +434,8 @@ export function createSemanticActionRegistry() {
     action,
     list,
     setBinding,
+    resetAction,
+    resetAllBindings,
     bindingProfile,
     updateBindings,
     activate,

@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   createSemanticActionRegistry,
   isSemanticInputTarget,
+  isReservedKeyboardBinding,
+  keyboardBindingsEqual,
   keyboardBindingDisplay,
   keyboardBindingFromEvent,
   normalizeBindingSlots,
@@ -96,10 +98,10 @@ describe('context-scoped dispatch', () => {
   it('matches KeyboardEvent.code and every modifier exactly', () => {
     const registry = createSemanticActionRegistry();
     registry.register(ACTION, () => true);
-    registry.setBinding(ACTION.id, 1, { code: 'KeyR', ctrlKey: true });
-    expect(registry.dispatchKeyboardEvent(key('KeyR', { ctrlKey: true }), 'captain').claimed)
+    registry.setBinding(ACTION.id, 1, { code: 'KeyR', shiftKey: true });
+    expect(registry.dispatchKeyboardEvent(key('KeyR', { shiftKey: true }), 'captain').claimed)
       .toBe(true);
-    expect(registry.dispatchKeyboardEvent(key('KeyR', { ctrlKey: true, shiftKey: true }), 'captain').claimed)
+    expect(registry.dispatchKeyboardEvent(key('KeyR', { shiftKey: true, altKey: true }), 'captain').claimed)
       .toBe(false);
     expect(registry.dispatchKeyboardEvent(key('KeyR'), 'helm').claimed).toBe(false);
   });
@@ -132,6 +134,238 @@ describe('context-scoped dispatch', () => {
     const claimedButUnavailable = key('KeyR');
     expect(registry.dispatchKeyboardEvent(claimedButUnavailable, 'captain').handled).toBe(false);
     expect(claimedButUnavailable.preventDefault).toHaveBeenCalledOnce();
+  });
+});
+
+describe('conflict-safe remapping', () => {
+  const definition = (id, contexts, code, second = null) => ({
+    id,
+    contexts,
+    labelId: `semantic_action.${id}.label`,
+    accessibilityLabelId: `semantic_action.${id}.accessibility`,
+    bindings: [{ code }, second && { code: second }],
+  });
+
+  it('conflicts only in intersecting contexts and preserves disjoint reuse', () => {
+    const registry = createSemanticActionRegistry();
+    registry.register(definition('bridge.primary', ['captain', 'bridge'], 'KeyA'));
+    registry.register(definition('captain.secondary', ['captain'], 'KeyB'));
+    registry.register(definition('helm.secondary', ['helm'], 'KeyC'));
+
+    expect(registry.setBinding('bridge.primary', 0, { code: 'KeyY' }).status).toBe('applied');
+    expect(registry.setBinding('helm.secondary', 0, { code: 'KeyY' }).status).toBe('applied');
+    const before = registry.bindingProfile();
+    const conflict = registry.setBinding('captain.secondary', 0, { code: 'KeyY' });
+    expect(conflict).toMatchObject({
+      status: 'conflict',
+      conflicts: [{ actionId: 'bridge.primary', slot: 0 }],
+    });
+    expect(registry.bindingProfile()).toEqual(before);
+
+    const replaced = registry.setBinding(
+      'captain.secondary', 0, { code: 'KeyY' }, { replace: true },
+    );
+    expect(replaced.status).toBe('applied');
+    expect(registry.action('bridge.primary').bindings[0]).toBeNull();
+    expect(registry.action('captain.secondary').bindings[0].code).toBe('KeyY');
+    expect(registry.action('helm.secondary').bindings[0].code).toBe('KeyY');
+  });
+
+  it('clears every overlapping conflict atomically and detects same-action slots', () => {
+    const registry = createSemanticActionRegistry();
+    registry.register(definition('multi.target', ['captain', 'bridge'], 'KeyA'));
+    registry.register(definition('captain.source', ['captain'], 'KeyB'));
+    registry.register(definition('bridge.source', ['bridge'], 'KeyC'));
+    registry.setBinding('captain.source', 0, { code: 'KeyY' });
+    registry.setBinding('bridge.source', 0, { code: 'KeyY' });
+
+    const conflict = registry.setBinding('multi.target', 1, { code: 'KeyY' });
+    expect(conflict.conflicts.map(({ actionId }) => actionId)).toEqual([
+      'captain.source', 'bridge.source',
+    ]);
+    registry.setBinding('multi.target', 1, { code: 'KeyY' }, { replace: true });
+    expect(registry.action('captain.source').bindings[0]).toBeNull();
+    expect(registry.action('bridge.source').bindings[0]).toBeNull();
+
+    const sameAction = registry.setBinding('multi.target', 0, { code: 'KeyY' });
+    expect(sameAction).toMatchObject({
+      status: 'conflict',
+      conflicts: [{ actionId: 'multi.target', slot: 1 }],
+    });
+  });
+
+  it('treats modifiers as binding identity', () => {
+    const plain = normalizeKeyboardBinding({ code: 'KeyY' });
+    const shifted = normalizeKeyboardBinding({ code: 'KeyY', shiftKey: true });
+    expect(keyboardBindingsEqual(plain, shifted)).toBe(false);
+
+    const registry = createSemanticActionRegistry();
+    registry.register(definition('captain.one', ['captain'], 'KeyA'));
+    registry.register(definition('captain.two', ['captain'], 'KeyB'));
+    registry.setBinding('captain.one', 0, plain);
+    expect(registry.setBinding('captain.two', 0, shifted).status).toBe('applied');
+  });
+});
+
+describe('reserved keyboard chords', () => {
+  it('covers portable browser function keys and reviewer-reported misses', () => {
+    expect(isReservedKeyboardBinding({ code: 'F4', ctrlKey: true })).toBe(true);
+    expect(isReservedKeyboardBinding({ code: 'F1' })).toBe(true);
+    expect(isReservedKeyboardBinding({ code: 'F6' })).toBe(true);
+    expect(isReservedKeyboardBinding({ code: 'Home', altKey: true })).toBe(true);
+    for (const code of ['F1', 'F3', 'F5', 'F6', 'F7', 'F10', 'F11', 'F12']) {
+      expect(isReservedKeyboardBinding({ code })).toBe(true);
+    }
+  });
+
+  it('covers tab selection, address-bar and every Meta chord', () => {
+    expect(isReservedKeyboardBinding({ code: 'Digit1', ctrlKey: true })).toBe(true);
+    expect(isReservedKeyboardBinding({ code: 'Digit9', ctrlKey: true })).toBe(true);
+    expect(isReservedKeyboardBinding({ code: 'KeyD', altKey: true })).toBe(true);
+    expect(isReservedKeyboardBinding({ code: 'KeyI', metaKey: true })).toBe(true);
+    expect(isReservedKeyboardBinding({ code: 'KeyV', metaKey: true })).toBe(true);
+    expect(isReservedKeyboardBinding({ code: 'ArrowLeft', metaKey: true })).toBe(true);
+    for (let digit = 1; digit <= 9; digit++) {
+      expect(isReservedKeyboardBinding({ code: `Digit${digit}`, ctrlKey: true })).toBe(true);
+    }
+    for (const code of ['KeyA', 'KeyV', 'ArrowUp', 'F2', 'Numpad1']) {
+      expect(isReservedKeyboardBinding({ code, metaKey: true })).toBe(true);
+    }
+  });
+
+  it('refuses dedicated browser and OS keys without applying them', () => {
+    const codes = [
+      'PrintScreen',
+      'BrowserBack', 'BrowserForward', 'BrowserRefresh', 'BrowserHome',
+      'BrowserSearch', 'BrowserFavorites', 'BrowserStop',
+    ];
+    const registry = createSemanticActionRegistry();
+    registry.register(ACTION);
+    const before = registry.bindingProfile();
+    for (const code of codes) {
+      expect(isReservedKeyboardBinding({ code })).toBe(true);
+      expect(registry.setBinding(ACTION.id, 0, { code })).toMatchObject({
+        status: 'reserved', actionId: ACTION.id, slot: 0,
+      });
+      expect(registry.bindingProfile()).toEqual(before);
+    }
+  });
+
+  it('protects browser and OS chords even with optional Shift', () => {
+    for (const binding of [
+      { code: 'Escape' },
+      { code: 'Tab', ctrlKey: true },
+      { code: 'KeyR', ctrlKey: true, shiftKey: true },
+      { code: 'KeyW', metaKey: true },
+      { code: 'KeyD', ctrlKey: true },
+      { code: 'KeyH', ctrlKey: true },
+      { code: 'KeyJ', metaKey: true },
+      { code: 'KeyU', ctrlKey: true },
+      { code: 'KeyK', metaKey: true },
+      { code: 'F4', metaKey: true, shiftKey: true },
+      { code: 'PageUp', ctrlKey: true },
+      { code: 'PageDown', metaKey: true },
+      { code: 'Delete', ctrlKey: true, shiftKey: true },
+      { code: 'Delete', ctrlKey: true, altKey: true },
+      { code: 'KeyA', ctrlKey: true, shiftKey: true },
+      { code: 'KeyB', ctrlKey: true, shiftKey: true },
+      { code: 'KeyC', ctrlKey: true, shiftKey: true },
+      { code: 'KeyI', ctrlKey: true, shiftKey: true },
+      { code: 'KeyJ', ctrlKey: true, shiftKey: true },
+      { code: 'KeyM', ctrlKey: true, shiftKey: true },
+      { code: 'KeyQ', ctrlKey: true, shiftKey: true },
+      { code: 'KeyD', altKey: true },
+      { code: 'KeyE', altKey: true, shiftKey: true },
+      { code: 'KeyF', altKey: true },
+      { code: 'F4', altKey: true },
+      { code: 'Tab', altKey: true, shiftKey: true },
+      { code: 'Home', altKey: true, shiftKey: true },
+      { code: 'ArrowLeft', altKey: true },
+      { code: 'ArrowDown', altKey: true },
+      { code: 'Space', altKey: true },
+      { code: 'Enter', altKey: true },
+      { code: 'KeyB', altKey: true, shiftKey: true },
+      { code: 'KeyI', altKey: true, shiftKey: true },
+      { code: 'KeyT', altKey: true, shiftKey: true },
+      { code: 'Space', metaKey: true },
+      { code: 'KeyQ', metaKey: true, shiftKey: true },
+      { code: 'KeyM', metaKey: true },
+      { code: 'BracketLeft', metaKey: true },
+      { code: 'Backquote', metaKey: true },
+      { code: 'AltLeft', altKey: true },
+      { code: 'MetaRight', metaKey: true },
+    ]) expect(isReservedKeyboardBinding(binding)).toBe(true);
+  });
+
+  it('keeps ordinary controls and standalone Control/Shift available', () => {
+    for (const binding of [
+      { code: 'Space' },
+      { code: 'ArrowLeft' },
+      { code: 'ArrowRight', shiftKey: true },
+      { code: 'F2' },
+      { code: 'F4' },
+      { code: 'F8' },
+      { code: 'F9' },
+      { code: 'KeyR' },
+      { code: 'KeyY', ctrlKey: true },
+      { code: 'Delete', ctrlKey: true },
+      { code: 'KeyX', altKey: true },
+      { code: 'KeyR', altKey: true },
+      { code: 'Digit1', altKey: true },
+      { code: 'ControlLeft', ctrlKey: true },
+      { code: 'ShiftRight', shiftKey: true },
+    ]) expect(isReservedKeyboardBinding(binding)).toBe(false);
+  });
+
+  it('refuses a reserved proposal without mutating either slot', () => {
+    const registry = createSemanticActionRegistry();
+    registry.register(ACTION);
+    const before = registry.bindingProfile();
+    expect(registry.setBinding(ACTION.id, 0, { code: 'KeyR', ctrlKey: true }))
+      .toMatchObject({ status: 'reserved' });
+    expect(registry.bindingProfile()).toEqual(before);
+  });
+});
+
+describe('authored binding resets', () => {
+  const action = (id, contexts, first, second) => ({
+    id,
+    contexts,
+    labelId: `semantic_action.${id}.label`,
+    accessibilityLabelId: `semantic_action.${id}.accessibility`,
+    bindings: [{ code: first }, { code: second }],
+  });
+
+  it('restores both action slots and clears remaps colliding with those defaults', () => {
+    const registry = createSemanticActionRegistry();
+    registry.register(action('captain.one', ['captain'], 'KeyA', 'Digit1'));
+    registry.register(action('captain.two', ['captain'], 'KeyB', 'Digit2'));
+    registry.setBinding('captain.one', 0, { code: 'KeyY' });
+    registry.setBinding('captain.one', 1, { code: 'KeyU' });
+    registry.setBinding('captain.two', 0, { code: 'KeyA' });
+    registry.setBinding('captain.two', 1, { code: 'Digit1' });
+
+    const result = registry.resetAction('captain.one');
+    expect(result.cleared).toHaveLength(2);
+    expect(registry.action('captain.one').bindings.map((binding) => binding.code))
+      .toEqual(['KeyA', 'Digit1']);
+    expect(registry.action('captain.two').bindings).toEqual([null, null]);
+  });
+
+  it('restores the complete two-slot authored profile globally', () => {
+    const registry = createSemanticActionRegistry();
+    registry.register(action('captain.one', ['captain'], 'KeyA', 'Digit1'));
+    registry.register(action('captain.two', ['captain'], 'KeyB', 'Digit2'));
+    registry.setBinding('captain.one', 0, { code: 'KeyY' });
+    registry.setBinding('captain.one', 1, null);
+    registry.setBinding('captain.two', 0, null);
+    registry.setBinding('captain.two', 1, { code: 'KeyU' });
+
+    expect(registry.resetAllBindings().status).toBe('applied');
+    expect(registry.action('captain.one').bindings.map((binding) => binding.code))
+      .toEqual(['KeyA', 'Digit1']);
+    expect(registry.action('captain.two').bindings.map((binding) => binding.code))
+      .toEqual(['KeyB', 'Digit2']);
   });
 });
 

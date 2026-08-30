@@ -57,14 +57,25 @@ Outbound: context-scoped operator input first resolves through
 slots and presentation metadata sit above transport and carry no Station or
 session authority. Each console iframe owns an isolated registry instance;
 `client.html` owns the current in-memory binding choices and copies them into
-iframes through `__updateSemanticActionBindings` on load and remap. The first
-real adapter is `captain.red-alert`: its visible control and default/remapped
-keyboard bindings all invoke the same adapter, which derives an explicit
-boolean from the latest authoritative Captain view and emits the legacy
-`set_red_alert` action. Each console iframe then posts its `console_action`, and
-`gui/action-map.js` remains the table-driven dispatcher mapping `action.action`
-values to `ClientMessage`s (mostly `ControlSystem { target, payload }`) via
-`send(type, data?)`.
+iframes through `__updateSemanticActionBindings` on load and remap. The two real
+Captain adapters are `captain.red-alert` and `captain.weapons-hold`: each
+visible control and its default/remapped keyboard bindings invoke the same
+adapter, derive an explicit boolean from the latest authoritative Captain view,
+and emit the existing `set_red_alert` or `set_weapons_hold` action. Each console
+iframe then posts its `console_action`, and `gui/action-map.js` remains the
+table-driven dispatcher mapping `action.action` values to `ClientMessage`s
+(mostly `ControlSystem { target, payload }`) via `send(type, data?)`.
+
+Keyboard binding identity is `KeyboardEvent.code` plus all four modifiers.
+Registry conflicts exist only where action context arrays intersect, including
+two slots on the same action. Settings asks the parent registry to propose a
+change; conflicting proposals remain presentation-only until the player chooses
+Replace, which atomically clears every overlapping assignment, while Cancel and
+reserved browser/OS chords leave the profile untouched. Authored two-slot
+defaults are retained separately from current bindings. Per-action reset
+restores both slots and clears collisions with those defaults; Reset All
+restores the complete conflict-free authored profile. These contexts and local
+binding choices add no Station or command authority.
 
 ## Module inventory (`gui/`)
 
@@ -79,7 +90,7 @@ values to `ClientMessage`s (mostly `ControlSystem { target, payload }`) via
 | `console-state.js` | Pure view-model builders. One family registry contains all builders, including Command, Tractor and Umbilical; flat and composed consoles carry actual owned `SystemId`s and projected families, while typed blackboard discriminants select semantic data independently of id spelling. |
 | `console-payload.js` | Metadata-driven flat/keyed normalization plus `familyView`: mirrors flat views only under actual projected ids and selects composite views by Console Family, with no inverse id census. |
 | `action-map.js` | Table-driven `console_action` → `ClientMessage` dispatch |
-| `semantic-action-registry.js`, `stations/captain-actions.js` | Non-authoritative context/input identity, exactly two binding slots, keyboard matching and the real Captain Red Alert adapter above `action-map.js` |
+| `semantic-action-registry.js`, `stations/captain-actions.js` | Non-authoritative context/input identity, exactly two binding slots, reserved-chord policy, overlap-only conflict replacement and reset operations, plus the real Captain Red Alert and Weapons Hold adapters above `action-map.js` |
 | `iframe-bridge.js` | `push()` / `wireLoad()` state-push into console iframes (ADR-0001 §2) |
 | `content-switcher.js` | Section visibility over the ship's mounted stations; one human directly holds one station |
 | `station-roster.js` | Pure fold: players + station defs → lobby roster rows + aggregates |

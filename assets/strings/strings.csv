@@ -2,6 +2,8 @@ id,context,en
 help.bindings.heading,Station Help heading over the current semantic action bindings,[Bindings]
 semantic_action.captain.red_alert.label,Captain semantic action display name,[Red Alert]
 semantic_action.captain.red_alert.accessibility,Captain semantic action accessible description,[Raise or stand down Red Alert from the Captain console.]
+semantic_action.captain.weapons_hold.label,Captain semantic action display name,[Weapons Hold]
+semantic_action.captain.weapons_hold.accessibility,Captain semantic action accessible description,[Hold or release all weapons fire from the Captain console.]
 input.modifier.control,Keyboard binding display name for the Control modifier,Ctrl
 input.modifier.shift,Keyboard binding display name for the Shift modifier,Shift
 input.modifier.alt,Keyboard binding display name for the Alt modifier,Alt
@@ -16,6 +18,13 @@ settings.controls.slot,Phone client Controls tab binding slot label; {slot} is 1
 settings.controls.slot_value,Station Help current semantic binding; {slot} is 1 or 2 and {binding} is the displayed chord,"Slot {slot}: {binding}"
 settings.controls.capture_label,"Phone client Controls tab accessible remap label; {action} is the display name and {slot} is 1 or 2","Remap {action}, slot {slot}"
 settings.controls.press_key,Phone client Controls tab prompt shown while a remap slot has focus,[Press a key]
+settings.controls.reset_action,Phone client Controls tab button restoring one semantic action to authored defaults,[Reset Action]
+settings.controls.reset_all,Phone client Controls tab button restoring every semantic action to authored defaults,[Reset All]
+settings.controls.reserved,Assertive feedback refusing a browser or OS reserved chord; {binding} is the displayed chord,[{binding} is reserved by the browser or operating system. Choose another binding.]
+settings.controls.conflict_heading,Accessible semantic binding conflict heading; {binding} is the displayed chord,[{binding} is already assigned in an overlapping context.]
+settings.controls.conflict_item,"Semantic binding conflict item; {action} is an action name and {slot} is 1 or 2","[{action}, slot {slot}]"
+settings.controls.replace,Semantic binding conflict button that clears every overlapping assignment,[Replace]
+settings.controls.cancel,Semantic binding conflict button that changes nothing,[Cancel]
 world.combat_test.harrow.blood_eagle,assets/worlds/combat_test.toml → scripted Harrow display identity,Blood-Eagle
 world.combat_test.harrow.iron_spear,assets/worlds/combat_test.toml → scripted Harrow display identity,Iron-Spear
 world.combat_test.harrow.black_anvil,assets/worlds/combat_test.toml → scripted Harrow display identity,Black-Anvil

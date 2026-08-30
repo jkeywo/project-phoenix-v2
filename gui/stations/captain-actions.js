@@ -12,6 +12,7 @@ import { createSemanticActionRegistry } from '../semantic-action-registry.js';
 
 export const CAPTAIN_ACTION_CONTEXT = 'captain';
 export const CAPTAIN_RED_ALERT_ACTION_ID = 'captain.red-alert';
+export const CAPTAIN_WEAPONS_HOLD_ACTION_ID = 'captain.weapons-hold';
 
 /** Stable metadata plus the two-slot default binding contract. */
 export const CAPTAIN_RED_ALERT_ACTION = Object.freeze({
@@ -23,6 +24,24 @@ export const CAPTAIN_RED_ALERT_ACTION = Object.freeze({
     Object.freeze({
       type: 'keyboard',
       code: 'KeyR',
+      ctrlKey: false,
+      shiftKey: false,
+      altKey: false,
+      metaKey: false,
+    }),
+    null,
+  ]),
+});
+
+export const CAPTAIN_WEAPONS_HOLD_ACTION = Object.freeze({
+  id: CAPTAIN_WEAPONS_HOLD_ACTION_ID,
+  contexts: Object.freeze([CAPTAIN_ACTION_CONTEXT]),
+  labelId: 'semantic_action.captain.weapons_hold.label',
+  accessibilityLabelId: 'semantic_action.captain.weapons_hold.accessibility',
+  bindings: Object.freeze([
+    Object.freeze({
+      type: 'keyboard',
+      code: 'KeyH',
       ctrlKey: false,
       shiftKey: false,
       altKey: false,
@@ -53,6 +72,12 @@ export function registerCaptainActions(registry, options = {}) {
     // new authority decision. The host remains responsible for admission.
     if (!view || view.red_alert_auto || !sendAction) return false;
     sendAction('set_red_alert', { active: !Boolean(view.red_alert) });
+    return true;
+  });
+  registry.register(CAPTAIN_WEAPONS_HOLD_ACTION, () => {
+    const view = captainActionView(getState());
+    if (!view || view.red_alert_auto || !sendAction) return false;
+    sendAction('set_weapons_hold', { held: !Boolean(view.weapons_hold) });
     return true;
   });
   return registry;

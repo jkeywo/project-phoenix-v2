@@ -80,9 +80,10 @@ test('captain console: camera-select and red alert call __sendAction with correc
   await camBtns.nth(2).click();
   await camBtns.nth(0).click();
   await page.locator('ph-red-alert').locator('#alert-btn').click();
+  await page.locator('ph-red-alert').locator('#hold-btn').click();
 
   const sent = (await page.evaluate(() => window.__sent)).map(JSON.parse);
-  expect(sent).toHaveLength(4);
+  expect(sent).toHaveLength(5);
   for (const envelope of sent) {
     expect(Number.isFinite(envelope.__input_ms)).toBe(true);
     delete envelope.__input_ms;
@@ -92,6 +93,7 @@ test('captain console: camera-select and red alert call __sendAction with correc
     { action: 'set_view', console: 'captain', direction: 'Starboard' },
     { action: 'set_view', console: 'captain', direction: 'Fore' },
     { action: 'set_red_alert', console: 'captain', active: true },
+    { action: 'set_weapons_hold', console: 'captain', held: true },
   ]);
 });
 

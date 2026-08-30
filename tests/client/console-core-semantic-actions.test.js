@@ -3,6 +3,32 @@ import { describe, it, expect, vi } from 'vitest';
 import { initConsole } from '../../gui/console-core.js';
 
 describe('console-core semantic action runtime', () => {
+  it('routes the second real Captain action through the same semantic runtime', () => {
+    const sent = [];
+    window.__sendAction = (json) => sent.push(JSON.parse(json));
+    const runtime = initConsole({ name: 'captain', render: () => {} });
+    window.__updateConsole('captain', JSON.stringify({
+      red_alert: false,
+      weapons_hold: false,
+      red_alert_auto: false,
+    }));
+
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      code: 'KeyH', bubbles: true, cancelable: true,
+    }));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({
+      action: 'set_weapons_hold', console: 'captain', held: true,
+    });
+
+    runtime.disposeSemanticActions();
+    delete window.__sendAction;
+    delete window.__updateConsole;
+    delete window.__updateSemanticActionBindings;
+    delete window.activateSemanticAction;
+    delete window.sendAction;
+  });
+
   it('routes default and parent-remapped Captain keys through the legacy action envelope', () => {
     const sent = [];
     window.__sendAction = (json) => sent.push(JSON.parse(json));

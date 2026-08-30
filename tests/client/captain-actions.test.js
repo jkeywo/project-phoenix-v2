@@ -3,6 +3,8 @@ import {
   CAPTAIN_ACTION_CONTEXT,
   CAPTAIN_RED_ALERT_ACTION,
   CAPTAIN_RED_ALERT_ACTION_ID,
+  CAPTAIN_WEAPONS_HOLD_ACTION,
+  CAPTAIN_WEAPONS_HOLD_ACTION_ID,
   createCaptainActionRegistry,
 } from '../../gui/stations/captain-actions.js';
 
@@ -23,6 +25,18 @@ describe('real Captain Red Alert semantic adapter', () => {
     expect(CAPTAIN_RED_ALERT_ACTION.bindings).toHaveLength(2);
     expect(CAPTAIN_RED_ALERT_ACTION.bindings[0]).toMatchObject({ code: 'KeyR' });
     expect(CAPTAIN_RED_ALERT_ACTION.bindings[1]).toBeNull();
+  });
+
+  it('declares Weapons Hold as a second real Captain action with two slots', () => {
+    expect(CAPTAIN_WEAPONS_HOLD_ACTION).toMatchObject({
+      id: 'captain.weapons-hold',
+      contexts: ['captain'],
+      labelId: expect.any(String),
+      accessibilityLabelId: expect.any(String),
+    });
+    expect(CAPTAIN_WEAPONS_HOLD_ACTION.bindings).toHaveLength(2);
+    expect(CAPTAIN_WEAPONS_HOLD_ACTION.bindings[0]).toMatchObject({ code: 'KeyH' });
+    expect(CAPTAIN_WEAPONS_HOLD_ACTION.bindings[1]).toBeNull();
   });
 
   it('emits the existing explicit set_red_alert envelope from the default binding', () => {
@@ -69,6 +83,22 @@ describe('real Captain Red Alert semantic adapter', () => {
     );
     expect(result.actionId).toBe(CAPTAIN_RED_ALERT_ACTION_ID);
     expect(sendAction).toHaveBeenCalledWith('set_red_alert', { active: true });
+  });
+
+  it('routes default and remapped Weapons Hold through the existing explicit envelope', () => {
+    const sendAction = vi.fn();
+    const registry = createCaptainActionRegistry({
+      getState: () => ({ weapons_hold: false, red_alert_auto: false }),
+      sendAction,
+    });
+    expect(registry.dispatchKeyboardEvent(key('KeyH'), CAPTAIN_ACTION_CONTEXT))
+      .toMatchObject({ claimed: true, actionId: CAPTAIN_WEAPONS_HOLD_ACTION_ID, handled: true });
+    expect(sendAction).toHaveBeenLastCalledWith('set_weapons_hold', { held: true });
+
+    registry.setBinding(CAPTAIN_WEAPONS_HOLD_ACTION_ID, 0, { code: 'KeyJ' });
+    registry.dispatchKeyboardEvent(key('KeyJ'), CAPTAIN_ACTION_CONTEXT);
+    expect(sendAction).toHaveBeenCalledTimes(2);
+    expect(sendAction).toHaveBeenLastCalledWith('set_weapons_hold', { held: true });
   });
 
   it('does not emit while authoritative state says the system is AI-run', () => {

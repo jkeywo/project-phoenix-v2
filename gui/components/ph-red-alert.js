@@ -7,6 +7,7 @@ import { t } from '../strings.js';
 import {
   CAPTAIN_ACTION_CONTEXT,
   CAPTAIN_RED_ALERT_ACTION_ID,
+  CAPTAIN_WEAPONS_HOLD_ACTION_ID,
 } from '../stations/captain-actions.js';
 import { PhElement, phDefine } from './ph-element.js';
 
@@ -60,9 +61,13 @@ export class PhRedAlert extends PhElement {
     // stations with the guns cold.
     const holdBtn = this.shadowRoot.getElementById('hold-btn');
     holdBtn.addEventListener('click', () => {
-      if (this.sendAction && !holdBtn.disabled) {
-        const currentlyHeld = !!(this.state && this.state.hold);
-        this.sendAction('set_weapons_hold', { held: !currentlyHeld });
+      if (holdBtn.disabled) return;
+      const activate = typeof window !== 'undefined' && window.activateSemanticAction;
+      if (typeof activate === 'function') {
+        activate(CAPTAIN_WEAPONS_HOLD_ACTION_ID, {
+          context: CAPTAIN_ACTION_CONTEXT,
+          source: 'control',
+        });
       }
     });
   }

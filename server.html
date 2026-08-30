@@ -150,6 +150,21 @@
     }
     #canvas { display: block; width: 100%; height: 100%; background: #000; }
     #overlay { position: absolute; bottom: 1rem; right: 1rem; z-index: 190; display: none; }
+    /* Before a world is selected the join surface is a real flex child of the
+       scenario panel, between the world picker and saved-session catalogue.
+       Keeping it in layout makes every catalogue control visible/clickable and
+       also lets the portrait layout scroll all three surfaces in sequence. */
+    #overlay.pre-scenario {
+      position: static;
+      flex: 0 1 auto;
+      align-self: center;
+      min-width: 0;
+      max-height: calc(100vh - var(--settings-cog-keepout) - 1.5rem);
+      margin: var(--settings-cog-keepout) 1rem 1.5rem;
+      overflow-y: auto;
+      box-sizing: border-box;
+    }
+    #overlay.pre-scenario #qr-panel { margin-left: auto; margin-right: auto; }
     #qr { display: none; }
     /* The join panel (PRD #1023 module 4, user story 4): "I want the join QR
        framed, captioned, and accompanied by a readable URL, so that guests can
@@ -342,6 +357,100 @@
     }
     #snapshot-import-status {
       font-size: 0.75rem; color: #9ab; white-space: normal; word-break: break-word;
+    }
+    /* Peer-local save catalogue (issue #865). It is a sibling of the ordinary
+       scenario picker, so starting a new session never disappears behind save
+       management and no control can imply live-session restore. */
+    #save-slots-panel {
+      margin-left: auto;
+      width: clamp(19rem, 31vw, 29rem);
+      min-width: 18rem;
+      box-sizing: border-box;
+      padding: var(--settings-cog-keepout) 1rem 1.5rem;
+      overflow-y: auto;
+      background: rgba(0,0,0,0.82);
+      border-left: 1px solid #334;
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+    }
+    .save-slots-heading { margin: 0; color: #cce; font-size: 1rem; letter-spacing: 0.06em; }
+    .save-slots-intro, .save-slots-hint {
+      margin: 0; color: #889; font-size: 0.72rem; line-height: 1.4;
+    }
+    .save-slots-create, .save-slots-actions {
+      display: grid; grid-template-columns: 1fr auto; gap: 0.4rem;
+    }
+    .save-slots-label { grid-column: 1 / -1; color: #9ab; font-size: 0.7rem; }
+    .save-slots-input {
+      min-width: 0; background: #08090d; color: #cde; border: 1px solid #334;
+      border-radius: 3px; padding: 0.42rem 0.5rem; font: inherit;
+    }
+    .save-slots-button {
+      background: #111; color: #aae; border: 1px solid #445; border-radius: 3px;
+      padding: 0.42rem 0.6rem; font: inherit; cursor: pointer;
+    }
+    .save-slots-button:hover:not(:disabled) { background: #223; border-color: #669; }
+    .save-slots-button.primary { border-color: #668; color: #ddf; }
+    .save-slots-button.danger { border-color: #733; color: #fbb; }
+    .save-slots-button:disabled, .save-slots-input:disabled { opacity: 0.45; cursor: default; }
+    .save-slots-button:focus-visible, .save-slots-input:focus-visible, .save-slot-select:focus-visible {
+      outline: 2px solid #9cf; outline-offset: 2px;
+    }
+    .save-slots-list {
+      list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem;
+    }
+    .save-slot-select {
+      width: 100%; display: flex; flex-direction: column; gap: 0.15rem;
+      background: #0b0c12; color: #cde; border: 1px solid #334; border-radius: 4px;
+      padding: 0.55rem; font: inherit; text-align: left; cursor: pointer;
+    }
+    .save-slot-select.selected { background: #18203a; border-color: #668; }
+    .save-slot-name { color: #eef; font-weight: 700; overflow-wrap: anywhere; }
+    .save-slot-detail, .save-slot-metadata { color: #899; font-size: 0.68rem; overflow-wrap: anywhere; }
+    .save-slot-compatibility { font-size: 0.68rem; }
+    .save-slot-compatibility.compatible { color: #7c9; }
+    .save-slot-compatibility.pending { color: #bc8; }
+    .save-slot-compatibility.incompatible, .save-slot-metadata { color: #d99; }
+    .save-slots-actions { border-top: 1px solid #223; padding-top: 0.65rem; }
+    .save-slots-confirm { border: 1px solid #733; background: #180d10; padding: 0.65rem; }
+    .save-slots-confirm p { margin: 0 0 0.55rem; color: #fbb; }
+    .save-slots-confirm button + button { margin-left: 0.4rem; }
+    .save-slots-status {
+      min-height: 1.2em; color: #9ab; font-size: 0.75rem; line-height: 1.4;
+      overflow-wrap: anywhere;
+    }
+    .save-slots-status.ok { color: #7c9; }
+    .save-slots-status.pending { color: #bc8; }
+    .save-slots-status.failed { color: #f99; }
+    .save-slots-empty { color: #889; font-size: 0.75rem; }
+    /* The named manual-save affordance belongs to running-session chrome, not
+       to the pre-scenario picker. Rust's lobby phase drives `[hidden]` below;
+       PhoenixReady is intentionally not a proxy for a capturable World. */
+    #manual-save-panel {
+      position: fixed;
+      top: 56px; right: 12px;
+      z-index: 170;
+      width: min(22rem, calc(100vw - 24px));
+      box-sizing: border-box;
+      padding: 0.7rem;
+      border: 1px solid #334;
+      border-radius: 4px;
+      background: rgba(4, 8, 13, 0.92);
+      color: #cde;
+      font-family: monospace;
+    }
+    #manual-save-panel[hidden] { display: none; }
+    #manual-save-panel .save-slots-heading { margin-bottom: 0.55rem; }
+    @media (orientation: portrait), (max-width: 800px) {
+      #scenario-panel { flex-direction: column; overflow-y: auto; }
+      #world-list, #save-slots-panel {
+        width: 100%; max-width: none; min-width: 0; overflow: visible;
+      }
+      #overlay.pre-scenario {
+        width: 100%; max-height: none; margin: 0; padding: 1rem; overflow: visible;
+      }
+      #save-slots-panel { border-left: 0; border-top: 1px solid #334; }
     }
     #mod-pack-status {
       font-size: 0.72rem; color: #889; white-space: normal; word-break: break-word;
@@ -1245,7 +1354,16 @@
       var ok = parts[0] === 'ok';
       // Only the message may contain a tab, so everything past the second one
       // is rejoined rather than dropped.
-      showSnapshotStatus(ok, parts.slice(2).join('\t'));
+      var message = parts.slice(2).join('\t');
+      showSnapshotStatus(ok, message);
+      if (parts[1] === 'save') {
+        if (window.phSaveSlotsController) {
+          window.phSaveSlotsController.reportOutcome(ok, message);
+        }
+        if (window.phManualSaveController) {
+          window.phManualSaveController.reportOutcome(ok, message);
+        }
+      }
       // Three sources now (issue #866 added `export`), so the mapping is a
       // table rather than a ternary: a fourth would otherwise land silently on
       // the resume button.
@@ -1394,6 +1512,7 @@
         <div id="snapshot-import-status"></div>
       </div>
     </div>
+    <aside id="save-slots-panel"></aside>
   </div>
 
   <!-- ── HTML Lobby Panel (issue #436) ──────────────────────────────────── -->
@@ -1588,6 +1707,11 @@
          panel: a resume that the version gate refused has to be readable on a
          page the host has only just loaded. -->
     <div id="snapshot-status" role="status" aria-live="polite"></div>
+
+    <!-- Persistent running-session save chrome (issue #865). The catalogue
+         remains on the pre-session panel; this compact surface owns only a
+         named fixed-tick capture and is shown from authoritative GamePhase. -->
+    <aside id="manual-save-panel" hidden></aside>
   </div>
 
   <!-- Trunk replaces this with the compiled WASM bundle. It fires
@@ -1628,6 +1752,104 @@
     // mechanics of both are in a module so vitest can reach them.
     import * as snapshotTransfer from './gui/snapshot-transfer.js';
     window.phSnapshotTransfer = snapshotTransfer;
+    import * as saveSlots from './gui/save-slots.js';
+    window.phSaveSlots = saveSlots;
+    // Peer-local Store identity is an async serialized claim (Web Lock first,
+    // SharedWorker fallback). Begin it as soon as this module island loads;
+    // startPhoenix awaits the same promise before any App can emit an autosave,
+    // and catalogue refresh awaits it before listing.
+    window.phSaveIdentityReady = saveSlots.prepareBrowserSaveIdentity(window);
+    window.__saveSlotsCaptureAvailable = false;
+    window.__setSaveSlotsPhase = function (phase) {
+      const capturable = saveSlots.captureAvailableForPhase(phase);
+      window.__saveSlotsCaptureAvailable = capturable;
+      const manualRoot = document.getElementById('manual-save-panel');
+      // Keep the disabled control and its refusal visible at GameOver. Lobby
+      // returns to the catalogue, where the adapter below mirrors a refusal.
+      if (manualRoot) manualRoot.hidden = phase !== 'InProgress' && phase !== 'GameOver';
+      if (window.phSaveSlotsController) {
+        window.phSaveSlotsController.setPhase(phase);
+      }
+      if (window.phManualSaveController) {
+        window.phManualSaveController.setPhase(phase);
+      }
+    };
+    window.__mountSaveSlots = function () {
+      const bindings = window.wasmBindings;
+      if (!bindings || typeof bindings.wasm_list_save_slots !== 'function') return null;
+      const api = {
+        list: function () { return Array.from(bindings.wasm_list_save_slots() || []); },
+        create: function (name) { return bindings.wasm_create_save_slot(name); },
+        rename: function (slotId, name) { return bindings.wasm_rename_save_slot(slotId, name); },
+        export: function (slotId) { return bindings.wasm_export_save_slot(slotId); },
+        takeExport: function () { return bindings.wasm_take_exported_snapshot(); },
+        exportName: function () { return bindings.wasm_export_file_name(); },
+        delete: function (slotId, confirmed) { return bindings.wasm_delete_save_slot(slotId, confirmed); },
+      };
+      if (!window.phSaveSlotsController) {
+        const root = document.getElementById('save-slots-panel');
+        if (root) {
+          window.phSaveSlotsController = saveSlots.mountSaveSlots({
+            root,
+            doc: document,
+            api,
+            mode: 'catalogue',
+            canCapture: function () { return false; },
+            download: snapshotTransfer.downloadArtifact,
+            onNewSession: function () {
+              saveSlots.clearPendingResume(window);
+              if (typeof window.__hostChooseNewSession === 'function') {
+                window.__hostChooseNewSession();
+              }
+              const first = document.querySelector('.scenario-entry');
+              const fallback = document.getElementById('world-list-label');
+              (first || fallback)?.focus();
+            },
+            onStart: async function (row) {
+              // Always reload. Even when this catalogue is re-shown after
+              // GameOver, a save starts a NEW App and never mutates the World.
+              const url = new URL(window.location.href);
+              url.searchParams.set('scenario', row.scenario);
+              url.searchParams.set('ship', row.selectedShip);
+              url.searchParams.set('resume', row.slotId);
+              if (!await saveSlots.armBrowserSaveIdentityHandoff(window)) return false;
+              window.location.href = url.toString();
+              return true;
+            },
+          });
+        }
+      } else {
+        window.phSaveSlotsController.refresh();
+      }
+      if (!window.phManualSaveController) {
+        const manualRoot = document.getElementById('manual-save-panel');
+        if (manualRoot) {
+          window.phManualSaveController = saveSlots.mountSaveSlots({
+            root: manualRoot,
+            doc: document,
+            api,
+            mode: 'manual',
+            idPrefix: 'in-session',
+            canCapture: function () { return window.__saveSlotsCaptureAvailable; },
+            // Lobby hides the in-session surface, so mirror its immediate
+            // fixed-boundary refusal into the still-usable catalogue. The
+            // existing snapshot-status adapter may later replace this with
+            // the bridge's exact failure (including queue capacity).
+            onPendingCaptureDropped: function (message) {
+              if (window.phSaveSlotsController) {
+                window.phSaveSlotsController.reportOutcome(false, message);
+              }
+            },
+          });
+        }
+      }
+      window.__setSaveSlotsPhase(window.__saveSlotsPhase || '');
+      return window.phSaveSlotsController;
+    };
+    // This module is deferred while the classic host script below installs
+    // the WASM-ready listener. Signal its half of the two-sided startup latch:
+    // either the module or Trunk may finish first, but mounting needs both.
+    window.dispatchEvent(new Event('PhoenixSaveSlotsModuleReady'));
   </script>
   <!-- Console-action dispatch table (issue #822): the host page routes its
        embedded console actions through the same gui/action-map.js →
@@ -2021,6 +2243,13 @@
   window.__updateLobby = function(json) {
     let s;
     try { s = JSON.parse(json); } catch (e) { console.warn('[Phoenix] bad lobby state json', e); return; }
+    // Manual capture is a running-World affordance. Drive it from Rust's
+    // authoritative phase before any optional view-model module can defer the
+    // rest of this paint; PhoenixReady fires before App::run and is too early.
+    window.__saveSlotsPhase = s.phase;
+    if (typeof window.__setSaveSlotsPhase === 'function') {
+      window.__setSaveSlotsPhase(s.phase);
+    }
 
     // Pure phase-transition / title / crew / ready-badge / countdown /
     // station-card / reserved-chip / spectator-pill / hint computation lives
@@ -3580,29 +3809,55 @@
      *  reload and without re-running the one-shot preload. */
     let _worldLoadedIntoBevy = false;
 
+    // The module-owned New Session button calls this after consuming the URL's
+    // resume/scenario pair. Clear the classic script's matching pre-load state
+    // too, so a debug `?resume=autosave` cannot survive an explicit choice to
+    // begin fresh. The button is only visible before `_worldLoadStarted`.
+    window.__hostChooseNewSession = function() {
+      window.__phoenixPendingImport = null;
+      if (_worldLoadStarted) return;
+      selectedScenario = null;
+      _preSelection = { scenario_id: null, template_path: null };
+      _lockedShipTemplate = null;
+      _lockedCuratedShips = [];
+      const panel = document.getElementById('scenario-panel');
+      if (panel) panel.style.display = 'flex';
+      renderScenarioLockState();
+      showJoinQrOverPanel();
+    };
+
     function showLobbyPanel() {
       const panel = document.getElementById('lobby-panel');
       if (panel) panel.style.display = '';
     }
 
     // ── Pre-scenario join QR (issue #755, AC1) ────────────────────────────
-    // The #overlay QR lives over the Bevy canvas (z-index 190) and is hidden
-    // (display:none) until the Lobby phase — but that's AFTER world load. The
-    // full-screen #scenario-panel is z-index 200, so during scenario selection
-    // the overlay is both hidden and behind the panel. To make the join code
-    // visible while the host is still choosing a scenario, force the overlay
-    // visible and lift it ABOVE the panel. driveWorldLoad()/the confirm path
-    // revert the z-index so the normal Lobby-phase behaviour is untouched.
+    // The #overlay QR normally lives over the Bevy canvas and is hidden until
+    // Lobby — but that is AFTER world load. During scenario selection, dock the
+    // same live node into #scenario-panel's central flex slot. It remains fully
+    // visible without covering either the world picker or save catalogue, and
+    // moving the node preserves all transport state and event handlers.
     function showJoinQrOverPanel() {
       const qrOverlay = document.getElementById('overlay');
       if (!qrOverlay) return;
+      const scenarioPanel = document.getElementById('scenario-panel');
+      const saveSlotsPanel = document.getElementById('save-slots-panel');
+      if (scenarioPanel && qrOverlay.parentElement !== scenarioPanel) {
+        scenarioPanel.insertBefore(qrOverlay, saveSlotsPanel || null);
+      }
+      qrOverlay.classList.add('pre-scenario');
       qrVisible = true;
       qrOverlay.style.display = 'block';
-      qrOverlay.style.zIndex = '210'; // above #scenario-panel (z-index 200)
     }
     function resetJoinQrLayer() {
       const qrOverlay = document.getElementById('overlay');
-      if (qrOverlay) qrOverlay.style.zIndex = ''; // back to CSS default (190)
+      if (!qrOverlay) return;
+      const viewscreenShell = document.getElementById('viewscreen-shell');
+      const topBar = document.getElementById('top-bar');
+      if (viewscreenShell && qrOverlay.parentElement !== viewscreenShell) {
+        viewscreenShell.insertBefore(qrOverlay, topBar || null);
+      }
+      qrOverlay.classList.remove('pre-scenario');
     }
 
     // ── Pre-world phone messaging ─────────────────────────────────────────
@@ -4231,7 +4486,7 @@
     (function hoistQrToPageLoad() {
       if (new URLSearchParams(location.search).get('scenario')) return;
       initHostTransport();
-      // Lift the QR overlay above the scenario panel so the join code is
+      // Dock the live QR surface into the scenario layout so the join code is
       // visible DURING scenario selection, not just after world load (AC1).
       showJoinQrOverPanel();
       acquireWakeLock();
@@ -4428,6 +4683,14 @@ function finishInit() {
   window.wasm_snapshot_status = wasmBindings.wasm_snapshot_status;
   window.wasm_prepare_resume = wasmBindings.wasm_prepare_resume;
   window.wasm_resume_pending = wasmBindings.wasm_resume_pending;
+  // Peer-local save catalogue (issue #865). Starting a row still goes through
+  // the pre-init stage below; none of these exports receives a live World.
+  window.wasm_list_save_slots = wasmBindings.wasm_list_save_slots;
+  window.wasm_create_save_slot = wasmBindings.wasm_create_save_slot;
+  window.wasm_rename_save_slot = wasmBindings.wasm_rename_save_slot;
+  window.wasm_export_save_slot = wasmBindings.wasm_export_save_slot;
+  window.wasm_delete_save_slot = wasmBindings.wasm_delete_save_slot;
+  window.wasm_stage_save_slot = wasmBindings.wasm_stage_save_slot;
   // Portable saves (issue #866): export is a running-session action, import is
   // a pre-activation one, and both go through the same record as the slot above.
   window.wasm_export_snapshot = wasmBindings.wasm_export_snapshot;
@@ -4559,10 +4822,11 @@ function finishInit() {
     if (modStatus) modStatus.textContent = '';
     try { _scenarioCatalog = Array.from(wasmBindings.wasm_get_scenario_catalog() || []); } catch (_) {}
     renderScenarioLockState();
+    if (window.phSaveSlotsController) window.phSaveSlotsController.refresh();
     // Re-broadcast the (now-unlocked) catalog so already-connected phones
     // return to the shared pre-scenario picker for the next round (issue #756).
     broadcastScenarioCatalog();
-    // Re-lift the join QR above the freshly re-shown scenario panel (AC1).
+    // Re-dock the join QR in the freshly re-shown scenario panel (AC1).
     showJoinQrOverPanel();
     startMenuMusic();
   }
@@ -4618,6 +4882,23 @@ function finishInit() {
   window.wasm_select_ship = wasmBindings.wasm_select_ship;
 
   const ships = wasm_get_available_ships();
+
+  // A saved session owns its boot hull. The catalogue carries that canonical
+  // template path beside `scenario` so a multi-hull world does not stop at the
+  // ordinary picker — or, worse, let another choice build the wrong authored
+  // component set and only discover it when restore begins.
+  const resumeShip = new URLSearchParams(window.location.search).get('ship');
+  if (resumeShip) {
+    const offered = (ships || []).find(s => s.template_path === resumeShip);
+    if ((ships || []).length > 0 && !offered) {
+      showFatalError(t('server.fatal.load_failed', {
+        path: resumeShip,
+        detail: t('server.save_slots.hull_unavailable'),
+      }));
+      return;
+    }
+    _lockedShipTemplate = resumeShip;
+  }
 
   // QR-first flow (issue #755): the player ship was already locked pre-load by
   // the arbiter and validated against the selected scenario's catalog ships.
@@ -4841,21 +5122,35 @@ async function startServer() {
   try {
     var resumeSlot = new URLSearchParams(window.location.search).get('resume');
     if (resumeSlot && typeof wasm_prepare_resume === 'function') {
-      var refusal = wasm_prepare_resume(resumeSlot);
-      if (refusal) {
+      // #865's named catalogue route is the same fresh-app gate as #862's
+      // legacy autosave route. Prefer the explicit catalogue name when this
+      // build carries it; the fallback keeps old artifacts resumable.
+      var stageSlot = typeof wasm_stage_save_slot === 'function'
+        ? wasm_stage_save_slot
+        : wasm_prepare_resume;
+      var refusal = stageSlot(resumeSlot);
+      var startAnswer = window.phSaveSlots
+        ? window.phSaveSlots.startPreparationResult(refusal)
+        : { ok: !refusal, message: refusal };
+      if (!startAnswer.ok) {
         // `vellum_save::Moved`'s own sentence, verbatim — it names which
         // version dimension moved, which no phoenix-invented status would.
         // Shown, not logged: the host is about to play a session they think
         // they resumed, and a console.warn tells nobody who is not looking at
         // DevTools (issue #862 AC4).
-        showSnapshotStatus(false, refusal);
-        console.warn('[Phoenix] the saved session was refused: ' + refusal);
+        showSnapshotStatus(false, startAnswer.message);
+        console.warn('[Phoenix] the saved session was refused: ' + startAnswer.message);
       }
       // Strip the parameter either way. It has been consumed — a refused
       // resume must not be re-attempted on every subsequent reload, and an
       // accepted one must not be re-staged if the host reloads mid-session.
       var cleaned = new URL(window.location.href);
       cleaned.searchParams.delete('resume');
+      // The catalogue supplies `scenario` only so this fresh page can load the
+      // saved world's content before the gate. Once consumed it must not turn
+      // future reloads into a permanent picker bypass.
+      cleaned.searchParams.delete('scenario');
+      cleaned.searchParams.delete('ship');
       window.history.replaceState(null, '', cleaned.toString());
     }
   } catch (e) {
@@ -4900,14 +5195,40 @@ async function startServer() {
 // Trunk fires TrunkApplicationStarted once the WASM binary is fully
 // instantiated and sets window.wasmBindings to the wasm-bindgen exports.
 
+let _startPhoenixPromise = null;
 function startPhoenix() {
-  preloadAndStart(selectedScenario, _lockedCuratedShips).catch(err => {
+  if (_startPhoenixPromise) return _startPhoenixPromise;
+  _startPhoenixPromise = Promise.resolve(window.phSaveIdentityReady).then(() =>
+    preloadAndStart(selectedScenario, _lockedCuratedShips)
+  ).catch(err => {
+    _startPhoenixPromise = null;
     console.error('Failed to start preload:', err);
   });
+  return _startPhoenixPromise;
 }
+
+let _mountSaveSlotsPromise = null;
+function mountSaveSlotsWhenReady() {
+  if (!wasmReady || typeof window.__mountSaveSlots !== 'function') return null;
+  if (_mountSaveSlotsPromise) return _mountSaveSlotsPromise;
+  // The Store namespace is claimed asynchronously through a browser lifecycle
+  // primitive. Mount only after both the module and WASM exports exist and that
+  // claim has settled, so neither startup ordering can leave an empty surface.
+  _mountSaveSlotsPromise = Promise.resolve(window.phSaveIdentityReady).then(() =>
+    window.__mountSaveSlots()
+  ).catch(e => {
+    _mountSaveSlotsPromise = null;
+    console.error('[Phoenix] local save catalogue mount failed:', e);
+    return null;
+  });
+  return _mountSaveSlotsPromise;
+}
+
+window.addEventListener('PhoenixSaveSlotsModuleReady', mountSaveSlotsWhenReady);
 
 window.addEventListener('TrunkApplicationStarted', () => {
   wasmReady = true;
+  mountSaveSlotsWhenReady();
   // The demo-build flag (issue #939) is bound here rather than in
   // finishInit()'s list: the settings cog can be opened long before a world is
   // loaded. This is the SECOND of the two answers gui/build-flags.js consults —

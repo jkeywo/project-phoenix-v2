@@ -118,6 +118,38 @@ fn parse_world_reads_the_station_activity_bucket_secs() {
     );
 }
 
+/// Issue #865: the rolling autosave cadence is authored in simulation seconds
+/// and converted once to the exact logical-tick boundary every peer shares.
+#[test]
+fn parse_world_reads_an_exact_autosave_interval() {
+    let defaulted = parse_world("[global]\nseed = 7\n").expect("TOML should parse");
+    assert_eq!(defaulted.global.autosave_interval_secs, 30.0);
+    assert_eq!(
+        defaulted.global.checked_autosave_interval_ticks(),
+        Some(1_800)
+    );
+
+    let authored = parse_world("[global]\nsim_tick_hz = 120.0\nautosave_interval_secs = 2.5\n")
+        .expect("2.5 seconds at 120 Hz is exactly 300 logical ticks");
+    assert_eq!(authored.global.autosave_interval_secs, 2.5);
+    assert_eq!(authored.global.checked_autosave_interval_ticks(), Some(300));
+}
+
+/// An autosave cadence is part of deterministic scheduling, so invalid values
+/// are refused at load rather than clamped or rounded onto a different tick.
+#[test]
+fn parse_world_rejects_an_invalid_autosave_interval() {
+    for value in ["0.0", "-1.0", "nan", "inf", "0.025"] {
+        let source = format!("[global]\nsim_tick_hz = 60.0\nautosave_interval_secs = {value}\n");
+        let err = parse_world(&source)
+            .expect_err("the interval must be finite, positive, and exactly tick-aligned");
+        assert!(
+            err.contains("autosave_interval_secs") && err.contains("cannot be rounded"),
+            "the load error must name the field and exact-tick contract for {value}; got: {err}"
+        );
+    }
+}
+
 /// `[global] trigger_fire_history_depth` (issue #1151): how many recent fires
 /// the trigger-fire-history debug recorder keeps per trigger. Authored data,
 /// not a Rust literal (AGENTS.md #11) — the serde default is the only

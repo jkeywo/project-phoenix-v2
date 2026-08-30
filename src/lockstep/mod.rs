@@ -114,7 +114,7 @@ pub struct FleetLockstep(pub LockstepSession);
 pub struct FleetSlotOf(pub HostSlot);
 
 /// One player ship in the frozen fleet.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FleetShip {
     /// The host that flies it.
     pub host: HostSlot,
@@ -165,7 +165,7 @@ impl FleetShip {
 /// pre-#1116 behaviour to the byte: one ship, spawned from the first GameStart
 /// `[[entity]]` tagged `ship`, tagged [`crate::server_app::LocalShip`], flying
 /// whatever the lobby selected.
-#[derive(Resource, Clone, Debug, PartialEq, Eq)]
+#[derive(Resource, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FleetRoster {
     ships: Vec<FleetShip>,
     local: HostSlot,
@@ -252,6 +252,22 @@ impl FleetRoster {
         }
     }
 
+    /// Keep the saved ship topology while releasing every old crew assignment.
+    ///
+    /// A peer-local save starts a new independent session, not a reconstruction
+    /// of the host mesh that happened to be connected when it was captured.
+    /// The hulls and this peer's local slot still decide which authored ships
+    /// bootstrap, but nobody from the old session is considered connected to
+    /// them. The local ship can therefore be claimed through this new App's
+    /// ordinary [`crate::lobby::Sessions`], while the other ships begin on AI
+    /// backfill.
+    pub fn into_uncrewed(mut self) -> Self {
+        for ship in &mut self.ships {
+            ship.crew.clear();
+        }
+        self
+    }
+
     /// Whether this roster describes a lone host — the shipped single-player
     /// case, and the state every fixture is in.
     pub fn is_solo(&self) -> bool {
@@ -281,6 +297,22 @@ impl FleetRoster {
     pub fn is_member(&self, host: HostSlot) -> bool {
         self.ships.iter().any(|ship| ship.host == host)
     }
+}
+
+/// Whether `host` takes its crew state from this App's live [`Sessions`].
+///
+/// Ship count is not the authority boundary: a saved multi-ship roster can run
+/// without its old peer mesh. In that standalone state only the local ship can
+/// have newly connected crew, while every saved remote ship remains frozen on
+/// its now-empty roster crew (AI Backfill). Once a [`FleetLockstep`] session is
+/// active, every ship — the local one included — must use the identically frozen
+/// roster so peers cannot derive different control sources.
+pub(crate) fn uses_live_sessions(
+    roster: &FleetRoster,
+    fleet_lockstep_active: bool,
+    host: HostSlot,
+) -> bool {
+    !fleet_lockstep_active && roster.is_local(host)
 }
 
 /// Who a transport says delivered a frame — the mesh-boundary authentication
@@ -741,6 +773,28 @@ pub fn join_fleet(world: &mut World, roster: FleetRoster, delay: u64) {
     // that stamped its own input six ticks into the future would be adding
     // latency to buy agreement with an empty set of peers.
     world.insert_resource(CommandDelay(if alone { 0 } else { delay }));
+    if let Some(mut pending) = world.get_resource_mut::<PendingCommands>() {
+        pending.set_origin(local);
+    }
+}
+
+/// Bootstrap a saved fleet as one peer's new independent local session.
+///
+/// Save-slot resume is startup-only, but its boot identity may describe a real
+/// multi-host fleet. Reusing [`join_fleet`] here would recreate the old wait set
+/// without recreating its transports: every remote watermark would remain at
+/// the opening delay and the new session would stop forever a few ticks after
+/// restore. Instead, preserve the authored ship topology and this peer's local
+/// slot, release the old crew, and deliberately install no [`FleetLockstep`].
+/// The local ship follows the new App's live Sessions; every other saved fleet
+/// ship begins on AI backfill.
+pub fn start_saved_fleet_standalone(world: &mut World, roster: FleetRoster) {
+    let roster = roster.into_uncrewed();
+    let local = roster.local();
+    world.insert_resource(roster);
+    world.remove_resource::<FleetLockstep>();
+    world.insert_resource(MeshAgreement::new(0));
+    world.insert_resource(CommandDelay(0));
     if let Some(mut pending) = world.get_resource_mut::<PendingCommands>() {
         pending.set_origin(local);
     }
@@ -1369,6 +1423,46 @@ mod tests {
         );
         assert!(roster.crew_of(HostSlot(1)).is_empty());
         assert!(roster.crew_of(HostSlot(9)).is_empty());
+    }
+
+    /// A peer-local save preserves the ships it booted, but it is not a ticket
+    /// back into the old mesh. Starting it must release the old wait set and
+    /// crew assignments so the new App can advance by itself.
+    #[test]
+    fn a_saved_fleet_starts_as_an_uncrewed_standalone_session() {
+        use crate::command_admission::log::PendingCommands;
+
+        let mut app = App::new();
+        app.init_resource::<PendingCommands>();
+        register_lockstep(&mut app);
+        let saved = roster();
+        join_fleet(app.world_mut(), saved.clone(), 6);
+        assert!(app.world().contains_resource::<FleetLockstep>());
+        assert_eq!(app.world().resource::<CommandDelay>().0, 6);
+
+        start_saved_fleet_standalone(app.world_mut(), saved);
+
+        assert!(!app.world().contains_resource::<FleetLockstep>());
+        assert_eq!(app.world().resource::<CommandDelay>().0, 0);
+        let restored = app.world().resource::<FleetRoster>();
+        assert_eq!(restored.len(), 2);
+        assert!(restored.is_local(HostSlot(2)));
+        assert!(restored.ships().iter().all(|ship| ship.crew.is_empty()));
+    }
+
+    #[test]
+    fn only_a_standalone_rosters_local_ship_uses_live_sessions() {
+        let restored = roster().into_uncrewed();
+
+        assert!(uses_live_sessions(&restored, false, HostSlot(2)));
+        assert!(
+            !uses_live_sessions(&restored, false, HostSlot(1)),
+            "a saved remote ship has no crew in this independent App"
+        );
+        assert!(
+            !uses_live_sessions(&restored, true, HostSlot(2)),
+            "active lockstep keeps even the local ship on frozen roster crew"
+        );
     }
 
     /// A disagreement renders both digests and names the peer, because "the

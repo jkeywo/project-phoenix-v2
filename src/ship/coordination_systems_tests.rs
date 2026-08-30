@@ -2800,7 +2800,7 @@ station = "navigation"
     // fleet rather than a fleet of one — the latter would keep the live-Sessions
     // path, exactly as a solo mission must.
     let local = crate::command_admission::HostSlot::SOLO;
-    app.insert_resource(crate::lockstep::FleetRoster::new(
+    let roster = crate::lockstep::FleetRoster::new(
         vec![
             crate::lockstep::FleetShip {
                 host: local,
@@ -2813,7 +2813,8 @@ station = "navigation"
             crate::lockstep::FleetShip::new(crate::command_admission::HostSlot(9)),
         ],
         local,
-    ));
+    );
+    crate::lockstep::join_fleet(app.world_mut(), roster, 2);
 
     // Baseline: the frozen captain seat hosts navigation as a human.
     tick(&mut app);

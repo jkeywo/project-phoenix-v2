@@ -81,6 +81,56 @@ fn main() {
         None => None,
     };
 
+    // Saves are operator-private state, not authored content. Resolve the path
+    // while it still means "relative to where phoenix-host was launched";
+    // `pin_content_root` below deliberately changes the process CWD so content
+    // paths all share one root. Claiming creates the directory eagerly and
+    // prevents two native hosts from reading or writing the same catalogue.
+    // Keep the token in this `main` scope so the claim outlives every Store read,
+    // the Bevy app, and the delivery worker.
+    let _save_directory_claim = if let Some(sim) = args.sim.as_mut() {
+        let launch_dir = match std::env::current_dir() {
+            Ok(launch_dir) => launch_dir,
+            Err(e) => {
+                eprintln!("phoenix-host: cannot resolve private save paths: {e}");
+                std::process::exit(1);
+            }
+        };
+        sim.save_dir = resolve_launch_path(&launch_dir, &sim.save_dir)
+            .to_string_lossy()
+            .into_owned();
+        for action in &mut sim.save_actions {
+            if let project_phoenix::delivery::args::SaveOperatorAction::Export { path, .. } = action
+            {
+                *path = resolve_launch_path(&launch_dir, path)
+                    .to_string_lossy()
+                    .into_owned();
+            }
+        }
+        match project_phoenix::save_slots_store::NativeSaveDirectoryClaim::try_acquire(
+            &sim.save_dir,
+        ) {
+            Ok(claim) => Some(claim),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                eprintln!(
+                    "phoenix-host: private save directory {} is already claimed by another \
+                     phoenix-host; pass a distinct --save-dir for a concurrent native peer",
+                    sim.save_dir
+                );
+                std::process::exit(1);
+            }
+            Err(error) => {
+                eprintln!(
+                    "phoenix-host: cannot claim private save directory {}: {error}",
+                    sim.save_dir
+                );
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
+
     // `--setup` (issue #1123): enumerate the connected monitors, print their
     // stable identities and geometry, validate the profile against them if one
     // was given, and exit. A standalone diagnostic — it opens no HTTP listener
@@ -209,8 +259,27 @@ fn main() {
     // world that does not load fails at the prompt rather than after a window
     // and a listener are up.
     let preload = sim_preload.expect("a simulation run preloads its templates");
+    let resume_boot_identity = sim.resume_slot.as_deref().and_then(|slot_id| {
+        let store = vellum_save::FileStore::new(&sim.save_dir);
+        match project_phoenix::save_slots::peek_slot_boot_identity(&store, slot_id) {
+            Ok((_scenario, boot_identity)) => boot_identity,
+            Err(error) => {
+                // The complete version-aware refusal still belongs to the
+                // post-build startup gate below. Only an intact current save
+                // can contribute a hull here; an absent/old/damaged row builds
+                // normally and is then refused without mutating the App.
+                eprintln!(
+                    "phoenix-host: local slot {slot_id:?} cannot supply a boot hull yet: {error}"
+                );
+                None
+            }
+        }
+    });
     let mut cfg = native_host::NativeHostConfig::new(sim.world.clone());
-    cfg.ship_path = sim.ship.clone();
+    cfg.ship_path = resume_boot_identity
+        .as_ref()
+        .map(|identity| identity.selected_ship.clone())
+        .or_else(|| sim.ship.clone());
     cfg.seed = sim.seed;
     cfg.solo = sim.solo;
     cfg.log_spec = sim.log_spec.clone();
@@ -361,6 +430,43 @@ fn main() {
             std::process::exit(1);
         }
     };
+    project_phoenix::save_slots_store::install_local_save_store(
+        &mut app,
+        vellum_save::FileStore::new(&sim.save_dir),
+    );
+    eprintln!("phoenix-host: private saves {}", sim.save_dir);
+    let current_versions =
+        project_phoenix::snapshot::versions(&project_phoenix::content_ledger::frozen_or_live());
+    for action in &sim.save_actions {
+        match apply_native_save_action(&mut app, action, &current_versions, &sim.world) {
+            Ok(lines) => {
+                for line in lines {
+                    eprintln!("phoenix-host: {line}");
+                }
+            }
+            Err(e) => {
+                eprintln!("phoenix-host: save catalogue: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+    if let Some(slot_id) = sim.resume_slot.as_deref() {
+        match project_phoenix::save_slots_store::stage_new_native_session_from_slot(
+            app.world_mut(),
+            slot_id,
+            &current_versions,
+            &sim.world,
+        ) {
+            Ok(tick) => eprintln!(
+                "phoenix-host: staged local slot {slot_id:?} from tick {tick} for this new session"
+            ),
+            Err(e) => {
+                eprintln!("phoenix-host: cannot resume local slot {slot_id:?}: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+    app.add_systems(bevy::prelude::Update, report_save_outcomes);
 
     // The crew path (issue #1113), and the answer to #1121's deferred "browser
     // clients cannot join a native host": one outbound WebSocket to the
@@ -457,6 +563,183 @@ fn main() {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn resolve_launch_path(launch_dir: &std::path::Path, configured: &str) -> std::path::PathBuf {
+    let configured = std::path::PathBuf::from(configured);
+    if configured.is_absolute() {
+        configured
+    } else {
+        launch_dir.join(configured)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn apply_native_save_action(
+    app: &mut bevy::prelude::App,
+    action: &project_phoenix::delivery::args::SaveOperatorAction,
+    current: &vellum_save::Versions,
+    loaded_scenario: &str,
+) -> Result<Vec<String>, String> {
+    use project_phoenix::delivery::args::SaveOperatorAction;
+
+    match action {
+        SaveOperatorAction::List => {
+            let service = app
+                .world()
+                .get_resource::<project_phoenix::save_slots_store::SaveSlotService>()
+                .ok_or_else(|| "no local save Store is installed".to_string())?;
+            let rows = service
+                .list_for_loaded_scenario(current, loaded_scenario)
+                .map_err(|error| format!("{error:?}"))?;
+            let mut lines = vec![format!("{} local save slot(s)", rows.len())];
+            lines.extend(rows.iter().map(describe_save_row));
+            Ok(lines)
+        }
+        SaveOperatorAction::Create { display_name } => {
+            let slot_id =
+                project_phoenix::save_slots_store::queue_named_manual_save_for_new_session(
+                    app.world_mut(),
+                    display_name,
+                )
+                .map_err(str::to_string)?;
+            Ok(vec![format!(
+                "manual slot {slot_id} reserved as {display_name:?}; capture waits for InProgress"
+            )])
+        }
+        SaveOperatorAction::Rename {
+            slot_id,
+            display_name,
+        } => {
+            app.world()
+                .get_resource::<project_phoenix::save_slots_store::SaveSlotService>()
+                .ok_or_else(|| "no local save Store is installed".to_string())?
+                .rename(slot_id, display_name)
+                .map_err(|error| format!("{error:?}"))?;
+            Ok(vec![format!(
+                "renamed manual slot {slot_id} to {display_name:?}"
+            )])
+        }
+        SaveOperatorAction::Export { slot_id, path } => {
+            use std::io::Write;
+
+            let artifact = app
+                .world()
+                .get_resource::<project_phoenix::save_slots_store::SaveSlotService>()
+                .ok_or_else(|| "no local save Store is installed".to_string())?
+                .export(slot_id)
+                .map_err(|error| error.to_string())?;
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)
+                .map_err(|error| format!("cannot create export {path:?}: {error}"))?;
+            file.write_all(artifact.as_bytes())
+                .map_err(|error| format!("cannot write export {path:?}: {error}"))?;
+            Ok(vec![format!("exported local slot {slot_id} to {path:?}")])
+        }
+        SaveOperatorAction::Delete { slot_id, confirmed } => {
+            if !confirmed {
+                return Err(format!(
+                    "refusing to delete {slot_id}: --confirm-delete was not supplied"
+                ));
+            }
+            app.world_mut()
+                .get_resource_mut::<project_phoenix::save_slots_store::SaveSlotService>()
+                .ok_or_else(|| "no local save Store is installed".to_string())?
+                .delete(slot_id)
+                .map_err(|error| format!("{error:?}"))?;
+            Ok(vec![format!("deleted confirmed local slot {slot_id}")])
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn describe_save_row(row: &project_phoenix::save_slots::SaveSlotEntry) -> String {
+    let kind = match row.kind {
+        project_phoenix::save_slots::SaveSlotKind::Autosave => "autosave",
+        project_phoenix::save_slots::SaveSlotKind::Manual => "manual",
+    };
+    let record = row.record.as_ref().map_or_else(
+        || "no readable record".to_string(),
+        |record| format!("{} tick {}", record.scenario, record.capture_tick),
+    );
+    let start = match &row.start {
+        project_phoenix::save_slots::StartState::Ready => "compatible".to_string(),
+        project_phoenix::save_slots::StartState::ContentDeferred => {
+            "content check deferred until its scenario loads".to_string()
+        }
+        project_phoenix::save_slots::StartState::Refused(refusal) => {
+            format!("refused: {refusal}")
+        }
+    };
+    format!(
+        "{} [{kind}] {:?} — {record}; {start}",
+        row.slot_id, row.display_name
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn report_save_outcomes(
+    mut service: Option<bevy::prelude::ResMut<project_phoenix::save_slots_store::SaveSlotService>>,
+) {
+    let Some(service) = service.as_mut() else {
+        return;
+    };
+    while let Some(outcome) = service.pop_outcome() {
+        let slot = match &outcome.decision.slot {
+            project_phoenix::save_slots::CaptureSlot::RollingAutosave => {
+                project_phoenix::save_slots::AUTOSAVE_SLOT
+            }
+            project_phoenix::save_slots::CaptureSlot::Manual(slot_id) => slot_id.as_str(),
+        };
+        match outcome.result {
+            Ok(()) => eprintln!(
+                "phoenix-host: saved local slot {slot} at tick {} ({:?})",
+                outcome.decision.tick, outcome.decision.reason
+            ),
+            Err(error) => eprintln!(
+                "phoenix-host: local save {slot} failed at tick {}: {error:?}",
+                outcome.decision.tick
+            ),
+        }
+    }
+    // The Store adapter retains only its bounded recent refusal ring. Drain it
+    // alongside write outcomes so a native operator never gets a reserved slot
+    // message followed by silence when the fixed-boundary phase gate refuses
+    // that capture.
+    while let Some(refusal) = service.pop_manual_refusal() {
+        eprintln!("phoenix-host: {}", describe_manual_save_refusal(&refusal));
+    }
+    while let Some(outcome) = service.pop_restore_outcome() {
+        match outcome {
+            project_phoenix::save_slots_store::NativeRestoreOutcome::Applied { tick } => {
+                eprintln!("phoenix-host: resumed the new native session at tick {tick}")
+            }
+            project_phoenix::save_slots_store::NativeRestoreOutcome::Failed { detail } => {
+                eprintln!("phoenix-host: native resume failed: {detail}")
+            }
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn describe_manual_save_refusal(
+    refusal: &project_phoenix::save_slots::RefusedManualSave,
+) -> String {
+    let reason = match refusal.reason {
+        project_phoenix::save_slots::ManualSaveRefusalReason::PhaseChanged { phase } => {
+            format!("the run reached {phase:?} before its capture boundary")
+        }
+        project_phoenix::save_slots::ManualSaveRefusalReason::StartupRestorePending => {
+            "a startup restore was pending at its capture boundary".to_string()
+        }
+    };
+    format!(
+        "local manual save {} was refused at tick {}: {reason}",
+        refusal.slot_id, refusal.tick
+    )
+}
+
 /// Print what the crew transport has to say — the issued join code above all.
 ///
 /// A Bevy system rather than a callback because the transport is a resource the
@@ -524,4 +807,159 @@ fn bind_args(
         out.content_dir = ".".to_string();
     }
     out
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+    use project_phoenix::delivery::args::SaveOperatorAction;
+
+    const SLOT: &str = "00000000-0000-4000-8000-000000000123";
+
+    #[test]
+    fn native_operator_actions_reach_the_installed_catalogue_service() {
+        let dir =
+            std::env::temp_dir().join(format!("phoenix-host-save-actions-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let versions = vellum_save::Versions::new(7, "rules", 0x1234);
+        let run = project_phoenix::snapshot::run_for(
+            project_phoenix::snapshot::PhoenixSnapshot {
+                tick: 41,
+                ..Default::default()
+            },
+            0xfeed,
+            17,
+            "assets/worlds/probe.toml",
+            versions.clone(),
+        );
+        project_phoenix::save_slots::write_manual_save(
+            &vellum_save::FileStore::new(&dir),
+            SLOT,
+            "Before",
+            &run,
+        )
+        .unwrap();
+        let mut app = bevy::prelude::App::new();
+        app.init_resource::<project_phoenix::save_slots_lifecycle::PendingStoredRuns>();
+        project_phoenix::save_slots_store::install_local_save_store(
+            &mut app,
+            vellum_save::FileStore::new(&dir),
+        );
+
+        let listed = apply_native_save_action(
+            &mut app,
+            &SaveOperatorAction::List,
+            &versions,
+            "assets/worlds/probe.toml",
+        )
+        .unwrap();
+        assert!(listed.iter().any(|line| line.contains("Before")));
+
+        apply_native_save_action(
+            &mut app,
+            &SaveOperatorAction::Rename {
+                slot_id: SLOT.into(),
+                display_name: "After".into(),
+            },
+            &versions,
+            "assets/worlds/probe.toml",
+        )
+        .unwrap();
+        let export = dir.with_extension("export.ron");
+        let _ = std::fs::remove_file(&export);
+        apply_native_save_action(
+            &mut app,
+            &SaveOperatorAction::Export {
+                slot_id: SLOT.into(),
+                path: export.to_string_lossy().into_owned(),
+            },
+            &versions,
+            "assets/worlds/probe.toml",
+        )
+        .unwrap();
+        let exported = std::fs::read_to_string(&export).unwrap();
+        assert_eq!(
+            project_phoenix::snapshot::StoredRun::from_ron(&exported).unwrap(),
+            run
+        );
+
+        let unconfirmed = apply_native_save_action(
+            &mut app,
+            &SaveOperatorAction::Delete {
+                slot_id: SLOT.into(),
+                confirmed: false,
+            },
+            &versions,
+            "assets/worlds/probe.toml",
+        )
+        .unwrap_err();
+        assert!(unconfirmed.contains("--confirm-delete"));
+        apply_native_save_action(
+            &mut app,
+            &SaveOperatorAction::Delete {
+                slot_id: SLOT.into(),
+                confirmed: true,
+            },
+            &versions,
+            "assets/worlds/probe.toml",
+        )
+        .unwrap();
+        assert!(app
+            .world()
+            .resource::<project_phoenix::save_slots_store::SaveSlotService>()
+            .list_for_loaded_scenario(&versions, "assets/worlds/probe.toml")
+            .unwrap()
+            .is_empty());
+
+        drop(app);
+        let _ = std::fs::remove_file(export);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn native_operator_reporter_surfaces_and_drains_manual_refusals() {
+        let dir = std::env::temp_dir().join(format!(
+            "phoenix-host-save-refusal-report-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut app = bevy::prelude::App::new();
+        app.init_resource::<project_phoenix::save_slots_lifecycle::PendingStoredRuns>();
+        project_phoenix::save_slots_store::install_local_save_store(
+            &mut app,
+            vellum_save::FileStore::new(&dir),
+        );
+        app.add_systems(bevy::prelude::Update, report_save_outcomes);
+
+        let slot_id = project_phoenix::save_slots_store::request_named_manual_save(
+            app.world_mut(),
+            "Refused operator save",
+        )
+        .expect("the native operator reserves a manual slot");
+        project_phoenix::save_slots_lifecycle::begin_startup_restore(app.world_mut());
+
+        // Frame one transfers the lifecycle refusal into the service's bounded
+        // recent ring during PostUpdate. Frame two reports and drains it during
+        // Update, matching the native binary's ordinary one-frame outcome lag.
+        app.update();
+        let refusal = app
+            .world()
+            .resource::<project_phoenix::save_slots_store::SaveSlotService>()
+            .manual_refusals()
+            .next()
+            .expect("the bounded service ring receives the refusal");
+        assert_eq!(refusal.slot_id, slot_id);
+        assert!(describe_manual_save_refusal(refusal).contains("startup restore"));
+
+        app.update();
+        assert!(app
+            .world()
+            .resource::<project_phoenix::save_slots_store::SaveSlotService>()
+            .manual_refusals()
+            .next()
+            .is_none());
+
+        drop(app);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

@@ -484,7 +484,20 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// system can rebuild it on the first continuation tick. Navigation's waypoint
 /// and clearance frontier and Weapons' global/default replacement state also
 /// landed before any format-14 artifact shipped, so they share this boundary.
-pub const SNAPSHOT_FORMAT: u32 = 14;
+///
+/// Format 15 carries the boot identity that must exist before a snapshot can be
+/// restored: the selected local hull, the frozen fleet roster, and every
+/// successfully spawned authored `GameStart` entity's `EntityUuid`. A scenario
+/// may offer several hulls whose authored component sets differ while retaining
+/// the same scenario content digest. A fresh lobby may also reach `GameStart` on
+/// a different tick, so merely rebuilding the same roster can mint different
+/// UUIDs for the player ships and for any authored GameStart NPCs every captured
+/// row names. Without this field a fresh session can boot one hull (or the right
+/// hull and roster under new identities), pass every version check, and then
+/// apply a snapshot captured from another. There is no honest migration for a
+/// format-14 artifact because the missing choices cannot be inferred from world
+/// state, so the format gate refuses it rather than guessing.
+pub const SNAPSHOT_FORMAT: u32 = 15;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -2265,6 +2278,39 @@ fn reduce_dialogue_node(message_id: &str, dialogue: &ActiveDialogue) -> Dialogue
     }
 }
 
+/// One authored `GameStart` row's stable identity.
+///
+/// The row index is stored alongside the UUID rather than relying on the UUID
+/// vector's position alone. A `when` predicate may skip a row on either boot;
+/// keying by authored index makes that drift fail honestly as a missing/extra
+/// entity instead of shifting every later UUID onto the wrong entity.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GameStartEntityUuid {
+    pub authored_index: u32,
+    pub entity_uuid: String,
+}
+
+/// The choices that determine which authored player-ship world is built before
+/// [`restore`] may run.
+///
+/// This reuses [`crate::lockstep::FleetRoster`] itself rather than introducing a
+/// second fleet schema. `selected_ship` is the canonical template path held by
+/// [`crate::lobby::SelectedShipResource`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BootIdentity {
+    pub selected_ship: String,
+    pub fleet: crate::lockstep::FleetRoster,
+    /// Every authored `GameStart` entity that actually spawned, in authored row
+    /// order. This includes the fleet's player ships and any GameStart NPCs.
+    ///
+    /// Defaulted only so a damaged format-15 development artifact still parses
+    /// far enough for [`required_boot_identity`] to give the semantic refusal.
+    /// A current-format run with a missing, short, invalid, out-of-order, or
+    /// duplicate list is never admitted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub game_start_entity_uuids: Vec<GameStartEntityUuid>,
+}
+
 /// Captured authoritative world state: everything issue #894's record says a
 /// divergence is defined over, at one tick.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -2273,6 +2319,11 @@ pub struct PhoenixSnapshot {
     /// `vellum_save::Snapshot::tick`, which is the envelope's copy; this is the
     /// resource's own value, and [`restore`] writes it back.
     pub tick: u64,
+    /// The pre-world choices this payload requires. Present in every real host;
+    /// optional only so deliberately partial bare-`App` fixtures remain useful.
+    /// Current-format save-slot admission treats absence as malformed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boot_identity: Option<BootIdentity>,
     /// `Time<Fixed>`'s exact accumulator toward the next logical tick.
     ///
     /// `SimTick` says which tick completed; this says whether the next rendered
@@ -2409,6 +2460,17 @@ pub struct TrackedEntitiesState {
 pub fn capture(world: &World) -> PhoenixSnapshot {
     PhoenixSnapshot {
         tick: world.get_resource::<SimTick>().map_or(0, |t| t.0),
+        boot_identity: world
+            .get_resource::<crate::lobby::SelectedShipResource>()
+            .zip(world.get_resource::<crate::lockstep::FleetRoster>())
+            .map(|(selected, fleet)| BootIdentity {
+                selected_ship: selected.0.clone(),
+                fleet: fleet.clone(),
+                game_start_entity_uuids: world
+                    .get_resource::<crate::server_app::GameStartEntityUuids>()
+                    .map(|uuids| uuids.0.clone())
+                    .unwrap_or_default(),
+            }),
         fixed_overstep_nanos: world
             .get_resource::<Time<bevy::time::Fixed>>()
             .and_then(|time| u64::try_from(time.overstep().as_nanos()).ok()),
@@ -4627,7 +4689,169 @@ pub fn load_from<S: vellum_save::Store>(
         .ok_or(LoadRefusal::Empty)?;
     let run = StoredRun::from_ron(&text).map_err(|e| LoadRefusal::Unparsable(e.to_string()))?;
     run.versions.check(current).map_err(LoadRefusal::Moved)?;
+    required_boot_identity(&run)?;
     Ok(run)
+}
+
+/// Return the pre-world identity a current-format run requires.
+///
+/// The version check must run before this semantic check so an older artifact
+/// reports the authoritative format refusal. A run claiming the current format
+/// while omitting either its snapshot or its boot identity is malformed: there
+/// is no safe hull/fleet a host can infer on its behalf.
+pub fn required_boot_identity(run: &StoredRun) -> Result<&BootIdentity, LoadRefusal> {
+    let identity = run
+        .snapshot
+        .as_ref()
+        .and_then(|snapshot| snapshot.state.boot_identity.as_ref())
+        .ok_or_else(|| {
+            LoadRefusal::Unparsable(
+                "the current snapshot format does not carry its required boot identity".to_string(),
+            )
+        })?;
+
+    if identity.selected_ship.trim().is_empty() {
+        return Err(LoadRefusal::Unparsable(
+            "the current snapshot boot identity has no selected player hull".to_string(),
+        ));
+    }
+    if identity.fleet.is_empty() {
+        return Err(LoadRefusal::Unparsable(
+            "the current snapshot boot identity has an empty fleet roster".to_string(),
+        ));
+    }
+    if !identity.fleet.is_member(identity.fleet.local()) {
+        return Err(LoadRefusal::Unparsable(
+            "the current snapshot boot identity's local slot is absent from its fleet roster"
+                .to_string(),
+        ));
+    }
+    if identity
+        .fleet
+        .ships()
+        .windows(2)
+        .any(|pair| pair[0].host >= pair[1].host)
+    {
+        return Err(LoadRefusal::Unparsable(
+            "the current snapshot boot identity's fleet roster is not in unique slot order"
+                .to_string(),
+        ));
+    }
+    if identity.game_start_entity_uuids.len() < identity.fleet.len() {
+        return Err(LoadRefusal::Unparsable(format!(
+            "the current snapshot boot identity carries {} GameStart UUID(s) for a fleet of {}",
+            identity.game_start_entity_uuids.len(),
+            identity.fleet.len()
+        )));
+    }
+    if identity
+        .game_start_entity_uuids
+        .windows(2)
+        .any(|pair| pair[0].authored_index >= pair[1].authored_index)
+    {
+        return Err(LoadRefusal::Unparsable(
+            "the current snapshot boot identity's GameStart UUIDs are not in unique authored-row order"
+                .to_string(),
+        ));
+    }
+    let snapshot = run
+        .snapshot
+        .as_ref()
+        .expect("a boot identity can only be reached through a snapshot");
+    let mut seen = std::collections::BTreeSet::new();
+    for row in &identity.game_start_entity_uuids {
+        let uuid = &row.entity_uuid;
+        let Some(parsed) = crate::world_id::WorldId::parse(uuid) else {
+            return Err(LoadRefusal::Unparsable(format!(
+                "the current snapshot boot identity's GameStart UUID for authored row {} is not a minted world id",
+                row.authored_index
+            )));
+        };
+        if parsed.namespace != crate::world_id::IdNamespace::Entity {
+            return Err(LoadRefusal::Unparsable(format!(
+                "the current snapshot boot identity's GameStart UUID for authored row {} is not an entity id",
+                row.authored_index
+            )));
+        }
+        if parsed.render() != *uuid {
+            return Err(LoadRefusal::Unparsable(format!(
+                "the current snapshot boot identity's GameStart UUID for authored row {} is not canonical",
+                row.authored_index
+            )));
+        }
+        if !seen.insert(uuid) {
+            return Err(LoadRefusal::Unparsable(format!(
+                "the current snapshot boot identity repeats GameStart UUID {uuid:?}"
+            )));
+        }
+        let occurrences = snapshot
+            .state
+            .entities
+            .iter()
+            .filter(|entity| entity.uuid == *uuid)
+            .count();
+        if occurrences > 1 {
+            return Err(LoadRefusal::Unparsable(format!(
+                "the current snapshot boot identity's GameStart UUID {uuid:?} occurs {occurrences} times in the captured entity roster"
+            )));
+        }
+    }
+
+    Ok(identity)
+}
+
+/// Validate the saved GameStart identity map against the world that will boot.
+///
+/// Format validation above can prove order, namespace and UUID uniqueness without
+/// loading content. Once the selected scenario is available, this second gate
+/// proves every authored index still exists and still names a `GameStart` row.
+/// It deliberately does not require the UUID to occur in the captured entity
+/// roster: a GameStart entity destroyed before the save is absent there, but its
+/// original identity is still required so the fresh bootstrap can spawn and the
+/// restore can recognise that entity as surplus and despawn it again.
+pub fn validate_boot_identity_for_world(
+    identity: &BootIdentity,
+    world_config: &crate::world::config::WorldConfig,
+) -> Result<(), LoadRefusal> {
+    for row in &identity.game_start_entity_uuids {
+        let authored_index = row.authored_index as usize;
+        let Some(authored) = world_config.entities.get(authored_index) else {
+            return Err(LoadRefusal::Unparsable(format!(
+                "the current snapshot boot identity names missing authored entity row {} in a world with {} row(s)",
+                row.authored_index,
+                world_config.entities.len()
+            )));
+        };
+        if authored.spawn_on != crate::world::config::WorldEntitySpawnOn::GameStart {
+            return Err(LoadRefusal::Unparsable(format!(
+                "the current snapshot boot identity names authored entity row {}, which is not a GameStart row",
+                row.authored_index
+            )));
+        }
+    }
+    for (authored_index, authored) in world_config.entities.iter().enumerate() {
+        if authored.spawn_on != crate::world::config::WorldEntitySpawnOn::GameStart
+            || authored.when_predicate.is_some()
+        {
+            continue;
+        }
+        let authored_index = u32::try_from(authored_index).map_err(|_| {
+            LoadRefusal::Unparsable(
+                "the loaded world contains more authored entity rows than a boot identity can address"
+                    .to_string(),
+            )
+        })?;
+        if identity
+            .game_start_entity_uuids
+            .binary_search_by_key(&authored_index, |row| row.authored_index)
+            .is_err()
+        {
+            return Err(LoadRefusal::Unparsable(format!(
+                "the current snapshot boot identity omits unconditional GameStart entity row {authored_index}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 // ── Restore ──────────────────────────────────────────────────────────────────

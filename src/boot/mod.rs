@@ -385,6 +385,13 @@ struct RenderStackApplied;
 pub fn build(plan: BootPlan) -> Result<App, BootError> {
     let mut app = App::new();
 
+    // Shared artifact metadata for the peer-local save lifecycle. This comes
+    // from the same BootPlan on browser, native, and headless profiles; target
+    // adapters therefore cannot disagree about which scenario a capture names.
+    app.insert_resource(crate::save_slots_lifecycle::SaveScenario(
+        plan.world_path.clone(),
+    ));
+
     // The render-stack profile's shared core rides in *with* its renderer: on the
     // browser that renderer is `DefaultPlugins`, which is a superset of
     // [`core_plugins`] (it carries `PanicHandlerPlugin`, `LogPlugin`, the task

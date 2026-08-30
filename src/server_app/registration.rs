@@ -264,6 +264,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         ),
     ));
     crate::sim_tick::register_sim_tick(app);
+    crate::save_slots_lifecycle::register(app);
     app.add_systems(First, crate::sim_tick::reconcile_fixed_timestep);
 
     // Physics first, unless the caller asked for it last — see
@@ -368,6 +369,15 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             .declare_state::<crate::entities::spawner::EntityMass>(
                 StateClass::Derived,
                 "entity-mass-state",
+            )
+            // Save-resume boot identity is derived from the GameStart spawn
+            // rows (or transiently staged from the compatible saved run). The
+            // spawned EntityUuid components are folded; these lookup vectors
+            // exist only to reproduce/capture those identities.
+            .declare_state::<GameStartEntityUuids>(StateClass::Derived, "save-resume-boot-identity")
+            .declare_state::<ResumeGameStartEntityUuids>(
+                StateClass::Derived,
+                "save-resume-boot-identity",
             );
     }
 

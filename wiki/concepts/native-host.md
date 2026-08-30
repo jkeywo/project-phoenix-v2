@@ -1,9 +1,9 @@
 ---
 title: Native Host
 type: concept
-tags: [native, viewscreen, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile, media-devices, camera, microphone]
-sources: [src/native_host/mod.rs, src/native_host/app.rs, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_display.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/recovery.rs, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs]
-updated: 2026-08-29
+tags: [native, viewscreen, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile, media-devices, camera, microphone, saves]
+sources: [src/native_host/mod.rs, src/native_host/app.rs, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_display.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/recovery.rs, src/delivery/serve.rs, src/delivery/args.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs, src/save_slots_store.rs]
+updated: 2026-08-30
 ---
 
 # Native Host
@@ -32,6 +32,7 @@ the startup version pin are shared rather than forked.
 | Boot profile + render surface | `src/boot/mod.rs` (`BootProfile::NativeHost`, `NativeRenderSurface`) |
 | Process, argv, threading | `src/bin/phoenix_host.rs` |
 | Template preload | `src/entities/template_preload.rs` |
+| Private save Store and restore adapter | `src/save_slots_store.rs` |
 
 ## The boot profile
 
@@ -85,6 +86,18 @@ directory) and raw `std::fs` against the working directory, for world TOML,
 templates, Rhai scripts and rig sidecars. `pin_content_root` sets both from the
 one `--content-dir`, because pinning one and not the other half-loads content
 silently.
+
+The native process also installs a peer-private `vellum_save::FileStore`, by
+default under `.phoenix/saves` relative to its launch directory. Before any
+catalogue or resume read it claims that directory through a persistent,
+non-`.ron` lock sentinel held for the process lifetime; another native host
+pointed at the same directory is refused at startup and needs a distinct
+`--save-dir`, and shutdown releases the lock without deleting the sentinel. Its
+list, create, rename, export,
+confirmed-delete and startup-resume switches are
+documented under [Peer-Local Save Catalogues](./save-catalogues.md); resume
+builds a new App with the saved hull/fleet ship topology, deliberately without
+rejoining the old mesh, and is never a live World mutation.
 
 ## The transport seam
 

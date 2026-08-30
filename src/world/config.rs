@@ -1815,6 +1815,21 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         ));
     }
 
+    // Autosaves are scheduled from the deterministic logical clock (issue
+    // #865), so an authored duration must land on one exact tick boundary.
+    // Rounding here would make the configured cadence a lie and create a
+    // second timing rule beside the simulation's own tick count.
+    if raw.global.checked_autosave_interval_ticks().is_none() {
+        return Err(format!(
+            "[global] autosave_interval_secs = {} at sim_tick_hz = {} does not produce a \
+             positive whole number of simulation ticks (got {} ticks): autosave timing is \
+             deterministic and cannot be rounded",
+            raw.global.autosave_interval_secs,
+            raw.global.sim_tick_hz,
+            raw.global.autosave_interval_secs * raw.global.sim_tick_hz,
+        ));
+    }
+
     // The AI decision tick is in turn derived from the logical simulation tick
     // by counting (issue #895), so the same commensurability contract applies
     // one level up: `sim_tick_hz / ai_tick_hz` must be a positive integer.

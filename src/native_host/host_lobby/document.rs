@@ -46,6 +46,13 @@
 //! player CAN see on this surface comes through `gui/strings.js` from
 //! `assets/strings/strings.csv`, like the web lobby's (AGENTS.md rule 11).
 //!
+//! It also carries no Google Fonts `<link>`, which `server.html` does have. A
+//! bridge machine is not assumed to have internet, and a render-blocking
+//! stylesheet on a host that does not would stall the surface's first paint for
+//! however long the DNS lookup takes. The shared sheet's faces are all declared
+//! with a fallback stack (`'Chakra Petch', system-ui, monospace`), so the cost
+//! is the substitute face rather than an unstyled lobby.
+//!
 //! # The one edit
 //!
 //! | edit | why |

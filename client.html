@@ -148,6 +148,10 @@
        gamepad preference/tuning, feedback preferences and future GM
        confirmations. It never enters a ClientMessage or a session save. -->
   <script type="module" src="gui/operator-profile.js"></script>
+  <!-- Projects that one unchanged profile onto the APIs this browser or native
+       pane actually has. Capability loss suppresses an output, never a saved
+       portable choice. -->
+  <script type="module" src="gui/operator-surface-adapter.js"></script>
   <style>
     /* The lobby's vocabulary is gui/tokens.css, linked above — it used to keep
        a parallel `:root` here whose `--edge` was a different colour from the
@@ -1613,6 +1617,8 @@
     let semanticActionRegistry = null;
     let operatorProfile = null;
     let preferredGamepadSlot = null;
+    let operatorSurfaceCapabilities = null;
+    let activeFeedbackPreferences = { vibration: true, semanticCues: true };
     let _actionFeedbackRouter = null;
     /// Parent-only gamepad sampler. Iframes never poll navigator.getGamepads(),
     /// so an inactive or disconnected Station cannot receive controller input.
@@ -2741,10 +2747,15 @@
     function pushSemanticBindingsToIframe(iframeEl) {
       if (!iframeEl || !semanticActionRegistry) return;
       try {
-        const update = iframeEl.contentWindow
+        const target = iframeEl.contentWindow;
+        const update = target
           && iframeEl.contentWindow.__updateSemanticActionBindings;
         if (typeof update === 'function') {
           update(semanticActionRegistry.bindingProfile());
+        }
+        const updateFeedback = target && target.__updateActionFeedbackPreferences;
+        if (typeof updateFeedback === 'function') {
+          updateFeedback(activeFeedbackPreferences);
         }
       } catch (_) { /* a cross-origin or not-yet-loaded frame is retried on load */ }
     }
@@ -2791,19 +2802,26 @@
 
     function applyPreparedOperatorProfile(prepared) {
       const api = window.OperatorProfile;
-      if (!api || !prepared || !prepared.profile || !semanticActionRegistry) {
+      const adapter = window.OperatorSurfaceAdapter;
+      if (!api || !adapter || !prepared || !prepared.profile || !semanticActionRegistry) {
         return { status: 'rejected', code: 'profile-registry-unavailable' };
       }
-      const applied = api.applyOperatorProfile(prepared.profile, semanticActionRegistry);
+      const applied = adapter.applyOperatorProfileToSurface(
+        prepared.profile,
+        semanticActionRegistry,
+        { root: window },
+      );
       if (!applied || applied.status !== 'applied') return applied;
-      operatorProfile = prepared.profile;
+      operatorProfile = applied.portableProfile;
+      operatorSurfaceCapabilities = applied.capabilities;
+      activeFeedbackPreferences = applied.active.feedback;
       preferredGamepadSlot = operatorProfile.gamepad.preferredSlot;
-      if (window.simState) {
-        window.simState.accessibilityProfile = operatorProfile.accessibility;
+      if (window.simState && applied.active.accessibility) {
+        window.simState.accessibilityProfile = applied.active.accessibility;
       }
       if (gamepadInputRuntime
           && typeof gamepadInputRuntime.restorePreferred === 'function') {
-        gamepadInputRuntime.restorePreferred(preferredGamepadSlot);
+        gamepadInputRuntime.restorePreferred(applied.active.preferredGamepadSlot);
       }
       pushSemanticBindingsToConsoles();
       if (gamepadInputRuntime) gamepadInputRuntime.neutralize();
@@ -3377,7 +3395,8 @@
         applyPreparedOperatorProfile(loadedProfile);
       }
 
-      gamepadInputRuntime = typeof window.createGamepadInputRuntime === 'function'
+      gamepadInputRuntime = (!operatorSurfaceCapabilities || operatorSurfaceCapabilities.gamepad)
+        && typeof window.createGamepadInputRuntime === 'function'
         ? window.createGamepadInputRuntime({
             getContext: () => activeConsole,
             getActions: (context) => semanticActionRegistry
@@ -3459,9 +3478,16 @@
           onSemanticTuning: (actionId, tuning) => {
             return updateSemanticTuning(actionId, tuning);
           },
+          getOperatorCapabilities: () => operatorSurfaceCapabilities,
           getGamepadState: () => gamepadInputRuntime
             ? gamepadInputRuntime.state()
-            : { devices: [], selectedIndex: null, status: 'none', capturing: null },
+            : {
+                devices: [], selectedIndex: null,
+                retainedIndex: preferredGamepadSlot,
+                status: operatorSurfaceCapabilities
+                  && !operatorSurfaceCapabilities.gamepad ? 'unavailable' : 'none',
+                capturing: null,
+              },
           onGamepadSelection: (index) => gamepadInputRuntime
             ? (() => {
                 const result = gamepadInputRuntime.select(index);

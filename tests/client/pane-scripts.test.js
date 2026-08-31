@@ -146,6 +146,7 @@ beforeEach(() => {
   delete window.__phoenixPaneApply;
   delete window.phoenixPaneOut;
   delete window.PhoenixTransportFactories;
+  delete window.PhoenixOperatorCapabilities;
   delete window.connectionManager;
   window.sessionStorage.clear();
   window.history.replaceState(null, '', '#');
@@ -158,6 +159,23 @@ afterEach(() => {
 });
 
 describe('pane_boot.js — the identity comes out of the fragment', () => {
+  it('declares native capability gaps before the shared client profile loads', () => {
+    // #1124 remains the only pane input route: no browser-shaped Gamepad API
+    // stub is allowed to create a second path. #1127 remains the Accessibility
+    // path; the declaration only filters active capabilities and retains data.
+    runBoot(fragment('abcd', 'Ada'));
+    expect(window.PhoenixOperatorCapabilities).toEqual({
+      surface: 'native-pane',
+      keyboard: true,
+      gamepad: false,
+      vibration: false,
+      semanticCues: true,
+      accessibility: true,
+    });
+    expect(BOOT.indexOf('window.PhoenixOperatorCapabilities ='))
+      .toBeLessThan(BOOT.indexOf('window.__phoenixPane'));
+  });
+
   it('reads the token and name the host put in location.hash', () => {
     // The point of the fragment: a browser never transmits it, so a live
     // participant's session token is in no byte the host serves. The boot

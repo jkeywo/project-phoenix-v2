@@ -1279,6 +1279,35 @@ describe('semantic controls tab', () => {
     expect(selector.children.some((option) => option.value === '0')).toBe(true);
   });
 
+  it('shows native capability loss while retaining portable gamepad and vibration choices', () => {
+    const { doc } = openControls({
+      getOperatorCapabilities: () => ({
+        surface: 'native-pane', keyboard: true, gamepad: false,
+        vibration: false, semanticCues: true, accessibility: true,
+      }),
+      getGamepadState: () => ({
+        devices: [], selectedIndex: null, retainedIndex: 2,
+        status: 'unavailable', capturing: null,
+      }),
+    });
+    const controls = descendants(bodyOf(doc));
+    const selector = controls.find((el) => el.getAttribute
+      && el.getAttribute('data-control') === 'semantic-gamepad-select');
+    const status = controls.find((el) => el.getAttribute
+      && el.getAttribute('data-control') === 'semantic-gamepad-status');
+    const vibration = controls.find((el) => el.getAttribute
+      && el.getAttribute('data-control') === 'operator-profile-vibration-unavailable');
+
+    expect(selector.disabled).toBe(true);
+    expect(selector.value).toBe('2');
+    expect(selector.children.at(-1).textContent)
+      .toBe(t('settings.controls.gamepad.device_retained', { slot: '3' }));
+    expect(status.textContent).toBe(t('settings.controls.gamepad.status_unavailable'));
+    expect(status.getAttribute('role')).toBe('status');
+    expect(vibration.textContent)
+      .toBe(t('settings.controls.profile.vibration_unavailable'));
+  });
+
   it('preserves exact binding focus across pad status changes and disarms on conflict/blur', () => {
     let gamepad = {
       devices: [{ index: 0, supported: true }],

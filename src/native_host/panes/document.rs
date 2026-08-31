@@ -864,6 +864,36 @@ mod tests {
         assert!(!build_pane_document(&client).unwrap().contains("<audio"));
     }
 
+    #[test]
+    fn a_native_pane_declares_profile_capabilities_before_the_shared_adapter() {
+        // #1280 does not create a native profile, input sampler or
+        // Accessibility apply path. The first injected script declares only
+        // capability facts; the repository's ordinary profile and surface
+        // adapter then consume them. Keyboard still arrives through #1124 and
+        // OS defaults are still injected separately by #1127 below.
+        let client = std::fs::read_to_string("client.html").unwrap();
+        let html = build_pane_document(&client).unwrap();
+        let declaration = html
+            .find("window.PhoenixOperatorCapabilities =")
+            .expect("pane boot declares its operator capabilities");
+        let profile = html
+            .find("src=\"gui/operator-profile.js\"")
+            .expect("the ordinary versioned profile remains the schema owner");
+        let adapter = html
+            .find("src=\"gui/operator-surface-adapter.js\"")
+            .expect("the shared surface adapter remains in the pane document");
+        assert!(declaration < profile);
+        assert!(profile < adapter);
+        assert!(html.contains("surface: 'native-pane'"));
+        assert!(html.contains("gamepad: false"));
+        assert!(html.contains("vibration: false"));
+        assert_eq!(
+            html.matches("src=\"gui/operator-profile.js\"").count(),
+            1,
+            "a pane must not gain a competing native profile"
+        );
+    }
+
     // ── OS accessibility default injection (issue #1127) ─────────────────────
 
     #[test]

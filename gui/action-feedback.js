@@ -57,6 +57,21 @@ const PRESENTATION = Object.freeze({
   }),
 });
 
+export const ACTION_FEEDBACK_PREFERENCE_DEFAULTS = Object.freeze({
+  vibration: true,
+  semanticCues: true,
+});
+
+export function normalizeActionFeedbackPreferences(value) {
+  const source = value && typeof value === 'object' ? value : {};
+  return Object.freeze({
+    vibration: typeof source.vibration === 'boolean'
+      ? source.vibration : ACTION_FEEDBACK_PREFERENCE_DEFAULTS.vibration,
+    semanticCues: typeof source.semanticCues === 'boolean'
+      ? source.semanticCues : ACTION_FEEDBACK_PREFERENCE_DEFAULTS.semanticCues,
+  });
+}
+
 let fallbackSequence = 0;
 
 /** True for the exact bounded opaque string shape the Rust wire accepts. */
@@ -351,13 +366,14 @@ export class ActionFeedbackRouter {
  * Emit the shared visual/live-status value and only the effects it declares.
  * Presentation-restored values deliberately declare neither cue nor haptic.
  */
-export function emitActionFeedbackTransition(root, value) {
+export function emitActionFeedbackTransition(root, value, preferences = null) {
   if (!root || typeof root.dispatchEvent !== 'function' || typeof CustomEvent !== 'function') return;
+  const enabled = normalizeActionFeedbackPreferences(preferences);
   root.dispatchEvent(new CustomEvent('phoenix-action-feedback', { detail: value }));
-  if (value.cue) {
+  if (value.cue && enabled.semanticCues) {
     root.dispatchEvent(new CustomEvent('phoenix-semantic-cue', { detail: value }));
   }
-  if (value.vibrationIntent) {
+  if (value.vibrationIntent && enabled.vibration) {
     root.dispatchEvent(new CustomEvent('phoenix-vibration-intent', { detail: value }));
   }
 }

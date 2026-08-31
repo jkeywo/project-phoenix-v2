@@ -294,6 +294,10 @@ export function buildSettingsState(opts = {}) {
     tabs: visibleClientTabs(demo).map((tab) => ({ id: tab.id, labelId: tab.labelId })),
     activeTab: resolveClientActiveTab(opts.activeTab || null, demo),
     semanticActions: Array.isArray(opts.semanticActions) ? opts.semanticActions : [],
+    operatorCapabilities: opts.operatorCapabilities
+      && typeof opts.operatorCapabilities === 'object'
+      ? opts.operatorCapabilities
+      : { gamepad: true, vibration: true, semanticCues: true, accessibility: true },
     gamepad: opts.gamepad && typeof opts.gamepad === 'object' ? opts.gamepad : {
       devices: [], selectedIndex: null, status: 'none', capturing: null,
     },
@@ -434,6 +438,7 @@ function persistMasterVolume(value) {
  *   onSemanticCapture?: (actionId: string|null, slot: number|null, active: boolean) => void,
  *   onOperatorProfileExport?: () => string,
  *   onOperatorProfileImport?: (json: string) => object|Promise<object>,
+ *   getOperatorCapabilities?: () => object,
  *   doc?: Document,
  *   isDemo?: () => boolean,
  * }} opts
@@ -458,6 +463,7 @@ export function mountSettings({
   onSemanticCapture: _onSemanticCapture,
   onOperatorProfileExport: _onOperatorProfileExport,
   onOperatorProfileImport: _onOperatorProfileImport,
+  getOperatorCapabilities: _getOperatorCapabilities,
   downloadOperatorProfile: _downloadOperatorProfile,
   readOperatorProfileFile: _readOperatorProfileFile,
   doc: _doc,
@@ -775,10 +781,15 @@ export function mountSettings({
     body.appendChild(motionSec);
   }
 
-  function buildOperatorProfileSection(body) {
+  function buildOperatorProfileSection(body, capabilities) {
     const profileSection = section('settings.controls.profile.heading');
     profileSection.appendChild(hint('settings.controls.profile.hint'));
     profileSection.appendChild(hint('settings.controls.profile.private_hint'));
+    if (capabilities && capabilities.vibration === false) {
+      const unavailable = hint('settings.controls.profile.vibration_unavailable');
+      unavailable.setAttribute('data-control', 'operator-profile-vibration-unavailable');
+      profileSection.appendChild(unavailable);
+    }
     const profileRow = row('settings-rating-row');
     const exportProfile = action(
       t('settings.controls.profile.export'),
@@ -853,7 +864,7 @@ export function mountSettings({
     const gamepad = view.gamepad || {};
     // Keep Reset All as the final focusable control in this tab. Existing
     // conflict Escape/Shift+Tab behavior relies on that stable modal boundary.
-    buildOperatorProfileSection(body);
+    buildOperatorProfileSection(body, view.operatorCapabilities);
     semanticControls.render(body, {
       actions: view.semanticActions,
       capturing: gamepad.capturing || null,
@@ -1005,6 +1016,9 @@ export function mountSettings({
       semanticActions: typeof _getSemanticActions === 'function'
         ? _getSemanticActions()
         : [],
+      operatorCapabilities: typeof _getOperatorCapabilities === 'function'
+        ? _getOperatorCapabilities()
+        : null,
       gamepad: typeof _getGamepadState === 'function'
         ? _getGamepadState()
         : null,
@@ -1046,6 +1060,8 @@ export function mountSettings({
   function updateGamepadSelector(selector, gamepad) {
     if (!selector) return;
     selector.innerHTML = '';
+    const unavailable = gamepad && gamepad.status === 'unavailable';
+    selector.disabled = !!unavailable;
     const none = doc.createElement('option');
     none.value = '';
     none.textContent = t('settings.controls.gamepad.none');
@@ -1063,7 +1079,7 @@ export function mountSettings({
       selector.appendChild(option);
       seen.add(Number(device.index));
     }
-    if (gamepad && gamepad.selectedIndex != null
+    if (!unavailable && gamepad && gamepad.selectedIndex != null
         && !seen.has(Number(gamepad.selectedIndex))) {
       const disconnected = doc.createElement('option');
       disconnected.value = String(gamepad.selectedIndex);
@@ -1072,8 +1088,18 @@ export function mountSettings({
       });
       selector.appendChild(disconnected);
     }
-    selector.value = !gamepad || gamepad.selectedIndex == null
-      ? '' : String(gamepad.selectedIndex);
+    if (unavailable && gamepad.retainedIndex != null) {
+      const retained = doc.createElement('option');
+      retained.value = String(gamepad.retainedIndex);
+      retained.textContent = t('settings.controls.gamepad.device_retained', {
+        slot: String(Number(gamepad.retainedIndex) + 1),
+      });
+      selector.appendChild(retained);
+      selector.value = retained.value;
+    } else {
+      selector.value = !gamepad || gamepad.selectedIndex == null
+        ? '' : String(gamepad.selectedIndex);
+    }
   }
 
   function updateGamepadStatus(status, gamepad) {

@@ -77,8 +77,10 @@ import {
 // happened". See `__input_ms` in `sendAction` below.
 import { nowMs } from './console-latency.js';
 import {
+  ACTION_FEEDBACK_PREFERENCE_DEFAULTS,
   ActionFeedbackLifecycle,
   emitActionFeedbackTransition,
+  normalizeActionFeedbackPreferences,
 } from './action-feedback.js';
 
 export function initConsole({ name, render }) {
@@ -133,7 +135,7 @@ export function initConsole({ name, render }) {
   }
 
   function _presentActionFeedback(value) {
-    emitActionFeedbackTransition(_root, value);
+    emitActionFeedbackTransition(_root, value, _feedbackPreferences);
     if (typeof document === 'undefined' || !value || value.isCurrent === false) return;
     if (value.cancelled || !value.statusId) {
       _semanticFeedbackByAction.delete(value.actionId);
@@ -146,6 +148,7 @@ export function initConsole({ name, render }) {
   // One registry per console document. The parent page owns the mutable
   // in-memory binding choices and explicitly copies them into each iframe;
   // module instances in separate realms are never treated as shared state.
+  var _feedbackPreferences = ACTION_FEEDBACK_PREFERENCE_DEFAULTS;
   var _actionFeedback = new ActionFeedbackLifecycle({
     now: nowMs,
     onTransition: _presentActionFeedback,
@@ -326,6 +329,16 @@ export function initConsole({ name, render }) {
   // local presentation data; no profile or binding becomes a ClientMessage.
   _root.__updateSemanticActionBindings = function(profile) {
     return _semanticActions.updateBindings(profile);
+  };
+
+  // Explicit parent → iframe feedback-preference update. It follows the same
+  // private, in-memory seam as bindings and never becomes a ClientMessage.
+  // Surface capability filtering happens in the parent adapter, so a native
+  // pane can retain `vibration: true` in its portable profile while suppressing
+  // an output Ultralight cannot provide.
+  _root.__updateActionFeedbackPreferences = function(preferences) {
+    _feedbackPreferences = normalizeActionFeedbackPreferences(preferences);
+    return _feedbackPreferences;
   };
 
   var _semanticKeyHandler = null;

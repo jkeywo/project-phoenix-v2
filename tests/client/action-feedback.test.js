@@ -297,4 +297,22 @@ describe('feedback event hooks', () => {
     expect(seen.cue).toEqual([value]);
     expect(seen.vibration).toEqual([value]);
   });
+
+  it('keeps mandatory status while profile preferences suppress optional outputs', () => {
+    const seen = { feedback: [], cue: [], vibration: [] };
+    window.addEventListener('phoenix-action-feedback', (event) => seen.feedback.push(event.detail));
+    window.addEventListener('phoenix-semantic-cue', (event) => seen.cue.push(event.detail));
+    window.addEventListener('phoenix-vibration-intent', (event) => seen.vibration.push(event.detail));
+    const value = {
+      actionId: 'captain.red-alert', correlation: 'corr-private', state: 'Applied',
+      statusId: 'action_feedback.applied', cue: 'action-applied', vibrationIntent: 'confirm',
+    };
+    emitActionFeedbackTransition(window, value, {
+      semanticCues: false,
+      vibration: false,
+    });
+    expect(seen.feedback).toEqual([value]);
+    expect(seen.cue).toEqual([]);
+    expect(seen.vibration).toEqual([]);
+  });
 });

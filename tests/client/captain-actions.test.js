@@ -24,7 +24,9 @@ describe('real Captain Red Alert semantic adapter', () => {
     });
     expect(CAPTAIN_RED_ALERT_ACTION.bindings).toHaveLength(2);
     expect(CAPTAIN_RED_ALERT_ACTION.bindings[0]).toMatchObject({ code: 'KeyR' });
-    expect(CAPTAIN_RED_ALERT_ACTION.bindings[1]).toBeNull();
+    expect(CAPTAIN_RED_ALERT_ACTION.bindings[1]).toEqual({
+      type: 'gamepad', input: 'button', control: 'face-bottom',
+    });
   });
 
   it('declares Weapons Hold as a second real Captain action with two slots', () => {
@@ -67,6 +69,21 @@ describe('real Captain Red Alert semantic adapter', () => {
       source: 'control',
     });
     expect(sendAction).toHaveBeenCalledWith('set_red_alert', { active: false });
+  });
+
+  it('routes a gamepad activation through the same Red Alert adapter', () => {
+    const sendAction = vi.fn();
+    const registry = createCaptainActionRegistry({
+      getState: () => ({ red_alert: false, red_alert_auto: false }),
+      sendAction,
+    });
+    expect(registry.activate(CAPTAIN_RED_ALERT_ACTION_ID, {
+      context: CAPTAIN_ACTION_CONTEXT,
+      source: 'gamepad',
+    })).toEqual({
+      claimed: true, actionId: CAPTAIN_RED_ALERT_ACTION_ID, handled: true,
+    });
+    expect(sendAction).toHaveBeenCalledWith('set_red_alert', { active: true });
   });
 
   it('dispatches a remapped binding through the same adapter and identity', () => {

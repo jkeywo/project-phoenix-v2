@@ -8,7 +8,7 @@
 
 import { t } from './strings.js';
 import { stationDisplayName } from './console-state.js';
-import { formatKeyboardBinding } from './semantic-action-registry.js';
+import { formatSemanticBinding } from './semantic-action-registry.js';
 
 const HELP_SECTIONS = {
   captain: [['help.captain.0.heading', 'help.captain.0.body'], ['help.captain.1.heading', 'help.captain.1.body'], ['help.captain.2.heading', 'help.captain.2.body']],
@@ -94,7 +94,7 @@ export function renderStationHelp(root, stationId, semanticActions = []) {
       slots.className = 'station-help-section-body station-help-bindings';
       slots.textContent = (action.bindings || []).map((binding, index) => t(
         'settings.controls.slot_value',
-        { slot: String(index + 1), binding: formatKeyboardBinding(binding, t) },
+        { slot: String(index + 1), binding: formatSemanticBinding(binding, t) },
       )).join(t('input.binding.slots_separator'));
       section.appendChild(slots);
       sections.appendChild(section);

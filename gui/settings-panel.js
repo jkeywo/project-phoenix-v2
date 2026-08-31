@@ -52,7 +52,7 @@ import { controlSystemEnvelope } from './command-gateway.js';
 import { renderStationHelp } from './help-panel.js';
 import { renderManual } from './manual-panel.js';
 import {
-  formatKeyboardBinding,
+  formatSemanticBinding,
   isReservedKeyboardBinding,
   keyboardBindingFromEvent,
 } from './semantic-action-registry.js';
@@ -239,6 +239,7 @@ export function godModeMessage() {
  *   demo?: boolean,
  *   activeTab?: string|null,
  *   semanticActions?: Array<object>,
+ *   gamepad?: object,
  * }} opts
  * @returns {{
  *   tabs: Array<{id: string, labelId: string}>,
@@ -290,6 +291,9 @@ export function buildSettingsState(opts = {}) {
     tabs: visibleClientTabs(demo).map((tab) => ({ id: tab.id, labelId: tab.labelId })),
     activeTab: resolveClientActiveTab(opts.activeTab || null, demo),
     semanticActions: Array.isArray(opts.semanticActions) ? opts.semanticActions : [],
+    gamepad: opts.gamepad && typeof opts.gamepad === 'object' ? opts.gamepad : {
+      devices: [], selectedIndex: null, status: 'none', capturing: null,
+    },
     stationId,
     afk,
     ratings,
@@ -421,6 +425,9 @@ function persistMasterVolume(value) {
  *     options?: {replace?: boolean}) => object,
  *   onSemanticResetAction?: (actionId: string) => object,
  *   onSemanticResetAll?: () => object,
+ *   getGamepadState?: () => object,
+ *   onGamepadSelection?: (index: number|null) => object,
+ *   onSemanticCapture?: (actionId: string|null, slot: number|null, active: boolean) => void,
  *   doc?: Document,
  *   isDemo?: () => boolean,
  * }} opts
@@ -439,6 +446,9 @@ export function mountSettings({
   onSemanticBinding: _onSemanticBinding,
   onSemanticResetAction: _onSemanticResetAction,
   onSemanticResetAll: _onSemanticResetAll,
+  getGamepadState: _getGamepadState,
+  onGamepadSelection: _onGamepadSelection,
+  onSemanticCapture: _onSemanticCapture,
   doc: _doc,
   isDemo: _isDemo,
 } = {}) {
@@ -446,7 +456,8 @@ export function mountSettings({
   if (!doc) {
     return {
       open() {}, close() {}, rebuildContent() {},
-      selectTab() {}, isOpen: () => false,
+      selectTab() {}, isOpen: () => false, proposeSemanticBinding() {},
+      updateGamepadState() {},
     };
   }
   const win = doc.defaultView || (typeof window !== 'undefined' ? window : null);
@@ -503,7 +514,7 @@ export function mountSettings({
     if (typeof _onSemanticBinding === 'function') {
       return _onSemanticBinding(actionId, slot, binding, options);
     }
-    return isReservedKeyboardBinding(binding)
+    return binding && binding.type !== 'gamepad' && isReservedKeyboardBinding(binding)
       ? { status: 'reserved', actionId, slot, binding }
       : { status: 'unavailable', actionId, slot, binding };
   };
@@ -552,6 +563,35 @@ export function mountSettings({
     );
     if (control && typeof control.focus === 'function') control.focus();
   };
+
+  function proposeSemanticBinding(actionId, slot, binding) {
+    // A keyboard proposal rebuilds the capture node. Do not depend on a
+    // removed focused element emitting blur: explicitly end the parallel
+    // gamepad capture before replacing the DOM.
+    if (typeof _onSemanticCapture === 'function') {
+      _onSemanticCapture(actionId, slot, false);
+    }
+    const result = setSemanticBinding(actionId, slot, binding);
+    const reserved = result && result.status === 'reserved';
+    if (reserved) {
+      pendingBindingConflict = null;
+      bindingFeedback = {
+        labelId: 'settings.controls.reserved',
+        values: { binding: formatSemanticBinding(binding, t) },
+      };
+    } else if (result && result.status === 'conflict') {
+      pendingBindingConflict = result;
+      bindingFeedback = null;
+    } else {
+      pendingBindingConflict = null;
+      bindingFeedback = null;
+    }
+    if (shell.isOpen()) {
+      buildContent();
+      if (reserved) focusSemanticBinding(actionId, slot);
+    }
+    return result;
+  }
 
   const cancelPendingBindingConflict = () => {
     if (!pendingBindingConflict) return false;
@@ -782,6 +822,32 @@ export function mountSettings({
     intro.appendChild(resetAll);
     body.appendChild(intro);
 
+    const gamepad = view.gamepad || {};
+    const gamepadSection = section('settings.controls.gamepad.heading');
+    gamepadSection.appendChild(hint('settings.controls.gamepad.hint'));
+    const gamepadLabel = doc.createElement('label');
+    gamepadLabel.className = 'settings-binding-label';
+    gamepadLabel.textContent = t('settings.controls.gamepad.selector');
+    const selector = doc.createElement('select');
+    selector.setAttribute('data-control', 'semantic-gamepad-select');
+    selector.setAttribute('aria-label', t('settings.controls.gamepad.selector'));
+    updateGamepadSelector(selector, gamepad);
+    selector.addEventListener('change', () => {
+      if (typeof _onGamepadSelection === 'function') {
+        _onGamepadSelection(selector.value === '' ? null : Number(selector.value));
+      }
+      buildContent();
+    });
+    gamepadLabel.appendChild(selector);
+    gamepadSection.appendChild(gamepadLabel);
+
+    const status = doc.createElement('div');
+    status.className = 'settings-section-hint settings-gamepad-status';
+    status.setAttribute('data-control', 'semantic-gamepad-status');
+    updateGamepadStatus(status, gamepad);
+    gamepadSection.appendChild(status);
+    body.appendChild(gamepadSection);
+
     if (bindingFeedback) {
       const feedback = doc.createElement('div');
       feedback.className = 'settings-binding-feedback';
@@ -790,26 +856,6 @@ export function mountSettings({
       feedback.textContent = t(bindingFeedback.labelId, bindingFeedback.values || {});
       body.appendChild(feedback);
     }
-
-    const handleBindingProposal = (actionId, slot, binding) => {
-      const result = setSemanticBinding(actionId, slot, binding);
-      const reserved = result && result.status === 'reserved';
-      if (reserved) {
-        pendingBindingConflict = null;
-        bindingFeedback = {
-          labelId: 'settings.controls.reserved',
-          values: { binding: formatKeyboardBinding(binding, t) },
-        };
-      } else if (result && result.status === 'conflict') {
-        pendingBindingConflict = result;
-        bindingFeedback = null;
-      } else {
-        pendingBindingConflict = null;
-        bindingFeedback = null;
-      }
-      buildContent();
-      if (reserved) focusSemanticBinding(actionId, slot);
-    };
 
     if (pendingBindingConflict) {
       const proposal = pendingBindingConflict;
@@ -821,7 +867,7 @@ export function mountSettings({
       const heading = doc.createElement('div');
       heading.className = 'settings-binding-conflict-heading';
       heading.textContent = t('settings.controls.conflict_heading', {
-        binding: formatKeyboardBinding(proposal.binding, t),
+        binding: formatSemanticBinding(proposal.binding, t),
       });
       prompt.appendChild(heading);
 
@@ -882,7 +928,11 @@ export function mountSettings({
         const capture = doc.createElement('input');
         capture.type = 'text';
         capture.readOnly = true;
-        capture.value = formatKeyboardBinding(binding, t);
+        const capturing = gamepad.capturing
+          && gamepad.capturing.actionId === semanticAction.id
+          && gamepad.capturing.slot === slot;
+        capture.value = capturing
+          ? t('settings.controls.press_key') : formatSemanticBinding(binding, t);
         capture.className = 'settings-binding-capture';
         capture.setAttribute('data-control', `semantic-binding-${semanticAction.id}-${slot}`);
         capture.setAttribute('data-semantic-binding-capture', 'true');
@@ -902,10 +952,16 @@ export function mountSettings({
         capture.addEventListener('focus', () => {
           pendingModifier = null;
           capture.value = t('settings.controls.press_key');
+          if (typeof _onSemanticCapture === 'function') {
+            _onSemanticCapture(semanticAction.id, slot, true);
+          }
         });
         capture.addEventListener('blur', () => {
           pendingModifier = null;
-          capture.value = formatKeyboardBinding(binding, t);
+          capture.value = formatSemanticBinding(binding, t);
+          if (typeof _onSemanticCapture === 'function') {
+            _onSemanticCapture(semanticAction.id, slot, false);
+          }
         });
         capture.addEventListener('keydown', (event) => {
           const escape = isEscapeEvent(event);
@@ -945,7 +1001,7 @@ export function mountSettings({
           if (!next) return;
           if (typeof event.preventDefault === 'function') event.preventDefault();
           if (typeof event.stopPropagation === 'function') event.stopPropagation();
-          handleBindingProposal(semanticAction.id, slot, next);
+          proposeSemanticBinding(semanticAction.id, slot, next);
         });
         capture.addEventListener('keyup', (event) => {
           if (!pendingModifier
@@ -954,7 +1010,7 @@ export function mountSettings({
           if (typeof event.stopPropagation === 'function') event.stopPropagation();
           const candidate = pendingModifier.binding;
           pendingModifier = null;
-          handleBindingProposal(semanticAction.id, slot, candidate);
+          proposeSemanticBinding(semanticAction.id, slot, candidate);
         });
 
         bindingRow.appendChild(label);
@@ -1087,6 +1143,9 @@ export function mountSettings({
       semanticActions: typeof _getSemanticActions === 'function'
         ? _getSemanticActions()
         : [],
+      gamepad: typeof _getGamepadState === 'function'
+        ? _getGamepadState()
+        : null,
     });
     activeTab = view.activeTab;
 
@@ -1115,6 +1174,70 @@ export function mountSettings({
     else if (activeTab === 'ship-manual') buildShipManualTab(body);
   }
 
+  function visibleGamepadStatus(gamepad) {
+    const unsupportedOnly = gamepad && gamepad.status === 'none'
+      && (gamepad.devices || []).some((device) => !device.supported)
+      && !(gamepad.devices || []).some((device) => device.supported);
+    return unsupportedOnly ? 'unsupported' : ((gamepad && gamepad.status) || 'none');
+  }
+
+  function updateGamepadSelector(selector, gamepad) {
+    if (!selector) return;
+    selector.innerHTML = '';
+    const none = doc.createElement('option');
+    none.value = '';
+    none.textContent = t('settings.controls.gamepad.none');
+    selector.appendChild(none);
+    const seen = new Set();
+    for (const device of (gamepad && gamepad.devices) || []) {
+      const option = doc.createElement('option');
+      option.value = String(device.index);
+      option.textContent = t(device.supported
+        ? 'settings.controls.gamepad.device'
+        : 'settings.controls.gamepad.device_unsupported', {
+        slot: String(Number(device.index) + 1),
+      });
+      option.disabled = !device.supported;
+      selector.appendChild(option);
+      seen.add(Number(device.index));
+    }
+    if (gamepad && gamepad.selectedIndex != null
+        && !seen.has(Number(gamepad.selectedIndex))) {
+      const disconnected = doc.createElement('option');
+      disconnected.value = String(gamepad.selectedIndex);
+      disconnected.textContent = t('settings.controls.gamepad.device_disconnected', {
+        slot: String(Number(gamepad.selectedIndex) + 1),
+      });
+      selector.appendChild(disconnected);
+    }
+    selector.value = !gamepad || gamepad.selectedIndex == null
+      ? '' : String(gamepad.selectedIndex);
+  }
+
+  function updateGamepadStatus(status, gamepad) {
+    if (!status) return;
+    const visibleStatus = visibleGamepadStatus(gamepad);
+    status.setAttribute('role', visibleStatus === 'disconnected' ? 'alert' : 'status');
+    status.setAttribute('aria-live', visibleStatus === 'disconnected' ? 'assertive' : 'polite');
+    status.textContent = t(`settings.controls.gamepad.status_${visibleStatus}`);
+  }
+
+  // Gamepad polling can change status while a binding input owns focus. Update
+  // only the selector options and live status; rebuilding the whole modal here
+  // would detach that exact input, losing keyboard/gamepad capture and making
+  // blur unreliable as the disarm boundary.
+  function updateGamepadState(gamepad) {
+    if (!shell.isOpen() || activeTab !== 'controls') return;
+    updateGamepadSelector(
+      overlay.querySelector('[data-control="semantic-gamepad-select"]'),
+      gamepad,
+    );
+    updateGamepadStatus(
+      overlay.querySelector('[data-control="semantic-gamepad-status"]'),
+      gamepad,
+    );
+  }
+
   function selectTab(id) {
     if (id !== activeTab) {
       // Conflict prompts and reserved feedback describe a Controls capture.
@@ -1124,6 +1247,7 @@ export function mountSettings({
       // are deliberately untouched here.
       pendingBindingConflict = null;
       bindingFeedback = null;
+      if (typeof _onSemanticCapture === 'function') _onSemanticCapture(null, null, false);
     }
     activeTab = id;
     if (shell.isOpen()) buildContent();
@@ -1139,6 +1263,8 @@ export function mountSettings({
     close: shell.close,
     isOpen: shell.isOpen,
     selectTab,
+    proposeSemanticBinding,
+    updateGamepadState,
     rebuildContent: () => {
       if (shell.isOpen()) buildContent();
     },

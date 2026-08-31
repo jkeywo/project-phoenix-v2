@@ -1,8 +1,8 @@
 ---
 title: Client Architecture
 type: concept
-tags: [client, javascript, iframe, console, console-family, state, accessibility, keyboard, feedback, vitest]
-sources: [client.html, server.html, gui/mount-plan.js, gui/hero-bar.js, gui/reducer-result.js, gui/lobby-state.js, gui/sim-state.js, gui/comms-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/stations/captain-actions.js, gui/action-map.js, gui/console-core.js, gui/console-latency.js, gui/iframe-bridge.js, gui/client-router.js, gui/coordination-popup.js, gui/accessibility-profile.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/command_admission/mod.rs, src/console/captain/server.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
+tags: [client, javascript, iframe, console, console-family, state, accessibility, keyboard, gamepad, feedback, vitest]
+sources: [client.html, server.html, gui/mount-plan.js, gui/hero-bar.js, gui/reducer-result.js, gui/lobby-state.js, gui/sim-state.js, gui/comms-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/gamepad-input.js, gui/stations/captain-actions.js, gui/action-map.js, gui/console-core.js, gui/console-latency.js, gui/iframe-bridge.js, gui/client-router.js, gui/coordination-popup.js, gui/accessibility-profile.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/command_admission/mod.rs, src/console/captain/server.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
 updated: 2026-08-31
 ---
 
@@ -81,7 +81,10 @@ visible/live status, semantic cue and optional vibration intent. Pending never
 changes Red Alert's active styling: only the normal authoritative Captain
 blackboard does. Weapons Hold remains on the uncorrelated legacy envelope.
 
-Keyboard binding identity is `KeyboardEvent.code` plus all four modifiers.
+Each binding slot is a union: `KeyboardEvent.code` plus all four modifiers, or
+a portable control from the browser's standard gamepad mapping. Gamepad
+bindings name logical controls (face-bottom, D-pad directions, or a left-stick
+axis direction and threshold), never `Gamepad.id`, vendor data or a connection.
 Registry conflicts exist only where action context arrays intersect, including
 two slots on the same action. Settings asks the parent registry to propose a
 change; conflicting proposals remain presentation-only until the player chooses
@@ -91,6 +94,19 @@ defaults are retained separately from current bindings. Per-action reset
 restores both slots and clears collisions with those defaults; Reset All
 restores the complete conflict-free authored profile. These contexts and local
 binding choices add no Station or command authority.
+
+`gui/gamepad-input.js` is the only Gamepad API reader. The parent client samples
+one snapshot per animation frame and activates semantic actions only in the
+currently active console iframe. A player must explicitly choose a connected
+`mapping === "standard"` browser slot; no selected slot means no gamepad input.
+Ownership also carries an ephemeral connection generation, so disconnect clears
+edge state and raises a persistent client-level accessible warning outside
+Settings, and a new device reusing the same index cannot inherit control. The
+Settings mirror updates its selector/status nodes in place so a polling status
+change cannot detach a focused binding-capture control. Selection, reconnection,
+console-context changes and binding capture all require a neutral sample before
+a held discrete control can make a rising edge. Keyboard dispatch remains the
+independent iframe path throughout.
 
 ## Module inventory (`gui/`)
 
@@ -106,7 +122,7 @@ binding choices add no Station or command authority.
 | `console-payload.js` | Metadata-driven flat/keyed normalization plus `familyView`: mirrors flat views only under actual projected ids and selects composite views by Console Family, with no inverse id census. |
 | `action-map.js` | Table-driven `console_action` → `ClientMessage` dispatch |
 | `action-feedback.js` | Pure bounded Pressed → Pending → Applied/Refused/TimedOut presentation lifecycle, exact parent-to-originating-iframe router, and the shared live-status/semantic-cue/vibration transition |
-| `semantic-action-registry.js`, `stations/captain-actions.js` | Non-authoritative context/input identity, exactly two binding slots, reserved-chord policy, overlap-only conflict replacement and reset operations, plus the real Captain Red Alert and Weapons Hold adapters above `action-map.js` |
+| `semantic-action-registry.js`, `gamepad-input.js`, `stations/captain-actions.js` | Non-authoritative context/input identity, exactly two keyboard-or-standard-gamepad slots, explicit one-connection gamepad ownership with neutral-gated edges, reserved-chord policy, overlap-only conflict replacement and reset operations, plus the real Captain Red Alert and Weapons Hold adapters above `action-map.js` |
 | `iframe-bridge.js` | `push()` / `wireLoad()` state-push into console iframes (ADR-0001 §2) |
 | `content-switcher.js` | Section visibility over the ship's mounted stations; one human directly holds one station |
 | `station-roster.js` | Pure fold: players + station defs → lobby roster rows + aggregates |

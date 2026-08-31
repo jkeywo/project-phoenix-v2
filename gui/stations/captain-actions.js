@@ -30,7 +30,11 @@ export const CAPTAIN_RED_ALERT_ACTION = Object.freeze({
       altKey: false,
       metaKey: false,
     }),
-    null,
+    Object.freeze({
+      type: 'gamepad',
+      input: 'button',
+      control: 'face-bottom',
+    }),
   ]),
 });
 

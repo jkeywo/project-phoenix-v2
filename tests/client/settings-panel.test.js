@@ -564,6 +564,15 @@ describe('the demo build gate', () => {
 // ── The page the cog lives on ────────────────────────────────────────────────
 
 describe('client.html', () => {
+  it('keeps the selected-gamepad disconnect alert outside the Settings modal', () => {
+    expect(CLIENT_HTML).toMatch(
+      /<div id="gamepad-input-alert" role="alert" aria-live="assertive"[^>]*hidden><\/div>/,
+    );
+    expect(CLIENT_HTML).toContain("t('client.gamepad.disconnect_warning')");
+    expect(CLIENT_HTML).toContain('updateGamepadClientWarning(state)');
+    expect(CLIENT_HTML).toContain('settingsPanel.updateGamepadState(state)');
+  });
+
   it('does not add a duplicate fixed station title above the active console', () => {
     expect(CLIENT_HTML).not.toMatch(/id="phase-title"/);
     expect(CLIENT_HTML).not.toMatch(/_consoleTitleEl/);
@@ -1043,7 +1052,7 @@ describe('semantic controls tab', () => {
     return out;
   };
 
-  function openControls() {
+  function openControls(extra = {}) {
     const doc = makeDoc();
     const registry = createCaptainActionRegistry();
     const sent = [];
@@ -1054,6 +1063,7 @@ describe('semantic controls tab', () => {
         registry.setBinding(actionId, slot, binding, options),
       onSemanticResetAction: (actionId) => registry.resetAction(actionId),
       onSemanticResetAll: () => registry.resetAllBindings(),
+      ...extra,
     });
     inst.open();
     inst.selectTab('controls');
@@ -1075,8 +1085,120 @@ describe('semantic controls tab', () => {
       el.getAttribute && String(el.getAttribute('data-control') || '')
         .startsWith('semantic-binding-captain.red-alert-'));
     expect(captures).toHaveLength(2);
-    expect(captures.map((el) => el.value)).toEqual(['R', t('input.binding.unassigned')]);
+    expect(captures.map((el) => el.value)).toEqual([
+      'R', t('input.gamepad.face_bottom'),
+    ]);
     expect(captures.every((el) => el.getAttribute('aria-label'))).toBe(true);
+  });
+
+  it('shows explicit device selection and accessible unsupported/disconnect states', () => {
+    let gamepad = {
+      devices: [
+        { index: 0, supported: true },
+        { index: 1, supported: false },
+      ],
+      selectedIndex: null,
+      status: 'none',
+      capturing: null,
+    };
+    const selections = [];
+    const { doc, inst } = openControls({
+      getGamepadState: () => gamepad,
+      onGamepadSelection: (index) => selections.push(index),
+    });
+    let selector = descendants(bodyOf(doc)).find((el) => el.getAttribute
+      && el.getAttribute('data-control') === 'semantic-gamepad-select');
+    expect(selector.children.map((option) => option.value)).toEqual(['', '0', '1']);
+    expect(selector.children[2].disabled).toBe(true);
+    selector.value = '0';
+    selector.dispatch('change');
+    expect(selections).toEqual([0]);
+
+    gamepad = {
+      devices: [{ index: 1, supported: true }],
+      selectedIndex: 0,
+      status: 'disconnected',
+      capturing: null,
+    };
+    inst.rebuildContent();
+    const status = descendants(bodyOf(doc)).find((el) => el.getAttribute
+      && el.getAttribute('data-control') === 'semantic-gamepad-status');
+    expect(status.getAttribute('role')).toBe('alert');
+    expect(status.getAttribute('aria-live')).toBe('assertive');
+    expect(status.textContent).toBe(t('settings.controls.gamepad.status_disconnected'));
+    selector = descendants(bodyOf(doc)).find((el) => el.getAttribute
+      && el.getAttribute('data-control') === 'semantic-gamepad-select');
+    expect(selector.children.some((option) => option.value === '0')).toBe(true);
+  });
+
+  it('preserves exact binding focus across pad status changes and disarms on conflict/blur', () => {
+    let gamepad = {
+      devices: [{ index: 0, supported: true }],
+      selectedIndex: 0,
+      status: 'ready',
+      capturing: null,
+    };
+    const captures = [];
+    let inst = null;
+    const opened = openControls({
+      getGamepadState: () => gamepad,
+      onSemanticCapture: (actionId, slot, active) => {
+        captures.push({ actionId, slot, active });
+        gamepad = {
+          ...gamepad,
+          status: active ? 'neutral' : 'ready',
+          capturing: active ? { actionId, slot } : null,
+        };
+        if (inst) inst.updateGamepadState(gamepad);
+      },
+    });
+    ({ inst } = opened);
+    const { doc, registry } = opened;
+    const control = descendants(bodyOf(doc)).find((el) => el.getAttribute
+      && el.getAttribute('data-control') === 'semantic-binding-captain.red-alert-1');
+    control.focus();
+    expect(doc.activeElement).toBe(control);
+    expect(descendants(bodyOf(doc))).toContain(control);
+    expect(control.value).toBe(t('settings.controls.press_key'));
+    const status = descendants(bodyOf(doc)).find((el) => el.getAttribute
+      && el.getAttribute('data-control') === 'semantic-gamepad-status');
+    expect(status.textContent).toBe(t('settings.controls.gamepad.status_neutral'));
+
+    // A keyboard remap still completes while the selected-pad status changes.
+    control.dispatch('keydown', {
+      code: 'KeyY', key: 'y', repeat: false,
+      preventDefault() {}, stopPropagation() {},
+    });
+    expect(registry.action(CAPTAIN_RED_ALERT_ACTION_ID).bindings[1]).toMatchObject({
+      type: 'keyboard', code: 'KeyY',
+    });
+    expect(captures.at(-1)).toEqual({
+      actionId: 'captain.red-alert', slot: 1, active: false,
+    });
+
+    // A conflicting key moves focus to Cancel only after capture is disarmed.
+    const replacement = descendants(bodyOf(doc)).find((el) => el.getAttribute
+      && el.getAttribute('data-control') === 'semantic-binding-captain.red-alert-1');
+    replacement.focus();
+    replacement.dispatch('keydown', {
+      code: 'KeyH', key: 'h', repeat: false,
+      preventDefault() {}, stopPropagation() {},
+    });
+    const cancel = descendants(bodyOf(doc)).find((el) => el.getAttribute
+      && el.getAttribute('data-control') === 'semantic-binding-conflict-cancel');
+    expect(doc.activeElement).toBe(cancel);
+    expect(captures.at(-1).active).toBe(false);
+
+    // Cancel deliberately returns to a newly focused capture; leaving it is
+    // the final disarm/neutral boundary.
+    cancel.click();
+    const retried = descendants(bodyOf(doc)).find((el) => el.getAttribute
+      && el.getAttribute('data-control') === 'semantic-binding-captain.red-alert-1');
+    expect(doc.activeElement).toBe(retried);
+    expect(descendants(bodyOf(doc))).toContain(retried);
+    expect(captures.at(-1).active).toBe(true);
+    retried.blur();
+    expect(captures.at(-1).active).toBe(false);
   });
 
   it('captures a remap in memory without sending a ClientMessage', () => {
@@ -1413,15 +1535,19 @@ describe('semantic controls tab', () => {
     descendants(bodyOf(doc)).find((el) => el.getAttribute
       && el.getAttribute('data-control')
         === 'semantic-binding-reset-captain.red-alert').click();
-    expect(registry.action(CAPTAIN_RED_ALERT_ACTION_ID).bindings.map((binding) =>
-      binding && binding.code)).toEqual(['KeyR', null]);
+    expect(registry.action(CAPTAIN_RED_ALERT_ACTION_ID).bindings).toEqual([
+      expect.objectContaining({ type: 'keyboard', code: 'KeyR' }),
+      { type: 'gamepad', input: 'button', control: 'face-bottom' },
+    ]);
     expect(registry.action(CAPTAIN_WEAPONS_HOLD_ACTION_ID).bindings.map((binding) =>
       binding && binding.code)).toEqual(['KeyJ', 'KeyK']);
 
     descendants(bodyOf(doc)).find((el) => el.getAttribute
       && el.getAttribute('data-control') === 'semantic-binding-reset-all').click();
-    expect(registry.action(CAPTAIN_RED_ALERT_ACTION_ID).bindings.map((binding) =>
-      binding && binding.code)).toEqual(['KeyR', null]);
+    expect(registry.action(CAPTAIN_RED_ALERT_ACTION_ID).bindings).toEqual([
+      expect.objectContaining({ type: 'keyboard', code: 'KeyR' }),
+      { type: 'gamepad', input: 'button', control: 'face-bottom' },
+    ]);
     expect(registry.action(CAPTAIN_WEAPONS_HOLD_ACTION_ID).bindings.map((binding) =>
       binding && binding.code)).toEqual(['KeyH', null]);
   });

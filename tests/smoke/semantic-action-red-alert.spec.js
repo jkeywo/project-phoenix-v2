@@ -7,6 +7,35 @@
 import { test, expect, readHostPeerId, waitForWasmReady } from './fixtures';
 import { ts } from './strings';
 
+async function installFabricatedGamepads(page) {
+  await page.addInitScript(() => {
+    let pads = [];
+    Object.defineProperty(navigator, 'getGamepads', {
+      configurable: true,
+      value: () => pads,
+    });
+    window.__setFabricatedGamepads = (specs) => {
+      pads = [];
+      for (const spec of specs) {
+        if (!spec) continue;
+        const buttons = Array.from({ length: 17 }, () => ({ pressed: false, value: 0 }));
+        for (const index of spec.pressed || []) buttons[index] = { pressed: true, value: 1 };
+        pads[spec.index] = {
+          index: spec.index,
+          mapping: spec.mapping === undefined ? 'standard' : spec.mapping,
+          buttons,
+          axes: spec.axes || [0, 0, 0, 0],
+          id: `fabricated-hardware-${spec.index}`,
+        };
+      }
+    };
+  });
+}
+
+async function setPads(page, specs) {
+  await page.evaluate((next) => window.__setFabricatedGamepads(next), specs);
+}
+
 test('remapped Captain Red Alert binding reaches the authoritative command path', async ({ context }) => {
   test.setTimeout(180_000);
 
@@ -149,6 +178,97 @@ test('remapped Captain Red Alert binding reaches the authoritative command path'
   });
   await expect(alertButton).toHaveClass(/active/);
   await expect(alertFeedback).toHaveText(ts('action_feedback.applied'));
+
+  await captain.close();
+  await serverPage.close();
+});
+
+test('one selected standard gamepad owns Red Alert without transfer on disconnect', async ({ context }) => {
+  test.setTimeout(180_000);
+
+  const serverPage = await context.newPage();
+  await serverPage.goto('/?scenario=assets/worlds/default.toml', {
+    waitUntil: 'domcontentloaded',
+  });
+  await waitForWasmReady(serverPage);
+  const hostId = await readHostPeerId(serverPage);
+  const captain = await context.newPage();
+  await installFabricatedGamepads(captain);
+  await captain.goto(`/client/#${hostId}`, { waitUntil: 'domcontentloaded' });
+  await captain.waitForSelector('#station-list .station-row', { timeout: 15_000 });
+  await captain.click('#station-list .station-row:has-text("Captain") button.claim-btn');
+  await captain.waitForSelector('#ready-btn:not([style*="display: none"])', { timeout: 5_000 });
+  await captain.click('#ready-btn');
+  await expect(captain.locator('#captain-ui')).toHaveClass(/active/, { timeout: 10_000 });
+
+  const alertButton = captain.frameLocator('#captain-iframe')
+    .locator('ph-red-alert').locator('#alert-btn');
+  await expect(alertButton).toHaveText(ts('component.red_alert.standby'));
+
+  await setPads(captain, [{ index: 0 }, { index: 1 }]);
+  await captain.click('#settings-btn');
+  await captain.click('.settings-tab[data-tab="controls"]');
+  const selector = captain.locator('[data-control="semantic-gamepad-select"]');
+  await expect(selector.locator('option')).toHaveCount(3);
+  await expect(captain.locator('[data-control="semantic-binding-captain.red-alert-1"]'))
+    .toHaveValue(ts('input.gamepad.face_bottom'));
+  await selector.selectOption('0');
+  await expect(captain.locator('[data-control="semantic-gamepad-status"]'))
+    .toContainText(ts('settings.controls.gamepad.status_ready'));
+  await captain.keyboard.press('Escape');
+
+  // Pad 1 is connected and active but unowned.
+  await setPads(captain, [{ index: 0 }, { index: 1, pressed: [0] }]);
+  await captain.waitForTimeout(150);
+  await expect(alertButton).toHaveText(ts('component.red_alert.standby'));
+  await setPads(captain, [{ index: 0 }, { index: 1 }]);
+  await captain.waitForTimeout(50);
+
+  // The selected pad's rising edge uses the real Captain authority route.
+  await setPads(captain, [{ index: 0, pressed: [0] }, { index: 1 }]);
+  await expect(alertButton).toHaveText(ts('component.red_alert.active'), { timeout: 10_000 });
+
+  // Disconnect retains the dead ownership generation and never transfers to pad 1.
+  await setPads(captain, [null, { index: 1, pressed: [0] }]);
+  const liveWarning = captain.locator('#gamepad-input-alert');
+  await expect(liveWarning).toBeVisible();
+  await expect(liveWarning).toHaveAttribute('role', 'alert');
+  await expect(liveWarning).toContainText(ts('client.gamepad.disconnect_warning'));
+  await captain.waitForTimeout(150);
+  await expect(alertButton).toHaveText(ts('component.red_alert.active'));
+
+  // Keyboard is independent of the disconnected gamepad owner.
+  await captain.keyboard.press('KeyR');
+  await expect(alertButton).toHaveText(ts('component.red_alert.standby'), { timeout: 10_000 });
+  await expect(liveWarning).toBeVisible();
+
+  // Settings mirrors the same dead ownership without being needed for the
+  // warning to appear.
+  await captain.click('#settings-btn');
+  await captain.click('.settings-tab[data-tab="controls"]');
+  const warning = captain.locator('[data-control="semantic-gamepad-status"]');
+  await expect(warning).toHaveAttribute('role', 'alert');
+  await expect(warning).toContainText(ts('settings.controls.gamepad.status_disconnected'));
+  await captain.keyboard.press('Escape');
+
+  // A new pad at index 0 is a new generation. Explicit reselection while its
+  // button is held stays neutral-gated until release and a fresh edge.
+  await setPads(captain, [{ index: 0, pressed: [0] }, { index: 1 }]);
+  await captain.click('#settings-btn');
+  await captain.click('.settings-tab[data-tab="controls"]');
+  await selector.selectOption('');
+  await expect(liveWarning).toBeHidden();
+  await selector.selectOption('0');
+  await expect(captain.locator('[data-control="semantic-gamepad-status"]'))
+    .toContainText(ts('settings.controls.gamepad.status_neutral'));
+  await expect(liveWarning).toBeHidden();
+  await captain.keyboard.press('Escape');
+  await captain.waitForTimeout(150);
+  await expect(alertButton).toHaveText(ts('component.red_alert.standby'));
+  await setPads(captain, [{ index: 0 }, { index: 1 }]);
+  await captain.waitForTimeout(100);
+  await setPads(captain, [{ index: 0, pressed: [0] }, { index: 1 }]);
+  await expect(alertButton).toHaveText(ts('component.red_alert.active'), { timeout: 10_000 });
 
   await captain.close();
   await serverPage.close();

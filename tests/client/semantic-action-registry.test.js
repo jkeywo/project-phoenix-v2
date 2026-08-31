@@ -8,7 +8,9 @@ import {
   keyboardBindingFromEvent,
   normalizeBindingSlots,
   normalizeKeyboardBinding,
+  formatSemanticBinding,
 } from '../../gui/semantic-action-registry.js';
+import { t } from '../../gui/strings.js';
 
 const ACTION = {
   id: 'captain.red-alert',
@@ -205,6 +207,31 @@ describe('conflict-safe remapping', () => {
     registry.setBinding('captain.one', 0, plain);
     expect(registry.setBinding('captain.two', 0, shifted).status).toBe('applied');
   });
+
+  it('detects and replaces logical gamepad conflicts in overlapping contexts', () => {
+    const registry = createSemanticActionRegistry();
+    registry.register({
+      ...ACTION,
+      bindings: [{ code: 'KeyR' }, {
+        type: 'gamepad', input: 'button', control: 'face-bottom',
+      }],
+    });
+    registry.register({
+      ...ACTION,
+      id: 'captain.second',
+      bindings: [{ code: 'KeyH' }, null],
+    });
+    const binding = { type: 'gamepad', input: 'button', control: 'face-bottom' };
+    expect(registry.setBinding('captain.second', 1, binding)).toMatchObject({
+      status: 'conflict', conflicts: [{ actionId: ACTION.id, slot: 1 }],
+    });
+    registry.setBinding('captain.second', 1, binding, { replace: true });
+    expect(registry.action(ACTION.id).bindings[1]).toBeNull();
+    expect(registry.action('captain.second').bindings[1]).toEqual(binding);
+    registry.resetAction(ACTION.id);
+    expect(registry.action(ACTION.id).bindings[1]).toEqual(binding);
+    expect(registry.action('captain.second').bindings[1]).toBeNull();
+  });
 });
 
 describe('reserved keyboard chords', () => {
@@ -392,5 +419,44 @@ describe('binding profile seam and display tokens', () => {
       modifiers: ['input.modifier.control'],
       code: 'R',
     });
+  });
+
+  it('serializes only logical gamepad controls and formats the binding union', () => {
+    const registry = createSemanticActionRegistry();
+    registry.register({
+      ...ACTION,
+      bindings: [{ code: 'KeyR' }, {
+        type: 'gamepad', input: 'axis', control: 'left-stick-x',
+        direction: 'positive', threshold: 0.75,
+      }],
+    });
+    const profile = registry.bindingProfile();
+    expect(profile[ACTION.id][1]).toEqual({
+      type: 'gamepad', input: 'axis', control: 'left-stick-x',
+      direction: 'positive', threshold: 0.75,
+    });
+    const encoded = JSON.stringify(profile);
+    expect(encoded).not.toContain('id');
+    expect(encoded).not.toContain('index');
+    expect(encoded).not.toContain('hardware');
+    expect(formatSemanticBinding(profile[ACTION.id][1], t))
+      .toBe(t('input.gamepad.left_stick_right', { threshold: '0.75' }));
+  });
+
+  it('keeps gamepad axis and device labels free of encoding artifacts', () => {
+    const labels = [
+      'input.gamepad.left_stick_left',
+      'input.gamepad.left_stick_right',
+      'input.gamepad.left_stick_up',
+      'input.gamepad.left_stick_down',
+    ].map((id) => t(id, { threshold: '0.5' }));
+    labels.push(
+      t('settings.controls.gamepad.device_unsupported', { slot: '1' }),
+      t('settings.controls.gamepad.device_disconnected', { slot: '1' }),
+    );
+
+    for (const label of labels) {
+      expect(label).not.toMatch(/[\u00c2\u00c3\u00e2\ufffd]/u);
+    }
   });
 });

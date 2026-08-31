@@ -98,6 +98,10 @@
        Captain blackboard remains the sole Red Alert gameplay state. -->
   <script type="module" src="gui/action-feedback.js"></script>
   <script type="module" src="gui/action-map.js"></script>
+  <!-- One explicitly selected standard gamepad is sampled in this parent
+       realm. Logical bindings are copied to console iframes, but only the
+       active iframe receives semantic activation. -->
+  <script type="module" src="gui/gamepad-input.js"></script>
   <!-- Parent-realm semantic action metadata + in-memory binding profile. The
        active console iframe owns its own registry instance and receives this
        profile through an explicit update seam. -->
@@ -180,6 +184,13 @@
     #conn-diag-copy { pointer-events: auto; flex: 0 0 auto;
       font-size: var(--text-xs); color: var(--edge-strong); background: transparent;
       border: 1px solid var(--edge-strong); border-radius: 3px; padding: 0.1rem 0.4rem; }
+    #gamepad-input-alert { position: fixed; left: 50%; bottom: 3.5rem;
+      transform: translateX(-50%); z-index: 26; max-width: min(32rem, 88vw);
+      padding: 0.55rem 0.75rem; border: 1px solid var(--warning);
+      border-radius: 3px; background: var(--surface-panel); color: var(--warning);
+      font-family: 'JetBrains Mono', monospace; font-size: var(--text-sm);
+      line-height: 1.35; text-align: center; }
+    #gamepad-input-alert[hidden] { display: none; }
     /* Typed join entry (issue #1111). Shown only when this page was opened
        with no host in its fragment — the case that until now was a dead end
        reading "no host id in URL". The field takes either the five letters
@@ -1243,6 +1254,10 @@
          continue to resolve. -->
   </div>
 
+  <!-- Client-level controller ownership warning. It remains outside Settings
+       so a lost selected pad is visible and announced while the modal is shut. -->
+  <div id="gamepad-input-alert" role="alert" aria-live="assertive"
+       aria-atomic="true" hidden></div>
   <div id="status" data-i18n="client.connecting">Connecting…</div>
   <!-- The readout and the control that copies it, in one left-anchored row so
        neither can reach the corner the lobby's READY button lives in. -->
@@ -1590,6 +1605,9 @@
     /// through __updateSemanticActionBindings instead of relying on a singleton.
     let semanticActionRegistry = null;
     let _actionFeedbackRouter = null;
+    /// Parent-only gamepad sampler. Iframes never poll navigator.getGamepads(),
+    /// so an inactive or disconnected Station cannot receive controller input.
+    let gamepadInputRuntime = null;
     let pendingMidGameClaim = false;
     // #771 AC3: a mid-round station release is a two-step arm→confirm (imitates
     // ph-comms-current-message). First click arms + swaps the button to a
@@ -2733,22 +2751,41 @@
     function updateSemanticBinding(actionId, slot, binding, options) {
       if (!semanticActionRegistry) return { status: 'unavailable' };
       const result = semanticActionRegistry.setBinding(actionId, slot, binding, options);
-      if (result.status === 'applied') pushSemanticBindingsToConsoles();
+      if (result.status === 'applied') {
+        pushSemanticBindingsToConsoles();
+        if (gamepadInputRuntime) gamepadInputRuntime.neutralize();
+      }
       return result;
     }
 
     function resetSemanticAction(actionId) {
       if (!semanticActionRegistry) return { status: 'unavailable' };
       const result = semanticActionRegistry.resetAction(actionId);
-      if (result.status === 'applied') pushSemanticBindingsToConsoles();
+      if (result.status === 'applied') {
+        pushSemanticBindingsToConsoles();
+        if (gamepadInputRuntime) gamepadInputRuntime.neutralize();
+      }
       return result;
     }
 
     function resetAllSemanticActions() {
       if (!semanticActionRegistry) return { status: 'unavailable' };
       const result = semanticActionRegistry.resetAllBindings();
-      if (result.status === 'applied') pushSemanticBindingsToConsoles();
+      if (result.status === 'applied') {
+        pushSemanticBindingsToConsoles();
+        if (gamepadInputRuntime) gamepadInputRuntime.neutralize();
+      }
       return result;
+    }
+
+    function updateGamepadClientWarning(state) {
+      const warning = $('gamepad-input-alert');
+      if (!warning) return;
+      const disconnected = state && state.status === 'disconnected';
+      warning.textContent = disconnected
+        ? t('client.gamepad.disconnect_warning')
+        : '';
+      warning.hidden = !disconnected;
     }
 
     // Send the host's key events to the active console, so helm's WASD/arrows,
@@ -3224,6 +3261,39 @@
         ? window.createCaptainActionRegistry()
         : null;
 
+      gamepadInputRuntime = typeof window.createGamepadInputRuntime === 'function'
+        ? window.createGamepadInputRuntime({
+            getContext: () => activeConsole,
+            getActions: (context) => semanticActionRegistry
+              ? semanticActionRegistry.list(context)
+              : [],
+            activate: (actionId, options) => {
+              const iframe = activeConsoleIframe();
+              try {
+                const activate = iframe && iframe.contentWindow
+                  && iframe.contentWindow.activateSemanticAction;
+                return typeof activate === 'function'
+                  ? activate(actionId, options)
+                  : false;
+              } catch (_) { return false; }
+            },
+            onCapture: (target, binding) => {
+              if (settingsPanel && typeof settingsPanel.proposeSemanticBinding === 'function') {
+                settingsPanel.proposeSemanticBinding(target.actionId, target.slot, binding);
+              } else {
+                updateSemanticBinding(target.actionId, target.slot, binding);
+              }
+            },
+            onStateChange: (state) => {
+              updateGamepadClientWarning(state);
+              if (settingsPanel
+                  && typeof settingsPanel.updateGamepadState === 'function') {
+                settingsPanel.updateGamepadState(state);
+              }
+            },
+          })
+        : null;
+
       installConsoleKeyRelay();
 
       // Mount the settings panel (gear button + overlay) once state is ready.
@@ -3259,6 +3329,17 @@
           },
           onSemanticResetAction: (actionId) => resetSemanticAction(actionId),
           onSemanticResetAll: () => resetAllSemanticActions(),
+          getGamepadState: () => gamepadInputRuntime
+            ? gamepadInputRuntime.state()
+            : { devices: [], selectedIndex: null, status: 'none', capturing: null },
+          onGamepadSelection: (index) => gamepadInputRuntime
+            ? gamepadInputRuntime.select(index)
+            : { status: 'unavailable' },
+          onSemanticCapture: (actionId, slot, active) => {
+            if (!gamepadInputRuntime) return;
+            if (active) gamepadInputRuntime.beginCapture(actionId, slot);
+            else gamepadInputRuntime.endCapture(actionId, slot);
+          },
           // Every audio channel this page owns. Master volume scales each
           // element's own authored level rather than replacing it, so adding
           // a channel here needs no other change (issue #940).
@@ -3267,6 +3348,8 @@
           myToken: myToken,
         });
       }
+
+      if (gamepadInputRuntime) gamepadInputRuntime.start(window);
 
       // Apply the private Accessibility profile to the shell at boot (issue
       // #1102). Console iframes are (re)covered as they mount and on every

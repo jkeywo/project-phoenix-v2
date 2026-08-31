@@ -16,13 +16,22 @@ input.modifier.meta,Keyboard binding display name for the platform Meta modifier
 input.binding.separator,Keyboard binding display separator between modifiers and key," + "
 input.binding.slots_separator,Keyboard binding display separator between the two slots," · "
 input.binding.unassigned,Keyboard binding display for an empty slot,[Unassigned]
+input.gamepad.face_bottom,Portable standard-gamepad display name for the bottom face button,[Gamepad Face Bottom]
+input.gamepad.dpad_up,Portable standard-gamepad display name for D-pad up,[Gamepad D-pad Up]
+input.gamepad.dpad_down,Portable standard-gamepad display name for D-pad down,[Gamepad D-pad Down]
+input.gamepad.dpad_left,Portable standard-gamepad display name for D-pad left,[Gamepad D-pad Left]
+input.gamepad.dpad_right,Portable standard-gamepad display name for D-pad right,[Gamepad D-pad Right]
+input.gamepad.left_stick_left,Portable standard-gamepad axis-direction display name; {threshold} is the activation threshold,[Gamepad Left Stick Left at {threshold}]
+input.gamepad.left_stick_right,Portable standard-gamepad axis-direction display name; {threshold} is the activation threshold,[Gamepad Left Stick Right at {threshold}]
+input.gamepad.left_stick_up,Portable standard-gamepad axis-direction display name; {threshold} is the activation threshold,[Gamepad Left Stick Up at {threshold}]
+input.gamepad.left_stick_down,Portable standard-gamepad axis-direction display name; {threshold} is the activation threshold,[Gamepad Left Stick Down at {threshold}]
 settings.tab.controls,Phone client settings menu name of the semantic action binding tab,[Controls]
 settings.controls.heading,Phone client Controls tab heading over semantic action bindings,[Action Bindings]
-settings.controls.hint,Phone client Controls tab explanation of the two in-memory remappable slots,[Select either slot and press a key.]
+settings.controls.hint,Phone client Controls tab explanation of the two in-memory remappable slots,[Select either slot and press a key or control on the selected gamepad.]
 settings.controls.slot,Phone client Controls tab binding slot label; {slot} is 1 or 2,Slot {slot}
 settings.controls.slot_value,Station Help current semantic binding; {slot} is 1 or 2 and {binding} is the displayed chord,"Slot {slot}: {binding}"
 settings.controls.capture_label,"Phone client Controls tab accessible remap label; {action} is the display name and {slot} is 1 or 2","Remap {action}, slot {slot}"
-settings.controls.press_key,Phone client Controls tab prompt shown while a remap slot has focus,[Press a key]
+settings.controls.press_key,Phone client Controls tab prompt shown while a remap slot has focus,[Press a key or gamepad control]
 settings.controls.reset_action,Phone client Controls tab button restoring one semantic action to authored defaults,[Reset Action]
 settings.controls.reset_all,Phone client Controls tab button restoring every semantic action to authored defaults,[Reset All]
 settings.controls.reserved,Assertive feedback refusing a browser or OS reserved chord; {binding} is the displayed chord,[{binding} is reserved by the browser or operating system. Choose another binding.]
@@ -30,6 +39,19 @@ settings.controls.conflict_heading,Accessible semantic binding conflict heading;
 settings.controls.conflict_item,"Semantic binding conflict item; {action} is an action name and {slot} is 1 or 2","[{action}, slot {slot}]"
 settings.controls.replace,Semantic binding conflict button that clears every overlapping assignment,[Replace]
 settings.controls.cancel,Semantic binding conflict button that changes nothing,[Cancel]
+settings.controls.gamepad.heading,Phone client Controls tab heading for the explicitly owned gamepad,[Gamepad]
+settings.controls.gamepad.hint,Phone client Controls tab explanation of single-device ownership,[Choose one standard-mapped gamepad. No gamepad controls work until you select one.]
+settings.controls.gamepad.selector,Accessible label for the gamepad device selector,[Controlling gamepad]
+settings.controls.gamepad.none,Gamepad selector option which gives no device control,[None]
+settings.controls.gamepad.device,Generic gamepad selector option; {slot} is the one-based browser slot,[Gamepad {slot}]
+settings.controls.gamepad.device_unsupported,Disabled gamepad selector option; {slot} is the one-based browser slot,[Gamepad {slot} (unsupported mapping)]
+settings.controls.gamepad.device_disconnected,Selected gamepad option retained after disconnect; {slot} is the one-based browser slot,[Gamepad {slot} (disconnected)]
+settings.controls.gamepad.status_none,Accessible gamepad status before an explicit device selection,[No gamepad selected. Keyboard controls remain active.]
+settings.controls.gamepad.status_ready,Accessible gamepad status after a standard device is selected,[Selected gamepad ready.]
+settings.controls.gamepad.status_neutral,Accessible gamepad status while held controls are gated,[Release the selected gamepad controls to continue.]
+settings.controls.gamepad.status_unsupported,Accessible gamepad status for connected devices without the standard mapping,[Only standard-mapped gamepads are supported.]
+settings.controls.gamepad.status_disconnected,Assertive warning after the selected connection is lost,[Selected gamepad disconnected. Select a device again. Keyboard controls remain active.]
+client.gamepad.disconnect_warning,Persistent client-level live warning outside Settings after selected gamepad disconnect,[Selected gamepad disconnected. No other gamepad has taken control. Keyboard controls remain active.]
 world.combat_test.harrow.blood_eagle,assets/worlds/combat_test.toml → scripted Harrow display identity,Blood-Eagle
 world.combat_test.harrow.iron_spear,assets/worlds/combat_test.toml → scripted Harrow display identity,Iron-Spear
 world.combat_test.harrow.black_anvil,assets/worlds/combat_test.toml → scripted Harrow display identity,Black-Anvil

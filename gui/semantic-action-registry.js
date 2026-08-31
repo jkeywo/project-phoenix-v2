@@ -11,6 +11,12 @@
  * fully testable in Node.
  */
 
+import {
+  gamepadBindingDisplay,
+  gamepadBindingsEqual,
+  normalizeGamepadBinding,
+} from './gamepad-input.js';
+
 export const SEMANTIC_BINDING_SLOT_COUNT = 2;
 
 const MODIFIER_KEYS = ['ctrlKey', 'shiftKey', 'altKey', 'metaKey'];
@@ -78,6 +84,14 @@ export function normalizeKeyboardBinding(value) {
   });
 }
 
+/** Normalize the keyboard/gamepad binding union, or the empty-slot sentinel. */
+export function normalizeSemanticBinding(value) {
+  if (value == null || value === '') return null;
+  return value && value.type === 'gamepad'
+    ? normalizeGamepadBinding(value)
+    : normalizeKeyboardBinding(value);
+}
+
 /** Normalize and pad an action's binding list to exactly two slots. */
 export function normalizeBindingSlots(values) {
   if (values != null && !Array.isArray(values)) {
@@ -89,7 +103,7 @@ export function normalizeBindingSlots(values) {
   }
   return Object.freeze(Array.from(
     { length: SEMANTIC_BINDING_SLOT_COUNT },
-    (_, index) => normalizeKeyboardBinding(slots[index]),
+    (_, index) => normalizeSemanticBinding(slots[index]),
   ));
 }
 
@@ -110,6 +124,11 @@ export function keyboardBindingsEqual(left, right) {
   if (!left || !right || left.type !== 'keyboard' || right.type !== 'keyboard') return false;
   return left.code === right.code
     && MODIFIER_KEYS.every((key) => left[key] === right[key]);
+}
+
+/** True when two canonical bindings identify the same logical input. */
+export function semanticBindingsEqual(left, right) {
+  return keyboardBindingsEqual(left, right) || gamepadBindingsEqual(left, right);
 }
 
 /**
@@ -190,6 +209,14 @@ export function formatKeyboardBinding(binding, translate) {
     .join(tr('input.binding.separator'));
 }
 
+/** Format either member of the semantic binding union. */
+export function formatSemanticBinding(binding, translate) {
+  const tr = typeof translate === 'function' ? translate : (id) => id;
+  if (!binding || binding.type !== 'gamepad') return formatKeyboardBinding(binding, tr);
+  const display = gamepadBindingDisplay(binding);
+  return display.labelId ? tr(display.labelId, display.values) : tr('input.binding.unassigned');
+}
+
 function normalizeDefinition(definition) {
   if (!definition || typeof definition !== 'object') {
     throw new TypeError('semantic action definition is required');
@@ -259,7 +286,7 @@ export function createSemanticActionRegistry(options = {}) {
       const otherSlots = source.get(otherId) || [];
       for (let otherSlot = 0; otherSlot < SEMANTIC_BINDING_SLOT_COUNT; otherSlot++) {
         if (otherId === id && otherSlot === slot) continue;
-        if (keyboardBindingsEqual(binding, otherSlots[otherSlot])) {
+        if (semanticBindingsEqual(binding, otherSlots[otherSlot])) {
           conflicts.push({
             actionId: otherId,
             slot: otherSlot,
@@ -302,7 +329,7 @@ export function createSemanticActionRegistry(options = {}) {
     bindings.set(normalized.id, normalizeBindingSlots(normalized.bindings));
     for (let slot = 0; slot < SEMANTIC_BINDING_SLOT_COUNT; slot++) {
       const binding = normalized.bindings[slot];
-      if (isReservedKeyboardBinding(binding)) {
+      if (binding && binding.type === 'keyboard' && isReservedKeyboardBinding(binding)) {
         definitions.delete(normalized.id);
         authoredDefaults.delete(normalized.id);
         bindings.delete(normalized.id);
@@ -337,8 +364,8 @@ export function createSemanticActionRegistry(options = {}) {
 
   function setBinding(id, slot, value, options = {}) {
     assertActionAndSlot(id, slot);
-    const binding = normalizeKeyboardBinding(value);
-    if (isReservedKeyboardBinding(binding)) {
+    const binding = normalizeSemanticBinding(value);
+    if (binding && binding.type === 'keyboard' && isReservedKeyboardBinding(binding)) {
       return { status: 'reserved', actionId: id, slot, binding: copyBinding(binding) };
     }
     const conflicts = conflictsFor(id, slot, binding);

@@ -301,6 +301,21 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
                 ship_stations: empty_ship_stations(),
                 ship_config: ShipClientConfig::default(),
                 station_ratings: HashMap::new(),
+                gms: vec![crate::gm_roster::GmOperator {
+                    id: "gm-1".into(),
+                    name: "Morgan".into(),
+                    connected: true,
+                }],
+            },
+        ),
+        (
+            ServerMessageDiscriminants::GmRosterChanged,
+            ServerMessage::GmRosterChanged {
+                gms: vec![crate::gm_roster::GmOperator {
+                    id: "gm-1".into(),
+                    name: "Morgan".into(),
+                    connected: true,
+                }],
             },
         ),
         (
@@ -4837,6 +4852,7 @@ fn ship_client_config_station_systems_round_trips() {
         ship_stations: empty_ship_stations(),
         ship_config: config.clone(),
         station_ratings: HashMap::new(),
+        gms: vec![],
     };
     assert_server_roundtrip(&JsonCodec, msg.clone());
     assert_server_roundtrip(&PrettyJsonCodec, msg.clone());
@@ -4880,6 +4896,7 @@ fn ship_client_config_console_families_round_trip_as_public_strings() {
         ship_stations: empty_ship_stations(),
         ship_config: config.clone(),
         station_ratings: HashMap::new(),
+        gms: vec![],
     };
 
     let json = JsonCodec.encode_server(&msg).unwrap();
@@ -4912,6 +4929,7 @@ fn ship_client_config_console_families_default_empty_when_missing() {
         ship_stations: empty_ship_stations(),
         ship_config: ShipClientConfig::default(),
         station_ratings: HashMap::new(),
+        gms: vec![],
     };
     let json = JsonCodec.encode_server(&msg).unwrap();
     assert!(
@@ -4946,6 +4964,7 @@ fn ship_client_config_station_systems_defaults_empty_when_missing() {
         ship_stations: empty_ship_stations(),
         ship_config: ShipClientConfig::default(),
         station_ratings: HashMap::new(),
+        gms: vec![],
     };
     let full_json = JsonCodec.encode_server(&msg).unwrap();
     // Remove the station_systems entry to simulate an old server payload.
@@ -4981,6 +5000,7 @@ fn ship_client_config_helm_capability_round_trips() {
         ship_stations: empty_ship_stations(),
         ship_config: config.clone(),
         station_ratings: HashMap::new(),
+        gms: vec![],
     };
     assert_server_roundtrip(&JsonCodec, msg.clone());
     assert_server_roundtrip(&PrettyJsonCodec, msg.clone());
@@ -5052,6 +5072,7 @@ fn ship_client_config_station_tutorials_round_trip() {
         ship_stations: empty_ship_stations(),
         ship_config: config.clone(),
         station_ratings: HashMap::new(),
+        gms: vec![],
     };
     assert_server_roundtrip(&JsonCodec, msg.clone());
     assert_server_roundtrip(&PrettyJsonCodec, msg.clone());
@@ -5074,6 +5095,7 @@ fn ship_client_config_station_tutorials_default_empty_when_missing() {
         ship_stations: empty_ship_stations(),
         ship_config: ShipClientConfig::default(),
         station_ratings: HashMap::new(),
+        gms: vec![],
     };
     let json = JsonCodec.encode_server(&msg).unwrap();
     assert!(
@@ -5086,6 +5108,100 @@ fn ship_client_config_station_tutorials_default_empty_when_missing() {
     } else {
         panic!("expected Welcome");
     }
+}
+
+// ── Crew-public GM roster (issue #1289) ──────────────────────────────
+
+#[test]
+fn gm_roster_decoder_canonicalises_a_bounded_full_replacement() {
+    let roster = decode_gm_roster(
+        r#"[
+            {"id":"gm-2","name":"","connected":false},
+            {"id":"gm-1","name":"Morgan","connected":true}
+        ]"#,
+    )
+    .expect("valid public roster");
+
+    assert_eq!(
+        roster
+            .operators()
+            .iter()
+            .map(|operator| operator.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["gm-1", "gm-2"]
+    );
+    assert!(roster.operators()[0].connected);
+    assert!(!roster.operators()[1].connected);
+}
+
+#[test]
+fn gm_roster_decoder_rejects_duplicates_bounds_and_private_fields() {
+    assert!(decode_gm_roster(
+        r#"[
+            {"id":"gm-1","name":"One","connected":true},
+            {"id":"gm-1","name":"Two","connected":false}
+        ]"#
+    )
+    .is_none());
+
+    let too_many = serde_json::to_string(
+        &(0..=crate::gm_roster::MAX_GM_OPERATORS)
+            .map(|index| crate::gm_roster::GmOperator {
+                id: format!("gm-{index}"),
+                name: String::new(),
+                connected: true,
+            })
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    assert!(decode_gm_roster(&too_many).is_none());
+
+    for private_field in ["peer", "credential", "owner", "leader", "station"] {
+        let raw = format!(
+            r#"[{{"id":"gm-1","name":"Morgan","connected":true,"{private_field}":"secret"}}]"#
+        );
+        assert!(
+            decode_gm_roster(&raw).is_none(),
+            "private field {private_field} must be refused at the codec boundary"
+        );
+    }
+}
+
+#[test]
+fn gm_wire_rows_have_only_public_identity_name_and_presence() {
+    let message = ServerMessage::GmRosterChanged {
+        gms: vec![crate::gm_roster::GmOperator {
+            id: "gm-1".into(),
+            name: "Morgan".into(),
+            connected: true,
+        }],
+    };
+    let encoded = JsonCodec.encode_server(&message).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+    let row = &value["data"]["gms"][0];
+    assert_eq!(
+        row.as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>(),
+        ["connected", "id", "name"].into_iter().collect()
+    );
+}
+
+#[test]
+fn welcome_gm_projection_defaults_empty_for_older_senders() {
+    let message = ServerMessage::Welcome {
+        state: state(),
+        ship_stations: empty_ship_stations(),
+        ship_config: ShipClientConfig::default(),
+        station_ratings: HashMap::new(),
+        gms: vec![],
+    };
+    let encoded = JsonCodec.encode_server(&message).unwrap();
+    assert!(!encoded.contains("\"gms\""));
+    let decoded = JsonCodec.decode_server(&encoded).unwrap();
+    assert!(matches!(decoded, ServerMessage::Welcome { gms, .. } if gms.is_empty()));
 }
 
 // ── The browser host's join-handshake verdict (issue #1111) ─────────────────

@@ -218,7 +218,7 @@ resurrecting the old value.
 | `hero-bar.js` | Shared complete-Station tab model over `SimSnapshot.station_hosts`: direct Station pinned first, visiting Stations in hull order, selected identity/rating/ownership, and roving keyboard focus |
 | `sim-state.js` | JS port of the old Rust `ClientSimState`: `apply(msg)`, per-console radar configs, message builders, typed blackboard discriminants, both read-only Console Family replicas from `Welcome`, and the latest explicitly Station- or Ship-addressed Coordination popup with producer-authored presentation retained beside its typed payload |
 | `reducer-result.js` | Fresh reducer results: mergeable semantic change sets plus an ordered, repeatable lifecycle/presentation effect sequence |
-| `lobby-state.js` | Lobby view-model (stations, players, ready states) and lobby-domain reducer results |
+| `lobby-state.js` | Lobby view-model (stations, players, equal public GM presence, ready states) and lobby-domain reducer results; GM roster updates are full replacements and never become player or Station rows |
 | `comms-state.js` | Comms inbox/contact view-model and Comms-domain reducer results |
 | `console-state.js` | Pure view-model builders. One family registry contains all builders, including Command, Tractor and Umbilical; flat and composed consoles carry actual owned `SystemId`s and projected families, while typed blackboard discriminants select semantic data independently of id spelling. |
 | `console-payload.js` | Metadata-driven flat/keyed normalization plus `familyView`: mirrors flat views only under actual projected ids and selects composite views by Console Family, with no inverse id census. |

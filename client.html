@@ -685,6 +685,27 @@
     }
     #lobby-mods .mods-active-version { color: var(--ink-dim); margin-left: 6px; }
 
+    /* Crew-public equal GM presence. It is a sibling of the Station roster,
+       not a Station row: GMs never enter crew/spectator counts or controls. */
+    #gm-presence[aria-hidden="true"] { display: none; }
+    #gm-presence {
+      flex-shrink: 0; margin-top: 6px; padding: 7px 9px;
+      border: 1px solid var(--edge); border-radius: 5px;
+      background: var(--surface-panel);
+    }
+    #gm-presence-heading {
+      margin: 0 0 5px; color: var(--ink-dim); font-size: var(--text-xs);
+      letter-spacing: .08em; text-transform: uppercase;
+    }
+    #gm-presence-list { display: flex; flex-wrap: wrap; gap: 5px; }
+    .gm-presence-pill {
+      padding: 3px 7px; border: 1px solid var(--signal);
+      border-radius: 3px; color: var(--signal); font-size: var(--text-sm);
+    }
+    .gm-presence-pill.disconnected {
+      opacity: .6; border-style: dashed; color: var(--ink-dim);
+    }
+
 
     /* -- Lobby section: full-viewport when active ------------------------ */
     #lobby-ui.active {
@@ -1192,6 +1213,13 @@
           <input id="name-input" type="text" placeholder="Your name" data-i18n-attr="placeholder:client.name_placeholder" autocomplete="off" />
         </label>
       </div>
+
+      <!-- Public Game Master presence, separate from every crew and Station
+           count. The heading labels the region for assistive technology. -->
+      <section id="gm-presence" role="region" aria-labelledby="gm-presence-heading" aria-hidden="true">
+        <h2 id="gm-presence-heading" data-i18n="lobby.gms.heading"></h2>
+        <div id="gm-presence-list" role="list"></div>
+      </section>
 
       <!-- Station list -->
       <div id="station-list"></div>
@@ -2333,6 +2361,24 @@
       // the view model.
       lobbyConsole = vm.selectedConsole;
       const mine = myConsoles(s);
+
+      // Equal GM presence is crew-public but never a Station/spectator row.
+      const gmRegion = document.getElementById('gm-presence');
+      const gmHeading = document.getElementById('gm-presence-heading');
+      const gmList = document.getElementById('gm-presence-list');
+      if (gmRegion && gmList) {
+        gmRegion.setAttribute('aria-hidden', vm.gmGroup.visible ? 'false' : 'true');
+        if (gmHeading) gmHeading.textContent = t(vm.gmGroup.headingId);
+        gmList.innerHTML = '';
+        for (const gm of vm.gmGroup.entries) {
+          const row = document.createElement('span');
+          row.className = 'gm-presence-pill' + (gm.connected ? '' : ' disconnected');
+          row.setAttribute('role', 'listitem');
+          row.dataset.gmId = gm.id;
+          row.textContent = t(gm.labelId, { name: gm.name || gm.id });
+          gmList.appendChild(row);
+        }
+      }
       // #771 AC3/AC4: the armed-release confirm only exists in-progress; leaving
       // InProgress (or never being in it) disarms so lobby release is immediate.
       const inProgress = s.phase === 'InProgress';

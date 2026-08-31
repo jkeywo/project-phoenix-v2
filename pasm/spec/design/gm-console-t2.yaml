@@ -16,6 +16,26 @@ entities:
       coordinates: [gm-milestone-peer-tracer, roadmap-band-a2-native-network-foundation]
       runs_in: [host-browser-runtime, headless-runtime]
 
+  - component: gm-operator-admission-and-presence
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Reconnectable Equal-GM Admission and Presence
+      summary: "The privileged fleet-host path admits either its existing player-ship role or a GM role. Each GM receives a stable public gm-N identity and a private reconnect capability, consumes no ship capacity, has no Station or leader bit, and remains visible as connected or disconnected in a separately projected roster. Crew admission has no GM request surface. Rust validates and full-replaces the bounded public {id, name, connected} roster, then publishes it through Welcome, GmRosterChanged, and the host lobby projection without changing player readiness or ship-slot policy."
+      rationale:
+        - "The host-mesh technical slot still authenticates deterministic peer traffic, but it is deliberately absent from the public GM row and grants no operator precedence."
+        - "Keeping reconnect capability and rendezvous peer identity out of the authoritative public roster prevents transport bookkeeping from becoming simulation identity or crew-visible authority."
+    architecture:
+      kind: session-identity-registry
+      authority: authoritative
+      coordinates: [gm-t2-peer-and-admission-contract, gm-milestone-peer-tracer]
+      runs_in: [host-browser-runtime, phone-browser-runtime]
+    implementation:
+      status: declared
+      paths: [gui/host-mesh.js, gui/fleet-session.js, src/gm_roster.rs, src/core/messages.rs, src/lobby/server.rs, src/server/bridge.rs, gui/lobby-state.js, gui/host-lobby-view.js, gui/lobby-view.js, server.html, client.html]
+      symbols: [GmRoster, GmOperator, wasm_set_gm_roster, createFleetOwner, createFleetMember, admitHost]
+      tests: [cargo test, npx vitest run]
+
   - decision: gm-t2-join-pause-and-projection-contract
     core:
       status: accepted

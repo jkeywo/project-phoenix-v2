@@ -1,5 +1,6 @@
 pub use crate::core::debug_surface::DebugSurface;
 pub use crate::entities::tags::EntityTag;
+pub use crate::gm_roster::GmOperator;
 use crate::lobby::stations_config::ShipStations;
 use crate::ship::damage::DamageTier;
 pub use crate::ship::manual::ShipManualWire;
@@ -3014,6 +3015,16 @@ pub enum ServerMessage {
         /// `RatingChanged` or `SimState`.
         #[serde(default)]
         station_ratings: HashMap<StationId, String>,
+        /// Crew-public equal Game Master identities. GMs are host-class peers,
+        /// not `Player` rows and not player-ship fleet slots.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        gms: Vec<GmOperator>,
+    },
+    /// Full replacement of the crew-public GM roster (issue #1289). A delta
+    /// would make reconnect/order handling part of every client; the host page
+    /// already owns the complete rendezvous projection, so the wire does too.
+    GmRosterChanged {
+        gms: Vec<GmOperator>,
     },
     PlayerJoined {
         player: Player,
@@ -5299,6 +5310,10 @@ pub struct LobbyStatePayload {
     pub all_ready: bool,
     pub stations: Vec<StationPayload>,
     pub spectators: Vec<String>,
+    /// Separate equal GM operators. They consume neither a Station nor one of
+    /// `max_players`, and therefore never affect crew/readiness counts here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gms: Vec<GmOperator>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub loading_progress: Option<f32>,
     /// Remaining seconds in the pre-game countdown, or 0 when no countdown is active.

@@ -546,8 +546,15 @@ describe('the Fleet section', () => {
   /** Bindings carrying a mutable fleet state the module reads back. */
   function fleetBindings(initial = { open: false }) {
     let fleet = { open: false, owner: false, admission: null, frozen: false, ...initial };
+    let role = initial.role === 'gm' ? 'gm' : 'ship';
     const bindings = makeBindings({
       __hostFleetState: () => fleet,
+      __hostFleetRole: () => role,
+      __hostSetFleetRole: (next) => {
+        bindings.calls.push(['__hostSetFleetRole', next]);
+        if (!fleet.open && (next === 'ship' || next === 'gm')) role = next;
+        return role === next;
+      },
       __hostFleetOpen: () => {
         bindings.calls.push(['__hostFleetOpen']);
         fleet = { open: true, owner: true, admission: 'open', frozen: false };
@@ -595,6 +602,23 @@ describe('the Fleet section', () => {
     expect(visible('fleet-join')).toBe(true);
     expect(visible('fleet-leave')).toBe(false);
     expect(visible('fleet-admission')).toBe(false);
+  });
+
+  it('defaults to a player ship and lets the privileged host choose GM before joining', () => {
+    const bindings = fleetBindings();
+    openFleetTab(bindings);
+    expect(control('fleet-role-group').getAttribute('role')).toBe('group');
+    expect(control('fleet-role-group').getAttribute('aria-label')).toBe(t('settings.fleet.role_heading'));
+    expect(control('fleet-role-ship').getAttribute('aria-pressed')).toBe('true');
+    expect(control('fleet-role-gm').getAttribute('aria-pressed')).toBe('false');
+
+    control('fleet-role-gm').click();
+    expect(bindings.calls).toContainEqual(['__hostSetFleetRole', 'gm']);
+    expect(control('fleet-role-ship').getAttribute('aria-pressed')).toBe('false');
+    expect(control('fleet-role-gm').getAttribute('aria-pressed')).toBe('true');
+
+    control('fleet-open').click();
+    expect(visible('fleet-role-group')).toBe(false);
   });
 
   it('opening a fleet swaps to the lead\'s controls', () => {
@@ -707,10 +731,19 @@ describe('the Fleet section', () => {
     for (const name of [
       '__hostFleetState', '__hostFleetOpen', '__hostFleetJoin',
       '__hostFleetSetAdmission', '__hostFleetLeave', '__hostFleetCodeLimit',
-      '__hostFleetRotate',
+      '__hostFleetRotate', '__hostFleetRole', '__hostSetFleetRole',
     ]) {
       expect(SRC, name).toContain(`window.${name}`);
     }
+  });
+
+  it('threads the selected role and private GM reconnect capability through the host-only mesh seam', () => {
+    expect(SRC).toContain('role: fleetRole');
+    expect(SRC).toContain('reconnectCredential: priorIdentity ? priorIdentity.reconnectCredential : null');
+    expect(SRC).toContain('onIdentity: (identity) =>');
+    expect(SRC).toContain('rememberGmIdentity(code, identity)');
+    expect(SRC).toContain('window.wasm_set_gm_roster(JSON.stringify(gms))');
+    expect(SRC).not.toContain('ClientMessage::SetFleetRole');
   });
 
   // ── Rotating the fleet code (issue #1115) ─────────────────────────────────

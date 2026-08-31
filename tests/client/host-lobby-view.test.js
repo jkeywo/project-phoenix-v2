@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { hostLobbyViewModel } from '../../gui/host-lobby-view.js';
+
+const SERVER_HTML = fs.readFileSync(path.join(
+  path.dirname(fileURLToPath(import.meta.url)), '../../server.html',
+), 'utf-8');
 
 function payload(overrides = {}) {
   return {
@@ -11,6 +18,7 @@ function payload(overrides = {}) {
     all_ready: false,
     stations: [],
     spectators: [],
+    gms: [],
     countdown_secs: 0,
     ...overrides,
   };
@@ -245,5 +253,57 @@ describe('hostLobbyViewModel — AI-only launch button', () => {
     expect(hostLobbyViewModel(payload(), '').aiLaunchVisible).toBe(true);
     expect(hostLobbyViewModel(payload({ crew_count: 1 }), '').aiLaunchVisible).toBe(false);
     expect(hostLobbyViewModel(payload({ spectators: ['Zed'] }), '').aiLaunchVisible).toBe(false);
+  });
+});
+
+describe('hostLobbyViewModel GM presence', () => {
+  it('ships a labelled host-lobby region with list semantics', () => {
+    expect(SERVER_HTML).toContain('id="lobby-gm-group" role="region" aria-labelledby="lobby-gm-heading"');
+    expect(SERVER_HTML).toContain('id="lobby-gm-list" class="lobby-rail-section" role="list"');
+    expect(SERVER_HTML).toContain('id="fleet-gm-group" role="region" aria-labelledby="fleet-gm-heading"');
+    expect(SERVER_HTML).toContain('id="fleet-gms" role="list"');
+    expect(SERVER_HTML).toContain("pill.setAttribute('role', 'listitem')");
+  });
+
+  it('projects connected and disconnected GMs into a distinct equal group', () => {
+    const vm = hostLobbyViewModel(payload({
+      gms: [
+        { id: 'gm-a', name: 'Ada', connected: true },
+        { id: 'gm-b', name: 'Bo', connected: false },
+      ],
+    }), '');
+    expect(vm.gmGroup).toEqual({
+      visible: true,
+      headingId: 'lobby.gms.heading',
+      pills: [
+        { id: 'gm-a', name: 'Ada', connected: true, labelId: 'lobby.gms.connected' },
+        { id: 'gm-b', name: 'Bo', connected: false, labelId: 'lobby.gms.disconnected' },
+      ],
+    });
+  });
+
+  it('does not count GMs as crew, spectators or AI-launch blockers', () => {
+    const vm = hostLobbyViewModel(payload({
+      crew_count: 0,
+      max_players: 3,
+      spectators: [],
+      gms: [{ id: 'gm-a', name: 'Ada', connected: true }],
+    }), '');
+    expect(vm.crew).toEqual({
+      count: 0,
+      max: 3,
+      dots: [false, false, false],
+      spectatorTag: { visible: false, count: 0 },
+    });
+    expect(vm.spectatorPills).toEqual([{ kind: 'empty', id: 'server.no_players', params: {} }]);
+    expect(vm.aiLaunchVisible).toBe(true);
+  });
+
+  it('hides the GM region when the public roster is empty', () => {
+    expect(hostLobbyViewModel(payload(), '').gmGroup).toEqual({
+      visible: false,
+      headingId: 'lobby.gms.heading',
+      pills: [],
+    });
   });
 });

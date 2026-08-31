@@ -138,6 +138,13 @@ pub struct LobbyPlugin;
 
 impl Plugin for LobbyPlugin {
     fn build(&self, app: &mut App) {
+        {
+            use crate::authoritative::{DeclareState, StateClass};
+            // Host/session membership, not simulation state. Like FleetRoster,
+            // this says who is connected where; any later typed GM command is
+            // the value that crosses into the deterministic world.
+            app.declare_state::<crate::gm_roster::GmRoster>(StateClass::Timer, "gm-session-state");
+        }
         if !app.is_plugin_added::<bevy::state::app::StatesPlugin>() {
             app.add_plugins(bevy::state::app::StatesPlugin);
         }
@@ -149,6 +156,7 @@ impl Plugin for LobbyPlugin {
         app.insert_resource(Sessions(SessionManager::new()))
             .insert_resource(initial_cache)
             .insert_resource(LobbyOutbox::default())
+            .init_resource::<crate::gm_roster::GmRoster>()
             .insert_resource(ShipClientConfigResource::default())
             .insert_resource(ShipManualResource::default())
             .init_resource::<ShipStations>()
@@ -773,6 +781,7 @@ pub fn handle_identify_system(
     ship_stations: Option<Res<ShipStations>>,
     ship_client_config: Res<ShipClientConfigResource>,
     ship_manual: Res<ShipManualResource>,
+    gm_roster: Res<crate::gm_roster::GmRoster>,
     mut ship_query: Query<
         (
             &ShipConfigComponent,
@@ -806,6 +815,7 @@ pub fn handle_identify_system(
                 stations,
                 &ship_client_config.0,
                 &ratings_snapshot,
+                gm_roster.operators(),
             );
             // Publish the read-only ship manual (issue #772) to this client
             // right after its Welcome — same trigger, same recipient. Only when
@@ -845,6 +855,7 @@ pub fn handle_identify_system(
                 stations,
                 &ship_client_config.0,
                 &pending_ratings,
+                gm_roster.operators(),
             );
             let mut fallback_ratings = ActiveStationRatings::default();
             let sent_welcome = result
@@ -1767,6 +1778,38 @@ mod tests {
         assert!(out
             .iter()
             .any(|m| matches!(&m.msg, ServerMessage::Welcome { .. })));
+    }
+
+    #[test]
+    fn identify_welcome_projects_the_separate_gm_resource() {
+        let mut app = test_app();
+        app.insert_resource(
+            crate::gm_roster::GmRoster::try_new(vec![crate::gm_roster::GmOperator {
+                id: "gm-1".into(),
+                name: "Morgan".into(),
+                connected: true,
+            }])
+            .unwrap(),
+        );
+        push(
+            &mut app,
+            "peer-id",
+            ClientMessage::Identify {
+                token: "t1".into(),
+                name: "Alice".into(),
+            },
+        );
+
+        let out = tick(&mut app);
+        let gms = out.iter().find_map(|outbound| match &outbound.msg {
+            ServerMessage::Welcome { state, gms, .. } => {
+                assert_eq!(state.players.len(), 1);
+                Some(gms)
+            }
+            _ => None,
+        });
+        assert_eq!(gms.unwrap()[0].id, "gm-1");
+        assert_eq!(app.world().resource::<Sessions>().0.players().len(), 1);
     }
 
     #[test]

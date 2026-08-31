@@ -295,6 +295,7 @@ pub(crate) fn push_lobby_state(
     world_resource: Option<Res<WorldResource>>,
     preload: Option<Res<AssetPreloadResource>>,
     countdown: Option<Res<CountdownTimer>>,
+    gm_roster: Option<Res<crate::gm_roster::GmRoster>>,
     mut writer: MessageWriter<LobbyStateChanged>,
 ) {
     let Some(sessions) = sessions else { return };
@@ -346,6 +347,10 @@ pub(crate) fn push_lobby_state(
         all_ready,
         stations: roster.stations,
         spectators,
+        gms: gm_roster
+            .as_ref()
+            .map(|roster| roster.projection())
+            .unwrap_or_default(),
         loading_progress,
         countdown_secs,
     };

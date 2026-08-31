@@ -19,6 +19,8 @@ import {
   ADMISSION_OPEN,
   HOST_FRAME_HOST_LOSS,
   HOST_FRAME_TICK,
+  HOST_ROLE_GM,
+  HOST_ROLE_SHIP,
   asHostFrame,
   encodeHostFrame,
   helloFrame,
@@ -374,6 +376,181 @@ describe('admitting a second ship host', () => {
     const two = await memberOn(world, factories, lead.code.suffix);
     expect(two.member.slot).toBeNull();
     expect(two.refusals.map((r) => r.reason)).toContain('client-stamp-missing');
+  });
+});
+
+describe('privileged GM host role and reconnect (issue #1289)', () => {
+  const credentialSequence = (...values) => {
+    let index = 0;
+    return () => values[index++];
+  };
+
+  it('admits a GM as a deterministic host peer without adding a ship row', async () => {
+    const identities = [];
+    const { factories, world, lead } = await fleetOf({
+      credentialFactory: credentialSequence('gm-one-private'),
+    });
+    const gm = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM,
+      name: 'Morgan',
+      ship: { template_path: 'must-not-be-a-ship.toml' },
+      onIdentity: (identity) => identities.push(identity),
+    });
+
+    expect(gm.refusals).toEqual([]);
+    expect(gm.member).toMatchObject({
+      role: HOST_ROLE_GM,
+      operatorId: 'gm-1',
+      reconnectCredential: 'gm-one-private',
+    });
+    // `slot-2` is the private technical mesh identity used to authenticate
+    // frames. It is deliberately absent from the public GM row.
+    expect(gm.member.slot).toBe('slot-2');
+    expect(identities).toEqual([{
+      role: HOST_ROLE_GM,
+      operatorId: 'gm-1',
+      reconnectCredential: 'gm-one-private',
+    }]);
+    expect(lastRoster(lead).slots).toHaveLength(1);
+    expect(lastRoster(lead).gms).toEqual([
+      { id: 'gm-1', name: 'Morgan', connected: true },
+    ]);
+    expect(lastRoster(lead).gms[0]).not.toHaveProperty('owner');
+    expect(lastRoster(lead).gms[0]).not.toHaveProperty('permissions');
+    expect(JSON.stringify(lastRoster(lead))).not.toContain('gm-one-private');
+
+    // A GM cannot accidentally create a ship record through the legacy member
+    // update surface; its controls arrive later as typed GM commands.
+    expect(gm.member.update({ ship: { template_path: 'still-not-a-ship.toml' } })).toBe(false);
+    await settle();
+    expect(lastRoster(lead).slots).toHaveLength(1);
+  });
+
+  it('keeps multiple GMs mechanically equal and outside ship capacity', async () => {
+    const { factories, world, lead } = await fleetOf({
+      credentialFactory: credentialSequence('secret-a', 'secret-b'),
+    });
+    const a = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM,
+      name: 'A',
+    });
+    const b = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM,
+      name: 'B',
+    });
+
+    expect([a.member.operatorId, b.member.operatorId]).toEqual(['gm-1', 'gm-2']);
+    const gmRows = lastRoster(lead).gms;
+    expect(gmRows).toEqual([
+      { id: 'gm-1', name: 'A', connected: true },
+      { id: 'gm-2', name: 'B', connected: true },
+    ]);
+    expect(gmRows.map((row) => Object.keys(row).sort()))
+      .toEqual([['connected', 'id', 'name'], ['connected', 'id', 'name']]);
+
+    // Each welcome is point-to-point. The roster broadcast an existing GM
+    // receives when another joins contains no sibling credential.
+    const ownerChannels = factories.peer.channels.filter((channel) => channel.origin === 'answer');
+    expect(JSON.stringify(ownerChannels[0].sent)).not.toContain('secret-b');
+    expect(JSON.stringify(ownerChannels[1].sent)).not.toContain('secret-a');
+
+    // Both GM simulations joined, but only the lead ship consumes capacity.
+    expect(lastRoster(lead).slots).toHaveLength(1);
+    for (let i = 0; i < MAX_SLOTS - 1; i += 1) {
+      const ship = await memberOn(world, factories, lead.code.suffix);
+      expect(ship.member.role).toBe(HOST_ROLE_SHIP);
+    }
+    expect(lastRoster(lead).slots).toHaveLength(MAX_SLOTS);
+    expect(lastRoster(lead).gms).toHaveLength(2);
+  });
+
+  it('reconnects the same GM from a new peer while new admission is closed', async () => {
+    const { factories, world, lead } = await fleetOf({
+      credentialFactory: credentialSequence('stable-private-capability'),
+    });
+    const first = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM,
+      name: 'Morgan',
+    });
+    const original = {
+      slot: first.member.slot,
+      operatorId: first.member.operatorId,
+      credential: first.member.reconnectCredential,
+    };
+    first.member.close();
+    await settle();
+    expect(lastRoster(lead).gms).toEqual([
+      { id: 'gm-1', name: 'Morgan', connected: false },
+    ]);
+
+    lead.fleet.setAdmission(ADMISSION_CLOSED);
+    await settle();
+    expect(lastRoster(lead).admission).toBe(ADMISSION_CLOSED);
+    // The service remains reachable because only the later private hello can
+    // distinguish this known operator from a new peer.
+    expect(world.registry.snapshot()[0].admission).toBe(ADMISSION_OPEN);
+
+    const replacement = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM,
+      name: 'cannot rename a recovered identity',
+      reconnectCredential: original.credential,
+    });
+    expect(replacement.refusals).toEqual([]);
+    expect(replacement.member.slot).toBe(original.slot);
+    expect(replacement.member.operatorId).toBe(original.operatorId);
+    expect(replacement.member.reconnectCredential).toBe(original.credential);
+    expect(lastRoster(lead).gms).toEqual([
+      { id: 'gm-1', name: 'Morgan', connected: true },
+    ]);
+  });
+
+  it('refuses an unknown credential without duplicating or taking over the operator', async () => {
+    const { factories, world, lead } = await fleetOf({
+      credentialFactory: credentialSequence('real-private-capability'),
+    });
+    const first = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM,
+      name: 'Morgan',
+    });
+    first.member.close();
+    await settle();
+    lead.fleet.setAdmission(ADMISSION_CLOSED);
+    await settle();
+
+    const attacker = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM,
+      reconnectCredential: 'wrong-private-capability',
+    });
+    expect(attacker.member.slot).toBeNull();
+    expect(attacker.refusals.map((entry) => entry.reason)).toContain('recovery-only');
+    expect(lastRoster(lead).gms).toEqual([
+      { id: 'gm-1', name: 'Morgan', connected: false },
+    ]);
+  });
+
+  it('opens a GM-only owner with a private identity and no player ship', async () => {
+    const ownerIdentity = [];
+    const { lead } = await fleetOf({
+      role: HOST_ROLE_GM,
+      name: 'Morgan',
+      ship: { template_path: 'must-not-survive.toml' },
+      credentialFactory: credentialSequence('owner-private-capability'),
+      onIdentity: (identity) => ownerIdentity.push(identity),
+    });
+
+    expect(lead.fleet.role).toBe(HOST_ROLE_GM);
+    expect(lead.fleet.slot).toBe('slot-1'); // technical star-centre identity
+    expect(lead.fleet.operatorId).toBe('gm-1');
+    expect(lead.fleet.reconnectCredential).toBe('owner-private-capability');
+    expect(ownerIdentity).toEqual([{
+      role: HOST_ROLE_GM,
+      operatorId: 'gm-1',
+      reconnectCredential: 'owner-private-capability',
+    }]);
+    expect(lastRoster(lead).slots).toEqual([]);
+    expect(lastRoster(lead).gms).toEqual([
+      { id: 'gm-1', name: 'Morgan', connected: true },
+    ]);
   });
 });
 

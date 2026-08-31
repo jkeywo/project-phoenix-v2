@@ -1,9 +1,9 @@
 ---
 title: Server HTML Lobby UI
 type: concept
-tags: [lobby, server, html, ui, bridge, responsive, accessibility, reduced-motion]
-sources: [server.html, gui/host-lobby-view.js, src/server/viewscreen_border.rs, src/console_bridge.rs, src/server/bridge.rs]
-updated: 2026-08-27
+tags: [lobby, server, html, ui, bridge, responsive, accessibility, reduced-motion, gm]
+sources: [server.html, client.html, gui/host-lobby-view.js, gui/lobby-view.js, gui/lobby-state.js, src/server/viewscreen_border.rs, src/console_bridge.rs, src/server/bridge.rs, src/core/messages.rs, src/gm_roster.rs]
+updated: 2026-08-31
 ---
 
 # Server HTML Lobby UI
@@ -34,6 +34,7 @@ This is a **one-way state-push channel** that runs in parallel to the regular [M
 | `max_players` | `u32` | Number of claimable seats on the active ship. |
 | `stations` | `Vec<StationPayload>` | One entry per claimable, non-auxiliary station. |
 | `spectators` | `Vec<String>` | Names holding the explicit Spectator role. |
+| `gms` | `Vec<GmOperator>` | Equal GM presence rows (`id`, `name`, `connected`), separate from every crew and Station count. |
 | `all_stations_filled` | `bool` | Flips ready badge to `READY TO LAUNCH`. |
 
 `StationPayload`: `name`, `short_code`, `rank`, `holder_name?`, `is_mine`, `preset_names`.
@@ -58,6 +59,8 @@ The grid is sized directly from the claimable roster. It creates no padding or r
         │   ├── #station-grid.lobby-grid        /* auto-fit minmax(220, 360)     */
         │   │   └── .station-card[.claimed]     /* one per claimable Station     */
         └── .lobby-rail                          /* aside; rail right or below   */
+            ├── #lobby-gm-group[role=region]
+            │   └── #lobby-gm-list              /* equal GM presence            */
             ├── .lobby-rail-label
             ├── #lobby-spectator-list.lobby-rail-section
             │   └── .spectator-pill[.waiting]   /* one per connected/waiting     */
@@ -94,9 +97,11 @@ A scroll fallback (`overflow-y: auto` on `#station-grid`) handles rosters that d
 - `RedAlertVignetteMaterial`, shield flash, hull shake, camera shake, and the
   reduced-motion preference remain renderer-side presentation state.
 
-The lobby cards, rail, QR area, and responsive layout are DOM owned by
+The lobby cards, GM group, rail, QR area, and responsive layout are DOM owned by
 `server.html` and `gui/host-lobby-view.js`; Bevy publishes data but does not
-build a lobby UI tree.
+build a lobby UI tree. The crew page receives the same public GM projection in
+`Welcome` and `GmRosterChanged`, and `gui/lobby-view.js` renders it as a sibling
+region rather than folding it into the Station list.
 
 ## Viewscreen reduced motion
 

@@ -2,8 +2,8 @@
 title: Player
 type: entity
 tags: [player, session, identity, station, reconnect]
-sources: [src/core/messages.rs, src/lobby/session.rs, src/lobby/handler.rs, src/lobby/server.rs]
-updated: 2026-08-27
+sources: [src/core/messages.rs, src/lobby/session.rs, src/lobby/handler.rs, src/lobby/server.rs, src/gm_roster.rs]
+updated: 2026-08-31
 ---
 
 # Player
@@ -25,6 +25,11 @@ restoration, and the public Spectator and AFK flags.
   its systems to Backfill and makes that player ineligible to host a visiting
   station. Leaving AFK restores the saved control configuration.
 
+A [GM Operator](./gm-operator.md) is not another Player presence role. It is
+admitted by privileged server code, has its own reconnect identity and public
+roster, consumes no player-ship or Station capacity, and never enters
+`SessionManager` as crew or Spectator.
+
 ## Lifecycle
 
 1. `Identify` registers or reconnects the token and returns `Welcome`.
@@ -44,6 +49,7 @@ destroy token-based identity and rating restoration.
 ## Related
 
 - [Session](./session.md)
+- [GM Operator](./gm-operator.md)
 - [Station](./station.md)
 - [Console](./console.md)
 - [Networking](../concepts/networking.md)

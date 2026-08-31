@@ -79,6 +79,8 @@ import {
   HOST_FRAME_ROSTER,
   HOST_FRAME_SLOT,
   HOST_FRAME_WELCOME,
+  HOST_ROLE_GM,
+  HOST_ROLE_SHIP,
   admissionFrame,
   admitHost,
   asHostFrame,
@@ -158,9 +160,14 @@ function defaultAuthenticateFrame(raw, authSlot) {
  *   the authoritative host-to-host verdict — `wasm_check_host_stamp`.
  * @param {{template_path: string|null, name?: string}|null} [opts.ship]
  * @param {string} [opts.name]
+ * @param {'ship'|'gm'} [opts.role] privileged host role; absent remains `ship`
+ * @param {()=>string} [opts.credentialFactory] injectable secure GM credential
+ *   mint, used by deterministic tests; production uses Web Crypto
  * @param {(code:object)=>void} [opts.onCode] the issued fleet code; fires again
  *   with a NEW one if the service was lost and this host re-registered.
  * @param {(roster:object)=>void} [opts.onRoster] every change, owner included.
+ * @param {(identity:{role:string,operatorId:string,reconnectCredential:string})=>void}
+ *   [opts.onIdentity] the local GM identity only; never called for another GM
  * @param {(raw:string, authSlot:number)=>void} [opts.onSimulationFrame] a
  *   simulation frame from a member, still encoded, with the fleet slot the
  *   delivering connection was authenticated as (issue #1120) — hand both to
@@ -183,8 +190,11 @@ export function createFleetOwner(opts) {
     checkStamp = REFUSE_UNCHECKED,
     ship = null,
     name = '',
+    role = HOST_ROLE_SHIP,
+    credentialFactory,
     onCode = () => {},
     onRoster = () => {},
+    onIdentity = () => {},
     onSimulationFrame = () => {},
     onHostLost = () => {},
     onSlotClaimed = () => {},
@@ -194,7 +204,15 @@ export function createFleetOwner(opts) {
     factories,
   } = opts;
 
-  let fleet = openFleet({ ship, name, maxSlots, maxNameLength, maxShipPathLength });
+  let fleet = openFleet({
+    ship,
+    name,
+    role,
+    maxSlots,
+    maxNameLength,
+    maxShipPathLength,
+    credentialFactory,
+  });
   /** rendezvous peer id → the admitted connection adapter. */
   const links = new Map();
   /**
@@ -214,6 +232,17 @@ export function createFleetOwner(opts) {
     for (const conn of links.values()) conn.send(json);
     onRoster(roster);
   };
+
+  /**
+   * Service admission must remain open when a known GM may reconnect. The
+   * rendezvous service cannot inspect the private credential in the later
+   * host-mesh hello, so the authoritative role/credential gate lives here;
+   * unknown peers that reach it are still refused by `admitHost`.
+   */
+  const serviceAdmission = () =>
+    fleet.frozen || (fleet.gms && fleet.gms.length > 0)
+      ? ADMISSION_OPEN
+      : fleet.admission;
 
   function onHello(conn, body) {
     // A replacement machine reclaiming a specific disconnected slot (issue #1120)
@@ -246,6 +275,8 @@ export function createFleetOwner(opts) {
       peer: conn.peer,
       ship: body.ship || null,
       name: body.name || '',
+      role: body.role,
+      reconnectCredential: body.reconnect_credential,
     });
     if (!verdict.ok) {
       onLog(`[fleet] refusing ${String(conn.peer).slice(0, 8)}…: ${verdict.reason}`);
@@ -258,8 +289,12 @@ export function createFleetOwner(opts) {
     }
     fleet = verdict.fleet;
     links.set(conn.peer, conn);
-    connSlots.set(conn.peer, hostSlotOrdinal(verdict.slot.id));
-    conn.send(encodeHostFrame(welcomeFrame(verdict.slot.id, rosterOf(fleet))));
+    connSlots.set(conn.peer, hostSlotOrdinal(verdict.meshSlot));
+    conn.send(encodeHostFrame(welcomeFrame(verdict.meshSlot, rosterOf(fleet), {
+      role: verdict.role,
+      operatorId: verdict.operatorId,
+      reconnectCredential: verdict.reconnectCredential,
+    })));
     publish();
   }
 
@@ -315,8 +350,11 @@ export function createFleetOwner(opts) {
       // silently become the permanent lockout the freeze exists to prevent.
       // There is one rule for what state the service record should be in, and
       // this is it, stated the same way in both places.
-      if (fleet.frozen) host.setAdmission(ADMISSION_OPEN);
-      else if (fleet.admission === ADMISSION_CLOSED) host.setAdmission(ADMISSION_CLOSED);
+      const nextAdmission = serviceAdmission();
+      if (nextAdmission === ADMISSION_CLOSED) host.setAdmission(ADMISSION_CLOSED);
+      else if (fleet.frozen || fleet.admission === ADMISSION_CLOSED) {
+        host.setAdmission(ADMISSION_OPEN);
+      }
     },
     onConnection: (conn) => {
       conn.on('data', (raw) => {
@@ -398,11 +436,22 @@ export function createFleetOwner(opts) {
   });
 
   publish();
+  const ownerGm = fleet.gms && fleet.gms.find((gm) => gm.meshSlot === fleet.owner);
+  if (ownerGm) {
+    onIdentity({
+      role: HOST_ROLE_GM,
+      operatorId: ownerGm.id,
+      reconnectCredential: ownerGm.credential,
+    });
+  }
 
   return {
     get code() { return code; },
     get isOwner() { return true; },
     get slot() { return fleet.owner; },
+    get role() { return ownerGm ? HOST_ROLE_GM : HOST_ROLE_SHIP; },
+    get operatorId() { return ownerGm ? ownerGm.id : null; },
+    get reconnectCredential() { return ownerGm ? ownerGm.credential : null; },
     roster: () => rosterOf(fleet),
 
     /**
@@ -418,7 +467,7 @@ export function createFleetOwner(opts) {
       if (fleet.frozen) return;
       const next = state === ADMISSION_CLOSED ? ADMISSION_CLOSED : ADMISSION_OPEN;
       fleet = setAdmission(fleet, next);
-      host.setAdmission(next);
+      host.setAdmission(serviceAdmission());
       for (const conn of links.values()) conn.send(encodeHostFrame(admissionFrame(next)));
       publish();
     },
@@ -508,8 +557,13 @@ export function createFleetOwner(opts) {
  * @param {string} [opts.name]
  * @param {string|null} [opts.claim] the disconnected slot id this host is
  *   reclaiming (issue #1120); null for an ordinary join.
+ * @param {'ship'|'gm'} [opts.role] privileged host role; absent remains `ship`
+ * @param {string|null} [opts.reconnectCredential] private capability returned
+ *   by an earlier GM welcome; it is never a public roster field
  * @param {(roster:object)=>void} [opts.onRoster]
  * @param {(slotId:string, roster:object)=>void} [opts.onWelcome]
+ * @param {(identity:{role:string,operatorId:string,reconnectCredential:string})=>void}
+ *   [opts.onIdentity] this member's own GM identity only
  * @param {(reason:string, detail?:string)=>void} [opts.onError] a TERMINAL
  *   refusal — of this host's admission, or from the service — as a machine
  *   reason. The link is over by the time this fires.
@@ -532,8 +586,11 @@ export function createFleetMember(opts) {
     ship = null,
     name = '',
     claim = null,
+    role = HOST_ROLE_SHIP,
+    reconnectCredential = null,
     onRoster = () => {},
     onWelcome = () => {},
+    onIdentity = () => {},
     onSimulationFrame = () => {},
     onError = () => {},
     onRefusedSlot = () => {},
@@ -544,6 +601,9 @@ export function createFleetMember(opts) {
 
   let mine = null;
   let roster = null;
+  let acceptedRole = role === HOST_ROLE_GM ? HOST_ROLE_GM : HOST_ROLE_SHIP;
+  let operatorId = null;
+  let privateReconnectCredential = reconnectCredential;
   let announced = { ship, name };
   // Declared before the joiner because its own callbacks reach back for it.
   // They only ever run after an async socket event, so the assignment below has
@@ -573,6 +633,8 @@ export function createFleetMember(opts) {
         // A replacement machine names the disconnected slot it is reclaiming
         // (issue #1120); a plain join leaves this null.
         claim,
+        role: acceptedRole,
+        reconnectCredential: privateReconnectCredential,
       })));
     },
     onData: (frame) => {
@@ -599,8 +661,19 @@ export function createFleetMember(opts) {
       if (decoded.t === HOST_FRAME_WELCOME) {
         mine = decoded.d.slot || null;
         roster = decoded.d.roster || null;
+        acceptedRole = decoded.d.role === HOST_ROLE_GM ? HOST_ROLE_GM : HOST_ROLE_SHIP;
+        operatorId = acceptedRole === HOST_ROLE_GM ? decoded.d.operator_id || null : null;
+        privateReconnectCredential = acceptedRole === HOST_ROLE_GM
+          ? decoded.d.reconnect_credential || null
+          : null;
         onLog(`[fleet] admitted as ${mine}`);
-        onWelcome(mine, roster);
+        const identity = {
+          role: acceptedRole,
+          operatorId,
+          reconnectCredential: privateReconnectCredential,
+        };
+        onWelcome(mine, roster, identity);
+        if (acceptedRole === HOST_ROLE_GM) onIdentity(identity);
         onRoster(roster);
         return;
       }
@@ -648,6 +721,9 @@ export function createFleetMember(opts) {
   return {
     get isOwner() { return false; },
     get slot() { return mine; },
+    get role() { return acceptedRole; },
+    get operatorId() { return operatorId; },
+    get reconnectCredential() { return privateReconnectCredential; },
     get code() { return joiner.failed ? null : { suffix: joiner.suffix, full: joiner.full }; },
     roster: () => roster,
 
@@ -664,8 +740,13 @@ export function createFleetMember(opts) {
 
     /** Announce this host's own ship or readiness to the fleet owner. */
     update(patch) {
+      // A GM has no ship slot to patch. Later GM controls use their own typed
+      // commands; sending a `slot` frame here would imply the ship record this
+      // role deliberately does not own.
+      if (acceptedRole === HOST_ROLE_GM) return false;
       announced = { ...announced, ...patch };
       joiner.sendFrame(encodeHostFrame(slotFrame(patch)));
+      return true;
     },
 
     close() {

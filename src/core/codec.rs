@@ -642,6 +642,18 @@ pub fn decode_fleet_roster(raw: &str) -> Option<(crate::lockstep::FleetRoster, O
     Some((FleetRoster::new(ships, local), delay))
 }
 
+/// Decode one complete crew-public GM roster from the host page (issue #1289).
+///
+/// The accepted wire shape is exactly an array of `{ id, name, connected }`
+/// rows. [`crate::gm_roster::GmOperator`]'s `deny_unknown_fields` prevents a
+/// private peer id, reconnect credential or authority flag from crossing this
+/// boundary unnoticed; [`crate::gm_roster::GmRoster::try_new`] applies the
+/// bounded, unique and deterministic roster contract.
+pub fn decode_gm_roster(raw: &str) -> Option<crate::gm_roster::GmRoster> {
+    let operators: Vec<crate::gm_roster::GmOperator> = serde_json::from_str(raw).ok()?;
+    crate::gm_roster::GmRoster::try_new(operators).ok()
+}
+
 /// Encode the fleet-link status the host page's operator surface reads.
 ///
 /// Derived and read-only. `waiting_on` names the peers a stall is blocked on,

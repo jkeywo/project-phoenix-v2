@@ -280,6 +280,15 @@
     #fleet-slots .fleet-ready {
       color: var(--cyan-bright); letter-spacing: var(--tracking-wide);
     }
+    #fleet-gm-group[aria-hidden="true"] { display: none; }
+    #fleet-gm-group { margin-top: 6px; padding-top: 6px; border-top: 1px solid #334; }
+    #fleet-gm-heading {
+      color: var(--ink-faint); font-size: var(--text-xs);
+      text-transform: uppercase; letter-spacing: var(--tracking-wide);
+    }
+    #fleet-gms { display: flex; flex-direction: column; gap: 2px; margin-top: 3px; }
+    .fleet-gm { color: var(--cyan-bright); }
+    .fleet-gm.disconnected { color: var(--ink-faint); opacity: .65; }
     #fleet-status, #fleet-error {
       margin-top: 4px; text-align: center; font-size: var(--text-xs);
       color: var(--ink-faint);
@@ -650,6 +659,20 @@
       color: #556;
       font-size: 0.8rem;
       font-style: italic;
+    }
+    #lobby-gm-group[aria-hidden="true"] { display: none; }
+    #lobby-gm-group {
+      margin-bottom: 0.75rem; padding-bottom: 0.75rem;
+      border-bottom: 1px solid #334;
+    }
+    .gm-pill {
+      padding: 4px 10px; border-radius: 3px;
+      background: #10252a; color: #5fd8e8;
+      border: 1px solid #2a8a96; font-size: 0.75rem;
+      white-space: nowrap; align-self: flex-start;
+    }
+    .gm-pill.disconnected {
+      color: #778; border-style: dashed; border-color: #445; opacity: .7;
     }
 
     /* Aggregate RESERVED chip (compact mode only) */
@@ -1289,6 +1312,9 @@
       font-family: var(--font-mono, monospace); font-size: 11px;
       letter-spacing: 0.15em; text-transform: uppercase;
     }
+    .server-settings-role-group {
+      display: flex; flex-wrap: wrap; gap: 6px; width: 100%;
+    }
     .server-settings-slider { flex: 1; min-width: 140px; }
     .server-settings-readout {
       min-width: 4ch; text-align: right;
@@ -1600,6 +1626,10 @@
 
         <!-- Log rail: spectators + status -->
         <aside class="lobby-rail">
+          <section id="lobby-gm-group" role="region" aria-labelledby="lobby-gm-heading" aria-hidden="true">
+            <div id="lobby-gm-heading" class="lobby-rail-label" data-i18n="lobby.gms.heading"></div>
+            <div id="lobby-gm-list" class="lobby-rail-section" role="list"></div>
+          </section>
           <div>
             <div class="lobby-rail-label" data-i18n="server.connected">Connected</div>
             <div id="lobby-spectator-list" class="lobby-rail-section"></div>
@@ -1712,6 +1742,10 @@
             <span id="fleet-url"></span>
           </div>
           <ul id="fleet-slots"></ul>
+          <section id="fleet-gm-group" role="region" aria-labelledby="fleet-gm-heading" aria-hidden="true">
+            <div id="fleet-gm-heading" data-i18n="lobby.gms.heading"></div>
+            <div id="fleet-gms" role="list"></div>
+          </section>
           <div id="fleet-status"></div>
           <div id="fleet-error"></div>
         </div>
@@ -2522,6 +2556,24 @@
       }
     }
 
+    // ── Equal Game Master presence ────────────────────────────────────
+    const gmGroup = document.getElementById('lobby-gm-group');
+    const gmHeading = document.getElementById('lobby-gm-heading');
+    const gmList = document.getElementById('lobby-gm-list');
+    if (gmGroup && gmList) {
+      gmGroup.setAttribute('aria-hidden', vm.gmGroup.visible ? 'false' : 'true');
+      if (gmHeading) gmHeading.textContent = t(vm.gmGroup.headingId);
+      gmList.innerHTML = '';
+      for (const gm of vm.gmGroup.pills) {
+        const pill = document.createElement('span');
+        pill.className = 'gm-pill' + (gm.connected ? '' : ' disconnected');
+        pill.setAttribute('role', 'listitem');
+        pill.dataset.gmId = gm.id;
+        pill.textContent = t(gm.labelId, { name: gm.name || gm.id });
+        gmList.appendChild(pill);
+      }
+    }
+
     // ── Status hint ───────────────────────────────────────────────────
     const hintEl = document.getElementById('lobby-status-hint');
     if (hintEl) {
@@ -2806,12 +2858,73 @@
     let fleetNotice = null;
     /** ICE servers, latched by initHostTransport so a fleet can reuse them. */
     let fleetIceServers = [];
+    /** Privileged host-mesh role chosen before open/join. Phones never set it. */
+    let fleetRole = 'ship';
+    /** Distinguishes the default from an operator deliberately choosing ship. */
+    let fleetRoleExplicit = false;
+    /** One private GM reconnect capability, scoped to the fleet code that issued it. */
+    const FLEET_GM_IDENTITY_KEY = 'phoenix.fleet.gm-identity.v1';
+    let fleetIdentityStorage = null;
+    try { fleetIdentityStorage = window.localStorage; } catch (_) {}
     /**
      * The hull `wasm_select_ship` was last called with, as a fleet ship — see
      * `lockPlayerHull`. Held here rather than read back out of Rust because the
      * fleet needs it on paths where Bevy is not running yet.
      */
     let _selectedHull = null;
+
+    function normaliseFleetRole(role) {
+      return role === 'gm' ? 'gm' : 'ship';
+    }
+
+    /** Public settings adapter. Role is immutable while a fleet link is live. */
+    window.__hostFleetRole = function() { return fleetRole; };
+    window.__hostSetFleetRole = function(role) {
+      const next = normaliseFleetRole(role);
+      if (fleetHandle || (role !== 'ship' && role !== 'gm')) return false;
+      fleetRole = next;
+      fleetRoleExplicit = true;
+      return true;
+    };
+
+    function storedGmIdentity(code) {
+      if (!fleetIdentityStorage || !code) return null;
+      try {
+        const value = JSON.parse(fleetIdentityStorage.getItem(FLEET_GM_IDENTITY_KEY) || 'null');
+        return value && value.code === String(code)
+          && typeof value.reconnectCredential === 'string'
+          && value.reconnectCredential
+          ? value
+          : null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function rememberGmIdentity(code, identity) {
+      if (!fleetIdentityStorage || !code || !identity || identity.role !== 'gm'
+          || typeof identity.reconnectCredential !== 'string'
+          || !identity.reconnectCredential) return;
+      try {
+        fleetIdentityStorage.setItem(FLEET_GM_IDENTITY_KEY, JSON.stringify({
+          code: String(code),
+          operatorId: identity.operatorId || null,
+          reconnectCredential: identity.reconnectCredential,
+        }));
+      } catch (_) {}
+    }
+
+    /** Full crew-public replacement; private GM identity never crosses to Rust. */
+    function publishGmRoster(roster) {
+      if (typeof window.wasm_set_gm_roster !== 'function') return;
+      const gms = roster && Array.isArray(roster.gms) ? roster.gms : [];
+      try {
+        const refusal = window.wasm_set_gm_roster(JSON.stringify(gms));
+        if (refusal) console.warn(`[fleet] GM roster refused: ${refusal}`);
+      } catch (e) {
+        console.warn('[fleet] could not publish GM roster', e);
+      }
+    }
 
     /**
      * This host's own delivery stamp, in the field form the handshake reads.
@@ -2865,6 +2978,7 @@
      * during scenario selection has to show until the world loads.
      */
     function fleetShip() {
+      if (fleetRole === 'gm') return null;
       if (_selectedHull) return _selectedHull;
       const path = _preSelection && _preSelection.template_path;
       return path ? { template_path: path } : null;
@@ -2889,7 +3003,7 @@
      * inert when there is no fleet, which is the ordinary case.
      */
     function announceFleetSelection() {
-      if (!fleetHandle) return;
+      if (!fleetHandle || normaliseFleetRole(fleetHandle.role || fleetRole) === 'gm') return;
       try {
         fleetHandle.update({ ship: fleetShip(), ready: !!_selectedHull });
       } catch (e) {
@@ -3097,6 +3211,26 @@
         }
       }
 
+      // GMs are a second, equal presence group — never fake ship rows.
+      const fleetGmGroup = document.getElementById('fleet-gm-group');
+      const fleetGmList = document.getElementById('fleet-gms');
+      const publicGms = fleetRoster && Array.isArray(fleetRoster.gms) ? fleetRoster.gms : [];
+      if (fleetGmGroup && fleetGmList) {
+        fleetGmGroup.setAttribute('aria-hidden', publicGms.length > 0 ? 'false' : 'true');
+        fleetGmList.innerHTML = '';
+        for (const gm of publicGms) {
+          const row = document.createElement('span');
+          row.className = 'fleet-gm' + (gm.connected ? '' : ' disconnected');
+          row.setAttribute('role', 'listitem');
+          row.dataset.gmId = gm.id || '';
+          row.textContent = t(
+            gm.connected ? 'lobby.gms.connected' : 'lobby.gms.disconnected',
+            { name: gm.name || gm.id || '' },
+          );
+          fleetGmList.appendChild(row);
+        }
+      }
+
       const status = document.getElementById('fleet-status');
       if (status) status.textContent = vm.status ? t(vm.status.id, vm.status.params) : '';
       const error = document.getElementById('fleet-error');
@@ -3141,6 +3275,7 @@
       fleetSuffix = null;
       fleetFault = reason;
       fleetNotice = null;
+      publishGmRoster(null);
       paintFleetPanel();
     }
 
@@ -3155,6 +3290,7 @@
      */
     function adoptFleet(handle) {
       fleetHandle = handle;
+      fleetRole = normaliseFleetRole(handle && handle.role);
       announceFleetSelection();
       paintFleetPanel();
       return handle;
@@ -3186,9 +3322,18 @@
         maxNameLength: data.limits.max_slot_name_length,
         maxShipPathLength: data.limits.max_slot_ship_path_length,
         checkStamp: checkHostStamp,
+        role: fleetRole,
+        name: fleetRole === 'gm' ? t('settings.fleet.role_gm') : '',
         ship: fleetShip(),
+        onIdentity: (identity) => {
+          fleetRole = normaliseFleetRole(identity && identity.role);
+        },
         onCode: (code) => { fleetSuffix = code.suffix; paintFleetPanel(); },
-        onRoster: (roster) => { fleetRoster = roster; paintFleetPanel(); },
+        onRoster: (roster) => {
+          fleetRoster = roster;
+          publishGmRoster(roster);
+          paintFleetPanel();
+        },
         onSimulationFrame: receiveMeshFrame,
         // A member host dropped mid-mission (issue #1119). Tell the simulation
         // the slot; it agrees the disconnect tick from that host's own watermark
@@ -3225,6 +3370,17 @@
       fleetNotice = null;
       let handle = null;
       let refusal = null;
+      const parsedIdentityCode = window.joinCode.parseJoinCode(
+        code, window.joinCode.NAMESPACE_SERVER, data,
+      );
+      const identityCode = parsedIdentityCode.ok ? parsedIdentityCode.full : String(code);
+      // A stored capability also restores the role on a fragment-driven page
+      // reload, which otherwise auto-joins before the operator can reopen the
+      // Settings selector and choose GM again.
+      const priorIdentity = (!fleetRoleExplicit || fleetRole === 'gm')
+        ? storedGmIdentity(identityCode)
+        : null;
+      if (priorIdentity) fleetRole = 'gm';
       handle = window.fleetSession.createFleetMember({
         base: rendezvousBase,
         data,
@@ -3232,7 +3388,14 @@
         claim,
         stamp: hostStampField(),
         iceServers: fleetIceServers,
+        role: fleetRole,
+        name: fleetRole === 'gm' ? t('settings.fleet.role_gm') : '',
+        reconnectCredential: priorIdentity ? priorIdentity.reconnectCredential : null,
         ship: fleetShip(),
+        onIdentity: (identity) => {
+          fleetRole = normaliseFleetRole(identity && identity.role);
+          rememberGmIdentity(identityCode, identity);
+        },
         onWelcome: () => {
           fleetFault = null;
           fleetNotice = null;
@@ -3243,7 +3406,12 @@
           announceFleetSelection();
           paintFleetPanel();
         },
-        onRoster: (roster) => { fleetRoster = roster; fleetNotice = null; paintFleetPanel(); },
+        onRoster: (roster) => {
+          fleetRoster = roster;
+          fleetNotice = null;
+          publishGmRoster(roster);
+          paintFleetPanel();
+        },
         onSimulationFrame: receiveMeshFrame,
         // The fleet declined a change this host asked for about its own slot.
         // It is still IN the fleet — reporting it is the whole answer, and
@@ -3264,6 +3432,11 @@
         return false;
       }
       adoptFleet(handle);
+      rememberGmIdentity(identityCode, {
+        role: handle.role,
+        operatorId: handle.operatorId,
+        reconnectCredential: handle.reconnectCredential,
+      });
       fleetSuffix = handle.code ? handle.code.suffix : null;
       paintFleetPanel();
       return true;
@@ -3299,6 +3472,7 @@
         frozen: !!(fleetRoster && fleetRoster.frozen),
         suffix: fleetSuffix,
         reason: fleetFault,
+        role: fleetRole,
       };
     };
 
@@ -4760,6 +4934,10 @@ function finishInit() {
   window.wasm_receive_mesh_frame = wasmBindings.wasm_receive_mesh_frame;
   window.wasm_take_mesh_frames = wasmBindings.wasm_take_mesh_frames;
   window.wasm_join_fleet = wasmBindings.wasm_join_fleet;
+  window.wasm_set_gm_roster = wasmBindings.wasm_set_gm_roster;
+  // A fleet can connect before the world finishes loading. Re-publish its
+  // latest full GM projection now that the Rust boundary exists.
+  publishGmRoster(fleetRoster);
   window.wasm_mesh_status = wasmBindings.wasm_mesh_status;
   // A peer ship host left the fleet (issue #1119): report its slot so the
   // simulation flips that ship to Backfill at an agreed tick.

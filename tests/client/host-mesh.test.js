@@ -24,6 +24,8 @@ import {
   hostSlotOrdinal,
   ADMISSION_CLOSED,
   ADMISSION_OPEN,
+  HOST_ROLE_GM,
+  HOST_ROLE_SHIP,
   REASON_ADMISSION_CLOSED,
   REASON_FLEET_FULL,
   REASON_RECOVERY_ONLY,
@@ -193,7 +195,7 @@ describe('the envelope', () => {
     // silently fails to agree a tick; refusing an unrecognised `m` is what
     // makes that fail loudly, and this pair of pins is what catches a
     // one-sided bump.
-    expect(HOST_MESH_PROTOCOL).toBe(4);
+    expect(HOST_MESH_PROTOCOL).toBe(5);
     const rust = readFileSync(
       path.join(path.dirname(fileURLToPath(import.meta.url)), '../../src/lockstep/frame.rs'),
       'utf8',
@@ -277,6 +279,166 @@ describe('opening a fleet', () => {
     // The service's own per-record bound must be the looser of the two, or the
     // fleet's designed size would be silently clipped by a memory limit.
     expect(MAX).toBeLessThanOrEqual(JOIN_DATA.limits.max_peers_per_record);
+  });
+});
+
+describe('privileged GM host role (issue #1289)', () => {
+  const credentials = (...values) => {
+    let index = 0;
+    return () => values[index++];
+  };
+
+  it('keeps an absent role as the existing ship-host behaviour', () => {
+    const fleet = fleetOf({ name: 'Lead', ship: { template_path: 'destroyer.toml' } });
+    expect(fleet.slots).toHaveLength(1);
+    expect(fleet.gms).toEqual([]);
+    expect(helloFrame({ name: 'Two' }).d).toEqual({ ship: null, name: 'Two' });
+    expect(admitHost(fleet, { peer: 'p2' })).toMatchObject({
+      ok: true,
+      role: HOST_ROLE_SHIP,
+      meshSlot: 'slot-2',
+    });
+  });
+
+  it('represents a GM-only owner without inventing a ship or public GM leader', () => {
+    const fleet = fleetOf({
+      role: HOST_ROLE_GM,
+      name: 'Morgan',
+      ship: { template_path: 'must-not-survive.toml' },
+      credentialFactory: credentials('owner-private-capability'),
+    });
+    const roster = rosterOf(fleet);
+
+    // The technical owner is still the deterministic star centre, but it is
+    // not a ship row and does not confer public leadership on the GM row.
+    expect(fleet.owner).toBe('slot-1');
+    expect(fleet.slots).toEqual([]);
+    expect(roster.gms).toEqual([{ id: 'gm-1', name: 'Morgan', connected: true }]);
+    expect(Object.keys(roster.gms[0]).sort()).toEqual(['connected', 'id', 'name']);
+    expect(roster.gms[0]).not.toHaveProperty('owner');
+    expect(roster.gms[0]).not.toHaveProperty('permissions');
+    expect(JSON.stringify(roster)).not.toContain('owner-private-capability');
+  });
+
+  it('admits equal GM operators without consuming authored ship capacity', () => {
+    let fleet = fleetOf({ credentialFactory: credentials('gm-a-secret', 'gm-b-secret') });
+    const first = admitHost(fleet, { peer: 'gm-peer-a', role: HOST_ROLE_GM, name: 'A' });
+    fleet = first.fleet;
+    const second = admitHost(fleet, { peer: 'gm-peer-b', role: HOST_ROLE_GM, name: 'B' });
+    fleet = second.fleet;
+
+    expect(first).toMatchObject({
+      role: HOST_ROLE_GM,
+      meshSlot: 'slot-2',
+      operatorId: 'gm-1',
+      reconnectCredential: 'gm-a-secret',
+    });
+    expect(second).toMatchObject({
+      role: HOST_ROLE_GM,
+      meshSlot: 'slot-3',
+      operatorId: 'gm-2',
+      reconnectCredential: 'gm-b-secret',
+    });
+    expect(fleet.slots).toHaveLength(1);
+    expect(rosterOf(fleet).gms).toEqual([
+      { id: 'gm-1', name: 'A', connected: true },
+      { id: 'gm-2', name: 'B', connected: true },
+    ]);
+
+    // GM peers are extra host-class simulations, not player-ship rows. Every
+    // authored ship slot remains available after both have joined.
+    fleet = withMembers(fleet, MAX - 1);
+    expect(fleet.slots).toHaveLength(MAX);
+    expect(fleet.gms).toHaveLength(2);
+  });
+
+  it('rebinds a disconnected GM by private credential even after admission closes', () => {
+    const admitted = admitHost(
+      fleetOf({ credentialFactory: credentials('reconnect-me') }),
+      { peer: 'old-peer', role: HOST_ROLE_GM, name: 'Morgan' },
+    );
+    const disconnected = dropHost(admitted.fleet, 'old-peer');
+    const closed = setAdmission(disconnected, ADMISSION_CLOSED);
+    const rebound = admitHost(closed, {
+      peer: 'new-peer',
+      role: HOST_ROLE_GM,
+      reconnectCredential: admitted.reconnectCredential,
+      name: 'an attacker cannot rename on reconnect',
+    });
+
+    expect(rebound).toMatchObject({
+      ok: true,
+      reconnected: true,
+      operatorId: 'gm-1',
+      meshSlot: 'slot-2',
+      reconnectCredential: 'reconnect-me',
+    });
+    expect(rosterOf(rebound.fleet).gms).toEqual([
+      { id: 'gm-1', name: 'Morgan', connected: true },
+    ]);
+    expect(rebound.fleet.gms).toHaveLength(1);
+  });
+
+  it('also rebinds after freeze, but never lets a bad credential hijack or duplicate', () => {
+    const admitted = admitHost(
+      fleetOf({ credentialFactory: credentials('only-real-secret') }),
+      { peer: 'old-peer', role: HOST_ROLE_GM },
+    );
+    const frozen = freezeFleet(dropHost(admitted.fleet, 'old-peer'));
+
+    const bad = admitHost(frozen, {
+      peer: 'attacker',
+      role: HOST_ROLE_GM,
+      reconnectCredential: 'wrong-secret',
+    });
+    expect(bad).toEqual({ ok: false, reason: REASON_RECOVERY_ONLY });
+    expect(frozen.gms).toHaveLength(1);
+    expect(frozen.gms[0]).toMatchObject({ connected: false, peer: null });
+
+    const rebound = admitHost(frozen, {
+      peer: 'replacement',
+      role: HOST_ROLE_GM,
+      reconnectCredential: 'only-real-secret',
+    });
+    expect(rebound.ok).toBe(true);
+    expect(rebound.operatorId).toBe('gm-1');
+    expect(rebound.fleet.gms).toHaveLength(1);
+
+    // The same capability cannot displace the now-live replacement.
+    expect(admitHost(rebound.fleet, {
+      peer: 'second-attacker',
+      role: HOST_ROLE_GM,
+      reconnectCredential: 'only-real-secret',
+    })).toEqual({ ok: false, reason: REASON_RECOVERY_ONLY });
+  });
+
+  it('puts role and reconnect capability only in the privileged host envelope', () => {
+    const hello = helloFrame({
+      role: HOST_ROLE_GM,
+      name: 'Morgan',
+      ship: { template_path: 'ignored.toml' },
+      reconnectCredential: 'private-capability',
+    });
+    expect(hello.d).toEqual({
+      role: HOST_ROLE_GM,
+      name: 'Morgan',
+      reconnect_credential: 'private-capability',
+    });
+    expect(hello).not.toHaveProperty('type');
+    expect(hello).not.toHaveProperty('data');
+
+    const roster = rosterOf(fleetOf());
+    const welcome = welcomeFrame('slot-2', roster, {
+      role: HOST_ROLE_GM,
+      operatorId: 'gm-1',
+      reconnectCredential: 'private-capability',
+    });
+    expect(welcome.d).toMatchObject({
+      role: HOST_ROLE_GM,
+      operator_id: 'gm-1',
+      reconnect_credential: 'private-capability',
+    });
+    expect(JSON.stringify(welcome.d.roster)).not.toContain('private-capability');
   });
 });
 

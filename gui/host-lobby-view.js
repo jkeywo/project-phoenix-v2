@@ -30,6 +30,7 @@
  *                    scenario_body, crew_count, max_players, all_ready,
  *                    stations: [{ name, short_code, rank, holder_name,
  *                    preset_names, consoles? }], spectators: string[],
+ *                    gms: [{ id, name, connected }],
  *                    loading_progress?: number, countdown_secs }.
  * @param {string} prevPhase  The phase seen on the previous call (server.html's
  *                    `_lobbyPrevPhase`), used to detect the Loading→InProgress
@@ -43,6 +44,7 @@ export function hostLobbyViewModel(s, prevPhase) {
   const crewN = s.crew_count || 0;
   const stations = s.stations || [];
   const spectators = s.spectators || [];
+  const gms = Array.isArray(s.gms) ? s.gms : [];
   const countdownSecs = s.countdown_secs || 0;
 
   // ── Phase transitions (loading overlay, audio, panel/QR visibility) ────
@@ -165,6 +167,21 @@ export function hostLobbyViewModel(s, prevPhase) {
     ? [{ kind: 'empty', id: 'server.no_players', params: {} }]
     : [...crewPills, ...waitingPills];
 
+  // Game Masters are peers of one another, not crew, spectators, Stations or
+  // player ships. Keep them in their own labelled group and do not feed them
+  // into any of the counts above. A disconnected GM remains visible so the
+  // room can distinguish an empty control surface from an operator reconnect.
+  const gmGroup = {
+    visible: gms.length > 0,
+    headingId: 'lobby.gms.heading',
+    pills: gms.map(gm => ({
+      id: gm && gm.id != null ? String(gm.id) : '',
+      name: gm && gm.name != null ? String(gm.name) : '',
+      connected: !!(gm && gm.connected),
+      labelId: gm && gm.connected ? 'lobby.gms.connected' : 'lobby.gms.disconnected',
+    })),
+  };
+
   // ── Status hint ──────────────────────────────────────────────────────────
   let hint;
   if (countdownSecs > 0) {
@@ -190,6 +207,7 @@ export function hostLobbyViewModel(s, prevPhase) {
     cards,
     reservedChip,
     spectatorPills,
+    gmGroup,
     hint,
     aiLaunchVisible,
   };

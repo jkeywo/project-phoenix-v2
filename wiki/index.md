@@ -16,6 +16,7 @@ Current implementation orientation only. For intended design use
 
 ## Domain entities
 
+- [GM Operator](./entities/gm-operator.md)
 - [Player](./entities/player.md)
 - [Session](./entities/session.md)
 - [Station](./entities/station.md)

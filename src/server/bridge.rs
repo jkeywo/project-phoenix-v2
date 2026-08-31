@@ -506,6 +506,12 @@ thread_local! {
     /// socket callback, which holds no `World`.
     static PENDING_FLEET: RefCell<Option<String>> = const { RefCell::new(None) };
 
+    /// A validated crew-public GM roster waiting for its full replacement in
+    /// Bevy (issue #1289). Decoded at the WASM boundary so no `serde_json`
+    /// escapes `core::codec`; latched here because the JS call has no `World`.
+    static PENDING_GM_ROSTER: RefCell<Option<crate::gm_roster::GmRoster>> =
+        const { RefCell::new(None) };
+
     /// JS callback registered by the host page to receive outbound messages.
     /// Signature: callback(target: string, payload: string)
     static OUTBOUND_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
@@ -1220,6 +1226,7 @@ pub fn wasm_init() {
         PreUpdate,
         (
             drain_inbound,
+            drain_gm_roster,
             drain_disconnects,
             drain_snapshot_requests,
             drain_host_controls.before(crate::debug::catalogue::refresh_readback),
@@ -1420,6 +1427,24 @@ pub fn wasm_join_fleet(roster_json: &str) -> String {
     }
 }
 
+/// Replace the crew-public Game Master roster on the next frame (issue #1289).
+///
+/// The host page owns the complete rendezvous projection and therefore sends a
+/// complete array, never deltas. Each row is exactly `{ id, name, connected }`;
+/// the codec rejects duplicate/unbounded rows and any private extra field.
+/// Returns `""` on success or a stable machine reason on refusal.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_set_gm_roster(roster_json: &str) -> String {
+    match crate::core::codec::decode_gm_roster(roster_json) {
+        Some(roster) => {
+            PENDING_GM_ROSTER.with(|pending| *pending.borrow_mut() = Some(roster));
+            String::new()
+        }
+        None => "gm-roster-unreadable".to_string(),
+    }
+}
+
 /// What this host's fleet link looks like from the simulation's side (issue
 /// #1116), as JSON for the operator surface and the smoke tests.
 ///
@@ -1573,6 +1598,35 @@ fn drain_mesh_inbound(world: &mut World) {
                 crate::lockstep::MeshOrigin::LocalObservation,
             );
         }
+    }
+}
+
+/// Apply one full public GM-roster replacement and emit a reliable crew delta
+/// only when its canonical contents actually changed.
+#[cfg(any(target_arch = "wasm32", test))]
+fn apply_gm_roster_replacement(world: &mut World, replacement: crate::gm_roster::GmRoster) -> bool {
+    if world
+        .get_resource::<crate::gm_roster::GmRoster>()
+        .is_some_and(|current| current == &replacement)
+    {
+        return false;
+    }
+
+    let gms = replacement.projection();
+    world.insert_resource(replacement);
+    world.write_message(crate::lobby::OutboundMessage {
+        target: crate::lobby::Target::All,
+        msg: crate::core::messages::ServerMessage::GmRosterChanged { gms },
+        delivery: crate::core::messages::DeliveryClass::Reliable,
+    });
+    true
+}
+
+/// Drain the validated host-page latch into the authoritative public resource.
+#[cfg(target_arch = "wasm32")]
+fn drain_gm_roster(world: &mut World) {
+    if let Some(replacement) = PENDING_GM_ROSTER.with(|pending| pending.borrow_mut().take()) {
+        apply_gm_roster_replacement(world, replacement);
     }
 }
 
@@ -4156,18 +4210,18 @@ fn flush_host_channels(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_instagib_toggles, begin_browser_startup_restore, browser_restore_bootstrap_started,
-        defer_unloaded_scenario_content, host_channels, import_resume_after_scenario,
-        load_resume_after_scenario, next_restore_step, resolve_browser_startup_restore,
-        save_slot_start_projection, scoped_browser_save_namespace, BoundedFifo,
-        BrowserResumeRefusal, PendingBrowserSaves, PendingRestore, RestoreStep, RestoreWaited,
-        MAX_PENDING_BROWSER_SAVES,
+        apply_gm_roster_replacement, apply_instagib_toggles, begin_browser_startup_restore,
+        browser_restore_bootstrap_started, defer_unloaded_scenario_content, host_channels,
+        import_resume_after_scenario, load_resume_after_scenario, next_restore_step,
+        resolve_browser_startup_restore, save_slot_start_projection, scoped_browser_save_namespace,
+        BoundedFifo, BrowserResumeRefusal, PendingBrowserSaves, PendingRestore, RestoreStep,
+        RestoreWaited, MAX_PENDING_BROWSER_SAVES,
     };
     use crate::console::navigation::server::apply_teleport_to_waypoint;
     use crate::console::navigation::{NavigationWaypoint, WaypointMode};
     use crate::server_app::Instagib;
     use crate::ship::state::ShipPhysics;
-    use bevy::prelude::World;
+    use bevy::prelude::{App, Messages, World};
     use std::fmt;
 
     #[derive(Debug)]
@@ -4250,6 +4304,53 @@ spawn_on = "game_start"
             }),
             start,
         }
+    }
+
+    #[test]
+    fn gm_roster_replacement_broadcasts_only_when_canonical_contents_change() {
+        use crate::core::messages::{DeliveryClass, ServerMessage};
+        use crate::gm_roster::{GmOperator, GmRoster};
+        use crate::lobby::{OutboundMessage, Target};
+
+        let mut app = App::new();
+        app.add_message::<OutboundMessage>()
+            .init_resource::<GmRoster>();
+        let mut cursor = app
+            .world()
+            .resource::<Messages<OutboundMessage>>()
+            .get_cursor();
+        let first = GmRoster::try_new(vec![
+            GmOperator {
+                id: "gm-2".into(),
+                name: String::new(),
+                connected: false,
+            },
+            GmOperator {
+                id: "gm-1".into(),
+                name: "Morgan".into(),
+                connected: true,
+            },
+        ])
+        .unwrap();
+
+        assert!(apply_gm_roster_replacement(app.world_mut(), first.clone()));
+        assert!(
+            !apply_gm_roster_replacement(app.world_mut(), first),
+            "the same canonical full replacement is a no-op"
+        );
+
+        let messages: Vec<_> = cursor
+            .read(app.world().resource::<Messages<OutboundMessage>>())
+            .collect();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].target, Target::All);
+        assert_eq!(messages[0].delivery, DeliveryClass::Reliable);
+        assert!(matches!(
+            &messages[0].msg,
+            ServerMessage::GmRosterChanged { gms }
+                if gms.iter().map(|gm| gm.id.as_str()).collect::<Vec<_>>()
+                    == vec!["gm-1", "gm-2"]
+        ));
     }
 
     #[test]

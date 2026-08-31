@@ -681,6 +681,31 @@ export function mountServerSettings(opts = {}) {
     const el = section('settings.fleet');
     el.appendChild(hint('settings.fleet.hint'));
 
+    // Fleet role belongs to this privileged HOST, never a phone/crew member.
+    // It is chosen before opening or joining and then disappears while the
+    // membership is live, so role cannot drift underneath an authenticated
+    // connection. Two ordinary pressed buttons give touch, keyboard and
+    // screen-reader users the same mutually-exclusive choice.
+    const roleRow = rowHost();
+    const roleGroup = doc.createElement('div');
+    roleGroup.className = 'server-settings-role-group';
+    roleGroup.setAttribute('role', 'group');
+    roleGroup.setAttribute('aria-label', t('settings.fleet.role_heading'));
+    roleGroup.setAttribute('data-control', 'fleet-role-group');
+    controls.fleet.roleGroup = roleGroup;
+    controls.fleet.roleShip = control('fleet-role-ship', 'settings.fleet.role_ship', () => {
+      invoke('__hostSetFleetRole', 'ship');
+      refresh();
+    });
+    controls.fleet.roleGm = control('fleet-role-gm', 'settings.fleet.role_gm', () => {
+      invoke('__hostSetFleetRole', 'gm');
+      refresh();
+    });
+    roleGroup.appendChild(controls.fleet.roleShip);
+    roleGroup.appendChild(controls.fleet.roleGm);
+    roleRow.appendChild(roleGroup);
+    el.appendChild(roleRow);
+
     const openRow = rowHost();
     controls.fleet.open = control('fleet-open', 'settings.fleet.open', () => {
       invoke('__hostFleetOpen');
@@ -747,6 +772,11 @@ export function mountServerSettings(opts = {}) {
     return raw && typeof raw === 'object' ? raw : null;
   }
 
+  /** The pre-join role selected on the privileged host. */
+  function fleetRole() {
+    return invoke('__hostFleetRole') === 'gm' ? 'gm' : 'ship';
+  }
+
   /**
    * Show the controls this host's fleet state actually offers.
    *
@@ -762,6 +792,17 @@ export function mountServerSettings(opts = {}) {
     const limit = invoke('__hostFleetCodeLimit');
     if (controls.fleet.input && Number.isFinite(limit) && limit > 0) {
       controls.fleet.input.maxLength = limit;
+    }
+    show(controls.fleet.roleGroup, !has);
+    const role = fleetRole();
+    for (const [name, el] of [
+      ['ship', controls.fleet.roleShip],
+      ['gm', controls.fleet.roleGm],
+    ]) {
+      if (!el) continue;
+      const selected = role === name;
+      el.classList.toggle('active', selected);
+      el.setAttribute('aria-pressed', selected ? 'true' : 'false');
     }
     show(controls.fleet.open, !has);
     show(controls.fleet.input, !has);

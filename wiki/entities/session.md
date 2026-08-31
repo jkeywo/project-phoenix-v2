@@ -2,16 +2,19 @@
 title: Session
 type: entity
 tags: [session, server, identity, reconnect]
-sources: [src/lobby/session.rs, src/lobby/handler.rs, src/lobby/server.rs, src/server/bridge.rs]
-updated: 2026-08-28
+sources: [src/lobby/session.rs, src/lobby/handler.rs, src/lobby/server.rs, src/gm_roster.rs, src/server/bridge.rs]
+updated: 2026-08-31
 ---
 
 # Session
 
 `SessionManager` is the authoritative server-side record of every connected or
-recently disconnected [Player](./player.md). Identity is the browser's 32-hex
-session token — held per tab in `sessionStorage`, with a persistent
-`localStorage` copy the first tab adopts — not the ephemeral rendezvous peer id.
+recently disconnected [Player](./player.md). It does not contain
+[GM Operators](./gm-operator.md), whose privileged host-mesh identity and
+public presence live in the separate `GmRoster`. Player identity is the
+browser's 32-hex session token — held per tab in `sessionStorage`, with a
+persistent `localStorage` copy the first tab adopts — not the ephemeral
+rendezvous peer id.
 The host bridge maps a peer to that token after `Identify` and passes only the
 token into simulation message handling.
 
@@ -47,5 +50,6 @@ The lobby handler and its server adapter own these transitions and broadcasts;
 ## Related
 
 - [Player](./player.md)
+- [GM Operator](./gm-operator.md)
 - [Station](./station.md)
 - [Game Phases](../concepts/game-phases.md)

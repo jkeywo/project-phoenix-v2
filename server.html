@@ -25,6 +25,13 @@
      sizes. Defined once and consumed by this page, the host viewscreen, and
      every console document (which reaches it through gui/console.css). -->
 <link rel="stylesheet" href="gui/tokens.css" />
+<!-- The lobby panel's stylesheet (issue #1325), lifted out of the inline
+     <style> below so that this page and the host-lobby document the NATIVE
+     host assembles in memory load the same one. Linked here, before that
+     block, because that is the position its rules were written in: nothing
+     earlier in the inline sheet targets a lobby element, and the one later
+     rule that did moved into this file with them. -->
+<link rel="stylesheet" href="gui/host-lobby.css" />
 
   <!-- CDN dep loaded before our script so it's in scope synchronously. The
        PeerJS tag that used to sit alongside it is gone (issue #1112): the crew
@@ -365,325 +372,9 @@
     .mod-pack-conflict { color: #cb8; word-break: break-word; }
     .mod-pack-finding { color: #889; word-break: break-word; }
     .mod-pack-finding.error { color: #d88; }
-    /* ── Lobby panel (issue #436) ────────────────────────────────────────── */
-    .lobby-panel {
-      position: fixed;
-      inset: 0;
-      z-index: 180;
-      font-family: monospace;
-      color: #cce;
-    }
-    .lobby-bg {
-      position: absolute;
-      inset: 0;
-      background: rgb(0, 0, 0);
-    }
-    .lobby-panel-wrap {
-      position: relative;
-      z-index: 1;
-      display: flex;
-      flex-direction: column;
-      height: 100%;
-      padding: clamp(1rem, 3vw, 2rem) clamp(1rem, 4vw, 3rem);
-      /* #lobby-title is the first thing in the top-left corner here too. The
-         clamp already clears the cog above ~1100px viewport width (4vw ≥ 44px)
-         and stops clearing it below that, so floor the LEFT edge only — the
-         top and right stay on the clamp, which keeps the vertical space for
-         the station grid. */
-      padding-left: max(clamp(1rem, 4vw, 3rem), var(--settings-cog-keepout));
-      box-sizing: border-box;
-    }
-    .lobby-grid-column {
-      display: flex;
-      flex-direction: column;
-      flex: 1;
-      gap: 8px;
-      min-width: 0;
-      min-height: 0;
-    }
-    .station-card {
-      display: flex; flex-direction: column; gap: 6px;
-      padding: 10px 12px; border-radius: 6px;
-      background: #0e0e14; border: 1px solid #2a2d3a;
-      transition: border-color .2s, box-shadow .2s;
-      font-family: 'Chakra Petch', system-ui, monospace;
-    }
-    .station-card.claimed {
-      border-color: #2a8a96; box-shadow: 0 0 8px rgba(42,138,150,0.25);
-    }
-    .station-card.empty {
-      opacity: 0.5; border-style: dashed;
-      background: repeating-linear-gradient(45deg,transparent,transparent 6px,rgba(255,255,255,0.02) 6px,rgba(255,255,255,0.02) 12px);
-    }
-    .station-card .card-header {
-      display: flex; align-items: center; justify-content: space-between;
-    }
-    .station-card .card-avatar {
-      width: 32px; height: 32px; border-radius: 50%;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 0.75rem; font-weight: bold; background: #191e28;
-      color: #5fd8e8; border: 1px solid #2a3a48;
-    }
-    .station-card .card-name {
-      font-size: 0.9rem; font-weight: 600; color: #cce;
-    }
-    .station-card .card-rank {
-      font-size: 0.65rem; color: #778; text-transform: uppercase; letter-spacing: .06em;
-    }
-    .station-card .card-consoles {
-      display: flex; flex-wrap: wrap; gap: 4px;
-    }
-    .station-card .console-chip {
-      padding: 2px 8px; border-radius: 3px;
-      font-size: 0.65rem; background: #181e2a; color: #7aa;
-      border: 1px solid #2a3a48;
-    }
-    .station-card .complexity-pill {
-      padding: 1px 8px; border-radius: 8px;
-      font-size: 0.6rem; font-weight: 600; text-transform: uppercase;
-      background: #2a3a48; color: #7aa;
-    }
-    .station-card .complexity-pill.low {
-      background: #1a3828; color: #5fd88a; border: 1px solid #2a6850;
-    }
-    /* Crew dots */
-    .crew-dot {
-      width: 8px; height: 8px; border-radius: 50%;
-      background: #2a2d3a; border: 1px solid #3a3d4a;
-      transition: background .2s, border-color .2s;
-    }
-    .crew-dot.filled { background: #5fd8e8; border-color: #5fd8e8; }
-    /* Ready badge states */
-    #lobby-ready-badge.go {
-      background: #0a2830; color: #5fd8e8; border-color: #5fd8e8;
-      animation: ready-pulse 1.5s ease-in-out infinite;
-    }
-    @keyframes ready-pulse {
-      0%, 100% { box-shadow: 0 0 4px rgba(95,216,232,0.3); }
-      50% { box-shadow: 0 0 14px rgba(95,216,232,0.6); }
-    }
-
-    /* Lobby responsive layout */
-    .lobby-body {
-      display: flex;
-      flex: 1;
-      gap: 2rem;
-      padding-top: 1rem;
-      overflow: hidden;
-      min-height: 0;
-    }
-    .lobby-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 360px));
-      gap: 12px;
-      flex: 1;
-      align-content: start;
-      justify-content: center;
-      overflow-y: auto;
-    }
-    .lobby-rail {
-      width: 18rem;
-      min-width: 14rem;
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-      border-left: 1px solid #334;
-      padding-left: 1.5rem;
-    }
-    .lobby-rail-section {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      font-size: 0.8rem;
-      color: #889;
-    }
-    .lobby-rail-spacer { flex: 1; }
-    .lobby-status-hint {
-      font-size: 0.75rem;
-      color: #667;
-      text-align: right;
-      padding-top: 0.5rem;
-      border-top: 1px solid #334;
-    }
-    .lobby-rail-label {
-      font-size: 0.7rem;
-      color: #667;
-      text-transform: uppercase;
-      letter-spacing: .08em;
-      margin-bottom: 0.5rem;
-    }
-
-    /* Card font scaling for wide screens / readability */
-    .station-card .card-name { font-size: clamp(0.85rem, 1vw, 1rem); }
-    .station-card .card-rank { font-size: clamp(0.6rem, 0.7vw, 0.7rem); }
-    .station-card .console-chip { font-size: clamp(0.6rem, 0.7vw, 0.7rem); }
-    .station-card .complexity-pill { font-size: clamp(0.55rem, 0.65vw, 0.65rem); }
-
-    .station-card { min-height: 90px; }
-
-    /* Connected-list pills (used in both landscape column and compact wrap) */
-    .spectator-pill {
-      padding: 4px 10px;
-      border-radius: 3px;
-      background: #181e2a;
-      color: #aac;
-      border: 1px solid #2a3a48;
-      font-size: 0.75rem;
-      white-space: nowrap;
-      align-self: flex-start;
-    }
-    .spectator-pill.waiting {
-      font-style: italic;
-      color: #778;
-      border-style: dashed;
-    }
-    .spectator-empty {
-      color: #556;
-      font-size: 0.8rem;
-      font-style: italic;
-    }
-
-    /* Aggregate RESERVED chip (compact mode only) */
-    .reserved-aggregate {
-      display: none;
-      padding: 6px 12px;
-      border-radius: 4px;
-      border: 1px dashed #2a2d3a;
-      background: repeating-linear-gradient(45deg,transparent,transparent 6px,rgba(255,255,255,0.02) 6px,rgba(255,255,255,0.02) 12px);
-      font-size: 0.75rem;
-      color: #667;
-      text-align: center;
-      letter-spacing: .04em;
-      font-family: 'Chakra Petch', system-ui, monospace;
-    }
-
-    /* Header reflow */
-    .lobby-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      flex-wrap: wrap;
-      row-gap: 0.5rem;
-      padding-bottom: 1rem;
-      border-bottom: 1px solid #334;
-    }
-    .lobby-title-block { display: flex; flex-direction: column; }
-    .lobby-status-block {
-      display: flex;
-      align-items: center;
-      gap: 1.5rem;
-      flex-wrap: wrap;
-      row-gap: 0.5rem;
-    }
-    .lobby-crew-info {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-    .lobby-crew-label {
-      font-size: 0.75rem;
-      color: #889;
-      text-transform: uppercase;
-      letter-spacing: .06em;
-    }
-    #lobby-title {
-      font-size: clamp(1.1rem, 2.5vw, 1.6rem);
-      font-weight: bold;
-      letter-spacing: .08em;
-      color: #cce;
-    }
-    #lobby-subtitle {
-      font-size: 0.8rem;
-      color: #778;
-    }
-    #lobby-crew-count {
-      font-size: clamp(1rem, 2vw, 1.4rem);
-      font-weight: bold;
-      color: #aae;
-      font-family: 'JetBrains Mono', monospace;
-    }
-    #lobby-crew-dots { display: flex; gap: 4px; }
-    #lobby-spectator-tag {
-      font-size: 0.7rem;
-      color: #667;
-      padding: 2px 6px;
-      border: 1px solid #445;
-      border-radius: 3px;
-    }
-    #lobby-ready-badge {
-      padding: 6px 14px;
-      border-radius: 4px;
-      font-size: 0.8rem;
-      font-weight: bold;
-      letter-spacing: .1em;
-      background: #332;
-      color: #ca0;
-      border: 1px solid #ca0;
-      transition: all .3s ease;
-    }
-
-    /* AI-only launch button (bottom-left, lobby only, no-players condition) */
-    #ai-launch-btn {
-      position: absolute;
-      bottom: 1.5rem;
-      left: 1.5rem;
-      padding: 8px 16px;
-      background: #0a1a20;
-      color: #5fd8e8;
-      border: 1px solid #2a8a96;
-      border-radius: 4px;
-      font-family: 'Chakra Petch', system-ui, monospace;
-      font-size: 0.75rem;
-      font-weight: 600;
-      letter-spacing: .1em;
-      text-transform: uppercase;
-      cursor: pointer;
-      transition: background .2s, border-color .2s, box-shadow .2s;
-      z-index: 2;
-    }
-    #ai-launch-btn:hover {
-      background: #0d2830;
-      border-color: #5fd8e8;
-      box-shadow: 0 0 8px rgba(95,216,232,0.25);
-    }
-
-    /* Compact form: portrait OR narrow landscape */
-    @media (orientation: portrait), (max-width: 720px) {
-      .lobby-body {
-        flex-direction: column;
-        overflow: auto;
-      }
-      .lobby-grid {
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        overflow-y: visible;
-      }
-      /* Hide individual RESERVED placeholders, show aggregate */
-      .lobby-grid .station-card.empty.per-slot { display: none; }
-      .reserved-aggregate.active { display: block; }
-      /* Rail collapses to bottom strip */
-      .lobby-rail {
-        width: auto;
-        min-width: 0;
-        border-left: none;
-        border-top: 1px solid #334;
-        padding-left: 0;
-        padding-top: 0.75rem;
-        flex-direction: column;
-        gap: 0.5rem;
-      }
-      .lobby-rail-spacer { display: none; }
-      .lobby-status-hint {
-        text-align: left;
-        border-top: none;
-        padding-top: 0;
-      }
-      /* CONNECTED list becomes flex-wrap of pills */
-      .lobby-rail-section {
-        flex-direction: row;
-        flex-wrap: wrap;
-        gap: 6px;
-      }
-    }
+    /* The lobby panel's own rules live in gui/host-lobby.css (issue #1325),
+       linked in <head> above: server.html and the native host-lobby document
+       render one lobby, so they load one stylesheet. */
 
     /* ── HTML viewscreen HUD overlay (issue #422) ───────────────────────── */
     #hud-overlay {
@@ -711,14 +402,11 @@
        in a room full of people, so a looping glow is exactly what a viewer
        who asked for stillness cannot walk away from. Each loop is held at
        the frame that carries its meaning rather than switched off: the
-       ready badge keeps its glow, the red-alert vignette keeps its full
-       opacity, the spinner keeps its arc. */
+       red-alert vignette keeps its full opacity, the spinner keeps its arc.
+       The lobby ready badge's half of this block moved to gui/host-lobby.css
+       with the rest of the lobby's rules (issue #1325). */
     @media (prefers-reduced-motion: reduce) {
       .spinner-ring { animation: none; }
-      #lobby-ready-badge.go {
-        animation: none;
-        box-shadow: 0 0 14px rgba(95,216,232,0.6);
-      }
       #hud-overlay.alert-on #hud-vignette {
         animation: none;
         opacity: 1;
@@ -1689,6 +1377,15 @@
        window.hostLobbyViewModel, the same load-order-tolerant pattern
        client.html uses for window.lobbyViewModel. -->
   <script type="module" src="gui/host-lobby-view.js"></script>
+  <!-- Host lobby renderer (issue #1325): every DOM write inside #lobby-panel
+       that used to be inline in __updateLobby below. Extracted because the
+       NATIVE host now renders the same lobby on its viewscreen window from an
+       in-memory document that loads this very module (see
+       src/native_host/host_lobby/document.rs) — one lobby, one renderer, and
+       no second implementation of these element ids to drift. Self-registers
+       window.hostLobbyRender, the same load-order-tolerant pattern as the view
+       model above; __updateLobby skips its paint until both are up. -->
+  <script type="module" src="gui/host-lobby-render.js"></script>
   <!-- Host audio engine (issue #1228): the data-driven audio graph
        (clampVol/applyMaster/setChannelVolume/mkLoop/initBlasterAudio/
        startGameAudio/startMenuMusic/stopMenuMusic/applyHudAudio, the
@@ -2014,8 +1711,8 @@
   // ── HTML lobby panel (issue #436) ──────────────────────────────────────
   //
   // Rust pushes LobbyStatePayload JSON here via the "lobby" host channel.
-  // We parse it and render the station grid,
-  // crew counter, ready badge, and spectator list.
+  // We parse it, run the pure view model, perform this page's own side
+  // effects, and hand the rest to the shared lobby renderer.
 
   let _lobbyPrevPhase = '';
   window.__updateLobby = function(json) {
@@ -2024,11 +1721,17 @@
 
     // Pure phase-transition / title / crew / ready-badge / countdown /
     // station-card / reserved-chip / spectator-pill / hint computation lives
-    // in gui/host-lobby-view.js (issue #1229) — this function only performs
-    // side effects (audio, the shared qrVisible flag) and DOM writes. Boot
-    // race: skip the paint until the module loads — the next lobby push
+    // in gui/host-lobby-view.js (issue #1229); the DOM writes for the lobby
+    // panel itself live in gui/host-lobby-render.js (issue #1325), which the
+    // NATIVE host's lobby document loads too — one lobby, one renderer. What
+    // stays here is what is this page's alone: the side effects (audio, the
+    // shared qrVisible flag, the fleet freeze, the mesh pump) and the three
+    // overlays that are viewscreen chrome rather than lobby chrome.
+    //
+    // Boot race: skip the paint until BOTH modules load — the next lobby push
     // re-renders (mirrors client.html's window.lobbyViewModel guard).
     if (typeof window.hostLobbyViewModel !== 'function') return;
+    if (!window.hostLobbyRender) return;
     const vm = window.hostLobbyViewModel(s, _lobbyPrevPhase);
     const tr = vm.transitions;
 
@@ -2081,15 +1784,8 @@
     // speak".
     pumpMeshFrames();
 
-    // ── Show/hide panel + canvas based on phase ───────────────────────
-    const panel = document.getElementById('lobby-panel');
+    // ── QR overlay ── this page's own chrome, not the lobby's ───────
     const qrOverlay = document.getElementById('overlay');
-    if (panel) panel.style.display = tr.showPanel ? '' : 'none';
-    // NOTE: do NOT hide the Bevy canvas (#canvas) here. The lobby panel already
-    // covers it completely (z-index:180, solid background). Hiding the canvas
-    // with display:none causes Bevy to see a 0×0 window and throttle / suspend
-    // its rAF loop, which delays SimState delivery after game start and breaks
-    // the smoke tests. The canvas must stay in the render tree at all times.
     if (qrOverlay && tr.qrOverlayAction) {
       if (tr.qrOverlayAction === 'show') { qrVisible = true; qrOverlay.style.display = 'block'; }
       else { qrVisible = false; qrOverlay.style.display = 'none'; }
@@ -2105,161 +1801,18 @@
       if (goOverlay) goOverlay.style.display = 'none';
     }
 
-    // ── Title / subtitle ──────────────────────────────────────────────
-    // Both are the world's authored `[global] title` / `description`, which
-    // combat_test.toml holds as string ids. They arrive resolved: every host
-    // channel crosses localiseHostPayload in __hostChannel (issue #949).
-    const titleEl = document.getElementById('lobby-title');
-    const subEl = document.getElementById('lobby-subtitle');
-    if (titleEl) titleEl.textContent = vm.title || t('server.unknown_scenario');
-    if (subEl) subEl.textContent = vm.subtitle;
-
-    // ── Crew count ────────────────────────────────────────────────────
-    const crewEl = document.getElementById('lobby-crew-count');
-    const dotsEl = document.getElementById('lobby-crew-dots');
-    if (crewEl) crewEl.textContent = vm.crew.count + '/' + vm.crew.max;
-
-    // Crew dot indicators
-    if (dotsEl) {
-      dotsEl.innerHTML = '';
-      for (const filled of vm.crew.dots) {
-        const dot = document.createElement('div');
-        dot.className = 'crew-dot' + (filled ? ' filled' : '');
-        dotsEl.appendChild(dot);
-      }
-    }
-
-    // Spectator tag
-    const specTag = document.getElementById('lobby-spectator-tag');
-    if (specTag) {
-      specTag.style.display = vm.crew.spectatorTag.visible ? 'inline' : 'none';
-      if (vm.crew.spectatorTag.visible) specTag.textContent = '+' + vm.crew.spectatorTag.count;
-    }
-
-    // ── Ready badge ───────────────────────────────────────────────────
-    const badge = document.getElementById('lobby-ready-badge');
-    if (badge) {
-      badge.textContent = t(vm.readyBadge.id, vm.readyBadge.params);
-      badge.className = vm.readyBadge.className;
-    }
-
-    // ── Countdown display ─────────────────────────────────────────────
-    const cdEl = document.getElementById('lobby-countdown');
-    if (cdEl) {
-      if (vm.countdown.visible) {
-        cdEl.textContent = String(vm.countdown.secs);
-        cdEl.style.display = 'flex';
-      } else {
-        cdEl.style.display = 'none';
-      }
-    }
-
-    // ── Station grid ──────────────────────────────────────────────────
-    const grid = document.getElementById('station-grid');
-    if (!grid) return;
-    grid.innerHTML = '';
-
-    for (const c of vm.cards) {
-      const card = document.createElement('div');
-      card.className = 'station-card' + (c.claimed ? ' claimed' : '');
-
-      // Header row: avatar + name + rank
-      const header = document.createElement('div');
-      header.className = 'card-header';
-      const nameInfo = document.createElement('div');
-      nameInfo.style.cssText = 'display:flex;flex-direction:column;gap:2px;';
-      const name = document.createElement('div');
-      name.className = 'card-name';
-      name.textContent = c.name;
-      const rank = document.createElement('div');
-      rank.className = 'card-rank';
-      rank.textContent = c.rank;
-      nameInfo.appendChild(name);
-      nameInfo.appendChild(rank);
-      header.appendChild(nameInfo);
-
-      // Avatar initials
-      const avatar = document.createElement('div');
-      avatar.className = 'card-avatar';
-      avatar.textContent = c.avatar.text;
-      if (c.avatar.placeholder) avatar.style.color = '#556';
-      header.appendChild(avatar);
-      card.appendChild(header);
-
-      // Console chips
-      const chips = document.createElement('div');
-      chips.className = 'card-consoles';
-      for (const chipLabel of c.consoles) {
-        const chip = document.createElement('span');
-        chip.className = 'console-chip';
-        chip.textContent = chipLabel;
-        chips.appendChild(chip);
-      }
-      card.appendChild(chips);
-
-      // Footer: complexity pill(s)
-      if (c.presetPills.length > 0) {
-        const footer = document.createElement('div');
-        footer.style.cssText = 'display:flex;gap:6px;align-items:center;margin-top:2px;';
-        for (const pill of c.presetPills) {
-          const pillEl = document.createElement('span');
-          pillEl.className = 'complexity-pill' + (pill.low ? ' low' : '');
-          pillEl.textContent = t(pill.id);
-          footer.appendChild(pillEl);
-        }
-        card.appendChild(footer);
-      }
-
-      grid.appendChild(card);
-    }
-
-    // Aggregate RESERVED chip (visible only in compact mode via CSS)
-    const aggregate = document.getElementById('reserved-aggregate');
-    if (aggregate) {
-      if (vm.reservedChip.active) {
-        aggregate.classList.add('active');
-        // Two ids, not one with a JS-side `s`: a language whose plural rule is
-        // not English's cannot be served by suffixing a letter.
-        aggregate.textContent = t(vm.reservedChip.id, vm.reservedChip.params);
-      } else {
-        aggregate.classList.remove('active');
-        aggregate.textContent = '';
-      }
-    }
-
-    // ── Spectator list ─────────────────────────────────────────────────
-    const specList = document.getElementById('lobby-spectator-list');
-    if (specList) {
-      specList.innerHTML = '';
-      specList.style.color = '';
-      for (const p of vm.spectatorPills) {
-        const pill = document.createElement('span');
-        if (p.kind === 'crew') {
-          pill.className = 'spectator-pill';
-          pill.textContent = p.text;
-        } else if (p.kind === 'waiting') {
-          pill.className = 'spectator-pill waiting';
-          pill.textContent = t(p.id, p.params);
-        } else {
-          pill.className = 'spectator-empty';
-          pill.textContent = t(p.id);
-        }
-        specList.appendChild(pill);
-      }
-    }
-
-    // ── Status hint ───────────────────────────────────────────────────
-    const hintEl = document.getElementById('lobby-status-hint');
-    if (hintEl) {
-      hintEl.textContent = t(vm.hint.id, vm.hint.params);
-      hintEl.style.color = vm.hint.color;
-    }
-
-    // ── AI-only launch button ─────────────────────────────────────────
-    const aiBtn = document.getElementById('ai-launch-btn');
-    if (aiBtn) {
-      aiBtn.style.display = vm.aiLaunchVisible ? '' : 'none';
-    }
+    // ── The lobby panel itself ──────────────────────────────
+    // gui/host-lobby-render.js (issue #1325) owns every write inside
+    // #lobby-panel — the panel's own show/hide included — and the native
+    // host's lobby document calls the same function with the same view model.
+    //
+    // NOTE: do NOT hide the Bevy canvas (#canvas) alongside the panel. The
+    // lobby panel already covers it completely (z-index:180, solid
+    // background). Hiding the canvas with display:none causes Bevy to see a
+    // 0×0 window and throttle / suspend its rAF loop, which delays SimState
+    // delivery after game start and breaks the smoke tests. The canvas must
+    // stay in the render tree at all times.
+    window.hostLobbyRender.renderHostLobby(document, vm, t);
   };
 
   // ── Viewscreen AI chatter widget ────────────────────────────────────────

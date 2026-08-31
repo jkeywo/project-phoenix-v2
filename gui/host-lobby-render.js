@@ -1,0 +1,237 @@
+/**
+ * gui/host-lobby-render.js — the host lobby panel's renderer (issue #1325).
+ *
+ * The DOM half of the pair whose pure half is `gui/host-lobby-view.js`:
+ * `hostLobbyViewModel()` decides what the lobby says, this writes it into a
+ * document. Both used to live inside `server.html`'s `__updateLobby` — #1229
+ * lifted out the decisions, this lifts out the writes — because the native
+ * host now renders the SAME lobby on its viewscreen window
+ * (`src/native_host/host_lobby/`), and a second implementation of these
+ * thirteen element ids is a second lobby that drifts from this one the first
+ * time either is touched.
+ *
+ * ## What it writes, and what it deliberately does not
+ *
+ * Exactly the contents of `#lobby-panel` — the panel's own visibility, the
+ * title/subtitle, the crew counter and its dots, the spectator tag, the ready
+ * badge, the countdown, the station-card grid, the aggregate RESERVED chip,
+ * the connected-pill list, the status hint and the AI-launch button.
+ *
+ * It does NOT touch the host page's other surfaces: the asset-loading
+ * overlay, the QR overlay and the game-over overlay are viewscreen chrome
+ * that a lobby push happens to be a convenient moment to reconcile, they are
+ * coupled to page-lifetime state `server.html` owns (`qrVisible`, the audio
+ * graph, the fleet freeze), and the native lobby document has none of them.
+ * Those stay in `server.html`'s glue, beside the audio and fleet side effects
+ * that were never render at all.
+ *
+ * Every write is guarded on the element existing, which is what lets one
+ * renderer serve two documents: the native lobby document carries the panel
+ * markup and no `#ai-launch-btn` (this slice's native lobby is read-only —
+ * selection stays on the CLI), and the button's branch simply does nothing.
+ *
+ * ## `t` is passed in, not imported
+ *
+ * The view model returns `{ id, params }` pairs for text whose string id
+ * depends on the data (`gui/lobby-view.js`'s `statusLine` convention). The
+ * caller resolves them, because the two consumers reach their string table
+ * differently: `server.html` holds a classic-script `t()` closed over
+ * `window.phStrings`, and the native lobby document imports `gui/strings.js`
+ * directly. Neither is this module's business.
+ */
+
+/**
+ * Render one lobby view model into `doc`.
+ *
+ * @param {Document} doc the document holding the `#lobby-panel` markup.
+ * @param {object} vm the return of `hostLobbyViewModel()`.
+ * @param {(id: string, params?: object) => string} t string-id resolver.
+ * @param {{revealChrome?: boolean}} [opts] `revealChrome` forces the panel
+ *   visible even when the phase says otherwise. It is the native host's
+ *   permanent-surface reveal (issue #1325): on the viewscreen the lobby
+ *   chrome yields at mission start and one host key brings it back, and that
+ *   decision is a native one (`native_host::host_lobby::reveal`) rather than
+ *   anything the payload can carry. `server.html` passes nothing and gets the
+ *   phase-only behaviour it always had.
+ */
+export function renderHostLobby(doc, vm, t, opts) {
+  const revealChrome = !!(opts && opts.revealChrome);
+
+  // ── Show/hide the panel ─────────────────────────────────────────────
+  // NOTE (server.html): do NOT hide the Bevy canvas (#canvas) alongside this.
+  // The lobby panel already covers it completely (z-index:180, solid
+  // background). Hiding the canvas with display:none causes Bevy to see a 0×0
+  // window and throttle / suspend its rAF loop, which delays SimState delivery
+  // after game start and breaks the smoke tests. The canvas must stay in the
+  // render tree at all times.
+  const panel = doc.getElementById('lobby-panel');
+  if (panel) panel.style.display = (vm.transitions.showPanel || revealChrome) ? '' : 'none';
+
+  // ── Title / subtitle ──────────────────────────────────────────────
+  // Both are the world's authored `[global] title` / `description`, which
+  // combat_test.toml holds as string ids. They arrive resolved: every host
+  // channel crosses localiseHostPayload before it reaches the view model
+  // (issue #949).
+  const titleEl = doc.getElementById('lobby-title');
+  const subEl = doc.getElementById('lobby-subtitle');
+  if (titleEl) titleEl.textContent = vm.title || t('server.unknown_scenario');
+  if (subEl) subEl.textContent = vm.subtitle;
+
+  // ── Crew count ────────────────────────────────────────────────────
+  const crewEl = doc.getElementById('lobby-crew-count');
+  const dotsEl = doc.getElementById('lobby-crew-dots');
+  if (crewEl) crewEl.textContent = vm.crew.count + '/' + vm.crew.max;
+
+  // Crew dot indicators
+  if (dotsEl) {
+    dotsEl.innerHTML = '';
+    for (const filled of vm.crew.dots) {
+      const dot = doc.createElement('div');
+      dot.className = 'crew-dot' + (filled ? ' filled' : '');
+      dotsEl.appendChild(dot);
+    }
+  }
+
+  // Spectator tag
+  const specTag = doc.getElementById('lobby-spectator-tag');
+  if (specTag) {
+    specTag.style.display = vm.crew.spectatorTag.visible ? 'inline' : 'none';
+    if (vm.crew.spectatorTag.visible) specTag.textContent = '+' + vm.crew.spectatorTag.count;
+  }
+
+  // ── Ready badge ───────────────────────────────────────────────────
+  const badge = doc.getElementById('lobby-ready-badge');
+  if (badge) {
+    badge.textContent = t(vm.readyBadge.id, vm.readyBadge.params);
+    badge.className = vm.readyBadge.className;
+  }
+
+  // ── Countdown display ─────────────────────────────────────────────
+  const cdEl = doc.getElementById('lobby-countdown');
+  if (cdEl) {
+    if (vm.countdown.visible) {
+      cdEl.textContent = String(vm.countdown.secs);
+      cdEl.style.display = 'flex';
+    } else {
+      cdEl.style.display = 'none';
+    }
+  }
+
+  // ── Station grid ──────────────────────────────────────────────────
+  // The early return is the original's: with no grid there is no lobby body to
+  // fill, and everything below it lives in that body. Kept rather than
+  // flattened, so a document that carries the header alone renders the header
+  // alone instead of a half-populated rail.
+  const grid = doc.getElementById('station-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+
+  for (const c of vm.cards) {
+    const card = doc.createElement('div');
+    card.className = 'station-card' + (c.claimed ? ' claimed' : '');
+
+    // Header row: avatar + name + rank
+    const header = doc.createElement('div');
+    header.className = 'card-header';
+    const nameInfo = doc.createElement('div');
+    nameInfo.style.cssText = 'display:flex;flex-direction:column;gap:2px;';
+    const name = doc.createElement('div');
+    name.className = 'card-name';
+    name.textContent = c.name;
+    const rank = doc.createElement('div');
+    rank.className = 'card-rank';
+    rank.textContent = c.rank;
+    nameInfo.appendChild(name);
+    nameInfo.appendChild(rank);
+    header.appendChild(nameInfo);
+
+    // Avatar initials
+    const avatar = doc.createElement('div');
+    avatar.className = 'card-avatar';
+    avatar.textContent = c.avatar.text;
+    if (c.avatar.placeholder) avatar.style.color = '#556';
+    header.appendChild(avatar);
+    card.appendChild(header);
+
+    // Console chips
+    const chips = doc.createElement('div');
+    chips.className = 'card-consoles';
+    for (const chipLabel of c.consoles) {
+      const chip = doc.createElement('span');
+      chip.className = 'console-chip';
+      chip.textContent = chipLabel;
+      chips.appendChild(chip);
+    }
+    card.appendChild(chips);
+
+    // Footer: complexity pill(s)
+    if (c.presetPills.length > 0) {
+      const footer = doc.createElement('div');
+      footer.style.cssText = 'display:flex;gap:6px;align-items:center;margin-top:2px;';
+      for (const pill of c.presetPills) {
+        const pillEl = doc.createElement('span');
+        pillEl.className = 'complexity-pill' + (pill.low ? ' low' : '');
+        pillEl.textContent = t(pill.id);
+        footer.appendChild(pillEl);
+      }
+      card.appendChild(footer);
+    }
+
+    grid.appendChild(card);
+  }
+
+  // Aggregate RESERVED chip (visible only in compact mode via CSS)
+  const aggregate = doc.getElementById('reserved-aggregate');
+  if (aggregate) {
+    if (vm.reservedChip.active) {
+      aggregate.classList.add('active');
+      // Two ids, not one with a JS-side `s`: a language whose plural rule is
+      // not English's cannot be served by suffixing a letter.
+      aggregate.textContent = t(vm.reservedChip.id, vm.reservedChip.params);
+    } else {
+      aggregate.classList.remove('active');
+      aggregate.textContent = '';
+    }
+  }
+
+  // ── Spectator list ─────────────────────────────────────────────────
+  const specList = doc.getElementById('lobby-spectator-list');
+  if (specList) {
+    specList.innerHTML = '';
+    specList.style.color = '';
+    for (const p of vm.spectatorPills) {
+      const pill = doc.createElement('span');
+      if (p.kind === 'crew') {
+        pill.className = 'spectator-pill';
+        pill.textContent = p.text;
+      } else if (p.kind === 'waiting') {
+        pill.className = 'spectator-pill waiting';
+        pill.textContent = t(p.id, p.params);
+      } else {
+        pill.className = 'spectator-empty';
+        pill.textContent = t(p.id);
+      }
+      specList.appendChild(pill);
+    }
+  }
+
+  // ── Status hint ───────────────────────────────────────────────────
+  const hintEl = doc.getElementById('lobby-status-hint');
+  if (hintEl) {
+    hintEl.textContent = t(vm.hint.id, vm.hint.params);
+    hintEl.style.color = vm.hint.color;
+  }
+
+  // ── AI-only launch button ─────────────────────────────────────────
+  // Absent from the native lobby document, which is read-only in this slice.
+  const aiBtn = doc.getElementById('ai-launch-btn');
+  if (aiBtn) {
+    aiBtn.style.display = vm.aiLaunchVisible ? '' : 'none';
+  }
+}
+
+// Expose for the classic (non-module) script in server.html — the same
+// self-registering pattern window.hostLobbyViewModel uses.
+if (typeof window !== 'undefined') {
+  window.hostLobbyRender = { renderHostLobby };
+}

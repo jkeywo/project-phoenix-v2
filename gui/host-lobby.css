@@ -1,0 +1,356 @@
+/*
+ * gui/host-lobby.css - the host lobby panel's stylesheet (issue #1325).
+ *
+ * Lifted verbatim out of server.html's inline <style> (issue #436's block,
+ * plus its reduced-motion rule from the block below it) so that the ONE
+ * lobby surface has ONE stylesheet: server.html links it, and so does the
+ * host-lobby document the native host assembles in memory
+ * (src/native_host/host_lobby/document.rs). A second copy for the native
+ * surface is exactly the drift issue #1325 asked to avoid on the render
+ * path, and CSS is the other half of a render path.
+ *
+ * Linked from server.html BEFORE its inline <style>. Nothing earlier in that
+ * block targets a lobby element, and the only later rule that does -
+ * `#lobby-ready-badge.go` under `prefers-reduced-motion` - moved here with
+ * it, keeping its position after the base rule it overrides. So the cascade
+ * these rules were written against is unchanged.
+ *
+ * `--settings-cog-keepout` is server.html's own: the settings cog is a host
+ * PAGE control and the keep-out it reserves is that page's geometry. The
+ * native lobby document defines its own value for the same reason - there is
+ * no cog on that surface - so the reference here is satisfied wherever this
+ * sheet is loaded.
+ */
+
+/* ── Lobby panel (issue #436) ────────────────────────────────────────── */
+.lobby-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 180;
+  font-family: monospace;
+  color: #cce;
+}
+.lobby-bg {
+  position: absolute;
+  inset: 0;
+  background: rgb(0, 0, 0);
+}
+.lobby-panel-wrap {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: clamp(1rem, 3vw, 2rem) clamp(1rem, 4vw, 3rem);
+  /* #lobby-title is the first thing in the top-left corner here too. The
+     clamp already clears the cog above ~1100px viewport width (4vw ≥ 44px)
+     and stops clearing it below that, so floor the LEFT edge only — the
+     top and right stay on the clamp, which keeps the vertical space for
+     the station grid. */
+  padding-left: max(clamp(1rem, 4vw, 3rem), var(--settings-cog-keepout));
+  box-sizing: border-box;
+}
+.lobby-grid-column {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+}
+.station-card {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 10px 12px; border-radius: 6px;
+  background: #0e0e14; border: 1px solid #2a2d3a;
+  transition: border-color .2s, box-shadow .2s;
+  font-family: 'Chakra Petch', system-ui, monospace;
+}
+.station-card.claimed {
+  border-color: #2a8a96; box-shadow: 0 0 8px rgba(42,138,150,0.25);
+}
+.station-card.empty {
+  opacity: 0.5; border-style: dashed;
+  background: repeating-linear-gradient(45deg,transparent,transparent 6px,rgba(255,255,255,0.02) 6px,rgba(255,255,255,0.02) 12px);
+}
+.station-card .card-header {
+  display: flex; align-items: center; justify-content: space-between;
+}
+.station-card .card-avatar {
+  width: 32px; height: 32px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.75rem; font-weight: bold; background: #191e28;
+  color: #5fd8e8; border: 1px solid #2a3a48;
+}
+.station-card .card-name {
+  font-size: 0.9rem; font-weight: 600; color: #cce;
+}
+.station-card .card-rank {
+  font-size: 0.65rem; color: #778; text-transform: uppercase; letter-spacing: .06em;
+}
+.station-card .card-consoles {
+  display: flex; flex-wrap: wrap; gap: 4px;
+}
+.station-card .console-chip {
+  padding: 2px 8px; border-radius: 3px;
+  font-size: 0.65rem; background: #181e2a; color: #7aa;
+  border: 1px solid #2a3a48;
+}
+.station-card .complexity-pill {
+  padding: 1px 8px; border-radius: 8px;
+  font-size: 0.6rem; font-weight: 600; text-transform: uppercase;
+  background: #2a3a48; color: #7aa;
+}
+.station-card .complexity-pill.low {
+  background: #1a3828; color: #5fd88a; border: 1px solid #2a6850;
+}
+/* Crew dots */
+.crew-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #2a2d3a; border: 1px solid #3a3d4a;
+  transition: background .2s, border-color .2s;
+}
+.crew-dot.filled { background: #5fd8e8; border-color: #5fd8e8; }
+/* Ready badge states */
+#lobby-ready-badge.go {
+  background: #0a2830; color: #5fd8e8; border-color: #5fd8e8;
+  animation: ready-pulse 1.5s ease-in-out infinite;
+}
+@keyframes ready-pulse {
+  0%, 100% { box-shadow: 0 0 4px rgba(95,216,232,0.3); }
+  50% { box-shadow: 0 0 14px rgba(95,216,232,0.6); }
+}
+
+/* Lobby responsive layout */
+.lobby-body {
+  display: flex;
+  flex: 1;
+  gap: 2rem;
+  padding-top: 1rem;
+  overflow: hidden;
+  min-height: 0;
+}
+.lobby-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 360px));
+  gap: 12px;
+  flex: 1;
+  align-content: start;
+  justify-content: center;
+  overflow-y: auto;
+}
+.lobby-rail {
+  width: 18rem;
+  min-width: 14rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  border-left: 1px solid #334;
+  padding-left: 1.5rem;
+}
+.lobby-rail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: #889;
+}
+.lobby-rail-spacer { flex: 1; }
+.lobby-status-hint {
+  font-size: 0.75rem;
+  color: #667;
+  text-align: right;
+  padding-top: 0.5rem;
+  border-top: 1px solid #334;
+}
+.lobby-rail-label {
+  font-size: 0.7rem;
+  color: #667;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  margin-bottom: 0.5rem;
+}
+
+/* Card font scaling for wide screens / readability */
+.station-card .card-name { font-size: clamp(0.85rem, 1vw, 1rem); }
+.station-card .card-rank { font-size: clamp(0.6rem, 0.7vw, 0.7rem); }
+.station-card .console-chip { font-size: clamp(0.6rem, 0.7vw, 0.7rem); }
+.station-card .complexity-pill { font-size: clamp(0.55rem, 0.65vw, 0.65rem); }
+
+.station-card { min-height: 90px; }
+
+/* Connected-list pills (used in both landscape column and compact wrap) */
+.spectator-pill {
+  padding: 4px 10px;
+  border-radius: 3px;
+  background: #181e2a;
+  color: #aac;
+  border: 1px solid #2a3a48;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  align-self: flex-start;
+}
+.spectator-pill.waiting {
+  font-style: italic;
+  color: #778;
+  border-style: dashed;
+}
+.spectator-empty {
+  color: #556;
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+/* Aggregate RESERVED chip (compact mode only) */
+.reserved-aggregate {
+  display: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  border: 1px dashed #2a2d3a;
+  background: repeating-linear-gradient(45deg,transparent,transparent 6px,rgba(255,255,255,0.02) 6px,rgba(255,255,255,0.02) 12px);
+  font-size: 0.75rem;
+  color: #667;
+  text-align: center;
+  letter-spacing: .04em;
+  font-family: 'Chakra Petch', system-ui, monospace;
+}
+
+/* Header reflow */
+.lobby-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  row-gap: 0.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #334;
+}
+.lobby-title-block { display: flex; flex-direction: column; }
+.lobby-status-block {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  row-gap: 0.5rem;
+}
+.lobby-crew-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.lobby-crew-label {
+  font-size: 0.75rem;
+  color: #889;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+#lobby-title {
+  font-size: clamp(1.1rem, 2.5vw, 1.6rem);
+  font-weight: bold;
+  letter-spacing: .08em;
+  color: #cce;
+}
+#lobby-subtitle {
+  font-size: 0.8rem;
+  color: #778;
+}
+#lobby-crew-count {
+  font-size: clamp(1rem, 2vw, 1.4rem);
+  font-weight: bold;
+  color: #aae;
+  font-family: 'JetBrains Mono', monospace;
+}
+#lobby-crew-dots { display: flex; gap: 4px; }
+#lobby-spectator-tag {
+  font-size: 0.7rem;
+  color: #667;
+  padding: 2px 6px;
+  border: 1px solid #445;
+  border-radius: 3px;
+}
+#lobby-ready-badge {
+  padding: 6px 14px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: bold;
+  letter-spacing: .1em;
+  background: #332;
+  color: #ca0;
+  border: 1px solid #ca0;
+  transition: all .3s ease;
+}
+
+/* AI-only launch button (bottom-left, lobby only, no-players condition) */
+#ai-launch-btn {
+  position: absolute;
+  bottom: 1.5rem;
+  left: 1.5rem;
+  padding: 8px 16px;
+  background: #0a1a20;
+  color: #5fd8e8;
+  border: 1px solid #2a8a96;
+  border-radius: 4px;
+  font-family: 'Chakra Petch', system-ui, monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background .2s, border-color .2s, box-shadow .2s;
+  z-index: 2;
+}
+#ai-launch-btn:hover {
+  background: #0d2830;
+  border-color: #5fd8e8;
+  box-shadow: 0 0 8px rgba(95,216,232,0.25);
+}
+
+/* Compact form: portrait OR narrow landscape */
+@media (orientation: portrait), (max-width: 720px) {
+  .lobby-body {
+    flex-direction: column;
+    overflow: auto;
+  }
+  .lobby-grid {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    overflow-y: visible;
+  }
+  /* Hide individual RESERVED placeholders, show aggregate */
+  .lobby-grid .station-card.empty.per-slot { display: none; }
+  .reserved-aggregate.active { display: block; }
+  /* Rail collapses to bottom strip */
+  .lobby-rail {
+    width: auto;
+    min-width: 0;
+    border-left: none;
+    border-top: 1px solid #334;
+    padding-left: 0;
+    padding-top: 0.75rem;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .lobby-rail-spacer { display: none; }
+  .lobby-status-hint {
+    text-align: left;
+    border-top: none;
+    padding-top: 0;
+  }
+  /* CONNECTED list becomes flex-wrap of pills */
+  .lobby-rail-section {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+}
+
+/* Reduced motion (PRD #1023 module 3), the lobby's own half. The viewscreen
+   is a television in a room full of people, so a looping glow is exactly what
+   a viewer who asked for stillness cannot walk away from. The badge is held at
+   the frame that carries its meaning rather than switched off, so it keeps its
+   glow. Its siblings in that media block (the boot spinner, the red-alert
+   vignette) are not lobby chrome and stay in server.html. */
+@media (prefers-reduced-motion: reduce) {
+  #lobby-ready-badge.go {
+    animation: none;
+    box-shadow: 0 0 14px rgba(95,216,232,0.6);
+  }
+}

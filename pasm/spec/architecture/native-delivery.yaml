@@ -167,6 +167,61 @@ entities:
           tests/native_viewscreen_render.rs,
         ]
 
+  - component: native-runtime-world-load
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Native Runtime World Load
+      summary: How a native host that booted with no world gets one (issue #1326). --lobby composes the same authoritative app with WorldIngest::Deferred, holds the merged scenario catalogue, publishes it to every participant that identifies, and arbitrates SelectScenario + SelectPlayerShip first-valid-wins exactly as the browser host does — then runs the SAME boot::ingest_world on the World of the app that is already drawing the lobby, followed by a RuntimeWorldLoad schedule that restates the Startup spawn order. --world is the same decision made at the prompt instead.
+      rationale:
+        - "[ai] The browser host can arbitrate in JavaScript because its Bevy app does not exist yet when the choice is made — wasm_init throws to unwind the JS stack, so it must run after wasm_load_world. A native host has no such escape: its lobby IS the viewscreen and the viewscreen is the running app, so the arbitration and the ingest both have to happen inside a process that is already ticking."
+        - "[ai] The determinism claim is made by REUSE, not by prose. boot::ingest_world took a &mut App and now takes a &mut World precisely so both callers are the same function: the ledger reset, read, validate, compile, abort-on-broken, native template gate, apply, eager record, freeze and resource insert exist once. The seed precedence, hull resolution, hull cache gate and the two ship resources are likewise one extracted function (native_host::app::install_world_selection) called from both sites."
+        - "[ai] WorldIngest::Deferred deliberately does NOT freeze the content ledger. Freezing seals the content digest for the world being loaded and there is no world; nothing may spawn before the runtime load, which is what makes an unfrozen ledger safe here rather than merely tolerable. The runtime load then resets and freezes in the documented order."
+        - "[ai] WorldIdMint is parked at tick 0 across the spawn pass and the live mint restored afterwards. begin_tick resets a namespace's sequence only when the tick MOVES, so without parking, the same authored world would mint different uuids depending on how long the operator spent choosing a scenario — and those uuids are folded into the authoritative digest by name, key a snapshot's entity matching, and in a fleet have to agree across hosts. Restoring rather than leaving the mint at zero is what stops an id minted after the load colliding with one minted before it."
+        - "[ai] The RuntimeWorldLoad schedule restates the Startup TOPOLOGICAL order rather than inventing one, including the compile_world_scripts before setup_world before spawn_world_entities pin that server_app::registration expresses with .after and .before edges — a pin whose tie-break flip moved the authoritative digest once already. The guard against the two orders drifting is a test asserting that a runtime-loaded world mints exactly the ids a boot-loaded one mints, not the comment."
+        - "[ai] --lobby is an explicit flag rather than a reinterpretation of a bare invocation. A bare phoenix-host is PRD #855's delivery-only host — the mode the shipped Windows bundle uses — and silently turning it into a windowed authoritative host would delete that mode. --lobby and --world are refused together because they are the same decision made at two moments and one of them would have to be ignored."
+        - "[ai] What is NOT claimed: that a runtime-loaded host reaches InProgress on the same tick a --solo --world host does. It does not, and never could — the mission starts when the crew ready up, which is already true of every crewed boot. spawn_game_start_entities mints on the phase-transition tick on both paths."
+    architecture:
+      kind: service
+      authority: authoritative
+      coordinates: [native-delivery-host, delivery-catalogue-payload, base-scenario-manifest]
+      runs_in: [native-host-runtime]
+    implementation:
+      status: declared
+      paths:
+        [
+          src/native_host/world_load.rs,
+          src/lobby/scenario_arbiter.rs,
+          src/native_host/app.rs,
+          src/boot/mod.rs,
+          src/delivery/serve.rs,
+          src/delivery/args.rs,
+          src/bin/phoenix_host.rs,
+          gui/scenario-arbiter.js,
+        ]
+      symbols:
+        [
+          NativeWorldLoadPlugin,
+          NativeWorldLoadSet,
+          RuntimeWorldLoad,
+          LobbyScenarioCatalog,
+          LobbyBootSettings,
+          LobbySelection,
+          ScenarioSelection,
+          SelectionOutcome,
+          select_scenario,
+          select_player_ship,
+          world_path_for,
+          curated_ships_for,
+          catalog_wire,
+          ManifestSource,
+          ingest_world,
+          install_world_selection,
+          boot_plan,
+          WorldIngest,
+        ]
+      tests: [cargo test, tests/native_host_lobby.rs]
+
   - component: curated-public-catalogue-gate
     core:
       status: implemented

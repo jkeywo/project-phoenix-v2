@@ -192,6 +192,12 @@ struct ViewscreenRadarSpec {
 ///
 /// Presentation only: nothing it touches is authoritative state, so it cannot
 /// move the digest.
+///
+/// Native-only because its one caller is: the browser host loads its world
+/// before `wasm_init` composes the app at all, so `Startup` has never run when
+/// the hull is chosen and there is nothing to take down. Compiling it into the
+/// wasm build would be dead code the moment it landed.
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn despawn_viewscreen_radar_widgets(
     mut commands: Commands,
     containers: Query<Entity, With<RadarContainerMode>>,

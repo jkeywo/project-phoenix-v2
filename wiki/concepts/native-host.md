@@ -2,8 +2,8 @@
 title: Native Host
 type: concept
 tags: [native, viewscreen, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile, media-devices, camera, microphone]
-sources: [src/native_host/mod.rs, src/native_host/app.rs, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_display.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/recovery.rs, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs]
-updated: 2026-08-29
+sources: [src/native_host/mod.rs, src/native_host/app.rs, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/recovery.rs, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs]
+updated: 2026-08-31
 ---
 
 # Native Host
@@ -421,6 +421,7 @@ phoenix-host --world assets/worlds/combat_test.toml --profile bridge.toml
 | Piece | File |
 |---|---|
 | The pure model — identity, density, geometry, round-trip, resolution | `src/native_host/bridge_profile.rs` |
+| The pure layout **law** — assign/move/unassign, refusals, eligibility | `src/native_host/bridge_layout.rs` |
 | The winit adapter — enumerate, resolve, open surfaces, `--setup` | `src/native_host/bridge_display.rs` |
 | The `--setup`/`--profile` flags | `src/delivery/args.rs`, `src/bin/phoenix_host.rs` |
 
@@ -460,9 +461,46 @@ one/two-pane geometry is computed by `pane_rects`: one pane is the whole monitor
 two divide it side-by-side (default) or stacked, tiling exactly with the odd
 pixel absorbed by the last pane.
 
+A profile that assigns monitors but names **no** `viewscreen` is refused too
+(`ProfileError::MissingViewscreen`, issue #1327): the viewscreen role is what
+places the process's primary window, so without one that window stays wherever
+the OS opened it — on a monitor a `station` entry may also name, covering the
+shared view with a console. A profile with **no** `[[display]]` tables at all
+(the `[[touch]]`/`[[media]]`-only shape) opens no Station window and stays valid.
+A `[[display.pane]]` may also carry an optional `station = "…"` naming the
+station id whose console it shows; it is absent for a hand-authored
+`--pane <NAME>` pane, so pre-#1327 profiles round-trip byte-identically.
+
 The profile is **not** the private player Accessibility profile (#1127): this is
 shared operator configuration of the physical room, carrying nothing about any
 one player, and the two are kept in separate files.
+
+### The layout law (issue #1327)
+
+`bridge_profile` judges a **file**; `bridge_layout` judges a **transition** — the
+one place the three arrangement rules live, so the lobby's buttons, a saved
+per-ship-class layout and a CLI profile cannot disagree:
+
+1. exactly one viewscreen (a `BridgeLayout` is built with one and can only move
+   it — it is never `None`);
+2. a station's console never opens on the viewscreen's monitor, and the
+   viewscreen never moves onto a monitor holding consoles (refused, never a
+   silent eviction — unassign them first);
+3. at most `MAX_STATIONS_PER_MONITOR` (= `MAX_PANES_PER_STATION`) consoles per
+   screen, split side by side (`LAYOUT_SPLIT`).
+
+`BridgeLayout::apply(&self, &LayoutAction)` answers a **new** layout or a
+`LayoutRefusal` and never mutates its input; `SetViewscreen` / `AssignStation` /
+`UnassignStation` are the whole vocabulary (assigning a seated station *is* the
+move). Stations are keyed by `StationId`, never by participant name — a console
+on a wall monitor is claimable by anyone — and that id survives persistence in
+the pane slot's `station` field. `occupancy()` and `eligibility()` report enough
+to grey a button row with no further logic: every monitor is `Selected`,
+`Eligible`, or `Excluded(IsViewscreen | Full)`. `to_profile` /
+`write_displays_into` / `adopt_profile` convert to and from a `ValidatedProfile`,
+routing every adopted seat through the same law so a saved layout cannot smuggle
+in an arrangement a button press could not make; anything that will not fit is
+reported as a `LayoutAdoption` rather than dropped.
 
 ### The winit adapter, and missing displays
 

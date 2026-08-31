@@ -4,6 +4,11 @@
 // table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import {
+  HELM_ACTION_CONTEXT,
+  HELM_STEERING_ACTION_ID,
+  HELM_THRUST_ACTION_ID,
+} from '../stations/helm-actions.js';
 import { PhElement, phDefine } from './ph-element.js';
 
 export class PhHelmJoystick extends PhElement {
@@ -100,7 +105,7 @@ export class PhHelmJoystick extends PhElement {
     this.setAttribute('role', 'group');
     this.setAttribute('aria-label', t('component.helm_joystick.label'));
     if (!this.hasAttribute('tabindex')) this.setAttribute('tabindex', '0');
-    // Keyboard (WASD / arrows) drives the same set_helm output as the on-screen
+    // Keyboard (WASD / arrows) drives the same semantic axis identities as the on-screen
     // thumbstick. Gamepad axes are owned by the parent semantic input runtime,
     // so this component never polls or chooses a device. This is the
     // DELIBERATE key-relay coexistence
@@ -321,9 +326,14 @@ export class PhHelmJoystick extends PhElement {
   };
 
   #sendAction() {
-    if (this.sendAction) {
-      this.sendAction('set_helm', { thrust: -this.#py || 0, yaw: this.#px || 0 });
-    }
+    const activate = typeof window !== 'undefined' && window.activateSemanticAction;
+    if (typeof activate !== 'function') return;
+    activate(HELM_THRUST_ACTION_ID, {
+      context: HELM_ACTION_CONTEXT, source: 'control', value: -this.#py || 0,
+    });
+    activate(HELM_STEERING_ACTION_ID, {
+      context: HELM_ACTION_CONTEXT, source: 'control', value: this.#px || 0,
+    });
   }
 }
 

@@ -57,9 +57,9 @@ describe('Navigation semantic-action structural coverage', () => {
     const direct = source('gui/battleship/navigation.html');
     expect(direct).toContain("initConsole({ name: 'navigation'");
     const cruiserComms = source('gui/cruiser/comms.html');
-    expect(cruiserComms).toContain("actionFamilies: ['comms', 'navigation']");
+    expect(cruiserComms).toMatch(/actionFamilies:\s*\[[^\]]*'navigation'[^\]]*\]/);
     const courierCaptain = source('gui/courier/captain.html');
-    expect(courierCaptain).toContain("actionFamilies: ['captain', 'navigation']");
+    expect(courierCaptain).toMatch(/actionFamilies:\s*\[[^\]]*'navigation'[^\]]*\]/);
   });
 
   it('includes Navigation in product discovery and preserves correlated wire envelopes', () => {

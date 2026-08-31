@@ -835,6 +835,32 @@ function blackboardOfKind(state, kind, preferredIds = []) {
 }
 
 /**
+ * Resolve one exact authored System instance by System kind.
+ *
+ * Preferred ids preserve Station-authored order. The complete selected-ship
+ * projection follows in lexical order so cross-station capabilities such as
+ * Viewscreen remain available without making the instance id a convention.
+ * The map is optional on the wire; absence intentionally resolves to `null`.
+ *
+ * @param {{systemKinds?: Object<string,string>}} state
+ * @param {string} kind authored `[[system]].kind`
+ * @param {string[]} [preferredIds]
+ * @returns {string|null}
+ */
+function authoredSystemIdOfKind(state, kind, preferredIds = []) {
+  const kinds = state.systemKinds || {};
+  const seen = new Set();
+  for (const id of preferredIds) {
+    seen.add(id);
+    if (kinds[id] === kind) return id;
+  }
+  for (const id of Object.keys(kinds).filter(id => !seen.has(id)).sort()) {
+    if (kinds[id] === kind) return id;
+  }
+  return null;
+}
+
+/**
  * Command console. Returns JSON of {@link CommandConsolePayload}.
  *
  * Reads the `Command` blackboard variant under the authored instance id. It
@@ -926,6 +952,9 @@ export function withCommandAdvice(consoleName, state, json) {
  *             z: number, yaw: number, impulse_charge_progress: number,
  *             on_screen: boolean, blips: RadarBlip[],
  *             waypoint: {x: number, z: number}|null,
+ *             thrust_system_id: string|null, steering_system_id: string|null,
+ *             lateral_system_id: string|null, impulse_system_id: string|null,
+ *             boost_system_id: string|null, viewscreen_system_id: string|null,
  *             own_hull: StationHullAggregate, boost_enabled: boolean,
  *             boost_battery: number, boost_active: boolean,
  *             helm_auto: boolean, engine_port_thrust: number,
@@ -1022,6 +1051,18 @@ export function buildHelmConsoleState(state, systemIds = []) {
     on_screen:               state.currentView === 'Radar',
     blips,
     waypoint:                state.navigationWaypoint || null,
+    // Exact command owners from the selected hull's authored System kinds.
+    // Instance ids are opaque: no canonical-id or prefix inference belongs on
+    // the client. A legacy server that omits the projection yields null, which
+    // lets older action paths retain their own compatibility fallback.
+    thrust_system_id:        authoredSystemIdOfKind(state, 'helm_thrust', systemIds),
+    steering_system_id:      authoredSystemIdOfKind(state, 'helm_steering', systemIds),
+    lateral_system_id:       authoredSystemIdOfKind(state, 'lateral_thrust', systemIds),
+    impulse_system_id:       authoredSystemIdOfKind(state, 'helm_impulse', systemIds),
+    boost_system_id:         authoredSystemIdOfKind(state, 'helm_boost', systemIds),
+    // Viewscreen is Captain-owned on shipped hulls, so it deliberately falls
+    // through from the preferred Helm ids to the complete selected-ship map.
+    viewscreen_system_id:    authoredSystemIdOfKind(state, 'viewscreen', systemIds),
     own_hull:                aggregateStationHull('helm', state.consoleHull, state.stationSystems),
     boost_enabled:           !!boostEnabled,
     boost_battery:           boostBattery,
@@ -1113,7 +1154,7 @@ export function buildHelmTowLoadView(state) {
  * is when the Dock control shows, `docked` when it becomes Undock, and `refusal`
  * is a `strings.csv` id the console resolves.
  *
- * @param {{ blackboards?, blackboardKinds?, systemConsoleFamilies? }} state
+ * @param {{ blackboards?, blackboardKinds?, systemConsoleFamilies?, systemKinds? }} state
  * @param {string[]} [systemIds] authored Helm-family ids for this Station
  * @returns {object|null}
  */
@@ -1123,7 +1164,14 @@ export function buildHelmDockView(state, systemIds = []) {
     : Object.entries(state.systemConsoleFamilies || {})
       .filter(([, family]) => family === 'helm')
       .map(([id]) => id);
-  const entry = blackboardOfKind(state, 'Dock', owned);
+  const projectedSystemId = authoredSystemIdOfKind(state, 'dock', owned);
+  const hasKindProjection = Object.keys(state.systemKinds || {}).length > 0;
+  const entry = projectedSystemId
+    && Object.prototype.hasOwnProperty.call(state.blackboards || {}, projectedSystemId)
+    ? { systemId: projectedSystemId, data: state.blackboards[projectedSystemId] }
+    // Pre-projection Welcome payloads remain readable through the typed
+    // blackboard discriminator. Once the authored map exists it is decisive.
+    : (!hasKindProjection ? blackboardOfKind(state, 'Dock', owned) : null);
   const systemId = entry?.systemId || null;
   const bb = entry?.data || null;
   if (!bb) return null;

@@ -27,7 +27,7 @@ describe('Comms semantic-action structural coverage', () => {
       expect(html).toContain('<ph-comms-contact-list');
       expect(html).toContain('<ph-comms-hail-list');
       expect(html).toContain('<ph-comms-current-message');
-      expect(html).toContain(`initConsole({ name: 'comms'`);
+      expect(html).toMatch(/initConsole\s*\(\s*\{[\s\S]*?name:\s*'comms'/);
       expect(source(`gui/${hull}/comms.console.js`)).toContain('makeCommsRender');
     });
   }

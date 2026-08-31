@@ -30,7 +30,8 @@
  *    `name` — for same-origin separate-tab mode (ADR-0001 §3 target 4).
  *
  * @param {{ name: string, render: function(state: object): void,
- *           actionFamilies?: string[], getActionContext?: function(): string }} opts
+ *           actionFamilies?: string[], getActionContext?: function(): string,
+ *           supportsSemanticAction?: function(string, string, object): boolean }} opts
  *   name   — lowercase station id (e.g. 'repair', 'helm'). Pre-issue #618
  *            these were PascalCase Console enum variant names.
  *   render — Called with the parsed (and shape-normalised) state object on
@@ -109,6 +110,7 @@ export function initConsole({
   render,
   actionFamilies = [],
   getActionContext = null,
+  supportsSemanticAction = null,
   navigationActions,
 }) {
   // Resolve the global object: `window` in browsers, `globalThis` in Node/tests.
@@ -202,6 +204,28 @@ export function initConsole({
     registerHelmActions(_semanticActions, {
       getState: function() { return _latestState; },
       sendAction: sendAction,
+      hasThrustControl: function() {
+        return typeof document !== 'undefined' && !!document.querySelector('ph-helm-joystick');
+      },
+      hasSteeringControl: function() {
+        return typeof document !== 'undefined' && !!document.querySelector('ph-helm-joystick');
+      },
+      hasLateralControl: function() {
+        return typeof document !== 'undefined'
+          && !!document.querySelector('ph-lateral-thrust-joystick');
+      },
+      hasImpulseControl: function() {
+        return typeof document !== 'undefined' && !!document.querySelector('ph-impulse-btn');
+      },
+      hasBoostControl: function() {
+        return typeof document !== 'undefined' && !!document.querySelector('ph-boost-btn');
+      },
+      hasViewscreenControl: function() {
+        return typeof document !== 'undefined' && !!document.querySelector('ph-helm-radar');
+      },
+      hasDockControl: function() {
+        return typeof document !== 'undefined' && !!document.getElementById('dock-btn');
+      },
     });
   }
   if (_actionContexts.has(TACTICAL_ACTION_CONTEXT)) {
@@ -445,7 +469,10 @@ export function initConsole({
   _root.__supportsSemanticAction = function(actionId, context) {
     const entry = _semanticActions.action(String(actionId || ''));
     if (!entry) return false;
-    return entry.contexts.includes(_resolvedActionContext(context));
+    const resolvedContext = _resolvedActionContext(context);
+    if (!entry.contexts.includes(resolvedContext)) return false;
+    return typeof supportsSemanticAction !== 'function'
+      || supportsSemanticAction(entry.id, resolvedContext, entry) === true;
   };
 
   // Semantic activation is a live document seam just like sendAction. Both a
@@ -473,11 +500,24 @@ export function initConsole({
   };
 
   var _semanticKeyHandler = null;
+  var _semanticBlurHandler = null;
+  function _releaseAllKeyboardHolds() {
+    for (const context of _actionContexts) {
+      _semanticActions.releaseKeyboardHolds(context);
+    }
+  }
   if (typeof document !== 'undefined' && document.addEventListener) {
     _semanticKeyHandler = function(event) {
       _semanticActions.dispatchKeyboardEvent(event, _resolvedActionContext());
     };
     document.addEventListener('keydown', _semanticKeyHandler);
+    document.addEventListener('keyup', _semanticKeyHandler);
+  }
+  if (_root && typeof _root.addEventListener === 'function') {
+    _semanticBlurHandler = function() {
+      _releaseAllKeyboardHolds();
+    };
+    _root.addEventListener('blur', _semanticBlurHandler);
   }
 
   // ── Static text (localisation) ─────────────────────────────────────────
@@ -500,8 +540,14 @@ export function initConsole({
       if (_semanticKeyHandler && typeof document !== 'undefined'
           && document.removeEventListener) {
         document.removeEventListener('keydown', _semanticKeyHandler);
+        document.removeEventListener('keyup', _semanticKeyHandler);
         _semanticKeyHandler = null;
       }
+      if (_semanticBlurHandler && _root && typeof _root.removeEventListener === 'function') {
+        _root.removeEventListener('blur', _semanticBlurHandler);
+        _semanticBlurHandler = null;
+      }
+      _releaseAllKeyboardHolds();
       if (_semanticFeedbackEl) {
         _semanticFeedbackEl.remove();
         _semanticFeedbackEl = null;

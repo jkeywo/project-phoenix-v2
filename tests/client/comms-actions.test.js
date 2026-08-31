@@ -12,6 +12,7 @@ import {
   createCommsActionRegistry,
   currentCommsMessage,
 } from '../../gui/stations/comms-actions.js';
+import { NAVIGATION_ACTIONS } from '../../gui/stations/navigation-actions.js';
 
 let sequence = 0;
 
@@ -54,7 +55,10 @@ describe('Comms semantic action family', () => {
 
     const settings = createClientSemanticActionRegistry();
     expect(settings.list(COMMS_ACTION_CONTEXT).map((entry) => entry.id))
-      .toEqual(COMMS_ACTIONS.map((entry) => entry.id));
+      .toEqual([
+        ...COMMS_ACTIONS,
+        ...NAVIGATION_ACTIONS.filter((entry) => entry.contexts.includes(COMMS_ACTION_CONTEXT)),
+      ].map((entry) => entry.id));
   });
 
   it('hails the authoritative UUID through one correlated adapter for keys and controls', () => {

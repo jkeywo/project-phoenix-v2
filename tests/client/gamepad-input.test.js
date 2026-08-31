@@ -60,6 +60,29 @@ const CONTINUOUS_ACTION = {
   ],
 };
 
+const DIGITAL_LATERAL_ACTION = {
+  ...CONTINUOUS_ACTION,
+  id: 'helm.lateral-thrust',
+  labelId: 'semantic_action.helm.lateral_thrust.label',
+  accessibilityLabelId: 'semantic_action.helm.lateral_thrust.accessibility',
+  bindings: [
+    { type: 'gamepad', input: 'axis', control: 'shoulder-pair' },
+    null,
+  ],
+};
+
+const HOLD_ACTION = {
+  id: 'helm.boost',
+  contexts: ['helm'],
+  labelId: 'semantic_action.helm.boost.label',
+  accessibilityLabelId: 'semantic_action.helm.boost.accessibility',
+  hold: true,
+  bindings: [
+    { type: 'keyboard', code: 'ShiftLeft' },
+    { type: 'gamepad', input: 'button', control: 'face-bottom' },
+  ],
+};
+
 describe('standard gamepad bindings', () => {
   it('normalizes portable button, D-pad and axis-direction identities', () => {
     for (const control of [
@@ -102,6 +125,26 @@ describe('standard gamepad bindings', () => {
     expect(gamepadBindingsEqual(lowerThreshold, {
       ...lowerThreshold, direction: 'negative', threshold: 0.5,
     })).toBe(false);
+  });
+
+  it('models the shipped shoulder pair as one signed axis owning both buttons', () => {
+    const pair = { type: 'gamepad', input: 'axis', control: 'shoulder-pair' };
+    expect(normalizeGamepadBinding(pair, { continuous: true })).toEqual(pair);
+    expect(gamepadBindingsEqual(pair, {
+      type: 'gamepad', input: 'button', control: 'left-shoulder',
+    })).toBe(true);
+    expect(gamepadBindingsEqual(pair, {
+      type: 'gamepad', input: 'button', control: 'right-shoulder',
+    })).toBe(true);
+    expect(gamepadBindingPressed({
+      ...pair, direction: 'negative', threshold: 0.5,
+    }, pad(0, { pressed: [4] }))).toBe(true);
+    expect(gamepadBindingPressed({
+      ...pair, direction: 'positive', threshold: 0.5,
+    }, pad(0, { pressed: [5] }))).toBe(true);
+    expect(gamepadBindingPressed({
+      ...pair, direction: 'positive', threshold: 0.5,
+    }, pad(0, { pressed: [4, 5] }))).toBe(false);
   });
 
   it('samples only standard-mapped snapshots at their standard indices', () => {
@@ -212,6 +255,206 @@ describe('explicit connection ownership and discrete edges', () => {
     snapshot = [pad(0, { axes: [0.8, 0, 0, 0] })];
     runtime.poll(snapshot);
     expect(activate).toHaveBeenCalledTimes(2);
+  });
+
+  it('dispatches a hold once on press and once on release without repeats', () => {
+    let snapshot = [pad(0)];
+    const activate = vi.fn(() => ({ handled: true }));
+    const runtime = createGamepadInputRuntime({
+      getGamepads: () => snapshot,
+      getContext: () => 'helm',
+      getActions: () => [HOLD_ACTION],
+      activate,
+    });
+    runtime.select(0);
+    runtime.poll(snapshot);
+    snapshot = [pad(0, { pressed: [0] })];
+    runtime.poll(snapshot);
+    runtime.poll(snapshot);
+    snapshot = [pad(0)];
+    runtime.poll(snapshot);
+    expect(activate.mock.calls.map(([id, options]) => [id, options.pressed])).toEqual([
+      [HOLD_ACTION.id, true], [HOLD_ACTION.id, false],
+    ]);
+  });
+
+  it('releases a live hold before context change and selected-pad disconnect', () => {
+    let context = 'helm';
+    let snapshot = [pad(0)];
+    const activate = vi.fn(() => ({ handled: true }));
+    const runtime = createGamepadInputRuntime({
+      getGamepads: () => snapshot,
+      getContext: () => context,
+      getActions: () => [HOLD_ACTION],
+      activate,
+    });
+    runtime.select(0);
+    runtime.poll(snapshot);
+    snapshot = [pad(0, { pressed: [0] })];
+    runtime.poll(snapshot);
+    context = 'captain';
+    runtime.poll(snapshot);
+    expect(activate.mock.calls.slice(0, 2).map(([, options]) => [
+      options.context, options.pressed,
+    ])).toEqual([['helm', true], ['helm', false]]);
+
+    context = 'helm';
+    snapshot = [pad(0)];
+    runtime.poll(snapshot);
+    snapshot = [pad(0, { pressed: [0] })];
+    runtime.poll(snapshot);
+    snapshot = [];
+    runtime.poll(snapshot);
+    expect(activate).toHaveBeenLastCalledWith(HOLD_ACTION.id, expect.objectContaining({
+      context: 'helm', pressed: false,
+    }));
+  });
+
+  it('keeps the selected composite context through catalogue re-arm, holds, and axes', () => {
+    const boost = { ...HOLD_ACTION, contexts: ['helm', 'courier'] };
+    const lateral = { ...DIGITAL_LATERAL_ACTION, contexts: ['helm', 'courier'] };
+    let context = 'courier';
+    let actions = null;
+    let snapshot = [pad(0, { pressed: [0] })];
+    const activate = vi.fn(() => ({ handled: true }));
+    const runtime = createGamepadInputRuntime({
+      getGamepads: () => snapshot,
+      getContext: () => context,
+      getActions: () => actions,
+      activate,
+    });
+    runtime.select(0);
+
+    // Loading a nullable iframe catalogue while Boost is held must not turn
+    // the already-held input into a press.
+    runtime.poll(snapshot, 0);
+    actions = [boost, lateral];
+    runtime.poll(snapshot, 1);
+    expect(runtime.state().status).toBe('neutral');
+    expect(activate).not.toHaveBeenCalled();
+    snapshot = [pad(0)];
+    runtime.poll(snapshot, 2);
+
+    // A live catalogue transition releases the accepted hold through the
+    // context that pressed it, then requires that binding to return neutral.
+    snapshot = [pad(0, { pressed: [0] })];
+    runtime.poll(snapshot, 3);
+    actions = [{ ...boost, tuning: { repeat: false } }, lateral];
+    runtime.poll(snapshot, 4);
+    expect(activate.mock.calls.filter(([id]) => id === boost.id).map(([, options]) => [
+      options.context, options.pressed,
+    ])).toEqual([['courier', true], ['courier', false]]);
+    expect(runtime.state().status).toBe('neutral');
+
+    snapshot = [pad(0)];
+    runtime.poll(snapshot, 5);
+    snapshot = [pad(0, { pressed: [0] })];
+    runtime.poll(snapshot, 6);
+    context = 'captain';
+    actions = [GAMEPAD_ACTION];
+    runtime.poll(snapshot, 7);
+    expect(activate.mock.calls.filter(([id]) => id === boost.id).map(([, options]) => [
+      options.context, options.pressed,
+    ])).toEqual([
+      ['courier', true], ['courier', false],
+      ['courier', true], ['courier', false],
+    ]);
+
+    // The composite shoulder axis likewise uses Courier rather than its first
+    // declared Helm context. Both shoulders produce one physical neutral, and
+    // a subsequent context switch must not duplicate it.
+    context = 'courier';
+    actions = [boost, lateral];
+    snapshot = [pad(0)];
+    runtime.poll(snapshot, 8);
+    snapshot = [pad(0, { pressed: [4] })];
+    runtime.poll(snapshot, 9);
+    snapshot = [pad(0, { pressed: [4, 5] })];
+    runtime.poll(snapshot, 10);
+    context = 'captain';
+    actions = [GAMEPAD_ACTION];
+    runtime.poll(snapshot, 11);
+    expect(activate.mock.calls.filter(([id]) => id === lateral.id).map(([, options]) => [
+      options.context, options.value, options.neutral,
+    ])).toEqual([
+      ['courier', -1, false],
+      ['courier', 0, true],
+    ]);
+
+    // A still-live direction is instead neutralized once by the context switch.
+    context = 'courier';
+    actions = [boost, lateral];
+    snapshot = [pad(0)];
+    runtime.poll(snapshot, 12);
+    snapshot = [pad(0, { pressed: [5] })];
+    runtime.poll(snapshot, 13);
+    context = 'captain';
+    actions = [GAMEPAD_ACTION];
+    runtime.poll(snapshot, 14);
+    expect(activate.mock.calls.filter(([id]) => id === lateral.id).map(([, options]) => [
+      options.context, options.value, options.neutral,
+    ])).toEqual([
+      ['courier', -1, false],
+      ['courier', 0, true],
+      ['courier', 1, false],
+      ['courier', 0, true],
+    ]);
+  });
+
+  it('drops composite ownership on transport loss and re-arms without delayed releases', () => {
+    const boost = { ...HOLD_ACTION, contexts: ['helm', 'courier'] };
+    const lateral = { ...DIGITAL_LATERAL_ACTION, contexts: ['helm', 'courier'] };
+    let context = 'courier';
+    let actions = [boost, lateral];
+    let snapshot = [pad(0)];
+    let transportLive = true;
+    const activate = vi.fn(() => ({ handled: true }));
+    const runtime = createGamepadInputRuntime({
+      getGamepads: () => snapshot,
+      getContext: () => context,
+      getActions: () => actions,
+      activate,
+      isTransportLive: () => transportLive,
+    });
+    runtime.select(0);
+    runtime.poll(snapshot, 0);
+    snapshot = [pad(0, { pressed: [0, 4] })];
+    runtime.poll(snapshot, 1);
+    expect(activate).toHaveBeenCalledTimes(2);
+
+    transportLive = false;
+    context = 'captain';
+    actions = [GAMEPAD_ACTION];
+    runtime.poll(snapshot, 2);
+    runtime.poll(snapshot, 3);
+    expect(activate).toHaveBeenCalledTimes(2);
+
+    // Returning transport, and even returning to the original context, stays
+    // inert until every now-visible binding is physically neutral again.
+    transportLive = true;
+    runtime.poll(snapshot, 4);
+    context = 'courier';
+    actions = [boost, lateral];
+    runtime.poll(snapshot, 5);
+    expect(runtime.state().status).toBe('neutral');
+    expect(activate).toHaveBeenCalledTimes(2);
+    snapshot = [pad(0)];
+    runtime.poll(snapshot, 6);
+    expect(runtime.state().status).toBe('ready');
+
+    // Fresh inputs after re-arm still own and release through Courier.
+    snapshot = [pad(0, { pressed: [0, 5] })];
+    runtime.poll(snapshot, 7);
+    snapshot = [pad(0)];
+    runtime.poll(snapshot, 8);
+    expect(activate.mock.calls.slice(2).map(([id, options]) => [
+      id, options.context, options.value, options.pressed,
+    ])).toEqual([
+      [lateral.id, 'courier', 1, undefined],
+      [boost.id, 'courier', undefined, true],
+      [lateral.id, 'courier', 0, undefined],
+      [boost.id, 'courier', undefined, false],
+    ]);
   });
 
   it('disconnects without transfer and index reuse requires explicit neutral reselection', () => {
@@ -391,6 +634,61 @@ describe('continuous standard-gamepad axes', () => {
     expect(activate).toHaveBeenLastCalledWith('helm.steering', expect.objectContaining({
       context: 'helm', value: 0, neutral: true,
     }));
+  });
+
+  it('preserves lateral LB/RB direction and both-pressed neutral as one continuous binding', () => {
+    let snapshot = [pad(0)];
+    const activate = vi.fn();
+    const runtime = createGamepadInputRuntime({
+      getGamepads: () => snapshot,
+      getContext: () => 'helm',
+      getActions: () => [DIGITAL_LATERAL_ACTION],
+      activate,
+    });
+    runtime.select(0);
+    runtime.poll(snapshot, 0);
+
+    snapshot = [pad(0, { pressed: [4] })];
+    runtime.poll(snapshot, 1);
+    expect(activate).toHaveBeenLastCalledWith('helm.lateral-thrust', expect.objectContaining({
+      context: 'helm', value: -1,
+    }));
+    snapshot = [pad(0, { pressed: [4, 5] })];
+    runtime.poll(snapshot, 2);
+    expect(activate).toHaveBeenLastCalledWith('helm.lateral-thrust', expect.objectContaining({
+      context: 'helm', value: 0,
+    }));
+    snapshot = [pad(0, { pressed: [5] })];
+    runtime.poll(snapshot, 3);
+    expect(activate).toHaveBeenLastCalledWith('helm.lateral-thrust', expect.objectContaining({
+      context: 'helm', value: 1,
+    }));
+    snapshot = [pad(0)];
+    runtime.poll(snapshot, 4);
+    expect(activate).toHaveBeenLastCalledWith('helm.lateral-thrust', expect.objectContaining({
+      context: 'helm', value: 0,
+    }));
+  });
+
+  it('captures either shoulder as the continuous shoulder-pair identity', () => {
+    let snapshot = [pad(0)];
+    const captures = [];
+    const runtime = createGamepadInputRuntime({
+      getGamepads: () => snapshot,
+      getContext: () => 'helm',
+      getActions: () => [DIGITAL_LATERAL_ACTION],
+      onCapture: (target, binding) => captures.push({ target, binding }),
+    });
+    runtime.select(0);
+    runtime.poll(snapshot, 0);
+    runtime.beginCapture('helm.lateral-thrust', 0);
+    runtime.poll(snapshot, 1);
+    snapshot = [pad(0, { pressed: [5] })];
+    runtime.poll(snapshot, 2);
+    expect(captures).toEqual([{
+      target: { actionId: 'helm.lateral-thrust', slot: 0 },
+      binding: { type: 'gamepad', input: 'axis', control: 'shoulder-pair' },
+    }]);
   });
 
   it('uses greatest deflection with deterministic slot order on a tie', () => {

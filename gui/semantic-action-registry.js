@@ -18,9 +18,22 @@ import {
 } from './gamepad-input.js';
 
 export const SEMANTIC_BINDING_SLOT_COUNT = 2;
+/** Adapter result for a real local hold-source transition that emitted no
+ * authoritative command. The source remains tracked for its eventual release,
+ * while the provisional feedback press is cancelled instead of timing out. */
+export const SEMANTIC_HANDLED_WITHOUT_FEEDBACK = Symbol('semantic-handled-without-feedback');
 export const CONTINUOUS_DEADZONE_MAX = 0.95;
 
 const MODIFIER_KEYS = ['ctrlKey', 'shiftKey', 'altKey', 'metaKey'];
+const MODIFIER_CODE_FAMILIES = Object.freeze({
+  ControlLeft: 'Control', ControlRight: 'Control',
+  ShiftLeft: 'Shift', ShiftRight: 'Shift',
+  AltLeft: 'Alt', AltRight: 'Alt',
+  MetaLeft: 'Meta', MetaRight: 'Meta',
+});
+const MODIFIER_CODE_FLAGS = Object.freeze({
+  Control: 'ctrlKey', Shift: 'shiftKey', Alt: 'altKey', Meta: 'metaKey',
+});
 const EDITABLE_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
 const RESERVED_UNMODIFIED_CODES = new Set([
   'Escape', 'Tab',
@@ -75,13 +88,14 @@ export function normalizeKeyboardBinding(value) {
   }
   const code = typeof value.code === 'string' ? value.code.trim() : '';
   if (!code) throw new TypeError('semantic action keyboard binding requires code');
+  const ownFlag = MODIFIER_CODE_FLAGS[keyboardCodeFamily(code)] || null;
   return Object.freeze({
     type: 'keyboard',
     code,
-    ctrlKey: !!value.ctrlKey,
-    shiftKey: !!value.shiftKey,
-    altKey: !!value.altKey,
-    metaKey: !!value.metaKey,
+    ctrlKey: ownFlag === 'ctrlKey' ? false : !!value.ctrlKey,
+    shiftKey: ownFlag === 'shiftKey' ? false : !!value.shiftKey,
+    altKey: ownFlag === 'altKey' ? false : !!value.altKey,
+    metaKey: ownFlag === 'metaKey' ? false : !!value.metaKey,
   });
 }
 
@@ -163,8 +177,16 @@ export function keyboardBindingFromEvent(event) {
 /** True when two canonical keyboard bindings identify the same chord. */
 export function keyboardBindingsEqual(left, right) {
   if (!left || !right || left.type !== 'keyboard' || right.type !== 'keyboard') return false;
-  return left.code === right.code
+  return keyboardCodesEqual(left.code, right.code)
     && MODIFIER_KEYS.every((key) => left[key] === right[key]);
+}
+
+function keyboardCodeFamily(code) {
+  return MODIFIER_CODE_FAMILIES[code] || code;
+}
+
+function keyboardCodesEqual(left, right) {
+  return keyboardCodeFamily(left) === keyboardCodeFamily(right);
 }
 
 /** True when two canonical bindings identify the same logical input. */
@@ -218,8 +240,12 @@ export function isSemanticInputTarget(target) {
 /** Compare a canonical binding with a KeyboardEvent-shaped object. */
 export function keyboardBindingMatches(binding, event) {
   if (!binding || binding.type !== 'keyboard' || !event) return false;
-  return binding.code === event.code
-    && MODIFIER_KEYS.every((key) => binding[key] === !!event[key]);
+  if (!keyboardCodesEqual(binding.code, event.code)) return false;
+  // A standalone modifier is the key being bound, not a modifier chord. Its
+  // browser flag differs between keydown and keyup and between engines, so do
+  // not require that one self-flag while retaining every other modifier.
+  const ownFlag = MODIFIER_CODE_FLAGS[keyboardCodeFamily(binding.code)] || null;
+  return MODIFIER_KEYS.every((key) => key === ownFlag || binding[key] === !!event[key]);
 }
 
 /**
@@ -281,6 +307,10 @@ function normalizeDefinition(definition) {
       ? 'authoritative'
       : null;
   const continuous = normalizeContinuousDefinition(definition.continuous);
+  const hold = definition.hold === true;
+  if (continuous && hold) {
+    throw new TypeError('continuous semantic action cannot also be a hold action');
+  }
   const tuning = continuous
     ? normalizeContinuousTuning(definition.tuning)
     : null;
@@ -291,6 +321,7 @@ function normalizeDefinition(definition) {
     accessibilityLabelId,
     authoritativeFeedback: definition.authoritativeFeedback === true,
     feedback,
+    hold,
     ...(continuous ? { continuous, tuning } : {}),
     bindings: normalizeBindingSlots(definition.bindings, { continuous: !!continuous }),
   });
@@ -312,6 +343,7 @@ export function createSemanticActionRegistry(options = {}) {
   const bindings = new Map();
   const authoredTuning = new Map();
   const tuning = new Map();
+  const keyboardHolds = new Map();
   const actionFeedback = options.actionFeedback || null;
 
   function assertActionAndSlot(id, slot) {
@@ -684,8 +716,9 @@ export function createSemanticActionRegistry(options = {}) {
         : actionFeedback.cancel(feedback.correlation);
     };
     let handled = false;
+    let feedbackSuppressed = false;
     try {
-      handled = adapter ? adapter({
+      const adapterResult = adapter ? adapter({
         actionId: id,
         context,
         source: options.source || 'control',
@@ -705,6 +738,10 @@ export function createSemanticActionRegistry(options = {}) {
         surface: options.surface && typeof options.surface === 'object'
           ? options.surface
           : null,
+        binding: options.binding && typeof options.binding === 'object'
+          ? { ...options.binding }
+          : null,
+        pressed: options.pressed !== false,
         correlation: feedback ? feedback.correlation : null,
         inputMs: feedback ? feedback.inputMs : null,
         feedbackKind: definition.feedback,
@@ -715,7 +752,9 @@ export function createSemanticActionRegistry(options = {}) {
         cancelFeedback: feedback && definition.feedback === 'local'
           ? () => bufferOrApplyLocalFeedback('cancel')
           : null,
-      }) !== false : false;
+      }) : false;
+      feedbackSuppressed = adapterResult === SEMANTIC_HANDLED_WITHOUT_FEEDBACK;
+      handled = adapterResult !== false;
     } catch (error) {
       activationOpen = false;
       if (feedback && typeof actionFeedback.cancel === 'function') {
@@ -725,14 +764,15 @@ export function createSemanticActionRegistry(options = {}) {
     }
     activationOpen = false;
     if (feedback) {
-      if (handled && typeof actionFeedback.pending === 'function') {
+      if (handled && !feedbackSuppressed && typeof actionFeedback.pending === 'function') {
         actionFeedback.pending(feedback.correlation);
         if (bufferedLocalFeedback?.kind === 'settle') {
           actionFeedback.settle(feedback.correlation, bufferedLocalFeedback.outcome);
         } else if (bufferedLocalFeedback?.kind === 'cancel') {
           actionFeedback.cancel(feedback.correlation);
         }
-      } else if (!handled && typeof actionFeedback.cancel === 'function') {
+      } else if ((!handled || feedbackSuppressed)
+          && typeof actionFeedback.cancel === 'function') {
         actionFeedback.cancel(feedback.correlation);
       }
     }
@@ -740,27 +780,75 @@ export function createSemanticActionRegistry(options = {}) {
       claimed: true,
       actionId: id,
       handled,
-      ...(feedback && handled ? { correlation: feedback.correlation, inputMs: feedback.inputMs } : {}),
+      ...(feedback && handled && !feedbackSuppressed
+        ? { correlation: feedback.correlation, inputMs: feedback.inputMs }
+        : {}),
     };
   }
 
   function dispatchKeyboardEvent(event, context) {
-    if (!event || (event.type && event.type !== 'keydown') || event.repeat) {
+    if (!event || (event.type && event.type !== 'keydown' && event.type !== 'keyup')) {
       return { claimed: false, actionId: null, handled: false };
     }
+    if (event.type === 'keyup') {
+      const heldKey = [...keyboardHolds.keys()]
+        .find((code) => keyboardCodesEqual(code, event.code));
+      if (!heldKey) return { claimed: false, actionId: null, handled: false };
+      const held = keyboardHolds.get(heldKey);
+      keyboardHolds.delete(heldKey);
+      if (event.cancelable !== false && typeof event.preventDefault === 'function') {
+        event.preventDefault();
+      }
+      return activate(held.actionId, {
+        context: held.context,
+        source: 'keyboard',
+        event,
+        binding: held.binding,
+        pressed: false,
+      });
+    }
+    if (event.repeat) return { claimed: false, actionId: null, handled: false };
     if (isSemanticInputTarget(event.target)) {
       return { claimed: false, actionId: null, handled: false };
     }
     for (const entry of list(context)) {
-      if (!entry.bindings.some((binding) => keyboardBindingMatches(binding, event))) continue;
+      const binding = entry.bindings.find((candidate) => keyboardBindingMatches(candidate, event));
+      if (!binding) continue;
       // The binding is now claimed. Nothing else causes preventDefault — an
       // unbound key remains ordinary browser/page input.
       if (event.cancelable !== false && typeof event.preventDefault === 'function') {
         event.preventDefault();
       }
-      return activate(entry.id, { context, source: 'keyboard', event });
+      const result = activate(entry.id, {
+        context, source: 'keyboard', event, binding, pressed: true,
+      });
+      if (entry.hold && result.handled) {
+        keyboardHolds.set(event.code, {
+          actionId: entry.id,
+          context,
+          binding,
+          eventCode: event.code,
+        });
+      }
+      return result;
     }
     return { claimed: false, actionId: null, handled: false };
+  }
+
+  function releaseKeyboardHolds(context) {
+    const releases = [];
+    for (const [code, held] of keyboardHolds) {
+      if (context && held.context !== context) continue;
+      keyboardHolds.delete(code);
+      releases.push(activate(held.actionId, {
+        context: held.context,
+        source: 'keyboard',
+        event: { code: held.eventCode },
+        binding: held.binding,
+        pressed: false,
+      }));
+    }
+    return releases;
   }
 
   return {
@@ -779,6 +867,7 @@ export function createSemanticActionRegistry(options = {}) {
     updateTuning,
     activate,
     dispatchKeyboardEvent,
+    releaseKeyboardHolds,
   };
 }
 

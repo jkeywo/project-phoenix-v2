@@ -1,5 +1,75 @@
 /** Parent/iframe routing helpers for a composite Station's semantic families. */
 
+const SUBCONTEXT_ATTRIBUTE = 'data-semantic-action-context';
+
+function normalizedContext(value) {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+/**
+ * Keep a composite document's keyboard/gamepad family explicit.
+ *
+ * Each interactive region names its family with
+ * `data-semantic-action-context`. Pointer interaction or keyboard focus moves
+ * the active family; until either happens the authored default remains active.
+ * The controller deliberately remembers the last selected region when focus
+ * moves to shared chrome, so an unrelated footer control cannot silently
+ * redirect input.
+ */
+export function createSemanticSubcontextController(root, options = {}) {
+  if (!root || typeof root.querySelectorAll !== 'function'
+      || typeof root.addEventListener !== 'function') {
+    throw new TypeError('semantic subcontext controller requires an event root');
+  }
+  const defaultContext = normalizedContext(options.defaultContext);
+  if (!defaultContext) throw new TypeError('semantic subcontext default is required');
+
+  const selector = `[${SUBCONTEXT_ATTRIBUTE}]`;
+  const regions = Array.from(root.querySelectorAll(selector));
+  const contexts = new Set(regions
+    .map((region) => normalizedContext(region.getAttribute(SUBCONTEXT_ATTRIBUTE)))
+    .filter(Boolean));
+  contexts.add(defaultContext);
+  let activeContext = defaultContext;
+
+  function select(context) {
+    const next = normalizedContext(context);
+    if (!contexts.has(next)) return false;
+    activeContext = next;
+    for (const region of regions) {
+      const selected = normalizedContext(region.getAttribute(SUBCONTEXT_ATTRIBUTE)) === next;
+      region.toggleAttribute('data-semantic-action-active', selected);
+    }
+    return true;
+  }
+
+  function regionFromEvent(event) {
+    const target = event && event.target;
+    if (!target || typeof target.closest !== 'function') return null;
+    const region = target.closest(selector);
+    if (!region || !regions.includes(region)) return null;
+    return region;
+  }
+
+  function onInteraction(event) {
+    const region = regionFromEvent(event);
+    if (region) select(region.getAttribute(SUBCONTEXT_ATTRIBUTE));
+  }
+
+  root.addEventListener('focusin', onInteraction);
+  root.addEventListener('pointerdown', onInteraction);
+  select(defaultContext);
+
+  return Object.freeze({
+    getContext: () => activeContext,
+    select,
+    dispose() {
+      root.removeEventListener('focusin', onInteraction);
+      root.removeEventListener('pointerdown', onInteraction);
+    },
+  });
+}
+
 /** Read the active semantic subcontext exposed by an iframe, or its Station. */
 export function semanticContextForIframe(iframe, fallback) {
   try {
@@ -53,6 +123,7 @@ export function iframeForSemanticContext(context, activeIframe, lookup) {
 
 if (typeof window !== 'undefined') {
   window.CompositeActionRouting = Object.freeze({
+    createSemanticSubcontextController,
     semanticContextForIframe,
     semanticActionsForIframe,
     iframeForSemanticContext,

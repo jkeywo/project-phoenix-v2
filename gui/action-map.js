@@ -18,11 +18,18 @@
 import { dispatchRepairTeam, setRepairPriority, setRepairTargetPriority } from './repair-dispatch.js';
 import {
   sendHelmInput,
+  sendThrust,
   sendSteering,
+  sendLateralThrust,
   startImpulseCharge,
   cancelImpulse,
   toggleBoost,
   setBoost,
+  HELM_THRUST_SYSTEM_ID,
+  HELM_STEERING_SYSTEM_ID,
+  HELM_IMPULSE_SYSTEM_ID,
+  HELM_BOOST_SYSTEM_ID,
+  LATERAL_THRUST_SYSTEM_ID,
 } from './helm-dispatch.js';
 
 function controlSystemId(action, fallback) {
@@ -67,18 +74,24 @@ export const ACTION_MAP = Object.freeze({
    * nearest viable dock-marker pair; `target` is the authored Dock SystemId
    * resolved into the Helm view by the #1251 metadata tracer. */
   dock: (a, send) => {
-    if (!a.target) return;
-    send('ControlSystem', {
-      target: a.target,
+    const target = controlSystemId(a, a.target);
+    if (!target) return;
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
+      target,
       payload: { type: 'Dock' },
     });
   },
 
   /** Undock, backing the ship clear and returning ordinary flight (issue #1159). */
   undock: (a, send) => {
-    if (!a.target) return;
-    send('ControlSystem', {
-      target: a.target,
+    const target = controlSystemId(a, a.target);
+    if (!target) return;
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
+      target,
       payload: { type: 'Undock' },
     });
   },
@@ -345,55 +358,96 @@ export const ACTION_MAP = Object.freeze({
    *  human owns. Component emitters (ph-helm-joystick) are unchanged.
    */
   helm_input: (a, send) => {
-    sendHelmInput(a.thrust, a.steering, send);
+    sendHelmInput(a.thrust, a.steering, send, {
+      thrustSystemId: a.thrust_system_id,
+      steeringSystemId: a.steering_system_id,
+    });
   },
 
   /** Set helm via analog joystick (ph-helm-joystick component).
    *  Same per-axis fan-out as helm_input (issue #801); the joystick's yaw
    *  maps to the steering axis. */
   set_helm: (a, send) => {
-    sendHelmInput(a.thrust, a.yaw, send);
+    sendHelmInput(a.thrust, a.yaw, send, {
+      thrustSystemId: a.thrust_system_id,
+      steeringSystemId: a.steering_system_id,
+    });
   },
 
   /** Continuous semantic steering uses only the existing narrow axis route. */
   set_helm_steering: (a, send) => {
     if (!Number.isFinite(a.value)) return;
-    sendSteering(a.value, send);
+    sendSteering(a.value, send, controlSystemId(a, HELM_STEERING_SYSTEM_ID));
+  },
+
+  /** Continuous semantic thrust uses only the existing narrow axis route. */
+  set_helm_thrust: (a, send) => {
+    if (!Number.isFinite(a.value)) return;
+    sendThrust(a.value, send, controlSystemId(a, HELM_THRUST_SYSTEM_ID));
+  },
+
+  /** Ship-specific lateral thrust retains its independently admitted route. */
+  set_helm_lateral: (a, send) => {
+    if (!Number.isFinite(a.value)) return;
+    sendLateralThrust(a.value, send, controlSystemId(a, LATERAL_THRUST_SYSTEM_ID));
   },
 
   /** Begin charging the impulse drive. Targets 'helm-impulse' (issue #801). */
   start_impulse_charge: (a, send) => {
-    startImpulseCharge(send);
-  },
-
-  /** Cancel an active impulse charge. Targets 'helm-impulse' (issue #801). */
-  cancel_impulse: (a, send) => {
+    const target = controlSystemId(a, HELM_IMPULSE_SYSTEM_ID);
     const correlated = typeof a.correlation === 'string' && a.correlation;
     if (!correlated) {
-      cancelImpulse(send);
+      startImpulseCharge(send, target);
       return;
     }
     send('ControlSystemCorrelated', {
       correlation: a.correlation,
-      target: 'helm-impulse',
+      target,
+      payload: { type: 'StartImpulseCharge' },
+    });
+  },
+
+  /** Cancel an active impulse charge. Targets 'helm-impulse' (issue #801). */
+  cancel_impulse: (a, send) => {
+    const target = controlSystemId(a, HELM_IMPULSE_SYSTEM_ID);
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    if (!correlated) {
+      cancelImpulse(send, target);
+      return;
+    }
+    send('ControlSystemCorrelated', {
+      correlation: a.correlation,
+      target,
       payload: { type: 'CancelImpulse' },
     });
   },
 
   /** Toggle the boost drive on/off. Targets 'helm-boost' (issue #801). */
   toggle_boost: (a, send) => {
-    toggleBoost(send);
+    toggleBoost(send, controlSystemId(a, HELM_BOOST_SYSTEM_ID));
   },
 
   /** Explicitly set boost on or off (hold-to-boost). Targets 'helm-boost'. */
   set_boost: (a, send) => {
-    setBoost(a.active, send);
+    const target = controlSystemId(a, HELM_BOOST_SYSTEM_ID);
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    if (!correlated) {
+      setBoost(a.active, send, target);
+      return;
+    }
+    send('ControlSystemCorrelated', {
+      correlation: a.correlation,
+      target,
+      payload: { type: 'SetBoost', data: { active: !!a.active } },
+    });
   },
 
   /** Switch the view-screen to the radar mode. */
   set_radar_view: (a, send) => {
-    send('ControlSystem', {
-      target: 'viewscreen',
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
+      target: controlSystemId(a, 'viewscreen'),
       payload: { type: 'SetView', data: { mode: { kind: 'Radar' } } },
     });
   },

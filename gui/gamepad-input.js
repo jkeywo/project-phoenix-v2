@@ -25,6 +25,13 @@ export const STANDARD_GAMEPAD_CONTROLS = Object.freeze({
     labelId: 'input.gamepad.left_shoulder' }),
   'right-shoulder': Object.freeze({ input: 'button', index: 5,
     labelId: 'input.gamepad.right_shoulder' }),
+  // One signed logical axis preserves Helm's shipped bumper pair: LB is -1,
+  // RB is +1 and pressing both cancels to neutral. Continuous binding capture
+  // may therefore learn the pair from either shoulder without treating two
+  // required directions as two unrelated action alternatives.
+  'shoulder-pair': Object.freeze({ input: 'axis', negativeIndex: 4, positiveIndex: 5,
+    members: Object.freeze(['left-shoulder', 'right-shoulder']),
+    labelId: 'input.gamepad.shoulder_pair' }),
   'left-trigger': Object.freeze({ input: 'button', index: 6,
     labelId: 'input.gamepad.left_trigger' }),
   'right-trigger': Object.freeze({ input: 'button', index: 7,
@@ -103,9 +110,16 @@ export function gamepadBindingsEqual(left, right) {
     const b = normalizeGamepadBinding(right, {
       continuous: right.input === 'axis' && right.direction == null,
     });
-    if (a.input === 'axis' && b.input === 'axis' && a.control === b.control
+    const controlsOverlap = a.control === b.control
+      || (STANDARD_GAMEPAD_CONTROLS[a.control]?.members || []).includes(b.control)
+      || (STANDARD_GAMEPAD_CONTROLS[b.control]?.members || []).includes(a.control);
+    if (!controlsOverlap) return false;
+    if (a.input === 'axis' && b.input === 'axis'
         && (a.direction == null || b.direction == null)) return true;
-    return a.input === b.input && a.control === b.control
+    // A composite signed axis owns each of its constituent buttons, so the
+    // defaults cannot silently assign LB/RB to another concurrent action.
+    if (a.input !== b.input) return true;
+    return a.input === b.input
       && (a.input !== 'axis' || a.direction === b.direction);
   } catch (_) {
     return false;
@@ -131,6 +145,15 @@ function pressedButton(button) {
   return !!(button && (button.pressed || Number(button.value) >= 0.5));
 }
 
+function controlAxis(gamepad, mapped) {
+  if (Number.isInteger(mapped?.negativeIndex) && Number.isInteger(mapped?.positiveIndex)) {
+    const negative = pressedButton((gamepad.buttons || [])[mapped.negativeIndex]) ? -1 : 0;
+    const positive = pressedButton((gamepad.buttons || [])[mapped.positiveIndex]) ? 1 : 0;
+    return negative + positive;
+  }
+  return Number((gamepad.axes || [])[mapped?.index]) || 0;
+}
+
 /** Whether one logical binding is active on one standard-mapped snapshot. */
 export function gamepadBindingPressed(value, gamepad) {
   if (!gamepad || gamepad.mapping !== 'standard') return false;
@@ -140,7 +163,7 @@ export function gamepadBindingPressed(value, gamepad) {
   if (binding.input !== 'axis') {
     return pressedButton((gamepad.buttons || [])[mapped.index]);
   }
-  const axis = Number((gamepad.axes || [])[mapped.index]) || 0;
+  const axis = controlAxis(gamepad, mapped);
   return binding.direction === 'negative'
     ? axis <= -binding.threshold : axis >= binding.threshold;
 }
@@ -165,7 +188,7 @@ function firstCaptureBinding(gamepad, options = {}) {
   }
   for (const [control, mapped] of CONTROL_ENTRIES) {
     if (mapped.input !== 'axis') continue;
-    const value = Number((gamepad.axes || [])[mapped.index]) || 0;
+    const value = controlAxis(gamepad, mapped);
     if (options.continuous === true && Math.abs(value) >= GAMEPAD_AXIS_CAPTURE_THRESHOLD) {
       return normalizeGamepadBinding({
         type: 'gamepad', input: 'axis', control,
@@ -256,6 +279,7 @@ export function createGamepadInputRuntime(options = {}) {
   let captureTarget = null;
   let previousPressed = new Set();
   const continuousOutputs = new Map();
+  const heldDiscrete = new Map();
   let neutralGate = false;
   let lastContext = null;
   let lastActionCatalogueSignature = null;
@@ -324,7 +348,7 @@ export function createGamepadInputRuntime(options = {}) {
     return action && action.continuous && Number.isFinite(action.continuous.neutral);
   }
 
-  function dispatchContinuous(action, value, timestamp, immediate = false) {
+  function dispatchContinuous(action, context, value, timestamp, immediate = false) {
     const spec = action.continuous;
     const previous = continuousOutputs.get(action.id);
     const isNeutral = value === spec.neutral;
@@ -332,17 +356,22 @@ export function createGamepadInputRuntime(options = {}) {
     if (!isNeutral && previous && previous.value !== spec.neutral && !immediate
         && timestamp - previous.lastSentAt < spec.cadenceMs) return false;
     if (!isTransportLive()) {
-      if (isNeutral) continuousOutputs.delete(action.id);
+      continuousOutputs.delete(action.id);
       return false;
     }
+    // A composite console can expose the same semantic action in more than
+    // one context.  The active caller-selected context owns the first live
+    // output; its neutral must return through that same context even if the
+    // parent has selected another subcontext in the meantime.
+    const outputContext = previous?.context ?? context;
     activate(action.id, {
-      context: action.contexts[0], source: 'gamepad', value,
+      context: outputContext, source: 'gamepad', value,
       neutral: isNeutral,
     });
     continuousOutputs.set(action.id, {
       value,
       neutral: spec.neutral,
-      context: action.contexts[0],
+      context: outputContext,
       lastSentAt: timestamp,
     });
     return true;
@@ -360,6 +389,21 @@ export function createGamepadInputRuntime(options = {}) {
       }
     }
     continuousOutputs.clear();
+  }
+
+  function flushDiscreteHolds() {
+    const transportLive = isTransportLive();
+    for (const held of heldDiscrete.values()) {
+      if (transportLive) {
+        activate(held.actionId, {
+          context: held.context,
+          source: 'gamepad',
+          binding: { ...held.binding },
+          pressed: false,
+        });
+      }
+    }
+    heldDiscrete.clear();
   }
 
   function status() {
@@ -390,6 +434,7 @@ export function createGamepadInputRuntime(options = {}) {
 
   function neutralize(timestamp = now()) {
     flushContinuous(timestamp);
+    flushDiscreteHolds();
     previousPressed.clear();
     neutralGate = !!selection;
     notify();
@@ -398,6 +443,7 @@ export function createGamepadInputRuntime(options = {}) {
   function select(index) {
     if (index == null || index === '') {
       flushContinuous();
+      flushDiscreteHolds();
       selection = null;
       captureTarget = null;
       previousPressed.clear();
@@ -434,6 +480,7 @@ export function createGamepadInputRuntime(options = {}) {
     const pad = latestSnapshot[slot];
     if (pad && pad.mapping === 'standard') return select(slot);
     flushContinuous();
+    flushDiscreteHolds();
     selection = { index: slot, generation: -1 };
     captureTarget = null;
     previousPressed.clear();
@@ -457,7 +504,10 @@ export function createGamepadInputRuntime(options = {}) {
 
   function noteDisconnected(index) {
     const record = connection(Number(index));
-    if (selection && selection.index === Number(index)) flushContinuous();
+    if (selection && selection.index === Number(index)) {
+      flushContinuous();
+      flushDiscreteHolds();
+    }
     record.connected = false;
     previousPressed.clear();
     neutralGate = !!selection;
@@ -469,7 +519,10 @@ export function createGamepadInputRuntime(options = {}) {
     const record = connection(Number(gamepad.index));
     // A browser connection event is a new ephemeral connection even when a
     // missed poll never observed the old slot empty.
-    if (selection && selection.index === Number(gamepad.index)) flushContinuous();
+    if (selection && selection.index === Number(gamepad.index)) {
+      flushContinuous();
+      flushDiscreteHolds();
+    }
     record.connected = true;
     record.generation += 1;
     previousPressed.clear();
@@ -486,7 +539,7 @@ export function createGamepadInputRuntime(options = {}) {
         const mapped = STANDARD_GAMEPAD_CONTROLS[binding.control];
         if (!mapped || mapped.input !== 'axis') continue;
         const value = normalizeContinuousAxis(
-          (gamepad.axes || [])[mapped.index], action.tuning, action.continuous,
+          controlAxis(gamepad, mapped), action.tuning, action.continuous,
         );
         if (value !== action.continuous.neutral) return false;
       }
@@ -526,7 +579,7 @@ export function createGamepadInputRuntime(options = {}) {
       const mapped = STANDARD_GAMEPAD_CONTROLS[binding.control];
       if (!mapped || mapped.input !== 'axis') continue;
       const value = normalizeContinuousAxis(
-        (gamepad.axes || [])[mapped.index], action.tuning, action.continuous,
+        controlAxis(gamepad, mapped), action.tuning, action.continuous,
       );
       const deflection = continuousDeflection(value, action.continuous);
       if (!selected || deflection > selected.deflection) {
@@ -543,6 +596,7 @@ export function createGamepadInputRuntime(options = {}) {
     const actionCatalogueSignature = catalogueSignatureFor(actionCatalogue);
     if (context !== lastContext) {
       flushContinuous(timestamp);
+      flushDiscreteHolds();
       lastContext = context;
       lastActionCatalogueSignature = actionCatalogueSignature;
       previousPressed.clear();
@@ -554,10 +608,22 @@ export function createGamepadInputRuntime(options = {}) {
       // that as a new ownership boundary and require every newly visible input
       // to return to neutral before it can dispatch.
       flushContinuous(timestamp);
+      flushDiscreteHolds();
       lastActionCatalogueSignature = actionCatalogueSignature;
       previousPressed.clear();
       neutralGate = !!selection;
       notify();
+    }
+    if (!isTransportLive()) {
+      // A transport outage cannot carry a release. Drop ownership now and
+      // re-arm through neutral so neither a hold nor an axis replays a stale
+      // release when transport returns.
+      flushContinuous(timestamp);
+      flushDiscreteHolds();
+      previousPressed.clear();
+      neutralGate = !!selection;
+      notify();
+      return state();
     }
     // A background page must not silently satisfy the neutral gate and resume
     // output before the operator can see it. The visible transition re-arms
@@ -571,6 +637,7 @@ export function createGamepadInputRuntime(options = {}) {
     const pad = selectedPad();
     if (!pad || pad.mapping !== 'standard') {
       flushContinuous(timestamp);
+      flushDiscreteHolds();
       previousPressed.clear();
       notify();
       return state();
@@ -613,6 +680,7 @@ export function createGamepadInputRuntime(options = {}) {
       const previous = continuousOutputs.get(action.id);
       dispatchContinuous(
         action,
+        context,
         value,
         timestamp,
         !previous || previous.value === action.continuous.neutral,
@@ -637,9 +705,26 @@ export function createGamepadInputRuntime(options = {}) {
         const key = bindingKey(binding);
         nextPressed.add(key);
         if (!previousPressed.has(key)) {
-          activate(action.id, { context, source: 'gamepad', binding: { ...binding } });
+          const result = activate(action.id, {
+            context, source: 'gamepad', binding: { ...binding }, pressed: true,
+          });
+          if (action.hold && (result === true || result?.handled === true)) {
+            heldDiscrete.set(key, { actionId: action.id, context, binding: { ...binding } });
+          }
         }
       }
+    }
+    for (const [key, held] of heldDiscrete) {
+      if (nextPressed.has(key)) continue;
+      if (isTransportLive()) {
+        activate(held.actionId, {
+          context: held.context,
+          source: 'gamepad',
+          binding: { ...held.binding },
+          pressed: false,
+        });
+      }
+      heldDiscrete.delete(key);
     }
     previousPressed = nextPressed;
     notify();

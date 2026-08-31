@@ -1,8 +1,11 @@
-// Issue #1278: the selected standard gamepad's horizontal stick reaches the
-// real Helm SetSteering route. Disconnect emits one stop, never transfers to a
-// second pad, and an explicitly reselected displaced replacement stays gated.
+// Issues #1278/#1288: the selected standard gamepad reaches the real Helm
+// continuous and discrete routes. Authoritative feedback proves accepted and
+// refused commands; disconnect emits one stop, never transfers to a second
+// pad, and an explicitly reselected displaced replacement stays gated.
 
-import { test, expect, readHostPeerId, waitForWasmReady } from './fixtures';
+import {
+  test, expect, createTestClient, readHostPeerId, waitForWasmReady,
+} from './fixtures';
 import { ts } from './strings';
 
 async function installFabricatedGamepads(page) {
@@ -16,10 +19,17 @@ async function installFabricatedGamepads(page) {
       pads = [];
       for (const spec of specs) {
         if (!spec) continue;
+        const buttons = Array.from(
+          { length: 17 },
+          (_unused, index) => ({
+            pressed: (spec.pressed || []).includes(index),
+            value: (spec.pressed || []).includes(index) ? 1 : 0,
+          }),
+        );
         pads[spec.index] = {
           index: spec.index,
           mapping: spec.mapping === undefined ? 'standard' : spec.mapping,
-          buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })),
+          buttons,
           axes: spec.axes || [0, 0, 0, 0],
           id: `fabricated-hardware-${spec.index}`,
         };
@@ -30,6 +40,42 @@ async function installFabricatedGamepads(page) {
 
 async function setPads(page, specs) {
   await page.evaluate((next) => window.__setFabricatedGamepads(next), specs);
+}
+
+async function installHelmFeedbackProbe(frameBody) {
+  await frameBody.evaluate(() => {
+    window.__helmFeedbackTransitions = [];
+    window.addEventListener('phoenix-action-feedback', (event) => {
+      const value = event && event.detail;
+      if (!value || value.lifecycleTransition !== true) return;
+      window.__helmFeedbackTransitions.push({
+        actionId: value.actionId,
+        correlation: value.correlation,
+        state: value.state,
+      });
+    });
+  });
+}
+
+async function expectAppliedLifecycles(frameBody, actionId, count = 1) {
+  const expected = Array.from(
+    { length: count },
+    () => ['Pressed', 'Pending', 'Applied'],
+  ).flat();
+  await expect.poll(
+    () => frameBody.evaluate((_body, id) => (
+      window.__helmFeedbackTransitions
+        .filter((event) => event.actionId === id)
+        .map((event) => event.state)
+    ), actionId),
+    { timeout: 10_000 },
+  ).toEqual(expected);
+  const events = await frameBody.evaluate((_body, id) => (
+    window.__helmFeedbackTransitions.filter((event) => event.actionId === id)
+  ), actionId);
+  for (let offset = 0; offset < events.length; offset += 3) {
+    expect(new Set(events.slice(offset, offset + 3).map((event) => event.correlation)).size).toBe(1);
+  }
 }
 
 test('selected continuous Helm axis steers authoritatively and reconnects neutral-gated', async ({ context }) => {
@@ -75,7 +121,40 @@ test('selected continuous Helm axis steers authoritatively and reconnects neutra
     .toHaveValue(ts('input.gamepad.left_stick_x'));
   await helm.keyboard.press('Escape');
 
-  const radar = helm.frameLocator('#helm-iframe').locator('ph-helm-radar');
+  const helmFrame = helm.frameLocator('#helm-iframe');
+  const frameBody = helmFrame.locator('body');
+  await installHelmFeedbackProbe(frameBody);
+
+  // Three independently bindable discrete Helm actions take their real
+  // gamepad routes. Boost is a hold: both the rising and falling edge receive
+  // their own terminal authoritative outcome.
+  await setPads(helm, [{ index: 0, pressed: [3] }, { index: 1 }]);
+  await expectAppliedLifecycles(frameBody, 'helm.viewscreen');
+  await setPads(helm, [{ index: 0 }, { index: 1 }]);
+  await setPads(helm, [{ index: 0, pressed: [1] }, { index: 1 }]);
+  await expectAppliedLifecycles(frameBody, 'helm.impulse');
+  await setPads(helm, [{ index: 0 }, { index: 1 }]);
+  await setPads(helm, [{ index: 0, pressed: [0] }, { index: 1 }]);
+  await expectAppliedLifecycles(frameBody, 'helm.boost');
+  await setPads(helm, [{ index: 0 }, { index: 1 }]);
+  await expectAppliedLifecycles(frameBody, 'helm.boost', 2);
+
+  // The same well-formed correlated Helm command from a peer without Helm
+  // tenure is refused by the real authority boundary and cannot start a jump.
+  const nonHelm = await createTestClient(context, hostId, { name: 'No Helm' });
+  const refusedCorrelation = 'smoke-non-helm-impulse';
+  await nonHelm.send('ControlSystemCorrelated', {
+    correlation: refusedCorrelation,
+    target: 'helm-impulse',
+    payload: { type: 'StartImpulseCharge' },
+  });
+  expect((await nonHelm.waitForMessage('ActionFeedback', 10_000)).data).toEqual({
+    correlation: refusedCorrelation,
+    outcome: 'Refused',
+  });
+  await nonHelm.close();
+
+  const radar = helmFrame.locator('ph-helm-radar');
   const initialHeading = await radar.evaluate((element) => Number(element.state.ship_heading));
   // Pad 1 is displaced but unowned and cannot steer.
   await setPads(helm, [{ index: 0 }, { index: 1, axes: [1, 0, 0, 0] }]);

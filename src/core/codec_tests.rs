@@ -4862,8 +4862,16 @@ fn ship_client_config_console_families_round_trip_as_public_strings() {
         ("helm".to_string(), ConsoleFamily::Helm),
         ("scan".to_string(), ConsoleFamily::Sensors),
     ]);
+    let system_kinds = HashMap::from([
+        (
+            "port-flight-vector".to_string(),
+            "helm_steering".to_string(),
+        ),
+        ("berthing-clamps".to_string(), "dock".to_string()),
+    ]);
     let config = ShipClientConfig {
         system_console_families,
+        system_kinds,
         blackboard_console_families,
         ..ShipClientConfig::default()
     };
@@ -4879,6 +4887,8 @@ fn ship_client_config_console_families_round_trip_as_public_strings() {
     assert!(json.contains("\"berthing-clamps\":\"helm\""));
     assert!(json.contains("\"main-drive\":\"helm\""));
     assert!(json.contains("\"scan\":\"sensors\""));
+    assert!(json.contains("\"port-flight-vector\":\"helm_steering\""));
+    assert!(json.contains("\"berthing-clamps\":\"dock\""));
     let decoded = JsonCodec.decode_server(&json).unwrap();
     if let ServerMessage::Welcome { ship_config, .. } = decoded {
         assert_eq!(
@@ -4889,6 +4899,7 @@ fn ship_client_config_console_families_round_trip_as_public_strings() {
             ship_config.blackboard_console_families,
             config.blackboard_console_families
         );
+        assert_eq!(ship_config.system_kinds, config.system_kinds);
     } else {
         panic!("expected Welcome");
     }
@@ -4911,10 +4922,15 @@ fn ship_client_config_console_families_default_empty_when_missing() {
         !json.contains("blackboard_console_families"),
         "the empty blackboard projection is omitted from the public payload"
     );
+    assert!(
+        !json.contains("system_kinds"),
+        "the empty authored-kind projection is omitted from the public payload"
+    );
     let decoded = JsonCodec.decode_server(&json).unwrap();
     if let ServerMessage::Welcome { ship_config, .. } = decoded {
         assert!(ship_config.system_console_families.is_empty());
         assert!(ship_config.blackboard_console_families.is_empty());
+        assert!(ship_config.system_kinds.is_empty());
     } else {
         panic!("expected Welcome");
     }

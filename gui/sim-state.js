@@ -142,6 +142,10 @@ export class ClientSimState {
      *  Welcome ship_config.system_console_families. Every owned System has an
      *  entry; the client never infers presentation from its id spelling. */
     this.systemConsoleFamilies = {};
+    /** Authoritative System id → authored System kind projection, populated
+     *  from Welcome ship_config.system_kinds. Command surfaces use this to
+     *  select exact fine-System owners without parsing instance-id spelling. */
+    this.systemKinds = {};
     /** Authoritative reserved/aggregate blackboard key → Console Family
      *  projection. Kept separate because these keys are not Systems and convey
      *  no ownership or command authority. */
@@ -405,6 +409,7 @@ export class ClientSimState {
         this.stationRatings = d.station_ratings || {};
         this.stationSystems = sc.station_systems || {};
         this.systemConsoleFamilies = sc.system_console_families || {};
+        this.systemKinds = sc.system_kinds || {};
         this.blackboardConsoleFamilies = sc.blackboard_console_families || {};
         // Anonymous eligibility projection (issue #1103): per station → per
         // rating → the assist-functions that station forces manual. Hull-derived

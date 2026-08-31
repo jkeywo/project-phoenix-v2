@@ -8,7 +8,7 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 51 expected action keys', () => {
+  it('contains exactly the 53 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'cancel_impulse',
       'charge_blaster_cancel',
@@ -35,7 +35,9 @@ describe('ACTION_MAP', () => {
       'select_scenario',
       'set_boost',
       'set_helm',
+      'set_helm_lateral',
       'set_helm_steering',
+      'set_helm_thrust',
       'set_lateral_thrust',
       'set_navigation_chart',
       'set_navigation_waypoint',
@@ -111,6 +113,24 @@ describe('dock / undock (issue #1159)', () => {
     ACTION_MAP.dock({ action: 'dock' }, send);
     ACTION_MAP.undock({ action: 'undock' }, send);
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it('preserves the authored Dock target in correlated semantic envelopes', () => {
+    const send = mkSend();
+    ACTION_MAP.dock({ target: 'dock', correlation: 'helm-dock-1' }, send);
+    ACTION_MAP.undock({ target: 'dock', correlation: 'helm-undock-1' }, send);
+    expect(send.mock.calls).toEqual([
+      ['ControlSystemCorrelated', {
+        correlation: 'helm-dock-1',
+        target: 'dock',
+        payload: { type: 'Dock' },
+      }],
+      ['ControlSystemCorrelated', {
+        correlation: 'helm-undock-1',
+        target: 'dock',
+        payload: { type: 'Undock' },
+      }],
+    ]);
   });
 });
 
@@ -462,11 +482,46 @@ describe('set_helm_steering', () => {
   });
 });
 
+describe('semantic Helm thrust variants', () => {
+  it('keeps thrust and lateral thrust on their existing narrow routes', () => {
+    const send = mkSend();
+    ACTION_MAP.set_helm_thrust({ value: 0.75 }, send);
+    ACTION_MAP.set_helm_lateral({ value: -0.25 }, send);
+    expect(send.mock.calls).toEqual([
+      ['ControlSystem', {
+        target: 'helm-thrust',
+        payload: { type: 'SetThrust', data: { value: 0.75 } },
+      }],
+      ['ControlSystem', {
+        target: 'helm-lateral-thrust',
+        payload: { type: 'LateralThrustInput', data: { lateral: -0.25 } },
+      }],
+    ]);
+  });
+
+  it('refuses non-finite thrust values before transport', () => {
+    const send = mkSend();
+    ACTION_MAP.set_helm_thrust({ value: Number.NaN }, send);
+    ACTION_MAP.set_helm_lateral({ value: Number.POSITIVE_INFINITY }, send);
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
 describe('start_impulse_charge', () => {
   it('calls send StartImpulseCharge', () => {
     const send = mkSend();
     ACTION_MAP.start_impulse_charge({}, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'helm-impulse',
+      payload: { type: 'StartImpulseCharge' },
+    });
+  });
+
+  it('carries semantic correlation on the same impulse target', () => {
+    const send = mkSend();
+    ACTION_MAP.start_impulse_charge({ correlation: 'helm-impulse-1' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'helm-impulse-1',
       target: 'helm-impulse',
       payload: { type: 'StartImpulseCharge' },
     });
@@ -501,6 +556,24 @@ describe('set_boost', () => {
       payload: { type: 'SetBoost', data: { active: false } },
     });
   });
+
+  it('carries hold press and release correlations without changing SetBoost', () => {
+    const send = mkSend();
+    ACTION_MAP.set_boost({ active: true, correlation: 'helm-boost-on' }, send);
+    ACTION_MAP.set_boost({ active: false, correlation: 'helm-boost-off' }, send);
+    expect(send.mock.calls).toEqual([
+      ['ControlSystemCorrelated', {
+        correlation: 'helm-boost-on',
+        target: 'helm-boost',
+        payload: { type: 'SetBoost', data: { active: true } },
+      }],
+      ['ControlSystemCorrelated', {
+        correlation: 'helm-boost-off',
+        target: 'helm-boost',
+        payload: { type: 'SetBoost', data: { active: false } },
+      }],
+    ]);
+  });
 });
 
 describe('cancel_impulse', () => {
@@ -532,6 +605,65 @@ describe('set_radar_view', () => {
       target: 'viewscreen',
       payload: { type: 'SetView', data: { mode: { kind: 'Radar' } } },
     });
+  });
+
+  it('carries semantic correlation on the existing viewscreen route', () => {
+    const send = mkSend();
+    ACTION_MAP.set_radar_view({ correlation: 'helm-view-1' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'helm-view-1',
+      target: 'viewscreen',
+      payload: { type: 'SetView', data: { mode: { kind: 'Radar' } } },
+    });
+  });
+});
+
+describe('authored Helm owner routing', () => {
+  it('targets arbitrary authored SystemIds for every Helm command family', () => {
+    const send = mkSend();
+    ACTION_MAP.helm_input({
+      thrust: 0.2,
+      steering: -0.3,
+      thrust_system_id: 'drive-array-port',
+      steering_system_id: 'yaw-ring-a',
+    }, send);
+    ACTION_MAP.set_helm_thrust({ value: 0.4, control_system_id: 'drive-array-starboard' }, send);
+    ACTION_MAP.set_helm_steering({ value: 0.5, control_system_id: 'yaw-ring-b' }, send);
+    ACTION_MAP.set_helm_lateral({ value: -1, control_system_id: 'translation-ring' }, send);
+    ACTION_MAP.start_impulse_charge({
+      control_system_id: 'jump-coil', correlation: 'impulse-start',
+    }, send);
+    ACTION_MAP.cancel_impulse({
+      control_system_id: 'jump-coil', correlation: 'impulse-cancel',
+    }, send);
+    ACTION_MAP.toggle_boost({ control_system_id: 'overburner' }, send);
+    ACTION_MAP.set_boost({
+      active: true, control_system_id: 'overburner', correlation: 'boost-on',
+    }, send);
+    ACTION_MAP.set_radar_view({
+      control_system_id: 'forward-display', correlation: 'radar',
+    }, send);
+    ACTION_MAP.dock({
+      target: 'legacy-dock', control_system_id: 'berthing-clamps', correlation: 'dock',
+    }, send);
+    ACTION_MAP.undock({
+      target: 'legacy-dock', control_system_id: 'berthing-clamps', correlation: 'undock',
+    }, send);
+
+    expect(send.mock.calls.map(([, envelope]) => envelope.target)).toEqual([
+      'drive-array-port',
+      'yaw-ring-a',
+      'drive-array-starboard',
+      'yaw-ring-b',
+      'translation-ring',
+      'jump-coil',
+      'jump-coil',
+      'overburner',
+      'overburner',
+      'forward-display',
+      'berthing-clamps',
+      'berthing-clamps',
+    ]);
   });
 });
 

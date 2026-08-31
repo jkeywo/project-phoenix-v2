@@ -961,6 +961,56 @@ describe('buildHelmConsoleState', () => {
     expect(() => parse(buildHelmConsoleState(EMPTY))).not.toThrow();
   });
 
+  it('projects exact command-owner ids from arbitrary authored System kinds', () => {
+    const ids = [
+      'delta-throttle',
+      'crosswind-servo',
+      'port-burst',
+      'pulse-coil-nine',
+      'overdrive-cell',
+      'berthing-clamps',
+    ];
+    const s = parse(buildHelmConsoleState({
+      systemKinds: {
+        'delta-throttle': 'helm_thrust',
+        'crosswind-servo': 'helm_steering',
+        'port-burst': 'lateral_thrust',
+        'pulse-coil-nine': 'helm_impulse',
+        'overdrive-cell': 'helm_boost',
+        'bridge-glass': 'viewscreen',
+        'berthing-clamps': 'dock',
+      },
+      blackboards: {
+        'berthing-clamps': {
+          range: 250, available: true, engaged: false, docked: false,
+        },
+      },
+    }, ids));
+
+    expect(s).toMatchObject({
+      thrust_system_id: 'delta-throttle',
+      steering_system_id: 'crosswind-servo',
+      lateral_system_id: 'port-burst',
+      impulse_system_id: 'pulse-coil-nine',
+      boost_system_id: 'overdrive-cell',
+      // Viewscreen is not in Helm's owned ids; the selected-ship kind map is
+      // intentionally the cross-station authority projection.
+      viewscreen_system_id: 'bridge-glass',
+      dock: { system_id: 'berthing-clamps' },
+    });
+  });
+
+  it('keeps owner ids nullable for a legacy Welcome without the kind projection', () => {
+    expect(parse(buildHelmConsoleState(EMPTY))).toMatchObject({
+      thrust_system_id: null,
+      steering_system_id: null,
+      lateral_system_id: null,
+      impulse_system_id: null,
+      boost_system_id: null,
+      viewscreen_system_id: null,
+    });
+  });
+
   it('heading is in degrees [0, 360)', () => {
     const cases = [
       { yaw: 0,           expectedHeading: 0 },

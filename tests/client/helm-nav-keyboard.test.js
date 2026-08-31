@@ -22,6 +22,13 @@ import '../../gui/components/ph-lateral-thrust-joystick.js';
 import '../../gui/components/ph-navigation-map.js';
 import '../../gui/components/ph-helm-radar.js';
 import '../../gui/components/ph-boost-btn.js';
+import {
+  HELM_ACTION_CONTEXT,
+  HELM_BOOST_ACTION_ID,
+  HELM_LATERAL_ACTION_ID,
+  HELM_STEERING_ACTION_ID,
+  HELM_THRUST_ACTION_ID,
+} from '../../gui/stations/helm-actions.js';
 
 let rafCb = null;
 let origGetContext;
@@ -42,6 +49,7 @@ function tick() {
 beforeEach(() => {
   document.body.innerHTML = '';
   window.sendAction = vi.fn();
+  window.activateSemanticAction = vi.fn(() => ({ handled: true }));
   rafCb = null;
   const fakeCtx = makeRadarCtx();
   origGetContext = HTMLCanvasElement.prototype.getContext;
@@ -62,6 +70,7 @@ beforeEach(() => {
 afterEach(() => {
   document.body.innerHTML = '';   // disconnects components → removes their listeners
   delete window.sendAction;
+  delete window.activateSemanticAction;
   HTMLCanvasElement.prototype.getContext = origGetContext;
   window.requestAnimationFrame = origRAF;
   window.cancelAnimationFrame = origCARAF;
@@ -121,15 +130,19 @@ describe('composite role + accessible name (AC #1)', () => {
 // ── Helm joystick: keyboard flight + key-relay coexistence (AC #2) ───────────
 
 describe('helm joystick keyboard flight (AC #2)', () => {
-  it('an arrow key drives the SAME set_helm the pointer drag emits', () => {
+  it('an arrow key drives the SAME semantic axes the pointer drag emits', () => {
     mount('ph-helm-joystick');
     docKey('keydown', 'ArrowUp');   // forward thrust
     tick();
-    expect(window.sendAction).toHaveBeenCalledTimes(1);
-    const [action, payload] = window.sendAction.mock.calls[0];
-    expect(action).toBe('set_helm');
-    expect(payload.thrust).toBeCloseTo(1, 5);
-    expect(payload.yaw).toBe(0);
+    expect(window.activateSemanticAction).toHaveBeenCalledTimes(2);
+    expect(window.activateSemanticAction.mock.calls).toEqual([
+      [HELM_THRUST_ACTION_ID, {
+        context: HELM_ACTION_CONTEXT, source: 'control', value: 1,
+      }],
+      [HELM_STEERING_ACTION_ID, {
+        context: HELM_ACTION_CONTEXT, source: 'control', value: 0,
+      }],
+    ]);
   });
 
   it('a native + relayed press of the same key fires set_helm ONCE (no double-fire)', () => {
@@ -140,20 +153,22 @@ describe('helm joystick keyboard flight (AC #2)', () => {
     docKey('keydown', 'ArrowUp');
     docKey('keydown', 'ArrowUp');
     tick();
-    expect(window.sendAction).toHaveBeenCalledTimes(1);
+    expect(window.activateSemanticAction).toHaveBeenCalledTimes(2);
   });
 
   it('releasing the key snaps the stick back to zero', () => {
     mount('ph-helm-joystick');
     docKey('keydown', 'ArrowUp');
     tick();
-    window.sendAction.mockClear();
+    window.activateSemanticAction.mockClear();
     docKey('keyup', 'ArrowUp');
     tick();
-    const last = window.sendAction.mock.calls.at(-1);
-    expect(last[0]).toBe('set_helm');
-    expect(last[1].thrust === 0 || Object.is(last[1].thrust, -0)).toBe(true);
-    expect(last[1].yaw === 0 || Object.is(last[1].yaw, -0)).toBe(true);
+    expect(window.activateSemanticAction.mock.calls.map((call) => call[0])).toEqual([
+      HELM_THRUST_ACTION_ID, HELM_STEERING_ACTION_ID,
+    ]);
+    expect(window.activateSemanticAction.mock.calls.every(
+      (call) => call[1].value === 0 || Object.is(call[1].value, -0),
+    )).toBe(true);
   });
 
   it('does not steal Tab — a non-flight key is left for the browser', () => {
@@ -161,21 +176,22 @@ describe('helm joystick keyboard flight (AC #2)', () => {
     const ev = docKey('keydown', 'Tab');
     tick();
     expect(ev.defaultPrevented).toBe(false);
-    expect(window.sendAction).not.toHaveBeenCalled();
+    expect(window.activateSemanticAction).not.toHaveBeenCalled();
   });
 });
 
 // ── Lateral thruster: keyboard strafe (AC #2) ───────────────────────────────
 
 describe('lateral thruster keyboard strafe (AC #2)', () => {
-  it('an arrow key drives the SAME set_lateral_thrust the pointer drag emits', () => {
+  it('an arrow key drives the SAME semantic lateral axis the pointer drag emits', () => {
     mount('ph-lateral-thrust-joystick');
     docKey('keydown', 'ArrowLeft');   // port
     tick();
-    expect(window.sendAction).toHaveBeenCalledTimes(1);
-    const [action, payload] = window.sendAction.mock.calls[0];
-    expect(action).toBe('set_lateral_thrust');
-    expect(payload.lateral).toBeCloseTo(-1, 5);
+    expect(window.activateSemanticAction).toHaveBeenCalledWith(
+      HELM_LATERAL_ACTION_ID, {
+        context: HELM_ACTION_CONTEXT, source: 'control', value: -1,
+      },
+    );
   });
 });
 
@@ -186,6 +202,12 @@ describe('navigation chart keyboard operation (AC #2/#4)', () => {
     { uuid: 'alpha', name: 'Alpha Station', kind: 'station', stance: 'friendly', world_x: 100, world_z: 0 },
     { uuid: 'bravo', name: 'Bravo Depot', kind: 'station', stance: 'neutral', world_x: -50, world_z: 80 },
   ];
+
+  beforeEach(() => {
+    // This component-level suite exercises the DOM fallback path. The semantic
+    // Navigation adapter and its surface handoff have their own focused suite.
+    delete window.activateSemanticAction;
+  });
 
   function chartWithContacts() {
     const el = mount('ph-navigation-map');
@@ -263,9 +285,15 @@ describe('boost hold-to-boost from the keyboard (AC #2/#4)', () => {
     const btn = el.shadowRoot.getElementById('btn');
     btn.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, composed: true, cancelable: true }));
     btn.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true, composed: true, cancelable: true }));
-    expect(window.sendAction.mock.calls).toEqual([
-      ['set_boost', { active: true }],
-      ['set_boost', { active: false }],
+    expect(window.activateSemanticAction.mock.calls).toEqual([
+      [HELM_BOOST_ACTION_ID, {
+        context: HELM_ACTION_CONTEXT,
+        source: 'control', detail: { holdSource: 'boost-button' }, pressed: true,
+      }],
+      [HELM_BOOST_ACTION_ID, {
+        context: HELM_ACTION_CONTEXT,
+        source: 'control', detail: { holdSource: 'boost-button' }, pressed: false,
+      }],
     ]);
   });
 
@@ -275,7 +303,7 @@ describe('boost hold-to-boost from the keyboard (AC #2/#4)', () => {
     const btn = el.shadowRoot.getElementById('btn');
     btn.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, composed: true, cancelable: true }));
     btn.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true, composed: true, cancelable: true }));
-    expect(window.sendAction.mock.calls.map((c) => c[1].active)).toEqual([true, false]);
+    expect(window.activateSemanticAction.mock.calls.map((c) => c[1].pressed)).toEqual([true, false]);
   });
 
   it('a blur while the key is held releases boost once — no stuck-true', () => {
@@ -287,9 +315,15 @@ describe('boost hold-to-boost from the keyboard (AC #2/#4)', () => {
     const btn = el.shadowRoot.getElementById('btn');
     btn.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, composed: true, cancelable: true }));
     btn.dispatchEvent(new FocusEvent('blur'));
-    expect(window.sendAction.mock.calls).toEqual([
-      ['set_boost', { active: true }],
-      ['set_boost', { active: false }],
+    expect(window.activateSemanticAction.mock.calls).toEqual([
+      [HELM_BOOST_ACTION_ID, {
+        context: HELM_ACTION_CONTEXT,
+        source: 'control', detail: { holdSource: 'boost-button' }, pressed: true,
+      }],
+      [HELM_BOOST_ACTION_ID, {
+        context: HELM_ACTION_CONTEXT,
+        source: 'control', detail: { holdSource: 'boost-button' }, pressed: false,
+      }],
     ]);
   });
 });

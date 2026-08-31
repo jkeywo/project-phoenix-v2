@@ -5,7 +5,7 @@ import { createSemanticActionRegistry } from './semantic-action-registry.js';
 import {
   CAPTAIN_ACTIONS,
 } from './stations/captain-actions.js';
-import { HELM_STEERING_ACTION } from './stations/helm-actions.js';
+import { HELM_ACTIONS } from './stations/helm-actions.js';
 import { COMMS_ACTIONS } from './stations/comms-actions.js';
 import { SENSOR_SCIENCE_ACTIONS } from './stations/sensors-actions.js';
 import { MOD_ACTIONS } from './editor-mod-actions.js';
@@ -17,7 +17,7 @@ export function createClientSemanticActionRegistry({ adapters = {}, actionFeedba
   const registry = createSemanticActionRegistry({ actionFeedback });
   for (const action of [
     ...CAPTAIN_ACTIONS,
-    HELM_STEERING_ACTION,
+    ...HELM_ACTIONS,
     ...TACTICAL_ACTIONS,
     ...COMMS_ACTIONS,
     ...SENSOR_SCIENCE_ACTIONS,

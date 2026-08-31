@@ -2,6 +2,10 @@
 import { t } from '../../gui/strings.js';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { PhHelmJoystick } from '../../gui/components/ph-helm-joystick.js';
+import {
+  HELM_STEERING_ACTION_ID,
+  HELM_THRUST_ACTION_ID,
+} from '../../gui/stations/helm-actions.js';
 
 const JOYSTICK_SOURCE = String(PhHelmJoystick);
 
@@ -35,8 +39,8 @@ function tickRaf() {
 }
 
 function setup(opts) {
-  if (opts && opts.sendAction) {
-    window.sendAction = opts.sendAction;
+  if (opts && opts.activateSemanticAction) {
+    window.activateSemanticAction = opts.activateSemanticAction;
   }
   document.body.innerHTML = '<ph-helm-joystick id="test-el"></ph-helm-joystick>';
   const el = document.getElementById('test-el');
@@ -55,12 +59,12 @@ function stubWellRect(el, w, h) {
 describe('PhHelmJoystick', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
-    delete window.sendAction;
+    delete window.activateSemanticAction;
   });
 
   afterEach(() => {
     document.body.innerHTML = '';
-    delete window.sendAction;
+    delete window.activateSemanticAction;
     restoreRAF();
   });
 
@@ -96,21 +100,21 @@ describe('PhHelmJoystick', () => {
     expect(el.shadowRoot.getElementById('well').classList.contains('auto')).toBe(false);
   });
 
-  it('does not fire sendAction when auto state is active', () => {
+  it('does not activate an action when auto state is active', () => {
     mockRAF();
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
     el.state = { auto: true };
     stubWellRect(el, 240, 240);
     const well = el.shadowRoot.getElementById('well');
     well.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1, clientX: 200, clientY: 200 }));
-    expect(sendAction).not.toHaveBeenCalled();
+    expect(activateSemanticAction).not.toHaveBeenCalled();
   });
 
-  it('sends normalized set_helm action on pointer release after drag', () => {
+  it('activates the two normalized Helm axes on pointer release', () => {
     mockRAF();
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
     el.state = { auto: false };
     stubWellRect(el, 240, 240);
     const well = el.shadowRoot.getElementById('well');
@@ -122,35 +126,38 @@ describe('PhHelmJoystick', () => {
     // Release sends the final action synchronously
     well.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }));
 
-    expect(sendAction).toHaveBeenCalledTimes(1);
-    const call = sendAction.mock.calls[0];
-    expect(call[0]).toBe('set_helm');
-    expect(Math.abs(call[1].thrust)).toBeLessThanOrEqual(1);
-    expect(Math.abs(call[1].yaw)).toBeLessThanOrEqual(1);
+    expect(activateSemanticAction).toHaveBeenCalledTimes(2);
+    expect(activateSemanticAction.mock.calls.map((call) => call[0])).toEqual([
+      HELM_THRUST_ACTION_ID, HELM_STEERING_ACTION_ID,
+    ]);
+    for (const [, options] of activateSemanticAction.mock.calls) {
+      expect(options.source).toBe('control');
+      expect(Math.abs(options.value)).toBeLessThanOrEqual(1);
+    }
   });
 
-  it('snaps nub to center and sends zero thrust/yaw on release', () => {
+  it('snaps nub to center and activates zero thrust/steering on release', () => {
     vi.useFakeTimers();
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
     el.state = { auto: false };
     stubWellRect(el, 240, 240);
     const well = el.shadowRoot.getElementById('well');
 
     well.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1, clientX: 200, clientY: 50 }));
     vi.advanceTimersByTime(100);
-    sendAction.mockClear();
+    activateSemanticAction.mockClear();
 
     well.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }));
     // allow the final sendAction (fired synchronously in onUp) plus visual rAF
     vi.advanceTimersByTime(0);
 
-    const calls = sendAction.mock.calls;
-    expect(calls.length).toBeGreaterThanOrEqual(1);
-    const last = calls[calls.length - 1];
-    expect(last[0]).toBe('set_helm');
-    expect(last[1].thrust === 0 || Object.is(last[1].thrust, -0)).toBe(true);
-    expect(last[1].yaw === 0 || Object.is(last[1].yaw, -0)).toBe(true);
+    const calls = activateSemanticAction.mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls.map((call) => call[0])).toEqual([
+      HELM_THRUST_ACTION_ID, HELM_STEERING_ACTION_ID,
+    ]);
+    expect(calls.every((call) => call[1].value === 0 || Object.is(call[1].value, -0))).toBe(true);
 
     // snap also applies via rAF — advance a frame
     vi.advanceTimersByTime(16);

@@ -117,6 +117,21 @@ pub struct OutboundMessage {
 #[derive(bevy::ecs::schedule::SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LobbySystemSet;
 
+/// Project the selected ship's resolved authored System topology onto the
+/// public instance-id -> kind map used by client command surfaces.
+///
+/// The include resolver has already composed the selected entity before this
+/// seam sees it, so walking `systems` covers every live `[[system]]` entry
+/// without teaching the browser any instance-id naming convention.
+fn project_system_kinds(
+    systems: &[crate::ship::config::SystemInstanceConfig],
+) -> std::collections::HashMap<String, String> {
+    systems
+        .iter()
+        .map(|system| (system.id.0.clone(), system.kind.clone()))
+        .collect()
+}
+
 // ── Plugin ─────────────────────────────────────────────────────────────────
 
 pub struct LobbyPlugin;
@@ -438,6 +453,7 @@ fn update_session_with_config(
             let registry = crate::ship::system_registry::SystemKindRegistry::with_core_systems()
                 .expect("the built-in System descriptor registry must be valid");
             next.system_console_families = registry.project_console_families(&sc.systems);
+            next.system_kinds = project_system_kinds(&sc.systems);
             next.blackboard_console_families = registry.project_blackboard_console_families();
             // Anonymous accessibility eligibility projection (issue #1103):
             // per station → per rating → the T1 assist-functions the station
@@ -1696,6 +1712,44 @@ mod tests {
         let msgs = app.world().resource::<Outbox>().0.clone();
         app.world_mut().resource_mut::<Outbox>().0.clear();
         msgs
+    }
+
+    #[test]
+    fn client_system_kind_projection_preserves_arbitrary_authored_instance_ids() {
+        use crate::core::messages::SystemId;
+        use crate::ship::config::SystemInstanceConfig;
+
+        let system = |id: &str, kind: &str| SystemInstanceConfig {
+            id: SystemId(id.into()),
+            kind: kind.into(),
+            station: None,
+            ai_only: false,
+            human_seeking: false,
+            seek_order: vec![],
+            power_group: None,
+            marker: None,
+            config: None,
+        };
+        let projected = project_system_kinds(&[
+            system("port-flight-vector", "helm_steering"),
+            system("berthing-clamps", "dock"),
+            system("pulse-reservoir-seven", "helm_boost"),
+        ]);
+
+        assert_eq!(
+            projected,
+            std::collections::HashMap::from([
+                (
+                    "port-flight-vector".to_string(),
+                    "helm_steering".to_string()
+                ),
+                ("berthing-clamps".to_string(), "dock".to_string()),
+                (
+                    "pulse-reservoir-seven".to_string(),
+                    "helm_boost".to_string()
+                ),
+            ])
+        );
     }
 
     #[test]

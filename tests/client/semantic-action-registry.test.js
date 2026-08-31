@@ -9,6 +9,7 @@ import {
   normalizeBindingSlots,
   normalizeKeyboardBinding,
   formatSemanticBinding,
+  SEMANTIC_HANDLED_WITHOUT_FEEDBACK,
 } from '../../gui/semantic-action-registry.js';
 import { t } from '../../gui/strings.js';
 
@@ -55,6 +56,16 @@ describe('semantic action registration and normalization', () => {
     const registry = createSemanticActionRegistry();
     registry.register(ACTION);
     expect(() => registry.register(ACTION)).toThrow(/already registered/i);
+  });
+
+  it('rejects an action that is both continuous and hold-to-operate', () => {
+    const registry = createSemanticActionRegistry();
+    expect(() => registry.register({
+      ...ACTION,
+      hold: true,
+      continuous: { min: -1, max: 1, neutral: 0, cadenceMs: 100 },
+      tuning: { deadzone: 0.1, inverted: false },
+    })).toThrow(/continuous.*hold/i);
   });
 
   it('exposes two current slots and context metadata without authority fields', () => {
@@ -157,6 +168,98 @@ describe('context-scoped dispatch', () => {
     const claimedButUnavailable = key('KeyR');
     expect(registry.dispatchKeyboardEvent(claimedButUnavailable, 'captain').handled).toBe(false);
     expect(claimedButUnavailable.preventDefault).toHaveBeenCalledOnce();
+  });
+
+  it('treats left/right modifier keys as one hold binding and releases once', () => {
+    const adapter = vi.fn(() => true);
+    const registry = createSemanticActionRegistry();
+    registry.register({
+      ...ACTION,
+      id: 'helm.boost',
+      contexts: ['helm'],
+      hold: true,
+      bindings: [{ code: 'ShiftLeft' }, null],
+    }, adapter);
+
+    const down = key('ShiftRight', { shiftKey: true });
+    expect(registry.dispatchKeyboardEvent(down, 'helm')).toMatchObject({ handled: true });
+    registry.dispatchKeyboardEvent(key('ShiftRight', {
+      type: 'keydown', shiftKey: true, repeat: true,
+    }), 'helm');
+    const up = key('ShiftRight', { type: 'keyup', shiftKey: false });
+    expect(registry.dispatchKeyboardEvent(up, 'helm')).toMatchObject({ handled: true });
+    expect(adapter.mock.calls.map(([activation]) => ({
+      pressed: activation.pressed, code: activation.event.code,
+    }))).toEqual([
+      { pressed: true, code: 'ShiftRight' },
+      { pressed: false, code: 'ShiftRight' },
+    ]);
+    expect(keyboardBindingsEqual(
+      normalizeKeyboardBinding({ code: 'ShiftLeft' }),
+      normalizeKeyboardBinding({ code: 'ShiftRight' }),
+    )).toBe(true);
+    expect(keyboardBindingsEqual(
+      normalizeKeyboardBinding({ code: 'ShiftLeft' }),
+      keyboardBindingFromEvent({ code: 'ShiftRight', shiftKey: true }),
+    )).toBe(true);
+  });
+
+  it('releases accepted keyboard holds on blur with their actual key side', () => {
+    const adapter = vi.fn(() => true);
+    const registry = createSemanticActionRegistry();
+    registry.register({
+      ...ACTION,
+      id: 'helm.boost',
+      contexts: ['helm'],
+      hold: true,
+      bindings: [{ code: 'ShiftLeft' }, null],
+    }, adapter);
+    registry.dispatchKeyboardEvent(key('ShiftRight', { shiftKey: true }), 'helm');
+    expect(registry.releaseKeyboardHolds('helm')).toHaveLength(1);
+    expect(adapter).toHaveBeenLastCalledWith(expect.objectContaining({
+      pressed: false,
+      event: { code: 'ShiftRight' },
+    }));
+    expect(registry.releaseKeyboardHolds('helm')).toEqual([]);
+  });
+
+  it('does not retain a rejected keyboard hold for later release', () => {
+    const adapter = vi.fn(() => false);
+    const registry = createSemanticActionRegistry();
+    registry.register({
+      ...ACTION, id: 'helm.boost', contexts: ['helm'], hold: true,
+      bindings: [{ code: 'ShiftLeft' }, null],
+    }, adapter);
+    registry.dispatchKeyboardEvent(key('ShiftLeft', { shiftKey: true }), 'helm');
+    registry.dispatchKeyboardEvent(key('ShiftLeft', { type: 'keyup' }), 'helm');
+    expect(adapter).toHaveBeenCalledOnce();
+  });
+
+  it('tracks a composited hold source without leaving authoritative feedback pending', () => {
+    let serial = 0;
+    const actionFeedback = {
+      press: vi.fn(() => ({ correlation: `hold-${++serial}`, inputMs: serial })),
+      pending: vi.fn(),
+      cancel: vi.fn(),
+    };
+    const registry = createSemanticActionRegistry({ actionFeedback });
+    registry.register({
+      ...ACTION,
+      id: 'helm.boost',
+      contexts: ['helm'],
+      hold: true,
+      authoritativeFeedback: true,
+      bindings: [{ code: 'ShiftLeft' }, null],
+    }, () => SEMANTIC_HANDLED_WITHOUT_FEEDBACK);
+
+    const result = registry.dispatchKeyboardEvent(
+      key('ShiftRight', { shiftKey: true }),
+      'helm',
+    );
+    expect(result).toEqual({ claimed: true, actionId: 'helm.boost', handled: true });
+    expect(actionFeedback.pending).not.toHaveBeenCalled();
+    expect(actionFeedback.cancel).toHaveBeenCalledWith('hold-1');
+    expect(registry.releaseKeyboardHolds('helm')).toHaveLength(1);
   });
 });
 

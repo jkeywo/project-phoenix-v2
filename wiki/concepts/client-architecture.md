@@ -171,15 +171,27 @@ immediate neutral for an active continuous action and then require every bound
 continuous axis to fall within its configured deadzone before input can resume.
 Nonzero values dispatch immediately and then at the action's authored cadence;
 release or disconnect emits neutral exactly once. Multiple bound axes resolve
-by greatest deflection, then binding-slot order. Keyboard dispatch remains the
-independent iframe path throughout.
+by greatest deflection, then binding-slot order. Discrete hold actions likewise
+emit one press and one release; console changes, disconnects, deselection and
+visibility interruption release accepted holds before re-arming the neutral
+gate, so boost cannot remain latched after its physical input disappears.
+Keyboard dispatch remains the independent iframe path throughout, with
+left/right modifier keys treated as the same portable binding family while the
+actual pressed side is retained for release.
 
-`helm.steering` is the first continuous semantic action. The parent samples the
-selected standard pad's left-stick X axis, while the Helm iframe adapter emits
-only `set_helm_steering`; `gui/action-map.js` maps that to the existing
-`SetSteering` command on `helm-steering`. The visual joystick no longer reads
-the Gamepad API or chooses a device, and its pointer/WASD `set_helm` path stays
-unchanged.
+The complete Helm semantic family is `helm.thrust`, `helm.steering`,
+`helm.lateral-thrust`, `helm.impulse`, `helm.boost`, `helm.viewscreen` and
+`helm.dock`. The parent samples the selected standard pad's authored axes and
+buttons; each iframe control and its retained keyboard/pointer behavior activate
+the same identities. `gui/action-map.js` maps those identities onto the existing
+fine-system commands without changing the 100 ms continuous cadence or
+normalising an analogue value a second time. Cruiser, Destroyer and the Courier's
+composite Tactical console mount the lateral action's visible control, while only
+Destroyer mounts contextual Dock;
+the capability checks keep those variants unavailable on other hulls. Impulse,
+boost, viewscreen and dock use correlated authoritative feedback, completed by
+their owning consumers after application or refusal. No Helm component polls
+the Gamepad API or bypasses the semantic registry with a direct command.
 
 `gui/operator-profile.js` is the one current-version private browser profile.
 It whitelists Accessibility effects and assistance, exactly two bindings for

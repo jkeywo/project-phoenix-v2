@@ -42,9 +42,8 @@ impl Plugin for CaptainPlugin {
             crate::ship::system_registry::CAPTAIN_KIND,
             crate::ship::system_registry::CAPTAIN_SYSTEM_ID,
         ))
-        .register_admitted_consumer(ConsumerMatcher::exact(
+        .register_admitted_consumer(ConsumerMatcher::kind(
             crate::ship::system_registry::VIEWSCREEN_KIND,
-            crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID,
         ));
         app.init_resource::<crate::server_app::CaptainPriorityBoost>();
         // The scripted weapons-hold queue `apply_scripted_weapons_holds` drains
@@ -373,6 +372,7 @@ pub fn mirror_weapons_hold_flags(
 
 fn view_request_from_admitted(
     cmd: &crate::core::messages::AdmittedCommand,
+    ship_config: Option<&crate::ship_plugin::ShipConfigComponent>,
 ) -> Option<(SystemId, ViewMode)> {
     /// Map a "cinematic" marker name to the Cinematic view mode.
     fn resolve(mode: &ViewMode) -> ViewMode {
@@ -381,23 +381,46 @@ fn view_request_from_admitted(
             _ => mode.clone(),
         }
     }
-    match &cmd.payload {
-        // `SetView` arrives either on the viewscreen target or (legacy helm
-        // console path) on the `"helm"` station-id target — the coarse helm
-        // system is gone (#801), but the wire string is unchanged and resolves
-        // through the station-name admission fallback. Either way the
-        // requesting system is derived from the view mode itself.
-        SystemControlPayload::SetView { mode }
-            if cmd.target.0 == crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID
-                || cmd.target.0 == crate::ship::system_registry::HELM_STATION_ID =>
-        {
-            Some((
-                crate::ship::viewscreen::source_system_for_view_mode(mode),
-                resolve(mode),
-            ))
-        }
-        _ => None,
+    let config = ship_config.map(|config| &config.0);
+    let has_authored_viewscreen = config.is_some_and(|config| {
+        config
+            .systems
+            .iter()
+            .any(|system| system.kind == crate::ship::system_registry::VIEWSCREEN_KIND)
+    });
+    let target_is_viewscreen = config
+        .and_then(|config| config.system(&cmd.target))
+        .is_some_and(|system| system.kind == crate::ship::system_registry::VIEWSCREEN_KIND)
+        || (!has_authored_viewscreen
+            && cmd.target.0 == crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID);
+    let SystemControlPayload::SetView { mode } = &cmd.payload else {
+        return None;
+    };
+    if !target_is_viewscreen && cmd.target.0 != crate::ship::system_registry::HELM_STATION_ID {
+        return None;
     }
+
+    let source_kind = match mode {
+        ViewMode::Camera(_) | ViewMode::Cinematic => crate::ship::system_registry::CAPTAIN_KIND,
+        ViewMode::Radar => crate::ship::system_registry::HELM_RADAR_KIND,
+        ViewMode::ScienceRadar | ViewMode::SensorsRadar => {
+            crate::ship::system_registry::SENSORS_KIND
+        }
+        ViewMode::SystemChart | ViewMode::NavigationChart => {
+            crate::ship::system_registry::NAVIGATION_KIND
+        }
+        ViewMode::Comms => crate::ship::system_registry::COMMS_KIND,
+    };
+    let source = config
+        .and_then(|config| {
+            config
+                .systems
+                .iter()
+                .find(|system| system.kind == source_kind)
+        })
+        .map(|system| system.id.clone())
+        .unwrap_or_else(|| crate::ship::viewscreen::source_system_for_view_mode(mode));
+    Some((source, resolve(mode)))
 }
 
 /// Apply admitted viewscreen `SetView` requests to the local ship's
@@ -410,7 +433,13 @@ fn view_request_from_admitted(
 /// making the monotonic arbiter `sequence` an authoritative total order rather
 /// than depending on Bevy's ambiguous system-execution order.
 pub(crate) fn handle_set_view(
-    ship_query: Query<&AdmittedCommands, With<crate::server_app::LocalShip>>,
+    ship_query: Query<
+        (
+            &AdmittedCommands,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
     mut view_mode_q: Query<
         &mut crate::ship::state::ShipViewMode,
         With<crate::server_app::LocalShip>,
@@ -419,12 +448,12 @@ pub(crate) fn handle_set_view(
         ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
     >,
 ) {
-    let Some(admitted) = ship_query.iter().next() else {
+    let Some((admitted, ship_config)) = ship_query.iter().next() else {
         return;
     };
     let mut vm = view_mode_q.iter_mut().next();
     for cmd in admitted.0.iter() {
-        if let Some((source, mode)) = view_request_from_admitted(cmd) {
+        if let Some((source, mode)) = view_request_from_admitted(cmd, ship_config) {
             let outcome = if let Some(view_mode) = vm.as_deref_mut() {
                 view_mode.request_view_mode_from(source, mode);
                 ActionFeedbackOutcome::Applied
@@ -471,9 +500,17 @@ fn backfill_captain_prefers_cinematic_view(
         // system, not the viewscreen (`source_system_for_view_mode`,
         // `is_command_authorized`'s `effective_target` remap) — the viewscreen
         // itself has no seat to be human- or AI-operated, the Captain does.
-        let policy = control_sources
-            .0
-            .policy_for(&crate::ship::system_registry::captain_system_id());
+        let captain_system_id = ship_config
+            .and_then(|config| {
+                config
+                    .0
+                    .systems
+                    .iter()
+                    .find(|system| system.kind == crate::ship::system_registry::CAPTAIN_KIND)
+            })
+            .map(|system| system.id.clone())
+            .unwrap_or_else(crate::ship::system_registry::captain_system_id);
+        let policy = control_sources.0.policy_for(&captain_system_id);
         if !policy.operate_ai {
             continue;
         }
@@ -483,9 +520,19 @@ fn backfill_captain_prefers_cinematic_view(
             // admission is not spammed every tick.
             continue;
         }
+        let viewscreen_system_id = ship_config
+            .and_then(|config| {
+                config
+                    .0
+                    .systems
+                    .iter()
+                    .find(|system| system.kind == crate::ship::system_registry::VIEWSCREEN_KIND)
+            })
+            .map(|system| system.id.clone())
+            .unwrap_or_else(crate::ship::system_registry::viewscreen_system_id);
         emit_ai_command(
             entity_uuid,
-            crate::ship::system_registry::viewscreen_system_id(),
+            viewscreen_system_id,
             SystemControlPayload::SetView {
                 mode: ViewMode::Cinematic,
             },
@@ -816,6 +863,7 @@ fn publish_captain_blackboard(
             Option<&crate::ship::state::ShipViewMode>,
             Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&crate::entities::spawner::EntityUuid>,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
             bevy::ecs::query::Has<crate::server_app::LocalShip>,
             &mut crate::server_app::ShipSystemBlackboards,
         ),
@@ -829,6 +877,7 @@ fn publish_captain_blackboard(
         view_mode_comp,
         hull_opt,
         uuid_opt,
+        ship_config,
         is_local,
         mut bbs,
     ) in ship_query.iter_mut()
@@ -852,10 +901,18 @@ fn publish_captain_blackboard(
             .0
             .source_for(&crate::ship::system_registry::red_alert_system_id())
             == ControlSource::Ai;
-        let viewscreen_auto = control_sources
-            .0
-            .source_for(&crate::ship::system_registry::viewscreen_system_id())
-            == ControlSource::Ai;
+        let viewscreen_system_id = ship_config
+            .and_then(|config| {
+                config
+                    .0
+                    .systems
+                    .iter()
+                    .find(|system| system.kind == crate::ship::system_registry::VIEWSCREEN_KIND)
+            })
+            .map(|system| system.id.clone())
+            .unwrap_or_else(crate::ship::system_registry::viewscreen_system_id);
+        let viewscreen_auto =
+            control_sources.0.source_for(&viewscreen_system_id) == ControlSource::Ai;
 
         // ── Player-only fields (LocalShip) ────────────────────────────────────
         // View mode / camera list / objectives are player camera + doctrine
@@ -960,7 +1017,7 @@ fn publish_captain_blackboard(
             red_alert_system_id: crate::ship::system_registry::red_alert_system_id(),
             red_alert_auto,
             weapons_hold,
-            viewscreen_system_id: crate::ship::system_registry::viewscreen_system_id(),
+            viewscreen_system_id,
             viewscreen_auto,
             view_direction,
             view_mode,

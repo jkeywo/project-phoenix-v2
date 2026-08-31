@@ -70,17 +70,41 @@ pub struct AdmissionPlugin;
 /// Exact target/payload pairs whose owning consumers complete the correlated
 /// operator lifecycle. A correlation never widens command authority: this is
 /// only the protocol allowlist for commands that can promise a terminal reply.
-fn supports_correlated_action_feedback(
+fn supports_correlated_action_feedback_for_kind(
     target: &crate::core::messages::SystemId,
     payload: &crate::core::messages::SystemControlPayload,
+    target_kind: Option<&str>,
 ) -> bool {
     use crate::core::messages::SystemControlPayload;
 
-    (target.0 == crate::ship::system_registry::RED_ALERT_SYSTEM_ID
-        && matches!(
+    let authored_terminal_owner = match target_kind {
+        Some(crate::ship::system_registry::HELM_IMPULSE_KIND) => matches!(
             payload,
-            SystemControlPayload::SetRedAlert { .. } | SystemControlPayload::SetWeaponsHold { .. }
-        ))
+            SystemControlPayload::StartImpulseCharge | SystemControlPayload::CancelImpulse
+        ),
+        Some(crate::ship::system_registry::HELM_BOOST_KIND) => matches!(
+            payload,
+            SystemControlPayload::SetBoost { .. } | SystemControlPayload::ToggleBoost
+        ),
+        Some(crate::ship::system_registry::VIEWSCREEN_KIND) => {
+            matches!(payload, SystemControlPayload::SetView { .. })
+        }
+        Some(crate::ship::system_registry::DOCK_KIND) => {
+            matches!(
+                payload,
+                SystemControlPayload::Dock | SystemControlPayload::Undock
+            )
+        }
+        _ => false,
+    };
+
+    authored_terminal_owner
+        || (target.0 == crate::ship::system_registry::RED_ALERT_SYSTEM_ID
+            && matches!(
+                payload,
+                SystemControlPayload::SetRedAlert { .. }
+                    | SystemControlPayload::SetWeaponsHold { .. }
+            ))
         || (target.0 == crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID
             && matches!(payload, SystemControlPayload::SetView { .. }))
         || (target.0 == crate::ship::system_registry::CAPTAIN_SYSTEM_ID
@@ -125,7 +149,20 @@ fn supports_correlated_action_feedback(
                     | SystemControlPayload::ScanTarget { .. }
             ))
         || (target.0 == crate::ship::system_registry::HELM_IMPULSE_SYSTEM_ID
-            && matches!(payload, SystemControlPayload::CancelImpulse))
+            && matches!(
+                payload,
+                SystemControlPayload::StartImpulseCharge | SystemControlPayload::CancelImpulse
+            ))
+        || (target.0 == crate::ship::system_registry::HELM_BOOST_SYSTEM_ID
+            && matches!(
+                payload,
+                SystemControlPayload::SetBoost { .. } | SystemControlPayload::ToggleBoost
+            ))
+        || (target.0 == crate::ship::system_registry::DOCK_KIND
+            && matches!(
+                payload,
+                SystemControlPayload::Dock | SystemControlPayload::Undock
+            ))
         || (is_shield_arc_target(&target.0)
             && matches!(payload, SystemControlPayload::SetShieldArcFocus { .. }))
         || (target.0 == crate::ship::system_registry::POWER_REACTOR_SYSTEM_ID
@@ -151,6 +188,14 @@ fn supports_correlated_action_feedback(
                 payload,
                 SystemControlPayload::StartTransfer | SystemControlPayload::StopTransfer
             ))
+}
+
+#[cfg(test)]
+fn supports_correlated_action_feedback(
+    target: &crate::core::messages::SystemId,
+    payload: &crate::core::messages::SystemControlPayload,
+) -> bool {
+    supports_correlated_action_feedback_for_kind(target, payload, None)
 }
 
 fn is_shield_arc_target(target: &str) -> bool {
@@ -465,18 +510,6 @@ pub fn admit_system_commands(
             } => (target, payload, Some(correlation.clone())),
             _ => continue,
         };
-        // Only exact target/payload pairs with an owning terminal consumer may
-        // carry a correlation. Every other envelope gets a real refusal before
-        // admission rather than timing out behind an unrelated consumer.
-        if correlation.is_some() && !supports_correlated_action_feedback(target, payload) {
-            write_action_feedback(
-                &mut outbound,
-                &ev.token,
-                correlation.as_ref().expect("checked above"),
-                ActionFeedbackOutcome::Refused,
-            );
-            continue;
-        }
         // Route: a registered NPC `ai:` token belongs to its own entity's
         // AdmittedCommands; everything else (humans, host page, unregistered
         // `ai:` backfill tokens) belongs to the LocalShip.
@@ -511,6 +544,27 @@ pub fn admit_system_commands(
             }
             continue;
         };
+        // Resolve the authored instance before evaluating the correlation
+        // allowlist. Discrete Helm, viewscreen and dock SystemIds are
+        // designer-owned; their registered kind identifies the terminal
+        // consumer. Continuous Helm axes deliberately stay uncorrelated.
+        let target_kind = ship_config
+            .0
+            .systems
+            .iter()
+            .find(|system| system.id == *target)
+            .map(|system| system.kind.as_str());
+        if correlation.is_some()
+            && !supports_correlated_action_feedback_for_kind(target, payload, target_kind)
+        {
+            write_action_feedback(
+                &mut outbound,
+                &ev.token,
+                correlation.as_ref().expect("checked above"),
+                ActionFeedbackOutcome::Refused,
+            );
+            continue;
+        }
         // The log's routing key, taken here because this is where the route was
         // resolved. The `Entity` above delivers inside this process; this names
         // the same ship for anything outside it (issue #898 review) — see
@@ -806,7 +860,12 @@ station = "repair"
         let scan = SystemControlPayload::ScanTarget {
             uuid: "target".into(),
         };
+        let start_impulse = SystemControlPayload::StartImpulseCharge;
         let cancel_impulse = SystemControlPayload::CancelImpulse;
+        let set_boost = SystemControlPayload::SetBoost { active: true };
+        let toggle_boost = SystemControlPayload::ToggleBoost;
+        let dock = SystemControlPayload::Dock;
+        let undock = SystemControlPayload::Undock;
         let shield_focus = SystemControlPayload::SetShieldArcFocus { focused: true };
         let waypoint = SystemControlPayload::SetNavigationWaypoint {
             x: 10.0,
@@ -849,10 +908,65 @@ station = "repair"
             &crate::ship::system_registry::sensors_system_id(),
             &scan,
         ));
-        assert!(supports_correlated_action_feedback(
-            &crate::ship::system_registry::helm_impulse_system_id(),
-            &cancel_impulse,
-        ));
+        for payload in [&start_impulse, &cancel_impulse] {
+            assert!(supports_correlated_action_feedback(
+                &crate::ship::system_registry::helm_impulse_system_id(),
+                payload,
+            ));
+        }
+        for payload in [&set_boost, &toggle_boost] {
+            assert!(supports_correlated_action_feedback(
+                &crate::ship::system_registry::helm_boost_system_id(),
+                payload,
+            ));
+        }
+        for payload in [&dock, &undock] {
+            assert!(supports_correlated_action_feedback(
+                &SystemId(crate::ship::system_registry::DOCK_KIND.into()),
+                payload,
+            ));
+        }
+        for (kind, payload) in [
+            (
+                crate::ship::system_registry::HELM_IMPULSE_KIND,
+                SystemControlPayload::StartImpulseCharge,
+            ),
+            (
+                crate::ship::system_registry::HELM_BOOST_KIND,
+                SystemControlPayload::SetBoost { active: true },
+            ),
+            (crate::ship::system_registry::VIEWSCREEN_KIND, view.clone()),
+            (crate::ship::system_registry::DOCK_KIND, dock.clone()),
+        ] {
+            assert!(supports_correlated_action_feedback_for_kind(
+                &SystemId("designer-owned-instance".into()),
+                &payload,
+                Some(kind),
+            ));
+        }
+        for (kind, payload) in [
+            (
+                crate::ship::system_registry::HELM_THRUST_KIND,
+                SystemControlPayload::SetThrust { value: 0.4 },
+            ),
+            (
+                crate::ship::system_registry::HELM_STEERING_KIND,
+                SystemControlPayload::SetSteering { value: -0.2 },
+            ),
+            (
+                crate::ship::system_registry::LATERAL_THRUST_KIND,
+                SystemControlPayload::LateralThrustInput { lateral: 1.0 },
+            ),
+        ] {
+            assert!(
+                !supports_correlated_action_feedback_for_kind(
+                    &SystemId("designer-owned-instance".into()),
+                    &payload,
+                    Some(kind),
+                ),
+                "continuous {kind} input has no terminal consumer and must stay uncorrelated"
+            );
+        }
         assert!(supports_correlated_action_feedback(
             &crate::ship::system_registry::shield_arc_system_id("fore").expect("fore"),
             &shield_focus,
@@ -963,6 +1077,27 @@ station = "repair"
             &crate::ship::system_registry::shield_arc_system_id("fore").expect("fore"),
             &cancel_impulse,
         ));
+        assert!(!supports_correlated_action_feedback(
+            &crate::ship::system_registry::helm_boost_system_id(),
+            &start_impulse,
+        ));
+        assert!(!supports_correlated_action_feedback(
+            &crate::ship::system_registry::helm_impulse_system_id(),
+            &set_boost,
+        ));
+        assert!(!supports_correlated_action_feedback(
+            &SystemId("berthing-clamps".into()),
+            &dock,
+        ));
+        assert!(!supports_correlated_action_feedback(
+            &SystemId(crate::ship::system_registry::DOCK_KIND.into()),
+            &view,
+        ));
+        assert!(!supports_correlated_action_feedback_for_kind(
+            &SystemId("designer-owned-instance".into()),
+            &dock,
+            Some(crate::ship::system_registry::HELM_THRUST_KIND),
+        ));
     }
 
     fn admitted(app: &mut App, ship: Entity) -> Vec<SystemControlPayload> {
@@ -1062,6 +1197,113 @@ station = "repair"
                     } if correlation.as_str() == "unsupported-feedback"
                 )
         }));
+    }
+
+    #[test]
+    fn correlated_continuous_helm_axes_are_refused_once_before_admission() {
+        let (mut app, ship) = admission_app(ControlSource::Human);
+        let helm_axes = crate::ship::config::ShipConfig::from_toml(
+            r#"
+[[station]]
+id = "repair"
+name = "Helm"
+description = "Flight control."
+rank = "Ltn."
+
+[[system]]
+id = "port-main-drive"
+kind = "helm_thrust"
+station = "repair"
+
+[[system]]
+id = "yaw-ring"
+kind = "helm_steering"
+station = "repair"
+
+[[system]]
+id = "translation-ring"
+kind = "lateral_thrust"
+station = "repair"
+"#,
+            &[
+                crate::ship::system_registry::HELM_THRUST_KIND,
+                crate::ship::system_registry::HELM_STEERING_KIND,
+                crate::ship::system_registry::LATERAL_THRUST_KIND,
+            ],
+        )
+        .expect("continuous Helm axis fixture is valid");
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(ShipConfigComponent(helm_axes));
+        let mut cursor = app
+            .world()
+            .resource::<Messages<OutboundMessage>>()
+            .get_cursor();
+
+        for (correlation, target, payload) in [
+            (
+                "continuous-thrust",
+                "port-main-drive",
+                SystemControlPayload::SetThrust { value: 0.5 },
+            ),
+            (
+                "continuous-steering",
+                "yaw-ring",
+                SystemControlPayload::SetSteering { value: -0.25 },
+            ),
+            (
+                "continuous-lateral",
+                "translation-ring",
+                SystemControlPayload::LateralThrustInput { lateral: 1.0 },
+            ),
+        ] {
+            send_correlated(
+                &mut app,
+                HOLDER,
+                correlation,
+                SystemId(target.into()),
+                payload,
+            );
+        }
+        app.update();
+
+        assert!(admitted(&mut app, ship).is_empty());
+        assert!(command_log(&app).is_empty());
+        assert!(app.world().resource::<log::PendingCommands>().is_empty());
+        let outbound = app.world().resource::<Messages<OutboundMessage>>();
+        let feedback: Vec<_> = cursor.read(outbound).collect();
+        for correlation in [
+            "continuous-thrust",
+            "continuous-steering",
+            "continuous-lateral",
+        ] {
+            let matching: Vec<_> = feedback
+                .iter()
+                .filter(|message| {
+                    message.target == Target::Token(HOLDER.into())
+                        && message.delivery == DeliveryClass::Reliable
+                        && matches!(
+                            &message.msg,
+                            ServerMessage::ActionFeedback {
+                                correlation: actual,
+                                ..
+                            } if actual.as_str() == correlation
+                        )
+                })
+                .collect();
+            assert_eq!(
+                matching.len(),
+                1,
+                "{correlation} must receive exactly one terminal refusal"
+            );
+            assert!(matches!(
+                &matching[0].msg,
+                ServerMessage::ActionFeedback {
+                    outcome: ActionFeedbackOutcome::Refused,
+                    ..
+                }
+            ));
+        }
     }
 
     #[test]

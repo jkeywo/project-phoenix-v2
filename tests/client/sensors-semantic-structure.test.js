@@ -38,7 +38,7 @@ describe('Sensors and Science semantic-action structural coverage', () => {
   for (const [path, context, controls] of SENSOR_VARIANTS) {
     it(`${path} mounts its complete shipped Sensors/Science variant`, () => {
       const html = source(path);
-      expect(html).toContain(`initConsole({ name: '${context}'`);
+      expect(html).toMatch(new RegExp(`initConsole\\s*\\(\\s*\\{[\\s\\S]*?name:\\s*'${context}'`));
       for (const control of controls) expect(html).toContain(control);
     });
   }
@@ -69,7 +69,9 @@ describe('Sensors and Science semantic-action structural coverage', () => {
 
   it('registers the family once at the console seam and parent private catalogue', () => {
     const consoleCore = source('gui/console-core.js');
-    expect(consoleCore).toContain('SENSOR_SCIENCE_ACTION_CONTEXTS.includes(_actionContext)');
+    expect(consoleCore).toContain(
+      'SENSOR_SCIENCE_ACTION_CONTEXTS.some((context) => _actionContexts.has(context))',
+    );
     expect(consoleCore).toContain('registerSensorScienceActions(_semanticActions');
     expect(source('gui/client-semantic-actions.js')).toContain('...SENSOR_SCIENCE_ACTIONS');
   });

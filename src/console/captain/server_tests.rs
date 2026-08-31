@@ -1119,6 +1119,70 @@ fn viewscreen_channel_2_set_view_can_request_radar() {
 }
 
 #[test]
+fn arbitrary_authored_viewscreen_instance_is_admitted_and_applied() {
+    let mut app = test_app();
+    let viewscreen_id = SystemId("bridge-display".into());
+    let radar_id = SystemId("flight-scope".into());
+    {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ShipConfigComponent, With<LocalShip>>();
+        let mut config = q.single_mut(app.world_mut()).unwrap();
+        config
+            .0
+            .systems
+            .iter_mut()
+            .find(|system| system.kind == crate::ship::system_registry::VIEWSCREEN_KIND)
+            .expect("fixture has a viewscreen")
+            .id = viewscreen_id.clone();
+        config
+            .0
+            .systems
+            .iter_mut()
+            .find(|system| system.kind == crate::ship::system_registry::HELM_RADAR_KIND)
+            .expect("fixture has a Helm radar")
+            .id = radar_id.clone();
+    }
+    start_game(&mut app);
+    push(
+        &mut app,
+        "helm",
+        ClientMessage::Identify {
+            token: "helm".into(),
+            name: "Hoshi".into(),
+        },
+    );
+    tick(&mut app);
+    app.world_mut().resource_mut::<Sessions>().0.set_station(
+        "helm",
+        Some(crate::core::messages::StationId("helm".into())),
+    );
+
+    push(
+        &mut app,
+        "helm",
+        ClientMessage::ControlSystem {
+            target: viewscreen_id.clone(),
+            payload: SystemControlPayload::SetView {
+                mode: ViewMode::Radar,
+            },
+        },
+    );
+    tick(&mut app);
+
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&crate::ship::state::ShipViewMode, With<LocalShip>>();
+    let view = q.single(app.world()).unwrap();
+    assert_eq!(view.view_mode, ViewMode::Radar);
+    assert_eq!(view.viewscreen.resolved().owner, radar_id);
+
+    tick(&mut app);
+    let bb = captain_bb(&mut app);
+    assert_eq!(bb.viewscreen_system_id, viewscreen_id);
+}
+
+#[test]
 fn unauthorised_set_view_does_not_disturb_active_view() {
     // AC3 (issue #769): an unauthorised SetView is rejected at admission
     // and never reaches the arbiter, so the currently resolved view is
@@ -1343,6 +1407,40 @@ fn backfilled_captain_switches_to_cinematic_view() {
         ViewMode::Cinematic,
         "an AI-operated Captain seat (a backfilled captain) must switch to Cinematic"
     );
+}
+
+#[test]
+fn backfilled_authored_captain_emits_to_authored_viewscreen_instance() {
+    let mut app = test_app();
+    let captain_id = SystemId("bridge-command".into());
+    let viewscreen_id = SystemId("bridge-display".into());
+    {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ShipConfigComponent, With<LocalShip>>();
+        let mut config = q.single_mut(app.world_mut()).unwrap();
+        config
+            .0
+            .systems
+            .iter_mut()
+            .find(|system| system.kind == crate::ship::system_registry::CAPTAIN_KIND)
+            .expect("fixture has a Captain system")
+            .id = captain_id.clone();
+        config
+            .0
+            .systems
+            .iter_mut()
+            .find(|system| system.kind == crate::ship::system_registry::VIEWSCREEN_KIND)
+            .expect("fixture has a viewscreen")
+            .id = viewscreen_id.clone();
+    }
+    start_game(&mut app);
+    set_control_source(&mut app, captain_id, ControlSource::Ai);
+
+    tick(&mut app);
+
+    assert_eq!(get_view_mode(&mut app), ViewMode::Cinematic);
+    assert_eq!(captain_bb(&mut app).viewscreen_system_id, viewscreen_id);
 }
 
 #[test]

@@ -23,8 +23,8 @@
     <div class="panel"></div><div class="panel-inner">
       <h1><span data-i18n="console.tactical.title">TACTICAL</span><small data-i18n="console.courier_tactical.subtitle">HELM · WEAPONS · SENSORS</small></h1>
       <div class="body">
-        <div class="col"><h2 data-i18n="console.tactical.weapons">Weapons</h2><ph-tactical-radar id="tactical-radar"></ph-tactical-radar><ph-blasters-controls id="blasters"></ph-blasters-controls><h2 data-i18n="console.tactical.sensors">Sensors</h2><ph-sensor-radar id="sensor-radar"></ph-sensor-radar><ph-sensor-panel id="sensor-panel"></ph-sensor-panel></div>
-        <div class="col"><h2 data-i18n="console.tactical.helm">Helm</h2><div class="sticks"><ph-helm-joystick id="helm"></ph-helm-joystick><ph-lateral-thrust-joystick id="lateral"></ph-lateral-thrust-joystick></div><div class="buttons"><ph-impulse-btn id="impulse"></ph-impulse-btn><ph-boost-btn id="boost"></ph-boost-btn></div></div>
+        <div class="col" role="region" tabindex="0" aria-labelledby="courier-tactical-heading" data-semantic-action-context="tactical"><h2 id="courier-tactical-heading" data-i18n="console.tactical.weapons">Weapons</h2><ph-tactical-radar id="tactical-radar"></ph-tactical-radar><ph-blasters-controls id="blasters"></ph-blasters-controls><h2 data-i18n="console.tactical.sensors">Sensors</h2><ph-sensor-radar id="sensor-radar"></ph-sensor-radar><ph-sensor-panel id="sensor-panel"></ph-sensor-panel></div>
+        <div class="col" role="region" tabindex="0" aria-labelledby="courier-helm-heading" data-semantic-action-context="helm"><h2 id="courier-helm-heading" data-i18n="console.tactical.helm">Helm</h2><div class="sticks"><ph-helm-joystick id="helm"></ph-helm-joystick><ph-lateral-thrust-joystick id="lateral"></ph-lateral-thrust-joystick></div><div class="buttons"><ph-impulse-btn id="impulse"></ph-impulse-btn><ph-boost-btn id="boost"></ph-boost-btn></div></div>
       </div>
       <footer><span class="dot"></span><span data-i18n="console.tactical.station_footer">TACTICAL STATION</span><span class="spacer"></span><ph-station-damage id="damage"></ph-station-damage></footer>
     </div>
@@ -40,12 +40,28 @@
     import '../components/ph-boost-btn.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
+    import { createSemanticSubcontextController } from '../composite-action-routing.js';
     // The render lives in gui/courier/tactical.console.js (issue #1234): the
     // shared Tactical renderer + this hull's variant (sensors + helm tail). s is
     // a system-id-keyed SystemStationConsolePayload. The vitest suite imports the
     // same renderStation.
-    import { renderStation } from './tactical.console.js';
-    initConsole({ name: 'tactical', render: renderStation });
+    import { renderStation, supportsCourierTacticalAction } from './tactical.console.js';
+    const actionSubcontext = createSemanticSubcontextController(document, {
+      defaultContext: 'tactical',
+    });
+    const runtime = initConsole({
+      name: 'tactical',
+      render: renderStation,
+      actionFamilies: ['helm'],
+      getActionContext: actionSubcontext.getContext,
+      supportsSemanticAction: (actionId, context) => (
+        supportsCourierTacticalAction(actionId, context, document)
+      ),
+    });
+    window.addEventListener('pagehide', () => {
+      actionSubcontext.dispose();
+      runtime.disposeSemanticActions();
+    }, { once: true });
   </script>
 </body>
 </html>

@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { initConsole } from '../../gui/console-core.js';
 import { ActionFeedbackRouter } from '../../gui/action-feedback.js';
 import { renderStation as courierCaptainRender } from '../../gui/courier/captain.console.js';
+import { supportsCourierTacticalAction } from '../../gui/courier/tactical.console.js';
 import { withConsoleFamilyProjection } from './console-family-fixture.js';
 import { createClientSemanticActionRegistry } from '../../gui/client-semantic-actions.js';
 import { createGamepadInputRuntime } from '../../gui/gamepad-input.js';
@@ -29,11 +30,144 @@ function standardPad(pressed = []) {
 }
 
 describe('console-core semantic action runtime', () => {
+  it('keeps Courier Tactical and Helm as independent active keyboard families', () => {
+    document.body.innerHTML = [
+      '<ph-tactical-radar id="tactical-radar"></ph-tactical-radar>',
+      '<ph-blasters-controls id="blasters"></ph-blasters-controls>',
+      '<ph-helm-joystick id="helm"></ph-helm-joystick>',
+      '<ph-lateral-thrust-joystick id="lateral"></ph-lateral-thrust-joystick>',
+      '<ph-impulse-btn id="impulse"></ph-impulse-btn>',
+      '<ph-boost-btn id="boost"></ph-boost-btn>',
+    ].join('');
+    const sent = [];
+    let context = 'tactical';
+    window.__sendAction = (json) => sent.push(JSON.parse(json));
+    const runtime = initConsole({
+      name: 'tactical',
+      render: () => {},
+      actionFamilies: ['helm'],
+      getActionContext: () => context,
+      supportsSemanticAction: (actionId, actionContext) => (
+        supportsCourierTacticalAction(actionId, actionContext, document)
+      ),
+    });
+    window.__updateConsole('tactical', JSON.stringify({
+      systems: {
+        'tactical-radar': {
+          blips: [{ uuid: 'enemy-1' }], target_uuid: null, tactical_auto: false,
+          blasters: [{ id: 'fore', fire_ready: true }],
+        },
+        'helm-joystick': {
+          helm_auto: false, lateral_auto: false, impulse_charge_progress: 0,
+          boost_enabled: true, boost_active: false, boost_battery: 1,
+          thrust_system_id: 'helm-thrust', steering_system_id: 'helm-steering',
+          lateral_system_id: 'helm-lateral', impulse_system_id: 'helm-impulse',
+          boost_system_id: 'helm-boost',
+        },
+      },
+      system_ids: ['tactical-radar', 'helm-joystick'],
+      system_families: { 'tactical-radar': 'tactical', 'helm-joystick': 'helm' },
+    }));
+    window.__updateSemanticActionBindings({
+      'tactical.target-selection': [{ type: 'keyboard', code: 'KeyU' }, null],
+      'helm.impulse': [{ type: 'keyboard', code: 'KeyU' }, null],
+    });
+
+    expect(runtime.semanticActions.action('tactical.target-selection')).not.toBeNull();
+    expect(runtime.semanticActions.action('helm.impulse')).not.toBeNull();
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      code: 'KeyU', bubbles: true, cancelable: true,
+    }));
+    context = 'helm';
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      code: 'KeyU', bubbles: true, cancelable: true,
+    }));
+
+    expect(sent.map((entry) => [entry.action, entry.console])).toEqual([
+      ['set_target', 'tactical'],
+      ['start_impulse_charge', 'tactical'],
+    ]);
+    expect(window.__supportsSemanticAction('helm.thrust', 'helm')).toBe(true);
+    expect(window.__supportsSemanticAction('helm.steering', 'helm')).toBe(true);
+    expect(window.__supportsSemanticAction('helm.lateral-thrust', 'helm')).toBe(true);
+    expect(window.__supportsSemanticAction('helm.impulse', 'helm')).toBe(true);
+    expect(window.__supportsSemanticAction('helm.boost', 'helm')).toBe(true);
+    expect(window.__supportsSemanticAction('helm.viewscreen', 'helm')).toBe(false);
+    expect(window.__supportsSemanticAction('helm.dock', 'helm')).toBe(false);
+
+    runtime.disposeSemanticActions();
+    document.body.innerHTML = '';
+    delete window.__sendAction;
+    delete window.__updateConsole;
+    delete window.__updateActionFeedback;
+    delete window.__updateSemanticActionBindings;
+    delete window.__semanticActionContext;
+    delete window.__supportsSemanticActionContext;
+    delete window.__supportsSemanticAction;
+    delete window.activateSemanticAction;
+    delete window.sendAction;
+  });
+
+  it('releases a Courier Helm hold on blur and dispose after returning to Tactical', () => {
+    document.body.innerHTML = [
+      '<ph-helm-joystick id="helm"></ph-helm-joystick>',
+      '<ph-lateral-thrust-joystick id="lateral"></ph-lateral-thrust-joystick>',
+      '<ph-impulse-btn id="impulse"></ph-impulse-btn>',
+      '<ph-boost-btn id="boost"></ph-boost-btn>',
+    ].join('');
+    const sent = [];
+    let context = 'helm';
+    window.__sendAction = (json) => sent.push(JSON.parse(json));
+    const runtime = initConsole({
+      name: 'tactical',
+      render: () => {},
+      actionFamilies: ['helm'],
+      getActionContext: () => context,
+    });
+    window.__updateConsole('tactical', JSON.stringify({
+      systems: {
+        helm: {
+          helm_auto: false, boost_enabled: true, boost_active: false, boost_battery: 1,
+          boost_system_id: 'helm-boost',
+        },
+      },
+      system_ids: ['helm'],
+      system_families: { helm: 'helm' },
+    }));
+
+    const pressBoost = () => document.dispatchEvent(new KeyboardEvent('keydown', {
+      code: 'ShiftLeft', shiftKey: true, bubbles: true, cancelable: true,
+    }));
+    pressBoost();
+    context = 'tactical';
+    window.dispatchEvent(new Event('blur'));
+    context = 'helm';
+    pressBoost();
+    context = 'tactical';
+    runtime.disposeSemanticActions();
+
+    expect(sent.filter((entry) => entry.action === 'set_boost').map((entry) => entry.active))
+      .toEqual([true, false, true, false]);
+    document.body.innerHTML = '';
+    delete window.__sendAction;
+    delete window.__updateConsole;
+    delete window.__updateActionFeedback;
+    delete window.__updateSemanticActionBindings;
+    delete window.__semanticActionContext;
+    delete window.__supportsSemanticActionContext;
+    delete window.__supportsSemanticAction;
+    delete window.activateSemanticAction;
+    delete window.sendAction;
+  });
+
   it('registers Helm steering and emits the narrow action from a continuous activation', () => {
+    document.body.innerHTML = '<ph-helm-joystick id="helm"></ph-helm-joystick>';
     const sent = [];
     window.__sendAction = (json) => sent.push(JSON.parse(json));
     const runtime = initConsole({ name: 'helm', render: () => {} });
-    window.__updateConsole('helm', JSON.stringify({ helm_auto: false }));
+    window.__updateConsole('helm', JSON.stringify({
+      helm_auto: false, steering_system_id: 'helm-steering',
+    }));
 
     expect(window.activateSemanticAction('helm.steering', {
       context: 'helm', source: 'gamepad', value: 0.45,
@@ -43,6 +177,7 @@ describe('console-core semantic action runtime', () => {
     })]);
 
     runtime.disposeSemanticActions();
+    document.body.innerHTML = '';
     delete window.__sendAction;
     delete window.__updateConsole;
     delete window.__updateActionFeedback;

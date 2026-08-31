@@ -1231,11 +1231,11 @@ describe('semantic controls tab', () => {
     expect(descendants(bodyOf(doc))).toContain(capture);
 
     inst.proposeSemanticBinding('helm.steering', 1, {
-      type: 'gamepad', input: 'axis', control: 'left-stick-y',
+      type: 'gamepad', input: 'axis', control: 'right-stick-y',
     });
     expect(captures.at(-1)).toEqual({ actionId: 'helm.steering', slot: 1, active: false });
     expect(registry.action('helm.steering').bindings[1]).toEqual({
-      type: 'gamepad', input: 'axis', control: 'left-stick-y',
+      type: 'gamepad', input: 'axis', control: 'right-stick-y',
     });
   });
 
@@ -1592,7 +1592,7 @@ describe('semantic controls tab', () => {
       preventDefault() {}, stopPropagation() {},
     });
     expect(registry.action(CAPTAIN_WEAPONS_HOLD_ACTION_ID).bindings[0]).toMatchObject({
-      code: 'ControlLeft', ctrlKey: true,
+      code: 'ControlLeft', ctrlKey: false,
     });
   });
 

@@ -10,6 +10,7 @@
 // its arrow-cycle and the Enter that dispatches the SAME named action a tap does.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { t } from '../../gui/strings.js';
+import { POWER_INCREASE_ACTION_ID } from '../../gui/stations/engineering-actions.js';
 import '../../gui/components/ph-power-controls.js';
 import '../../gui/components/ph-shield-facings.js';
 
@@ -71,16 +72,20 @@ describe('power controls: role, name and the single tab stop (AC #1)', () => {
     for (const pip of pips) expect(pip.getAttribute('role')).toBe('presentation');
   });
 
-  it('activating a stepper dispatches set_power once (the same action a tap does)', () => {
+  it('activating a stepper invokes the shared power action once', () => {
     const el = mount('ph-power-controls');
     el.state = { groups: [{ id: 'weapons', label: 'Weapons', level: 1, min_level: 1, max_level: 4 }] };
     const incr = el.shadowRoot.querySelector('.mini-btn[data-action="incr"]');
     // A native button activates on Enter/Space in a browser (proven end-to-end
     // in the smoke); here the click its activation resolves to fires exactly the
-    // one named action, with no keyboard-only fork to double it.
+    // one named action, with no keyboard-only fork to double it. The adapter,
+    // rather than this component, owns the eventual set_power wire command.
     incr.click();
-    expect(window.sendAction).toHaveBeenCalledTimes(1);
-    expect(window.sendAction).toHaveBeenCalledWith('set_power', { target: 'weapons', level: 2 });
+    expect(window.activateSemanticAction).toHaveBeenCalledTimes(1);
+    expect(window.activateSemanticAction).toHaveBeenCalledWith(POWER_INCREASE_ACTION_ID, {
+      source: 'control', detail: { target: 'weapons', level: 2 },
+    });
+    expect(window.sendAction).not.toHaveBeenCalled();
   });
 });
 

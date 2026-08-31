@@ -1542,6 +1542,15 @@ pub struct ShipClientConfig {
     /// System instance has an entry; clients never infer it from id spelling.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub system_console_families: HashMap<String, ConsoleFamily>,
+    /// Resolved authored System instance id -> System kind projection.
+    ///
+    /// This is the command-authority counterpart to
+    /// `system_console_families`: Console Family selects a presentation,
+    /// while the authored kind selects the exact fine System instance that
+    /// accepts a command. Clients must not recover either fact from an id's
+    /// spelling. Every selected-ship `[[system]]` entry has one mapping.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub system_kinds: HashMap<String, String>,
     /// Reserved/aggregate blackboard key -> Console Family metadata.
     ///
     /// These keys share the blackboard map's `SystemId` wire wrapper but are
@@ -1698,6 +1707,7 @@ impl Default for ShipClientConfig {
             ship_css: None,
             station_systems: HashMap::new(),
             system_console_families: HashMap::new(),
+            system_kinds: HashMap::new(),
             blackboard_console_families: HashMap::new(),
             station_assist_gaps: HashMap::new(),
             threat_bearing_epsilon_rad: default_threat_bearing_epsilon_rad(),

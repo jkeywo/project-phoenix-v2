@@ -92,13 +92,24 @@ a second monitor.
       land in that pane's field. Plain **Tab** moves between fields *within* the
       page — it does **not** jump panes (only Ctrl+Tab does).
 
-> Optional single-monitor variant that also exercises **compositing onto a
-> Station window**: author a profile with your one monitor as a `station` of two
-> panes (labels `Ada` and `Grace`) and no viewscreen, then launch with
-> `--profile`. The host logs that no monitor has the viewscreen role (correct —
-> you gave it none) and opens the Station window with the two panes composited on
-> it. Repeat the checks above. The viewscreen simply has nowhere to draw in this
-> variant; that is expected.
+> **This variant was retired by the bridge layout law (issue #1327).** It used to
+> read: author a profile with your one monitor as a `station` of two panes and no
+> viewscreen, and the host would open the Station window over the (unplaced)
+> viewscreen. That is exactly the overlay the law now forbids, so such a profile
+> is **refused at the prompt**:
+>
+> ```
+> phoenix-host: --profile: the profile assigns one monitor but gives no monitor
+> the "viewscreen" role; ... Give exactly one monitor the "viewscreen" role
+> ```
+>
+> - [ ] **Optional, 30 seconds:** author that profile anyway and confirm
+>       `--setup --profile` refuses it with the message above rather than opening
+>       a console over the shared view.
+>
+> Compositing onto a Station window is exercised by the multi-monitor setup (A1)
+> below; a one-monitor bridge has no lawful Station, and the `--pane`-only form
+> at the top of A0 is its supported shape.
 
 ### A1. Multi-monitor (`--profile`, two or more monitors)
 

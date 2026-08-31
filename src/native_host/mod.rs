@@ -40,6 +40,14 @@ pub mod app;
 /// borderless-fullscreen surface per configured monitor from a resolved
 /// [`bridge_profile`]. Provable only under the ignored integration test.
 pub mod bridge_display;
+/// The bridge **layout law** (issue #1327) — pure, Bevy-free. One viewscreen, no
+/// console over it, at most two consoles per screen: the typed assign/move/
+/// unassign transitions every path shares (lobby buttons, saved per-ship-class
+/// layouts, CLI profiles), their typed refusals, the per-monitor occupancy and
+/// per-station eligibility a greyed button row is a `map` over, and the
+/// conversion to and from a [`bridge_profile::ValidatedProfile`]. Where
+/// [`bridge_profile`] judges a *file*, this judges a *transition*.
+pub mod bridge_layout;
 /// The bridge-media profile model (issue #1126) — pure, Bevy-free. Media-device
 /// kinds and stable identities, the per-surface camera/microphone/output
 /// assignment, the parse/validate failure taxonomy (wrong-kind, duplicate,

@@ -79,10 +79,16 @@ In each pane, open the console **Settings** and find the **text size** control
 
 ### A-one-pane
 
-Author (or launch) a **one-pane** Station — one monitor, one console filling it —
-and repeat the two scale checks. A single full-monitor pane has the most room, so
+Author (or launch) a **one-pane** Station — one console filling a monitor — and
+repeat the two scale checks. A single full-monitor pane has the most room, so
 this is the easy case; confirm it anyway, because acceptance criterion 1 names
 *both* one- and two-pane layouts.
+
+> The Station monitor must be a **different** monitor from the viewscreen's, and
+> the profile must still name a `viewscreen` (issue #1327): a profile of stations
+> with no viewscreen is refused at the prompt, because a console would open over
+> the shared view. With only one display, drop `--profile` and use the
+> `--pane`-only form above.
 
 - [ ] One pane, **1.0×**: complete and clean.
 - [ ] One pane, **1.5×**: reflows, everything reachable, nothing overlapping.
@@ -103,7 +109,9 @@ mouse equivalents (a text editor, a file picker). None is touch-first.
 
 - [ ] **Display role** — set a monitor's `role = "viewscreen"` / `"station"` in
       `bridge.toml` with the keyboard; re-run `--setup` and see the assignment
-      change in the report. (Mouse: do the same edit in a GUI editor.)
+      change in the report. (Mouse: do the same edit in a GUI editor.) Exactly one
+      monitor must keep the `viewscreen` role; giving every monitor `station` is
+      refused with a message saying so, which is worth seeing once.
 - [ ] **Pane** — add/remove a `[[display.pane]]` and change `split`; `--setup`
       reflects the new pane layout and its Accessibility per-pane lines.
 - [ ] **Touch mapping** — add a `[[touch]]` entry mapping a device to a monitor;

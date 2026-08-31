@@ -85,6 +85,13 @@ fn supports_correlated_action_feedback(
             && matches!(payload, SystemControlPayload::SetView { .. }))
         || (target.0 == crate::ship::system_registry::CAPTAIN_SYSTEM_ID
             && matches!(payload, SystemControlPayload::SetObjectivePriority { .. }))
+        || (target.0 == crate::ship::system_registry::NAVIGATION_SYSTEM_ID
+            && matches!(
+                payload,
+                SystemControlPayload::SetNavigationWaypoint { .. }
+                    | SystemControlPayload::ClearNavigationWaypoint
+                    | SystemControlPayload::OrderCivilian { .. }
+            ))
         || (target.0 == crate::ship::system_registry::TACTICAL_RADAR_SYSTEM_ID
             && matches!(payload, SystemControlPayload::SetTarget { .. }))
         || (target.0 == crate::ship::system_registry::PHASER_CONTROL_SYSTEM_ID
@@ -761,6 +768,16 @@ station = "repair"
         };
         let cancel_impulse = SystemControlPayload::CancelImpulse;
         let shield_focus = SystemControlPayload::SetShieldArcFocus { focused: true };
+        let waypoint = SystemControlPayload::SetNavigationWaypoint {
+            x: 10.0,
+            z: -20.0,
+            source_uuid: None,
+        };
+        let clear_waypoint = SystemControlPayload::ClearNavigationWaypoint;
+        let civilian_order = SystemControlPayload::OrderCivilian {
+            target: "civilian-a".into(),
+            order: crate::civilian::CivilianOrder::Hold,
+        };
 
         assert!(supports_correlated_action_feedback(
             &crate::ship::system_registry::red_alert_system_id(),
@@ -800,6 +817,12 @@ station = "repair"
             &crate::ship::system_registry::shield_arc_system_id("fore").expect("fore"),
             &shield_focus,
         ));
+        for payload in [&waypoint, &clear_waypoint, &civilian_order] {
+            assert!(supports_correlated_action_feedback(
+                &crate::ship::system_registry::navigation_system_id(),
+                payload,
+            ));
+        }
 
         assert!(!supports_correlated_action_feedback(
             &crate::ship::system_registry::captain_system_id(),
@@ -808,6 +831,14 @@ station = "repair"
         assert!(!supports_correlated_action_feedback(
             &crate::ship::system_registry::viewscreen_system_id(),
             &objective,
+        ));
+        assert!(!supports_correlated_action_feedback(
+            &crate::ship::system_registry::captain_system_id(),
+            &waypoint,
+        ));
+        assert!(!supports_correlated_action_feedback(
+            &crate::ship::system_registry::viewscreen_system_id(),
+            &civilian_order,
         ));
         assert!(!supports_correlated_action_feedback(
             &SystemId("repair".into()),

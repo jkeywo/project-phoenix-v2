@@ -97,7 +97,12 @@
       const open = overlay.classList.contains('open'); close();
       if (!open) { overlay.classList.add('open'); button.classList.add('active'); }
     }
-    initConsole({ name: 'captain', render: renderStation });
+    initConsole({
+      name: 'captain',
+      render: renderStation,
+      actionFamilies: ['captain', 'navigation'],
+      navigationActions: { supportsChart: false, supportsCivilianOrders: false },
+    });
     document.getElementById('nav-toggle').onclick = () => toggle('nav');
     document.getElementById('comms-toggle').onclick = () => toggle('comms');
     document.getElementById('nav-back').onclick = close;

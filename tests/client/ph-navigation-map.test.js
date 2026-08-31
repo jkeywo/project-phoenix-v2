@@ -2,6 +2,14 @@
 import { t } from '../../gui/strings.js';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import '../../gui/components/ph-navigation-map.js';
+import {
+  NAVIGATION_CONTACT_ACTION_ID,
+  NAVIGATION_PAN_RIGHT_ACTION_ID,
+  NAVIGATION_WAYPOINT_ANCHOR_ACTION_ID,
+  NAVIGATION_WAYPOINT_CLEAR_ACTION_ID,
+  NAVIGATION_WAYPOINT_PLACE_ACTION_ID,
+  NAVIGATION_ZOOM_IN_ACTION_ID,
+} from '../../gui/stations/navigation-actions.js';
 
 // Canvas paint cannot resolve a CSS custom property, so the map names the
 // token and gui/components/ph-console-styles.js resolves it against the live
@@ -108,6 +116,7 @@ afterEach(() => {
   window.ResizeObserver = origRO;
   document.body.innerHTML = '';
   delete window.sendAction;
+  delete window.activateSemanticAction;
   roCallback = null;
 });
 
@@ -156,6 +165,15 @@ function drag(el, fromX, fromY, toX, toY) {
   el.dispatchEvent(new MouseEvent('mousedown', { clientX: fromX, clientY: fromY, bubbles: true }));
   el.dispatchEvent(new MouseEvent('mousemove', { clientX: toX, clientY: toY, bubbles: true }));
   el.dispatchEvent(new MouseEvent('mouseup', { clientX: toX, clientY: toY, bubbles: true }));
+}
+
+function touch(el, type, touches, changedTouches = []) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperties(event, {
+    touches: { value: touches },
+    changedTouches: { value: changedTouches },
+  });
+  el.dispatchEvent(event);
 }
 
 describe('PhNavigationMap', () => {
@@ -291,6 +309,56 @@ describe('PhNavigationMap', () => {
     expect(sendAction).toHaveBeenCalledWith('set_navigation_waypoint', { x: 0, z: 2500 });
   });
 
+  it('routes pointer placement through the Navigation semantic identity without optimistic state', () => {
+    const sendAction = vi.fn();
+    window.activateSemanticAction = vi.fn(() => ({ claimed: true, handled: true }));
+    const h = setup({ sendAction });
+    h.el.state = {
+      blips: [], range: 5000, ship_pos: { x: 0, z: 0 }, ship_heading: 0,
+    };
+    h.tickRaf();
+
+    h.el.shadowRoot.getElementById('btn-set-waypoint').click();
+    click(h.canvas, 150, 75);
+
+    expect(window.activateSemanticAction).toHaveBeenCalledWith(
+      NAVIGATION_WAYPOINT_PLACE_ACTION_ID,
+      expect.objectContaining({
+        context: 'navigation', source: 'control', surface: h.el,
+        detail: { x: 0, z: 2500 },
+      }),
+    );
+    expect(sendAction).not.toHaveBeenCalled();
+    expect(h.el.state.waypoint).toBeUndefined();
+  });
+
+  it('offers a non-drag keyboard cursor and commits it through the same placement action', () => {
+    window.activateSemanticAction = vi.fn(() => ({ claimed: true, handled: true }));
+    const h = setup();
+    h.el.state = {
+      blips: [], range: 5000, ship_pos: { x: 0, z: 0 }, ship_heading: 0,
+    };
+    h.tickRaf();
+
+    expect(h.el.getAttribute('aria-description')).toBe(t('component.navigation_map.keyboard_help'));
+    h.el.shadowRoot.getElementById('btn-set-waypoint').click();
+    h.el.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'ArrowRight', bubbles: true, cancelable: true,
+    }));
+    h.el.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Enter', bubbles: true, cancelable: true,
+    }));
+
+    expect(window.activateSemanticAction).toHaveBeenCalledWith(
+      NAVIGATION_WAYPOINT_PLACE_ACTION_ID,
+      expect.objectContaining({
+        context: 'navigation', source: 'control', surface: h.el,
+        detail: { x: 800, z: 0 },
+      }),
+    );
+    expect(h.canvas.classList.contains('picking')).toBe(false);
+  });
+
   it('pick mode places a free waypoint even when a blip is underneath the tap', () => {
     const sendAction = vi.fn();
     const h = setup({ sendAction });
@@ -351,6 +419,36 @@ describe('PhNavigationMap', () => {
       z: 0,
       source_uuid: 'abc',
     });
+  });
+
+  it('routes contact selection, anchoring and clearing through their semantic identities', () => {
+    window.activateSemanticAction = vi.fn((actionId, options) => {
+      if (actionId === NAVIGATION_CONTACT_ACTION_ID) options.surface.navigationSelect(options.detail);
+      return { claimed: true, handled: true };
+    });
+    const h = setup();
+    h.el.state = {
+      blips: [
+        { uuid: 'abc', kind: 'planet', name: 'Alpha', world_x: 1000, world_z: 0, stance: 'friendly' },
+      ],
+      range: 5000,
+      ship_pos: { x: 0, z: 0 },
+      ship_heading: 0,
+      waypoint: { x: 5, z: 10 },
+    };
+    h.tickRaf();
+
+    click(h.canvas, 180, 150);
+    h.el.shadowRoot.getElementById('btn-set-selected').click();
+    h.el.shadowRoot.getElementById('btn-clear-waypoint').click();
+
+    expect(window.activateSemanticAction.mock.calls.map(([actionId, options]) => (
+      [actionId, options.detail]
+    ))).toEqual([
+      [NAVIGATION_CONTACT_ACTION_ID, { uuid: 'abc' }],
+      [NAVIGATION_WAYPOINT_ANCHOR_ACTION_ID, { source_uuid: 'abc' }],
+      [NAVIGATION_WAYPOINT_CLEAR_ACTION_ID, {}],
+    ]);
   });
 
   it('tap on blip shows overlay with entity info', () => {
@@ -417,6 +515,24 @@ describe('PhNavigationMap', () => {
     h.tickRaf();
     expect(h.el.shadowRoot.getElementById('btn-set-waypoint').classList.contains('show')).toBe(false);
     expect(h.el.shadowRoot.getElementById('btn-clear-waypoint').classList.contains('show')).toBe(true);
+  });
+
+  it('disables every authoritative waypoint control while Navigation is Auto', () => {
+    const h = setup();
+    h.el.state = {
+      blips: [{ uuid: 'abc', world_x: 0, world_z: 0 }],
+      range: 5000,
+      ship_pos: { x: 0, z: 0 },
+      ship_heading: 0,
+      waypoint: { x: 100, z: 200 },
+      auto: true,
+    };
+    h.el.navigationSelect({ uuid: 'abc' });
+    h.tickRaf();
+
+    expect(h.el.shadowRoot.getElementById('btn-set-waypoint').disabled).toBe(true);
+    expect(h.el.shadowRoot.getElementById('btn-set-selected').disabled).toBe(true);
+    expect(h.el.shadowRoot.getElementById('btn-clear-waypoint').disabled).toBe(true);
   });
 
   it('Clear Waypoint button sends clear_navigation_waypoint', () => {
@@ -773,6 +889,67 @@ describe('PhNavigationMap', () => {
   });
 
   describe('zoom and pan', () => {
+    it('routes pointer pan and wheel zoom through semantic identities', () => {
+      window.activateSemanticAction = vi.fn((actionId, options) => {
+        if (actionId === NAVIGATION_PAN_RIGHT_ACTION_ID) {
+          options.surface.navigationPan(options.detail);
+        } else if (actionId === NAVIGATION_ZOOM_IN_ACTION_ID) {
+          options.surface.navigationZoom(options.detail);
+        }
+        return { claimed: true, handled: true };
+      });
+      const h = setup();
+      h.el.state = {
+        blips: [], range: 5000, ship_pos: { x: 0, z: 0 }, ship_heading: 0,
+      };
+      h.tickRaf();
+
+      drag(h.canvas, 100, 100, 200, 100);
+      h.canvas.dispatchEvent(new WheelEvent('wheel', {
+        deltaY: -120, clientX: 150, clientY: 150, bubbles: true, cancelable: true,
+      }));
+
+      expect(window.activateSemanticAction.mock.calls.map(([actionId]) => actionId)).toEqual([
+        NAVIGATION_PAN_RIGHT_ACTION_ID,
+        NAVIGATION_ZOOM_IN_ACTION_ID,
+      ]);
+      expect(window.activateSemanticAction.mock.calls[0][1]).toMatchObject({
+        context: 'navigation', source: 'control', surface: h.el, detail: { x: 200 },
+      });
+      expect(window.activateSemanticAction.mock.calls[1][1]).toMatchObject({
+        context: 'navigation', source: 'control', surface: h.el,
+        detail: { factor: 1.13, x: 300, y: 300 },
+      });
+    });
+
+    it('preserves touch drag and pinch while routing both through semantic identities', () => {
+      window.activateSemanticAction = vi.fn(() => ({ claimed: true, handled: true }));
+      const h = setup();
+      h.el.state = {
+        blips: [], range: 5000, ship_pos: { x: 0, z: 0 }, ship_heading: 0,
+      };
+      h.tickRaf();
+
+      touch(h.canvas, 'touchstart', [{ clientX: 100, clientY: 100 }]);
+      touch(h.canvas, 'touchmove', [{ clientX: 200, clientY: 100 }]);
+      touch(h.canvas, 'touchend', [], [{ clientX: 200, clientY: 100 }]);
+      touch(h.canvas, 'touchstart', [
+        { clientX: 100, clientY: 100 }, { clientX: 200, clientY: 100 },
+      ]);
+      touch(h.canvas, 'touchmove', [
+        { clientX: 80, clientY: 100 }, { clientX: 220, clientY: 100 },
+      ]);
+
+      expect(window.activateSemanticAction.mock.calls.map(([actionId]) => actionId)).toEqual([
+        NAVIGATION_PAN_RIGHT_ACTION_ID,
+        NAVIGATION_ZOOM_IN_ACTION_ID,
+      ]);
+      expect(window.activateSemanticAction.mock.calls[0][1].detail).toEqual({ x: 200 });
+      expect(window.activateSemanticAction.mock.calls[1][1].detail).toEqual({
+        factor: 1.4, x: 300, y: 200,
+      });
+    });
+
     it('drag longer than 5px prevents tap action', () => {
       const sendAction = vi.fn();
       const h = setup({ sendAction });

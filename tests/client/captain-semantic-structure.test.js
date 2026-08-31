@@ -26,7 +26,7 @@ describe('Captain semantic-action structural coverage', () => {
       expect(html).toContain('<ph-red-alert');
       expect(html).toContain('<ph-camera-select');
       expect(html).toContain('<ph-objective-list');
-      expect(html).toContain(`initConsole({ name: 'captain'`);
+      expect(html).toMatch(/initConsole\(\s*{\s*name:\s*'captain'/);
     });
   }
 

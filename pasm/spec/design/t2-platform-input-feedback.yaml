@@ -4,7 +4,7 @@ entities:
       status: partially-implemented
       confidence: confirmed
       title: Product-Wide Semantic Action Registry
-      summary: "T2 introduces one context-scoped semantic action registry above the existing client action map for player Stations, client and host chrome, the GM console, save-slot UX, and the existing mod/editor workflow. Actions declare stable identity, contexts, input shape, feedback semantics, confirmation category, and accessibility metadata. #1284 has migrated all shipped Tactical target and weapon controls through that registry without creating a second authority path. M6 reuses the registry rather than creating a Workshop-only command layer."
+      summary: "T2 introduces one context-scoped semantic action registry above the existing client action map for player Stations, client and host chrome, the GM console, save-slot UX, and the existing mod/editor workflow. Actions declare stable identity, contexts, input shape, feedback semantics, confirmation category, and accessibility metadata. #1283 has migrated Comms, #1284 all shipped Tactical target and weapon controls, #1285 Sensors and Science, and #1286 every shipped Navigation chart interaction (including local pan/zoom), waypoint, contact and civilian-order surface, without creating a second authority path. M6 reuses the registry rather than creating a Workshop-only command layer."
       rationale:
         - "Conflicts exist only where action contexts overlap. The registry is presentation and dispatch metadata, not a new command-authority path."
         - "PRD #1273 was decomposed on 2026-08-29 into issues #1274-#1288 for the shared input/feedback foundation and concrete console-family adoption, #1315 for configurable GM confirmations, #1321/#1322 for the bounded existing-editor workflow, and HITL exit #1323. Existing save issue #865 is reused and updated rather than duplicated."
@@ -34,7 +34,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Standard Gamepad Inputs with Explicit Device Ownership
-      summary: "T2 uses the browser standard gamepad mapping. Discrete actions may bind buttons, D-pad controls, or an axis direction crossing an authored threshold; continuous actions may bind analogue axes with inversion and deadzone. Multi-button controller chords are out of scope. A private profile names the preferred connected gamepad. When several exist the user selects explicitly; disconnect stops its input and warns rather than transferring control, keyboard remains available, and reconnect resumes only after neutral-input detection."
+      summary: "T2 uses the browser standard gamepad mapping, including face and D-pad buttons, Select, Start and both stick buttons. Discrete actions may bind buttons or an axis direction crossing an authored threshold; continuous actions may bind analogue axes with inversion and deadzone. Multi-button controller chords are out of scope. A private profile names the preferred connected gamepad. When several exist the user selects explicitly; disconnect stops its input and warns rather than transferring control, keyboard remains available, and reconnect resumes only after neutral-input detection."
       rationale:
         - "Explicit device ownership prevents a newly connected or drifting controller from silently taking a live Station."
     architecture:
@@ -52,6 +52,7 @@ entities:
       rationale:
         - "One lifecycle replaces scattered button flashes and bespoke rejection messages while retaining authority at the simulation."
         - "Issue #1283 retains `CommsResponseRejected` for its response-control-specific red flash while also completing the shared lifecycle. A stale, out-of-range, out-of-bounds, or otherwise invalid response therefore produces both the established exact-control refusal and a correlated `Refused`; it never becomes optimistic client state."
+        - "Issue #1286 applies that rule at the actual Navigation owners: waypoint set/clear settles only after the waypoint consumer runs, and a civilian order settles only after the civilian adapter accepts or refuses delivery into its authored compliance machine. Pending input never paints a waypoint or civilian outcome optimistically."
     architecture:
       kind: client-feedback-policy
       authority: non-authoritative

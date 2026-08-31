@@ -697,6 +697,14 @@ export function createSemanticActionRegistry(options = {}) {
         detail: options.detail && typeof options.detail === 'object'
           ? { ...options.detail }
           : null,
+        // A visible component may own local selection/cursor state needed to
+        // resolve its semantic detail. Keep that activation-local surface out
+        // of definitions and persisted bindings, but preserve it for the
+        // adapter instead of making a composite document guess which of two
+        // identical charts the operator used.
+        surface: options.surface && typeof options.surface === 'object'
+          ? options.surface
+          : null,
         correlation: feedback ? feedback.correlation : null,
         inputMs: feedback ? feedback.inputMs : null,
         feedbackKind: definition.feedback,

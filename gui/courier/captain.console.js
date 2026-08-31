@@ -72,7 +72,7 @@ export const renderStation = makeCaptainRender({
       navEl.state = {
         blips: nav.blips || [], regions: nav.regions || [], range: nav.radar_range || 800,
         ship_pos: { x: nav.ship_x || 0, z: nav.ship_z || 0 }, ship_heading: nav.ship_heading || 0,
-        waypoint: nav.waypoint || null,
+        waypoint: nav.waypoint || null, auto: !!nav.navigation_auto,
       };
     }
 

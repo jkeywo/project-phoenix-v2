@@ -476,7 +476,9 @@ export const ACTION_MAP = Object.freeze({
 
   /** Switch the view-screen to navigation chart mode. */
   set_navigation_chart: (a, send) => {
-    send('ControlSystem', {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
       target: 'viewscreen',
       payload: { type: 'SetView', data: { mode: { kind: 'NavigationChart' } } },
     });
@@ -497,7 +499,9 @@ export const ACTION_MAP = Object.freeze({
       if (typeof a.source_uuid === 'string' && a.source_uuid.length > 0) {
         data.source_uuid = a.source_uuid;
       }
-      send('ControlSystem', {
+      const correlated = typeof a.correlation === 'string' && a.correlation;
+      send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+        ...(correlated ? { correlation: a.correlation } : {}),
         target: 'navigation',
         payload: { type: 'SetNavigationWaypoint', data },
       });
@@ -506,7 +510,9 @@ export const ACTION_MAP = Object.freeze({
 
   /** Clear the shared custom navigation waypoint. */
   clear_navigation_waypoint: (a, send) => {
-    send('ControlSystem', {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
       target: 'navigation',
       payload: { type: 'ClearNavigationWaypoint' },
     });
@@ -547,7 +553,9 @@ export const ACTION_MAP = Object.freeze({
       order = { verb: 'dock', structure: a.structure };
     }
     if (!order) return;
-    send('ControlSystem', {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
       target: 'navigation',
       payload: { type: 'OrderCivilian', data: { target: a.target, order } },
     });

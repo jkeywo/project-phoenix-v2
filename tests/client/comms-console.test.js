@@ -149,7 +149,7 @@ describe('cruiser comms renderStation', () => {
 
   it('drives the navigation map and its overlay clone from the absorbed navigation system', () => {
     cruiserRender(payload, document);
-    const expected = { blips: [{ uuid: 'n1' }], regions: [{ id: 'r1' }], range: 4000, ship_pos: { x: 1, z: 2 }, ship_heading: 90, waypoint: { name: 'Gate' } };
+    const expected = { blips: [{ uuid: 'n1' }], regions: [{ id: 'r1' }], range: 4000, ship_pos: { x: 1, z: 2 }, ship_heading: 90, waypoint: { name: 'Gate' }, auto: true };
     expect(el('navigation-map').state).toEqual(expected);
     expect(el('nav-overlay-map').state).toEqual(expected);
   });

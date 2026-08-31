@@ -254,7 +254,7 @@ describe('courier captain renderStation', () => {
 
   it('drives the Nav overlay map and Comms overlay thread from the absorbed systems', () => {
     courierRender(payload, document);
-    expect(el('nav').state).toEqual({ blips: [{ uuid: 'n1' }], regions: [{ id: 'r1' }], range: 900, ship_pos: { x: 5, z: 6 }, ship_heading: 45, waypoint: { name: 'Beacon' } });
+    expect(el('nav').state).toEqual({ blips: [{ uuid: 'n1' }], regions: [{ id: 'r1' }], range: 900, ship_pos: { x: 5, z: 6 }, ship_heading: 45, waypoint: { name: 'Beacon' }, auto: false });
     expect(el('contacts').state).toEqual({ contacts: [{ id: 'c1' }] });
     expect(el('message').state).toEqual({ thread: { id: 'm2', is_read: false }, rejection: null });
   });

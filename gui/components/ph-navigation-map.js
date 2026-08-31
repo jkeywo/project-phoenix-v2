@@ -7,6 +7,19 @@ import { t } from '../strings.js';
 import { phColor } from './ph-console-styles.js';
 import { rovingKeyTarget } from '../roving-tabindex.js';
 import { PhElement, phDefine } from './ph-element.js';
+import { activateNavigationAction } from '../stations/navigation-action-control.js';
+import {
+  NAVIGATION_CONTACT_ACTION_ID,
+  NAVIGATION_PAN_DOWN_ACTION_ID,
+  NAVIGATION_PAN_LEFT_ACTION_ID,
+  NAVIGATION_PAN_RIGHT_ACTION_ID,
+  NAVIGATION_PAN_UP_ACTION_ID,
+  NAVIGATION_WAYPOINT_ANCHOR_ACTION_ID,
+  NAVIGATION_WAYPOINT_CLEAR_ACTION_ID,
+  NAVIGATION_WAYPOINT_PLACE_ACTION_ID,
+  NAVIGATION_ZOOM_IN_ACTION_ID,
+  NAVIGATION_ZOOM_OUT_ACTION_ID,
+} from '../stations/navigation-actions.js';
 
 export class PhNavigationMap extends PhElement {
   // Pure state and per-frame scratch: PRIVATE, because nothing reads them until
@@ -20,6 +33,9 @@ export class PhNavigationMap extends PhElement {
   #selectedBlip = null;
   #toastTimer = null;
   #picking = false;
+  #keyboardCursorX = Number.NaN;
+  #keyboardCursorY = Number.NaN;
+  #keyboardCursorVisible = false;
 
   #zoom = 1;
   #panX = 0;
@@ -66,6 +82,7 @@ export class PhNavigationMap extends PhElement {
       '.wp-btn.show { display: block; }',
       '.wp-btn.active { color: var(--gold); border-color: var(--gold); }',
       '.wp-btn:active { opacity: 0.7; }',
+      '.wp-btn:disabled { opacity: 0.42; cursor: not-allowed; }',
       '.toast { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-family: "JetBrains Mono", monospace; font-size: var(--text-sm); letter-spacing: 0.3em; color: var(--tactical); background: rgba(var(--rgb-deep), 0.92); border: 1px solid var(--tactical); box-shadow: 0 0 24px rgba(var(--rgb-tactical), 0.25); padding: 10px 24px; pointer-events: none; opacity: 0; transition: opacity 0.22s ease; z-index: 3; }',
       '.toast.show { opacity: 1; }',
       '</style>',
@@ -123,6 +140,7 @@ export class PhNavigationMap extends PhElement {
     // commits a waypoint through the SAME named action the bar button does.
     this.setAttribute('role', 'group');
     this.setAttribute('aria-label', t('component.navigation_map.label'));
+    this.setAttribute('aria-description', t('component.navigation_map.keyboard_help'));
     if (!this.hasAttribute('tabindex')) this.setAttribute('tabindex', '0');
     this.addEventListener('keydown', this.#boundKeyDown);
     this.canvas.addEventListener('mousedown', this.#boundMouseDown);
@@ -159,10 +177,124 @@ export class PhNavigationMap extends PhElement {
 
   set state(val) {
     this.#state = val;
+    if (val && val.auto && this.#picking) {
+      this.#picking = false;
+      this.canvas.classList.remove('picking');
+    }
     this.needsRender = true;
   }
 
   get state() { return this.#state; }
+
+  /** Current local contact identity for the Navigation semantic adapter. */
+  navigationSelectedUuid() {
+    return this.#selectedBlip && this.#selectedBlip.uuid || null;
+  }
+
+  /** Return the free world position under the local keyboard cursor. */
+  navigationPlacement() {
+    if (!this.canvas || this.canvas.width <= 0 || this.canvas.height <= 0) return null;
+    this.#ensureKeyboardCursor();
+    const state = this.#state || {};
+    const range = state.range || 50000;
+    const rangeClamped = range > 0 ? range : 50000;
+    const R = Math.min(this.canvas.width, this.canvas.height) / 2;
+    const scale = R / rangeClamped;
+    const [x, z] = this.#screenToWorld(
+      this.#keyboardCursorX,
+      this.#keyboardCursorY,
+      0,
+      0,
+      0,
+      scale,
+      this.canvas.width / 2,
+      this.canvas.height / 2,
+    );
+    return Number.isFinite(x) && Number.isFinite(z) ? { x, z } : null;
+  }
+
+  /** Apply one local contact-selection semantic operation. */
+  navigationSelect(detail = {}) {
+    const contacts = ((this.#state && this.#state.blips) || [])
+      .filter((entry) => entry && typeof entry.uuid === 'string' && entry.uuid);
+    let next = null;
+    if (Object.prototype.hasOwnProperty.call(detail, 'uuid')) {
+      next = detail.uuid == null ? null
+        : contacts.find((entry) => entry.uuid === detail.uuid) || null;
+      if (detail.uuid != null && !next) return false;
+    } else {
+      if (contacts.length === 0) return false;
+      const uuids = contacts.map((entry) => entry.uuid);
+      const current = this.#selectedBlip ? uuids.indexOf(this.#selectedBlip.uuid) : -1;
+      const direction = Number(detail.direction) < 0 ? -1 : 1;
+      const index = current < 0
+        ? (direction < 0 ? contacts.length - 1 : 0)
+        : (current + direction + contacts.length) % contacts.length;
+      next = contacts[index];
+    }
+    if ((this.#selectedBlip && this.#selectedBlip.uuid) === (next && next.uuid)) return false;
+    if (!this.#selectedBlip && !next) return false;
+    this.#selectedBlip = next;
+    this.#showOverlay(next);
+    this.#updateBar();
+    this.#dispatch('navselect', next);
+    this.needsRender = true;
+    return true;
+  }
+
+  /** Apply one local pan operation from a semantic binding or pointer gesture. */
+  navigationPan(detail = {}) {
+    if (!this.canvas || this.canvas.width <= 0 || this.canvas.height <= 0) return false;
+    const step = Math.min(this.canvas.width, this.canvas.height) * 0.08;
+    const dx = Number.isFinite(detail.x) ? detail.x
+      : detail.direction === 'left' ? -step : detail.direction === 'right' ? step : 0;
+    const dy = Number.isFinite(detail.y) ? detail.y
+      : detail.direction === 'up' ? -step : detail.direction === 'down' ? step : 0;
+    if (!Number.isFinite(dx) || !Number.isFinite(dy) || (dx === 0 && dy === 0)) return false;
+    this.#panX += dx;
+    this.#panY += dy;
+    this.needsRender = true;
+    return true;
+  }
+
+  /** Apply one local zoom operation, retaining the gesture's focal point. */
+  navigationZoom(detail = {}) {
+    if (!this.canvas || this.canvas.width <= 0 || this.canvas.height <= 0) return false;
+    const factor = Number.isFinite(detail.factor) && detail.factor > 0
+      ? detail.factor : detail.direction === 'out' ? 0.885 : 1.13;
+    const oldZoom = this.#zoom;
+    const newZoom = Math.max(this.#ZOOM_MIN, Math.min(this.#ZOOM_MAX, oldZoom * factor));
+    if (newZoom === oldZoom) return false;
+    const cx = this.canvas.width / 2;
+    const cy = this.canvas.height / 2;
+    const x = Number.isFinite(detail.x) ? detail.x : cx;
+    const y = Number.isFinite(detail.y) ? detail.y : cy;
+    const zoomRatio = newZoom / oldZoom;
+    this.#panX = x - cx - (x - cx - this.#panX) * zoomRatio;
+    this.#panY = y - cy - (y - cy - this.#panY) * zoomRatio;
+    this.#zoom = newZoom;
+    this.needsRender = true;
+    return true;
+  }
+
+  #activatePan(dx, dy) {
+    if (dx !== 0) {
+      const actionId = dx < 0 ? NAVIGATION_PAN_LEFT_ACTION_ID : NAVIGATION_PAN_RIGHT_ACTION_ID;
+      const detail = { x: dx };
+      activateNavigationAction(this, actionId, detail, () => this.navigationPan(detail));
+    }
+    if (dy !== 0) {
+      const actionId = dy < 0 ? NAVIGATION_PAN_UP_ACTION_ID : NAVIGATION_PAN_DOWN_ACTION_ID;
+      const detail = { y: dy };
+      activateNavigationAction(this, actionId, detail, () => this.navigationPan(detail));
+    }
+  }
+
+  #activateZoom(factor, x, y) {
+    const actionId = factor < 1 ? NAVIGATION_ZOOM_OUT_ACTION_ID : NAVIGATION_ZOOM_IN_ACTION_ID;
+    const detail = { factor, x, y };
+    activateNavigationAction(this, actionId, detail, () => this.navigationZoom(detail));
+  }
 
   initResize() {
     const updateSize = () => {
@@ -311,6 +443,8 @@ export class PhNavigationMap extends PhElement {
       this.#projectedBlips.push({ uuid: b.uuid, sx, sy, hitR: Math.max(14, blipR + 6), blip: b });
     }
 
+    if (this.#keyboardCursorVisible) this.#drawKeyboardCursor(octx, W, H, px);
+
     if (this.#offscreen) {
       this.ctx.drawImage(this.#offscreen, 0, 0);
     }
@@ -415,6 +549,41 @@ export class PhNavigationMap extends PhElement {
       octx.fillText('WP', px + d + 4, py + 3);
     }
     octx.restore();
+  }
+
+  #ensureKeyboardCursor() {
+    if (!Number.isFinite(this.#keyboardCursorX) || !Number.isFinite(this.#keyboardCursorY)) {
+      this.#keyboardCursorX = this.canvas.width / 2;
+      this.#keyboardCursorY = this.canvas.height / 2;
+    }
+    this.#keyboardCursorX = Math.max(0, Math.min(this.canvas.width, this.#keyboardCursorX));
+    this.#keyboardCursorY = Math.max(0, Math.min(this.canvas.height, this.#keyboardCursorY));
+  }
+
+  #drawKeyboardCursor(octx, width, height, px) {
+    this.#ensureKeyboardCursor();
+    const x = Math.max(0, Math.min(width, this.#keyboardCursorX));
+    const y = Math.max(0, Math.min(height, this.#keyboardCursorY));
+    const radius = 10 * px;
+    octx.save();
+    octx.strokeStyle = phColor(this, 'var(--gold)');
+    octx.lineWidth = Math.max(1, px);
+    octx.beginPath();
+    octx.moveTo(x - radius, y); octx.lineTo(x + radius, y);
+    octx.moveTo(x, y - radius); octx.lineTo(x, y + radius);
+    octx.stroke();
+    octx.restore();
+  }
+
+  #moveKeyboardCursor(dx, dy) {
+    this.#ensureKeyboardCursor();
+    const cssWidth = this.getBoundingClientRect ? this.getBoundingClientRect().width : 0;
+    const px = cssWidth > 0 ? this.canvas.width / cssWidth : 1;
+    const step = 24 * px;
+    this.#keyboardCursorX = Math.max(0, Math.min(this.canvas.width, this.#keyboardCursorX + dx * step));
+    this.#keyboardCursorY = Math.max(0, Math.min(this.canvas.height, this.#keyboardCursorY + dy * step));
+    this.#keyboardCursorVisible = true;
+    this.needsRender = true;
   }
 
   /**
@@ -621,10 +790,10 @@ export class PhNavigationMap extends PhElement {
       this.#showOverlay(null);
       this.#dispatch('navselect', null);
       this.#updateBar();
-      if (this.sendAction) {
-        this.sendAction('set_navigation_waypoint', { x: wx, z: wz });
-        this.#showToast(t('console.navigation.waypoint_set'));
-      }
+      const detail = { x: wx, z: wz };
+      activateNavigationAction(this, NAVIGATION_WAYPOINT_PLACE_ACTION_ID, detail, () => {
+        if (this.sendAction) this.sendAction('set_navigation_waypoint', detail);
+      });
       return;
     }
 
@@ -632,26 +801,23 @@ export class PhNavigationMap extends PhElement {
     // set the waypoint — that is an explicit command (bar buttons), matching
     // the former navigation console. Tapping empty space clears selection.
     const hit = this.#getBlipAt(bufX, bufY);
-    if (hit) {
-      if (this.#selectedBlip && this.#selectedBlip.uuid === hit.blip.uuid) return;
-      this.#selectedBlip = hit.blip;
-      this.#showOverlay(hit.blip);
-    } else {
-      if (!this.#selectedBlip) return;
-      this.#selectedBlip = null;
-      this.#showOverlay(null);
-    }
-    this.#updateBar();
-    this.#dispatch('navselect', this.#selectedBlip);
+    const detail = { uuid: hit ? hit.blip.uuid : null };
+    activateNavigationAction(this, NAVIGATION_CONTACT_ACTION_ID, detail, () => {
+      this.navigationSelect(detail);
+    });
   }
 
   #beginPick() {
+    if (this.#state && this.#state.auto) return;
     this.#picking = !this.#picking;
     if (this.#picking) {
       this.#selectedBlip = null;
       this.#showOverlay(null);
       this.#dispatch('navselect', null);
       this.canvas.classList.add('picking');
+      this.#keyboardCursorVisible = true;
+      this.#ensureKeyboardCursor();
+      this.focus();
       this.#showToast(t('console.navigation.tap_to_place'), 4000);
     } else {
       this.canvas.classList.remove('picking');
@@ -661,20 +827,25 @@ export class PhNavigationMap extends PhElement {
 
   #setToSelected() {
     const b = this.#selectedBlip;
-    if (!b || !this.sendAction) return;
+    if (!b) return;
     // Anchor the waypoint to the selected entity's UUID; the server refreshes
     // x/z from the entity's live transform each tick and auto-clears the
     // waypoint if the entity despawns (matching the former console).
-    this.sendAction('set_navigation_waypoint', {
-      x: b.world_x,
-      z: b.world_z,
-      source_uuid: b.uuid,
+    const detail = { source_uuid: b.uuid };
+    activateNavigationAction(this, NAVIGATION_WAYPOINT_ANCHOR_ACTION_ID, detail, () => {
+      if (!this.sendAction) return;
+      this.sendAction('set_navigation_waypoint', {
+        x: b.world_x,
+        z: b.world_z,
+        source_uuid: b.uuid,
+      });
     });
-    this.#showToast(t('console.navigation.waypoint_set'));
   }
 
   #clearWaypoint() {
-    if (this.sendAction) this.sendAction('clear_navigation_waypoint', {});
+    activateNavigationAction(this, NAVIGATION_WAYPOINT_CLEAR_ACTION_ID, {}, () => {
+      if (this.sendAction) this.sendAction('clear_navigation_waypoint', {});
+    });
   }
 
   /**
@@ -692,7 +863,24 @@ export class PhNavigationMap extends PhElement {
    * flight bindings, which are a different console entirely.
    */
   #boundKeyDown = (event) => {
+    // Ctrl-modified arrows belong to the semantic pan bindings;
+    // Shift+arrows retain the placement-cursor behaviour below.
+    if (event.ctrlKey && !event.shiftKey
+        && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
     const key = event.key;
+    const cursorDelta = key === 'ArrowLeft' ? [-1, 0]
+      : key === 'ArrowRight' ? [1, 0]
+        : key === 'ArrowUp' ? [0, -1]
+          : key === 'ArrowDown' ? [0, 1] : null;
+    // Pick mode is the keyboard sibling of tap-to-place: move a visible chart
+    // cursor and commit through the same semantic placement adapter. Holding
+    // Shift exposes/moves that cursor outside pick mode, so a remapped Place
+    // binding can use an arbitrary chart coordinate without any drag gesture.
+    if (cursorDelta && (this.#picking || event.shiftKey)) {
+      event.preventDefault();
+      this.#moveKeyboardCursor(cursorDelta[0], cursorDelta[1]);
+      return;
+    }
     if (key === 'Enter' || key === ' ' || key === 'Spacebar') {
       // Only the HOST's own Enter/Space commits the selection as a waypoint.
       // The bar buttons (SET AS WAYPOINT, CLEAR WAYPOINT) are focusable
@@ -703,7 +891,16 @@ export class PhNavigationMap extends PhElement {
       // when the focused target is a descendant control; the button runs its
       // own action, unimpeded, and the host stays out of it.
       if (event.composedPath()[0] !== this) return;
-      if (this.#selectedBlip) {
+      if (this.#picking) {
+        event.preventDefault();
+        this.#picking = false;
+        this.canvas.classList.remove('picking');
+        this.#updateBar();
+        const detail = this.navigationPlacement();
+        activateNavigationAction(this, NAVIGATION_WAYPOINT_PLACE_ACTION_ID, detail, () => {
+          if (detail && this.sendAction) this.sendAction('set_navigation_waypoint', detail);
+        });
+      } else if (this.#selectedBlip) {
         event.preventDefault();
         this.#setToSelected();
       }
@@ -725,10 +922,10 @@ export class PhNavigationMap extends PhElement {
     }
     if (next < 0) return;
     event.preventDefault();
-    this.#selectedBlip = contacts[next];
-    this.#showOverlay(this.#selectedBlip);
-    this.#updateBar();
-    this.#dispatch('navselect', this.#selectedBlip);
+    const detail = { uuid: contacts[next].uuid };
+    activateNavigationAction(this, NAVIGATION_CONTACT_ACTION_ID, detail, () => {
+      this.navigationSelect(detail);
+    });
   };
 
   #updateBar() {
@@ -740,6 +937,10 @@ export class PhNavigationMap extends PhElement {
     this.btnSetSelected.classList.toggle('show', hasSel);
     this.btnClearWaypoint.classList.toggle('show', hasWp);
     this.btnSetWaypoint.classList.toggle('active', this.#picking);
+    const auto = !!state.auto;
+    this.btnSetWaypoint.disabled = auto;
+    this.btnSetSelected.disabled = auto;
+    this.btnClearWaypoint.disabled = auto;
   }
 
   #showToast(msg, duration) {
@@ -778,9 +979,7 @@ export class PhNavigationMap extends PhElement {
     const dy = cpos.y - this.#dragStartY;
     if (Math.hypot(dx, dy) > 5) {
       this.#tapMoved = true;
-      this.#panX = this.#startPanX + dx;
-      this.#panY = this.#startPanY + dy;
-      this.needsRender = true;
+      this.#activatePan(this.#startPanX + dx - this.#panX, this.#startPanY + dy - this.#panY);
     }
   };
 
@@ -796,15 +995,7 @@ export class PhNavigationMap extends PhElement {
     e.preventDefault();
     const cpos = this.#eventBufPos(e);
     const factor = e.deltaY < 0 ? 1.13 : 0.885;
-    const newZoom = Math.max(this.#ZOOM_MIN, Math.min(this.#ZOOM_MAX, this.#zoom * factor));
-    const canvas = this.canvas;
-    const cx = canvas.width / 2;
-    const cy = canvas.height / 2;
-    const zoomRatio = newZoom / this.#zoom;
-    this.#panX = cpos.x - cx - (cpos.x - cx - this.#panX) * zoomRatio;
-    this.#panY = cpos.y - cy - (cpos.y - cy - this.#panY) * zoomRatio;
-    this.#zoom = newZoom;
-    this.needsRender = true;
+    this.#activateZoom(factor, cpos.x, cpos.y);
   };
 
   #boundTouchStart = (e) => {
@@ -836,25 +1027,15 @@ export class PhNavigationMap extends PhElement {
       const t0 = e.touches[0], t1 = e.touches[1];
       const dist = Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
       const factor = dist / this.#lastPinchDist;
-      const newZoom = Math.max(this.#ZOOM_MIN, Math.min(this.#ZOOM_MAX, this.#zoom * factor));
-      const canvas = this.canvas;
-      const cx = canvas.width / 2;
-      const cy = canvas.height / 2;
-      const zoomRatio = newZoom / this.#zoom;
-      this.#panX = this.#pinchMidX - cx - (this.#pinchMidX - cx - this.#panX) * zoomRatio;
-      this.#panY = this.#pinchMidY - cy - (this.#pinchMidY - cy - this.#panY) * zoomRatio;
-      this.#zoom = newZoom;
+      this.#activateZoom(factor, this.#pinchMidX, this.#pinchMidY);
       this.#lastPinchDist = dist;
-      this.needsRender = true;
     } else if (e.touches.length === 1 && this.#isDragging) {
       const cpos = this.#eventBufPos(e);
       const dx = cpos.x - this.#dragStartX;
       const dy = cpos.y - this.#dragStartY;
       if (Math.hypot(dx, dy) > 5) {
         this.#tapMoved = true;
-        this.#panX = this.#startPanX + dx;
-        this.#panY = this.#startPanY + dy;
-        this.needsRender = true;
+        this.#activatePan(this.#startPanX + dx - this.#panX, this.#startPanY + dy - this.#panY);
       }
     }
   };

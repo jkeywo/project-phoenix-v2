@@ -48,6 +48,30 @@ semantic_action.sensors.cancel_impulse.label,Sensors semantic action display nam
 semantic_action.sensors.cancel_impulse.accessibility,Sensors semantic action accessible description,[Cancel the active impulse charge from the Sensors console.]
 semantic_action.science.shield_focus.label,Science semantic action display name,[Shield Focus]
 semantic_action.science.shield_focus.accessibility,Science semantic action accessible description,[Choose or clear the focused shield facing.]
+semantic_action.navigation.chart.label,Navigation semantic action display name,[Navigation Chart]
+semantic_action.navigation.chart.accessibility,Navigation semantic action accessible description,[Show the Navigation chart on the shared viewscreen.]
+semantic_action.navigation.waypoint_place.label,Navigation semantic action display name,[Place Waypoint]
+semantic_action.navigation.waypoint_place.accessibility,Navigation semantic action accessible description,[Place a free waypoint at the Navigation map cursor.]
+semantic_action.navigation.waypoint_anchor.label,Navigation semantic action display name,[Waypoint to Contact]
+semantic_action.navigation.waypoint_anchor.accessibility,Navigation semantic action accessible description,[Anchor the shared waypoint to the selected Navigation contact.]
+semantic_action.navigation.waypoint_clear.label,Navigation semantic action display name,[Clear Waypoint]
+semantic_action.navigation.waypoint_clear.accessibility,Navigation semantic action accessible description,[Clear the shared Navigation waypoint.]
+semantic_action.navigation.contact.label,Navigation semantic action display name,[Contact Selection]
+semantic_action.navigation.contact.accessibility,Navigation semantic action accessible description,[Select the next contact on the Navigation chart.]
+semantic_action.navigation.civilian_order.label,Navigation semantic action display name,[Civilian Order]
+semantic_action.navigation.civilian_order.accessibility,Navigation semantic action accessible description,[Issue an available authored order to civilian traffic.]
+semantic_action.navigation.pan_left.label,Navigation semantic action display name,[Pan Map Left]
+semantic_action.navigation.pan_left.accessibility,Navigation semantic action accessible description,[Pan the Navigation chart left.]
+semantic_action.navigation.pan_right.label,Navigation semantic action display name,[Pan Map Right]
+semantic_action.navigation.pan_right.accessibility,Navigation semantic action accessible description,[Pan the Navigation chart right.]
+semantic_action.navigation.pan_up.label,Navigation semantic action display name,[Pan Map Up]
+semantic_action.navigation.pan_up.accessibility,Navigation semantic action accessible description,[Pan the Navigation chart up.]
+semantic_action.navigation.pan_down.label,Navigation semantic action display name,[Pan Map Down]
+semantic_action.navigation.pan_down.accessibility,Navigation semantic action accessible description,[Pan the Navigation chart down.]
+semantic_action.navigation.zoom_in.label,Navigation semantic action display name,[Zoom Map In]
+semantic_action.navigation.zoom_in.accessibility,Navigation semantic action accessible description,[Zoom in on the Navigation chart.]
+semantic_action.navigation.zoom_out.label,Navigation semantic action display name,[Zoom Map Out]
+semantic_action.navigation.zoom_out.accessibility,Navigation semantic action accessible description,[Zoom out from the Navigation chart.]
 semantic_action.host.qr_code.label,Host semantic action display name,[QR Code]
 semantic_action.host.qr_code.accessibility,Host semantic action accessible description,[Show or hide the crew join QR code.]
 semantic_action.host.qr_code.feedback,Host semantic action persistent status; {status} is a shared action feedback state,[QR Code: {status}]
@@ -547,6 +571,7 @@ component.impulse.cancel,Impulse button while charging. {pct} is charge percent;
 component.lateral.title,Lateral thruster joystick heading,LATERAL
 component.lateral.label,Accessible name (aria-label) for the lateral thruster control — the keyboard/pointer strafe control (issue #1176),Lateral thrust control
 component.navigation_map.label,Accessible name (aria-label) for the navigation chart — the keyboard/pointer contact-and-waypoint map (issue #1176),Navigation chart
+component.navigation_map.keyboard_help,Accessible keyboard help for free waypoint placement on the Navigation chart,[Use Shift plus arrow keys to move the placement cursor. Activate Place Waypoint to set that position.]
 component.objectives.empty,Objective list when the mission has no objectives yet,NO OBJECTIVES
 component.objectives.label,Accessible name (aria-label) for the mission objective list — the keyboard/pointer priority selector (issue #1178),Mission objectives
 component.tutorial.heading,Contextual tutorial overlay card (issue #916): eyebrow label above the tip title,TUTORIAL

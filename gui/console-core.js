@@ -83,6 +83,10 @@ import {
   SENSOR_SCIENCE_ACTION_CONTEXTS,
   registerSensorScienceActions,
 } from './stations/sensors-actions.js';
+import {
+  NAVIGATION_ACTION_CONTEXT,
+  registerNavigationActions,
+} from './stations/navigation-actions.js';
 // Console input-to-feedback latency (issue #1169, PRD #1144). `sendAction` is
 // the ONE place in a console document where a control's handler turns into an
 // outbound action, so it is the only honest place to stamp "the input event
@@ -95,11 +99,17 @@ import {
   normalizeActionFeedbackPreferences,
 } from './action-feedback.js';
 
-export function initConsole({ name, render }) {
+export function initConsole({ name, render, actionFamilies, navigationActions }) {
   // Resolve the global object: `window` in browsers, `globalThis` in Node/tests.
   // Evaluated at call-time so tests can set global.window before calling initConsole.
   var _root = (typeof window !== 'undefined') ? window : globalThis;
   var _actionContext = String(name || '').toLowerCase();
+  var _actionFamilies = new Set(
+    (Array.isArray(actionFamilies) && actionFamilies.length ? actionFamilies : [_actionContext])
+      .map(function(value) { return String(value || '').toLowerCase(); })
+      .filter(Boolean),
+  );
+  _actionFamilies.add(_actionContext);
   var _latestState = null;
   var _semanticActions = null;
   var _semanticFeedbackEl = null;
@@ -166,7 +176,7 @@ export function initConsole({ name, render }) {
     onTransition: _presentActionFeedback,
   });
   _semanticActions = createSemanticActionRegistry({ actionFeedback: _actionFeedback });
-  if (_actionContext === CAPTAIN_ACTION_CONTEXT) {
+  if (_actionFamilies.has(CAPTAIN_ACTION_CONTEXT)) {
     registerCaptainActions(_semanticActions, {
       getState: function() { return _latestState; },
       getAvailableCameraViews: typeof render.availableCameraViews === 'function'
@@ -177,19 +187,19 @@ export function initConsole({ name, render }) {
       sendAction: sendAction,
     });
   }
-  if (_actionContext === HELM_ACTION_CONTEXT) {
+  if (_actionFamilies.has(HELM_ACTION_CONTEXT)) {
     registerHelmActions(_semanticActions, {
       getState: function() { return _latestState; },
       sendAction: sendAction,
     });
   }
-  if (_actionContext === TACTICAL_ACTION_CONTEXT) {
+  if (_actionFamilies.has(TACTICAL_ACTION_CONTEXT)) {
     registerTacticalActions(_semanticActions, {
       getState: function() { return _latestState; },
       sendAction: sendAction,
     });
   }
-  if (_actionContext === COMMS_ACTION_CONTEXT) {
+  if (_actionFamilies.has(COMMS_ACTION_CONTEXT)) {
     registerCommsActions(_semanticActions, {
       getState: function() { return _latestState; },
       // Comms message selection is presentation-only, but it is still a real
@@ -208,6 +218,42 @@ export function initConsole({ name, render }) {
   if (SENSOR_SCIENCE_ACTION_CONTEXTS.includes(_actionContext)) {
     registerSensorScienceActions(_semanticActions, {
       getState: function() { return _latestState; },
+      sendAction: sendAction,
+    });
+  }
+  if (_actionFamilies.has(NAVIGATION_ACTION_CONTEXT)) {
+    registerNavigationActions(_semanticActions, {
+      getState: function() { return _latestState; },
+      getSurface: function() {
+        if (typeof document === 'undefined' || !document.querySelectorAll) return null;
+        var maps = Array.from(document.querySelectorAll('ph-navigation-map'));
+        if (maps.length === 0) return null;
+        var active = document.activeElement;
+        var focused = maps.find(function(map) {
+          return map === active || (typeof map.contains === 'function' && map.contains(active));
+        });
+        if (focused) return focused;
+        var open = maps.find(function(map) {
+          return typeof map.closest === 'function' && map.closest('.open');
+        });
+        if (open) return open;
+        var visible = maps.find(function(map) {
+          return typeof map.getClientRects !== 'function' || map.getClientRects().length > 0;
+        });
+        // A direct Navigation document owns its one chart even in non-layout
+        // harnesses.  A composite Captain/Comms document must not fall back to
+        // a hidden overlay map: the parent gamepad runtime addresses the host
+        // station context and can otherwise fire an invisible Navigation
+        // control. Cruiser Comms still has an always-visible inline chart, so
+        // that legitimate surface is selected by the `visible` arm above.
+        return visible || (_actionFamilies.size === 1 ? maps[0] : null);
+      },
+      supportsChart: navigationActions && navigationActions.supportsChart != null
+        ? navigationActions.supportsChart === true
+        : typeof document === 'undefined' || !!document.getElementById('btn-on-screen'),
+      supportsCivilianOrders: navigationActions && navigationActions.supportsCivilianOrders != null
+        ? navigationActions.supportsCivilianOrders === true
+        : typeof document === 'undefined' || !!document.querySelector('ph-civilian-traffic'),
       sendAction: sendAction,
     });
   }

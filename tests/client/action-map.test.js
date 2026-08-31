@@ -990,6 +990,57 @@ describe('order_civilian', () => {
   });
 });
 
+describe('Navigation correlated semantic envelopes', () => {
+  it('preserves correlation for chart, free/anchored waypoint, clear and civilian order', () => {
+    const send = mkSend();
+    const correlation = 'navigation-occurrence-7';
+
+    ACTION_MAP.set_navigation_chart({ correlation }, send);
+    ACTION_MAP.set_navigation_waypoint({ x: 1, z: 2, correlation }, send);
+    ACTION_MAP.set_navigation_waypoint({
+      x: 3, z: 4, source_uuid: 'beacon-a', correlation,
+    }, send);
+    ACTION_MAP.clear_navigation_waypoint({ correlation }, send);
+    ACTION_MAP.order_civilian({
+      target: 'civilian-a', verb: 'hold', correlation,
+    }, send);
+
+    expect(send.mock.calls).toEqual([
+      ['ControlSystemCorrelated', {
+        correlation,
+        target: 'viewscreen',
+        payload: { type: 'SetView', data: { mode: { kind: 'NavigationChart' } } },
+      }],
+      ['ControlSystemCorrelated', {
+        correlation,
+        target: 'navigation',
+        payload: { type: 'SetNavigationWaypoint', data: { x: 1, z: 2 } },
+      }],
+      ['ControlSystemCorrelated', {
+        correlation,
+        target: 'navigation',
+        payload: {
+          type: 'SetNavigationWaypoint',
+          data: { x: 3, z: 4, source_uuid: 'beacon-a' },
+        },
+      }],
+      ['ControlSystemCorrelated', {
+        correlation,
+        target: 'navigation',
+        payload: { type: 'ClearNavigationWaypoint' },
+      }],
+      ['ControlSystemCorrelated', {
+        correlation,
+        target: 'navigation',
+        payload: {
+          type: 'OrderCivilian',
+          data: { target: 'civilian-a', order: { verb: 'hold' } },
+        },
+      }],
+    ]);
+  });
+});
+
 // ── return_to_lobby (issue #822 / #756) ───────────────────────────────────────
 // Host-page lobby actions route through the same action map as everything else;
 // each maps to its bare ClientMessage variant.

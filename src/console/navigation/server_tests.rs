@@ -1,5 +1,7 @@
 use super::*;
-use crate::core::messages::{ClientMessage, ServerMessage};
+use crate::core::messages::{
+    ActionCorrelationId, ActionFeedbackOutcome, ClientMessage, ServerMessage,
+};
 use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage};
 use crate::server_app::{
     sim_state_broadcaster, LastBroadcastEntityPositions, LastBroadcastHull, ShipImpulse,
@@ -123,6 +125,34 @@ fn tick(app: &mut App) -> Vec<OutboundMessage> {
     let out = app.world().resource::<Outbox>().0.clone();
     app.world_mut().resource_mut::<Outbox>().0.clear();
     out
+}
+
+fn assert_action_feedback(
+    out: &[OutboundMessage],
+    correlation: &str,
+    outcome: ActionFeedbackOutcome,
+) {
+    let matching: Vec<_> = out
+        .iter()
+        .filter(|message| {
+            matches!(
+                &message.msg,
+                ServerMessage::ActionFeedback {
+                    correlation: actual,
+                    outcome: actual_outcome,
+                } if actual.as_str() == correlation && *actual_outcome == outcome
+            )
+        })
+        .collect();
+    assert_eq!(
+        matching.len(),
+        1,
+        "correlation {correlation} must receive one {outcome:?} terminal result"
+    );
+    assert!(matches!(
+        &matching[0].target,
+        crate::lobby::Target::Token(token) if token == "navigation"
+    ));
 }
 
 fn start_game_with_navigation(app: &mut App) {
@@ -309,6 +339,66 @@ fn navigation_holder_can_set_and_clear_waypoint() {
         },
     );
     tick(&mut app);
+    assert!(get_nav_waypoint(&mut app).is_none());
+}
+
+#[test]
+fn correlated_waypoint_owner_applies_or_refuses_each_exact_occurrence() {
+    let mut app = test_app();
+    start_game_with_navigation(&mut app);
+
+    push(
+        &mut app,
+        "navigation",
+        ClientMessage::ControlSystemCorrelated {
+            correlation: ActionCorrelationId::new("navigation-set").unwrap(),
+            target: crate::core::messages::SystemId("navigation".into()),
+            payload: SystemControlPayload::SetNavigationWaypoint {
+                x: 120.0,
+                z: -45.0,
+                source_uuid: None,
+            },
+        },
+    );
+    let out = tick(&mut app);
+    assert_action_feedback(&out, "navigation-set", ActionFeedbackOutcome::Applied);
+    assert_eq!(
+        get_nav_waypoint(&mut app),
+        Some(WaypointMode::Free { x: 120.0, z: -45.0 })
+    );
+
+    push(
+        &mut app,
+        "navigation",
+        ClientMessage::ControlSystemCorrelated {
+            correlation: ActionCorrelationId::new("navigation-invalid").unwrap(),
+            target: crate::core::messages::SystemId("navigation".into()),
+            payload: SystemControlPayload::SetNavigationWaypoint {
+                x: f32::NAN,
+                z: 1.0,
+                source_uuid: None,
+            },
+        },
+    );
+    let out = tick(&mut app);
+    assert_action_feedback(&out, "navigation-invalid", ActionFeedbackOutcome::Refused);
+    assert_eq!(
+        get_nav_waypoint(&mut app),
+        Some(WaypointMode::Free { x: 120.0, z: -45.0 }),
+        "a refused occurrence must not replace the authoritative waypoint"
+    );
+
+    push(
+        &mut app,
+        "navigation",
+        ClientMessage::ControlSystemCorrelated {
+            correlation: ActionCorrelationId::new("navigation-clear").unwrap(),
+            target: crate::core::messages::SystemId("navigation".into()),
+            payload: SystemControlPayload::ClearNavigationWaypoint,
+        },
+    );
+    let out = tick(&mut app);
+    assert_action_feedback(&out, "navigation-clear", ActionFeedbackOutcome::Applied);
     assert!(get_nav_waypoint(&mut app).is_none());
 }
 

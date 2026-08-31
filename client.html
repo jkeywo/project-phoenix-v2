@@ -3139,12 +3139,16 @@
       if (action.action === 'set_navigation_waypoint'
           && Number.isFinite(action.x)
           && Number.isFinite(action.z)) {
-        send('ControlSystem', {
+        const correlation = typeof action.correlation === 'string' && action.correlation;
+        send(correlation ? 'ControlSystemCorrelated' : 'ControlSystem', {
+          ...(correlation ? { correlation: action.correlation } : {}),
           target: 'navigation',
           payload: { type: 'SetNavigationWaypoint', data: { x: action.x, z: action.z } },
         });
       } else if (action.action === 'clear_navigation_waypoint') {
-        send('ControlSystem', {
+        const correlation = typeof action.correlation === 'string' && action.correlation;
+        send(correlation ? 'ControlSystemCorrelated' : 'ControlSystem', {
+          ...(correlation ? { correlation: action.correlation } : {}),
           target: 'navigation',
           payload: { type: 'ClearNavigationWaypoint' },
         });

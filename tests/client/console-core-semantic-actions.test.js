@@ -4,6 +4,29 @@ import { initConsole } from '../../gui/console-core.js';
 import { ActionFeedbackRouter } from '../../gui/action-feedback.js';
 import { renderStation as courierCaptainRender } from '../../gui/courier/captain.console.js';
 import { withConsoleFamilyProjection } from './console-family-fixture.js';
+import { createClientSemanticActionRegistry } from '../../gui/client-semantic-actions.js';
+import { createGamepadInputRuntime } from '../../gui/gamepad-input.js';
+import {
+  NAVIGATION_CHART_ACTION_ID,
+  NAVIGATION_WAYPOINT_PLACE_ACTION_ID,
+} from '../../gui/stations/navigation-actions.js';
+
+function disposeRuntime(runtime) {
+  runtime.disposeSemanticActions();
+  document.body.innerHTML = '';
+  delete window.__sendAction;
+  delete window.__updateConsole;
+  delete window.__updateActionFeedback;
+  delete window.__updateSemanticActionBindings;
+  delete window.activateSemanticAction;
+  delete window.sendAction;
+}
+
+function standardPad(pressed = []) {
+  const buttons = Array.from({ length: 17 }, () => ({ pressed: false, value: 0 }));
+  for (const index of pressed) buttons[index] = { pressed: true, value: 1 };
+  return { index: 0, mapping: 'standard', buttons, axes: [0, 0, 0, 0] };
+}
 
 describe('console-core semantic action runtime', () => {
   it('registers Helm steering and emits the narrow action from a continuous activation', () => {
@@ -324,5 +347,217 @@ describe('console-core semantic action runtime', () => {
     delete window.__updateSemanticActionBindings;
     delete window.activateSemanticAction;
     delete window.sendAction;
+  });
+
+  it('registers direct Navigation keyboard placement with correlated terminal feedback', () => {
+    document.body.innerHTML = '<ph-navigation-map id="navigation-map"></ph-navigation-map>';
+    const map = document.getElementById('navigation-map');
+    map.navigationPlacement = vi.fn(() => ({ x: 145, z: -230 }));
+    const sent = [];
+    window.__sendAction = (json) => sent.push(JSON.parse(json));
+    const runtime = initConsole({ name: 'navigation', render: () => {} });
+    window.__updateConsole('navigation', JSON.stringify({
+      navigation_auto: false,
+      waypoint: null,
+      blips: [],
+      civilians: [],
+    }));
+
+    const key = new KeyboardEvent('keydown', {
+      code: 'KeyP', bubbles: true, cancelable: true,
+    });
+    document.dispatchEvent(key);
+
+    expect(key.defaultPrevented).toBe(true);
+    expect(map.navigationPlacement).toHaveBeenCalledOnce();
+    expect(sent).toEqual([expect.objectContaining({
+      action: 'set_navigation_waypoint',
+      console: 'navigation',
+      x: 145,
+      z: -230,
+      correlation: expect.any(String),
+      semantic_action: NAVIGATION_WAYPOINT_PLACE_ACTION_ID,
+    })]);
+    const status = document.querySelector('.semantic-action-feedback');
+    expect(status.dataset.state).toBe('Pending');
+    expect(window.__updateActionFeedback({
+      correlation: sent[0].correlation,
+      state: 'Applied',
+    })).toBe(true);
+    expect(status.dataset.state).toBe('Applied');
+
+    disposeRuntime(runtime);
+  });
+
+  it('adds Navigation beside Captain on the Courier without changing the transport console identity', () => {
+    document.body.innerHTML = '<ph-navigation-map id="nav"></ph-navigation-map>';
+    const map = document.getElementById('nav');
+    map.navigationPlacement = () => ({ x: 9, z: 12 });
+    const sent = [];
+    window.__sendAction = (json) => sent.push(JSON.parse(json));
+    const runtime = initConsole({
+      name: 'captain',
+      render: () => {},
+      actionFamilies: ['captain', 'navigation'],
+      navigationActions: { supportsChart: false, supportsCivilianOrders: false },
+    });
+    window.__updateConsole('captain', JSON.stringify(withConsoleFamilyProjection({
+      systems: {
+        captain: { red_alert: false, red_alert_auto: false },
+        navigation: { navigation_auto: false, waypoint: null, blips: [] },
+      },
+    })));
+
+    expect(window.activateSemanticAction(NAVIGATION_WAYPOINT_PLACE_ACTION_ID, {
+      source: 'gamepad', surface: map,
+    })).toMatchObject({ claimed: true, handled: true });
+    expect(window.activateSemanticAction('captain.red-alert', {
+      source: 'control',
+    })).toMatchObject({ claimed: true, handled: true });
+    expect(window.activateSemanticAction(NAVIGATION_CHART_ACTION_ID, {
+      source: 'control',
+    })).toMatchObject({ claimed: false, handled: false });
+
+    expect(sent).toEqual([
+      expect.objectContaining({
+        action: 'set_navigation_waypoint', console: 'captain', x: 9, z: 12,
+      }),
+      expect.objectContaining({
+        action: 'set_red_alert', console: 'captain', active: true,
+      }),
+    ]);
+
+    disposeRuntime(runtime);
+  });
+
+  it('chooses the open Cruiser Comms Navigation map for a remapped placement action', () => {
+    document.body.innerHTML = [
+      '<ph-navigation-map id="inline"></ph-navigation-map>',
+      '<div class="open"><ph-navigation-map id="overlay"></ph-navigation-map></div>',
+    ].join('');
+    const inline = document.getElementById('inline');
+    const overlay = document.getElementById('overlay');
+    inline.navigationPlacement = vi.fn(() => ({ x: 1, z: 2 }));
+    overlay.navigationPlacement = vi.fn(() => ({ x: 30, z: 40 }));
+    const sent = [];
+    window.__sendAction = (json) => sent.push(JSON.parse(json));
+    const runtime = initConsole({
+      name: 'comms',
+      render: () => {},
+      actionFamilies: ['comms', 'navigation'],
+      navigationActions: { supportsChart: false, supportsCivilianOrders: false },
+    });
+    window.__updateConsole('comms', JSON.stringify(withConsoleFamilyProjection({
+      systems: {
+        comms: { comms_auto: false },
+        navigation: { navigation_auto: false, waypoint: null, blips: [] },
+      },
+    })));
+    window.__updateSemanticActionBindings({
+      [NAVIGATION_WAYPOINT_PLACE_ACTION_ID]: [{ code: 'KeyU' }, null],
+    });
+
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      code: 'KeyU', bubbles: true, cancelable: true,
+    }));
+
+    expect(inline.navigationPlacement).not.toHaveBeenCalled();
+    expect(overlay.navigationPlacement).toHaveBeenCalledOnce();
+    expect(sent).toEqual([expect.objectContaining({
+      action: 'set_navigation_waypoint', console: 'comms', x: 30, z: 40,
+    })]);
+
+    disposeRuntime(runtime);
+  });
+
+  it('routes the real parent Comms gamepad context into its Navigation-capable owning iframe', () => {
+    document.body.innerHTML = '<ph-navigation-map id="inline"></ph-navigation-map>';
+    const map = document.getElementById('inline');
+    map.navigationPlacement = vi.fn(() => ({ x: 70, z: -90 }));
+    map.getClientRects = () => [{ width: 300, height: 300 }];
+    const sent = [];
+    window.__sendAction = (json) => sent.push(JSON.parse(json));
+    const runtime = initConsole({
+      name: 'comms',
+      render: () => {},
+      actionFamilies: ['comms', 'navigation'],
+      navigationActions: { supportsChart: false, supportsCivilianOrders: false },
+    });
+    window.__updateConsole('comms', JSON.stringify(withConsoleFamilyProjection({
+      systems: {
+        comms: { comms_auto: false },
+        navigation: { navigation_auto: false, waypoint: null, blips: [] },
+      },
+    })));
+
+    const parentRegistry = createClientSemanticActionRegistry();
+    let pads = [standardPad()];
+    const parentGamepad = createGamepadInputRuntime({
+      getGamepads: () => pads,
+      getContext: () => 'comms',
+      getActions: (context) => parentRegistry.list(context),
+      isTransportLive: () => true,
+      // Same call client.html makes on the iframe resolved from activeConsole.
+      activate: (actionId, options) => window.activateSemanticAction(actionId, options),
+    });
+    parentGamepad.select(0);
+    parentGamepad.poll(pads);
+    pads = [standardPad([8])]; // standard Select → Navigation place
+    parentGamepad.poll(pads);
+
+    expect(map.navigationPlacement).toHaveBeenCalledOnce();
+    expect(sent).toEqual([expect.objectContaining({
+      action: 'set_navigation_waypoint',
+      console: 'comms',
+      x: 70,
+      z: -90,
+      semantic_action: NAVIGATION_WAYPOINT_PLACE_ACTION_ID,
+    })]);
+
+    disposeRuntime(runtime);
+  });
+
+  it('refuses parent Captain gamepad Navigation input while the Courier overlay is hidden', () => {
+    document.body.innerHTML = [
+      '<section class="overlay" id="nav-overlay">',
+      '<ph-navigation-map id="nav"></ph-navigation-map>',
+      '</section>',
+    ].join('');
+    const map = document.getElementById('nav');
+    map.navigationPlacement = vi.fn(() => ({ x: 7, z: 8 }));
+    map.getClientRects = () => [];
+    const sent = [];
+    window.__sendAction = (json) => sent.push(JSON.parse(json));
+    const runtime = initConsole({
+      name: 'captain',
+      render: () => {},
+      actionFamilies: ['captain', 'navigation'],
+      navigationActions: { supportsChart: false, supportsCivilianOrders: false },
+    });
+    window.__updateConsole('captain', JSON.stringify(withConsoleFamilyProjection({
+      systems: {
+        captain: { red_alert: false, red_alert_auto: false },
+        navigation: { navigation_auto: false, waypoint: null, blips: [] },
+      },
+    })));
+
+    const parentRegistry = createClientSemanticActionRegistry();
+    let pads = [standardPad()];
+    const parentGamepad = createGamepadInputRuntime({
+      getGamepads: () => pads,
+      getContext: () => 'captain',
+      getActions: (context) => parentRegistry.list(context),
+      isTransportLive: () => true,
+      activate: (actionId, options) => window.activateSemanticAction(actionId, options),
+    });
+    parentGamepad.select(0);
+    parentGamepad.poll(pads);
+    pads = [standardPad([8])];
+    parentGamepad.poll(pads);
+
+    expect(map.navigationPlacement).not.toHaveBeenCalled();
+    expect(sent).toEqual([]);
+
+    disposeRuntime(runtime);
   });
 });

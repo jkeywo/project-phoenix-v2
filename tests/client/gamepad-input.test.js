@@ -62,9 +62,15 @@ const CONTINUOUS_ACTION = {
 
 describe('standard gamepad bindings', () => {
   it('normalizes portable button, D-pad and axis-direction identities', () => {
-    expect(normalizeGamepadBinding({ type: 'gamepad', control: 'face-bottom' })).toEqual({
-      type: 'gamepad', input: 'button', control: 'face-bottom',
-    });
+    for (const control of [
+      'face-bottom', 'face-right', 'face-left', 'face-top',
+      'left-shoulder', 'right-shoulder', 'left-trigger', 'right-trigger',
+      'select', 'start', 'left-stick-button', 'right-stick-button',
+    ]) {
+      expect(normalizeGamepadBinding({ type: 'gamepad', control })).toEqual({
+        type: 'gamepad', input: 'button', control,
+      });
+    }
     expect(normalizeGamepadBinding({ type: 'gamepad', control: 'dpad-up' })).toEqual({
       type: 'gamepad', input: 'dpad', control: 'dpad-up',
     });
@@ -99,6 +105,14 @@ describe('standard gamepad bindings', () => {
       direction: 'negative', threshold: 0.6,
     };
     expect(gamepadBindingPressed(dpad, pad(0, { pressed: [14] }))).toBe(true);
+    expect(gamepadBindingPressed(
+      { type: 'gamepad', input: 'button', control: 'select' },
+      pad(0, { pressed: [8] }),
+    )).toBe(true);
+    expect(gamepadBindingPressed(
+      { type: 'gamepad', input: 'button', control: 'right-stick-button' },
+      pad(0, { pressed: [11] }),
+    )).toBe(true);
     expect(gamepadBindingPressed(axis, pad(0, { axes: [0, -0.7, 0, 0] }))).toBe(true);
     expect(gamepadBindingPressed(dpad, pad(0, { mapping: '', pressed: [14] }))).toBe(false);
     expect(enumerateGamepads([

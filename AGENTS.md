@@ -130,6 +130,26 @@ cargo build --release --features host --bin phoenix-host
 # binary. Bevy owns the main thread (winit requires it on Windows) and the HTTP
 # host moves to a worker with a shutdown path.
 ./target/release/phoenix-host --world assets/worlds/combat_test.toml --solo
+#
+# --lobby (issue #1326) is the SAME authoritative host with no world: it opens
+# the viewscreen on an empty GamePhase::Lobby holding the merged scenario
+# catalogue and ingests a world only once a SelectScenario + SelectPlayerShip
+# pair has been arbitrated — the same first-valid-wins rule server.html runs in
+# gui/scenario-arbiter.js, transcribed into the pure src/lobby/scenario_arbiter.rs.
+# --world is that same decision made at the prompt, and the two are refused
+# together. A BARE invocation (neither flag) is still PRD #855's delivery-only
+# host, unchanged. There is no on-screen picker yet (that is issue #1328), so a
+# --lobby host needs a phone or a --pane to pick for it.
+./target/release/phoenix-host --client-dir dist --lobby --rendezvous <URL> --origin <URL>
+#   src/native_host/world_load.rs is the whole of it. The runtime load calls the
+#   SAME boot::ingest_world a --world boot calls (it takes a &mut World for
+#   exactly that reason) and the SAME app::install_world_selection, then runs a
+#   RuntimeWorldLoad schedule restating Startup's topological spawn order —
+#   including the compile_world_scripts < setup_world < spawn_world_entities
+#   mint pin. WorldIdMint is parked at tick 0 across that pass and restored
+#   after, so a world's entity uuids do not depend on how long the operator
+#   spent choosing; tests/native_host_lobby.rs asserts a runtime-loaded world
+#   mints exactly the ids a boot-loaded one mints.
 #   --ship <PATH>   the player's hull [default: the world's first available_ships]
 #   --seed <N>      overrides the world's [global] seed
 #   --solo          start with nobody connected, every station on Backfill.

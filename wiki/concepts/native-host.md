@@ -1,8 +1,8 @@
 ---
 title: Native Host
 type: concept
-tags: [native, viewscreen, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile, media-devices, camera, microphone, lobby]
-sources: [src/native_host/mod.rs, src/native_host/app.rs, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs]
+tags: [native, viewscreen, lobby, scenario-selection, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile, media-devices, camera, microphone]
+sources: [src/native_host/mod.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs]
 updated: 2026-09-01
 ---
 
@@ -18,20 +18,27 @@ cargo build --release --features host --bin phoenix-host
 ```
 
 It is the **same binary** PRD #855 shipped for delivery. `--world` adds the
-simulation; with no `--world` the process is byte-for-byte the delivery host it
-always was, so the bundle serving, the `--manifest` catalogue restriction and
-the startup version pin are shared rather than forked.
+simulation; with neither `--world` nor `--lobby` the process is byte-for-byte
+the delivery host it always was, so the bundle serving, the `--manifest`
+catalogue restriction and the startup version pin are shared rather than forked.
+
+Since issue #1326 there is a third invocation — `--lobby` opens the same
+authoritative host with **no world**, waiting for a scenario to be picked. See
+[The world need not be known at boot](#the-world-need-not-be-known-at-boot).
 
 ## Where the code is
 
 | Piece | File |
 |---|---|
 | App builder | `src/native_host/app.rs` |
+| Runtime world load + selection arbitration | `src/native_host/world_load.rs` |
+| The pure first-valid-wins rule | `src/lobby/scenario_arbiter.rs` |
 | Transport seam | `src/native_host/transport.rs` |
 | Content-root pin | `src/native_host/mod.rs` (`pin_content_root`) |
-| Boot profile + render surface | `src/boot/mod.rs` (`BootProfile::NativeHost`, `NativeRenderSurface`) |
+| Boot profile + render surface | `src/boot/mod.rs` (`BootProfile::NativeHost`, `NativeRenderSurface`, `WorldIngest`) |
 | Process, argv, threading | `src/bin/phoenix_host.rs` |
 | Template preload | `src/entities/template_preload.rs` |
+| The one native manifest read + world resolver | `src/delivery/serve.rs` (`ManifestSource`) |
 
 ## The boot profile
 
@@ -60,6 +67,73 @@ profile has:
   is checked separately by `build_native_host_app`, because issue #935 made the
   player's own hull authored content that need not be in the world's declared
   set at all, so an explicit `--ship` would otherwise walk past the boot gate.
+
+## The world need not be known at boot
+
+```bash
+./target/release/phoenix-host --client-dir dist --lobby --rendezvous <URL> --origin <URL>
+```
+
+Issue #1326. The host opens its viewscreen on an **empty
+`GamePhase::Lobby`** holding the merged scenario catalogue, and ingests a world
+only when a `SelectScenario` + `SelectPlayerShip` pair has been arbitrated —
+from a phone, a local Station pane, or (slice #1328) the host's own on-screen
+picker. `--world` is the same decision made at the prompt; the two flags are
+refused together.
+
+The browser host arbitrates this in **JavaScript** (`gui/scenario-arbiter.js`,
+driven by `server.html`) and gets away with it because its Bevy app does not
+exist yet when the choice is made: `wasm_init` throws to unwind the JS stack, so
+it has to run *after* `wasm_load_world`. A native host has no such escape — its
+lobby *is* the viewscreen and the viewscreen is the running `App` — so both the
+rule and the ingest had to move inside a process that is already ticking.
+
+| Half | Where |
+|---|---|
+| The rule (first-valid-wins, hulls scoped to their scenario) | `lobby::scenario_arbiter` — pure, Bevy-free, a deliberate transcription of the JS |
+| The catalogue | `delivery::serve::ManifestSource::merged_catalog`, the same `build_merged_catalog` call `wasm_get_scenario_catalog` makes |
+| The Bevy adapter | `native_host::world_load` — one drain system and one exclusive load, `.after(LobbySystemSet)` and `.before(SimSet::Input)` |
+
+### Why the runtime load is the boot load
+
+The claim rests on reuse, and the guard is a test rather than a comment
+(`tests/native_host_lobby.rs`,
+`a_runtime_load_mints_the_same_world_entity_ids_as_a_boot_load`).
+
+- **`boot::ingest_world` takes a `&mut World`, not a `&mut App`**, precisely so
+  both callers are the same function: reset → read → validate → compile →
+  abort-on-broken → native template gate → apply → eager record → freeze →
+  insert `WorldConfig` + `PreCompiledScripts`, once, in one place.
+  `WorldIngest::Deferred` is the "no world yet" mode; it runs only the Rhai
+  hashing-seed pin and deliberately does **not** freeze — freezing seals the
+  content digest for a world that is not there.
+- **`app::install_world_selection`** is the extracted seed precedence, hull
+  resolution, hull template-cache gate, #935 hull re-record + re-freeze,
+  `PendingShipConfig` and canonical `SelectedShipResource`.
+  `build_native_host_app` calls it too.
+- **The `RuntimeWorldLoad` schedule** restates the `Startup` *topological*
+  order, including the `compile_world_scripts < setup_world <
+  spawn_world_entities` pin `server_app::registration` expresses with
+  `.after`/`.before` edges — a pin whose tie-break flip moved the authoritative
+  digest once already.
+- **`WorldIdMint` is parked at tick 0** across that pass and the live mint
+  restored after. `begin_tick` resets a namespace's sequence only when the tick
+  *moves*, so without parking the same authored world would mint different
+  uuids depending on how long the operator spent choosing — and those uuids are
+  folded into the digest **by name**, key a snapshot's entity matching, and in a
+  fleet have to agree across hosts. Restoring rather than leaving the mint at
+  zero is what stops a later id colliding with a world entity's.
+
+What is *not* claimed: that a runtime-loaded host reaches `InProgress` on the
+same tick a `--solo --world` host does. It does not, and never could — the
+mission starts when the crew ready up, which is already true of every crewed
+boot. `spawn_game_start_entities` mints on the phase-transition tick either way.
+
+A load that fails **after** the ingest (an uncached `--ship`, a hull with no
+`[[station]]` blocks) removes `WorldConfig` and `PreCompiledScripts` again:
+nothing has spawned at either failure point, and leaving them behind would give
+the operator a host holding a world it never built and deaf to every later pick.
+`--world` has no such case; it reports at the prompt and exits.
 
 ## The catalogue restriction cuts both ways
 

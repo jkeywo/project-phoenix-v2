@@ -170,9 +170,19 @@ impl LocalHostLobby {
         documents: &HostedDocuments,
     ) -> Result<(), HostLobbyDocumentError> {
         // The same machine-wide OS accessibility read every pane document gets
-        // (issue #1127), for the same reason: an Ultralight view has no
-        // OS-backed `matchMedia`, so `gui/accessibility-profile.js` would
-        // otherwise initialise from nothing at all. Best-effort and read once.
+        // (issue #1127), by the same call: an Ultralight view has no OS-backed
+        // `matchMedia`, so a `gui/` module that reads the machine's preferences
+        // would otherwise initialise from nothing at all. Best-effort, read
+        // once, and never across the transport seam.
+        //
+        // Stated honestly, because the claim is easy to overstate: the lobby
+        // chrome reads NOTHING from this layer today, exactly as the web lobby
+        // reads nothing from it — `gui/accessibility-profile.js` is the phone's,
+        // and the host lobby's own reduced-motion answer is a CSS media query.
+        // It is seeded because a document assembled for an Ultralight view is
+        // assembled the same way whichever surface it is, and because the slices
+        // that put profile-reading UI on this permanent surface should find the
+        // layer already there rather than have to remember to add it.
         let prefs = super::panes::os_prefs::query_os_accessibility_prefs();
         let body = super::panes::document::inject_os_accessibility_defaults(
             &build_host_lobby_document(host_index_html)?,

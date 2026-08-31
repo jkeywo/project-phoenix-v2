@@ -226,7 +226,7 @@ impl Plugin for LobbyPlugin {
 }
 
 /// Update the Sessions resource with available consoles from the ship's EntityConfig.
-fn update_session_with_config(
+pub(crate) fn update_session_with_config(
     mut ship_stations: ResMut<ShipStations>,
     mut ship_client_config: ResMut<ShipClientConfigResource>,
     mut ship_manual: ResMut<ShipManualResource>,

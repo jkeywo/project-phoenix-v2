@@ -40,7 +40,7 @@ use crate::ship::state::ShipPhysics;
 /// All four containers carry this component; `toggle_viewscreen_radar_widgets`
 /// compares it against `ShipState.view_mode` to show/hide the right one.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-enum RadarContainerMode {
+pub(crate) enum RadarContainerMode {
     Helm,
     Science,
     SystemChart,
@@ -178,7 +178,30 @@ struct ViewscreenRadarSpec {
     auto_scale: Option<AutoScaleRadar>,
 }
 
-fn spawn_viewscreen_radar_widgets(
+/// Remove the four viewscreen radar containers (and, as their children, the
+/// widgets themselves) so [`spawn_viewscreen_radar_widgets`] can be run again.
+///
+/// The native host's runtime world load (issue #1326) is the only caller: a host
+/// that boots into an empty lobby has already run the spawn once, against
+/// whatever hull the world-less lobby defaulted to, and the ranges, filters and
+/// chart scales all come from the hull. Re-running the spawn bare would leave
+/// two sets of widgets stacked on the viewscreen; not re-running it at all would
+/// leave the operator flying a destroyer behind a cruiser's radar — the
+/// "plausible mission with the wrong numbers" failure the native
+/// template-cache gate exists to prevent, wearing a presentation hat.
+///
+/// Presentation only: nothing it touches is authoritative state, so it cannot
+/// move the digest.
+pub(crate) fn despawn_viewscreen_radar_widgets(
+    mut commands: Commands,
+    containers: Query<Entity, With<RadarContainerMode>>,
+) {
+    for container in &containers {
+        commands.entity(container).despawn();
+    }
+}
+
+pub(crate) fn spawn_viewscreen_radar_widgets(
     mut commands: Commands,
     selected_ship: Option<Res<crate::lobby::SelectedShipResource>>,
 ) {

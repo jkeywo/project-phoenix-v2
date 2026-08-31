@@ -1844,7 +1844,7 @@ pub(crate) fn merge_layer_scripts(
 /// Runs after `init_world_runtime` in the Startup chain. Each path is pushed
 /// into `PendingWorldLayerChanges` rather than applied directly so the same
 /// `apply_world_layer_changes` path handles both startup and trigger-fired loads.
-fn load_extra_worlds(
+pub(crate) fn load_extra_worlds(
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     mut pending: ResMut<PendingWorldLayerChanges>,
 ) {

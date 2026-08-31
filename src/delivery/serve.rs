@@ -16,7 +16,10 @@ use crate::delivery::args::{ClientSource, HostArgs};
 use crate::delivery::http::{self, CachePolicy, PathRefusal, Request, MANIFEST_PATH, STAMP_PATH};
 use crate::delivery::stamp::{check_bundle_content, check_client_stamp, DeliveryStamp};
 use crate::delivery::{client_stamp_from_request, DeliveryManifest, DeliveryRefusal};
-use crate::world::manifest::{build_catalog, parse_manifest, validate_manifest};
+use crate::world::manifest::{
+    build_catalog, build_merged_catalog, parse_manifest, validate_manifest, Manifest,
+    MergedCatalog, ScenarioCatalog,
+};
 
 /// The largest request head this host will read before giving up. A browser's
 /// head is well under a kilobyte; the cap is here so a client that never sends
@@ -147,41 +150,121 @@ pub struct LoadedContent {
     pub findings: Vec<String>,
 }
 
+/// One scenario manifest, read off disk, with the world-resolver every
+/// catalogue build over it shares.
+///
+/// The native answer to the two things the browser gets from its JS preload:
+/// the manifest TOML (`wasm_push_scenario_manifest`) and a way to resolve each
+/// `[[scenario]] world` to its raw text (`wasm_push_world_toml`, read back by
+/// `resolved_world_source`). Native has neither — `config_cache::
+/// resolved_world_source` is a `None` stub off the browser — so the resolver is
+/// a filesystem read rooted at `content_dir`, and it lives HERE rather than
+/// being re-typed at each call site: [`load_content`] publishes a catalogue over
+/// HTTP and [`Self::merged_catalog`] hands one to the native host's lobby
+/// (issue #1326), and the two must never resolve a world differently.
+///
+/// Touches no process-global state.
+pub struct ManifestSource {
+    /// The content tree every relative path resolves against.
+    root: PathBuf,
+    /// The manifest's raw text — also this host's content identity, which
+    /// [`DeliveryStamp::for_manifest`] is taken over.
+    pub toml: String,
+    /// The path the manifest was read from, as given (relative to `root`).
+    pub manifest_rel: String,
+    /// The parsed manifest.
+    pub manifest: Manifest,
+}
+
+impl ManifestSource {
+    /// Read and parse `<content_dir>/<manifest_rel>`.
+    pub fn read(content_dir: &str, manifest_rel: &str) -> Result<Self, String> {
+        let root = Path::new(content_dir).to_path_buf();
+        let manifest_path = root.join(manifest_rel);
+        let toml = std::fs::read_to_string(&manifest_path).map_err(|e| {
+            format!(
+                "cannot read scenario manifest {}: {e}",
+                manifest_path.display()
+            )
+        })?;
+        let manifest = parse_manifest(&toml).map_err(|e| {
+            format!(
+                "scenario manifest {} is malformed: {e}",
+                manifest_path.display()
+            )
+        })?;
+        Ok(Self {
+            root,
+            toml,
+            manifest_rel: manifest_rel.to_string(),
+            manifest,
+        })
+    }
+
+    /// The raw text of one manifest-listed world, or `None` when it cannot be
+    /// read. The whole of native's `resolve_world`.
+    pub fn resolve_world(&self, rel: &str) -> Option<String> {
+        std::fs::read_to_string(self.root.join(rel)).ok()
+    }
+
+    /// `validate_manifest`'s findings, flattened to one line each for the
+    /// startup summary.
+    pub fn findings(&self) -> Vec<String> {
+        validate_manifest(&self.manifest, &self.toml, |rel| self.resolve_world(rel))
+            .into_iter()
+            .map(|f| format!("[{}] {}: {}", f.category, f.source.reference, f.message))
+            .collect()
+    }
+
+    /// The published catalogue — base manifest only, which is what a delivery
+    /// host serves.
+    pub fn catalog(&self) -> ScenarioCatalog {
+        build_catalog(&self.manifest, |rel| self.resolve_world(rel))
+    }
+
+    /// The catalogue a host *offers*: the base manifest merged with every
+    /// active mod pack, in load order — the same
+    /// [`build_merged_catalog`] call `wasm_get_scenario_catalog` makes
+    /// (issue #1326).
+    ///
+    /// On native the overlay stack is empty today (nothing calls
+    /// `config_cache::push_mod_pack` off the browser), so this returns exactly
+    /// what [`Self::catalog`] does; going through the merge anyway is what keeps
+    /// the native lobby's catalogue the browser's catalogue rather than a second
+    /// derivation of it, and is the seam a native mod-pack path would land on.
+    pub fn merged_catalog(&self) -> MergedCatalog {
+        let active = crate::entities::config_cache::active_packs();
+        let parsed: Vec<(String, Manifest)> = active
+            .iter()
+            .filter_map(|p| {
+                parse_manifest(&p.manifest_toml)
+                    .ok()
+                    .map(|m| (p.id.clone(), m))
+            })
+            .collect();
+        let mods: Vec<(&str, &Manifest)> = parsed.iter().map(|(id, m)| (id.as_str(), m)).collect();
+        build_merged_catalog(&self.manifest, &mods, |rel| self.resolve_world(rel))
+    }
+
+    /// The published document this manifest yields.
+    pub fn loaded_content(&self) -> LoadedContent {
+        LoadedContent {
+            manifest: DeliveryManifest {
+                stamp: DeliveryStamp::for_manifest(&self.toml),
+                manifest_path: self.manifest_rel.clone(),
+                scenarios: crate::delivery::payload::catalog_payload(&self.catalog()),
+            },
+            findings: self.findings(),
+        }
+    }
+}
+
 /// Read the manifest and its worlds off disk and build the published document.
 ///
 /// Touches no process-global state, so it is safe from a unit test — unlike
 /// [`preload_templates`], which is not.
 pub fn load_content(content_dir: &str, manifest_rel: &str) -> Result<LoadedContent, String> {
-    let root = Path::new(content_dir);
-    let manifest_path = root.join(manifest_rel);
-    let manifest_toml = std::fs::read_to_string(&manifest_path).map_err(|e| {
-        format!(
-            "cannot read scenario manifest {}: {e}",
-            manifest_path.display()
-        )
-    })?;
-    let manifest = parse_manifest(&manifest_toml).map_err(|e| {
-        format!(
-            "scenario manifest {} is malformed: {e}",
-            manifest_path.display()
-        )
-    })?;
-
-    let resolve_world = |rel: &str| std::fs::read_to_string(root.join(rel)).ok();
-    let findings = validate_manifest(&manifest, &manifest_toml, resolve_world)
-        .into_iter()
-        .map(|f| format!("[{}] {}: {}", f.category, f.source.reference, f.message))
-        .collect();
-
-    let catalog = build_catalog(&manifest, resolve_world);
-    Ok(LoadedContent {
-        manifest: DeliveryManifest {
-            stamp: DeliveryStamp::for_manifest(&manifest_toml),
-            manifest_path: manifest_rel.to_string(),
-            scenarios: crate::delivery::payload::catalog_payload(&catalog),
-        },
-        findings,
-    })
+    Ok(ManifestSource::read(content_dir, manifest_rel)?.loaded_content())
 }
 
 /// Populate the process-global native entity-template cache so the published

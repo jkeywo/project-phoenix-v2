@@ -252,6 +252,22 @@ pub enum WorldIngest {
     /// carries the target-correct values (the browser's `WasmReader` and script
     /// resolver) for shape and future use, but [`build`] consults none of them.
     HostPreloaded,
+    /// There is **no world yet** (issue #1326): compose the `App` and leave the
+    /// whole ingestion — reset, read, validate, compile, apply, freeze, insert —
+    /// to a later runtime load through [`ingest_world`] on the running `World`.
+    ///
+    /// The native host boots this way when it is given no `--world`: it opens
+    /// its window on an empty `GamePhase::Lobby`, publishes the scenario
+    /// catalogue, and ingests a world only once a `SelectScenario` +
+    /// `SelectPlayerShip` pair has been arbitrated.
+    ///
+    /// Boot runs step 1 of [`ingest_world`]'s order and nothing else. It must
+    /// NOT freeze: freezing is what seals the content digest for the world that
+    /// is being loaded, and there is none — a freeze here would publish an empty
+    /// content digest that the runtime load then has to reset out from under
+    /// anything that read it. Nothing may spawn before that load, which is what
+    /// makes "no frozen digest yet" safe rather than merely tolerable.
+    Deferred,
 }
 
 /// Everything [`build`] needs that is not implied by the [`BootProfile`].
@@ -412,7 +428,7 @@ pub fn build(plan: BootPlan) -> Result<App, BootError> {
         render_surrogate(&mut app);
     }
 
-    ingest_world(&mut app, &plan)?;
+    ingest_world(app.world_mut(), &plan)?;
 
     Ok(app)
 }
@@ -803,21 +819,40 @@ fn register_render_contract(app: &mut App) {
 ///    as resources for `WorldPlugin`'s `Startup` to consume; a broken-but-not-
 ///    aborted browser root carries its findings through so the downstream gate
 ///    blocks activation. Static-child compiled sets do not cross this boundary.
-fn ingest_world(app: &mut App, plan: &BootPlan) -> Result<(), BootError> {
+/// # Called twice, deliberately
+///
+/// [`build`] calls this on the `World` of the `App` it is composing. The native
+/// host's runtime world load (issue #1326) calls it on the `World` of an `App`
+/// that is **already running** — a host that booted into an empty lobby and has
+/// since had a scenario chosen. That is why it takes a `&mut World` rather than
+/// a `&mut App`: there is no `App` to hand it at the second call site, and there
+/// must not be a second implementation of this order. Everything the runtime
+/// path needs to be the boot path — the reset/apply/eager-record/freeze
+/// sequence, the abort-vs-block policy, the native template gate, and which two
+/// resources are inserted — is therefore stated once, here.
+pub(crate) fn ingest_world(world: &mut World, plan: &BootPlan) -> Result<(), BootError> {
     // Step 1 for both modes: the Rhai hashing-seed pin. Genuinely first, before any
     // script engine — `set_hashing_seed` no-ops once a hash is taken. Idempotent
     // across boots and across the browser's own earlier calls.
     crate::world::script::init_hashing_seed();
 
-    // The host already ingested the world by another route (the browser's JS
-    // preload + `WorldPlugin`'s Startup systems — see [`WorldIngest::HostPreloaded`]).
-    // Boot does not read, reset, or insert anything; it owns only the freeze that
-    // seals the content digest after the preload and before anything spawns. The
-    // host reset the ledger and streamed its records in at world-selection time, so
-    // a reset here would wipe them.
-    if matches!(plan.world_ingest, WorldIngest::HostPreloaded) {
-        crate::content_ledger::freeze();
-        return Ok(());
+    match plan.world_ingest {
+        // The host already ingested the world by another route (the browser's JS
+        // preload + `WorldPlugin`'s Startup systems — see
+        // [`WorldIngest::HostPreloaded`]). Boot does not read, reset, or insert
+        // anything; it owns only the freeze that seals the content digest after
+        // the preload and before anything spawns. The host reset the ledger and
+        // streamed its records in at world-selection time, so a reset here would
+        // wipe them.
+        WorldIngest::HostPreloaded => {
+            crate::content_ledger::freeze();
+            return Ok(());
+        }
+        // No world yet (issue #1326) — the seed pin above is the whole of boot's
+        // job, and a later call to this same function on the running `World` owns
+        // everything below. Deliberately no freeze: see [`WorldIngest::Deferred`].
+        WorldIngest::Deferred => return Ok(()),
+        WorldIngest::FromReader => {}
     }
 
     crate::content_ledger::reset();
@@ -910,8 +945,8 @@ fn ingest_world(app: &mut App, plan: &BootPlan) -> Result<(), BootError> {
     }
     crate::content_ledger::freeze();
 
-    app.insert_resource(loaded.config);
-    app.insert_resource(crate::world::server::PreCompiledScripts(loaded.scripts));
+    world.insert_resource(loaded.config);
+    world.insert_resource(crate::world::server::PreCompiledScripts(loaded.scripts));
     Ok(())
 }
 

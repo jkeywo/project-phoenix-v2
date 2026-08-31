@@ -98,8 +98,22 @@ impl std::error::Error for NativeHostError {}
 /// working directory, which [`crate::native_host::pin_content_root`] has
 /// already pinned to `--content-dir`.
 pub struct NativeHostConfig {
-    /// The root world TOML.
-    pub world_path: String,
+    /// The root world TOML, or `None` to boot into an **empty lobby** and take
+    /// the world from a runtime scenario selection instead (issue #1326).
+    ///
+    /// `Some` is `--world`: the world is ingested by [`crate::boot::build`]
+    /// before the `App` exists, exactly as it always was. `None` composes the
+    /// same `App` with [`WorldIngest::Deferred`], publishes [`Self::catalog`] to
+    /// the lobby, and ingests through
+    /// [`world_load`](crate::native_host::world_load) once a `SelectScenario` +
+    /// `SelectPlayerShip` pair has been arbitrated — the same two messages, and
+    /// the same first-valid-wins rule, the browser host arbitrates in
+    /// `gui/scenario-arbiter.js`.
+    pub world_path: Option<String>,
+    /// The scenario catalogue a world-less host offers, from
+    /// [`ManifestSource::merged_catalog`](crate::delivery::serve::ManifestSource::merged_catalog).
+    /// Empty (and unread) when [`Self::world_path`] is `Some`.
+    pub catalog: crate::world::manifest::ScenarioCatalog,
     /// The player's hull. `None` takes the world's first `available_ships`
     /// entry, which is what the browser's ship picker defaults to.
     pub ship_path: Option<String>,
@@ -182,7 +196,8 @@ impl NativeHostConfig {
     /// lobby that waits. The shape tests start from.
     pub fn new(world_path: impl Into<String>) -> Self {
         Self {
-            world_path: world_path.into(),
+            world_path: Some(world_path.into()),
+            catalog: crate::world::manifest::ScenarioCatalog::default(),
             ship_path: None,
             seed: None,
             log: LogFilterConfig::default(),
@@ -194,6 +209,20 @@ impl NativeHostConfig {
             panes: None,
             bridge_profile: None,
             host_lobby: None,
+        }
+    }
+
+    /// A world-less configuration (issue #1326): the same host, booted into an
+    /// empty [`GamePhase::Lobby`] offering `catalog`, with no world ingested
+    /// until a scenario and hull are selected at runtime.
+    ///
+    /// What `phoenix-host --client-dir dist` builds when it is given no
+    /// `--world`, and the shape the runtime-load tests start from.
+    pub fn lobby(catalog: crate::world::manifest::ScenarioCatalog) -> Self {
+        Self {
+            world_path: None,
+            catalog,
+            ..Self::new(String::new())
         }
     }
 }
@@ -252,72 +281,82 @@ pub fn curated_hulls_for_world(manifest_toml: &str, world_path: &str) -> Vec<Str
         .unwrap_or_default()
 }
 
-/// Assemble the native host's `App`. Does not run it — see [`run`].
+/// The [`BootPlan`] a native host composes, for `world_path` (or for no world
+/// at all).
 ///
-/// `preload` is the receipt from [`preload_content_templates`], taken by
-/// reference rather than performed here so that the caller (`phoenix-host`)
-/// can populate the cache *before* it binds its HTTP listener and builds the
-/// published catalogue from the same templates. It cannot be forged: boot
-/// re-checks the cache against the world's declared set regardless, and refuses
-/// with [`BootError::NativeTemplatesMissing`] on a miss.
-pub fn build_native_host_app(
-    cfg: &NativeHostConfig,
-    preload: &TemplatePreload,
-) -> Result<App, NativeHostError> {
-    // The model-marker contract gate (issue #758), before an `App` exists. An
-    // unresolved marker attaches a beam, exhaust plume or camera to the ship's
-    // centre and produces a plausible-looking mission with the wrong numbers —
-    // exactly the class of silent failure a windowed host is worst at showing.
-    preload.marker_gate().map_err(NativeHostError::Markers)?;
-
-    // The boot seam (issue #1217, fourth profile #1121). It composes the plugin
-    // core and the real render stack, and owns the whole world-ingestion order:
-    // Rhai hashing seed → content-ledger reset → read/validate/compile →
-    // abort on a broken world (NativeHost is authoritative, like headless) →
-    // the native template-cache check → ledger apply + eager record → freeze →
-    // insert the `WorldConfig` and its `PreCompiledScripts`.
-    let plan = BootPlan {
+/// Shared by [`build_native_host_app`] and by
+/// [`world_load`](crate::native_host::world_load)'s runtime ingest, so the two
+/// cannot disagree about the reader, the script resolver, the abort policy or
+/// the log filter — the runtime load is the boot load, differing only in *when*
+/// it runs. The render/surface/task-pool fields no longer choose anything once
+/// an `App` exists, but the runtime call still fills them from the settings the
+/// host booted with
+/// ([`LobbyBootSettings`](crate::native_host::world_load::LobbyBootSettings)) so
+/// there is one plan rather than a plan and an approximation of it.
+pub(crate) fn boot_plan(
+    world_path: Option<&str>,
+    log_spec: &str,
+    deterministic: bool,
+    surface: NativeRenderSurface,
+) -> BootPlan {
+    BootPlan {
         profile: BootProfile::NativeHost,
-        world_ingest: WorldIngest::FromReader,
+        world_ingest: match world_path {
+            Some(_) => WorldIngest::FromReader,
+            None => WorldIngest::Deferred,
+        },
         // Keep bevy-internal events quiet by default; a `--log` spec is folded
         // in after the `warn` floor, exactly as headless does it.
-        log_filter: if cfg.log_spec.is_empty() {
+        log_filter: if log_spec.is_empty() {
             "warn".to_string()
         } else {
-            format!("warn,{}", cfg.log_spec)
+            format!("warn,{log_spec}")
         },
-        world_path: cfg.world_path.clone(),
+        world_path: world_path.unwrap_or_default().to_string(),
         reader: Box::new(crate::world::load::FsReader),
         script_resolver: Box::new(crate::entities::config_cache::production_script_resolver()),
         // A shipped rendered host is not reproduced tick-for-tick, so it keeps
         // the multithreaded pool — the same answer both browser profiles give.
         // A digest comparison asks for the pinned executor instead; boot
         // honours it on every native composition path, wgpu included.
-        single_threaded: cfg.deterministic,
+        single_threaded: deterministic,
         raw_transform: None,
-        native_surface: cfg.surface,
-    };
-    let mut app = crate::boot::build(plan).map_err(NativeHostError::Boot)?;
+        native_surface: surface,
+    }
+}
 
-    // Everything the preload gathered before a `tracing` subscriber existed.
-    // Emitted HERE, after boot's `LogPlugin::build` installed one — before it,
-    // every line goes nowhere.
-    preload.report();
+/// Which hull to fly, and under what seed — the inputs
+/// [`install_world_selection`] resolves against a loaded world.
+pub(crate) struct HullChoice<'a> {
+    /// The world's authored path, for error messages only.
+    pub world_label: &'a str,
+    /// An explicit hull (`--ship`, or the lobby's `SelectPlayerShip`). `None`
+    /// takes the world's first curated `available_ships` entry.
+    pub ship_path: Option<&'a str>,
+    /// The manifest's curated hull allowlist for this world (issue #917); empty
+    /// means unrestricted.
+    pub curated_ships: &'a [String],
+    /// `--seed`, which outranks the world's own `[global] seed`.
+    pub seed: Option<u64>,
+}
 
-    // Crate-side `plog!` filtering, separate from boot's bevy `LogPlugin`.
-    app.insert_resource(cfg.log.clone())
-        .add_plugins(LoggingPlugin);
-
+/// Resolve the hull, gate it against the native template cache, and insert the
+/// two ship resources `LobbyPlugin` reads — returning the [`SimRng`] this run
+/// should adopt.
+///
+/// Extracted from [`build_native_host_app`] so the runtime world load
+/// ([`world_load`](crate::native_host::world_load)) performs the *same* steps in
+/// the same order rather than a second version of them: seed precedence, hull
+/// choice, the cache gate whose failure is otherwise silent, the #935 hull
+/// re-record + re-freeze, `PendingShipConfig`, and the canonical
+/// `SelectedShipResource`.
+pub(crate) fn install_world_selection(
+    world: &mut World,
+    world_config: &crate::world::config::WorldConfig,
+    choice: &HullChoice<'_>,
+) -> Result<SimRng, NativeHostError> {
     // Seed precedence: `--seed`, then the world's `[global] seed`, then the OS.
-    // Read back from the `WorldConfig` boot parsed and inserted — the first
-    // point at which both the config and the parsed world are in scope.
-    // Inserted into the app AFTER `add_simulation_plugins_with`'s
-    // `init_resource` below, so it overrides the OS-seeded default.
-    let world_config = app
-        .world()
-        .resource::<crate::world::config::WorldConfig>()
-        .clone();
-    let sim_rng = match (cfg.seed, world_config.global.seed) {
+    let sim_rng = match (choice.seed, world_config.global.seed) {
         (Some(seed), _) => SimRng::new(seed, SeedSource::Cli),
         (None, Some(seed)) => SimRng::new(seed, SeedSource::World),
         (None, None) => SimRng::random(),
@@ -332,28 +371,28 @@ pub fn build_native_host_app(
     // curated catalogue over HTTP (`--manifest assets/scenarios.demo.toml`,
     // issue #917's native half) and simultaneously flying a hull that catalogue
     // excludes.
-    let ship_path = match &cfg.ship_path {
-        Some(path) => path.clone(),
+    let ship_path = match choice.ship_path {
+        Some(path) => path.to_string(),
         None => world_config
             .available_ships
             .iter()
             .find(|s| {
-                cfg.curated_ships.is_empty()
-                    || cfg.curated_ships.iter().any(|c| c == &s.template_path)
+                choice.curated_ships.is_empty()
+                    || choice.curated_ships.iter().any(|c| c == &s.template_path)
             })
             .map(|s| s.template_path.clone())
             .ok_or_else(|| {
-                NativeHostError::NoShip(if cfg.curated_ships.is_empty() {
+                NativeHostError::NoShip(if choice.curated_ships.is_empty() {
                     format!(
                         "{} authors no [[available_ships]] and no --ship was given",
-                        cfg.world_path
+                        choice.world_label
                     )
                 } else {
                     format!(
                         "{} authors no [[available_ships]] the manifest's curated hull list \
                          admits ({}), and no --ship was given",
-                        cfg.world_path,
-                        cfg.curated_ships.join(", ")
+                        choice.world_label,
+                        choice.curated_ships.join(", ")
                     )
                 })
             })?,
@@ -397,7 +436,7 @@ pub fn build_native_host_app(
     let ship_config = ship_entity_config
         .ship_config
         .ok_or_else(|| NativeHostError::Ship(format!("{ship_path:?} has no [[station]] blocks")))?;
-    app.insert_resource(PendingShipConfig(ship_config));
+    world.insert_resource(PendingShipConfig(ship_config));
     // Store the CANONICAL key, not the raw `--ship` string: every downstream
     // reader (`lobby::server::update_session_with_config`, `server::radar`,
     // `server::reference_grid`, `server_app::world_setup`) looks this path up
@@ -406,7 +445,81 @@ pub fn build_native_host_app(
     // before checking, so a raw string here would let a `--ship` spelled with
     // `./` or Windows backslashes pass the gate and then miss every one of
     // those lookups, silently keeping a Default `ShipClientConfig`.
-    app.insert_resource(SelectedShipResource(ship_key.clone()));
+    world.insert_resource(SelectedShipResource(ship_key));
+
+    Ok(sim_rng)
+}
+
+/// Assemble the native host's `App`. Does not run it — see [`run`].
+///
+/// `preload` is the receipt from [`preload_content_templates`], taken by
+/// reference rather than performed here so that the caller (`phoenix-host`)
+/// can populate the cache *before* it binds its HTTP listener and builds the
+/// published catalogue from the same templates. It cannot be forged: boot
+/// re-checks the cache against the world's declared set regardless, and refuses
+/// with [`BootError::NativeTemplatesMissing`] on a miss.
+pub fn build_native_host_app(
+    cfg: &NativeHostConfig,
+    preload: &TemplatePreload,
+) -> Result<App, NativeHostError> {
+    // The model-marker contract gate (issue #758), before an `App` exists. An
+    // unresolved marker attaches a beam, exhaust plume or camera to the ship's
+    // centre and produces a plausible-looking mission with the wrong numbers —
+    // exactly the class of silent failure a windowed host is worst at showing.
+    preload.marker_gate().map_err(NativeHostError::Markers)?;
+
+    // The boot seam (issue #1217, fourth profile #1121). It composes the plugin
+    // core and the real render stack, and owns the whole world-ingestion order:
+    // Rhai hashing seed → content-ledger reset → read/validate/compile →
+    // abort on a broken world (NativeHost is authoritative, like headless) →
+    // the native template-cache check → ledger apply + eager record → freeze →
+    // insert the `WorldConfig` and its `PreCompiledScripts`.
+    //
+    // With no `--world` (issue #1326) the SAME plan is composed with
+    // [`WorldIngest::Deferred`] instead: identical profile, identical render
+    // surface, identical task-pool answer — boot simply stops after the Rhai
+    // hashing-seed pin, and `world_load::load_selected_world` runs the rest of
+    // that order later, on the running `World`, through this same function.
+    let mut app = crate::boot::build(boot_plan(
+        cfg.world_path.as_deref(),
+        &cfg.log_spec,
+        cfg.deterministic,
+        cfg.surface,
+    ))
+    .map_err(NativeHostError::Boot)?;
+
+    // Everything the preload gathered before a `tracing` subscriber existed.
+    // Emitted HERE, after boot's `LogPlugin::build` installed one — before it,
+    // every line goes nowhere.
+    preload.report();
+
+    // Crate-side `plog!` filtering, separate from boot's bevy `LogPlugin`.
+    app.insert_resource(cfg.log.clone())
+        .add_plugins(LoggingPlugin);
+
+    // The world half — everything below is skipped for a world-less host, which
+    // does it at runtime instead. `install_world_selection` is the shared body:
+    // seed precedence, hull resolution, the hull's own template-cache gate, and
+    // the two ship resources `LobbyPlugin` reads.
+    let sim_rng = match cfg.world_path.as_deref() {
+        Some(world_path) => {
+            let world_config = app
+                .world()
+                .resource::<crate::world::config::WorldConfig>()
+                .clone();
+            Some(install_world_selection(
+                app.world_mut(),
+                &world_config,
+                &HullChoice {
+                    world_label: world_path,
+                    ship_path: cfg.ship_path.as_deref(),
+                    curated_ships: &cfg.curated_ships,
+                    seed: cfg.seed,
+                },
+            )?)
+        }
+        None => None,
+    };
 
     // `ConfigCachePlugin` is wasm-only; its two jobs are the template cache
     // (done by the preload) and the faction registry, which
@@ -431,9 +544,32 @@ pub fn build_native_host_app(
             ..Default::default()
         },
     );
-    // After the plugins, so it overrides their OS-seeded `init_resource`.
-    app.insert_resource(sim_rng);
+    // After the plugins, so it overrides their OS-seeded `init_resource`. A
+    // world-less host has no `[global] seed` to read yet and keeps the
+    // OS-seeded default until `world_load` applies the same precedence to the
+    // world it ingests.
+    if let Some(sim_rng) = sim_rng {
+        app.insert_resource(sim_rng);
+    }
     app.add_plugins(WorldPlugin);
+
+    // The runtime world load (issue #1326). Installed unconditionally and inert
+    // with a world already ingested — its drain runs only while there is no
+    // `WorldConfig` — so a `--world` host is byte-for-byte unchanged, the same
+    // promise `BridgeDisplayPlugin` keeps below for `--profile`.
+    app.add_plugins(crate::native_host::world_load::NativeWorldLoadPlugin);
+    if cfg.world_path.is_none() {
+        app.insert_resource(crate::native_host::world_load::LobbyScenarioCatalog(
+            cfg.catalog.clone(),
+        ));
+        app.insert_resource(crate::native_host::world_load::LobbyBootSettings {
+            ship_path: cfg.ship_path.clone(),
+            seed: cfg.seed,
+            log_spec: cfg.log_spec.clone(),
+            deterministic: cfg.deterministic,
+            surface: cfg.surface,
+        });
+    }
 
     // The transport seam. Installed unconditionally and inert until something
     // inserts a `NativeTransportLink` — see the module docs for why it is here
@@ -522,7 +658,14 @@ pub fn build_native_host_app(
     if cfg.solo {
         app.add_systems(
             FixedUpdate,
-            solo_auto_start.before(crate::sim_sets::SimSet::Input),
+            solo_auto_start
+                .before(crate::sim_sets::SimSet::Input)
+                // A world-less host loads its world in this set (issue #1326);
+                // the edge is what makes `--solo` start the mission on the SAME
+                // tick the world lands, exactly as a `--world` host starts it on
+                // the first tick after `Startup` ingested one. With a world
+                // already ingested the set is empty and the edge is inert.
+                .after(crate::native_host::world_load::NativeWorldLoadSet),
         );
     } else if cfg.panes.as_ref().is_none_or(|p| p.opened.is_empty()) {
         // The mode is correct and the flag is not refused — but with nothing
@@ -571,13 +714,20 @@ pub fn build_native_host_app(
 /// page's force-start does. A solo run is the AI flying the mission; the
 /// viewscreen catches up as models stream in, and gating the simulation on a
 /// GPU upload would make the run's tick sequence depend on disk speed.
+///
+/// It DOES wait for a world (issue #1326). A `--world` host has the
+/// `WorldConfig` before the first fixed step, so that arm is byte-for-byte the
+/// behaviour it always had; a host that boots into an empty lobby would
+/// otherwise start a mission with no world at all on its very first tick,
+/// before anyone could pick one.
 fn solo_auto_start(
     state: Res<State<GamePhase>>,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
     mut next_state: ResMut<NextState<GamePhase>>,
     mut outbox: ResMut<LobbyOutbox>,
     mut started: Local<bool>,
 ) {
-    if *started || state.get() != &GamePhase::Lobby {
+    if *started || state.get() != &GamePhase::Lobby || world_config.is_none() {
         return;
     }
     next_state.set(GamePhase::InProgress);

@@ -58,17 +58,20 @@ pub struct HostArgs {
     pub profile: Option<String>,
 }
 
-/// The authoritative simulation's arguments, present only when `--world` was
-/// given (issue #1121).
+/// The authoritative simulation's arguments, present when `--world` (issue
+/// #1121) or `--lobby` (issue #1326) was given.
 ///
 /// A separate struct rather than five `Option` fields on [`HostArgs`] because
-/// they travel together: every one of them is meaningless without a world, and
-/// `Option<SimArgs>` makes "is this an authoritative host" a single question
-/// with a single answer.
+/// they travel together: every one of them is meaningless without an
+/// authoritative host, and `Option<SimArgs>` makes "is this an authoritative
+/// host" a single question with a single answer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SimArgs {
-    /// Root world TOML, relative to `content_dir`.
-    pub world: String,
+    /// Root world TOML, relative to `content_dir`, or `None` under `--lobby`:
+    /// the host boots into an empty lobby holding the scenario catalogue and
+    /// takes its world from a runtime `SelectScenario` + `SelectPlayerShip`
+    /// pair instead (issue #1326).
+    pub world: Option<String>,
     /// The player's hull. `None` takes the world's first `available_ships`
     /// entry — what the browser's ship picker pre-selects.
     pub ship: Option<String>,
@@ -132,8 +135,17 @@ USAGE:
 SIMULATION
     --world <PATH>        Run the authoritative simulation for this world,
                           relative to --content-dir, and open a native
-                          viewscreen window. Without it this process serves
-                          delivery only, exactly as it always has.
+                          viewscreen window. Without it (and without --lobby)
+                          this process serves delivery only, exactly as it
+                          always has.
+    --lobby               Open the same viewscreen window with NO world: the
+                          host waits in the lobby publishing its scenario
+                          catalogue, and loads a world when a participant picks
+                          a scenario and a hull — the same first-valid-wins
+                          arbitration the browser host runs before its own world
+                          load. Every flag below still applies to the mission
+                          that eventually starts. Mutually exclusive with
+                          --world, which is simply the same pick made up front.
     --ship <PATH>         The player's hull [default: the world's first
                           [[available_ships]] entry]
     --seed <N>            Override the world's [global] seed
@@ -159,8 +171,8 @@ BRIDGE DISPLAYS (issue #1123)
                           hardware identities, geometry and current assignment,
                           then exit. Validates --profile against them if given.
                           A standalone diagnostic — needs no --world, and
-                          refuses every simulation/crew flag (--world, --ship,
-                          --seed, --solo, --pane, --log, --log-entity,
+                          refuses every simulation/crew flag (--world, --lobby,
+                          --ship, --seed, --solo, --pane, --log, --log-entity,
                           --rendezvous, --origin) rather than silently
                           discarding them.
     --profile <PATH>      A bridge-display profile (TOML). With --world the host
@@ -240,6 +252,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
     let mut panes: Vec<String> = Vec::new();
     let mut setup = false;
     let mut profile: Option<String> = None;
+    let mut lobby = false;
 
     let mut it = args.into_iter();
     while let Some(arg) = it.next() {
@@ -253,6 +266,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
             "--setup" => setup = true,
             "--profile" => profile = Some(value_for(&arg, &mut it)?),
             "--world" => world = Some(value_for(&arg, &mut it)?),
+            "--lobby" => lobby = true,
             "--ship" => ship = Some(value_for(&arg, &mut it)?),
             "--seed" => {
                 let raw = value_for(&arg, &mut it)?;
@@ -284,6 +298,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
     if setup {
         for (flag, given) in [
             ("--world", world.is_some()),
+            ("--lobby", lobby),
             ("--ship", ship.is_some()),
             ("--seed", seed.is_some()),
             ("--log", !log_spec.is_empty()),
@@ -327,19 +342,30 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
     if origin.is_some() && rendezvous.is_none() {
         return Err("--origin only means anything with --rendezvous".to_string());
     }
-    // A bridge-display profile is applied by a running host (`--world`) or
-    // validated by `--setup`; on its own it has nothing to act on. Refuse at the
-    // prompt rather than reading a file nothing will use.
-    if profile.is_some() && world.is_none() && !setup {
+    // `--lobby` IS `--world` deferred (issue #1326): both ask for an
+    // authoritative host, and they differ only in whether the scenario is named
+    // up front or picked from the lobby. Given together, one of them is being
+    // ignored — say which rather than guessing.
+    if lobby && world.is_some() {
         return Err(
-            "--profile needs --world (to apply the bridge display profile) or --setup (to \
-             validate it against the connected displays)"
+            "--lobby and --world are the same decision made at two different moments: \
+             --world names the scenario up front, --lobby waits for someone to pick one"
+                .to_string(),
+        );
+    }
+    // A bridge-display profile is applied by a running host (`--world` or
+    // `--lobby`) or validated by `--setup`; on its own it has nothing to act on.
+    // Refuse at the prompt rather than reading a file nothing will use.
+    if profile.is_some() && world.is_none() && !lobby && !setup {
+        return Err(
+            "--profile needs --world or --lobby (to apply the bridge display profile) or \
+             --setup (to validate it against the connected displays)"
                 .to_string(),
         );
     }
 
-    let sim = match world {
-        Some(world) => Some(SimArgs {
+    let sim = if world.is_some() || lobby {
+        Some(SimArgs {
             world,
             ship,
             seed,
@@ -349,24 +375,26 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
             panes,
             rendezvous,
             origin,
-        }),
-        None => {
-            for (flag, given) in [
-                ("--ship", ship.is_some()),
-                ("--seed", seed.is_some()),
-                ("--log", !log_spec.is_empty()),
-                ("--log-entity", !log_entity.is_empty()),
-                ("--solo", solo),
-                ("--pane", !panes.is_empty()),
-                ("--rendezvous", rendezvous.is_some()),
-                ("--origin", origin.is_some()),
-            ] {
-                if given {
-                    return Err(format!("{flag} needs --world — it configures the simulation, and without a world this host serves delivery only"));
-                }
+        })
+    } else {
+        for (flag, given) in [
+            ("--ship", ship.is_some()),
+            ("--seed", seed.is_some()),
+            ("--log", !log_spec.is_empty()),
+            ("--log-entity", !log_entity.is_empty()),
+            ("--solo", solo),
+            ("--pane", !panes.is_empty()),
+            ("--rendezvous", rendezvous.is_some()),
+            ("--origin", origin.is_some()),
+        ] {
+            if given {
+                return Err(format!(
+                    "{flag} needs --world or --lobby — it configures the simulation, and \
+                     without one of those this host serves delivery only"
+                ));
             }
-            None
         }
+        None
     };
 
     Ok(ParseOutcome::Run(Box::new(HostArgs {
@@ -405,6 +433,10 @@ mod tests {
         }
     }
 
+    fn err(args: &[&str]) -> String {
+        parse(args).expect_err("expected a refusal")
+    }
+
     #[test]
     fn a_bare_invocation_serves_the_full_catalogue_to_the_lan_with_no_bundle() {
         let a = run(&[]);
@@ -428,7 +460,7 @@ mod tests {
             "dist",
         ]);
         let sim = a.sim.expect("--world selects the simulation");
-        assert_eq!(sim.world, "assets/worlds/combat_test.toml");
+        assert_eq!(sim.world.as_deref(), Some("assets/worlds/combat_test.toml"));
         assert_eq!(sim.ship, None);
         assert_eq!(sim.seed, None);
         assert!(!sim.solo);
@@ -440,6 +472,66 @@ mod tests {
             }
         );
         assert_eq!(a.manifest, DEFAULT_MANIFEST);
+    }
+
+    #[test]
+    fn lobby_selects_the_simulation_without_naming_a_world(/* issue #1326 */) {
+        let a = run(&["--lobby", "--client-dir", "dist"]);
+        let sim = a.sim.expect("--lobby selects the simulation");
+        assert_eq!(
+            sim.world, None,
+            "the world is chosen from the lobby, not at the prompt"
+        );
+        // Still the same delivery host underneath, exactly as --world leaves it.
+        assert_eq!(
+            a.client,
+            ClientSource::Bundled {
+                dir: "dist".to_string()
+            }
+        );
+        assert_eq!(a.manifest, DEFAULT_MANIFEST);
+    }
+
+    #[test]
+    fn the_simulation_flags_apply_to_a_lobby_host_too() {
+        let a = run(&["--lobby", "--solo", "--seed", "7"]);
+        let sim = a.sim.expect("--lobby selects the simulation");
+        assert!(sim.solo, "--solo starts the mission once a world is picked");
+        assert_eq!(sim.seed, Some(7));
+    }
+
+    #[test]
+    fn a_bare_invocation_is_still_delivery_only() {
+        assert!(
+            run(&["--client-dir", "dist"]).sim.is_none(),
+            "PRD #855's delivery-only mode is what a host with neither flag is"
+        );
+    }
+
+    #[test]
+    fn a_world_and_a_lobby_are_the_same_decision_twice() {
+        let err = err(&["--lobby", "--world", "assets/worlds/combat_test.toml"]);
+        assert!(err.contains("--lobby"), "{err}");
+        assert!(err.contains("--world"), "{err}");
+    }
+
+    #[test]
+    fn a_simulation_flag_alone_still_names_both_ways_in() {
+        let err = err(&["--solo"]);
+        assert!(err.contains("--world"), "{err}");
+        assert!(err.contains("--lobby"), "{err}");
+    }
+
+    #[test]
+    fn setup_refuses_a_lobby_the_way_it_refuses_a_world() {
+        let err = err(&["--setup", "--lobby"]);
+        assert!(err.contains("--lobby"), "{err}");
+    }
+
+    #[test]
+    fn a_bridge_profile_may_be_pinned_for_a_lobby_host() {
+        let a = run(&["--lobby", "--profile", "bridge.toml"]);
+        assert_eq!(a.profile.as_deref(), Some("bridge.toml"));
     }
 
     #[test]

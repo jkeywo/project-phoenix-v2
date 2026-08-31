@@ -38,7 +38,9 @@ fn main() {
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
     use project_phoenix::delivery::args::{parse_args, ClientSource, ParseOutcome, HELP};
-    use project_phoenix::delivery::serve::{preload_templates, HostServer, ShutdownSignal};
+    use project_phoenix::delivery::serve::{
+        preload_templates, HostServer, ManifestSource, ShutdownSignal,
+    };
     use project_phoenix::entities::template_preload::TemplatePreload;
     use project_phoenix::native_host;
 
@@ -209,7 +211,37 @@ fn main() {
     // world that does not load fails at the prompt rather than after a window
     // and a listener are up.
     let preload = sim_preload.expect("a simulation run preloads its templates");
-    let mut cfg = native_host::NativeHostConfig::new(sim.world.clone());
+    // `--world` names the scenario up front; `--lobby` (issue #1326) waits for
+    // one to be picked, and carries the catalogue this same process publishes
+    // over HTTP so the picker and the catalogue cannot disagree. Both build the
+    // same host — see `NativeHostConfig::world_path`.
+    let mut cfg = match &sim.world {
+        Some(world) => native_host::NativeHostConfig::new(world.clone()),
+        None => {
+            let manifest_source = match ManifestSource::read(&bound.content_dir, &bound.manifest) {
+                Ok(source) => source,
+                Err(e) => {
+                    // Unreachable in practice: `HostServer::bind` above read
+                    // and parsed this exact file.
+                    eprintln!("phoenix-host: {e}");
+                    std::process::exit(1);
+                }
+            };
+            let merged = manifest_source.merged_catalog();
+            for finding in &merged.findings {
+                eprintln!(
+                    "phoenix-host: lobby catalogue [{}] {}: {}",
+                    finding.category, finding.source.reference, finding.message
+                );
+            }
+            eprintln!(
+                "phoenix-host: no --world — waiting in the lobby with {} scenario(s) to \
+                 choose from",
+                merged.catalog.scenarios.len()
+            );
+            native_host::NativeHostConfig::lobby(merged.catalog)
+        }
+    };
     cfg.ship_path = sim.ship.clone();
     cfg.seed = sim.seed;
     cfg.solo = sim.solo;
@@ -222,10 +254,16 @@ fn main() {
     // outside it. An explicit `--ship` still wins, as `?ship=` does in the
     // browser. Read from the manifest the server actually loaded, by the same
     // path, so the two cannot name different files.
+    //
+    // A `--lobby` host has no world yet, so there is nothing to curate against
+    // here; the allowlist comes from the chosen scenario's own catalogue entry
+    // (`scenario_arbiter::curated_ships_for`), which IS the curated list — the
+    // same list `build_catalog` filtered when it published the catalogue.
     let manifest_path = std::path::Path::new(&bound.content_dir).join(&bound.manifest);
-    cfg.curated_ships = match std::fs::read_to_string(&manifest_path) {
-        Ok(toml) => native_host::curated_hulls_for_world(&toml, &sim.world),
-        Err(e) => {
+    cfg.curated_ships = match (&sim.world, std::fs::read_to_string(&manifest_path)) {
+        (None, _) => Vec::new(),
+        (Some(world), Ok(toml)) => native_host::curated_hulls_for_world(&toml, world),
+        (Some(_), Err(e)) => {
             // Unreachable in practice: `HostServer::bind` above already read and
             // parsed this exact file, so a failure here is a race with something
             // editing it mid-start. Unrestricted is the pre-#1121 answer.
@@ -550,6 +588,8 @@ fn main() {
     eprintln!(
         "phoenix-host: authoritative simulation on {} — native viewscreen",
         sim.world
+            .as_deref()
+            .unwrap_or("a scenario yet to be chosen from the lobby")
     );
 
     // Bevy owns the main thread (winit requires it on Windows); delivery moves

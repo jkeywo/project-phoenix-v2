@@ -4,7 +4,13 @@
 // command-admission and Captain server path. The component is not painted
 // optimistically, so its eventual active state is authoritative read-back.
 
-import { test, expect, readHostPeerId, waitForWasmReady } from './fixtures';
+import {
+  test,
+  expect,
+  createTestClient,
+  readHostPeerId,
+  waitForWasmReady,
+} from './fixtures';
 import { ts } from './strings';
 
 async function installFabricatedGamepads(page) {
@@ -36,6 +42,48 @@ async function setPads(page, specs) {
   await page.evaluate((next) => window.__setFabricatedGamepads(next), specs);
 }
 
+async function installCaptainFeedbackProbe(frameBody) {
+  await frameBody.evaluate(() => {
+    window.__captainFeedbackTransitions = [];
+    window.addEventListener('phoenix-action-feedback', (event) => {
+      const value = event && event.detail;
+      if (!value || value.lifecycleTransition !== true) return;
+      const alertRoot = document.querySelector('ph-red-alert')?.shadowRoot;
+      const cameraRoot = document.querySelector('ph-camera-select')?.shadowRoot;
+      const alertButton = alertRoot?.getElementById('alert-btn');
+      const holdButton = alertRoot?.getElementById('hold-btn');
+      const activeView = cameraRoot?.querySelector('.cam-btn.active');
+      window.__captainFeedbackTransitions.push({
+        actionId: value.actionId,
+        correlation: value.correlation,
+        state: value.state,
+        alertActive: alertButton?.classList.contains('active') ?? false,
+        alertBusy: alertButton?.getAttribute('aria-busy') ?? null,
+        holdHeld: holdButton?.classList.contains('held') ?? false,
+        holdBusy: holdButton?.getAttribute('aria-busy') ?? null,
+        activeView: activeView?.dataset.view ?? null,
+      });
+    });
+  });
+}
+
+async function expectAppliedLifecycle(frameBody, actionId) {
+  await expect.poll(
+    () => frameBody.evaluate((_body, id) => (
+      window.__captainFeedbackTransitions
+        .filter((event) => event.actionId === id)
+        .map((event) => event.state)
+    ), actionId),
+    { timeout: 10_000 },
+  ).toEqual(['Pressed', 'Pending', 'Applied']);
+
+  const events = await frameBody.evaluate((_body, id) => (
+    window.__captainFeedbackTransitions.filter((event) => event.actionId === id)
+  ), actionId);
+  expect(new Set(events.map((event) => event.correlation)).size).toBe(1);
+  return events;
+}
+
 test('remapped Captain Red Alert binding reaches the authoritative command path', async ({ context }) => {
   test.setTimeout(180_000);
 
@@ -56,10 +104,13 @@ test('remapped Captain Red Alert binding reaches the authoritative command path'
   await captain.click('#ready-btn');
   await expect(captain.locator('#captain-ui')).toHaveClass(/active/, { timeout: 10_000 });
 
-  const alertButton = captain.frameLocator('#captain-iframe')
-    .locator('ph-red-alert').locator('#alert-btn');
-  const alertFeedback = captain.frameLocator('#captain-iframe')
-    .locator('ph-red-alert').locator('#feedback-status');
+  const captainFrame = captain.frameLocator('#captain-iframe');
+  const frameBody = captainFrame.locator('body');
+  const alertComponent = captainFrame.locator('ph-red-alert');
+  const alertButton = alertComponent.locator('#alert-btn');
+  const holdButton = alertComponent.locator('#hold-btn');
+  const alertFeedback = alertComponent.locator('#feedback-status');
+  const activeViewButton = captainFrame.locator('ph-camera-select .cam-btn.active');
   await expect(alertButton).toBeEnabled();
   await expect(alertButton).toHaveText(ts('component.red_alert.standby'));
 
@@ -93,12 +144,25 @@ test('remapped Captain Red Alert binding reaches the authoritative command path'
   await holdBinding.press('KeyR');
   await expect(captain.locator('[data-control="semantic-binding-conflict-cancel"]'))
     .toBeFocused();
-  // Conflict Escape is modal-wide: move focus out of the prompt, then cancel
-  // without letting the shared Settings trap close the modal. Do not encode a
-  // fixed Tab count: the registry and private-profile sections grow as actions
-  // and portable settings are delivered.
+  // Conflict Escape is modal-wide: move backward out of the prompt to Reset
+  // All, then cancel without letting the shared Settings trap close the modal.
+  // Derive the distance from the live trap ring: adding another discoverable
+  // semantic action legitimately adds another binding input to that ring.
   const resetAll = captain.locator('[data-control="semantic-binding-reset-all"]');
-  await resetAll.focus();
+  const reverseTabsToResetAll = await captain.evaluate(() => {
+    const overlay = document.querySelector('#settings-overlay');
+    const target = overlay.querySelector('[data-control="semantic-binding-reset-all"]');
+    const focusable = window.focusableWithin(overlay);
+    const from = focusable.indexOf(document.activeElement);
+    const to = focusable.indexOf(target);
+    return from >= 0 && to >= 0
+      ? (from - to + focusable.length) % focusable.length
+      : -1;
+  });
+  expect(reverseTabsToResetAll).toBeGreaterThan(0);
+  for (let index = 0; index < reverseTabsToResetAll; index += 1) {
+    await captain.keyboard.press('Shift+Tab');
+  }
   await expect(resetAll).toBeFocused();
   await captain.keyboard.press('Escape');
   await expect(captain.locator('#settings-overlay')).toBeVisible();
@@ -202,14 +266,73 @@ test('remapped Captain Red Alert binding reaches the authoritative command path'
   // capture key above cannot also fire the action.
   await captain.keyboard.press('Escape');
   await expect(captain.locator('#settings-overlay')).toBeHidden();
+  await installCaptainFeedbackProbe(frameBody);
   await captain.keyboard.press('KeyU');
 
+  const alertEvents = await expectAppliedLifecycle(frameBody, 'captain.red-alert');
+  const alertPending = alertEvents.find((event) => event.state === 'Pending');
+  expect(alertPending).toMatchObject({ alertActive: false, alertBusy: 'true' });
   await expect(alertButton).toHaveText(ts('component.red_alert.active'), {
     timeout: 10_000,
   });
   await expect(alertButton).toHaveClass(/active/);
   await expect(alertFeedback).toHaveText(ts('action_feedback.applied'));
 
+  // The same shipped registry/transport/authority lifecycle covers Weapons
+  // Hold and the parameterised View action. Pending is observed before the
+  // ordinary Captain blackboard changes either control's rendered state.
+  await captain.keyboard.press('KeyH');
+  const holdEvents = await expectAppliedLifecycle(frameBody, 'captain.weapons-hold');
+  const holdPending = holdEvents.find((event) => event.state === 'Pending');
+  expect(holdPending).toMatchObject({ holdHeld: false, holdBusy: 'true' });
+  await expect(holdButton).toHaveText(ts('component.weapons_hold.held'));
+  await expect(holdButton).toHaveClass(/held/);
+
+  const viewBefore = await activeViewButton.count() === 1
+    ? await activeViewButton.getAttribute('data-view')
+    : null;
+  await captain.keyboard.press('KeyV');
+  const viewEvents = await expectAppliedLifecycle(frameBody, 'captain.view');
+  const viewPending = viewEvents.find((event) => event.state === 'Pending');
+  expect(viewPending.activeView).toBe(viewBefore);
+  await expect.poll(
+    async () => await activeViewButton.count() === 1
+      ? activeViewButton.getAttribute('data-view')
+      : null,
+    { timeout: 10_000 },
+  ).not.toBe(viewBefore);
+  const viewAfter = await activeViewButton.getAttribute('data-view');
+
+  // A real peer with no Captain tenure sends the same well-formed correlated
+  // state-setting command. Admission targets Refused back to that token, and
+  // advancing the authoritative clock proves the rejected request never
+  // changes Red Alert (or either already-applied sibling Captain state).
+  const nonCaptain = await createTestClient(context, hostId, {
+    name: 'Unassigned Crew',
+  });
+  const refusedCorrelation = 'smoke-non-captain-red-alert';
+  await nonCaptain.send('ControlSystemCorrelated', {
+    correlation: refusedCorrelation,
+    target: 'red-alert',
+    payload: { type: 'SetRedAlert', data: { active: false } },
+  });
+  const refusal = await nonCaptain.waitForMessage('ActionFeedback', 10_000);
+  expect(refusal.data).toEqual({
+    correlation: refusedCorrelation,
+    outcome: 'Refused',
+  });
+  const refusedAtTick = await serverPage.evaluate(() => window.wasm_sim_tick());
+  await expect.poll(
+    () => serverPage.evaluate(() => window.wasm_sim_tick()),
+    { timeout: 10_000 },
+  ).toBeGreaterThan(refusedAtTick + 2);
+  await expect(alertButton).toHaveText(ts('component.red_alert.active'));
+  await expect(alertButton).toHaveClass(/active/);
+  await expect(holdButton).toHaveText(ts('component.weapons_hold.held'));
+  await expect(holdButton).toHaveClass(/held/);
+  await expect(activeViewButton).toHaveAttribute('data-view', viewAfter);
+
+  await nonCaptain.close();
   await captain.close();
   await serverPage.close();
 });

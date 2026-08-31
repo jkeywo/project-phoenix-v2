@@ -690,6 +690,13 @@ export function createSemanticActionRegistry(options = {}) {
         context,
         source: options.source || 'control',
         event: options.event || null,
+        // Parameterised controls (for example one button per authored
+        // Viewscreen camera or objective) keep one stable semantic identity.
+        // The selected authored value is activation-local detail, never part
+        // of the binding identity or persisted profile.
+        detail: options.detail && typeof options.detail === 'object'
+          ? { ...options.detail }
+          : null,
         correlation: feedback ? feedback.correlation : null,
         inputMs: feedback ? feedback.inputMs : null,
         feedbackKind: definition.feedback,

@@ -73,6 +73,27 @@ describe('semantic action registration and normalization', () => {
 });
 
 describe('context-scoped dispatch', () => {
+  it('passes activation-local detail without adding it to persisted action metadata', () => {
+    const adapter = vi.fn(() => true);
+    const registry = createSemanticActionRegistry();
+    registry.register(ACTION, adapter);
+
+    registry.activate(ACTION.id, {
+      context: 'captain',
+      detail: { direction: 'cinematic' },
+    });
+
+    expect(adapter).toHaveBeenCalledWith(expect.objectContaining({
+      actionId: ACTION.id,
+      detail: { direction: 'cinematic' },
+    }));
+    expect(registry.action(ACTION.id)).not.toHaveProperty('detail');
+    expect(registry.bindingProfile()[ACTION.id]).toEqual([
+      expect.objectContaining({ code: 'KeyR' }),
+      null,
+    ]);
+  });
+
   it('dispatches default and remapped bindings through the same identity', () => {
     const adapter = vi.fn(() => true);
     const registry = createSemanticActionRegistry();

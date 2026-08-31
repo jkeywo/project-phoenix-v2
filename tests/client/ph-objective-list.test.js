@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { CAPTAIN_OBJECTIVE_PRIORITY_ACTION_ID } from '../../gui/stations/captain-actions.js';
 import '../../gui/components/ph-objective-list.js';
 
 function setup(opts) {
-  const sendAction = opts && opts.sendAction;
-  if (sendAction) {
-    window.sendAction = sendAction;
+  const activateSemanticAction = opts && opts.activateSemanticAction;
+  if (activateSemanticAction) {
+    window.activateSemanticAction = activateSemanticAction;
   }
   document.body.innerHTML = '<ph-objective-list id="test-panel"></ph-objective-list>';
   const el = document.getElementById('test-panel');
@@ -21,12 +22,12 @@ function queryText(host, sel) {
 describe('PhObjectiveList', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
-    delete window.sendAction;
+    delete window.activateSemanticAction;
   });
 
   afterEach(() => {
     document.body.innerHTML = '';
-    delete window.sendAction;
+    delete window.activateSemanticAction;
   });
 
   it('is defined and registered as a custom element', () => {
@@ -133,9 +134,9 @@ describe('PhObjectiveList', () => {
     expect(queryText(el, '.empty')).toBeNull();
   });
 
-  it('clicking an objective row calls sendAction with set_objective_priority', () => {
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+  it('routes a visible objective through the parameterised Captain semantic identity', () => {
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
     el.state = {
       objectives: [
         { id: 'obj-1', text: 'Scan the anomaly', done: false },
@@ -144,11 +145,16 @@ describe('PhObjectiveList', () => {
     };
     const rows = el.shadowRoot.querySelectorAll('.row');
     rows[1].click();
-    expect(sendAction).toHaveBeenCalledTimes(1);
-    expect(sendAction).toHaveBeenCalledWith('set_objective_priority', { id: 'obj-2' });
+    expect(activateSemanticAction).toHaveBeenCalledTimes(1);
+    expect(activateSemanticAction).toHaveBeenCalledWith(
+      CAPTAIN_OBJECTIVE_PRIORITY_ACTION_ID,
+      expect.objectContaining({
+        context: 'captain', source: 'control', detail: { id: 'obj-2' },
+      }),
+    );
   });
 
-  it('does not throw when sendAction is not set and row is clicked', () => {
+  it('does not throw when semantic activation is unavailable and row is clicked', () => {
     const { el } = setup();
     el.state = {
       objectives: [{ id: 'obj-1', text: 'Scan the anomaly', done: false }],

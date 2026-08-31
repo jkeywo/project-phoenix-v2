@@ -2519,9 +2519,9 @@ pub enum ClientMessage {
         payload: SystemControlPayload,
     },
     /// A `ControlSystem` request that asks for a targeted authoritative
-    /// lifecycle acknowledgement.  Issue #1276 enables this only for the
-    /// Captain's Red Alert action; the legacy envelope above remains the path
-    /// for every uncorrelated action, including Weapons Hold.
+    /// lifecycle acknowledgement. Only target/payload pairs whose consumer
+    /// owns a terminal feedback path are admitted with this envelope; the
+    /// legacy envelope above remains the path for uncorrelated commands.
     ControlSystemCorrelated {
         correlation: ActionCorrelationId,
         target: SystemId,

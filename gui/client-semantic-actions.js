@@ -2,15 +2,13 @@
 
 import { createSemanticActionRegistry } from './semantic-action-registry.js';
 import {
-  CAPTAIN_RED_ALERT_ACTION,
-  CAPTAIN_WEAPONS_HOLD_ACTION,
+  CAPTAIN_ACTIONS,
 } from './stations/captain-actions.js';
 import { HELM_STEERING_ACTION } from './stations/helm-actions.js';
 
 export function createClientSemanticActionRegistry() {
   const registry = createSemanticActionRegistry();
-  registry.register(CAPTAIN_RED_ALERT_ACTION);
-  registry.register(CAPTAIN_WEAPONS_HOLD_ACTION);
+  for (const action of CAPTAIN_ACTIONS) registry.register(action);
   registry.register(HELM_STEERING_ACTION);
   return registry;
 }

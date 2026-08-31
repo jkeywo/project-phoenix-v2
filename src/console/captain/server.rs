@@ -3,8 +3,9 @@ use bevy::prelude::*;
 use crate::authoritative::{DeclareState, StateClass};
 use crate::command_admission::ai_emit::emit_ai_command;
 use crate::core::messages::{
-    ActionFeedbackOutcome, AdmittedCommands, CameraView, CaptainBlackboard, DeliveryClass,
-    ObjectiveSnapshot, ServerMessage, SystemBlackboard, SystemControlPayload, SystemId, ViewMode,
+    ActionFeedbackOutcome, AdmittedCommand, AdmittedCommands, CameraView, CaptainBlackboard,
+    DeliveryClass, ObjectiveSnapshot, ServerMessage, SystemBlackboard, SystemControlPayload,
+    SystemId, ViewMode,
 };
 use crate::effect_queue::EffectQueue;
 use crate::objectives::WorldConditions;
@@ -98,6 +99,30 @@ impl Plugin for CaptainPlugin {
 
 // ── Input handlers ───────────────────────────────────────────────────────────
 
+fn finish_action_feedback(
+    cmd: &AdmittedCommand,
+    outbound: &mut Option<
+        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
+    >,
+    outcome: ActionFeedbackOutcome,
+) {
+    let (Some(correlation), Some(token), Some(messages)) = (
+        cmd.feedback_correlation.as_ref(),
+        cmd.response_token.as_ref(),
+        outbound.as_deref_mut(),
+    ) else {
+        return;
+    };
+    messages.write(crate::lobby::server::OutboundMessage {
+        target: crate::lobby::Target::Token(token.clone()),
+        msg: ServerMessage::ActionFeedback {
+            correlation: correlation.clone(),
+            outcome,
+        },
+        delivery: DeliveryClass::Reliable,
+    });
+}
+
 /// Applies `SetRedAlert { active }` commands from every ship's own
 /// `AdmittedCommands` to that ship's own `ShipRedAlert` (issue #748).
 ///
@@ -150,20 +175,7 @@ fn handle_set_red_alert(
                 // command, including an idempotent same-value assignment.  The
                 // normal Captain blackboard remains the only gameplay-state
                 // response and may arrive separately.
-                if let (Some(correlation), Some(token), Some(messages)) = (
-                    cmd.feedback_correlation.as_ref(),
-                    cmd.response_token.as_ref(),
-                    outbound.as_deref_mut(),
-                ) {
-                    messages.write(crate::lobby::server::OutboundMessage {
-                        target: crate::lobby::Target::Token(token.clone()),
-                        msg: ServerMessage::ActionFeedback {
-                            correlation: correlation.clone(),
-                            outcome: ActionFeedbackOutcome::Applied,
-                        },
-                        delivery: DeliveryClass::Reliable,
-                    });
-                }
+                finish_action_feedback(cmd, &mut outbound, ActionFeedbackOutcome::Applied);
             }
         }
     }
@@ -189,11 +201,15 @@ fn handle_set_weapons_hold(
         (&AdmittedCommands, &mut crate::ship::state::ShipWeaponsHold),
         With<crate::server_app::Ship>,
     >,
+    mut outbound: Option<
+        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
+    >,
 ) {
     for (admitted, mut hold) in ship_query.iter_mut() {
         for cmd in admitted.for_target(crate::ship::system_registry::RED_ALERT_SYSTEM_ID) {
             if let SystemControlPayload::SetWeaponsHold { held } = cmd.payload {
                 hold.0 = held;
+                finish_action_feedback(cmd, &mut outbound, ActionFeedbackOutcome::Applied);
             }
         }
     }
@@ -399,16 +415,23 @@ pub(crate) fn handle_set_view(
         &mut crate::ship::state::ShipViewMode,
         With<crate::server_app::LocalShip>,
     >,
+    mut outbound: Option<
+        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
+    >,
 ) {
     let Some(admitted) = ship_query.iter().next() else {
         return;
     };
-    let Some(mut vm) = view_mode_q.iter_mut().next() else {
-        return;
-    };
+    let mut vm = view_mode_q.iter_mut().next();
     for cmd in admitted.0.iter() {
         if let Some((source, mode)) = view_request_from_admitted(cmd) {
-            vm.request_view_mode_from(source, mode);
+            let outcome = if let Some(view_mode) = vm.as_deref_mut() {
+                view_mode.request_view_mode_from(source, mode);
+                ActionFeedbackOutcome::Applied
+            } else {
+                ActionFeedbackOutcome::Refused
+            };
+            finish_action_feedback(cmd, &mut outbound, outcome);
         }
     }
 }
@@ -485,6 +508,9 @@ fn handle_set_objective_priority(
         With<crate::server_app::LocalShip>,
     >,
     mut boost: ResMut<crate::server_app::CaptainPriorityBoost>,
+    mut outbound: Option<
+        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
+    >,
 ) {
     let Some((admitted, uuid)) = ship_query.iter().next() else {
         return;
@@ -496,6 +522,7 @@ fn handle_set_objective_priority(
     for cmd in admitted.for_target(crate::ship::system_registry::CAPTAIN_SYSTEM_ID) {
         if let SystemControlPayload::SetObjectivePriority { id } = &cmd.payload {
             boost.toggle(&scope, id);
+            finish_action_feedback(cmd, &mut outbound, ActionFeedbackOutcome::Applied);
         }
     }
 }

@@ -4,6 +4,10 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import {
+  CAPTAIN_ACTION_CONTEXT,
+  CAPTAIN_OBJECTIVE_PRIORITY_ACTION_ID,
+} from '../stations/captain-actions.js';
 import { PhElement, phDefine } from './ph-element.js';
 import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
 
@@ -20,9 +24,9 @@ export class PhObjectiveList extends PhElement {
     .list { display: flex; flex-direction: column; gap: 0.35rem; }
     .empty { font-size: var(--text-xs); color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
     /* The row is a native <button role="option"> (issue #1178): focusable,
-       named by its objective text, activating on Enter/Space through the SAME
-       set_objective_priority the pointer click sends. The reset strips the
-       browser button chrome so it still reads as a plain list row. */
+       named by its objective text, activating on Enter/Space through the same
+       Captain semantic action as a pointer click. The reset strips the browser
+       button chrome so it still reads as a plain list row. */
     .row { display: flex; align-items: flex-start; gap: 0.4rem; width: 100%; margin: 0; font: inherit; text-align: left; background: none; border: 0; color: inherit; font-size: var(--text-sm); line-height: 1.3; min-height: var(--control-hit-min); }
     .row .indicator { flex-shrink: 0; width: 0.7rem; height: 0.7rem; margin-top: 0.2rem; border: 1px solid var(--edge); border-radius: 50%; display: flex; align-items: center; justify-content: center; }
     .row .indicator.done { background: var(--loaded-dim); border-color: var(--loaded); }
@@ -92,10 +96,15 @@ export class PhObjectiveList extends PhElement {
         el.setAttribute('role', 'option');
         el.innerHTML = '<span class="indicator"></span><span class="text"></span>';
         // Enter/Space (native to the button) and a pointer tap alike run this
-        // one handler, dispatching the SAME set_objective_priority action.
+        // one handler, dispatching the same stable semantic action identity.
         el.addEventListener('click', () => {
-          if (this.sendAction && key) {
-            this.sendAction('set_objective_priority', { id: key });
+          const activate = typeof window !== 'undefined' && window.activateSemanticAction;
+          if (key && typeof activate === 'function') {
+            activate(CAPTAIN_OBJECTIVE_PRIORITY_ACTION_ID, {
+              context: CAPTAIN_ACTION_CONTEXT,
+              source: 'control',
+              detail: { id: key },
+            });
           }
         });
         this.#rowCache.set(key, el);

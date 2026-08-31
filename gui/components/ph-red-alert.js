@@ -49,10 +49,20 @@ export class PhRedAlert extends PhElement {
   connectedCallback() {
     super.connectedCallback();
     this._feedback = null;
+    this._feedbackByAction = new Map();
     this._onFeedback = (event) => {
       const value = event && event.detail;
-      if (!value || value.actionId !== CAPTAIN_RED_ALERT_ACTION_ID || value.isCurrent === false) return;
-      this._feedback = value;
+      if (!value
+          || ![CAPTAIN_RED_ALERT_ACTION_ID, CAPTAIN_WEAPONS_HOLD_ACTION_ID].includes(value.actionId)
+          || value.isCurrent === false) return;
+      if (value.cancelled || !value.statusId) {
+        this._feedbackByAction.delete(value.actionId);
+      } else {
+        this._feedbackByAction.set(value.actionId, value);
+      }
+      const current = [...this._feedbackByAction.values()];
+      this._feedback = current.slice().reverse()
+        .find((feedback) => feedback.state === 'Pending') || current.at(-1) || null;
       this._renderFeedback();
     };
     if (typeof window !== 'undefined') {
@@ -95,12 +105,21 @@ export class PhRedAlert extends PhElement {
   _renderFeedback() {
     const status = this.shadowRoot.getElementById('feedback-status');
     const btn = this.shadowRoot.getElementById('alert-btn');
-    if (!status || !btn) return;
+    const holdBtn = this.shadowRoot.getElementById('hold-btn');
+    if (!status || !btn || !holdBtn) return;
     const value = this._feedback;
     status.textContent = value && value.statusId ? t(value.statusId) : '';
     status.dataset.state = value && value.state ? value.state : '';
-    if (value && value.state === 'Pending') btn.setAttribute('aria-busy', 'true');
-    else btn.removeAttribute('aria-busy');
+    const redAlertFeedback = this._feedbackByAction
+      && this._feedbackByAction.get(CAPTAIN_RED_ALERT_ACTION_ID);
+    const weaponsHoldFeedback = this._feedbackByAction
+      && this._feedbackByAction.get(CAPTAIN_WEAPONS_HOLD_ACTION_ID);
+    if (redAlertFeedback && redAlertFeedback.state === 'Pending') {
+      btn.setAttribute('aria-busy', 'true');
+    } else btn.removeAttribute('aria-busy');
+    if (weaponsHoldFeedback && weaponsHoldFeedback.state === 'Pending') {
+      holdBtn.setAttribute('aria-busy', 'true');
+    } else holdBtn.removeAttribute('aria-busy');
   }
 
   render(state) {

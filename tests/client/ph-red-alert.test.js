@@ -101,6 +101,82 @@ describe('PhRedAlert', () => {
     );
   });
 
+  it('marks only the pending Weapons Hold control busy', () => {
+    const { el } = setup();
+    el.state = { active: false, hold: false, auto: false };
+    window.dispatchEvent(new CustomEvent('phoenix-action-feedback', {
+      detail: {
+        actionId: CAPTAIN_WEAPONS_HOLD_ACTION_ID,
+        state: 'Pending',
+        statusId: 'action_feedback.pending',
+        isCurrent: true,
+      },
+    }));
+
+    const alertButton = el.shadowRoot.getElementById('alert-btn');
+    const holdButton = el.shadowRoot.getElementById('hold-btn');
+    expect(alertButton.hasAttribute('aria-busy')).toBe(false);
+    expect(holdButton.getAttribute('aria-busy')).toBe('true');
+
+    window.dispatchEvent(new CustomEvent('phoenix-action-feedback', {
+      detail: {
+        actionId: CAPTAIN_WEAPONS_HOLD_ACTION_ID,
+        state: 'Applied',
+        statusId: 'action_feedback.applied',
+        isCurrent: true,
+      },
+    }));
+    expect(holdButton.hasAttribute('aria-busy')).toBe(false);
+  });
+
+  it('keeps overlapping Red Alert and Weapons Hold pending state independent', () => {
+    const { el } = setup();
+    el.state = { active: false, hold: false, auto: false };
+    const feedback = (actionId, state) => window.dispatchEvent(new CustomEvent(
+      'phoenix-action-feedback',
+      {
+        detail: {
+          actionId,
+          state,
+          statusId: state === 'Pending' ? 'action_feedback.pending' : 'action_feedback.applied',
+          isCurrent: true,
+        },
+      },
+    ));
+
+    feedback(CAPTAIN_RED_ALERT_ACTION_ID, 'Pending');
+    feedback(CAPTAIN_WEAPONS_HOLD_ACTION_ID, 'Pending');
+    feedback(CAPTAIN_RED_ALERT_ACTION_ID, 'Applied');
+
+    expect(el.shadowRoot.getElementById('alert-btn').hasAttribute('aria-busy')).toBe(false);
+    expect(el.shadowRoot.getElementById('hold-btn').getAttribute('aria-busy')).toBe('true');
+  });
+
+  it('keeps the sibling action pending when an unavailable activation is cancelled', () => {
+    const { el } = setup();
+    el.state = { active: false, hold: false, auto: false };
+    const feedback = (detail) => window.dispatchEvent(new CustomEvent(
+      'phoenix-action-feedback', { detail: { isCurrent: true, ...detail } },
+    ));
+
+    feedback({
+      actionId: CAPTAIN_RED_ALERT_ACTION_ID,
+      state: 'Pending',
+      statusId: 'action_feedback.pending',
+    });
+    feedback({
+      actionId: CAPTAIN_WEAPONS_HOLD_ACTION_ID,
+      state: null,
+      statusId: null,
+      cancelled: true,
+    });
+
+    expect(el.shadowRoot.getElementById('alert-btn').getAttribute('aria-busy')).toBe('true');
+    expect(el.shadowRoot.getElementById('hold-btn').hasAttribute('aria-busy')).toBe(false);
+    expect(el.shadowRoot.getElementById('feedback-status').textContent)
+      .toBe(t('action_feedback.pending'));
+  });
+
   it('clicking button when auto=true does not dispatch action', () => {
     const activateSemanticAction = vi.fn();
     const { el } = setup({ activateSemanticAction });

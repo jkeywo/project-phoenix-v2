@@ -55,6 +55,8 @@ describe('Helm semantic steering action', () => {
     expect(ids).toEqual([
       'captain.red-alert',
       'captain.weapons-hold',
+      'captain.view',
+      'captain.objective-priority',
       HELM_STEERING_ACTION_ID,
     ]);
   });

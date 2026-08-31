@@ -2,8 +2,8 @@
  * Correlated semantic-action feedback (issue #1276).
  *
  * This module owns presentation state only.  It never mutates simulation
- * state: a pending Red Alert remains visually pending until the ordinary
- * authoritative Captain blackboard says whether Red Alert is active.
+ * state: a pending action remains presentation-only until the ordinary
+ * authoritative console blackboard publishes the resulting gameplay state.
  *
  * Timestamps are epoch-relative stamps taken on this one device (the same
  * contract as console-latency's `nowMs`).  They are carried back to the

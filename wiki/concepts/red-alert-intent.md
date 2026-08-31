@@ -12,12 +12,12 @@ Red Alert is authoritative per-ship state (`ShipRedAlert`). The command is `SetR
 
 The active state is published to the relevant console and viewscreen presentation. The design for explicit set-state commands, Sensors target visibility, and required NPC capability coverage belongs in [PASM's Red Alert slice](../../pasm/spec/design/red-alert.yaml).
 
-A human Captain's Red Alert activation also has a transient, correlated
-presentation lifecycle: `Pressed` → `Pending` → `Applied`/`Refused`, with a
+A human Captain's Red Alert and Weapons Hold activations also have a transient,
+correlated presentation lifecycle: `Pressed` → `Pending` → `Applied`/`Refused`, with a
 client-local `TimedOut` result when no targeted host response arrives. Admission
 retains the opaque correlation only until the due command reaches the Captain
 consumer; the consumer returns `Applied` even for an idempotent same-state
 success. This metadata is absent from Red Alert gameplay state, payloads,
 command logs, mesh traffic, snapshots and replay. Consequently Pending never
-paints the alert as active: only the published `ShipRedAlert` state can do that.
-Weapons Hold remains uncorrelated.
+paints either control as active: only the published `ShipRedAlert` and
+`ShipWeaponsHold` states can do that.

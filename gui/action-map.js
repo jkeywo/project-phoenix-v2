@@ -225,7 +225,9 @@ export const ACTION_MAP = Object.freeze({
     } else {
       mode = { kind: a.direction };
     }
-    send('ControlSystem', {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
       target: 'viewscreen',
       payload: { type: 'SetView', data: { mode } },
     });
@@ -251,7 +253,9 @@ export const ACTION_MAP = Object.freeze({
    *  whole firing posture. Explicit like its sibling above, so a stale,
    *  duplicated or retried command is idempotent. */
   set_weapons_hold: (a, send) => {
-    send('ControlSystem', {
+    if (typeof a.correlation !== 'string' || !a.correlation) return;
+    send('ControlSystemCorrelated', {
+      correlation: a.correlation,
       target: 'red-alert',
       payload: { type: 'SetWeaponsHold', data: { held: !!a.held } },
     });
@@ -272,8 +276,9 @@ export const ACTION_MAP = Object.freeze({
 
   /** Toggle Captain priority boost on an objective (issue #675). */
   set_objective_priority: (a, send) => {
-    if (!a.id) return;
-    send('ControlSystem', {
+    if (!a.id || typeof a.correlation !== 'string' || !a.correlation) return;
+    send('ControlSystemCorrelated', {
+      correlation: a.correlation,
       target: 'captain',
       payload: { type: 'SetObjectivePriority', data: { id: a.id } },
     });

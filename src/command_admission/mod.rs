@@ -66,6 +66,26 @@ pub struct AdmissionSet;
 /// `AdmittedCommands` to read from.
 pub struct AdmissionPlugin;
 
+/// Exact target/payload pairs whose owning consumers complete the correlated
+/// operator lifecycle. A correlation never widens command authority: this is
+/// only the protocol allowlist for commands that can promise a terminal reply.
+fn supports_correlated_action_feedback(
+    target: &crate::core::messages::SystemId,
+    payload: &crate::core::messages::SystemControlPayload,
+) -> bool {
+    use crate::core::messages::SystemControlPayload;
+
+    (target.0 == crate::ship::system_registry::RED_ALERT_SYSTEM_ID
+        && matches!(
+            payload,
+            SystemControlPayload::SetRedAlert { .. } | SystemControlPayload::SetWeaponsHold { .. }
+        ))
+        || (target.0 == crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID
+            && matches!(payload, SystemControlPayload::SetView { .. }))
+        || (target.0 == crate::ship::system_registry::CAPTAIN_SYSTEM_ID
+            && matches!(payload, SystemControlPayload::SetObjectivePriority { .. }))
+}
+
 impl Plugin for AdmissionPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<crate::core::messages::InterSystemQueue>()
@@ -352,17 +372,10 @@ pub fn admit_system_commands(
             } => (target, payload, Some(correlation.clone())),
             _ => continue,
         };
-        // Issue #1276's tracer is deliberately narrow.  Only the exact Captain
-        // Red Alert target/payload pair owns this lifecycle; every other
-        // correlated envelope gets a real refusal rather than being admitted
-        // into a consumer that has no lifecycle contract.
-        if correlation.is_some()
-            && (target.0 != crate::ship::system_registry::RED_ALERT_SYSTEM_ID
-                || !matches!(
-                    payload,
-                    crate::core::messages::SystemControlPayload::SetRedAlert { .. }
-                ))
-        {
+        // Only exact target/payload pairs with an owning terminal consumer may
+        // carry a correlation. Every other envelope gets a real refusal before
+        // admission rather than timing out behind an unrelated consumer.
+        if correlation.is_some() && !supports_correlated_action_feedback(target, payload) {
             write_action_feedback(
                 &mut outbound,
                 &ev.token,
@@ -651,6 +664,48 @@ station = "repair"
                     payload,
                 },
             });
+    }
+
+    #[test]
+    fn correlated_action_feedback_allowlist_is_exact_by_target_and_payload() {
+        use crate::core::messages::{CameraView, ViewMode};
+
+        let red_alert = SystemControlPayload::SetRedAlert { active: true };
+        let hold = SystemControlPayload::SetWeaponsHold { held: true };
+        let view = SystemControlPayload::SetView {
+            mode: ViewMode::Camera(CameraView::new("camera_fore")),
+        };
+        let objective = SystemControlPayload::SetObjectivePriority { id: "o1".into() };
+
+        assert!(supports_correlated_action_feedback(
+            &crate::ship::system_registry::red_alert_system_id(),
+            &red_alert,
+        ));
+        assert!(supports_correlated_action_feedback(
+            &crate::ship::system_registry::red_alert_system_id(),
+            &hold,
+        ));
+        assert!(supports_correlated_action_feedback(
+            &crate::ship::system_registry::viewscreen_system_id(),
+            &view,
+        ));
+        assert!(supports_correlated_action_feedback(
+            &crate::ship::system_registry::captain_system_id(),
+            &objective,
+        ));
+
+        assert!(!supports_correlated_action_feedback(
+            &crate::ship::system_registry::captain_system_id(),
+            &red_alert,
+        ));
+        assert!(!supports_correlated_action_feedback(
+            &crate::ship::system_registry::viewscreen_system_id(),
+            &objective,
+        ));
+        assert!(!supports_correlated_action_feedback(
+            &SystemId("repair".into()),
+            &dispatch(0),
+        ));
     }
 
     fn admitted(app: &mut App, ship: Entity) -> Vec<SystemControlPayload> {

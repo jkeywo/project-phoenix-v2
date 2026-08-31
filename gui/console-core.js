@@ -49,7 +49,7 @@
 // below and t() calls in console render functions never see an empty table.
 // In Node tests strings-boot is a no-op; setup-strings.js loads the table.
 import './strings-boot.js';
-import { applyToDom } from './strings.js';
+import { applyToDom, t } from './strings.js';
 // Registers <ph-tutorial-overlay> (issue #916) so every console gets the
 // contextual tutorial overlay without per-file HTML; Node-safe (guarded
 // definition), so plain-Node test imports of this module stay fine.
@@ -87,18 +87,76 @@ export function initConsole({ name, render }) {
   var _root = (typeof window !== 'undefined') ? window : globalThis;
   var _actionContext = String(name || '').toLowerCase();
   var _latestState = null;
+  var _semanticActions = null;
+  var _semanticFeedbackEl = null;
+  var _semanticFeedbackByAction = new Map();
+
+  function _ensureSemanticFeedbackElement() {
+    if (_semanticFeedbackEl || typeof document === 'undefined') return;
+    _semanticFeedbackEl = document.createElement('div');
+    _semanticFeedbackEl.className = 'semantic-action-feedback';
+    _semanticFeedbackEl.setAttribute('role', 'status');
+    _semanticFeedbackEl.setAttribute('aria-live', 'polite');
+    _semanticFeedbackEl.setAttribute('aria-atomic', 'true');
+    (document.body || document.documentElement).appendChild(_semanticFeedbackEl);
+  }
+
+  function _renderActionFeedback() {
+    _ensureSemanticFeedbackElement();
+    if (!_semanticFeedbackEl) return;
+    const rows = [];
+    for (const value of _semanticFeedbackByAction.values()) {
+      const action = _semanticActions && _semanticActions.action(value.actionId);
+      const label = action ? t(action.labelId) : '';
+      const row = document.createElement('div');
+      row.className = 'semantic-action-feedback__item';
+      row.dataset.actionId = value.actionId;
+      row.dataset.state = value.state || '';
+      row.textContent = t('action_feedback.summary', {
+        action: label,
+        status: t(value.statusId),
+      });
+      rows.push(row);
+    }
+    _semanticFeedbackEl.replaceChildren(...rows);
+    if (rows.length === 1) {
+      _semanticFeedbackEl.dataset.state = rows[0].dataset.state;
+    } else if (rows.length > 1) {
+      _semanticFeedbackEl.dataset.state = 'Mixed';
+    } else {
+      _semanticFeedbackEl.removeAttribute('data-state');
+    }
+    _semanticFeedbackEl.dataset.pendingCount = String(
+      [..._semanticFeedbackByAction.values()]
+        .filter((value) => value.state === 'Pending').length,
+    );
+  }
+
+  function _presentActionFeedback(value) {
+    emitActionFeedbackTransition(_root, value);
+    if (typeof document === 'undefined' || !value || value.isCurrent === false) return;
+    if (value.cancelled || !value.statusId) {
+      _semanticFeedbackByAction.delete(value.actionId);
+    } else {
+      _semanticFeedbackByAction.set(value.actionId, value);
+    }
+    _renderActionFeedback();
+  }
 
   // One registry per console document. The parent page owns the mutable
   // in-memory binding choices and explicitly copies them into each iframe;
   // module instances in separate realms are never treated as shared state.
   var _actionFeedback = new ActionFeedbackLifecycle({
     now: nowMs,
-    onTransition: function(value) { emitActionFeedbackTransition(_root, value); },
+    onTransition: _presentActionFeedback,
   });
-  var _semanticActions = createSemanticActionRegistry({ actionFeedback: _actionFeedback });
+  _semanticActions = createSemanticActionRegistry({ actionFeedback: _actionFeedback });
   if (_actionContext === CAPTAIN_ACTION_CONTEXT) {
     registerCaptainActions(_semanticActions, {
       getState: function() { return _latestState; },
+      getAvailableCameraViews: typeof render.availableCameraViews === 'function'
+        ? function() { return render.availableCameraViews(_latestState); }
+        : null,
       // This is the existing console action transport. The Captain adapter
       // emits `set_red_alert`; action-map.js remains the sole wire builder.
       sendAction: sendAction,
@@ -300,6 +358,11 @@ export function initConsole({ name, render }) {
         document.removeEventListener('keydown', _semanticKeyHandler);
         _semanticKeyHandler = null;
       }
+      if (_semanticFeedbackEl) {
+        _semanticFeedbackEl.remove();
+        _semanticFeedbackEl = null;
+      }
+      _semanticFeedbackByAction.clear();
     },
   };
 }

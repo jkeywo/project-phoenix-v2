@@ -224,6 +224,8 @@ describe('courier captain renderStation', () => {
   it('filters the camera view list to fore + cinematic only', () => {
     courierRender(payload, document);
     expect(el('camera').state).toEqual({ views: ['camera_fore', 'cinematic'], current_view: 'cinematic', auto: false });
+    expect(rawCourierRender.availableCameraViews(withConsoleFamilyProjection(payload)))
+      .toEqual(el('camera').state.views);
   });
 
   it('drives objectives under the courier-specific id and station-damage', () => {

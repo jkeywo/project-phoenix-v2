@@ -57,29 +57,32 @@ Outbound: context-scoped operator input first resolves through
 slots and presentation metadata sit above transport and carry no Station or
 session authority. Each console iframe owns an isolated registry instance;
 `client.html` owns the current in-memory binding choices and copies them into
-iframes through `__updateSemanticActionBindings` on load and remap. The two real
-Captain adapters are `captain.red-alert` and `captain.weapons-hold`: each
-visible control and its default/remapped keyboard bindings invoke the same
-adapter, derive an explicit boolean from the latest authoritative Captain view,
-and emit the existing `set_red_alert` or `set_weapons_hold` action. Each console
-iframe then posts its `console_action`, and `gui/action-map.js` remains the
-table-driven dispatcher mapping `action.action` values to `ClientMessage`s
-(mostly `ControlSystem { target, payload }`) via `send(type, data?)`.
+iframes through `__updateSemanticActionBindings` on load and remap. The Captain
+family has four stable adapters: `captain.red-alert`, `captain.weapons-hold`,
+`captain.view`, and `captain.objective-priority`. Every visible Captain control
+and its default/remapped keyboard binding invokes one of those adapters. Boolean
+actions derive an explicit assignment from the latest authoritative view;
+camera and objective controls pass the selected authored identity as ephemeral
+activation detail, while their generic bindings cycle only through choices in
+that same view. Each console iframe then posts its `console_action`, and
+`gui/action-map.js` remains the table-driven dispatcher mapping
+`action.action` values to `ClientMessage`s (mostly
+`ControlSystem { target, payload }`) via `send(type, data?)`.
 
-Red Alert is the first action to opt into authoritative action feedback. Its
-registry activation mints one bounded opaque correlation and records the
-same-device epoch timestamp at `Pressed`, then moves presentation to `Pending`
-only after its adapter handles the activation. The action map sends a
-`ControlSystemCorrelated` envelope; the host keeps the correlation out of the
-payload, command log, mesh and simulation state, and replies reliably to the
-originating session with `ActionFeedback::Applied` only after the due Captain
-consumer runs, or `Refused` when admission rejects it. `client.html` owns the
-bounded correlation-to-iframe timeout router. It settles latency and forwards
-the terminal result only for that exact correlation; ordinary blackboard pushes
-cannot acknowledge it. The iframe's one lifecycle transition supplies the
-visible/live status, semantic cue and optional vibration intent. Pending never
-changes Red Alert's active styling: only the normal authoritative Captain
-blackboard does. Weapons Hold remains on the uncorrelated legacy envelope.
+All four Captain actions use authoritative action feedback. Registry activation
+mints one bounded opaque correlation and records the same-device epoch timestamp
+at `Pressed`, then moves presentation to `Pending` only after its adapter handles
+the activation. The action map sends a `ControlSystemCorrelated` envelope; the
+host accepts only the exact correlated Captain target/payload pairs, keeps
+the correlation out of the payload, command log, mesh and simulation state, and
+replies reliably to the originating session with `ActionFeedback::Applied` only
+after the matching Captain consumer runs, or `Refused` when admission rejects
+it. `client.html` owns the bounded correlation-to-iframe timeout router. It
+settles latency and forwards the terminal result only for that exact
+correlation; ordinary blackboard pushes cannot acknowledge it. Every iframe has
+one generic accessible final-status presenter, while specialised controls may
+also expose busy state. Pending never changes Red Alert, Weapons Hold, camera,
+or objective state: only the normal authoritative Captain blackboard does.
 
 The host page uses the same registry and lifecycle without pretending its local
 chrome is a console or a network command. `host.qr-code` is scoped to the

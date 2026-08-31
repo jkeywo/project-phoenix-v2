@@ -259,10 +259,11 @@ describe('set_phaser_mode', () => {
 });
 
 describe('set_view', () => {
-  it('calls send ControlSystem viewscreen SetView with Camera kind and direction', () => {
+  it('calls send correlated viewscreen SetView with Camera kind and direction', () => {
     const send = mkSend();
-    ACTION_MAP.set_view({ action: 'set_view', direction: 'Aft' }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
+    ACTION_MAP.set_view({ action: 'set_view', direction: 'Aft', correlation: 'view-1' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'view-1',
       target: 'viewscreen',
       payload: { type: 'SetView', data: { mode: { kind: 'Camera', data: 'Aft' } } },
     });
@@ -276,10 +277,20 @@ describe('set_view', () => {
 
   it('sends non-camera view modes by kind', () => {
     const send = mkSend();
-    ACTION_MAP.set_view({ action: 'set_view', direction: 'SensorsRadar' }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
+    ACTION_MAP.set_view({ action: 'set_view', direction: 'SensorsRadar', correlation: 'view-2' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'view-2',
       target: 'viewscreen',
       payload: { type: 'SetView', data: { mode: { kind: 'SensorsRadar' } } },
+    });
+  });
+
+  it('preserves the legacy uncorrelated SetView route for non-Captain adapters', () => {
+    const send = mkSend();
+    ACTION_MAP.set_view({ action: 'set_view', direction: 'Aft' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'viewscreen',
+      payload: { type: 'SetView', data: { mode: { kind: 'Camera', data: 'Aft' } } },
     });
   });
 });
@@ -350,10 +361,11 @@ describe('set_station_stance (issue #1107)', () => {
 // and the same explicit-desired-state shape, so a stale or retried press
 // cannot invert the order.
 describe('set_weapons_hold', () => {
-  it('sends ControlSystem with the explicit desired held=true state', () => {
+  it('sends correlated ControlSystem with the explicit desired held=true state', () => {
     const send = mkSend();
-    ACTION_MAP.set_weapons_hold({ action: 'set_weapons_hold', held: true }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
+    ACTION_MAP.set_weapons_hold({ action: 'set_weapons_hold', held: true, correlation: 'hold-1' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'hold-1',
       target: 'red-alert',
       payload: { type: 'SetWeaponsHold', data: { held: true } },
     });
@@ -362,8 +374,9 @@ describe('set_weapons_hold', () => {
 
   it('sends the explicit desired held=false state', () => {
     const send = mkSend();
-    ACTION_MAP.set_weapons_hold({ action: 'set_weapons_hold', held: false }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
+    ACTION_MAP.set_weapons_hold({ action: 'set_weapons_hold', held: false, correlation: 'hold-2' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'hold-2',
       target: 'red-alert',
       payload: { type: 'SetWeaponsHold', data: { held: false } },
     });
@@ -371,11 +384,18 @@ describe('set_weapons_hold', () => {
 
   it('coerces a missing held flag to false (never inverts)', () => {
     const send = mkSend();
-    ACTION_MAP.set_weapons_hold({ action: 'set_weapons_hold' }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
+    ACTION_MAP.set_weapons_hold({ action: 'set_weapons_hold', correlation: 'hold-3' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'hold-3',
       target: 'red-alert',
       payload: { type: 'SetWeaponsHold', data: { held: false } },
     });
+  });
+
+  it('does not create an untracked Weapons Hold command without a correlation', () => {
+    const send = mkSend();
+    ACTION_MAP.set_weapons_hold({ action: 'set_weapons_hold', held: true }, send);
+    expect(send).not.toHaveBeenCalled();
   });
 });
 
@@ -978,13 +998,22 @@ describe('scan_target', () => {
 // ── set_objective_priority (issue #675) ───────────────────────────────────────
 
 describe('set_objective_priority', () => {
-  it('sends ControlSystem SetObjectivePriority with id', () => {
+  it('sends correlated SetObjectivePriority with id', () => {
     const send = mkSend();
-    ACTION_MAP.set_objective_priority({ action: 'set_objective_priority', id: 'obj-1' }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
+    ACTION_MAP.set_objective_priority({
+      action: 'set_objective_priority', id: 'obj-1', correlation: 'objective-1',
+    }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'objective-1',
       target: 'captain',
       payload: { type: 'SetObjectivePriority', data: { id: 'obj-1' } },
     });
+  });
+
+  it('does not create an untracked Objective Priority command without a correlation', () => {
+    const send = mkSend();
+    ACTION_MAP.set_objective_priority({ action: 'set_objective_priority', id: 'obj-1' }, send);
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('does nothing when id is absent', () => {

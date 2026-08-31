@@ -128,10 +128,22 @@ fn push(app: &mut App, token: &str, msg: ClientMessage) {
 }
 
 fn correlated_red_alert(correlation: &str, active: bool) -> ClientMessage {
+    correlated_command(
+        correlation,
+        crate::ship::system_registry::red_alert_system_id(),
+        SystemControlPayload::SetRedAlert { active },
+    )
+}
+
+fn correlated_command(
+    correlation: &str,
+    target: SystemId,
+    payload: SystemControlPayload,
+) -> ClientMessage {
     ClientMessage::ControlSystemCorrelated {
         correlation: ActionCorrelationId::new(correlation).expect("valid test correlation"),
-        target: crate::ship::system_registry::red_alert_system_id(),
-        payload: SystemControlPayload::SetRedAlert { active },
+        target,
+        payload,
     }
 }
 
@@ -321,6 +333,88 @@ fn correlated_red_alert_idempotent_success_is_still_applied() {
         &messages,
         "captain",
         "captain-idempotent",
+        ActionFeedbackOutcome::Applied,
+    ));
+}
+
+#[test]
+fn correlated_weapons_hold_is_applied_by_the_authoritative_consumer() {
+    let mut app = test_app();
+    start_game(&mut app);
+    push(
+        &mut app,
+        "captain",
+        correlated_command(
+            "hold-accepted",
+            crate::ship::system_registry::red_alert_system_id(),
+            SystemControlPayload::SetWeaponsHold { held: true },
+        ),
+    );
+    let messages = tick(&mut app);
+
+    assert!(get_weapons_hold(&mut app));
+    assert!(has_feedback(
+        &messages,
+        "captain",
+        "hold-accepted",
+        ActionFeedbackOutcome::Applied,
+    ));
+}
+
+#[test]
+fn correlated_view_is_applied_only_after_the_view_consumer_runs() {
+    let mut app = test_app();
+    start_game(&mut app);
+    push(
+        &mut app,
+        "captain",
+        correlated_command(
+            "view-accepted",
+            crate::ship::system_registry::viewscreen_system_id(),
+            SystemControlPayload::SetView {
+                mode: ViewMode::Camera(CameraView::new("camera_aft")),
+            },
+        ),
+    );
+    let messages = tick(&mut app);
+
+    assert_eq!(
+        get_view_mode(&mut app),
+        ViewMode::Camera(CameraView::new("camera_aft")),
+    );
+    assert!(has_feedback(
+        &messages,
+        "captain",
+        "view-accepted",
+        ActionFeedbackOutcome::Applied,
+    ));
+}
+
+#[test]
+fn correlated_objective_priority_is_applied_after_the_scoped_toggle() {
+    let mut app = test_app();
+    start_game(&mut app);
+    push(
+        &mut app,
+        "captain",
+        correlated_command(
+            "objective-accepted",
+            crate::ship::system_registry::captain_system_id(),
+            SystemControlPayload::SetObjectivePriority {
+                id: "destroy-hostiles".into(),
+            },
+        ),
+    );
+    let messages = tick(&mut app);
+
+    assert!(app
+        .world()
+        .resource::<crate::server_app::CaptainPriorityBoost>()
+        .contains_objective("destroy-hostiles"));
+    assert!(has_feedback(
+        &messages,
+        "captain",
+        "objective-accepted",
         ActionFeedbackOutcome::Applied,
     ));
 }

@@ -4,6 +4,10 @@ semantic_action.captain.red_alert.label,Captain semantic action display name,[Re
 semantic_action.captain.red_alert.accessibility,Captain semantic action accessible description,[Raise or stand down Red Alert from the Captain console.]
 semantic_action.captain.weapons_hold.label,Captain semantic action display name,[Weapons Hold]
 semantic_action.captain.weapons_hold.accessibility,Captain semantic action accessible description,[Hold or release all weapons fire from the Captain console.]
+semantic_action.captain.view.label,Captain semantic action display name,[Viewscreen View]
+semantic_action.captain.view.accessibility,Captain semantic action accessible description,[Choose an available Captain viewscreen camera or cinematic view.]
+semantic_action.captain.objective_priority.label,Captain semantic action display name,[Objective Priority]
+semantic_action.captain.objective_priority.accessibility,Captain semantic action accessible description,[Choose the Captain priority objective.]
 semantic_action.helm.steering.label,Helm semantic action display name,[Steering]
 semantic_action.helm.steering.accessibility,Helm semantic action accessible description,[Steer the ship continuously from the Helm console.]
 semantic_action.host.qr_code.label,Host semantic action display name,[QR Code]
@@ -25,6 +29,7 @@ editor.mod.import.unreadable_heading,MOD editor validation heading when the ZIP 
 editor.mod.import.unreadable_detail,"MOD editor parse failure detail; reason is the existing parser message",[The selected archive could not be opened: {reason}]
 editor.mod.import.previous_workspace_preserved,MOD editor assurance after an unreadable import,[Your previous MOD workspace was not changed.]
 editor.mod.import.m6_boundary,MOD editor T2 scope note,"[T2 keeps this existing MOD workflow to import, validate, edit, and export one pack. Live inspectors and project tooling arrive with M6.]"
+action_feedback.summary,Shared semantic action visible and accessible status; {action} is the action label and {status} its lifecycle state,[{action}: {status}]
 input.modifier.control,Keyboard binding display name for the Control modifier,Ctrl
 input.modifier.shift,Keyboard binding display name for the Shift modifier,Shift
 input.modifier.alt,Keyboard binding display name for the Alt modifier,Alt

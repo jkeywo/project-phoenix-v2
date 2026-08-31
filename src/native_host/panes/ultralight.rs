@@ -84,6 +84,9 @@ use vellum_ultralight::staging;
 use crate::logging::{LogCat, LogFilterConfig};
 use crate::native_host::bridge_display::BridgeStationSurfaces;
 use crate::native_host::bridge_profile::PaneRect;
+use crate::native_host::host_lobby::{
+    pump_host_lobby, HostLobbyBridgeResource, HostLobbyRevealResource, HOST_LOBBY_SURFACE_ID,
+};
 use crate::native_host::input_routing::{
     pointer_follow_focus, ContactCaptureMap, FocusRing, MouseCapture, PaneHit, PanePlacement,
     PaneRouter, PointerMotion, WindowKey,
@@ -146,6 +149,24 @@ pub struct PaneDisplayEntry {
     pub id: PaneId,
     pub url: String,
     pub label: String,
+}
+
+/// The native host's own lobby surface (issue #1325), and where it loads from.
+///
+/// Present when `phoenix-host` published a lobby document — see
+/// [`LocalHostLobby`](crate::native_host::host_lobby::LocalHostLobby). Absent
+/// for a host with no bundle to build one from, which then runs exactly as it
+/// did before.
+///
+/// A resource of its own rather than another [`PaneDisplayEntry`], because the
+/// surface is not a pane: it has no participant label to seat it by, no identity
+/// in its URL, and it always takes the whole primary window rather than a slot.
+/// What it *does* share is everything below the URL — the one Ultralight
+/// runtime, the texture, the compositing node and the input router — which is
+/// why it is driven by [`PaneHost`] and not by a second host of its own.
+#[derive(Resource, Clone, Debug)]
+pub struct HostLobbyDisplayConfig {
+    pub url: String,
 }
 
 /// Copy the Ultralight SDK's shared libraries beside this executable and its
@@ -334,6 +355,22 @@ struct PaneWindow {
     copy_failures: u32,
 }
 
+impl PaneWindow {
+    /// Whether this window is the host-lobby surface rather than a participant's
+    /// pane (issue #1325).
+    ///
+    /// The surface shares the runtime, the texture, the compositing node and the
+    /// input router with the panes, and shares nothing above that: it has no
+    /// entry in the pane bus, so everything that treats a `PaneId` as a
+    /// participant — the pump, the fault path, the close-and-retire sweep —
+    /// asks this first. See
+    /// [`HOST_LOBBY_SURFACE_ID`](crate::native_host::host_lobby::HOST_LOBBY_SURFACE_ID)
+    /// for why the handle is reserved rather than minted.
+    fn is_host_lobby(&self) -> bool {
+        self.id == HOST_LOBBY_SURFACE_ID
+    }
+}
+
 /// Where a named pane's view sits, kept so a pane recreated after a crash
 /// (issue #1125) rebuilds in the same place — its participant name is stable
 /// across the recreation, its [`PaneId`] is not.
@@ -384,6 +421,13 @@ pub struct PaneHost {
     /// One 2-D camera per Station window, `(window, camera)` — spawned once and
     /// reused as panes are composited onto that window.
     station_cameras: Vec<(Entity, Entity)>,
+    /// Whether the host-lobby surface (issue #1325) is currently placed in the
+    /// router and drawn.
+    ///
+    /// Tracked so the router is rebuilt on the *edge* rather than every frame:
+    /// `rebuild_layout` re-derives the focus order, and doing that sixty times a
+    /// second would fight a Ctrl+Tab the operator just made.
+    lobby_present: bool,
 }
 
 impl PaneHost {
@@ -422,16 +466,25 @@ impl PaneHost {
     /// Rebuild the router and reconcile the focus order and touch captures after
     /// the set of open panes changed.
     fn rebuild_layout(&mut self) {
-        self.router = build_router(&self.windows);
+        self.router = build_router(&self.windows, self.lobby_present);
         self.focus.sync_order(self.router.focus_order());
     }
 }
 
 /// Build the pure router from the live pane windows.
-fn build_router(windows: &[PaneWindow]) -> PaneRouter {
+///
+/// The host-lobby surface (issue #1325) is placed **only while it is on
+/// screen**: with no placement, a pointer or a touch over that region resolves
+/// to no pane at all and is left to the viewscreen, which is the whole of
+/// "input-transparent when the chrome has yielded". It is also placed **last**,
+/// so that where a tiled pane overlaps it — panes draw on top — the pane wins
+/// the hit test, the router resolving to the first placement that contains the
+/// point.
+fn build_router(windows: &[PaneWindow], lobby_present: bool) -> PaneRouter {
     PaneRouter::new(
         windows
             .iter()
+            .filter(|w| lobby_present || !w.is_host_lobby())
             .map(|w| PanePlacement {
                 pane: w.id,
                 window: WindowKey(w.window.to_bits()),
@@ -476,6 +529,10 @@ impl Plugin for PaneDisplayPlugin {
         app.add_systems(PreUpdate, init_pane_host).add_systems(
             Update,
             (
+                // Before the input group: whether the lobby surface is placed in
+                // the router at all is decided here, and a click this frame must
+                // be routed against this frame's answer.
+                sync_host_lobby_presence,
                 (
                     route_pointer_input,
                     route_touch_input,
@@ -501,7 +558,11 @@ impl Plugin for PaneDisplayPlugin {
 fn init_pane_host(world: &mut World) {
     if world.get_non_send_resource::<PaneHost>().is_some()
         || world.get_resource::<PaneHostFailed>().is_some()
-        || world.get_resource::<PaneDisplayConfig>().is_none()
+        // Either kind of surface is reason enough to stand the host up: a host
+        // with no `--pane` still shows the lobby (issue #1325), and a host with
+        // panes and no bundle to build a lobby from still shows the panes.
+        || (world.get_resource::<PaneDisplayConfig>().is_none()
+            && world.get_resource::<HostLobbyDisplayConfig>().is_none())
     {
         return;
     }
@@ -530,15 +591,21 @@ fn init_pane_host(world: &mut World) {
     // takes `&mut World`.
     let log = world.get_resource::<LogFilterConfig>().cloned();
 
-    let config = world.resource::<PaneDisplayConfig>().clone();
-    if config.panes.is_empty() {
+    let config = world
+        .get_resource::<PaneDisplayConfig>()
+        .cloned()
+        .unwrap_or(PaneDisplayConfig { panes: Vec::new() });
+    let lobby_config = world.get_resource::<HostLobbyDisplayConfig>().cloned();
+    if config.panes.is_empty() && lobby_config.is_none() {
         world.insert_resource(PaneHostFailed);
         return;
     }
     // The bus itself is read per frame by `drive_panes`; what matters here is
     // that there IS one, because a pane host with no bus would draw consoles
-    // nothing could talk to.
-    if world.get_resource::<PaneBusResource>().is_none() {
+    // nothing could talk to. Only PANES need it — the lobby surface is not a
+    // participant and speaks over its own bridge (issue #1325) — so a
+    // lobby-only host is not held to it.
+    if !config.panes.is_empty() && world.get_resource::<PaneBusResource>().is_none() {
         world.insert_resource(PaneHostFailed);
         return;
     }
@@ -575,6 +642,8 @@ fn init_pane_host(world: &mut World) {
         scale: f64,
         window_origin: (i32, i32),
         station: bool,
+        /// The host-lobby surface rather than a participant's pane (#1325).
+        lobby: bool,
     }
     let mut seats: Vec<Seat> = Vec::new();
     let mut tiled: Vec<PaneDisplayEntry> = Vec::new();
@@ -592,6 +661,7 @@ fn init_pane_host(world: &mut World) {
                     scale: surface.geometry.scale_factor.max(0.1),
                     window_origin: (surface.geometry.position_x, surface.geometry.position_y),
                     station: true,
+                    lobby: false,
                 })
         });
         match seat {
@@ -613,9 +683,40 @@ fn init_pane_host(world: &mut World) {
                 scale: primary_scale,
                 window_origin: (0, 0),
                 station: false,
+                lobby: false,
             });
         }
     }
+    // The host-lobby surface takes the whole primary window, and is seated
+    // LAST (issue #1325). Last is what puts it last in the input router, so
+    // that where a tiled pane overlaps it the pane wins the hit test — the
+    // router resolves to the first placement containing the point, and a pane
+    // is what the operator is looking at there. Its DRAW order is the other way
+    // round and is set by an explicit `ZIndex` below, not by this order.
+    if let Some(lobby) = &lobby_config {
+        seats.push(Seat {
+            entry: PaneDisplayEntry {
+                id: HOST_LOBBY_SURFACE_ID,
+                url: lobby.url.clone(),
+                label: String::new(),
+            },
+            window: primary_entity,
+            origin: (0, 0),
+            size: (primary_width, primary_height),
+            scale: primary_scale,
+            window_origin: (0, 0),
+            station: false,
+            lobby: true,
+        });
+    }
+
+    // Whether the lobby chrome is on screen right now. `Lobby` is
+    // `GamePhase::default()`, so a host that has not inserted the resource yet
+    // is showing it — which is what a host boots into.
+    let lobby_present = world
+        .get_resource::<HostLobbyRevealResource>()
+        .map(|r| r.0.presence().composited)
+        .unwrap_or(true);
 
     let runtime = match UltralightRuntime::start(&RuntimeOptions::default()) {
         Ok(runtime) => runtime,
@@ -627,8 +728,9 @@ fn init_pane_host(world: &mut World) {
     };
 
     // The bus, for resolving each pane's participant name into the layout that a
-    // recreated pane (issue #1125) rebuilds against.
-    let bus = world.resource::<PaneBusResource>().clone();
+    // recreated pane (issue #1125) rebuilds against. Absent on a lobby-only
+    // host, which has no participants to resolve.
+    let bus = world.get_resource::<PaneBusResource>().cloned();
 
     let mut windows = Vec::new();
     let mut station_cameras: Vec<(Entity, Entity)> = Vec::new();
@@ -638,7 +740,7 @@ fn init_pane_host(world: &mut World) {
         let url = seat.entry.url.as_str();
         // Record this pane's slot by its stable participant name, so a pane
         // recreated after a view crash reopens in the same place (issue #1125).
-        if let Some(name) = bus.0.name_of(id) {
+        if let Some(name) = bus.as_ref().and_then(|b| b.0.name_of(id)) {
             layout.push(PaneSlotGeometry {
                 name,
                 origin: seat.origin,
@@ -734,6 +836,15 @@ fn init_pane_host(world: &mut World) {
                     top: Val::Px(seat.origin.1 as f32 / seat.scale as f32),
                     width: Val::Px(seat.size.0 as f32 / seat.scale as f32),
                     height: Val::Px(seat.size.1 as f32 / seat.scale as f32),
+                    // The lobby surface's INVISIBLE half (issue #1325). The
+                    // view stays alive and keeps being pushed to; it simply is
+                    // not drawn, which is what makes "the chrome yielded"
+                    // different from "the surface was torn down".
+                    display: if seat.lobby && !lobby_present {
+                        Display::None
+                    } else {
+                        Display::DEFAULT
+                    },
                     ..default()
                 },
                 ImageNode::new(handle.clone()),
@@ -744,6 +855,14 @@ fn init_pane_host(world: &mut World) {
         // uses the default UI camera and takes no marker.
         if let Some(cam) = station_camera {
             world.entity_mut(canvas).insert(UiTargetCamera(cam));
+        }
+        // The lobby surface draws BENEATH every pane on the same window. Its
+        // seat is last (which is what puts it last in the input router), so the
+        // draw order has to be said explicitly rather than inherited from spawn
+        // order. Negative only orders it within the UI pass — the UI still
+        // draws over the 3-D viewscreen, which is the point of the surface.
+        if seat.lobby {
+            world.entity_mut(canvas).insert(ZIndex(-1));
         }
         windows.push(PaneWindow {
             id,
@@ -758,26 +877,37 @@ fn init_pane_host(world: &mut World) {
             window_origin: seat.window_origin,
             copy_failures: 0,
         });
-        // The URL is NOT logged: it carries this pane's session token in its
-        // fragment, and an operator log is a file, a scrollback and a
-        // screenshot. `phoenix-host` prints the first eight characters of the
-        // token when it opens the pane, which is enough to correlate.
-        crate::pinfo!(
-            log,
-            LogCat::Lobby,
-            "pane host: {id} showing its console at {}x{} on {} ({})",
-            seat.size.0,
-            seat.size.1,
-            if seat.station {
-                "its Station window"
-            } else {
-                "the viewscreen window"
-            },
-            seat.entry.label,
-        );
+        if seat.lobby {
+            crate::pinfo!(
+                log,
+                LogCat::Lobby,
+                "pane host: the host lobby is on the viewscreen window at {}x{} ({})",
+                seat.size.0,
+                seat.size.1,
+                if lobby_present { "showing" } else { "yielded" },
+            );
+        } else {
+            // The URL is NOT logged: it carries this pane's session token in
+            // its fragment, and an operator log is a file, a scrollback and a
+            // screenshot. `phoenix-host` prints the first eight characters of
+            // the token when it opens the pane, which is enough to correlate.
+            crate::pinfo!(
+                log,
+                LogCat::Lobby,
+                "pane host: {id} showing its console at {}x{} on {} ({})",
+                seat.size.0,
+                seat.size.1,
+                if seat.station {
+                    "its Station window"
+                } else {
+                    "the viewscreen window"
+                },
+                seat.entry.label,
+            );
+        }
     }
 
-    let router = build_router(&windows);
+    let router = build_router(&windows, lobby_present);
     // Seed focus onto the first pane so a pure-keyboard operator sees the reticle
     // and has a defined keyboard target the instant panes exist, rather than a
     // blank ring in which keys go nowhere until the first Ctrl+Tab (issue #1124,
@@ -803,7 +933,83 @@ fn init_pane_host(world: &mut World) {
         router,
         ring: None,
         station_cameras,
+        lobby_present,
     });
+}
+
+/// Show or hide the host-lobby surface, and place or unplace it in the input
+/// router (issue #1325).
+///
+/// The three observable halves of one decision, taken by the pure
+/// [`RevealState`](crate::native_host::host_lobby::RevealState): the node's
+/// `display` is the **invisible** half, the router placement is the
+/// **input-transparent** half, and the third — telling the page to render chrome
+/// its own phase would hide — is pushed over the bridge by
+/// `host_lobby::publish_reveal`.
+///
+/// The view itself is never touched. It stays alive, stays loaded and stays
+/// pushed to, so a reveal is a `display` flip rather than a page load: that is
+/// what "the surface is permanent" buys, and what later slices (a QR overlay,
+/// settings, layout rows) are entitled to assume.
+///
+/// Runs only on the EDGE. `rebuild_layout` re-derives the keyboard focus order,
+/// and re-deriving it every frame would revert a Ctrl+Tab the operator just
+/// made — the same reason focus follows the pointer only on genuine motion.
+fn sync_host_lobby_presence(
+    host: Option<NonSendMut<PaneHost>>,
+    reveal: Option<Res<HostLobbyRevealResource>>,
+    mut nodes: Query<&mut Node>,
+    mut commands: Commands,
+) {
+    let (Some(mut host), Some(reveal)) = (host, reveal) else {
+        return;
+    };
+    let present = reveal.0.presence().composited;
+    if host.lobby_present == present {
+        return;
+    }
+    let Some(canvas) = host
+        .windows
+        .iter()
+        .find(|w| w.is_host_lobby())
+        .map(|w| w.canvas)
+    else {
+        // No lobby surface on this host (no bundle to build one from). Record
+        // the answer anyway so this does not re-run every frame.
+        host.lobby_present = present;
+        return;
+    };
+    host.lobby_present = present;
+    if let Ok(mut node) = nodes.get_mut(canvas) {
+        node.display = if present {
+            Display::DEFAULT
+        } else {
+            Display::None
+        };
+    }
+
+    // Re-place (or un-place) it in the router, and reconcile focus. `sync_order`
+    // clears focus when the focused surface leaves the order rather than
+    // carrying it onto whatever now occupies that position.
+    let previously_focused = host.focus.focused();
+    host.rebuild_layout();
+    if host.focus.focused().is_none() {
+        if present {
+            // The surface just came back and nothing else holds focus: seed it,
+            // so a keyboard operator has a defined target immediately rather
+            // than after a Ctrl+Tab. Same reasoning as `focused_on_first`.
+            host.focus.focus_next();
+        } else if previously_focused.is_some() {
+            // Focus left with the surface; the reticle goes with it.
+            if let Some((_, entity)) = host.ring.take() {
+                commands.entity(entity).try_despawn();
+            }
+        }
+    }
+    // Ultralight drops input into an unfocused view, so the views follow the
+    // model rather than the other way round.
+    let next = host.focus.focused();
+    host.focus_view(previously_focused, next);
 }
 
 /// Route this frame's pointer into the pane it belongs to, and let focus follow
@@ -1304,24 +1510,31 @@ fn spawn_focus_ring(commands: &mut Commands, window: &PaneWindow) -> Entity {
 fn drive_panes(
     host: Option<NonSendMut<PaneHost>>,
     bus: Option<Res<PaneBusResource>>,
+    lobby: Option<Res<HostLobbyBridgeResource>>,
     mut images: ResMut<Assets<Image>>,
     mut commands: Commands,
     log: Option<Res<LogFilterConfig>>,
 ) {
-    let (Some(mut host), Some(bus)) = (host, bus) else {
+    let Some(mut host) = host else {
         return;
     };
-    // Panes closed since the last frame — by a fault below, by the operator, or
-    // by anything else holding the bus — lose their view here, BEFORE anything
-    // is pumped or drawn. A view left behind is not inert: the input systems
-    // would still route to it, `pump_pane` would still drain a live page's
-    // records into a registry that refuses them, once per frame, for the rest of
-    // the run.
-    retire_closed_panes(&mut host, &bus, &mut commands, &log);
-    // Panes recreated after a fault (issue #1125) get a fresh view here, BEFORE
-    // the frame drives them, so a pane brought back on the same identity reloads
-    // its console and reconnects — the in-process analogue of a phone redialling.
-    open_pending_views(&mut host, &bus, &mut images, &mut commands, &log);
+    // The bus is OPTIONAL because the host-lobby surface (issue #1325) is not a
+    // participant: `phoenix-host --client-dir dist --world <w>` with no --pane
+    // has a pane host, one window and nothing on the pane bus at all.
+    if let Some(bus) = &bus {
+        // Panes closed since the last frame — by a fault below, by the operator,
+        // or by anything else holding the bus — lose their view here, BEFORE
+        // anything is pumped or drawn. A view left behind is not inert: the
+        // input systems would still route to it, `pump_pane` would still drain a
+        // live page's records into a registry that refuses them, once per frame,
+        // for the rest of the run.
+        retire_closed_panes(&mut host, bus, &mut commands, &log);
+        // Panes recreated after a fault (issue #1125) get a fresh view here,
+        // BEFORE the frame drives them, so a pane brought back on the same
+        // identity reloads its console and reconnects — the in-process analogue
+        // of a phone redialling.
+        open_pending_views(&mut host, bus, &mut images, &mut commands, &log);
+    }
     host.runtime.update();
 
     let mut pushed_this_frame = vec![false; host.windows.len()];
@@ -1333,10 +1546,36 @@ fn drive_panes(
             crate::pinfo!(
                 log,
                 LogCat::Lobby,
-                "pane host: {} finished loading its console",
-                pane.id
+                "pane host: {} finished loading",
+                if pane.is_host_lobby() {
+                    "the host lobby".to_string()
+                } else {
+                    format!("{} console", pane.id)
+                }
             );
         }
+        // The lobby surface rides its OWN bridge, over the same `PaneSurface`.
+        // Nothing it says is a `ClientMessage` and nothing it hears is a
+        // projection, so nothing it says may reach the pane bus — which is the
+        // whole reason the two are separate.
+        if pane.is_host_lobby() {
+            if let Some(lobby) = &lobby {
+                let report = pump_host_lobby(&lobby.0, &mut pane.surface);
+                pushed_this_frame[index] = report.pushed > 0;
+                if let Some(failure) = &report.push_failure {
+                    // Ordinary in the window between "the document loaded" and
+                    // "its module island ran" — the state is kept and retried,
+                    // so this is a debug line rather than a warning.
+                    crate::pdebug!(
+                        log,
+                        LogCat::Lobby,
+                        "pane host: the host lobby deferred a push: {failure}"
+                    );
+                }
+            }
+            continue;
+        }
+        let Some(bus) = &bus else { continue };
         let report = pump_pane(&bus.0, pane.id, &mut pane.surface);
         pushed_this_frame[index] = report.pushed > 0;
         for refusal in &report.refusals {
@@ -1374,8 +1613,17 @@ fn drive_panes(
                 // transient. A run past the threshold is the honest crash signal
                 // (issue #1125): fault it so it rides the same close → Backfill →
                 // recreate path an inbox overflow does.
-                if pane.copy_failures >= VIEW_CRASH_COPY_FAILURES {
-                    bus.0.fault(pane.id, PaneFault::ViewCrashed);
+                //
+                // The lobby surface has no such path and must not be given one:
+                // it holds no station to fall back to AI control, and it is
+                // PERMANENT (issue #1325) — closing it would be the one thing
+                // every later slice is told it may assume never happens. A dead
+                // lobby view is a warning per frame and a blank surface, which
+                // is honest and recoverable by restarting the host.
+                if pane.copy_failures >= VIEW_CRASH_COPY_FAILURES && !pane.is_host_lobby() {
+                    if let Some(bus) = &bus {
+                        bus.0.fault(pane.id, PaneFault::ViewCrashed);
+                    }
                 }
             }
         }
@@ -1391,6 +1639,7 @@ fn drive_panes(
     // resolving. The VIEW goes at the top of the next frame, through
     // `retire_closed_panes` — one path for every way a pane can be closed rather
     // than a teardown that only the fault route remembers to do.
+    let Some(bus) = &bus else { return };
     for outcome in service_faults(&bus.0) {
         match &outcome.recreated {
             Some((new_id, _)) => crate::pwarn!(
@@ -1602,12 +1851,16 @@ fn retire_closed_panes(
         return;
     }
     let open = bus.0.open_pane_ids();
-    if host.windows.iter().all(|w| open.contains(&w.id)) {
+    // The host-lobby surface is never in `open_pane_ids` — it is not a
+    // participant and has no registry entry — and it is PERMANENT (issue
+    // #1325), so it is not a candidate for retirement in either test below.
+    let survives = |w: &PaneWindow| open.contains(&w.id) || w.is_host_lobby();
+    if host.windows.iter().all(survives) {
         return;
     }
     let mut closed: Vec<PaneId> = Vec::new();
     host.windows.retain(|window| {
-        if open.contains(&window.id) {
+        if survives(window) {
             return true;
         }
         commands.entity(window.canvas).try_despawn();

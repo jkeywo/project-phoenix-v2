@@ -1,8 +1,8 @@
 ---
 title: Native Host
 type: concept
-tags: [native, viewscreen, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile, media-devices, camera, microphone]
-sources: [src/native_host/mod.rs, src/native_host/app.rs, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/recovery.rs, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs]
+tags: [native, viewscreen, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile, media-devices, camera, microphone, lobby]
+sources: [src/native_host/mod.rs, src/native_host/app.rs, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs]
 updated: 2026-09-01
 ---
 
@@ -778,10 +778,98 @@ projection resolves through `SessionManager::holder_for_station`, which gates on
 recreated pane, carrying the same token, is the only thing that receives that
 token's projection again, and that is the reconnect, not a leak.
 
+## The host lobby on the viewscreen (issue #1325)
+
+`phoenix-host --client-dir dist --world <w>`, built with `--features
+ultralight`, shows **the crew lobby the browser host shows** on the viewscreen
+window: scenario title, crew counter, the station grid filling in as phones
+claim seats, ready badge, countdown. No flag — it is what a windowed
+authoritative host has in front of it before a mission, and a native host had
+nothing there between #1121 and this.
+
+**One rendering path, not two.** The lobby DOM glue was inline in
+`server.html`'s `__updateLobby`; it is now `gui/host-lobby-render.js`, over the
+pure `gui/host-lobby-view.js` (#1229) that was already extracted, with the
+panel's stylesheet in `gui/host-lobby.css`. The host page links both, and so
+does the native document — which is *built from the host page's own
+`#lobby-panel` markup*, sliced out of the served `dist/index.html`, so there is
+no second copy of those element ids to drift.
+
+```text
+viewscreen_border::push_lobby_state       the same system the browser host runs
+  │  Messages<LobbyStateChanged>          the same codec::encode_lobby_state bytes
+  ▼
+host_lobby::feed_lobby_state              latest-wins, identical snapshots dropped
+  ▼
+HostLobbyBridge → pump_host_lobby         over panes::surface::PaneSurface
+  ▼
+window.__phoenixHostLobbyApply(json)      host_lobby_boot.js
+  ▼
+localiseHostPayload → hostLobbyViewModel → renderHostLobby
+   gui/host-channel.js  gui/host-lobby-view.js  gui/host-lobby-render.js
+```
+
+| Piece | File |
+|---|---|
+| Document assembly, bridge scripts, paths | `src/native_host/host_lobby/document.rs` |
+| Injected page scripts | `src/native_host/host_lobby/host_lobby_{boot,link}.js` |
+| The bridge and its frame loop | `src/native_host/host_lobby/bridge.rs` |
+| When the surface is on screen | `src/native_host/host_lobby/reveal.rs` |
+| Bevy wiring + `LocalHostLobby` | `src/native_host/host_lobby/mod.rs` |
+| Compositing and input | `src/native_host/panes/ultralight.rs` |
+
+Four things are worth knowing before touching it.
+
+**It is not a pane, and deliberately not on the pane bus.** A pane is a
+participant: minted session token, `Identify`, a claimed Station, command
+admission. This surface has no identity at all — it renders what the host is
+*already* broadcasting to every phone in the room and sends nothing back. Its
+URL therefore carries no fragment, and there is no token in a served body to
+worry about. It shares the runtime, the texture, the compositing node and the
+input router with the panes, and nothing above that.
+
+**It sits at the served root, not `/client/`.** The pane document is published
+at `/client/pane-<n>-<nonce>.html` because the *client* page's relative URLs
+resolve from there. This one borrows the **host** page's markup and modules, so
+it is published at `/host-lobby-<nonce>.html` and `gui/host-lobby-render.js`
+and `../assets/strings/strings.csv` resolve exactly as they do for
+`dist/index.html`. Same trick, other page. Loopback-only, like every hosted
+document.
+
+**The surface is permanent.** On mission start it is not torn down: the chrome
+*yields* — the page renders nothing (the shared view model already hides the
+panel outside `GamePhase::Lobby`), the Bevy node's `display` goes to `None`, and
+the placement leaves the #1124 router so a click over it reaches the viewscreen.
+**F9** reveals and hides it during play; returning to the lobby phase brings the
+chrome back on its own. Every phase change clears the manual latch, so a key
+pressed in the lobby — where it looks inert, the chrome already being on —
+cannot arm a reveal that springs open at launch. That decision is the pure
+`host_lobby::reveal::RevealState`, which is why it is CI-tested rather than only
+provable under the ignored GPU test.
+
+**One `PaneId` is reserved for it.** The router, the focus ring and the touch
+capture map are keyed by `PaneId`, and the surface has to appear in them for a
+mouse and a keyboard to operate it. `PaneRegistry` mints ids from `0` upward and
+never reuses one, so `HOST_LOBBY_SURFACE_ID` is `PaneId(u32::MAX)`; everything
+that treats a `PaneId` as a participant — the pump, the fault path, the
+close-and-retire sweep — checks for it and skips. Its canvas draws at
+`ZIndex(-1)` and it is placed **last** in the router, so where a tiled `--pane`
+overlaps it the pane both draws on top and wins the hit test.
+
+Two costs worth stating out loud. `viewscreen_border::push_lobby_state` writes a
+`LobbyStateChanged` every `Update` whether or not anything moved, and every push
+here is a synchronous `evaluate_script` on the Bevy main thread — the thread
+`FixedUpdate` runs `SimSet` on. So the bridge drops a payload identical to the
+last one accepted, and pushes the reveal flag only when it changes: a lobby
+nobody is touching costs the simulation nothing.
+
 ## Tests
 
 | File | Claim |
 |---|---|
+| `src/native_host/host_lobby/*` | The lobby surface (#1325), all feature-**off**: the document assembles from the repository's own `server.html` and carries every element id the shared renderer writes into, stops at the panel (a comment mentioning a `div` cannot unbalance the count), drops the AI-launch button, links the shared stylesheet, refuses a page with no lobby by name; the bridge's latest-wins collapse, its identical-snapshot drop, its deferral of a failed push and the newer-wins restore; and the reveal state machine — boot showing, mission start yielding invisible *and* input-transparent, F9 both ways, a return to the lobby restoring it, and a latch that cannot survive a phase change |
+| `tests/client/host-lobby-render.test.js` | The extracted renderer, in jsdom, driven against `server.html`'s own `#lobby-panel` subtree: cards, avatars, chips, pills, the ready badge's `go` class, the countdown, a re-render replacing rather than appending — and the two documents, one with the AI-launch button and one (the native lobby's) without |
+| `tests/native_host_lobby_ultralight.rs` | The real lobby document in a real Ultralight view over this process's own HTTP: a real `LobbyStatePayload` fills the station grid through the shared modules, the chrome yields on mission start and comes back on the reveal flag with no reload, and the surface rasterises. `#[ignore]`d: needs the SDK and a `trunk build`ed `dist/`, which CI has neither of |
 | `src/native_host/bridge_profile.rs` | The pure model: stable identity across a simulated OS-settings rearrange, identical-monitor disambiguation (including a TOML round-trip of a position-suffixed id), the one/two-pane geometry math (even and odd, side-by-side and stacked), the >2 density refusal, the one-viewscreen refusal (`ProfileError::MultipleViewscreens`, naming both monitors), the TOML round-trip (Windows backslash ids included), the missing/unassigned/changed-display reporting, and (#1125) the runtime loss/return detection — a lost Station names its panes, a lost viewscreen names none, a return is for explicit repair only. All feature-agnostic, run by the ordinary `cargo test` |
 | `src/native_host/bridge_display.rs` | A Bevy `Monitor` lifts into a `RawMonitor` and carries the documented identity; `--setup`'s exit code is clean only when a supplied profile both validates and resolves with no problems against the connected displays (`setup_profile_is_clean`); and (#1125) `watch_runtime_displays` itself — driven with *fake* `Monitor` entities spawned and despawned as bevy_winit does on hot-plug, so it runs in CI without a display — closes a lost Station's pane (→ Backfill) and no pane for a lost viewscreen |
 | `src/native_host/bridge_media.rs` + `bridge_media_tests.rs` | The pure media model (#1126): stable `kind:name` identity (recovered to its kind, stable across a re-enumeration, kind keeps a same-named camera/mic distinct, identical devices disambiguated by hardware id or ordinal); the validate failure taxonomy (wrong-kind, malformed id, duplicate-on-surface, duplicate-surface, shared-without-consent); the consented-share warning; resolve naming a missing vs a denied device while the surface stays usable; the deterministic default (OS-default/first per kind, denied skipped, forced share consented); and the setup report. Also the `[[media]]` TOML round-trip in `bridge_profile_tests.rs`. All feature-agnostic, run by the ordinary `cargo test` |
@@ -810,6 +898,7 @@ shared binary is a claim about whoever won that race.
 ## Related
 
 - [Build & Deployment](./build-and-deployment.md) · [Networking](./networking.md) · [Architecture](./architecture.md)
-- Issue #1121 — the host. Issue #1122 — local Ultralight panes. Issue #1123 — bridge display profiles (above). Issue #1125 — recovering a failed pane and a lost display (above). Issue #1112 — the transport. Issue #1124 — input routing between displays + pane→Station-window compositing (above). Issue #1126 — bridge media profiles: per-surface camera/microphone/output assignment (above).
+- [Server HTML Lobby UI](./server-lobby-ui.md) — the lobby this surface renders, and the modules both surfaces share
+- Issue #1121 — the host. Issue #1122 — local Ultralight panes. Issue #1325 — the host lobby on the native viewscreen (above). Issue #1123 — bridge display profiles (above). Issue #1125 — recovering a failed pane and a lost display (above). Issue #1112 — the transport. Issue #1124 — input routing between displays + pane→Station-window compositing (above). Issue #1126 — bridge media profiles: per-surface camera/microphone/output assignment (above).
 - [vellum](https://github.com/jkeywo/vellum) `crates/vellum-ultralight` — the extracted plumbing; `docs/handbook/dependencies.md` records why `ul-next` stopped being a per-game exception
 - `pasm/spec/architecture/native-delivery.yaml` — PRD #855's delivery declarations

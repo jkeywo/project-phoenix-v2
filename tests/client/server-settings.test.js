@@ -902,8 +902,11 @@ describe('server.html host-page guards', () => {
     // gui/host-lobby.css since #1325; the token it names is still this page's.
     const lobbyWrap = LOBBY_CSS.match(/\.lobby-panel-wrap\s*\{([^}]*)\}/);
     expect(lobbyWrap, '.lobby-panel-wrap rule not found').not.toBeNull();
+    // The optional fallback is the sheet saying the token may be absent — it is,
+    // on the native lobby surface, which has no cog. What is guarded is that the
+    // host page's floor still names the token.
     expect(lobbyWrap[1]).toMatch(
-      /padding-left:\s*max\([^)]*\([^)]*\),\s*var\(--settings-cog-keepout\)\)/,
+      /padding-left:\s*max\([^)]*\([^)]*\),\s*var\(--settings-cog-keepout(?:,[^)]*)?\)\)/,
     );
   });
 });

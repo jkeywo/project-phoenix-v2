@@ -160,6 +160,20 @@ pub struct NativeHostConfig {
     /// which opens one borderless-fullscreen surface per configured monitor:
     /// the viewscreen on the primary window, each Station on its own window.
     pub bridge_profile: Option<crate::native_host::bridge_profile::ValidatedProfile>,
+    /// The host's own lobby surface (issue #1325), already opened and published.
+    ///
+    /// Opened by the caller for the same reason panes are: the document is
+    /// published at the delivery listener's own address, and a `:0` bind does
+    /// not know its port until it has bound. What this builder does with it is
+    /// install [`HostLobbyPlugin`](crate::native_host::host_lobby::HostLobbyPlugin),
+    /// which carries the lobby state the browser host's own
+    /// `viewscreen_border::push_lobby_state` already emits across the bridge,
+    /// and (under `--features ultralight`) tell the pane display host to
+    /// composite it onto the viewscreen window.
+    ///
+    /// `None` leaves the host byte-for-byte as it was: no plugin, no resource,
+    /// no surface.
+    pub host_lobby: Option<crate::native_host::host_lobby::LocalHostLobby>,
 }
 
 impl NativeHostConfig {
@@ -179,6 +193,7 @@ impl NativeHostConfig {
             deterministic: false,
             panes: None,
             bridge_profile: None,
+            host_lobby: None,
         }
     }
 }
@@ -451,8 +466,34 @@ pub fn build_native_host_app(
                     .map(|(id, url, label)| PaneDisplayEntry { id, url, label })
                     .collect(),
             });
-            app.add_plugins(crate::native_host::panes::ultralight::PaneDisplayPlugin);
         }
+    }
+
+    // The host's own lobby surface (issue #1325). Not a participant and not on
+    // the pane bus: it renders the lobby state this process is ALREADY
+    // broadcasting to every phone in the room, over the same
+    // `gui/host-lobby-view.js` + `gui/host-lobby-render.js` pair `server.html`
+    // renders with. The plugin is what carries that state across the bridge; the
+    // display config below is what composites the surface, and only a build with
+    // the SDK has anything to composite onto.
+    if let Some(lobby) = &cfg.host_lobby {
+        app.insert_resource(crate::native_host::host_lobby::HostLobbyBridgeResource(
+            lobby.bridge.clone(),
+        ));
+        app.add_plugins(crate::native_host::host_lobby::HostLobbyPlugin);
+        #[cfg(feature = "ultralight")]
+        app.insert_resource(
+            crate::native_host::panes::ultralight::HostLobbyDisplayConfig { url: lobby.url() },
+        );
+    }
+
+    // One display host for both kinds of surface — Ultralight allows one
+    // `Renderer` per process, and `PaneDisplayPlugin` owns it. Added once,
+    // after both configs, because Bevy panics on a duplicate plugin and either
+    // block above can be the one that wanted it.
+    #[cfg(feature = "ultralight")]
+    if cfg.panes.is_some() || cfg.host_lobby.is_some() {
+        app.add_plugins(crate::native_host::panes::ultralight::PaneDisplayPlugin);
     }
 
     // Bridge-display profile (issue #1123). Installed unconditionally — the

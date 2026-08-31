@@ -1,23 +1,29 @@
 ---
 title: Server HTML Lobby UI
 type: concept
-tags: [lobby, server, html, ui, bridge, responsive, accessibility, reduced-motion]
-sources: [server.html, gui/host-lobby-view.js, src/server/viewscreen_border.rs, src/console_bridge.rs, src/server/bridge.rs]
-updated: 2026-08-27
+tags: [lobby, server, html, ui, bridge, responsive, accessibility, reduced-motion, native]
+sources: [server.html, gui/host-lobby-view.js, gui/host-lobby-render.js, gui/host-lobby.css, src/server/viewscreen_border.rs, src/console_bridge.rs, src/server/bridge.rs, src/native_host/host_lobby/mod.rs]
+updated: 2026-08-31
 ---
 
 # Server HTML Lobby UI
 
-The lobby UI on the **server** (viewscreen) page is rendered entirely as HTML/CSS/JS in `server.html`. The global `window.__updateLobby(json)` callback applies each `LobbyStatePayload` snapshot pushed by the Bevy server.
+The lobby UI on the **server** (viewscreen) page is rendered as HTML/CSS/JS. The global `window.__updateLobby(json)` callback applies each `LobbyStatePayload` snapshot pushed by the Bevy server.
 
-The host page is the only consumer of this push channel: each viewer of `server.html` sees the same lobby state because the data originates from a single authoritative Bevy world.
+Since issue #1325 the render itself is **not** in `server.html`: the decisions are `gui/host-lobby-view.js` (#1229), the DOM writes are `gui/host-lobby-render.js`, and the panel's rules are `gui/host-lobby.css`. `server.html` links all three and keeps only what is its own — the audio graph, the `qrVisible` flag, the fleet freeze and mesh pump, and the three overlays that are viewscreen chrome rather than lobby chrome (asset-loading, QR, game-over).
+
+The split exists because there are now **two** surfaces rendering this lobby from the same payload: the host page, and the native host's viewscreen surface (see [Native Host](./native-host.md#the-host-lobby-on-the-viewscreen-issue-1325)), whose document is built from this page's own `#lobby-panel` markup. Both call the same `renderHostLobby`. A second implementation of these element ids would drift the first time either was touched, so there is not one.
+
+Each viewer of `server.html` sees the same lobby state because the data originates from a single authoritative Bevy world.
 
 ## Push path (Rust → DOM)
 
 1. **Bevy producer.** `push_lobby_state` in `src/server/viewscreen_border.rs` builds a `LobbyStatePayload`, encodes it via `core::codec::encode_lobby_state`, and writes a `LobbyStateChanged` event. Its station roster contains claimable (`auxiliary = false`) seats only; auxiliary mounted Stations never become cards or affect counts.
 2. **WASM bridge drain.** `flush_host_channels` in `src/server/bridge.rs` drains those events on every tick and invokes the single registered host-channel callback with `("lobby", json)` (#818).
 3. **JS callback registration.** `set_host_channel_callback(window.__hostChannel)` is invoked once in `server.html` when WASM is ready; the dispatcher's handlers table routes `"lobby"` payloads to `window.__updateLobby`.
-4. **View model and DOM mutation.** `gui/host-lobby-view.js` derives the render model; `window.__updateLobby` in `server.html` applies it to the lobby DOM.
+4. **View model and DOM mutation.** `gui/host-lobby-view.js` derives the render model; `window.__updateLobby` in `server.html` performs the page's own side effects and hands the model to `gui/host-lobby-render.js`, which writes the lobby DOM.
+
+The native host reaches the same last step by a different route: it reads the same `LobbyStateChanged` message directly (there is no WASM bridge in that process) and pushes the same bytes over `native_host::host_lobby`'s bridge into an embedded view, whose module island calls the same `localiseHostPayload` → `hostLobbyViewModel` → `renderHostLobby` chain.
 
 This is a **one-way state-push channel** that runs in parallel to the regular [Message Flow](./message-flow.md) (which targets specific peers over their own DataChannels). Lobby state is broadcast-equivalent: only the host's own DOM consumes it.
 
@@ -94,9 +100,10 @@ A scroll fallback (`overflow-y: auto` on `#station-grid`) handles rosters that d
 - `RedAlertVignetteMaterial`, shield flash, hull shake, camera shake, and the
   reduced-motion preference remain renderer-side presentation state.
 
-The lobby cards, rail, QR area, and responsive layout are DOM owned by
-`server.html` and `gui/host-lobby-view.js`; Bevy publishes data but does not
-build a lobby UI tree.
+The lobby cards, rail and responsive layout are DOM owned by
+`gui/host-lobby-render.js` + `gui/host-lobby.css` over `gui/host-lobby-view.js`;
+the QR area stays `server.html`'s. Bevy publishes data but does not build a
+lobby UI tree — on either surface.
 
 ## Viewscreen reduced motion
 
@@ -121,6 +128,12 @@ Protocol-level lobby coverage stays in `tests/smoke/lobby.spec.js` (station
 selection, readiness, assignment broadcasts, and invalid claims). Those tests
 do not assert responsive DOM layout.
 
+`tests/client/host-lobby-render.test.js` drives the extracted renderer in jsdom
+against `server.html`'s own `#lobby-panel` subtree — lifted with `DOMParser`, so
+a renamed element fails there rather than rendering nothing with a clean log —
+including the document with fewer elements in it, which is the native lobby's.
+`tests/client/host-lobby-view.test.js` covers the pure model beneath it.
+
 `tests/smoke/viewscreen-reduced-motion.render.spec.js` exercises the live WASM
 motion latch and asserts zero page translation plus a disabled vignette pulse;
 the pure Rust tests beside `ViewscreenMotion` cover shake scaling and the
@@ -133,4 +146,6 @@ reduced-motion flash cap.
 - `src/server/bridge.rs` — `set_host_channel_callback`, `flush_host_channels` (named Host Channel table, #818)
 - `src/console_bridge.rs` — `LobbyStateChanged` event
 - `src/core/messages.rs` — `LobbyStatePayload` / `StationPayload`
-- [Message Flow](./message-flow.md), [Codec Seam](./codec-seam.md)
+- `gui/host-lobby-render.js`, `gui/host-lobby.css` — the shared renderer and stylesheet (#1325)
+- `src/native_host/host_lobby/` — the native host's surface over the same pair
+- [Native Host](./native-host.md), [Message Flow](./message-flow.md), [Codec Seam](./codec-seam.md)

@@ -295,6 +295,27 @@ fn main() {
     // bottom of `main` can withdraw the pane documents: the delivery thread
     // outlives `App::run()` by however long the join takes, and nothing should
     // be serving a bridge console in that window.
+    //
+    // Both embedded surfaces this host can show — a Station pane and the lobby
+    // (issue #1325) — need the Ultralight SDK's shared libraries beside the
+    // binary and its `resources/` in the working directory, so the staging is
+    // done ONCE here rather than by whichever surface happens to be built first.
+    // It reports rather than exits: a `--pane` cannot work without it and says
+    // so below, while a host that only wanted the lobby flies its mission with a
+    // blank surface, which is far better than refusing to start over chrome.
+    #[allow(unused_mut)]
+    let mut ultralight_ready = false;
+    #[cfg(feature = "ultralight")]
+    {
+        match native_host::panes::ultralight::stage_sdk() {
+            Ok(summary) => {
+                eprintln!("phoenix-host: {summary}");
+                ultralight_ready = true;
+            }
+            Err(e) => eprintln!("phoenix-host: {e}"),
+        }
+    }
+
     let mut pane_bus: Option<native_host::panes::PaneBus> = None;
     if !sim.panes.is_empty() {
         if !cfg!(feature = "ultralight") {
@@ -342,17 +363,69 @@ fn main() {
                 panes.host_addr,
             );
         }
-        #[cfg(feature = "ultralight")]
-        match native_host::panes::ultralight::stage_sdk() {
-            Ok(summary) => eprintln!("phoenix-host: {summary}"),
-            Err(e) => {
-                eprintln!("phoenix-host: {e}");
-                std::process::exit(1);
-            }
+        // A pane IS an embedded browser view, so an unstaged SDK is fatal for
+        // it — the reason was printed by the staging above.
+        if !ultralight_ready {
+            std::process::exit(1);
         }
         pane_bus = Some(panes.bus.clone());
         cfg.panes = Some(panes);
     }
+
+    // The host's own lobby surface (issue #1325). Opened after the bind, like a
+    // pane, because its document is published at this listener's own address and
+    // a `:0` bind does not know its port until it has bound.
+    //
+    // No flag: it is what a windowed authoritative host SHOWS before a mission,
+    // and a native host has had nothing there since #1121. It needs two things,
+    // and says so rather than failing when either is missing — a host that flies
+    // the mission with a blank lobby is far better than one that refuses to
+    // start over its chrome:
+    //
+    //   1. a build with `--features ultralight`, because the surface is an
+    //      embedded browser view;
+    //   2. a `--client-dir` bundle whose `index.html` is a Phoenix HOST page,
+    //      because the lobby markup and the `gui/` modules that render it come
+    //      out of that page rather than out of a copy in this binary.
+    let mut host_lobby: Option<native_host::host_lobby::LocalHostLobby> = None;
+    if ultralight_ready {
+        match &args.client {
+            ClientSource::Bundled { dir } => {
+                let index = std::path::Path::new(dir).join("index.html");
+                match std::fs::read_to_string(&index) {
+                    Ok(html) => {
+                        let lobby = native_host::host_lobby::LocalHostLobby::open(
+                            server.local_addr(),
+                        );
+                        match lobby.publish(&html, &server.hosted_documents()) {
+                            Ok(()) => {
+                                eprintln!(
+                                    "phoenix-host: the crew lobby is on the viewscreen                                      (press F9 in play to show or hide it)"
+                                );
+                                host_lobby = Some(lobby);
+                            }
+                            Err(e) => eprintln!(
+                                "phoenix-host: no lobby on the viewscreen — {}: {e}",
+                                index.display()
+                            ),
+                        }
+                    }
+                    Err(e) => eprintln!(
+                        "phoenix-host: no lobby on the viewscreen — cannot read {}: {e}",
+                        index.display()
+                    ),
+                }
+            }
+            ClientSource::Hosted => eprintln!(
+                "phoenix-host: no lobby on the viewscreen — it is built from the host page                  this process serves, and there is no --client-dir"
+            ),
+        }
+    }
+    cfg.host_lobby = host_lobby.clone();
+    // Kept for the shutdown below, before `server` moves into the delivery
+    // thread: the thread outlives `App::run()` by however long the join takes,
+    // and nothing should be serving a bridge surface in that window.
+    let hosted_documents = server.hosted_documents();
 
     let mut app = match native_host::build_native_host_app(&cfg, &preload) {
         Ok(app) => app,
@@ -450,6 +523,9 @@ fn main() {
     // stop signal, not after, so that window is empty rather than merely short.
     if let Some(bus) = &pane_bus {
         bus.withdraw_all();
+    }
+    if let Some(lobby) = &host_lobby {
+        lobby.withdraw(&hosted_documents);
     }
     shutdown.stop();
     if let Ok(handle) = delivery {

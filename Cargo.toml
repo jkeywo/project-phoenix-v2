@@ -23,44 +23,18 @@ resolver = "2"
 # so the repo carries a single vellum revision rather than one per crate. Adding
 # a second vellum consumer that pins a different rev now fails structurally.
 [workspace.dependencies]
-vellum-perf = { git = "https://github.com/jkeywo/vellum", rev = "a08dca9ca49033307bb6d5e85cb068205c1164b6", features = ["json"] }
-vellum-rng = { git = "https://github.com/jkeywo/vellum", rev = "a08dca9ca49033307bb6d5e85cb068205c1164b6" }
-vellum-replay = { git = "https://github.com/jkeywo/vellum", rev = "a08dca9ca49033307bb6d5e85cb068205c1164b6" }
-vellum-digest = { git = "https://github.com/jkeywo/vellum", rev = "a08dca9ca49033307bb6d5e85cb068205c1164b6" }
-vellum-save = { git = "https://github.com/jkeywo/vellum", rev = "a08dca9ca49033307bb6d5e85cb068205c1164b6", features = ["run"] }
-vellum-script = { git = "https://github.com/jkeywo/vellum", rev = "a08dca9ca49033307bb6d5e85cb068205c1164b6" }
-# ┌──────────────────────────────────────────────────────────────────────────┐
-# │  PRE-MERGE LOCAL DEPENDENCY — THIS LINE MUST BE REPOINTED BEFORE MERGE.  │
-# ├──────────────────────────────────────────────────────────────────────────┤
-# │  Issue #1122 extracted the shared Ultralight plumbing into a NEW vellum   │
-# │  crate on the `phoenix-ultralight` branch, which is NOT PUSHED YET. Until │
-# │  it is, this points at a local clone on one Windows machine, so:          │
-# │                                                                          │
-# │    * every OTHER pin above is a rev on the GitHub URL, deliberately       │
-# │      (issue #1184: one vellum rev for the whole repo, pinned once), and   │
-# │    * this line breaks that rule ON PURPOSE and TEMPORARILY, and           │
-# │    * **CI CANNOT RESOLVE IT.** Cargo fetches every git dependency during  │
-# │      resolution, optional or not, feature-gated or not — so an            │
-# │      `ubuntu-latest` runner fails at `cargo metadata`, before it compiles │
-# │      a line. That is expected on this branch and is not a code fault.     │
-# │                                                                          │
-# │  THE FIX, once John has pushed the vellum branch:                        │
-# │                                                                          │
-# │    vellum-ultralight = { git = "https://github.com/jkeywo/vellum",        │
-# │                          rev = "<the merged rev>" }                       │
-# │                                                                          │
-# │  and bump the six revs above to the SAME rev in the same diff, so the     │
-# │  repo carries one vellum revision as #1184 requires. This is a checklist  │
-# │  item in docs/delivery-checklist.md as well as a comment here, because a  │
-# │  comment is not a gate.                                                   │
-# └──────────────────────────────────────────────────────────────────────────┘
-#
-# NOT optional, and its SDK-linking feature is NOT on here. The crate's pure
-# half — the JS-bridge escaping and record splitting `native_host::panes` uses
-# to assemble a pane document — has no dependencies at all and compiles
-# everywhere, including wasm. Only `vellum-ultralight/ultralight` pulls
-# `ul-next`, and only this repo's own `ultralight` feature turns that on.
-vellum-ultralight = { git = "file:///C:/Coding/vellum", branch = "phoenix-ultralight" }
+vellum-perf = { git = "https://github.com/jkeywo/vellum", rev = "b4e8bca41967644f3ca83adba092b2a503d3506a", features = ["json"] }
+vellum-rng = { git = "https://github.com/jkeywo/vellum", rev = "b4e8bca41967644f3ca83adba092b2a503d3506a" }
+vellum-replay = { git = "https://github.com/jkeywo/vellum", rev = "b4e8bca41967644f3ca83adba092b2a503d3506a" }
+vellum-digest = { git = "https://github.com/jkeywo/vellum", rev = "b4e8bca41967644f3ca83adba092b2a503d3506a" }
+vellum-save = { git = "https://github.com/jkeywo/vellum", rev = "b4e8bca41967644f3ca83adba092b2a503d3506a", features = ["run"] }
+vellum-script = { git = "https://github.com/jkeywo/vellum", rev = "b4e8bca41967644f3ca83adba092b2a503d3506a" }
+# vellum-ultralight (issue #1122): the shared Ultralight pane plumbing, pinned to
+# the same rev as the crates above. Its SDK-linking `ultralight` feature is OFF
+# here — the crate's pure half (the JS-bridge escaping and record splitting
+# `native_host::panes` uses) has no dependencies and compiles everywhere, wasm
+# included; only this repo's own `ultralight` feature pulls `ul-next`.
+vellum-ultralight = { git = "https://github.com/jkeywo/vellum", rev = "b4e8bca41967644f3ca83adba092b2a503d3506a" }
 
 [lib]
 crate-type = ["cdylib", "rlib"]

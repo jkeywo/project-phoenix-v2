@@ -6644,7 +6644,7 @@ checksum = "f1bddf1187be692e79c5ffeab891132dfb0f236ed36a43c7ed39f1165ee20191"
 [[package]]
 name = "vellum-digest"
 version = "0.1.0"
-source = "git+https://github.com/jkeywo/vellum?rev=a08dca9ca49033307bb6d5e85cb068205c1164b6#a08dca9ca49033307bb6d5e85cb068205c1164b6"
+source = "git+https://github.com/jkeywo/vellum?rev=b4e8bca41967644f3ca83adba092b2a503d3506a#b4e8bca41967644f3ca83adba092b2a503d3506a"
 dependencies = [
  "base64",
  "postcard",
@@ -6654,7 +6654,7 @@ dependencies = [
 [[package]]
 name = "vellum-perf"
 version = "0.1.0"
-source = "git+https://github.com/jkeywo/vellum?rev=a08dca9ca49033307bb6d5e85cb068205c1164b6#a08dca9ca49033307bb6d5e85cb068205c1164b6"
+source = "git+https://github.com/jkeywo/vellum?rev=b4e8bca41967644f3ca83adba092b2a503d3506a#b4e8bca41967644f3ca83adba092b2a503d3506a"
 dependencies = [
  "serde",
  "serde_json",
@@ -6663,12 +6663,12 @@ dependencies = [
 [[package]]
 name = "vellum-replay"
 version = "0.1.0"
-source = "git+https://github.com/jkeywo/vellum?rev=a08dca9ca49033307bb6d5e85cb068205c1164b6#a08dca9ca49033307bb6d5e85cb068205c1164b6"
+source = "git+https://github.com/jkeywo/vellum?rev=b4e8bca41967644f3ca83adba092b2a503d3506a#b4e8bca41967644f3ca83adba092b2a503d3506a"
 
 [[package]]
 name = "vellum-rng"
 version = "0.1.0"
-source = "git+https://github.com/jkeywo/vellum?rev=a08dca9ca49033307bb6d5e85cb068205c1164b6#a08dca9ca49033307bb6d5e85cb068205c1164b6"
+source = "git+https://github.com/jkeywo/vellum?rev=b4e8bca41967644f3ca83adba092b2a503d3506a#b4e8bca41967644f3ca83adba092b2a503d3506a"
 dependencies = [
  "serde",
 ]
@@ -6676,7 +6676,7 @@ dependencies = [
 [[package]]
 name = "vellum-save"
 version = "0.1.0"
-source = "git+https://github.com/jkeywo/vellum?rev=a08dca9ca49033307bb6d5e85cb068205c1164b6#a08dca9ca49033307bb6d5e85cb068205c1164b6"
+source = "git+https://github.com/jkeywo/vellum?rev=b4e8bca41967644f3ca83adba092b2a503d3506a#b4e8bca41967644f3ca83adba092b2a503d3506a"
 dependencies = [
  "ron",
  "serde",
@@ -6688,7 +6688,7 @@ dependencies = [
 [[package]]
 name = "vellum-script"
 version = "0.1.0"
-source = "git+https://github.com/jkeywo/vellum?rev=a08dca9ca49033307bb6d5e85cb068205c1164b6#a08dca9ca49033307bb6d5e85cb068205c1164b6"
+source = "git+https://github.com/jkeywo/vellum?rev=b4e8bca41967644f3ca83adba092b2a503d3506a#b4e8bca41967644f3ca83adba092b2a503d3506a"
 dependencies = [
  "rhai",
  "vellum-digest",
@@ -6697,7 +6697,7 @@ dependencies = [
 [[package]]
 name = "vellum-ultralight"
 version = "0.1.0"
-source = "git+file:///C:/Coding/vellum?branch=phoenix-ultralight#b4e8bca41967644f3ca83adba092b2a503d3506a"
+source = "git+https://github.com/jkeywo/vellum?rev=b4e8bca41967644f3ca83adba092b2a503d3506a#b4e8bca41967644f3ca83adba092b2a503d3506a"
 dependencies = [
  "ul-next",
 ]

@@ -102,6 +102,14 @@ fn supports_correlated_action_feedback(
                 SystemControlPayload::FireTorpedo { .. }
                     | SystemControlPayload::SetTorpedoVolleyTarget { .. }
             ))
+        || (target.0 == crate::ship::system_registry::COMMS_SYSTEM_ID
+            && matches!(
+                payload,
+                SystemControlPayload::Hail { .. }
+                    | SystemControlPayload::RespondToMessage { .. }
+                    | SystemControlPayload::ClearComms
+                    | SystemControlPayload::ShowOnScreen { .. }
+            ))
 }
 
 impl Plugin for AdmissionPlugin {
@@ -694,6 +702,20 @@ station = "repair"
             mode: ViewMode::Camera(CameraView::new("camera_fore")),
         };
         let objective = SystemControlPayload::SetObjectivePriority { id: "o1".into() };
+        let hail = SystemControlPayload::Hail {
+            target_uuid: "contact-1".into(),
+        };
+        let response = SystemControlPayload::RespondToMessage {
+            message_id: "message-1".into(),
+            response_index: 0,
+        };
+        let clear = SystemControlPayload::ClearComms;
+        let show = SystemControlPayload::ShowOnScreen {
+            message_id: "message-1".into(),
+        };
+        let select = SystemControlPayload::SelectCommsMessage {
+            message_id: "message-1".into(),
+        };
 
         assert!(supports_correlated_action_feedback(
             &crate::ship::system_registry::red_alert_system_id(),
@@ -711,6 +733,12 @@ station = "repair"
             &crate::ship::system_registry::captain_system_id(),
             &objective,
         ));
+        for payload in [&hail, &response, &clear, &show] {
+            assert!(supports_correlated_action_feedback(
+                &crate::ship::system_registry::comms_system_id(),
+                payload,
+            ));
+        }
 
         assert!(!supports_correlated_action_feedback(
             &crate::ship::system_registry::captain_system_id(),
@@ -723,6 +751,14 @@ station = "repair"
         assert!(!supports_correlated_action_feedback(
             &SystemId("repair".into()),
             &dispatch(0),
+        ));
+        assert!(!supports_correlated_action_feedback(
+            &crate::ship::system_registry::comms_system_id(),
+            &select,
+        ));
+        assert!(!supports_correlated_action_feedback(
+            &crate::ship::system_registry::captain_system_id(),
+            &hail,
         ));
     }
 

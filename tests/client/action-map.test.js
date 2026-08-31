@@ -8,7 +8,7 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 52 expected action keys', () => {
+  it('contains exactly the 51 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'cancel_impulse',
       'charge_blaster_cancel',
@@ -31,7 +31,6 @@ describe('ACTION_MAP', () => {
       'respond_to_message',
       'return_to_lobby',
       'scan_target',
-      'select_comms_message',
       'select_player_ship',
       'select_scenario',
       'set_boost',
@@ -717,6 +716,16 @@ describe('hail', () => {
     });
   });
 
+  it('uses the additive correlated envelope for semantic hail feedback', () => {
+    const send = mkSend();
+    ACTION_MAP.hail({ target_uuid: 'npc-1', correlation: 'hail-1' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'hail-1',
+      target: 'comms',
+      payload: { type: 'Hail', data: { target_uuid: 'npc-1' } },
+    });
+  });
+
   it('does nothing when target_uuid is absent', () => {
     const send = mkSend();
     ACTION_MAP.hail({ action: 'hail' }, send);
@@ -724,19 +733,11 @@ describe('hail', () => {
   });
 });
 
-describe('select_comms_message', () => {
-  it('sends ControlSystem SelectCommsMessage targeting comms (issue #822)', () => {
+describe('retired select_comms_message route', () => {
+  it('cannot emit the unconsumed host command even for a forged legacy action', () => {
     const send = mkSend();
-    ACTION_MAP.select_comms_message({ action: 'select_comms_message', message_id: 'msg-42' }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
-      target: 'comms',
-      payload: { type: 'SelectCommsMessage', data: { message_id: 'msg-42' } },
-    });
-  });
-
-  it('does nothing when message_id is absent', () => {
-    const send = mkSend();
-    ACTION_MAP.select_comms_message({ action: 'select_comms_message' }, send);
+    expect(ACTION_MAP.select_comms_message).toBeUndefined();
+    dispatchConsoleAction({ action: 'select_comms_message', message_id: 'msg-42' }, send);
     expect(send).not.toHaveBeenCalled();
   });
 });
@@ -746,6 +747,18 @@ describe('respond_to_message', () => {
     const send = mkSend();
     ACTION_MAP.respond_to_message({ action: 'respond_to_message', message_id: 'msg-1', response_index: 2 }, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'comms',
+      payload: { type: 'RespondToMessage', data: { message_id: 'msg-1', response_index: 2 } },
+    });
+  });
+
+  it('preserves the exact message and index in the correlated response envelope', () => {
+    const send = mkSend();
+    ACTION_MAP.respond_to_message({
+      message_id: 'msg-1', response_index: 2, correlation: 'response-1',
+    }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'response-1',
       target: 'comms',
       payload: { type: 'RespondToMessage', data: { message_id: 'msg-1', response_index: 2 } },
     });
@@ -768,6 +781,14 @@ describe('clear_comms', () => {
     });
     expect(send).toHaveBeenCalledTimes(1);
   });
+
+  it('uses the additive correlated envelope for semantic clear feedback', () => {
+    const send = mkSend();
+    ACTION_MAP.clear_comms({ correlation: 'clear-1' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'clear-1', target: 'comms', payload: { type: 'ClearComms' },
+    });
+  });
 });
 
 describe('show_on_screen', () => {
@@ -775,6 +796,16 @@ describe('show_on_screen', () => {
     const send = mkSend();
     ACTION_MAP.show_on_screen({ action: 'show_on_screen', message_id: 'msg-7' }, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'comms',
+      payload: { type: 'ShowOnScreen', data: { message_id: 'msg-7' } },
+    });
+  });
+
+  it('uses the additive correlated envelope for semantic viewscreen feedback', () => {
+    const send = mkSend();
+    ACTION_MAP.show_on_screen({ message_id: 'msg-7', correlation: 'show-1' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'show-1',
       target: 'comms',
       payload: { type: 'ShowOnScreen', data: { message_id: 'msg-7' } },
     });

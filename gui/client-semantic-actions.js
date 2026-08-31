@@ -6,6 +6,7 @@ import {
   CAPTAIN_ACTIONS,
 } from './stations/captain-actions.js';
 import { HELM_STEERING_ACTION } from './stations/helm-actions.js';
+import { COMMS_ACTIONS } from './stations/comms-actions.js';
 import { MOD_ACTIONS } from './editor-mod-actions.js';
 import { TACTICAL_ACTIONS } from './stations/tactical-actions.js';
 
@@ -15,6 +16,7 @@ export function createClientSemanticActionRegistry({ adapters = {}, actionFeedba
     ...CAPTAIN_ACTIONS,
     HELM_STEERING_ACTION,
     ...TACTICAL_ACTIONS,
+    ...COMMS_ACTIONS,
     ...MOD_ACTIONS,
   ]) {
     registry.register(action, adapters[action.id]);

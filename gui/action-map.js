@@ -555,19 +555,11 @@ export const ACTION_MAP = Object.freeze({
   /** Open a comms channel to a contact by UUID. */
   hail: (a, send) => {
     if (a.target_uuid) {
-      send('ControlSystem', {
+      const correlated = typeof a.correlation === 'string' && a.correlation;
+      send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+        ...(correlated ? { correlation: a.correlation } : {}),
         target: 'comms',
         payload: { type: 'Hail', data: { target_uuid: a.target_uuid } },
-      });
-    }
-  },
-
-  /** Mark a comms message as selected / read. */
-  select_comms_message: (a, send) => {
-    if (a.message_id) {
-      send('ControlSystem', {
-        target: 'comms',
-        payload: { type: 'SelectCommsMessage', data: { message_id: a.message_id } },
       });
     }
   },
@@ -575,7 +567,9 @@ export const ACTION_MAP = Object.freeze({
   /** Send a pre-written response to a comms message. */
   respond_to_message: (a, send) => {
     if (a.message_id) {
-      send('ControlSystem', {
+      const correlated = typeof a.correlation === 'string' && a.correlation;
+      send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+        ...(correlated ? { correlation: a.correlation } : {}),
         target: 'comms',
         payload: {
           type: 'RespondToMessage',
@@ -587,7 +581,9 @@ export const ACTION_MAP = Object.freeze({
 
   /** Clear all read/acknowledged comms messages from the inbox. */
   clear_comms: (a, send) => {
-    send('ControlSystem', {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
       target: 'comms',
       payload: { type: 'ClearComms' },
     });
@@ -596,7 +592,9 @@ export const ACTION_MAP = Object.freeze({
   /** Send the selected comms message to the view screen. */
   show_on_screen: (a, send) => {
     if (a.message_id) {
-      send('ControlSystem', {
+      const correlated = typeof a.correlation === 'string' && a.correlation;
+      send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+        ...(correlated ? { correlation: a.correlation } : {}),
         target: 'comms',
         payload: { type: 'ShowOnScreen', data: { message_id: a.message_id } },
       });

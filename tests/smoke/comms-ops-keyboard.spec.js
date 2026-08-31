@@ -58,8 +58,12 @@ test('Comms console: a hail is selected and answered from the keyboard, with no 
     contacts: [],
     messages: [
       {
-        id: 'hail-1', sender_name: 'RELAY STATION', body: 'Do you copy?', is_read: false,
+        id: 'hail-1', sender_name: 'RELAY STATION', body: 'Do you copy?', is_read: true,
         responses: [{ text: 'Acknowledge', available: true, important: false }],
+      },
+      {
+        id: 'hail-2', sender_name: 'OUTER RELAY', body: 'Routine traffic follows.', is_read: false,
+        responses: [],
       },
     ],
   })));
@@ -67,11 +71,18 @@ test('Comms console: a hail is selected and answered from the keyboard, with no 
   // ── Tab reaches the hail list — it is one Tab stop (AC #1) ──────────────────
   expect(await tabTo(page, '#comms-hail-list')).toBe(true);
 
-  // Enter opens the focused hail: the SAME select_comms_message a tap sends.
+  // The unread second hail is the automatic thread, while focus starts on the
+  // first row. Enter therefore proves the shared local selection actually
+  // repaints both panels; no unconsumed host command leaves the console.
+  await expect(page.locator('ph-comms-current-message #sender-label')).toHaveText('OUTER RELAY');
   await page.keyboard.press('Enter');
-  await expect.poll(() => page.evaluate(
-    () => window.__sent.some((a) => a.action === 'select_comms_message' && a.message_id === 'hail-1')
-  )).toBe(true);
+  await expect(page.locator('ph-comms-hail-list .row').first())
+    .toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('ph-comms-current-message #sender-label')).toHaveText('RELAY STATION');
+  expect(await page.evaluate(
+    () => window.__sent.some((a) => a.action === 'select_comms_message')
+  )).toBe(false);
+  expect(await page.evaluate(() => window.__sent)).toEqual([]);
 
   // ── Tab on to the open thread and answer it from the keyboard ───────────────
   expect(await tabTo(page, '#comms-current-message')).toBe(true);

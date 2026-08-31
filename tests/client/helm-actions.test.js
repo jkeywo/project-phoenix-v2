@@ -71,6 +71,11 @@ describe('Helm semantic steering action', () => {
       'tactical.torpedo-volley-down',
       'tactical.torpedo-volley-up',
       'tactical.torpedo-fire',
+      'comms.hail',
+      'comms.select-message',
+      'comms.respond',
+      'comms.clear',
+      'comms.show-on-screen',
       'editor.mod.import',
       'editor.mod.validate',
       'editor.mod.export',
@@ -90,6 +95,11 @@ describe('Helm semantic steering action', () => {
       'tactical.torpedo-volley-down',
       'tactical.torpedo-volley-up',
       'tactical.torpedo-fire',
+      'comms.hail',
+      'comms.select-message',
+      'comms.respond',
+      'comms.clear',
+      'comms.show-on-screen',
     ]);
   });
 });

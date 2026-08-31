@@ -5,6 +5,7 @@
 import '../strings-boot.js';
 import { t } from '../strings.js';
 import { PhElement, phDefine } from './ph-element.js';
+import { COMMS_HAIL_ACTION_ID } from '../stations/comms-actions.js';
 
 export class PhCommsContactList extends PhElement {
   #pillCache = new Map();
@@ -38,7 +39,7 @@ export class PhCommsContactList extends PhElement {
     const raw = Array.isArray(s.contacts) ? s.contacts : [];
     const list = this.shadowRoot.getElementById('list');
 
-    const live = new Set(raw.map(c => c.id || ''));
+    const live = new Set(raw.map(c => c.uuid || c.id || ''));
     for (const [key, el] of this.#pillCache) {
       if (!live.has(key)) { el.remove(); this.#pillCache.delete(key); }
     }
@@ -50,7 +51,9 @@ export class PhCommsContactList extends PhElement {
     if (this.#emptyEl) { this.#emptyEl.remove(); this.#emptyEl = null; }
 
     raw.forEach(c => {
-      const id = c.id || '';
+      // CommsContact's authoritative wire identity is `uuid`. Keep `id` only
+      // as a compatibility fallback for pre-wire component fixtures.
+      const id = c.uuid || c.id || '';
       const name = c.name || '';
       const stance = c.stance || 'neutral';
       const inRange = !!c.in_range;
@@ -61,8 +64,10 @@ export class PhCommsContactList extends PhElement {
         pill.innerHTML = '<span class="name"></span><span class="badge"></span><button class="hail-btn">' + t('component.comms_contacts.hail') + '</button>';
         pill.lastChild.addEventListener('click', (e) => {
           e.stopPropagation();
-          if (this.sendAction) {
-            this.sendAction('hail', { target_uuid: id });
+          if (typeof window.activateSemanticAction === 'function') {
+            window.activateSemanticAction(COMMS_HAIL_ACTION_ID, {
+              source: 'control', detail: { target_uuid: id },
+            });
           }
         });
         this.#pillCache.set(id, pill);

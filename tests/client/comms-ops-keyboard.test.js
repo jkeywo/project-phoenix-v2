@@ -105,14 +105,18 @@ describe('ph-comms-hail-list (comms) keyboard contract', () => {
     expect(rows[0].tabIndex).toBe(-1);
   });
 
-  it('a click dispatches select_comms_message and marks the row selected', () => {
+  it('a click activates selection but only the shared owner projection marks the row', () => {
     const el = mount('ph-comms-hail-list', state);
     const rows = options(el);
     rows[1].click();
-    expect(window.sendAction).toHaveBeenCalledTimes(1);
-    expect(window.sendAction).toHaveBeenCalledWith('select_comms_message', { message_id: 'm2' });
-    expect(rows[1].getAttribute('aria-selected')).toBe('true');
+    expect(window.activateSemanticAction).toHaveBeenCalledTimes(1);
+    expect(window.activateSemanticAction).toHaveBeenCalledWith('comms.select-message', {
+      source: 'control', detail: { message_id: 'm2' },
+    });
+    expect(rows[1].getAttribute('aria-selected')).toBe('false');
     expect(rows[0].getAttribute('aria-selected')).toBe('false');
+    el.state = { ...state, selected_message_id: 'm2' };
+    expect(rows[1].getAttribute('aria-selected')).toBe('true');
   });
 
   it('the roving host keydown does not fork the action onto Enter or Space', () => {

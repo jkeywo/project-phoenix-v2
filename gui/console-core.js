@@ -75,6 +75,10 @@ import {
   TACTICAL_ACTION_CONTEXT,
   registerTacticalActions,
 } from './stations/tactical-actions.js';
+import {
+  COMMS_ACTION_CONTEXT,
+  registerCommsActions,
+} from './stations/comms-actions.js';
 // Console input-to-feedback latency (issue #1169, PRD #1144). `sendAction` is
 // the ONE place in a console document where a control's handler turns into an
 // outbound action, so it is the only honest place to stamp "the input event
@@ -176,6 +180,21 @@ export function initConsole({ name, render }) {
   } else if (_actionContext === TACTICAL_ACTION_CONTEXT) {
     registerTacticalActions(_semanticActions, {
       getState: function() { return _latestState; },
+      sendAction: sendAction,
+    });
+  } else if (_actionContext === COMMS_ACTION_CONTEXT) {
+    registerCommsActions(_semanticActions, {
+      getState: function() { return _latestState; },
+      // Comms message selection is presentation-only, but it is still a real
+      // operation: the shared renderer owns the selected id and repaints both
+      // the list and current-message panel synchronously. The semantic local
+      // lifecycle settles only after this callback reports that work applied.
+      selectMessage: typeof render.selectMessage === 'function'
+        ? function(messageId) { return render.selectMessage(_latestState, messageId); }
+        : null,
+      getCurrentMessage: typeof render.currentMessage === 'function'
+        ? function() { return render.currentMessage(_latestState); }
+        : null,
       sendAction: sendAction,
     });
   }

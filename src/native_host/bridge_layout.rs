@@ -48,6 +48,17 @@
 //! [`is-viewscreen`](ExclusionReason::IsViewscreen) or
 //! [`full`](ExclusionReason::Full). A button row is a `map` over that list.
 //!
+//! # When the bridge itself changes under a running host
+//!
+//! Screens are unplugged mid-session, and a ship's roster changes with its class.
+//! [`BridgeLayout::reconcile`] rebuilds a layout against a new monitor set and a
+//! new roster: every seat that still makes sense is kept, in its own order, and
+//! everything else degrades to unassigned. None of that is an error — a bridge
+//! whose screens changed is still a bridge — but none of it is silent either.
+//! Each degradation is reported as a [`LayoutAdoption`], including the one that
+//! would otherwise pass unnoticed: the operator's chosen viewscreen falling back
+//! to the primary because the monitor they picked is gone.
+//!
 //! # Not the file, and not the window
 //!
 //! Nothing here opens a window, and nothing here reads a monitor. The winit
@@ -135,8 +146,6 @@ pub enum LayoutRefusal {
         monitor: MonitorIdentity,
         stations: Vec<StationId>,
     },
-    /// A station was asked to give up a screen it does not have.
-    StationNotAssigned { station: StationId },
 }
 
 impl std::fmt::Display for LayoutRefusal {
@@ -173,11 +182,6 @@ impl std::fmt::Display for LayoutRefusal {
                  move onto it; unassign them first — they are not evicted to make room",
                 station_list(stations),
             ),
-            LayoutRefusal::StationNotAssigned { station } => write!(
-                f,
-                "station {:?} has no console on any screen, so there is none to close",
-                station.0
-            ),
         }
     }
 }
@@ -204,10 +208,18 @@ fn station_list(stations: &[StationId]) -> String {
 /// refusal and never mutates the one it was given, so a lobby can offer a
 /// prospective arrangement without committing to it.
 ///
-/// Seating is stored grouped by monitor, in monitor order, so two layouts with
-/// the same arrangement compare equal however they were built — which is what
-/// makes the profile round-trip an equality assertion rather than a set
-/// comparison.
+/// Seating is stored grouped by monitor, in monitor order, and **within a
+/// monitor in the order the consoles were assigned**. That order is not
+/// incidental: it is the left-to-right order the panes are drawn in
+/// ([`station_rects`](Self::station_rects)), it is what
+/// [`write_displays_into`](Self::write_displays_into) records in the file, and it
+/// is part of `PartialEq`. So two layouts are equal when they seat the same
+/// stations on the same monitors *in the same order* — which is what makes the
+/// profile round-trip an equality assertion rather than a set comparison — and
+/// moving a console off a shared screen and back swaps the two halves, because
+/// the console that stayed put is now the earlier of the two. That is the
+/// operator's own two actions showing up on the screen they are watching, not a
+/// rearrangement behind their back, so the order is left exactly as they made it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BridgeLayout {
     /// This bridge's monitors, in discovery order. Deduplicated.
@@ -307,10 +319,20 @@ impl BridgeLayout {
     /// Apply `action`, answering the layout it produces — or the typed reason it
     /// was refused. `self` is untouched either way.
     ///
-    /// An action that asks for what already holds (seating a station on the
-    /// monitor it is already on, or naming the current viewscreen) succeeds and
-    /// answers an identical layout, rather than being a refusal: pressing the
-    /// button under your finger is not an error.
+    /// # The no-op doctrine
+    ///
+    /// An action that asks for what already holds succeeds and answers an
+    /// identical layout, rather than being a refusal — **all three** of them:
+    /// naming the current viewscreen, seating a station on the monitor it is
+    /// already on, and closing a console that is not open. Pressing the button
+    /// under your finger is not an error, and two of these are reachable without
+    /// anyone pressing anything twice: a lobby's off button is pressed by two
+    /// clients at once, or a station is unassigned by one operator between
+    /// another's read and their click. Refusing the second one would make a race
+    /// look like a fault. Note the boundary — this is about a *lawful* action
+    /// that changes nothing; an action naming a monitor this bridge does not have
+    /// or a station off this ship's roster is still refused, because that is a
+    /// stale button rather than a settled state.
     pub fn apply(&self, action: &LayoutAction) -> Result<Self, LayoutRefusal> {
         match action {
             LayoutAction::SetViewscreen { monitor } => self.set_viewscreen(monitor),
@@ -375,10 +397,11 @@ impl BridgeLayout {
 
     fn unassign(&self, station: &StationId) -> Result<Self, LayoutRefusal> {
         self.require_station(station)?;
+        // The third no-op: a console that is not open is already closed. See
+        // `apply`'s note — the station is still checked against the roster first,
+        // so a stale button from another ship class is refused as that.
         let Some(index) = self.seat_of(station) else {
-            return Err(LayoutRefusal::StationNotAssigned {
-                station: station.clone(),
-            });
+            return Ok(self.clone());
         };
         let mut next = self.clone();
         next.seats[index].retain(|s| s != station);
@@ -430,11 +453,8 @@ impl BridgeLayout {
             monitor: self.monitors[index].clone(),
             is_viewscreen,
             stations: self.seats[index].clone(),
-            free_slots: if is_viewscreen {
-                0
-            } else {
-                MAX_STATIONS_PER_MONITOR - self.seats[index].len()
-            },
+            free_slots: (!is_viewscreen)
+                .then(|| MAX_STATIONS_PER_MONITOR - self.seats[index].len()),
         }
     }
 
@@ -543,6 +563,32 @@ impl BridgeLayout {
         profile
     }
 
+    /// This layout as a **validated** display profile — the shape
+    /// [`adopt_profile`](Self::adopt_profile), [`resolve`](super::bridge_profile::resolve)
+    /// and the winit adapter all take.
+    ///
+    /// Infallible, and that is the point: a lawful layout cannot write a profile
+    /// [`validate`](BridgeProfile::validate) rejects, so a consumer handed a
+    /// `Result` here would have to invent a story for an error that cannot
+    /// happen — and the stories are all bad (an `unwrap` that looks like a
+    /// panic waiting to happen, or a swallowed error that hides a real bug).
+    /// Every refusal is closed off by construction: the version is this build's,
+    /// the roles are the two words this module writes, monitors are deduplicated
+    /// so no id repeats, every emitted Station holds one or
+    /// [`MAX_STATIONS_PER_MONITOR`] panes, each pane's label and station id are
+    /// the station's own unique id, and there is always exactly one viewscreen
+    /// (rule 1). The tests hold the proof directly —
+    /// `a_layouts_profile_always_names_the_viewscreen` and
+    /// `a_layouts_validated_profile_is_the_same_arrangement`.
+    pub fn to_validated_profile(&self) -> ValidatedProfile {
+        self.to_profile()
+            .validate()
+            // Unreachable by the construction argued above; if it ever fires, a
+            // transition has produced an unlawful layout and the law itself is
+            // wrong — which is a panic, not a value to hand a caller.
+            .expect("a lawful layout writes a valid profile")
+    }
+
     /// Read `profile`'s arrangement onto this bridge's monitors and roster,
     /// answering the layout it produces and everything that did not fit.
     ///
@@ -623,6 +669,122 @@ impl BridgeLayout {
 
         (next, notes)
     }
+
+    /// Rebuild this arrangement against a changed bridge: a different set of
+    /// monitors (a screen unplugged, another plugged in) and/or a different
+    /// station roster (a different ship class, or one whose stations changed).
+    ///
+    /// **Never an error.** A bridge whose screens changed is still a bridge, and
+    /// there is nothing for an operator to fix at the moment a cable comes out —
+    /// so every seat that still makes sense is kept, exactly where and in the
+    /// order it was, and everything else degrades to unassigned. What this does
+    /// *not* do is degrade quietly: each degradation comes back as a
+    /// [`LayoutAdoption`], in the same vocabulary
+    /// [`adopt_profile`](Self::adopt_profile) speaks.
+    ///
+    /// - The **viewscreen** is kept when its monitor survived — even when it is
+    ///   not the primary, because that was the operator's choice and a re-plug of
+    ///   some *other* screen is no reason to overrule it. Only when its own
+    ///   monitor is gone does it fall back to primary-else-first, and that
+    ///   fallback is reported ([`ViewscreenMonitorGone`](LayoutAdoption::ViewscreenMonitorGone)):
+    ///   it is the one change here that would otherwise look like nothing
+    ///   happened.
+    /// - A **station whose monitor is gone** is left unassigned and named
+    ///   ([`StationMonitorGone`](LayoutAdoption::StationMonitorGone)); it is not
+    ///   re-homed onto some other screen, for the same reason a missing display's
+    ///   role is not ([`ProfileProblem`](super::bridge_profile::ProfileProblem)).
+    /// - A **station that left the roster** has its console closed and named
+    ///   ([`StationOffRoster`](LayoutAdoption::StationOffRoster)).
+    /// - A station that stays on a monitor that stays keeps its seat, and a
+    ///   station **new** to the roster arrives unassigned — that is the ordinary
+    ///   state of an unplaced console, not a degradation, so it gets no note.
+    /// - A seat the law refuses for any other reason is a
+    ///   [`SeatRefused`](LayoutAdoption::SeatRefused), exactly as in adoption.
+    ///   The one that actually happens: the viewscreen fell back onto a monitor
+    ///   that was holding consoles, which by rule 2 it may no longer.
+    ///
+    /// Handed **no** monitors, it keeps this layout whole and says so
+    /// ([`NoMonitorsReported`](LayoutAdoption::NoMonitorsReported)) — a bridge is
+    /// at least one screen (the lobby is drawn on it), so there is no lawful
+    /// layout to degrade to, and an empty enumeration is far more likely a
+    /// display driver restarting than a bridge that ceased to exist.
+    pub fn reconcile(
+        &self,
+        monitors: &[DiscoveredMonitor],
+        roster: impl IntoIterator<Item = StationId>,
+    ) -> (Self, Vec<LayoutAdoption>) {
+        let mut notes = Vec::new();
+        let identities = dedup(monitors.iter().map(|d| d.identity.clone()));
+        let roster = dedup(roster);
+
+        let Some(first) = identities.first() else {
+            notes.push(LayoutAdoption::NoMonitorsReported {
+                kept: self.monitors.clone(),
+            });
+            return (self.clone(), notes);
+        };
+
+        // The viewscreen first, as in adoption: every seat below is judged
+        // against it.
+        let viewscreen = if identities.contains(self.viewscreen()) {
+            self.viewscreen().clone()
+        } else {
+            let replacement = monitors
+                .iter()
+                .find(|d| d.primary)
+                .map(|d| d.identity.clone())
+                .unwrap_or_else(|| first.clone());
+            notes.push(LayoutAdoption::ViewscreenMonitorGone {
+                monitor: self.viewscreen().clone(),
+                replacement: replacement.clone(),
+            });
+            replacement
+        };
+        let index = identities
+            .iter()
+            .position(|m| m == &viewscreen)
+            .expect("the viewscreen is one of the monitors it was chosen from");
+
+        let mut next = Self {
+            seats: vec![Vec::new(); identities.len()],
+            monitors: identities,
+            roster,
+            viewscreen: index,
+        };
+
+        // Re-seat in the order this layout holds them — monitor by monitor, seat
+        // by seat — so a surviving screen's two halves stay in the order the
+        // operator is looking at.
+        for (seat, stations) in self.seats.iter().enumerate() {
+            let monitor = &self.monitors[seat];
+            for station in stations {
+                if !next.roster.contains(station) {
+                    notes.push(LayoutAdoption::StationOffRoster {
+                        station: station.clone(),
+                        monitor: monitor.clone(),
+                    });
+                    continue;
+                }
+                if !next.monitors.contains(monitor) {
+                    notes.push(LayoutAdoption::StationMonitorGone {
+                        station: station.clone(),
+                        monitor: monitor.clone(),
+                    });
+                    continue;
+                }
+                match next.assign(station, monitor) {
+                    Ok(placed) => next = placed,
+                    Err(refusal) => notes.push(LayoutAdoption::SeatRefused {
+                        station: station.clone(),
+                        monitor: monitor.clone(),
+                        refusal,
+                    }),
+                }
+            }
+        }
+
+        (next, notes)
+    }
 }
 
 /// Drop repeats, keeping the first occurrence and the input order.
@@ -646,10 +808,17 @@ pub struct MonitorOccupancy {
     pub is_viewscreen: bool,
     /// The stations seated on it, in the order their panes are laid out.
     pub stations: Vec<StationId>,
-    /// How many more consoles it can take. Always 0 for the viewscreen — not
-    /// because it is full, but because it takes none; `is_viewscreen` is the
-    /// distinction, and [`ExclusionReason`] is how it reaches a button.
-    pub free_slots: usize,
+    /// How many more consoles it can take — `None` for the viewscreen, which
+    /// takes none at all.
+    ///
+    /// `None` rather than `0`, because those are different facts and a zero here
+    /// reads as the wrong one. "Full" is a monitor already holding
+    /// [`MAX_STATIONS_PER_MONITOR`] consoles the operator can free a slot on; the
+    /// viewscreen is a screen no console ever opens on. A consumer drawing
+    /// occupied slots as `MAX_STATIONS_PER_MONITOR - free_slots` would have drawn
+    /// two full slots on the shared view. `is_viewscreen` is the distinction, and
+    /// [`ExclusionReason`] is how it reaches a button.
+    pub free_slots: Option<usize>,
 }
 
 /// Why a monitor is not offered for a station's console.
@@ -740,8 +909,9 @@ impl StationEligibility {
     }
 }
 
-/// Something a profile asked for that this bridge could not take — see
-/// [`BridgeLayout::adopt_profile`]. Reported, never silently applied.
+/// Something a profile asked for that this bridge could not take
+/// ([`BridgeLayout::adopt_profile`]), or something a change to the bridge itself
+/// took away ([`BridgeLayout::reconcile`]). Reported, never silent.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LayoutAdoption {
     /// The profile's viewscreen monitor could not be used; the layout kept the
@@ -771,6 +941,33 @@ pub enum LayoutAdoption {
         monitor: MonitorIdentity,
         refusal: LayoutRefusal,
     },
+    /// The monitor the operator had chosen for the viewscreen is no longer
+    /// connected, so the viewscreen fell back to the primary (or, failing that,
+    /// the first) screen — see [`BridgeLayout::reconcile`]. Reported because it
+    /// is the one degradation that leaves a perfectly ordinary-looking bridge:
+    /// without this note the operator's choice would simply be gone, with a
+    /// working viewscreen somewhere else to hide it.
+    ViewscreenMonitorGone {
+        monitor: MonitorIdentity,
+        replacement: MonitorIdentity,
+    },
+    /// A station's console was open on a monitor that is no longer connected, so
+    /// it is left unassigned rather than moved to some other screen — the same
+    /// no-silent-re-homing rule a missing display gets one slice up.
+    StationMonitorGone {
+        station: StationId,
+        monitor: MonitorIdentity,
+    },
+    /// A station that had a console open is not on the new roster — a different
+    /// ship class, or one whose stations changed. Its console is closed.
+    StationOffRoster {
+        station: StationId,
+        monitor: MonitorIdentity,
+    },
+    /// [`reconcile`](BridgeLayout::reconcile) was handed no monitors at all. A
+    /// bridge is at least one screen, so the layout was kept exactly as it was;
+    /// these are the monitors it still names.
+    NoMonitorsReported { kept: Vec<MonitorIdentity> },
 }
 
 impl std::fmt::Display for LayoutAdoption {
@@ -801,6 +998,36 @@ impl std::fmt::Display for LayoutAdoption {
                 "station {:?}'s console cannot open on monitor {monitor} ({refusal}); it is left \
                  unassigned",
                 station.0
+            ),
+            LayoutAdoption::ViewscreenMonitorGone {
+                monitor,
+                replacement,
+            } => write!(
+                f,
+                "monitor {monitor} was showing the viewscreen and is no longer connected, so the \
+                 viewscreen moved to {replacement}; pick the screen you want it on again once \
+                 {monitor} is back"
+            ),
+            LayoutAdoption::StationMonitorGone { station, monitor } => write!(
+                f,
+                "station {:?}'s console was on monitor {monitor}, which is no longer connected; it \
+                 is left unassigned rather than moved to another screen",
+                station.0
+            ),
+            LayoutAdoption::StationOffRoster { station, monitor } => write!(
+                f,
+                "station {:?} is not on this ship's roster, so its console on monitor {monitor} is \
+                 closed",
+                station.0
+            ),
+            LayoutAdoption::NoMonitorsReported { kept } => write!(
+                f,
+                "no monitors were reported at all, and a bridge is at least one screen; the layout \
+                 is left as it was, still naming {}",
+                match kept.len() {
+                    1 => "1 monitor".to_string(),
+                    n => format!("{n} monitors"),
+                }
             ),
         }
     }

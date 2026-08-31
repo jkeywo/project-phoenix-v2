@@ -3,7 +3,7 @@ title: Native Host
 type: concept
 tags: [native, viewscreen, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile, media-devices, camera, microphone]
 sources: [src/native_host/mod.rs, src/native_host/app.rs, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/recovery.rs, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs]
-updated: 2026-08-31
+updated: 2026-09-01
 ---
 
 # Native Host
@@ -469,7 +469,10 @@ shared view with a console. A profile with **no** `[[display]]` tables at all
 (the `[[touch]]`/`[[media]]`-only shape) opens no Station window and stays valid.
 A `[[display.pane]]` may also carry an optional `station = "…"` naming the
 station id whose console it shows; it is absent for a hand-authored
-`--pane <NAME>` pane, so pre-#1327 profiles round-trip byte-identically.
+`--pane <NAME>` pane, so pre-#1327 profiles round-trip byte-identically. Two panes
+naming the **same** station are refused (`ProfileError::DuplicatePaneStation`): a
+station has one console, so a file seating it on two screens leaves nothing to say
+which screen it opens on.
 
 The profile is **not** the private player Accessibility profile (#1127): this is
 shared operator configuration of the physical room, carrying nothing about any
@@ -496,11 +499,29 @@ move). Stations are keyed by `StationId`, never by participant name — a consol
 on a wall monitor is claimable by anyone — and that id survives persistence in
 the pane slot's `station` field. `occupancy()` and `eligibility()` report enough
 to grey a button row with no further logic: every monitor is `Selected`,
-`Eligible`, or `Excluded(IsViewscreen | Full)`. `to_profile` /
-`write_displays_into` / `adopt_profile` convert to and from a `ValidatedProfile`,
-routing every adopted seat through the same law so a saved layout cannot smuggle
-in an arrangement a button press could not make; anything that will not fit is
-reported as a `LayoutAdoption` rather than dropped.
+`Eligible`, or `Excluded(IsViewscreen | Full)` (and `free_slots` is `None` for the
+viewscreen, not `0` — it takes no console rather than being full). `to_profile` /
+`to_validated_profile` / `write_displays_into` / `adopt_profile` convert to and
+from a `ValidatedProfile`, routing every adopted seat through the same law so a
+saved layout cannot smuggle in an arrangement a button press could not make;
+anything that will not fit is reported as a `LayoutAdoption` rather than dropped.
+`to_validated_profile` is infallible: a lawful layout cannot write a profile
+`validate` rejects, so no consumer is handed an impossible error.
+
+An action that asks for what already holds is a **no-op**, not a refusal — all
+three of them: naming the current viewscreen, seating a station on the monitor it
+is already on, and closing a console that is not open. Two of those are reachable
+without a double-press (an off button pressed by two clients at once), so refusing
+them would make a race look like a fault. An action naming a monitor this bridge
+lacks or a station off its roster is still refused: that is a stale button.
+
+`BridgeLayout::reconcile(monitors, roster)` rebuilds a layout when the bridge
+changes underneath it — a screen unplugged, a different ship class. It is never an
+error and never silent: surviving seats keep their monitor and their order, a
+station whose monitor or station id vanished degrades to unassigned, and the
+viewscreen is **kept** when its own monitor survived (even off the primary — that
+was the operator's choice) or falls back to primary-else-first with a
+`LayoutAdoption::ViewscreenMonitorGone` note when it did not.
 
 ### The winit adapter, and missing displays
 

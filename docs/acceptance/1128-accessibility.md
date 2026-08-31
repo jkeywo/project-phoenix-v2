@@ -205,6 +205,11 @@ reflow and focus-order checks against this machine's **real** monitor geometries
 cargo test --features host --test native_bridge_accessibility -- --ignored --nocapture
 ```
 
+On a machine with only **one** display it reports `skipped — needs two displays`
+and passes: a Station may not share the viewscreen's monitor (the bridge layout
+law, issue #1327), so there is no lawful two-pane layout for it to check. Read the
+`--nocapture` line before treating an OK as evidence.
+
 The feature-gated winit/Ultralight adapter
 (`src/native_host/panes/ultralight.rs`, behind `--features ultralight`) is the
 thin layer this kit exercises by hand: it draws the reticle from the pure

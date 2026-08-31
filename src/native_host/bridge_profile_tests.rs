@@ -298,12 +298,19 @@ fn a_single_monitor_profile_naming_only_a_station_is_refused_too() {
     // reaches for: the single monitor is both where the primary window is and
     // where the console would open.
     let one = profile_with(vec![station_entry("only", &["Ada", "Grace"])]);
+    let err = one.validate().unwrap_err();
     assert_eq!(
-        one.validate().unwrap_err(),
+        err,
         ProfileError::MissingViewscreen {
             stations: vec!["only".to_string()],
         }
     );
+    // The singular wording, pinned: the #1124 acceptance kit quotes this exact
+    // phrase back to the operator (docs/acceptance/1124-input.md), and a quote
+    // nothing asserts is a quote that silently goes stale.
+    let msg = err.to_string();
+    assert!(msg.contains("one monitor"), "{msg}");
+    assert!(!msg.contains("1 monitors"), "{msg}");
 }
 
 #[test]
@@ -432,6 +439,108 @@ fn a_label_repeated_within_one_two_pane_station_is_also_refused() {
             label: "Ada".to_string()
         }
     );
+}
+
+#[test]
+fn two_panes_naming_the_same_station_are_refused() {
+    // A station has exactly one console. A file that seats it on two screens
+    // leaves nothing to say which one it opens on, so it is refused at the prompt
+    // — the same shape the layout law reports as `LayoutAdoption::StationNamedTwice`
+    // when it is handed one, so the file law and the transition law agree.
+    // The labels differ, so this is not `DuplicatePaneLabel` wearing a hat.
+    let dup = profile_with(vec![
+        viewscreen_entry("vs"),
+        DisplayEntry {
+            id: "m1".to_string(),
+            role: ROLE_STATION.to_string(),
+            split: None,
+            panes: vec![PaneSlot {
+                label: "Ada".to_string(),
+                station: Some("helm".to_string()),
+            }],
+        },
+        DisplayEntry {
+            id: "m2".to_string(),
+            role: ROLE_STATION.to_string(),
+            split: None,
+            panes: vec![PaneSlot {
+                label: "Grace".to_string(),
+                station: Some("helm".to_string()),
+            }],
+        },
+    ]);
+    let err = dup.validate().unwrap_err();
+    assert_eq!(
+        err,
+        ProfileError::DuplicatePaneStation {
+            station: "helm".to_string(),
+        }
+    );
+    let msg = err.to_string();
+    assert!(msg.contains("helm"), "{msg}");
+    assert!(msg.contains("one console"), "{msg}");
+
+    // The same hole inside a single two-pane Station.
+    let within = profile_with(vec![
+        viewscreen_entry("vs"),
+        DisplayEntry {
+            id: "m1".to_string(),
+            role: ROLE_STATION.to_string(),
+            split: Some(PaneSplit::SideBySide),
+            panes: vec![
+                PaneSlot {
+                    label: "Ada".to_string(),
+                    station: Some("helm".to_string()),
+                },
+                PaneSlot {
+                    label: "Grace".to_string(),
+                    station: Some("helm".to_string()),
+                },
+            ],
+        },
+    ]);
+    assert_eq!(
+        within.validate().unwrap_err(),
+        ProfileError::DuplicatePaneStation {
+            station: "helm".to_string(),
+        }
+    );
+}
+
+#[test]
+fn a_profile_the_layout_wrote_is_untouched_by_the_duplicate_station_rule() {
+    // A layout seats each station once and names each pane for its station, so
+    // `label` and `station` are the same unique id. The refusal cannot fire on
+    // anything the layout writes — which is what makes
+    // `BridgeLayout::to_validated_profile` infallible.
+    let ok = profile_with(vec![
+        viewscreen_entry("vs"),
+        DisplayEntry {
+            id: "m1".to_string(),
+            role: ROLE_STATION.to_string(),
+            split: Some(PaneSplit::SideBySide),
+            panes: vec![
+                PaneSlot::for_station("helm"),
+                PaneSlot::for_station("weapons"),
+            ],
+        },
+        DisplayEntry {
+            id: "m2".to_string(),
+            role: ROLE_STATION.to_string(),
+            split: None,
+            panes: vec![PaneSlot::for_station("comms")],
+        },
+    ]);
+    assert!(ok.validate().is_ok());
+
+    // And a profile of hand-authored participant panes names no station at all,
+    // so several of them never collide either.
+    let participants = profile_with(vec![
+        viewscreen_entry("vs"),
+        station_entry("m1", &["Ada", "Grace"]),
+        station_entry("m2", &["Kay"]),
+    ]);
+    assert!(participants.validate().is_ok());
 }
 
 #[test]

@@ -96,20 +96,35 @@ a second monitor.
 > read: author a profile with your one monitor as a `station` of two panes and no
 > viewscreen, and the host would open the Station window over the (unplaced)
 > viewscreen. That is exactly the overlay the law now forbids, so such a profile
-> is **refused at the prompt**:
+> is **refused at the prompt**. The two commands word it differently — check for
+> whichever you ran:
 >
 > ```
-> phoenix-host: --profile: the profile assigns one monitor but gives no monitor
-> the "viewscreen" role; ... Give exactly one monitor the "viewscreen" role
+> ./target/release/phoenix-host --setup --profile bad.toml
+>   → Profile is invalid: the profile assigns one monitor but gives no monitor
+>     the "viewscreen" role; ... Give exactly one monitor the "viewscreen" role
+>
+> ./target/release/phoenix-host --profile bad.toml --client-dir dist ...
+>   → phoenix-host: --profile: the profile assigns one monitor but gives no
+>     monitor the "viewscreen" role; ...        (and exits without opening a window)
 > ```
 >
 > - [ ] **Optional, 30 seconds:** author that profile anyway and confirm
->       `--setup --profile` refuses it with the message above rather than opening
->       a console over the shared view.
+>       `--setup --profile` reports `Profile is invalid: …` (and that actually
+>       running with it exits instead of opening a console over the shared view).
+>
+> **This does not retire the `--pane` form at the top of A0, which is not the same
+> thing.** The law governs where a *profile or the lobby* places a **station
+> console**: it forbids a borderless-fullscreen Station window opening over the
+> monitor the viewscreen was placed on. A profile-less `--pane Ada --pane Grace`
+> run places no monitor at all — it tiles named participant panes across this
+> process's own primary window, the legacy CLI path #1122 shipped — so there is no
+> separately-placed viewscreen surface for a console to cover. The retired variant
+> was a *profile* that assigned a monitor and named no viewscreen; A0's supported
+> shape assigns no monitor.
 >
 > Compositing onto a Station window is exercised by the multi-monitor setup (A1)
-> below; a one-monitor bridge has no lawful Station, and the `--pane`-only form
-> at the top of A0 is its supported shape.
+> below; a one-monitor bridge has no lawful Station.
 
 ### A1. Multi-monitor (`--profile`, two or more monitors)
 

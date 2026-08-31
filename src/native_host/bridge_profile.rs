@@ -250,7 +250,12 @@ fn base_key(raw: &RawMonitor) -> String {
 /// whose id happens to be somebody's name. Absent from the file it is `None`, and
 /// it is skipped when serialising — so every profile authored before #1327
 /// parses unchanged and round-trips byte-identically.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// There is deliberately **no `Default`**: a default `PaneSlot` is a pane with an
+/// empty label and no station, which [`BridgeProfile::validate`] would accept and
+/// which names nobody. Every pane is built by one of the two constructors below,
+/// each of which says what kind of pane it is making.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaneSlot {
     pub label: String,
     /// The station id whose console this pane shows, when a layout placed it.
@@ -513,9 +518,11 @@ impl BridgeProfile {
     /// This is where the "refused with a clear explanation" acceptance criterion
     /// lives: a Station with three panes, an unknown role word, a viewscreen that
     /// carries panes, two displays claiming one monitor, two displays both
-    /// claiming the viewscreen role, or a profile that assigns monitors but names
-    /// **no** viewscreen ([`ProfileError::MissingViewscreen`], issue #1327) are
-    /// each rejected here with an authored message, before any window is opened.
+    /// claiming the viewscreen role, two panes naming the same station
+    /// ([`ProfileError::DuplicatePaneStation`], issue #1327), or a profile that
+    /// assigns monitors but names **no** viewscreen
+    /// ([`ProfileError::MissingViewscreen`], issue #1327) are each rejected here
+    /// with an authored message, before any window is opened.
     ///
     /// Note what is *not* checked here, and does not need to be: "a Station on
     /// the viewscreen's monitor" is structurally impossible in a profile, because
@@ -537,6 +544,13 @@ impl BridgeProfile {
         // monitors could not be resolved to the right one. Refused at author time
         // rather than mis-resolved at runtime.
         let mut seen_labels: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        // And every station id already claimed by a pane. A station has exactly
+        // one console; a file naming it twice is asking the layout to open it on
+        // two screens, and the layout would have to pick one silently. Refused at
+        // the prompt, so the file law and the transition law
+        // (`LayoutAdoption::StationNamedTwice`) say the same thing about the same
+        // shape rather than only one of them catching it.
+        let mut seen_stations: std::collections::HashSet<&str> = std::collections::HashSet::new();
         // Named as soon as a second one turns up, rather than accumulated and
         // reported at the end: a bridge has exactly one shared viewscreen, and
         // `apply_bridge_profile` has no "last one wins" rule to fall back on —
@@ -577,6 +591,13 @@ impl BridgeProfile {
                             return Err(ProfileError::DuplicatePaneLabel {
                                 label: pane.label.clone(),
                             });
+                        }
+                        if let Some(station) = pane.station.as_deref() {
+                            if !seen_stations.insert(station) {
+                                return Err(ProfileError::DuplicatePaneStation {
+                                    station: station.to_string(),
+                                });
+                            }
                         }
                     }
                     DisplayRole::Station {
@@ -666,6 +687,12 @@ pub enum ProfileError {
     /// by two panes could not be resolved to the right monitor — each participant
     /// label is unique across the whole bridge.
     DuplicatePaneLabel { label: String },
+    /// Two Station panes across the profile name the same `station` id (issue
+    /// #1327). A station has exactly one console, so a file that seats it twice
+    /// is asking for one to be picked silently — the same shape the layout law
+    /// reports as `LayoutAdoption::StationNamedTwice` when it is handed one.
+    /// Refused at the prompt so both laws agree.
+    DuplicatePaneStation { station: String },
     /// Two or more `[[display]]` entries claim the `viewscreen` role. A bridge
     /// has exactly one shared viewscreen; without this refusal
     /// `apply_bridge_profile` would silently keep only the last one and leave
@@ -722,6 +749,12 @@ impl std::fmt::Display for ProfileError {
                 "two Station panes both carry the participant label {label:?}; a lost monitor's \
                  panes are resolved to disconnect by name, so each label must be unique across \
                  the whole bridge"
+            ),
+            ProfileError::DuplicatePaneStation { station } => write!(
+                f,
+                "two Station panes both name station {station:?}; a station has exactly one \
+                 console, so a profile that seats it on two screens leaves nothing to say which \
+                 one it opens on. Give the second pane its own station, or delete it"
             ),
             ProfileError::MultipleViewscreens { ids } => write!(
                 f,

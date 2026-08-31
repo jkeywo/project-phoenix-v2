@@ -23,6 +23,11 @@
 //! cargo test --features host --test native_bridge_accessibility -- --ignored --nocapture
 //! ```
 //!
+//! On a machine with only **one** display it reports a skip rather than a
+//! failure: a Station may not share the viewscreen's monitor (the bridge layout
+//! law, issue #1327), so there is no lawful two-pane layout to check, and calling
+//! that a failure would teach whoever runs this to ignore its verdict.
+//!
 //! It needs a display to enumerate monitors (the winit event loop), but it does
 //! **not** open Station windows or draw the reticle — that visual half (the
 //! bracketed focus frame, the contrast-bolded reticle, reflow with real text) is
@@ -154,14 +159,21 @@ fn drive(
     let vs_index = raws.iter().position(|(_, p)| *p).unwrap_or(0);
     let vs = &discovered[vs_index];
     let Some(station) = discovered.iter().find(|d| d.identity != vs.identity) else {
+        // A skip, not a failure. There is nothing wrong with a one-display
+        // machine — there is simply no lawful two-pane Station to check on it,
+        // and reporting that as an error would train whoever runs this to ignore
+        // its result. The verdict is a String either way, so a skip is an `Ok`
+        // that says what it did not do.
         finish(
             &outcome,
             &mut exit,
-            Err(
-                "only one monitor is connected, and a Station may not share the viewscreen's \
-                 monitor — run this check on a machine with two or more displays"
-                    .into(),
-            ),
+            Ok(format!(
+                "skipped — needs two displays. Only one monitor is connected ({}), and a Station \
+                 may not share the viewscreen's monitor (the bridge layout law, issue #1327), so \
+                 there is no two-pane Station layout to check. Re-run on a machine with two or \
+                 more displays.",
+                vs.identity
+            )),
         );
         return;
     };

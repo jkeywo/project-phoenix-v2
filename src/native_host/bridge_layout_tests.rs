@@ -9,7 +9,7 @@
 
 use super::*;
 
-use crate::native_host::bridge_profile::{identify, RawMonitor, TouchMapping};
+use crate::native_host::bridge_profile::{identify, RawMonitor, TouchMapping, ValidatedDisplay};
 
 // ── fixtures ────────────────────────────────────────────────────────────────
 
@@ -244,6 +244,9 @@ fn an_action_naming_a_station_off_the_roster_is_refused() {
             station: s("flight-deck"),
         }
     );
+    // The boundary of the no-op doctrine: closing an unseated console is a
+    // no-op, but closing one for a station this ship does not have is a stale
+    // button, and is still refused as that.
     assert_eq!(
         bridge()
             .apply(&LayoutAction::UnassignStation {
@@ -265,15 +268,29 @@ fn an_action_naming_a_station_off_the_roster_is_refused() {
 }
 
 #[test]
-fn closing_a_console_that_is_not_open_is_refused_rather_than_ignored() {
-    let err = bridge()
+fn closing_a_console_that_is_not_open_is_a_no_op_not_a_refusal() {
+    // The third no-op. It is not only a double-press: a lobby's off button gets
+    // pressed by two clients at once, and refusing the second would make an
+    // ordinary race look like a fault.
+    let layout = bridge();
+    let same = layout
         .apply(&LayoutAction::UnassignStation { station: s("helm") })
-        .unwrap_err();
+        .expect("closing a console that is not open changes nothing");
+    assert_eq!(same, layout);
+
+    // Twice over from a seated start: the first closes it, the second is the
+    // no-op, and the two answers are the same layout.
+    let seated = assign(&bridge(), "helm", LEFT);
+    let closed = seated
+        .apply(&LayoutAction::UnassignStation { station: s("helm") })
+        .unwrap();
+    assert!(closed.monitor_of(&s("helm")).is_none());
     assert_eq!(
-        err,
-        LayoutRefusal::StationNotAssigned { station: s("helm") }
+        closed
+            .apply(&LayoutAction::UnassignStation { station: s("helm") })
+            .unwrap(),
+        closed
     );
-    assert!(err.to_string().contains("helm"));
 }
 
 // ── move, and the no-ops that are not refusals ──────────────────────────────
@@ -287,8 +304,50 @@ fn assigning_a_seated_station_to_another_screen_moves_it_leaving_no_ghost() {
     assert!(layout.stations_on(&m(LEFT)).is_empty());
     assert_eq!(
         layout.occupancy_of(&m(LEFT)).unwrap().free_slots,
-        MAX_STATIONS_PER_MONITOR
+        Some(MAX_STATIONS_PER_MONITOR)
     );
+}
+
+#[test]
+fn moving_a_console_off_a_shared_screen_and_back_swaps_the_two_halves() {
+    // Seat order is the order consoles were assigned, and it is part of the
+    // layout's identity AND of what is drawn: the console that stayed put is now
+    // the earlier of the two, so the halves swap. Pinned as a contract rather
+    // than left as an accident, because it is what the operator sees.
+    let both = assign(&assign(&bridge(), "helm", LEFT), "weapons", LEFT);
+    assert_eq!(both.stations_on(&m(LEFT)), &[s("helm"), s("weapons")]);
+
+    let away = both
+        .apply(&LayoutAction::UnassignStation { station: s("helm") })
+        .unwrap();
+    let back = assign(&away, "helm", LEFT);
+
+    assert_eq!(
+        back.stations_on(&m(LEFT)),
+        &[s("weapons"), s("helm")],
+        "the console that stayed is now the left half"
+    );
+    assert_ne!(
+        back, both,
+        "seat order is part of PartialEq — these are not the same arrangement"
+    );
+
+    // And it is visible, not just structural: the rendered halves swap with it.
+    let rects = back.station_rects(&m(LEFT), &geometry(1920, 1080));
+    assert_eq!(rects[0].0, s("weapons"));
+    assert_eq!(rects[0].1.x, 0);
+    assert_eq!(rects[1].0, s("helm"));
+    assert_eq!(rects[1].1.x, 960);
+
+    // The file records the order too, so the swap survives a reload rather than
+    // being undone by one.
+    let reloaded = BridgeProfile::from_toml(&back.to_profile().to_toml().unwrap())
+        .unwrap()
+        .validate()
+        .unwrap();
+    let (adopted, notes) = back.adopt_profile(&reloaded);
+    assert_eq!(notes, Vec::new());
+    assert_eq!(adopted, back);
 }
 
 #[test]
@@ -325,16 +384,24 @@ fn occupancy_names_each_monitors_consoles_and_its_remaining_room() {
     assert_eq!(tv.monitor, m(TV));
     assert!(tv.is_viewscreen);
     assert!(tv.stations.is_empty());
-    assert_eq!(tv.free_slots, 0, "the viewscreen takes no console");
+    assert_eq!(
+        tv.free_slots, None,
+        "the viewscreen takes no console — None, never Some(0), which would read \
+         as a full screen somebody could free a slot on"
+    );
 
     let left = &occupancy[1];
     assert!(!left.is_viewscreen);
     assert_eq!(left.stations, vec![s("helm"), s("weapons")]);
-    assert_eq!(left.free_slots, 0);
+    assert_eq!(
+        left.free_slots,
+        Some(0),
+        "genuinely full, and that is a number"
+    );
 
     let right = &occupancy[2];
     assert!(right.stations.is_empty());
-    assert_eq!(right.free_slots, MAX_STATIONS_PER_MONITOR);
+    assert_eq!(right.free_slots, Some(MAX_STATIONS_PER_MONITOR));
 
     assert!(layout.occupancy_of(&m("Unplugged@1024x768")).is_none());
 }
@@ -714,34 +781,36 @@ fn adoption_replaces_the_arrangement_rather_than_adding_to_it() {
 
 #[test]
 fn a_profile_seating_one_station_on_two_screens_keeps_the_first_and_says_so() {
-    let mut profile = BridgeProfile::empty();
-    profile.displays = vec![
-        DisplayEntry {
-            id: TV.to_string(),
-            role: ROLE_VIEWSCREEN.to_string(),
-            split: None,
-            panes: Vec::new(),
-        },
-        DisplayEntry {
-            id: LEFT.to_string(),
-            role: ROLE_STATION.to_string(),
-            split: None,
+    // `validate` now refuses this shape at the prompt
+    // (`ProfileError::DuplicatePaneStation` — see
+    // `two_panes_naming_the_same_station_are_refused` in the profile tests), so
+    // the profile is assembled here by hand. The transition law keeps its own
+    // answer regardless: `ValidatedProfile` is a public struct, adoption is the
+    // one door every seat comes through, and a law that trusted its input to have
+    // been checked elsewhere is a law with a hole in it.
+    let station_on = |monitor: &str, label: &str| ValidatedDisplay {
+        identity: m(monitor),
+        role: DisplayRole::Station {
+            split: LAYOUT_SPLIT,
             panes: vec![PaneSlot {
-                label: "Ada".to_string(),
+                label: label.to_string(),
                 station: Some("helm".to_string()),
             }],
         },
-        DisplayEntry {
-            id: RIGHT.to_string(),
-            role: ROLE_STATION.to_string(),
-            split: None,
-            panes: vec![PaneSlot {
-                label: "Grace".to_string(),
-                station: Some("helm".to_string()),
-            }],
-        },
-    ];
-    let (adopted, notes) = bridge().adopt_profile(&profile.validate().unwrap());
+    };
+    let profile = ValidatedProfile {
+        displays: vec![
+            ValidatedDisplay {
+                identity: m(TV),
+                role: DisplayRole::Viewscreen,
+            },
+            station_on(LEFT, "Ada"),
+            station_on(RIGHT, "Grace"),
+        ],
+        touch: Vec::new(),
+        media: Default::default(),
+    };
+    let (adopted, notes) = bridge().adopt_profile(&profile);
     assert_eq!(adopted.stations_on(&m(LEFT)), &[s("helm")]);
     assert!(adopted.stations_on(&m(RIGHT)).is_empty());
     assert_eq!(
@@ -826,4 +895,262 @@ fn adopting_a_profile_that_seats_a_console_on_this_bridges_viewscreen_refuses_it
             monitor: m(TV),
         },
     }));
+}
+
+#[test]
+fn a_layouts_validated_profile_is_the_same_arrangement() {
+    // The infallible conversion consumers take: no `Result` to launder, because a
+    // lawful layout cannot write a profile `validate` rejects. What it produces
+    // is the arrangement itself — adopting it back is the identity.
+    let layout = assign(
+        &assign(&assign(&bridge(), "helm", LEFT), "weapons", LEFT),
+        "comms",
+        RIGHT,
+    );
+    let validated = layout.to_validated_profile();
+    let (adopted, notes) = layout.adopt_profile(&validated);
+    assert_eq!(notes, Vec::new());
+    assert_eq!(adopted, layout);
+
+    // Including the empty bridge, which is what the lobby opens on.
+    let empty = bridge();
+    assert_eq!(empty.to_validated_profile().displays.len(), 1);
+    assert_eq!(
+        empty.to_validated_profile().displays[0].role,
+        DisplayRole::Viewscreen
+    );
+    // And it agrees with the fallible form, so the two cannot drift.
+    assert_eq!(
+        layout.to_validated_profile(),
+        layout.to_profile().validate().unwrap()
+    );
+}
+
+// ── reconciling a layout with a bridge that changed under it ────────────────
+
+/// A discovered monitor with a chosen identity — the shape a plug event brings.
+/// The geometry is nominal: reconcile keys on identity, and only reads `primary`.
+fn discovered(id: &str, primary: bool) -> DiscoveredMonitor {
+    DiscoveredMonitor {
+        identity: m(id),
+        geometry: geometry(1920, 1080),
+        name: Some(id.to_string()),
+        primary,
+    }
+}
+
+/// This bridge's own three monitors, TV primary — the "nothing changed" report.
+fn all_three() -> Vec<DiscoveredMonitor> {
+    vec![
+        discovered(TV, true),
+        discovered(LEFT, false),
+        discovered(RIGHT, false),
+    ]
+}
+
+#[test]
+fn reconciling_against_the_same_bridge_changes_nothing_and_says_nothing() {
+    let layout = assign(
+        &assign(&assign(&bridge(), "helm", LEFT), "weapons", LEFT),
+        "comms",
+        RIGHT,
+    );
+    let (same, notes) = layout.reconcile(&all_three(), roster());
+    assert_eq!(
+        notes,
+        Vec::new(),
+        "nothing changed, so there is nothing to say"
+    );
+    assert_eq!(
+        same, layout,
+        "identical — including the seat order on the shared screen"
+    );
+}
+
+#[test]
+fn unplugging_the_viewscreens_monitor_falls_back_to_the_primary_and_says_so() {
+    // Never silently: the operator chose that screen, and a fallback that left no
+    // trace would look exactly like nothing having happened.
+    let layout = assign(&bridge(), "helm", LEFT);
+    let (next, notes) = layout.reconcile(
+        &[discovered(LEFT, false), discovered(RIGHT, true)],
+        roster(),
+    );
+
+    assert_eq!(
+        next.viewscreen(),
+        &m(RIGHT),
+        "primary, since the TV is gone"
+    );
+    assert_eq!(
+        notes,
+        vec![LayoutAdoption::ViewscreenMonitorGone {
+            monitor: m(TV),
+            replacement: m(RIGHT),
+        }]
+    );
+    let msg = notes[0].to_string();
+    assert!(msg.contains(TV), "{msg}");
+    assert!(msg.contains(RIGHT), "{msg}");
+    assert!(
+        next.stations_on(&m(LEFT)) == [s("helm")],
+        "the rest of the arrangement is untouched"
+    );
+
+    // Primary-ELSE-FIRST: with nothing flagged primary the first reported
+    // monitor takes it, matching `from_discovered`'s own fallback.
+    let (first, _) = bridge().reconcile(
+        &[discovered(RIGHT, false), discovered(LEFT, false)],
+        roster(),
+    );
+    assert_eq!(first.viewscreen(), &m(RIGHT));
+}
+
+#[test]
+fn reconciling_does_not_reset_a_surviving_viewscreen_to_the_primary() {
+    // The plug event this whole method exists for: somebody moved the viewscreen
+    // off the primary deliberately, then a DIFFERENT screen was re-plugged. The
+    // monitor set is re-reported, and the operator's choice must survive it.
+    let moved = bridge()
+        .apply(&LayoutAction::SetViewscreen { monitor: m(LEFT) })
+        .unwrap();
+    let seated = assign(&moved, "helm", TV);
+
+    let (next, notes) = seated.reconcile(&all_three(), roster());
+    assert_eq!(
+        next.viewscreen(),
+        &m(LEFT),
+        "the TV is primary, but the operator chose the LEFT screen"
+    );
+    assert_eq!(notes, Vec::new());
+    assert_eq!(next.stations_on(&m(TV)), &[s("helm")]);
+    assert_eq!(next, seated);
+}
+
+#[test]
+fn unplugging_a_stations_monitor_leaves_it_unassigned_and_names_it() {
+    // Not re-homed onto a screen that is still there: that is a rearrangement
+    // nobody asked for, and it is refused one slice up for the same reason.
+    let layout = assign(&assign(&bridge(), "helm", LEFT), "comms", RIGHT);
+    let (next, notes) =
+        layout.reconcile(&[discovered(TV, true), discovered(LEFT, false)], roster());
+
+    assert_eq!(next.viewscreen(), &m(TV));
+    assert_eq!(
+        next.stations_on(&m(LEFT)),
+        &[s("helm")],
+        "this one survived"
+    );
+    assert!(next.monitor_of(&s("comms")).is_none());
+    assert_eq!(
+        notes,
+        vec![LayoutAdoption::StationMonitorGone {
+            station: s("comms"),
+            monitor: m(RIGHT),
+        }]
+    );
+    let msg = notes[0].to_string();
+    assert!(msg.contains("comms"), "{msg}");
+    assert!(msg.contains("left unassigned"), "{msg}");
+}
+
+#[test]
+fn a_station_that_leaves_the_roster_has_its_console_closed_and_named() {
+    let layout = assign(&assign(&bridge(), "helm", LEFT), "weapons", LEFT);
+    let shrunk = ["helm", "comms", "engineering"].map(s).to_vec();
+    let (next, notes) = layout.reconcile(&all_three(), shrunk);
+
+    assert_eq!(next.roster().len(), 3);
+    assert_eq!(
+        next.stations_on(&m(LEFT)),
+        &[s("helm")],
+        "helm keeps its seat"
+    );
+    assert!(next.monitor_of(&s("weapons")).is_none());
+    assert_eq!(
+        notes,
+        vec![LayoutAdoption::StationOffRoster {
+            station: s("weapons"),
+            monitor: m(LEFT),
+        }]
+    );
+    assert!(notes[0].to_string().contains("weapons"));
+}
+
+#[test]
+fn a_station_new_to_the_roster_arrives_unassigned_with_nothing_to_report() {
+    // An unplaced console is the ordinary state of a station nobody has put on a
+    // screen yet, not a degradation — so there is no note to make.
+    let layout = assign(&bridge(), "helm", LEFT);
+    let mut grown = roster();
+    grown.push(s("flight-deck"));
+    let (next, notes) = layout.reconcile(&all_three(), grown);
+
+    assert_eq!(notes, Vec::new());
+    assert_eq!(next.roster().len(), 5);
+    assert!(next.monitor_of(&s("flight-deck")).is_none());
+    assert_eq!(next.stations_on(&m(LEFT)), &[s("helm")]);
+    // And it is a full citizen of the new bridge: it has a screen row.
+    let row = next
+        .eligibility_of(&s("flight-deck"))
+        .expect("on the new roster");
+    assert_eq!(
+        row.eligible().collect::<Vec<_>>(),
+        vec![&m(LEFT), &m(RIGHT)]
+    );
+}
+
+#[test]
+fn a_viewscreen_falling_back_onto_an_occupied_screen_unseats_it_by_the_same_rule() {
+    // The compound case, and the one that shows reconcile is not a second law:
+    // the TV is gone, the fallback lands on the monitor holding both consoles,
+    // and rule 2 refuses them there exactly as a button press would be refused.
+    let layout = assign(&assign(&bridge(), "helm", LEFT), "weapons", LEFT);
+    let (next, notes) = layout.reconcile(&[discovered(LEFT, true)], roster());
+
+    assert_eq!(next.viewscreen(), &m(LEFT));
+    assert!(next.stations_on(&m(LEFT)).is_empty());
+    assert_eq!(
+        notes,
+        vec![
+            LayoutAdoption::ViewscreenMonitorGone {
+                monitor: m(TV),
+                replacement: m(LEFT),
+            },
+            LayoutAdoption::SeatRefused {
+                station: s("helm"),
+                monitor: m(LEFT),
+                refusal: LayoutRefusal::StationOnViewscreenMonitor {
+                    station: s("helm"),
+                    monitor: m(LEFT),
+                },
+            },
+            LayoutAdoption::SeatRefused {
+                station: s("weapons"),
+                monitor: m(LEFT),
+                refusal: LayoutRefusal::StationOnViewscreenMonitor {
+                    station: s("weapons"),
+                    monitor: m(LEFT),
+                },
+            },
+        ]
+    );
+}
+
+#[test]
+fn reconciling_against_no_monitors_at_all_keeps_the_layout_and_says_so() {
+    // A bridge is at least one screen — the lobby is drawn on it — so there is no
+    // lawful layout to degrade to. An empty enumeration is a display driver
+    // restarting far more often than it is a bridge that ceased to exist.
+    let layout = assign(&bridge(), "helm", LEFT);
+    let (next, notes) = layout.reconcile(&[], roster());
+
+    assert_eq!(next, layout, "kept whole");
+    assert_eq!(
+        notes,
+        vec![LayoutAdoption::NoMonitorsReported {
+            kept: vec![m(TV), m(LEFT), m(RIGHT)],
+        }]
+    );
+    assert!(notes[0].to_string().contains("3 monitors"));
 }

@@ -442,7 +442,12 @@ fn find_tag_end(html: &str, open: &str) -> Option<usize> {
 /// Deliberately narrow — it matches an opening `<tag`, finds its `>`, and
 /// requires the matching `</tag>` — because the alternative is a general HTML
 /// parser for two elements this repository authors itself.
-fn strip_elements_matching(html: &str, tag: &str, marker: Option<&str>) -> String {
+///
+/// `pub(crate)` for [`super::super::host_lobby::document`], which strips the
+/// AI-launch `<button>` out of the read-only native lobby (issue #1325) — the
+/// same "remove an element the embedded surface must not carry" this does for
+/// `<audio>`, so it uses the same narrow matcher rather than a second one.
+pub(crate) fn strip_elements_matching(html: &str, tag: &str, marker: Option<&str>) -> String {
     let open_tag = format!("<{tag}");
     let close_tag = format!("</{tag}>");
     let mut out = String::with_capacity(html.len());

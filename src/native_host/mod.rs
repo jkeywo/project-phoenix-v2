@@ -63,6 +63,13 @@ pub mod bridge_media;
 /// the ordinary `cargo test` CI runs. The winit adapter that opens real
 /// borderless-fullscreen windows from a resolved profile is [`bridge_display`].
 pub mod bridge_profile;
+/// The native host's own lobby surface (issue #1325) — the crew lobby the
+/// browser host shows, composited onto the viewscreen window from an embedded
+/// web view over the SAME `gui/host-lobby-view.js` + `gui/host-lobby-render.js`
+/// pair `server.html` renders with. The document assembly, the bridge and the
+/// reveal state machine are pure and CI-tested; only the compositing lives
+/// behind `--features ultralight`, in [`panes::ultralight`].
+pub mod host_lobby;
 /// The pure input-routing model (issue #1124) — the coordinate transforms, the
 /// pane-boundary hit test, the keyboard-focus order and the touch
 /// contact-capture map. Bevy-free and CI-tested; the winit/Ultralight adapter

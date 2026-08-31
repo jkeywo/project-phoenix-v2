@@ -253,6 +253,16 @@ export class ModPackWorkspace {
     return m ? { ...m } : null;
   }
 
+  /** Replace one imported/member source text without rewriting its identity or
+   * base provenance. Exact source bytes remain available separately through
+   * `getSourceEntry`; export reuses them only when this text is unchanged. */
+  setMemberText(path, text) {
+    const member = this._members.get(path);
+    if (!member) return false;
+    member.text = str(text);
+    return true;
+  }
+
   /** Members in insertion order (which is archive order after an import). */
   getMembers() {
     return [...this._members.values()].map((m) => ({ ...m }));

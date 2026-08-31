@@ -3,11 +3,12 @@
  *
  * The fifth editor mode. It owns all DOM + IO around the pure
  * {@link ModPackWorkspace}: a `[pack]` identity form, a `[[scenario]]` list, a
- * member list with per-member `new`/`patch` provenance, and Export / Import
- * actions. Export runs the existing `exportModPack` admission gate (issue #759 /
- * #986) and downloads the host-consumed ZIP; Import reads a ZIP back into the
- * workspace via `readStoreZip`. Every edit marks MOD mode dirty so the shared
- * `beforeunload` guard fires (via `modeShell.hasAnyDirty()`).
+ * member list with per-member `new`/`patch` provenance and bounded source edit,
+ * plus Import / Validate / Export actions. Validate and Export run the existing
+ * `exportModPack` admission gate (issue #759 / #986); Export downloads the
+ * host-consumed ZIP, while Import reads one back into the workspace via the real
+ * archive reader. Every edit marks MOD mode dirty so the shared `beforeunload`
+ * guard fires (via `modeShell.hasAnyDirty()`).
  *
  * Discipline (matches #910 / M5): the logic module (`mod-pack-workspace.js`) is
  * DOM-free; THIS view owns the DOM. IO — reading base files to classify + detect
@@ -34,15 +35,42 @@ import {
 } from '../gui/action-feedback.js';
 import {
   MOD_ACTION_CONTEXT,
+  MOD_EXPORT_ACTION_ID,
   MOD_IMPORT_ACTION_ID,
+  MOD_VALIDATE_ACTION_ID,
   createModActionRegistry,
 } from './mod-actions.js';
+import { createSemanticControlsRemapper } from '../gui/semantic-controls-remapper.js';
+import {
+  applyOperatorProfile,
+  createOperatorProfileSnapshot,
+  loadOperatorProfile,
+  saveOperatorProfile,
+} from '../gui/operator-profile.js';
 
 /** MOD mode has no per-file save; a single sentinel key carries its dirty bit
  * so `modeShell.hasAnyDirty()` (and the beforeunload guard) sees pending edits. */
 export const MOD_DIRTY_KEY = 'mod-pack';
 
 const ENTITIES_PREFIX = 'assets/entities/';
+
+function browserProfileStorage() {
+  try {
+    return typeof window !== 'undefined' ? window.localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+function preserveSourceLineEndings(previousText, editedText) {
+  const previous = String(previousText ?? '');
+  const edited = String(editedText ?? '');
+  const crlfCount = (previous.match(/\r\n/g) || []).length;
+  const loneLfCount = (previous.replace(/\r\n/g, '').match(/\n/g) || []).length;
+  return crlfCount > 0 && loneLfCount === 0
+    ? edited.replace(/\r?\n/g, '\r\n')
+    : edited;
+}
 
 /** Default browser download: a store-only ZIP Blob + a transient anchor click.
  * Guarded so a headless/jsdom run (no `URL.createObjectURL`) is a silent no-op. */
@@ -93,6 +121,7 @@ export function mountModMode({
   readArchive = readStoreZipArchive,
   download = defaultDownload,
   feedbackRoot = typeof window !== 'undefined' ? window : globalThis,
+  profileStorage = browserProfileStorage(),
 } = {}) {
   if (!host) return null;
 
@@ -181,17 +210,52 @@ export function mountModMode({
   });
   memAdd.append(memPath, memAddBtn);
   memSection.appendChild(memAdd);
+  const memberEditor = el('section', {
+    class: 'mod-member-source-editor',
+    dataset: { t2MemberSourceEditor: 'true' },
+  });
+  memberEditor.hidden = true;
+  const memberEditorHeading = el('h4', { text: t('editor.mod.member.heading') });
+  const memberEditorPath = el('code', { class: 'mod-member-source-path' });
+  const memberEditorInput = el('textarea', {
+    class: 'mod-member-source-input',
+    rows: '14',
+    spellcheck: 'false',
+  });
+  memberEditorInput.addEventListener('input', () => {
+    if (!selectedMemberPath) return;
+    const current = workspace.getMember(selectedMemberPath);
+    const text = preserveSourceLineEndings(current?.text, memberEditorInput.value);
+    if (workspace.setMemberText(selectedMemberPath, text)) markDirty();
+  });
+  memberEditor.append(
+    memberEditorHeading,
+    memberEditorPath,
+    memberEditorInput,
+    el('p', { class: 'mod-member-source-hint', text: t('editor.mod.member.hint') }),
+  );
+  memSection.appendChild(memberEditor);
   body.appendChild(memSection);
 
   // Actions ------------------------------------------------------------------
   const actionsSection = el('section', { class: 'mod-section mod-actions' });
-  const exportBtn = el('button', { type: 'button', class: 'mod-export-btn', text: 'Export pack (.zip)' });
-  exportBtn.addEventListener('click', () => { exportPackNow(); });
   const importBtn = el('button', {
     type: 'button',
     class: 'mod-import-btn',
     text: t('editor.mod.import.button'),
     'aria-label': t('semantic_action.editor.mod.import.accessibility'),
+  });
+  const validateBtn = el('button', {
+    type: 'button',
+    class: 'mod-validate-btn',
+    text: t('editor.mod.validate.button'),
+    'aria-label': t('semantic_action.editor.mod.validate.accessibility'),
+  });
+  const exportBtn = el('button', {
+    type: 'button',
+    class: 'mod-export-btn',
+    text: t('editor.mod.export.button'),
+    'aria-label': t('semantic_action.editor.mod.export.accessibility'),
   });
   const importInput = el('input', {
     type: 'file',
@@ -213,35 +277,181 @@ export function mountModMode({
     class: 'mod-scope-boundary',
     text: t('editor.mod.import.m6_boundary'),
   });
-  actionsSection.append(exportBtn, importBtn, importInput, feedbackStatus, messages, scopeBoundary);
+  const privateSettings = el('details', { class: 'mod-private-settings' });
+  privateSettings.appendChild(el('summary', { text: t('editor.mod.settings.heading') }));
+  const privateSettingsBody = el('div', { class: 'mod-private-settings-body' });
+  privateSettings.appendChild(privateSettingsBody);
+  actionsSection.append(
+    importBtn,
+    validateBtn,
+    exportBtn,
+    importInput,
+    feedbackStatus,
+    messages,
+    privateSettings,
+    scopeBoundary,
+  );
   body.appendChild(actionsSection);
 
+  let selectedMemberPath = null;
   let pendingImport = null;
+  let pendingOperation = null;
+  const feedbackByAction = new Map();
+  let feedbackSequence = 0;
+
+  function renderActionFeedback() {
+    feedbackStatus.innerHTML = '';
+    const rows = [...feedbackByAction.values()].sort((left, right) => (
+      left.sequence - right.sequence
+    ));
+    if (rows.length === 0) {
+      delete feedbackStatus.dataset.state;
+      return;
+    }
+    for (const entry of rows) {
+      const action = semanticActions.action(entry.actionId);
+      feedbackStatus.appendChild(el('div', {
+        class: 'mod-action-feedback-row',
+        dataset: { actionId: entry.actionId, state: entry.state },
+        text: t('action_feedback.summary', {
+          action: t(action.labelId),
+          status: t(entry.statusId),
+        }),
+      }));
+    }
+    feedbackStatus.dataset.state = rows[rows.length - 1].state;
+  }
+
   const actionFeedback = new ActionFeedbackLifecycle({
     onTransition(value) {
       emitActionFeedbackTransition(feedbackRoot, value);
       if (!value.isCurrent) return;
       if (value.cancelled || !value.state || !value.statusId) {
-        feedbackStatus.textContent = '';
-        delete feedbackStatus.dataset.state;
-        return;
+        const shown = feedbackByAction.get(value.actionId);
+        if (!shown || shown.correlation === value.correlation) {
+          feedbackByAction.delete(value.actionId);
+        }
+      } else {
+        feedbackSequence += 1;
+        feedbackByAction.set(value.actionId, {
+          ...value,
+          sequence: feedbackSequence,
+        });
       }
-      feedbackStatus.textContent = t(value.statusId);
-      feedbackStatus.dataset.state = value.state;
+      renderActionFeedback();
     },
   });
   const semanticActions = createModActionRegistry({
     actionFeedback,
     openImport: beginImport,
+    validatePack: beginValidate,
+    exportPack: beginExport,
   });
+  let operatorProfile = null;
+  let profileStatus = null;
+  try {
+    const loaded = loadOperatorProfile(profileStorage, { registry: semanticActions });
+    const applied = applyOperatorProfile(loaded.profile, semanticActions);
+    operatorProfile = loaded.profile;
+    profileStatus = applied.status === 'applied'
+      ? { status: loaded.status }
+      : { status: 'rejected', code: applied.code };
+  } catch {
+    profileStatus = { status: 'rejected', code: 'profile-storage-read' };
+  }
+
+  const semanticControls = createSemanticControlsRemapper({
+    doc: document,
+    root: privateSettings,
+    setBinding(actionId, slot, binding, options) {
+      const result = semanticActions.setBinding(actionId, slot, binding, options);
+      if (result.status === 'applied') persistPrivateProfile();
+      return result;
+    },
+    resetAction(actionId) {
+      const result = semanticActions.resetAction(actionId);
+      if (result.status === 'applied') persistPrivateProfile();
+      return result;
+    },
+    resetAll() {
+      const result = semanticActions.resetAllBindings();
+      if (result.status === 'applied') persistPrivateProfile();
+      return result;
+    },
+    rebuild: renderPrivateSettings,
+  });
+
   importBtn.addEventListener('click', () => {
     semanticActions.activate(MOD_IMPORT_ACTION_ID, {
       context: MOD_ACTION_CONTEXT,
       source: 'control',
     });
   });
+  validateBtn.addEventListener('click', () => {
+    semanticActions.activate(MOD_VALIDATE_ACTION_ID, {
+      context: MOD_ACTION_CONTEXT,
+      source: 'control',
+    });
+  });
+  exportBtn.addEventListener('click', () => {
+    semanticActions.activate(MOD_EXPORT_ACTION_ID, {
+      context: MOD_ACTION_CONTEXT,
+      source: 'control',
+    });
+  });
   importInput.addEventListener('change', completeSelectedImport);
   importInput.addEventListener('cancel', cancelPendingImport);
+
+  function persistPrivateProfile() {
+    operatorProfile = createOperatorProfileSnapshot({
+      accessibility: operatorProfile?.accessibility,
+      bindings: semanticActions.bindingProfile(),
+      preferredGamepadSlot: operatorProfile?.gamepad?.preferredSlot,
+      tuning: semanticActions.tuningProfile(),
+      feedback: operatorProfile?.feedback,
+      gmConfirmations: operatorProfile?.gmConfirmations,
+    });
+    const saved = saveOperatorProfile(profileStorage, operatorProfile);
+    profileStatus = saved.status === 'saved'
+      ? { status: 'saved' }
+      : { status: 'rejected', code: saved.code };
+    renderPrivateSettings();
+    return saved;
+  }
+
+  function settingsSection(labelId) {
+    const section = el('section', { class: 'mod-settings-section' });
+    section.appendChild(el('h4', { text: t(labelId) }));
+    return section;
+  }
+
+  function renderPrivateSettings() {
+    privateSettingsBody.innerHTML = '';
+    if (profileStatus?.status === 'saved' || profileStatus?.status === 'rejected') {
+      privateSettingsBody.appendChild(el('div', {
+        class: `mod-profile-status mod-profile-status-${profileStatus.status}`,
+        role: profileStatus.status === 'rejected' ? 'alert' : 'status',
+        'aria-live': profileStatus.status === 'rejected' ? 'assertive' : 'polite',
+        text: t(profileStatus.status === 'rejected'
+          ? 'editor.mod.settings.storage_refused'
+          : 'editor.mod.settings.saved'),
+      }));
+    }
+    semanticControls.render(privateSettingsBody, {
+      actions: semanticActions.list(MOD_ACTION_CONTEXT),
+      section: settingsSection,
+      hint: (labelId) => el('p', { class: 'mod-settings-hint', text: t(labelId) }),
+      row: (className) => el('div', { class: `mod-settings-row ${className}` }),
+      action: (label, onClick) => el('button', {
+        type: 'button',
+        class: 'mod-settings-action',
+        text: label,
+        onclick: onClick,
+      }),
+    });
+  }
+
+  renderPrivateSettings();
 
   // ── Rendering ───────────────────────────────────────────────────────────
 
@@ -291,7 +501,12 @@ export function mountModMode({
     const members = workspace.getMembers();
     if (members.length === 0) {
       memList.appendChild(el('p', { class: 'mod-placeholder', text: 'No members yet.' }));
+      selectedMemberPath = null;
+      renderMemberEditor();
       return;
+    }
+    if (!members.some((member) => member.path === selectedMemberPath)) {
+      selectedMemberPath = null;
     }
     for (const m of members) {
       const row = el('div', {
@@ -303,15 +518,45 @@ export function mountModMode({
         text: m.classification,
       }));
       row.appendChild(el('span', { class: 'mod-member-path', text: m.path }));
+      const edit = el('button', {
+        type: 'button',
+        class: 'mod-member-edit',
+        text: t('editor.mod.member.edit'),
+        'aria-label': t('editor.mod.member.edit_accessibility', { path: m.path }),
+      });
+      edit.addEventListener('click', () => {
+        selectedMemberPath = m.path;
+        renderMemberEditor();
+        focusWithoutJump(memberEditorInput);
+      });
       const rm = el('button', { type: 'button', class: 'mod-member-remove', text: '×' });
       rm.addEventListener('click', () => {
         workspace.removeMember(m.path);
+        if (selectedMemberPath === m.path) selectedMemberPath = null;
         markDirty();
         renderMembers();
       });
-      row.appendChild(rm);
+      row.append(edit, rm);
       memList.appendChild(row);
     }
+    renderMemberEditor();
+  }
+
+  function renderMemberEditor() {
+    const member = selectedMemberPath ? workspace.getMember(selectedMemberPath) : null;
+    memberEditor.hidden = !member;
+    if (!member) {
+      memberEditorPath.textContent = '';
+      memberEditorInput.value = '';
+      memberEditorInput.removeAttribute('aria-label');
+      return;
+    }
+    memberEditorPath.textContent = member.path;
+    memberEditorInput.value = member.text;
+    memberEditorInput.setAttribute(
+      'aria-label',
+      t('editor.mod.member.source_accessibility', { path: member.path }),
+    );
   }
 
   function renderAll() {
@@ -324,27 +569,48 @@ export function mountModMode({
     messages.innerHTML = '';
   }
 
-  function renderMessages({ errors = [], warnings = [] }) {
-    messages.innerHTML = '';
+  function appendFindings(box, errors = [], warnings = []) {
     if (errors.length > 0) {
-      const box = el('div', { class: 'mod-messages-errors' });
-      box.appendChild(el('strong', { text: 'Export refused — resolve these first:' }));
       const ul = el('ul');
-      for (const e of errors) ul.appendChild(el('li', { text: e }));
+      for (const error of errors) ul.appendChild(el('li', { text: error }));
       box.appendChild(ul);
-      messages.appendChild(box);
     }
     if (warnings.length > 0) {
-      const box = el('div', { class: 'mod-messages-warnings' });
-      box.appendChild(el('strong', { text: 'Warnings (non-blocking):' }));
+      const warningBox = el('div', { class: 'mod-messages-warnings' });
+      warningBox.appendChild(el('strong', { text: t('editor.mod.import.warning_heading') }));
       const ul = el('ul');
-      for (const w of warnings) ul.appendChild(el('li', { text: w }));
-      box.appendChild(ul);
-      messages.appendChild(box);
+      for (const warning of warnings) ul.appendChild(el('li', { text: warning }));
+      warningBox.appendChild(ul);
+      box.appendChild(warningBox);
     }
-    if (errors.length === 0 && warnings.length === 0) {
-      messages.appendChild(el('p', { class: 'mod-messages-ok', text: 'Pack exported.' }));
-    }
+  }
+
+  function renderOperationRefusal(headingId, errors = [], warnings = []) {
+    messages.innerHTML = '';
+    const box = el('div', {
+      class: 'mod-operation-result mod-messages-errors',
+      role: 'alert',
+      tabindex: '-1',
+      dataset: { outcome: 'refused' },
+    });
+    box.appendChild(el('strong', { text: t(headingId) }));
+    appendFindings(box, errors, warnings);
+    messages.appendChild(box);
+    focusWithoutJump(box);
+    return box;
+  }
+
+  function renderOperationSuccess(messageId, warnings = []) {
+    messages.innerHTML = '';
+    const box = el('div', {
+      class: 'mod-operation-result mod-messages-ok',
+      role: 'status',
+      dataset: { outcome: 'applied' },
+    });
+    box.appendChild(el('p', { text: t(messageId) }));
+    appendFindings(box, [], warnings);
+    messages.appendChild(box);
+    return box;
   }
 
   function focusWithoutJump(node) {
@@ -417,8 +683,51 @@ export function mountModMode({
     messages.appendChild(box);
   }
 
+  function refuseBusyOperation(headingId, settleFeedback) {
+    renderOperationRefusal(headingId, [t('editor.mod.operation_busy')]);
+    settleFeedback?.(ACTION_FEEDBACK_STATE.REFUSED);
+    return true;
+  }
+
+  function beginValidate({ settleFeedback } = {}) {
+    if (pendingOperation === MOD_VALIDATE_ACTION_ID) return false;
+    if (pendingOperation || pendingImport) {
+      return refuseBusyOperation('editor.mod.validate.refused', settleFeedback);
+    }
+    pendingOperation = MOD_VALIDATE_ACTION_ID;
+    void validatePackNow({ settleFeedback })
+      .catch((error) => {
+        renderOperationRefusal('editor.mod.validate.refused', [String(error?.message || error)]);
+        settleFeedback?.(ACTION_FEEDBACK_STATE.REFUSED);
+      })
+      .finally(() => {
+        if (pendingOperation === MOD_VALIDATE_ACTION_ID) pendingOperation = null;
+      });
+    return true;
+  }
+
+  function beginExport({ settleFeedback } = {}) {
+    if (pendingOperation === MOD_EXPORT_ACTION_ID) return false;
+    if (pendingOperation || pendingImport) {
+      return refuseBusyOperation('editor.mod.export.refused', settleFeedback);
+    }
+    pendingOperation = MOD_EXPORT_ACTION_ID;
+    void exportPackNow({ settleFeedback })
+      .catch((error) => {
+        renderOperationRefusal('editor.mod.export.refused', [String(error?.message || error)]);
+        settleFeedback?.(ACTION_FEEDBACK_STATE.REFUSED);
+      })
+      .finally(() => {
+        if (pendingOperation === MOD_EXPORT_ACTION_ID) pendingOperation = null;
+      });
+    return true;
+  }
+
   function beginImport({ settleFeedback, cancelFeedback } = {}) {
     if (pendingImport) return false;
+    if (pendingOperation) {
+      return refuseBusyOperation('editor.mod.import.invalid_heading', settleFeedback);
+    }
     pendingImport = { settleFeedback, cancelFeedback };
     importInput.value = '';
     try {
@@ -551,29 +860,60 @@ export function mountModMode({
     return out;
   }
 
-  async function exportPackNow() {
-    clearMessages();
+  async function evaluateWorkspace() {
     const currentBase = await currentBaseForPatches();
     const staleWarnings = workspace.staleWarnings(currentBase);
     const staleMsgs = staleWarnings.map((w) => `${w.path}: ${w.message}`);
-
     const result = exportPack({ ...workspace.toExportInput(), rigIndex });
+    return {
+      result,
+      staleWarnings,
+      warnings: [...(result.warnings || []), ...staleMsgs],
+    };
+  }
+
+  async function validatePackNow({ settleFeedback = null } = {}) {
+    clearMessages();
+    const evaluated = await evaluateWorkspace();
+    const { result, staleWarnings, warnings } = evaluated;
     if (!result.ok) {
-      renderMessages({
-        errors: result.errors || [],
-        warnings: [...(result.warnings || []), ...staleMsgs],
-      });
+      renderOperationRefusal('editor.mod.validate.refused', result.errors || [], warnings);
+      settleFeedback?.(ACTION_FEEDBACK_STATE.REFUSED);
       return { ...result, staleWarnings };
     }
-    renderMessages({ errors: [], warnings: [...(result.warnings || []), ...staleMsgs] });
+    renderOperationSuccess('editor.mod.validate.success', warnings);
+    settleFeedback?.(ACTION_FEEDBACK_STATE.APPLIED);
+    focusWithoutJump(exportBtn);
+    return { ...result, staleWarnings };
+  }
+
+  async function exportPackNow({ settleFeedback = null } = {}) {
+    clearMessages();
+    const evaluated = await evaluateWorkspace();
+    const { result, staleWarnings, warnings } = evaluated;
+    if (!result.ok) {
+      renderOperationRefusal('editor.mod.export.refused', result.errors || [], warnings);
+      settleFeedback?.(ACTION_FEEDBACK_STATE.REFUSED);
+      return { ...result, staleWarnings };
+    }
     const filename = `${workspace.getPack().id || 'mod-pack'}.zip`;
     try {
       download(result.zip, filename);
-    } catch {
-      // A download failure must not lose the exported bytes; they are returned.
+    } catch (error) {
+      renderOperationRefusal(
+        'editor.mod.export.download_refused',
+        [String(error?.message || error)],
+        warnings,
+      );
+      settleFeedback?.(ACTION_FEEDBACK_STATE.REFUSED);
+      // Preserve the successfully generated bytes for recovery/caller retry.
+      return { ...result, staleWarnings, downloaded: false, downloadError: error };
     }
     markDirty(false);
-    return { ...result, staleWarnings };
+    renderOperationSuccess('editor.mod.export.success', warnings);
+    settleFeedback?.(ACTION_FEEDBACK_STATE.APPLIED);
+    focusWithoutJump(exportBtn);
+    return { ...result, staleWarnings, downloaded: true };
   }
 
   async function importArchiveBytes(bytes, { settleFeedback = null } = {}) {
@@ -616,6 +956,7 @@ export function mountModMode({
     // before surfacing semantic findings so the exact member text remains in
     // the editable workspace even when the existing export gate refuses it.
     workspace = candidate;
+    selectedMemberPath = null;
     markDirty(false);
     renderAll();
     const validation = exportPack({ ...workspace.toExportInput(), rigIndex });
@@ -638,6 +979,7 @@ export function mountModMode({
 
   return {
     getWorkspace: () => workspace,
+    getOperatorProfile: () => operatorProfile,
     render: renderAll,
     semanticActions,
     dispatchKeyboardEvent: (event) => semanticActions.dispatchKeyboardEvent(
@@ -647,6 +989,7 @@ export function mountModMode({
     _internal: {
       addMemberByPath,
       addFragmentMembers,
+      validatePackNow,
       exportPackNow,
       importArchiveBytes,
       currentBaseForPatches,
@@ -654,12 +997,17 @@ export function mountModMode({
       fields,
       elements: {
         exportBtn,
+        validateBtn,
         importBtn,
         importInput,
         feedbackStatus,
         scopeBoundary,
         memPath,
         memAddBtn,
+        memberEditor,
+        memberEditorInput,
+        privateSettings,
+        privateSettingsBody,
         scenAddBtn,
         messages,
         memList,

@@ -7,7 +7,9 @@ import {
 } from '../mod-pack-workspace.js';
 import {
   exportModPack,
+  createStoreZip,
   readStoreZip,
+  readStoreZipArchive,
   buildManifestToml,
   parsePackManifest,
   MANIFEST_PATH,
@@ -227,6 +229,43 @@ describe('ModPackWorkspace.fromArchiveFiles round trip', () => {
     const member = reopened.getMember(WORLD_PATH);
     expect(member.classification).toBe('patch');
     expect(member.baseDigest).toBe(digestText(WORLD_TEXT));
+  });
+
+  it('edits one member while retaining its source archive, comments, and base provenance', () => {
+    const manifest = `# retained manifest note\n${buildManifestToml(
+      [{ id: 'default', world: WORLD_PATH }],
+      goodPack(),
+    )}`;
+    const sourceWorld = '# retained world note\r\n[global]\r\nsim_tick_hz = 60\r\n[anchors]\r\n';
+    const bytes = createStoreZip([
+      { path: MANIFEST_PATH, text: manifest },
+      { path: WORLD_PATH, text: sourceWorld },
+    ]);
+    const archive = readStoreZipArchive(bytes);
+    const ws = ModPackWorkspace.fromArchiveFiles(
+      archive.files,
+      { [WORLD_PATH]: sourceWorld },
+      archive.source,
+    );
+    const before = ws.getMember(WORLD_PATH);
+    const editedWorld = sourceWorld.replace('sim_tick_hz = 60', 'sim_tick_hz = 30');
+
+    expect(ws.setMemberText(WORLD_PATH, editedWorld)).toBe(true);
+    expect(ws.setMemberText('assets/worlds/missing.toml', 'x')).toBe(false);
+    expect(ws.getMember(WORLD_PATH)).toMatchObject({
+      text: editedWorld,
+      classification: before.classification,
+      baseDigest: before.baseDigest,
+    });
+    expect(ws.getSourceEntry(WORLD_PATH).text).toBe(sourceWorld);
+    expect(Array.from(ws.getSourceArchive().bytes)).toEqual(Array.from(bytes));
+
+    const result = exportModPack(ws.toExportInput());
+    expect(result.ok).toBe(true);
+    const exported = readStoreZip(result.zip);
+    expect(exported[MANIFEST_PATH]).toBe(manifest);
+    expect(exported[WORLD_PATH]).toBe(editedWorld);
+    expect(exported[WORLD_PATH]).toContain('# retained world note\r\n');
   });
 
   it('parsePackManifest is the inverse of buildManifestToml (fixed point)', () => {

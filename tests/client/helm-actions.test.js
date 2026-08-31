@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createClientSemanticActionRegistry } from '../../gui/client-semantic-actions.js';
+import {
+  clientSettingsSemanticActions,
+  createClientSemanticActionRegistry,
+} from '../../gui/client-semantic-actions.js';
 import { createSemanticActionRegistry } from '../../gui/semantic-action-registry.js';
 import {
   HELM_ACTION_CONTEXT,
@@ -50,9 +53,20 @@ describe('Helm semantic steering action', () => {
     expect(sendAction).not.toHaveBeenCalled();
   });
 
-  it('publishes Captain and Helm definitions in the parent client catalogue', () => {
-    const ids = createClientSemanticActionRegistry().list().map((action) => action.id);
+  it('retains editor bindings in the parent catalogue but hides them from play Settings', () => {
+    const registry = createClientSemanticActionRegistry();
+    const ids = registry.list().map((action) => action.id);
     expect(ids).toEqual([
+      'captain.red-alert',
+      'captain.weapons-hold',
+      'captain.view',
+      'captain.objective-priority',
+      HELM_STEERING_ACTION_ID,
+      'editor.mod.import',
+      'editor.mod.validate',
+      'editor.mod.export',
+    ]);
+    expect(clientSettingsSemanticActions(registry).map((action) => action.id)).toEqual([
       'captain.red-alert',
       'captain.weapons-hold',
       'captain.view',

@@ -3468,7 +3468,9 @@
             }
           },
           getSemanticActions: () => semanticActionRegistry
-            ? semanticActionRegistry.list()
+            ? (typeof window.clientSettingsSemanticActions === 'function'
+                ? window.clientSettingsSemanticActions(semanticActionRegistry)
+                : semanticActionRegistry.list())
             : [],
           onSemanticBinding: (actionId, slot, binding, options) => {
             return updateSemanticBinding(actionId, slot, binding, options);

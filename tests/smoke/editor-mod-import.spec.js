@@ -8,6 +8,12 @@
 import { test, expect, modPackFixturePath } from './fixtures';
 import fs from 'fs';
 import path from 'path';
+import {
+  createStoreZip,
+  MANIFEST_PATH,
+  readStoreZipArchive,
+} from '../../editor/mod-pack-export.js';
+import { OPERATOR_PROFILE_KEY } from '../../gui/operator-profile.js';
 
 const ROOT = path.resolve(__dirname, '../..');
 const SMOL_DIST = [
@@ -108,11 +114,31 @@ async function openEditor(context, page) {
   expect(bootError).toBeNull();
 }
 
-test('MOD import keyboard action applies a valid archive and states the M6 boundary', async ({
+test('MOD golden tracer imports, edits, validates, remaps, and exports a valid archive', async ({
   context,
   page,
 }) => {
   await openEditor(context, page);
+
+  const committed = readStoreZipArchive(
+    fs.readFileSync(modPackFixturePath('editor-round-trip')),
+  );
+  const worldPath = 'assets/worlds/editor_arena.toml';
+  const fixtureBytes = createStoreZip([
+    {
+      path: MANIFEST_PATH,
+      text: `# Golden tracer manifest comment.\n${committed.files[MANIFEST_PATH]}`,
+    },
+    {
+      path: worldPath,
+      text: `# Golden tracer world comment.\r\n${committed.files[worldPath].replace(/\n/g, '\r\n')}`,
+    },
+  ]);
+  const source = readStoreZipArchive(fixtureBytes);
+  const editedWorld = source.files[worldPath].replace(
+    'title = "Editor Arena"',
+    'title = "Editor Arena - Edited"',
+  );
 
   const importButton = page.getByRole('button', { name: /Import a ZIP mod pack/i });
   await importButton.focus();
@@ -122,7 +148,11 @@ test('MOD import keyboard action applies a valid archive and states the M6 bound
   let chooserPromise = page.waitForEvent('filechooser');
   await page.keyboard.press('i');
   let chooser = await chooserPromise;
-  await chooser.setFiles(modPackFixturePath('editor-round-trip'));
+  await chooser.setFiles({
+    name: 'editor-round-trip-commented.zip',
+    mimeType: 'application/zip',
+    buffer: Buffer.from(fixtureBytes),
+  });
 
   await expect(page.locator('.mod-action-feedback')).toHaveAttribute('data-state', 'Applied');
   await expect(page.locator('.mod-import-success')).toBeVisible();
@@ -134,10 +164,76 @@ test('MOD import keyboard action applies a valid archive and states the M6 bound
     'Applied',
   ]);
 
-  // The T2 surface says what remains M6 work and carries no hidden placeholder
-  // controls for those deferred products.
+  // The source edit is bounded to one archive member. Validation is a separate
+  // semantic action, leaves the edit dirty, and returns focus to Export.
+  await page.locator(`.mod-member-row[data-path="${worldPath}"] .mod-member-edit`).click();
+  const sourceEditor = page.locator('.mod-member-source-input');
+  await expect(sourceEditor).toBeFocused();
+  await sourceEditor.fill(editedWorld);
+  const exportButton = page.getByRole('button', { name: /Validate and export/i });
+  await page.getByRole('button', { name: /Validate the editable MOD workspace/i }).focus();
+  await page.keyboard.press('v');
+  await expect(page.locator('.mod-action-feedback')).toHaveAttribute('data-state', 'Applied');
+  await expect(exportButton).toBeFocused();
+  await expect(page.locator('.mod-operation-result[data-outcome="applied"]')).toContainText(
+    /ready to export/i,
+  );
+
+  // The shared two-slot remapper persists only the private operator profile.
+  await page.locator('.mod-private-settings > summary').click();
+  const exportCapture = page.locator(
+    '[data-control="semantic-binding-editor.mod.export-0"]',
+  );
+  await exportCapture.focus();
+  await page.keyboard.press('x');
+  const profile = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), OPERATOR_PROFILE_KEY);
+  expect(profile.bindings['editor.mod.export'][0].code).toBe('KeyX');
+  expect(profile.bindings['captain.red-alert']).toBeTruthy();
+  expect(profile).not.toHaveProperty('identity');
+  expect(profile).not.toHaveProperty('station');
+  expect(profile).not.toHaveProperty('saves');
+
+  await exportButton.focus();
+  const downloadPromise = page.waitForEvent('download');
+  await page.keyboard.press('x');
+  const download = await downloadPromise;
+  const downloadPath = await download.path();
+  const exported = readStoreZipArchive(fs.readFileSync(downloadPath));
+  expect(exported.files[MANIFEST_PATH]).toBe(source.files[MANIFEST_PATH]);
+  expect(exported.files[MANIFEST_PATH]).toContain('# Golden tracer manifest comment.');
+  expect(exported.files[worldPath]).toBe(editedWorld);
+  expect(exported.files[worldPath]).toContain('# Golden tracer world comment.\r\n');
+  expect(await page.evaluate(() => (
+    Array.from(window.__modView.getWorkspace().getSourceArchive().bytes)
+  ))).toEqual(Array.from(fixtureBytes));
+  await expect(page.locator('.mod-action-feedback')).toHaveAttribute('data-state', 'Applied');
+  await expect(exportButton).toBeFocused();
+  expect((await page.evaluate(() => window.__feedback.map((entry) => entry.state))).slice(-6))
+    .toEqual(['Pressed', 'Pending', 'Applied', 'Pressed', 'Pending', 'Applied']);
+
+  // Exact top-level and action inventories are the browser scope proof: a
+  // Workshop, inspector, project writer, or model tool cannot be inserted into
+  // this bounded surface without changing the golden contract.
   await expect(page.locator('.mod-scope-boundary')).toContainText(/M6/i);
-  await expect(page.locator('[data-m6-inspector], [data-project-tooling]')).toHaveCount(0);
+  const inventory = (selector) => page.locator(selector).evaluateAll((nodes) => nodes.map(
+    (node) => `${node.tagName.toLowerCase()}.${Array.from(node.classList).join('.')}`,
+  ));
+  expect(await inventory('.mod-mode-body > *')).toEqual([
+    'section.mod-section.mod-meta',
+    'section.mod-section.mod-scenarios',
+    'section.mod-section.mod-members',
+    'section.mod-section.mod-actions',
+  ]);
+  expect(await inventory('.mod-actions > *')).toEqual([
+    'button.mod-import-btn',
+    'button.mod-validate-btn',
+    'button.mod-export-btn',
+    'input.mod-import-input.mod-file-input',
+    'div.mod-action-feedback',
+    'div.mod-messages',
+    'details.mod-private-settings',
+    'p.mod-scope-boundary',
+  ]);
 });
 
 test('MOD import cancellation clears the provisional lifecycle on a fresh page', async ({
@@ -152,7 +248,7 @@ test('MOD import cancellation clears the provisional lifecycle on a fresh page',
   // teardown cannot race a later chooser in another scenario.
   await importButton.focus();
   const chooserPromise = page.waitForEvent('filechooser');
-  await page.keyboard.press('i');
+  await importButton.click();
   const chooser = await chooserPromise;
   await chooser.setFiles([]);
   await expect(importButton).toBeFocused();

@@ -2,7 +2,7 @@
 title: Editor
 type: entity
 tags: [editor, tooling, scenario, entity, definitions, models, mod]
-sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js]
+sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js]
 updated: 2026-08-31
 ---
 
@@ -22,7 +22,7 @@ The browser editor is a project-root-aware authoring shell for World, Entity, De
 - Entity mode edits template sections against the shared component schema.
 - Definitions mode edits faction and complexity data through typed save payloads.
 - Models mode edits model-rig/LOD authoring surfaces.
-- MOD mode packages and inspects mod content against the project layout.
+- MOD mode packages mod content against the existing validation boundary.
 
 MOD ZIP import is the `editor.mod.import` semantic action in the `editor.mod`
 context. It uses the shared local feedback lifecycle. A readable pack is loaded
@@ -34,6 +34,22 @@ reuses those bytes so comments, ordering, extension keys, and line endings do
 not vanish. ZIP paths and contents use fatal UTF-8 decoding, matching the Rust
 upload reader. An unreadable ZIP or manifest leaves the previous workspace
 intact. T2 does not add the M6 live inspectors or project tooling to this editor.
+
+The same bounded workspace now exposes a source textarea for one selected
+member, preserving its imported base classification/digest and immutable source
+entry while the edited text changes. `editor.mod.validate` runs the existing
+export gate without downloading or clearing MOD dirty state;
+`editor.mod.export` runs that gate and downloads only an accepted ZIP. Both use
+Pressed/Pending/Applied-or-Refused feedback, focus an accessible refusal, and
+return successful focus to Export. Import, Validate, and Export each have two
+slots in the shared private operator profile and can be remapped through the
+common controls component. The parent client catalogue retains those bindings
+across surfaces, while ordinary play Settings filters out editor-only actions.
+Reset All is profile-wide: Captain, Helm, and editor remaps return to their
+authored defaults together. Feedback presentation is keyed per semantic action,
+so a busy Export or Import refusal remains alongside an outstanding Validate
+Pending state instead of erasing it. This tracer adds no unified inspector,
+project-root editing, model tooling, or Workshop redesign.
 
 ## Validation boundary
 

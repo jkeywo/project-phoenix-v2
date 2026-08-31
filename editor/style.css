@@ -1712,12 +1712,14 @@ form {
 .mod-add-row .mod-input { flex: 1 1 140px; }
 .mod-add-row button,
 .mod-export-btn,
+.mod-validate-btn,
 .mod-import-btn {
   background: #2a2d34; border: 1px solid #3a4a66; color: #cfe0ff;
   padding: 4px 12px; border-radius: 3px; font-size: 12px; cursor: pointer;
 }
 .mod-add-row button:hover,
 .mod-export-btn:hover,
+.mod-validate-btn:hover,
 .mod-import-btn:hover { background: #34435f; }
 .mod-scenario-list, .mod-member-list {
   display: flex; flex-direction: column; gap: 2px;
@@ -1736,6 +1738,11 @@ form {
 .mod-scenario-remove, .mod-member-remove {
   background: transparent; border: none; color: #d68a8a;
   cursor: pointer; font-size: 14px; line-height: 1; padding: 0 4px;
+}
+.mod-member-edit,
+.mod-settings-action {
+  background: #2a2d34; border: 1px solid #3a4a66; color: #cfe0ff;
+  padding: 3px 8px; border-radius: 3px; font-size: 11px; cursor: pointer;
 }
 .mod-member-badge {
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
@@ -1756,10 +1763,46 @@ form {
 .mod-messages-warnings { color: #d7ba7d; }
 .mod-messages-ok { color: #6a9955; }
 .mod-messages ul { margin: 4px 0 0; padding-left: 18px; }
-.mod-import-findings:focus {
+.mod-import-findings:focus,
+.mod-operation-result:focus {
   outline: 2px solid #8ab4ff;
   outline-offset: 4px;
 }
+.mod-member-source-editor {
+  display: flex; flex-direction: column; gap: 6px; margin-top: 10px;
+  padding-top: 10px; border-top: 1px solid #2f323a;
+}
+.mod-member-source-editor[hidden] { display: none; }
+.mod-member-source-editor h4,
+.mod-settings-section h4 { margin: 0; color: #ddd; font-size: 12px; }
+.mod-member-source-path { color: #9da5b4; font-size: 11px; }
+.mod-member-source-input {
+  width: 100%; box-sizing: border-box; resize: vertical;
+  background: #111317; border: 1px solid #3a4a66; border-radius: 3px;
+  color: #ddd; padding: 8px; font: 12px/1.45 monospace;
+}
+.mod-member-source-input:focus,
+.mod-private-settings input:focus,
+.mod-actions button:focus-visible {
+  outline: 2px solid #8ab4ff;
+  outline-offset: 2px;
+}
+.mod-member-source-hint,
+.mod-settings-hint { margin: 0; color: #9da5b4; font-size: 11px; }
+.mod-private-settings { max-width: 44rem; color: #cfe0ff; }
+.mod-private-settings > summary { cursor: pointer; font-size: 12px; }
+.mod-private-settings-body { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.mod-settings-section { display: flex; flex-direction: column; gap: 5px; }
+.mod-settings-row { display: flex; gap: 6px; }
+.mod-private-settings .settings-binding-label {
+  display: flex; flex-direction: column; gap: 3px; color: #9da5b4; font-size: 11px;
+}
+.mod-private-settings .settings-binding-capture {
+  background: #15171a; border: 1px solid #3a4a66; border-radius: 3px;
+  color: #ddd; padding: 4px 6px;
+}
+.mod-profile-status { font-size: 11px; color: #8fd6a0; }
+.mod-profile-status-rejected { color: #ffb4b4; }
 .mod-scope-boundary {
   max-width: 60rem;
   margin: 4px 0 0;

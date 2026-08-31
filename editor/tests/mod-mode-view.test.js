@@ -13,7 +13,13 @@ import {
   MANIFEST_PATH,
 } from '../mod-pack-export.js';
 import { canonicalTemplatePath } from '../entity-includes.js';
-import { MOD_ACTION_CONTEXT, MOD_IMPORT_ACTION_ID } from '../mod-actions.js';
+import {
+  MOD_ACTION_CONTEXT,
+  MOD_EXPORT_ACTION_ID,
+  MOD_IMPORT_ACTION_ID,
+  MOD_VALIDATE_ACTION_ID,
+} from '../mod-actions.js';
+import { OPERATOR_PROFILE_KEY } from '../../gui/operator-profile.js';
 
 // Issue #989 — the MOD-mode DOM view over the pure workspace. jsdom: the view
 // owns the DOM; IO (base-file reads for classification/stale, fragment
@@ -69,12 +75,14 @@ function mount(opts = {}) {
     exportPack: opts.exportPack,
     readArchive: opts.readArchive,
     feedbackRoot: opts.feedbackRoot,
+    profileStorage: opts.profileStorage ?? window.localStorage,
   });
   return { host, modeShell, view, download: dl };
 }
 
 beforeEach(() => {
   document.body.innerHTML = '';
+  window.localStorage.clear();
 });
 
 describe('mountModMode DOM shell', () => {
@@ -606,9 +614,253 @@ describe('#1321 semantic import lifecycle and validation focus', () => {
     expect(view._internal.elements.feedbackStatus.dataset.state).toBe('Refused');
   });
 
-  it('states the M6 scope boundary without exposing inspector or project controls', () => {
+  it('#1322 edits, validates, remaps, and exports one imported pack without losing source guarantees', async () => {
+    const manifestText = `# retain this manifest note\n${validManifestText()}`;
+    const worldText = '# retain this world note\r\n[global]\r\n[anchors]\r\n';
+    const editedWorld = worldText.replace(
+      '[global]\r\n',
+      '[global]\r\nsim_tick_hz = 60\r\n',
+    );
+    const bytes = archiveWithManifest(manifestText, [], worldText);
+    const ioBundle = makeIo({ [WORLD_PATH]: worldText });
+    const { host, view, modeShell, download } = mount({ ioBundle });
+    view.semanticActions.activate(MOD_IMPORT_ACTION_ID, { context: MOD_ACTION_CONTEXT });
+    await chooseBytes(view, bytes);
+
+    const before = view.getWorkspace().getMember(WORLD_PATH);
+    host.querySelector(`.mod-member-row[data-path="${WORLD_PATH}"] .mod-member-edit`).click();
+    const sourceInput = view._internal.elements.memberEditorInput;
+    expect(document.activeElement).toBe(sourceInput);
+    sourceInput.value = editedWorld;
+    sourceInput.dispatchEvent(new Event('input'));
+    expect(view.getWorkspace().getMember(WORLD_PATH)).toMatchObject({
+      text: editedWorld,
+      classification: 'patch',
+      baseDigest: before.baseDigest,
+    });
+    expect(modeShell.isDirty('MOD', MOD_DIRTY_KEY)).toBe(true);
+
+    const validateKey = new KeyboardEvent('keydown', {
+      code: 'KeyV', key: 'v', bubbles: true, cancelable: true,
+    });
+    expect(view.dispatchKeyboardEvent(validateKey)).toMatchObject({
+      claimed: true,
+      actionId: MOD_VALIDATE_ACTION_ID,
+      handled: true,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(view._internal.elements.feedbackStatus.dataset.state).toBe('Applied');
+    expect(document.activeElement).toBe(view._internal.elements.exportBtn);
+    expect(modeShell.isDirty('MOD', MOD_DIRTY_KEY)).toBe(true);
+    expect(download.calls).toHaveLength(0);
+
+    const capture = host.querySelector(
+      `[data-control="semantic-binding-${MOD_EXPORT_ACTION_ID}-0"]`,
+    );
+    capture.focus();
+    capture.dispatchEvent(new KeyboardEvent('keydown', {
+      code: 'KeyX', key: 'x', bubbles: true, cancelable: true,
+    }));
+    const privateProfile = JSON.parse(window.localStorage.getItem(OPERATOR_PROFILE_KEY));
+    expect(privateProfile.bindings[MOD_EXPORT_ACTION_ID][0].code).toBe('KeyX');
+    expect(privateProfile.bindings['captain.red-alert']).toBeTruthy();
+    expect(privateProfile).not.toHaveProperty('identity');
+    expect(privateProfile).not.toHaveProperty('station');
+    expect(privateProfile).not.toHaveProperty('saves');
+
+    const exportKey = new KeyboardEvent('keydown', {
+      code: 'KeyX', key: 'x', bubbles: true, cancelable: true,
+    });
+    expect(view.dispatchKeyboardEvent(exportKey)).toMatchObject({
+      claimed: true,
+      actionId: MOD_EXPORT_ACTION_ID,
+      handled: true,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(view._internal.elements.feedbackStatus.dataset.state).toBe('Applied');
+    expect(document.activeElement).toBe(view._internal.elements.exportBtn);
+    expect(modeShell.isDirty('MOD', MOD_DIRTY_KEY)).toBe(false);
+    expect(download.calls).toHaveLength(1);
+
+    const exported = readStoreZipArchive(download.calls[0].bytes);
+    expect(exported.files[MANIFEST_PATH]).toBe(manifestText);
+    expect(exported.files[WORLD_PATH]).toBe(editedWorld);
+    expect(exported.files[WORLD_PATH]).toContain('# retain this world note\r\n');
+    expect(view.getWorkspace().getSourceEntry(WORLD_PATH).text).toBe(worldText);
+    expect(Array.from(view.getWorkspace().getSourceArchive().bytes)).toEqual(Array.from(bytes));
+  });
+
+  it('#1322 Reset All restores Captain, Helm, and editor bindings in one persisted profile', () => {
+    const { host, view } = mount();
+    const registry = view.semanticActions;
+    const actionIds = ['captain.red-alert', 'helm.steering', MOD_EXPORT_ACTION_ID];
+    const defaults = Object.fromEntries(actionIds.map((id) => [
+      id,
+      registry.action(id).bindings,
+    ]));
+    const keyX = {
+      type: 'keyboard',
+      code: 'KeyX',
+      ctrlKey: false,
+      shiftKey: false,
+      altKey: false,
+      metaKey: false,
+    };
+    const keyZ = { ...keyX, code: 'KeyZ' };
+
+    expect(registry.setBinding('captain.red-alert', 1, keyZ).status).toBe('applied');
+    expect(registry.setBinding('helm.steering', 0, null).status).toBe('applied');
+    expect(registry.setBinding(MOD_EXPORT_ACTION_ID, 0, keyX).status).toBe('applied');
+    for (const id of actionIds) expect(registry.action(id).bindings).not.toEqual(defaults[id]);
+
+    host.querySelector('[data-control="semantic-binding-reset-all"]').click();
+
+    for (const id of actionIds) expect(registry.action(id).bindings).toEqual(defaults[id]);
+    const stored = JSON.parse(window.localStorage.getItem(OPERATOR_PROFILE_KEY));
+    for (const id of actionIds) expect(stored.bindings[id]).toEqual(defaults[id]);
+  });
+
+  it('#1322 keeps overlapping action feedback keyed while Validate is pending', async () => {
+    let releaseBase;
+    const baseGate = new Promise((resolve) => { releaseBase = resolve; });
+    const ioBundle = {
+      io: {
+        readFile: async (requestedPath) => {
+          if (requestedPath !== WORLD_PATH) throw new Error('not found');
+          await baseGate;
+          return WORLD_TEXT;
+        },
+      },
+    };
+    const { host, view } = mount({ ioBundle });
+    goodMeta(view);
+    view.getWorkspace().addMember(
+      { path: WORLD_PATH, text: WORLD_TEXT },
+      { [WORLD_PATH]: WORLD_TEXT },
+    );
+    view.getWorkspace().addScenario({ id: 'default', world: WORLD_PATH });
+    view.render();
+
+    expect(view.semanticActions.activate(MOD_VALIDATE_ACTION_ID, {
+      context: MOD_ACTION_CONTEXT,
+    })).toMatchObject({ claimed: true, handled: true });
+    expect(host.querySelector(
+      `.mod-action-feedback-row[data-action-id="${MOD_VALIDATE_ACTION_ID}"]`,
+    ).dataset.state).toBe('Pending');
+
+    // A different operation is explicitly refused, but both states remain in
+    // the aggregate live region and the refusal keeps focus.
+    expect(view.semanticActions.activate(MOD_EXPORT_ACTION_ID, {
+      context: MOD_ACTION_CONTEXT,
+    })).toMatchObject({ claimed: true, handled: true });
+    expect(host.querySelector(
+      `.mod-action-feedback-row[data-action-id="${MOD_VALIDATE_ACTION_ID}"]`,
+    ).dataset.state).toBe('Pending');
+    expect(host.querySelector(
+      `.mod-action-feedback-row[data-action-id="${MOD_EXPORT_ACTION_ID}"]`,
+    ).dataset.state).toBe('Refused');
+    expect(document.activeElement).toBe(host.querySelector(
+      '.mod-operation-result[data-outcome="refused"]',
+    ));
+
+    expect(view.semanticActions.activate(MOD_IMPORT_ACTION_ID, {
+      context: MOD_ACTION_CONTEXT,
+    })).toMatchObject({ claimed: true, handled: true });
+    expect(host.querySelector(
+      `.mod-action-feedback-row[data-action-id="${MOD_VALIDATE_ACTION_ID}"]`,
+    ).dataset.state).toBe('Pending');
+    expect(host.querySelector(
+      `.mod-action-feedback-row[data-action-id="${MOD_IMPORT_ACTION_ID}"]`,
+    ).dataset.state).toBe('Refused');
+    const busyAlert = host.querySelector('.mod-operation-result[data-outcome="refused"]');
+    expect(busyAlert.getAttribute('role')).toBe('alert');
+    expect(document.activeElement).toBe(busyAlert);
+
+    // A duplicate Validate is cancelled by the adapter. The shared lifecycle
+    // promotes the original correlation and the aggregate restores Pending.
+    expect(view.semanticActions.activate(MOD_VALIDATE_ACTION_ID, {
+      context: MOD_ACTION_CONTEXT,
+    })).toMatchObject({ claimed: true, handled: false });
+    expect(host.querySelector(
+      `.mod-action-feedback-row[data-action-id="${MOD_VALIDATE_ACTION_ID}"]`,
+    ).dataset.state).toBe('Pending');
+    expect(host.querySelectorAll('.mod-action-feedback-row')).toHaveLength(3);
+    expect(document.activeElement).toBe(busyAlert);
+
+    releaseBase();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(host.querySelector(
+      `.mod-action-feedback-row[data-action-id="${MOD_VALIDATE_ACTION_ID}"]`,
+    ).dataset.state).toBe('Applied');
+    expect(document.activeElement).toBe(view._internal.elements.exportBtn);
+  });
+
+  it('#1322 refuses an invalid member edit with focused accessible feedback and no download', async () => {
+    const bytes = validArchive();
+    const { host, view, modeShell, download } = mount();
+    view.semanticActions.activate(MOD_IMPORT_ACTION_ID, { context: MOD_ACTION_CONTEXT });
+    await chooseBytes(view, bytes);
+    host.querySelector(`.mod-member-row[data-path="${WORLD_PATH}"] .mod-member-edit`).click();
+    const sourceInput = view._internal.elements.memberEditorInput;
+    sourceInput.value = 'not_valid = [';
+    sourceInput.dispatchEvent(new Event('input'));
+
+    view.semanticActions.activate(MOD_VALIDATE_ACTION_ID, { context: MOD_ACTION_CONTEXT });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const refusal = host.querySelector('.mod-operation-result[data-outcome="refused"]');
+    expect(refusal).toBeTruthy();
+    expect(refusal.getAttribute('role')).toBe('alert');
+    expect(document.activeElement).toBe(refusal);
+    expect(view._internal.elements.feedbackStatus.dataset.state).toBe('Refused');
+    expect(modeShell.isDirty('MOD', MOD_DIRTY_KEY)).toBe(true);
+    expect(download.calls).toHaveLength(0);
+    expect(Array.from(view.getWorkspace().getSourceArchive().bytes)).toEqual(Array.from(bytes));
+  });
+
+  it('proves the bounded T2 surface and dependencies instead of placeholder selectors', () => {
     const { host, view } = mount();
     expect(view._internal.elements.scopeBoundary.textContent).toMatch(/M6/i);
-    expect(host.querySelector('[data-m6-inspector], [data-project-tooling]')).toBeNull();
+    const inventory = (selector) => Array.from(
+      host.querySelector(selector).children,
+      (node) => `${node.tagName.toLowerCase()}.${Array.from(node.classList).join('.')}`,
+    );
+    expect(inventory('.mod-mode-body')).toEqual([
+      'section.mod-section.mod-meta',
+      'section.mod-section.mod-scenarios',
+      'section.mod-section.mod-members',
+      'section.mod-section.mod-actions',
+    ]);
+    expect(inventory('.mod-actions')).toEqual([
+      'button.mod-import-btn',
+      'button.mod-validate-btn',
+      'button.mod-export-btn',
+      'input.mod-import-input.mod-file-input',
+      'div.mod-action-feedback',
+      'div.mod-messages',
+      'details.mod-private-settings',
+      'p.mod-scope-boundary',
+    ]);
+
+    const source = readFileSync(path.resolve(process.cwd(), 'editor/mod-mode-view.js'), 'utf8');
+    const dependencies = new Set([
+      ...Array.from(source.matchAll(/\bfrom\s+['"]([^'"]+)['"]/g), (match) => match[1]),
+      ...Array.from(source.matchAll(/^\s*import\s+['"]([^'"]+)['"]/gm), (match) => match[1]),
+    ]);
+    expect([...dependencies].sort()).toEqual([
+      '../gui/action-feedback.js',
+      '../gui/operator-profile.js',
+      '../gui/semantic-controls-remapper.js',
+      '../gui/strings-boot.js',
+      '../gui/strings.js',
+      './entity-cache.js',
+      './entity-includes.js',
+      './mod-actions.js',
+      './mod-pack-export.js',
+      './mod-pack-workspace.js',
+      './project-root.js',
+    ]);
+    expect(source).toContain("import { readFile as defaultReadFile } from './project-root.js';");
+    expect(source).not.toMatch(/\bwriteFile\b|\.\/save-flow\.js|models-mode-view|workshop|inspector/i);
   });
 });

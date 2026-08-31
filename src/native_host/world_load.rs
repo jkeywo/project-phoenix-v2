@@ -189,9 +189,18 @@ impl Plugin for NativeWorldLoadPlugin {
             (drain_scenario_selection, apply_pending_world_load)
                 .chain()
                 .in_set(NativeWorldLoadSet)
+                // After the lobby, so a participant who identifies and picks in
+                // the same tick has a session by the time the catalogue is
+                // addressed to their token — `Target::Token` resolves through
+                // `SessionManager`, and answering a token that does not exist
+                // yet would drop the one message that participant is waiting
+                // for.
+                .after(crate::lobby::LobbySystemSet)
                 // Before the simulation reads anything: a world that lands this
                 // tick must be visible to `SimSet::Input` on the same tick, the
                 // way a `Startup`-ingested one is visible to the first tick.
+                // (`SimSet::Input` already orders itself after
+                // `LobbySystemSet`, so this pair of edges cannot cycle.)
                 .before(crate::sim_sets::SimSet::Input)
                 .run_if(awaiting_world),
         );
@@ -344,6 +353,14 @@ fn apply_pending_world_load(world: &mut World) {
             "loading {} failed, staying in the lobby: {error}",
             pending.world_path
         );
+        // Put the lobby back to genuinely world-less. `install_world_selection`
+        // can fail AFTER `ingest_world` has already inserted these two (an
+        // uncached hull, a hull with no `[[station]]` blocks), and leaving them
+        // behind would take `awaiting_world` false — a host holding a world it
+        // never spawned, unable to accept another pick. Nothing has spawned yet
+        // at either failure point, so removing them is the whole undo.
+        world.remove_resource::<crate::world::config::WorldConfig>();
+        world.remove_resource::<crate::world::server::PreCompiledScripts>();
         if let Some(mut selection) = world.get_resource_mut::<LobbySelection>() {
             selection.0 = ScenarioSelection::default();
         }

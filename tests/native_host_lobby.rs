@@ -328,6 +328,49 @@ fn a_runtime_load_mints_the_same_world_entity_ids_as_a_boot_load() {
 }
 
 #[test]
+fn a_load_that_fails_after_the_ingest_leaves_a_pickable_lobby() {
+    // The failure the runtime path has that the boot path does not: `--world`
+    // reports an unusable hull at the prompt and the process exits, but here the
+    // ingest has already inserted `WorldConfig` + `PreCompiledScripts` by the
+    // time `install_world_selection` refuses. Left behind, they take
+    // `world_load::awaiting_world` false — a host holding a world it never
+    // spawned, deaf to every later pick. `--ship` naming a template the preload
+    // never cached is the reachable way to provoke exactly that ordering.
+    let preload = preload();
+    let mut cfg = lobby_config();
+    cfg.solo = true;
+    cfg.ship_path = Some("assets/entities/not_a_hull_at_all.toml".to_string());
+    let mut app = build_native_host_app(&cfg, &preload).expect("a world-less host assembles");
+    pump(&mut app, 4);
+
+    let (scenario_id, hull) = pick();
+    select(&mut app, "phone-1", &scenario_id, &hull);
+    pump(&mut app, 30);
+
+    assert!(
+        app.world().get_resource::<WorldConfig>().is_none(),
+        "a refused hull unwinds the ingest rather than half-loading the world"
+    );
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::Lobby,
+        "and the host is still in the lobby"
+    );
+
+    // Now a hull that IS cached: the same host loads normally, which is the
+    // whole point of unwinding rather than latching.
+    app.world_mut()
+        .resource_mut::<project_phoenix::native_host::world_load::LobbyBootSettings>()
+        .ship_path = None;
+    select(&mut app, "phone-2", &scenario_id, &hull);
+    pump(&mut app, 120);
+    assert!(
+        app.world().get_resource::<WorldConfig>().is_some(),
+        "the next selection loads normally"
+    );
+}
+
+#[test]
 fn an_unlisted_scenario_is_refused_and_the_host_stays_in_the_lobby() {
     // First-valid-wins means a request that fails catalogue validation locks
     // nothing — `gui/scenario-arbiter.js` returns 'rejected' and `server.html`

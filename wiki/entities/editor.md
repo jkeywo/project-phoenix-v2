@@ -2,8 +2,8 @@
 title: Editor
 type: entity
 tags: [editor, tooling, scenario, entity, definitions, models, mod]
-sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js]
-updated: 2026-08-27
+sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js]
+updated: 2026-08-31
 ---
 
 # Editor
@@ -23,6 +23,17 @@ The browser editor is a project-root-aware authoring shell for World, Entity, De
 - Definitions mode edits faction and complexity data through typed save payloads.
 - Models mode edits model-rig/LOD authoring surfaces.
 - MOD mode packages and inspects mod content against the project layout.
+
+MOD ZIP import is the `editor.mod.import` semantic action in the `editor.mod`
+context. It uses the shared local feedback lifecycle. A readable pack is loaded
+into the existing workspace before validation, so definite findings are focused
+and announced without discarding its source members. The workspace retains an
+immutable copy of the imported archive and each ordered entry's exact bytes;
+when the manifest fields and a member's text remain untouched, repair/export
+reuses those bytes so comments, ordering, extension keys, and line endings do
+not vanish. ZIP paths and contents use fatal UTF-8 decoding, matching the Rust
+upload reader. An unreadable ZIP or manifest leaves the previous workspace
+intact. T2 does not add the M6 live inspectors or project tooling to this editor.
 
 ## Validation boundary
 

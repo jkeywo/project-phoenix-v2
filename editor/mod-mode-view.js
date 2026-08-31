@@ -19,12 +19,24 @@
 import { ModPackWorkspace } from './mod-pack-workspace.js';
 import {
   exportModPack,
-  readStoreZip,
+  readStoreZipArchive,
   MANIFEST_PATH,
 } from './mod-pack-export.js';
 import { resolveEntityConfig as defaultResolveEntityConfig } from './entity-cache.js';
 import { readFile as defaultReadFile } from './project-root.js';
 import { canonicalTemplatePath } from './entity-includes.js';
+import '../gui/strings-boot.js';
+import { t } from '../gui/strings.js';
+import {
+  ACTION_FEEDBACK_STATE,
+  ActionFeedbackLifecycle,
+  emitActionFeedbackTransition,
+} from '../gui/action-feedback.js';
+import {
+  MOD_ACTION_CONTEXT,
+  MOD_IMPORT_ACTION_ID,
+  createModActionRegistry,
+} from './mod-actions.js';
 
 /** MOD mode has no per-file save; a single sentinel key carries its dirty bit
  * so `modeShell.hasAnyDirty()` (and the beforeunload guard) sees pending edits. */
@@ -78,8 +90,9 @@ export function mountModMode({
   resolveEntityConfig = defaultResolveEntityConfig,
   // Injectable seams so the view runs headless in tests.
   exportPack = exportModPack,
-  readArchive = readStoreZip,
+  readArchive = readStoreZipArchive,
   download = defaultDownload,
+  feedbackRoot = typeof window !== 'undefined' ? window : globalThis,
 } = {}) {
   if (!host) return null;
 
@@ -174,20 +187,61 @@ export function mountModMode({
   const actionsSection = el('section', { class: 'mod-section mod-actions' });
   const exportBtn = el('button', { type: 'button', class: 'mod-export-btn', text: 'Export pack (.zip)' });
   exportBtn.addEventListener('click', () => { exportPackNow(); });
-  const importInput = el('input', { type: 'file', accept: '.zip', class: 'mod-import-input' });
-  importInput.addEventListener('change', async () => {
-    const file = importInput.files && importInput.files[0];
-    if (!file) return;
-    const buf = await file.arrayBuffer();
-    await importArchiveBytes(new Uint8Array(buf));
-    importInput.value = '';
+  const importBtn = el('button', {
+    type: 'button',
+    class: 'mod-import-btn',
+    text: t('editor.mod.import.button'),
+    'aria-label': t('semantic_action.editor.mod.import.accessibility'),
   });
-  const importLabel = el('label', { class: 'mod-import-label', text: 'Import pack: ' });
-  importLabel.appendChild(importInput);
-  actionsSection.append(exportBtn, importLabel);
-  const messages = el('div', { class: 'mod-messages' });
-  actionsSection.appendChild(messages);
+  const importInput = el('input', {
+    type: 'file',
+    accept: '.zip,application/zip',
+    class: 'mod-import-input mod-file-input',
+    tabindex: '-1',
+    'aria-hidden': 'true',
+  });
+  const feedbackStatus = el('div', {
+    class: 'mod-action-feedback',
+    role: 'status',
+    'aria-live': 'polite',
+    'aria-atomic': 'true',
+  });
+  const messages = el('div', {
+    class: 'mod-messages',
+  });
+  const scopeBoundary = el('p', {
+    class: 'mod-scope-boundary',
+    text: t('editor.mod.import.m6_boundary'),
+  });
+  actionsSection.append(exportBtn, importBtn, importInput, feedbackStatus, messages, scopeBoundary);
   body.appendChild(actionsSection);
+
+  let pendingImport = null;
+  const actionFeedback = new ActionFeedbackLifecycle({
+    onTransition(value) {
+      emitActionFeedbackTransition(feedbackRoot, value);
+      if (!value.isCurrent) return;
+      if (value.cancelled || !value.state || !value.statusId) {
+        feedbackStatus.textContent = '';
+        delete feedbackStatus.dataset.state;
+        return;
+      }
+      feedbackStatus.textContent = t(value.statusId);
+      feedbackStatus.dataset.state = value.state;
+    },
+  });
+  const semanticActions = createModActionRegistry({
+    actionFeedback,
+    openImport: beginImport,
+  });
+  importBtn.addEventListener('click', () => {
+    semanticActions.activate(MOD_IMPORT_ACTION_ID, {
+      context: MOD_ACTION_CONTEXT,
+      source: 'control',
+    });
+  });
+  importInput.addEventListener('change', completeSelectedImport);
+  importInput.addEventListener('cancel', cancelPendingImport);
 
   // ── Rendering ───────────────────────────────────────────────────────────
 
@@ -215,6 +269,12 @@ export function mountModMode({
       row.appendChild(el('span', { class: 'mod-scenario-row-id', text: s.id || '(no id)' }));
       row.appendChild(el('span', { class: 'mod-scenario-row-world', text: s.world || '(no world)' }));
       if (s.label) row.appendChild(el('span', { class: 'mod-scenario-row-label', text: s.label }));
+      if (Array.isArray(s.ships) && s.ships.length > 0) {
+        row.appendChild(el('span', {
+          class: 'mod-scenario-row-ships',
+          text: s.ships.join(', '),
+        }));
+      }
       const rm = el('button', { type: 'button', class: 'mod-scenario-remove', text: '×' });
       rm.addEventListener('click', () => {
         workspace.removeScenario(s.id);
@@ -287,6 +347,122 @@ export function mountModMode({
     }
   }
 
+  function focusWithoutJump(node) {
+    if (!node || typeof node.focus !== 'function') return;
+    try {
+      node.focus({ preventScroll: true });
+    } catch {
+      node.focus();
+    }
+  }
+
+  function renderImportFindings({ errors = [], warnings = [] }) {
+    messages.innerHTML = '';
+    const box = el('div', {
+      class: 'mod-import-findings mod-messages-errors',
+      role: 'alert',
+      tabindex: '-1',
+      dataset: { outcome: 'refused' },
+    });
+    box.appendChild(el('strong', { text: t('editor.mod.import.invalid_heading') }));
+    box.appendChild(el('p', { text: t('editor.mod.import.source_retained') }));
+    if (errors.length > 0) {
+      const ul = el('ul');
+      for (const error of errors) ul.appendChild(el('li', { text: error }));
+      box.appendChild(ul);
+    }
+    if (warnings.length > 0) {
+      const warningHeading = el('strong', { text: t('editor.mod.import.warning_heading') });
+      const ul = el('ul');
+      for (const warning of warnings) ul.appendChild(el('li', { text: warning }));
+      box.append(warningHeading, ul);
+    }
+    messages.appendChild(box);
+    focusWithoutJump(box);
+    return box;
+  }
+
+  function renderUnreadableArchive(reason) {
+    messages.innerHTML = '';
+    const box = el('div', {
+      class: 'mod-import-findings mod-messages-errors',
+      role: 'alert',
+      tabindex: '-1',
+      dataset: { outcome: 'refused' },
+    });
+    box.appendChild(el('strong', { text: t('editor.mod.import.unreadable_heading') }));
+    box.appendChild(el('p', {
+      text: t('editor.mod.import.unreadable_detail', { reason: String(reason || '') }),
+    }));
+    box.appendChild(el('p', { text: t('editor.mod.import.previous_workspace_preserved') }));
+    messages.appendChild(box);
+    focusWithoutJump(box);
+    return box;
+  }
+
+  function renderImportSuccess(warnings = []) {
+    messages.innerHTML = '';
+    const box = el('div', {
+      class: 'mod-messages-ok mod-import-success',
+      role: 'status',
+      dataset: { outcome: 'applied' },
+    });
+    box.appendChild(el('p', { text: t('editor.mod.import.success') }));
+    if (warnings.length > 0) {
+      box.appendChild(el('strong', { text: t('editor.mod.import.warning_heading') }));
+      const ul = el('ul');
+      for (const warning of warnings) ul.appendChild(el('li', { text: warning }));
+      box.appendChild(ul);
+    }
+    messages.appendChild(box);
+  }
+
+  function beginImport({ settleFeedback, cancelFeedback } = {}) {
+    if (pendingImport) return false;
+    pendingImport = { settleFeedback, cancelFeedback };
+    importInput.value = '';
+    try {
+      importInput.click();
+    } catch (error) {
+      const pending = pendingImport;
+      pendingImport = null;
+      renderUnreadableArchive(error?.message);
+      pending?.settleFeedback?.(ACTION_FEEDBACK_STATE.REFUSED);
+    }
+    return true;
+  }
+
+  function cancelPendingImport() {
+    if (!pendingImport) return false;
+    const pending = pendingImport;
+    pendingImport = null;
+    importInput.value = '';
+    pending.cancelFeedback?.();
+    focusWithoutJump(importBtn);
+    return true;
+  }
+
+  async function completeSelectedImport() {
+    const file = importInput.files && importInput.files[0];
+    if (!file) {
+      cancelPendingImport();
+      return;
+    }
+    const pending = pendingImport;
+    try {
+      const buf = await file.arrayBuffer();
+      await importArchiveBytes(new Uint8Array(buf), {
+        settleFeedback: pending?.settleFeedback,
+      });
+    } catch (error) {
+      renderUnreadableArchive(error?.message);
+      pending?.settleFeedback?.(ACTION_FEEDBACK_STATE.REFUSED);
+    } finally {
+      pendingImport = null;
+      importInput.value = '';
+    }
+  }
+
   // ── Edit plumbing ─────────────────────────────────────────────────────────
 
   function markDirty(dirty = true) {
@@ -296,8 +472,14 @@ export function mountModMode({
   function onMetaInput(key, input) {
     if (key === 'content_epoch') {
       const raw = input.value.trim();
-      const epoch = raw === '' ? null : Number.parseInt(raw, 10);
-      workspace.setPack({ requires: { content_epoch: Number.isNaN(epoch) ? null : epoch } });
+      let epoch = null;
+      if (/^[+-]?\d+$/.test(raw)) {
+        const exact = BigInt(raw);
+        epoch = exact >= BigInt(Number.MIN_SAFE_INTEGER) && exact <= BigInt(Number.MAX_SAFE_INTEGER)
+          ? Number(exact)
+          : exact;
+      }
+      workspace.setPack({ requires: { content_epoch: epoch } });
     } else if (key === 'content_id') {
       workspace.setPack({ requires: { content_id: input.value } });
     } else {
@@ -394,13 +576,25 @@ export function mountModMode({
     return { ...result, staleWarnings };
   }
 
-  async function importArchiveBytes(bytes) {
+  async function importArchiveBytes(bytes, { settleFeedback = null } = {}) {
     clearMessages();
     let files;
+    let sourceArchive = null;
     try {
-      files = readArchive(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
+      const decoded = readArchive(
+        bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes),
+      );
+      // Keep the injection seam compatible with its historical map-only shape,
+      // while the real reader carries exact source provenance alongside it.
+      if (decoded?.files && decoded?.source) {
+        files = decoded.files;
+        sourceArchive = decoded.source;
+      } else {
+        files = decoded;
+      }
     } catch (e) {
-      renderMessages({ errors: [`could not read archive: ${e.message}`], warnings: [] });
+      renderUnreadableArchive(e.message);
+      settleFeedback?.(ACTION_FEEDBACK_STATE.REFUSED);
       return null;
     }
     const memberPaths = Object.keys(files).filter((p) => p !== MANIFEST_PATH);
@@ -409,9 +603,34 @@ export function mountModMode({
       const text = await readMaybe(p);
       if (text !== undefined) baseFiles[p] = text;
     }
-    workspace = ModPackWorkspace.fromArchiveFiles(files, baseFiles);
+    let candidate;
+    try {
+      candidate = ModPackWorkspace.fromArchiveFiles(files, baseFiles, sourceArchive);
+    } catch (error) {
+      renderUnreadableArchive(error.message);
+      settleFeedback?.(ACTION_FEEDBACK_STATE.REFUSED);
+      return null;
+    }
+
+    // A readable source bundle is the operator's recovery asset.  Install it
+    // before surfacing semantic findings so the exact member text remains in
+    // the editable workspace even when the existing export gate refuses it.
+    workspace = candidate;
     markDirty(false);
     renderAll();
+    const validation = exportPack({ ...workspace.toExportInput(), rigIndex });
+    if (!validation.ok) {
+      renderImportFindings({
+        errors: validation.errors || [],
+        warnings: validation.warnings || [],
+      });
+      settleFeedback?.(ACTION_FEEDBACK_STATE.REFUSED);
+      return workspace;
+    }
+
+    renderImportSuccess(validation.warnings || []);
+    settleFeedback?.(ACTION_FEEDBACK_STATE.APPLIED);
+    focusWithoutJump(fields.id);
     return workspace;
   }
 
@@ -420,6 +639,11 @@ export function mountModMode({
   return {
     getWorkspace: () => workspace,
     render: renderAll,
+    semanticActions,
+    dispatchKeyboardEvent: (event) => semanticActions.dispatchKeyboardEvent(
+      event,
+      MOD_ACTION_CONTEXT,
+    ),
     _internal: {
       addMemberByPath,
       addFragmentMembers,
@@ -428,7 +652,19 @@ export function mountModMode({
       currentBaseForPatches,
       onMetaInput,
       fields,
-      elements: { exportBtn, importInput, memPath, memAddBtn, scenAddBtn, messages, memList, scenList },
+      elements: {
+        exportBtn,
+        importBtn,
+        importInput,
+        feedbackStatus,
+        scopeBoundary,
+        memPath,
+        memAddBtn,
+        scenAddBtn,
+        messages,
+        memList,
+        scenList,
+      },
     },
   };
 }

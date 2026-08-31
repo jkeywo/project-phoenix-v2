@@ -1711,12 +1711,14 @@ form {
 .mod-add-row { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
 .mod-add-row .mod-input { flex: 1 1 140px; }
 .mod-add-row button,
-.mod-export-btn {
+.mod-export-btn,
+.mod-import-btn {
   background: #2a2d34; border: 1px solid #3a4a66; color: #cfe0ff;
   padding: 4px 12px; border-radius: 3px; font-size: 12px; cursor: pointer;
 }
 .mod-add-row button:hover,
-.mod-export-btn:hover { background: #34435f; }
+.mod-export-btn:hover,
+.mod-import-btn:hover { background: #34435f; }
 .mod-scenario-list, .mod-member-list {
   display: flex; flex-direction: column; gap: 2px;
 }
@@ -1742,10 +1744,25 @@ form {
 .mod-member-badge-new { background: #23402a; color: #8fd6a0; }
 .mod-member-badge-patch { background: #3a3320; color: #d6c078; }
 .mod-placeholder { color: #666; font-style: italic; font-size: 12px; margin: 4px 0; }
-.mod-actions { display: flex; flex-direction: column; gap: 8px; }
-.mod-import-label { color: #9da5b4; font-size: 12px; }
+.mod-actions { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.mod-file-input { display: none; }
+.mod-action-feedback {
+  min-height: 1.25em;
+  color: #d7e6ff;
+  font-weight: 600;
+}
 .mod-messages { margin-top: 4px; font-size: 12px; }
 .mod-messages-errors { color: #ffb4b4; }
 .mod-messages-warnings { color: #d7ba7d; }
 .mod-messages-ok { color: #6a9955; }
 .mod-messages ul { margin: 4px 0 0; padding-left: 18px; }
+.mod-import-findings:focus {
+  outline: 2px solid #8ab4ff;
+  outline-offset: 4px;
+}
+.mod-scope-boundary {
+  max-width: 60rem;
+  margin: 4px 0 0;
+  color: #9da5b4;
+  font-size: 11px;
+}

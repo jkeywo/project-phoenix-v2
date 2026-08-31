@@ -11,8 +11,10 @@ import {
   validatePackMeta,
   buildManifestToml,
   buildPackTable,
+  parsePackManifest,
   createStoreZip,
   readStoreZip,
+  readStoreZipArchive,
   crc32,
   PACK_FORMAT,
   MANIFEST_PATH,
@@ -120,11 +122,63 @@ describe('store-only ZIP writer', () => {
     expect(files['assets/worlds/default.toml']).toBe('[global]\ntitle = "x"\n');
   });
 
+  it('returns exact ordered source bytes alongside the compatibility text map', () => {
+    const content = new TextEncoder().encode('# exact source\r\nvalue = "Ã¸"\r\n');
+    const zip = createStoreZip([{ path: 'a.toml', bytes: content }]);
+    const decoded = readStoreZipArchive(zip);
+
+    expect(decoded.files['a.toml']).toBe('# exact source\r\nvalue = "Ã¸"\r\n');
+    expect(Array.from(decoded.source.bytes)).toEqual(Array.from(zip));
+    expect(decoded.source.entries.map((entry) => entry.path)).toEqual(['a.toml']);
+    expect(Array.from(decoded.source.entries[0].bytes)).toEqual(Array.from(content));
+  });
+
+  it('retains an own __proto__ member for semantic validation', () => {
+    const zip = createStoreZip([
+      { path: MANIFEST_PATH, text: 'manifest source\n' },
+      { path: '__proto__', text: 'untrusted member source\n' },
+    ]);
+    const decoded = readStoreZipArchive(zip);
+
+    expect(Object.getPrototypeOf(decoded.files)).toBeNull();
+    expect(Object.prototype.hasOwnProperty.call(decoded.files, '__proto__')).toBe(true);
+    expect(decoded.files.__proto__).toBe('untrusted member source\n');
+    expect(decoded.source.entries.map((entry) => entry.path)).toEqual([
+      MANIFEST_PATH,
+      '__proto__',
+    ]);
+  });
+
   it('a corrupted archive fails CRC verification', () => {
     const zip = createStoreZip([{ path: 'a.toml', text: 'hello world' }]);
     // Data begins after the 30-byte local header + 6-byte name "a.toml".
     zip[30 + 6] ^= 0xff;
     expect(() => readStoreZip(zip)).toThrow(/CRC/);
+  });
+
+  it('rejects arbitrary bytes instead of treating them as an empty archive', () => {
+    const notAZip = new TextEncoder().encode('this is not a ZIP archive');
+    expect(() => readStoreZip(notAZip)).toThrow(/ZIP/i);
+  });
+
+  it('rejects CRC-valid member content that is not UTF-8', () => {
+    const zip = createStoreZip([{ path: 'a.toml', bytes: Uint8Array.of(0xff) }]);
+    expect(() => readStoreZip(zip)).toThrow(/file "a\.toml".*UTF-8/i);
+  });
+
+  it('fatally rejects invalid UTF-8 in a local file name', () => {
+    const zip = createStoreZip([{ path: 'a', text: 'value' }]);
+    zip[30] = 0xff; // one-byte local name; central name remains structurally present
+    expect(() => readStoreZip(zip)).toThrow(/file name.*UTF-8/i);
+  });
+
+  it('fatally rejects invalid UTF-8 in a central-directory file name', () => {
+    const zip = createStoreZip([{ path: 'a', text: 'value' }]);
+    const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
+    const eocdOffset = zip.length - 22;
+    const centralOffset = view.getUint32(eocdOffset + 16, true);
+    zip[centralOffset + 46] = 0xff; // one-byte central name; local name remains valid
+    expect(() => readStoreZip(zip)).toThrow(/central directory file name.*UTF-8/i);
   });
 });
 
@@ -195,6 +249,132 @@ describe('buildManifestToml + validateManifestEntries', () => {
     ).toBe(true);
   });
 
+  it('validates the raw manifest schema before values can be normalised', () => {
+    const valid = buildManifestToml(
+      [{ id: 'default', world: DEFAULT_WORLD_PATH }],
+      goodPack(),
+    );
+
+    expect(() => parsePackManifest(valid.replace('format = 1\n', '')))
+      .toThrow(/\[pack\] format is required/i);
+    expect(() => parsePackManifest(
+      valid.replace('content_epoch = 1', 'content_epoch = "1"'),
+    )).toThrow(/content_epoch.*integer token/i);
+    for (const floatToken of ['1.0', '1e0']) {
+      expect(() => parsePackManifest(valid.replace('format = 1', `format = ${floatToken}`)))
+        .toThrow(/\[pack\] format.*integer token/i);
+      expect(() => parsePackManifest(
+        valid.replace('content_epoch = 1', `content_epoch = ${floatToken}`),
+      )).toThrow(/content_epoch.*integer token/i);
+    }
+    expect(() => parsePackManifest(valid.replace('id = "test-pack"', 'id = 7')))
+      .toThrow(/\[pack\] id must be a string/i);
+    expect(() => parsePackManifest(valid.replace('id = "default"\n', '')))
+      .toThrow(/scenario 1 id must be a string/i);
+  });
+
+  it.each([
+    ['minimum', '-9223372036854775808'],
+    ['maximum', '9223372036854775807'],
+  ])('accepts and exactly reserialises the signed i64 %s content_epoch', (_label, token) => {
+    const valid = buildManifestToml(
+      [{ id: 'default', world: DEFAULT_WORLD_PATH }],
+      goodPack(),
+    );
+    const parsed = parsePackManifest(valid.replace('content_epoch = 1', `content_epoch = ${token}`));
+
+    expect(parsed.pack.requires.content_epoch).toBe(BigInt(token));
+    expect(validatePackMeta(parsed.pack)).toEqual([]);
+    expect(buildManifestToml(parsed.scenarios, parsed.pack)).toContain(`content_epoch = ${token}`);
+  });
+
+  it.each([
+    ['below', '-9223372036854775809'],
+    ['above', '9223372036854775808'],
+  ])('rejects a TOML integer %s Rust signed-i64 range', (_label, token) => {
+    const valid = buildManifestToml(
+      [{ id: 'default', world: DEFAULT_WORLD_PATH }],
+      goodPack(),
+    );
+    expect(() => parsePackManifest(
+      valid.replace('content_epoch = 1', `content_epoch = ${token}`),
+    )).toThrow(/content_epoch.*signed 64-bit integer/i);
+  });
+
+  it('keeps safe content_epoch values as Numbers and unsafe i64 values exact as BigInts', () => {
+    const valid = buildManifestToml(
+      [{ id: 'default', world: DEFAULT_WORLD_PATH }],
+      goodPack(),
+    );
+    const safe = parsePackManifest(
+      valid.replace('content_epoch = 1', `content_epoch = ${Number.MAX_SAFE_INTEGER}`),
+    );
+    const unsafe = parsePackManifest(
+      valid.replace('content_epoch = 1', `content_epoch = ${BigInt(Number.MAX_SAFE_INTEGER) + 1n}`),
+    );
+
+    expect(safe.pack.requires.content_epoch).toBe(Number.MAX_SAFE_INTEGER);
+    expect(unsafe.pack.requires.content_epoch).toBe(BigInt(Number.MAX_SAFE_INTEGER) + 1n);
+    expect(validatePackMeta(safe.pack)).toEqual([]);
+    expect(validatePackMeta(unsafe.pack)).toEqual([]);
+  });
+
+  it('preserves a large ignored extension integer exactly and rejects its i64 overflow', () => {
+    const manifest = buildManifestToml(
+      [{ id: 'default', world: DEFAULT_WORLD_PATH }],
+      goodPack(),
+    );
+    const source = manifest.replace(
+      '[pack]\n',
+      '[pack]\ncustom_big_integer = 9007199254740992\n',
+    );
+    const semantics = parsePackManifest(source);
+    const worldText = '[global]\n[anchors]\n';
+    const result = exportModPack({
+      pack: semantics.pack,
+      scenarios: semantics.scenarios,
+      files: [{ path: DEFAULT_WORLD_PATH, text: worldText, parsed: goodWorld() }],
+      manifestSource: {
+        text: source,
+        bytes: new TextEncoder().encode(source),
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(readStoreZip(result.zip)[MANIFEST_PATH]).toBe(source);
+    expect(() => parsePackManifest(
+      source.replace('9007199254740992', '9223372036854775808'),
+    )).toThrow(/custom_big_integer.*signed 64-bit integer/i);
+  });
+
+  it('keeps raw missing compatibility fields invalid and refuses future formats', () => {
+    const valid = buildManifestToml(
+      [{ id: 'default', world: DEFAULT_WORLD_PATH }],
+      goodPack(),
+    );
+    const missingEpoch = parsePackManifest(valid.replace('content_epoch = 1\n', ''));
+    expect(missingEpoch.pack.requires.content_epoch).toBeNull();
+    expect(validatePackMeta(missingEpoch.pack).join('\n')).toMatch(/content_epoch.*integer/i);
+
+    const futureText = valid.replace('format = 1', 'format = 2');
+    const future = parsePackManifest(futureText);
+    expect(future.pack.format).toBe(2);
+    expect(validatePackMeta(future.pack).join('\n')).toMatch(/format 2.*supports at most 1/i);
+
+    const refusedBeforeMembers = exportModPack({
+      pack: goodPack(),
+      scenarios: [],
+      files: [{ path: 'outside/also-invalid.toml', text: 'not = "checked"\n' }],
+      manifestSource: {
+        text: futureText,
+        bytes: new TextEncoder().encode(futureText),
+      },
+    });
+    expect(refusedBeforeMembers.ok).toBe(false);
+    expect(refusedBeforeMembers.errors).toHaveLength(1);
+    expect(refusedBeforeMembers.errors[0]).toMatch(/format 2.*supports at most 1/i);
+  });
+
   it('empty manifest is a blocking finding', () => {
     const findings = validateManifestEntries([], {});
     expect(findings).toHaveLength(1);
@@ -216,6 +396,34 @@ describe('buildManifestToml + validateManifestEntries', () => {
       { [DEFAULT_WORLD_PATH]: '[global]\ntitle = "x"\n' },
     );
     expect(findings).toEqual([]);
+  });
+
+  it('preserves scenario ship curation and rejects hulls the world does not offer', () => {
+    const offered = 'assets/entities/alliance_destroyer.toml';
+    const absent = 'assets/entities/not_offered.toml';
+    const world = [
+      '[global]',
+      '[anchors]',
+      '[[available_ships]]',
+      `template_path = "${offered}"`,
+      '',
+    ].join('\n');
+
+    expect(validateManifestEntries(
+      [{ id: 'default', world: DEFAULT_WORLD_PATH, ships: [offered] }],
+      { [DEFAULT_WORLD_PATH]: world },
+    )).toEqual([]);
+
+    const findings = validateManifestEntries(
+      [{ id: 'default', world: DEFAULT_WORLD_PATH, ships: [offered, absent] }],
+      { [DEFAULT_WORLD_PATH]: world },
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      category: 'unknown-scenario-ship',
+      severity: 'error',
+    });
+    expect(findings[0].message).toContain(absent);
   });
 
   it('flags duplicate ids, empty id/world, unparseable and non-world paths', () => {

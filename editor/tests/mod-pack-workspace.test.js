@@ -120,12 +120,16 @@ describe('ModPackWorkspace members: add/remove/classify + base digest', () => {
 describe('ModPackWorkspace scenarios', () => {
   it('adds, lists, and removes scenario entries by id', () => {
     const ws = new ModPackWorkspace();
-    ws.addScenario({ id: 'default', world: WORLD_PATH, label: 'Default' });
+    const ships = ['assets/entities/alliance_destroyer.toml'];
+    ws.addScenario({ id: 'default', world: WORLD_PATH, label: 'Default', ships });
     ws.addScenario({ id: 'combat', world: 'assets/worlds/combat.toml' });
     expect(ws.getScenarios()).toEqual([
-      { id: 'default', world: WORLD_PATH, label: 'Default' },
+      { id: 'default', world: WORLD_PATH, label: 'Default', ships },
       { id: 'combat', world: 'assets/worlds/combat.toml' },
     ]);
+    const borrowed = ws.getScenarios();
+    borrowed[0].ships.push('assets/entities/mutated_outside_workspace.toml');
+    expect(ws.getScenarios()[0].ships).toEqual(ships);
     expect(ws.removeScenario('default')).toBe(true);
     expect(ws.getScenarios().map((s) => s.id)).toEqual(['combat']);
   });
@@ -226,10 +230,16 @@ describe('ModPackWorkspace.fromArchiveFiles round trip', () => {
   });
 
   it('parsePackManifest is the inverse of buildManifestToml (fixed point)', () => {
-    const scenarios = [{ id: 'default', world: WORLD_PATH, label: 'Default' }];
+    const scenarios = [{
+      id: 'default',
+      world: WORLD_PATH,
+      label: 'Default',
+      ships: ['assets/entities/alliance_destroyer.toml'],
+    }];
     const pack = goodPack({ author: 'A', description: 'D' });
     const toml = buildManifestToml(scenarios, pack);
     const parsed = parsePackManifest(toml);
+    expect(parsed.scenarios).toEqual(scenarios);
     expect(buildManifestToml(parsed.scenarios, parsed.pack)).toBe(toml);
   });
 });

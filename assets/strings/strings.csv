@@ -9,11 +9,22 @@ semantic_action.helm.steering.accessibility,Helm semantic action accessible desc
 semantic_action.host.qr_code.label,Host semantic action display name,[QR Code]
 semantic_action.host.qr_code.accessibility,Host semantic action accessible description,[Show or hide the crew join QR code.]
 semantic_action.host.qr_code.feedback,Host semantic action persistent status; {status} is a shared action feedback state,[QR Code: {status}]
+semantic_action.editor.mod.import.label,MOD editor semantic action display name,[Import mod pack]
+semantic_action.editor.mod.import.accessibility,MOD editor semantic action accessible description,[Import a ZIP mod pack into the editable MOD workspace.]
 action_feedback.pressed,Shared semantic action live status immediately after activation,[Pressed]
 action_feedback.pending,Shared semantic action live status while authoritative work is in flight,[Pending]
 action_feedback.applied,Shared semantic action live status after the authoritative consumer applies the request,[Applied]
 action_feedback.refused,Shared semantic action live status after authority refuses the request,[Refused]
 action_feedback.timed_out,Shared semantic action live status after no authoritative response arrives,[Timed out]
+editor.mod.import.button,MOD editor control that opens the ZIP picker,[Import pack (.zip)]
+editor.mod.import.success,MOD editor status after a valid source bundle is loaded,[Pack imported and ready to edit.]
+editor.mod.import.invalid_heading,MOD editor non-colour validation heading for a readable invalid import,[Import needs attention]
+editor.mod.import.source_retained,MOD editor assurance after a readable invalid import,[The source bundle remains loaded and editable. Resolve the listed validation findings before export.]
+editor.mod.import.warning_heading,MOD editor heading before non-blocking imported-pack findings,[Warnings]
+editor.mod.import.unreadable_heading,MOD editor validation heading when the ZIP or manifest cannot be parsed,[Import could not be read]
+editor.mod.import.unreadable_detail,"MOD editor parse failure detail; reason is the existing parser message",[The selected archive could not be opened: {reason}]
+editor.mod.import.previous_workspace_preserved,MOD editor assurance after an unreadable import,[Your previous MOD workspace was not changed.]
+editor.mod.import.m6_boundary,MOD editor T2 scope note,"[T2 keeps this existing MOD workflow to import, validate, edit, and export one pack. Live inspectors and project tooling arrive with M6.]"
 input.modifier.control,Keyboard binding display name for the Control modifier,Ctrl
 input.modifier.shift,Keyboard binding display name for the Shift modifier,Shift
 input.modifier.alt,Keyboard binding display name for the Alt modifier,Alt

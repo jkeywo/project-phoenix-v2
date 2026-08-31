@@ -152,6 +152,17 @@ cargo build --release --features host --bin phoenix-host
 #                   is_command_authorized entirely and carries mission-abort
 #                   authority — three separate gates enforce that.
 #   --log / --log-entity  same grammar as phoenix-headless
+#   THE CREW LOBBY IS ON THE VIEWSCREEN (issue #1325), with no flag, given a
+#     build with --features ultralight and a --client-dir bundle whose
+#     index.html is a host page (i.e. one `trunk build` wrote). It is the same
+#     lobby server.html shows, rendered by the same gui/host-lobby-view.js +
+#     gui/host-lobby-render.js over the same LobbyStatePayload, in an embedded
+#     view fed by src/native_host/host_lobby/'s bridge. The surface is
+#     PERMANENT: on mission start the chrome yields (invisible, and out of the
+#     #1124 input router so it cannot swallow a viewscreen click), F9 reveals
+#     and hides it in play, and returning to the lobby phase brings it back.
+#     Missing either prerequisite is a log line and a blank surface, never a
+#     refusal to start — chrome does not get to stop a mission.
 #   --manifest also narrows what this process FLIES, not only what it publishes:
 #     with a curating manifest in force the default hull is drawn from that
 #     manifest's allowlist (issue #917). An explicit --ship still wins.

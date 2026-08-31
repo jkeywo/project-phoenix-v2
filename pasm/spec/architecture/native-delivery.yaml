@@ -560,3 +560,59 @@ entities:
         ]
       symbols: [stage_sdk]
       tests: [cargo test, tests/native_host_pane_ultralight.rs]
+
+  - component: native-host-lobby-surface
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Native Host Lobby Surface
+      summary: The crew lobby the browser host shows, composited onto the native host's viewscreen window as a permanent embedded web view. It renders through the SAME pure view model and the SAME DOM renderer server.html renders through, from the same LobbyStatePayload bytes, over a bridge of its own. Read-only in this slice — scenario and hull selection stay on the CLI.
+      rationale:
+        - "[ai] THE POINT IS THAT THERE IS ONE RENDERING PATH, and getting it took an extraction rather than a reimplementation. The lobby's decisions were already pure (gui/host-lobby-view.js, issue #1229); its DOM writes and its stylesheet were still inline in server.html. Both moved out — gui/host-lobby-render.js and gui/host-lobby.css — and server.html now links what it used to contain. A native reimplementation of those thirteen element ids would have started identical and then rendered a new lobby row nowhere, with nothing failing, which is the exact failure mode #1122 refused for the console shell."
+        - "[ai] What stayed inline in server.html is what was never lobby render: the audio graph, the shared qrVisible flag, the fleet freeze, the mesh pump, and the three overlays that are VIEWSCREEN chrome rather than lobby chrome (asset-loading, QR, game-over). Each is coupled to page-lifetime state that page owns, and the native surface has none of them. The extraction is behaviour-preserving by construction: the renderer is the original block verbatim including its early return when #station-grid is absent, and the stylesheet was linked BEFORE the inline style block it came out of, where nothing earlier targets a lobby element and the one later rule that did (the ready badge under prefers-reduced-motion) moved with it."
+        - "[ai] The DOCUMENT is the pane-document trick applied to the other page. It is assembled in memory and published by this process's own delivery server at the HOST page's depth (/host-lobby-nonce.html), not the client's, because it borrows the host page's markup and modules — so gui/host-lobby-render.js and ../assets/strings/strings.csv resolve exactly as they do for dist/index.html, same origin, nothing rewritten. Its markup is SLICED OUT of the served page's own lobby panel by a depth-counted scan (comments skipped, or a comment mentioning a div would truncate the lobby at a place that still looked like valid markup) rather than authored in Rust, for the drift reason above. One edit: the AI-launch button is stripped, because the surface is read-only and a control that silently does nothing is worse than no control."
+        - "[ai] THE SURFACE IS NOT A PARTICIPANT, and is deliberately not on the pane bus. A pane has a minted session token, sends Identify, claims a Station and crosses command admission; this renders what the host is ALREADY broadcasting to every phone in the room and sends nothing back. Putting it on the bus would have meant a token to be refused for, a registry entry whose Welcome nobody wants, and asking routing::pane_receives which participant the viewscreen is — a question with no honest answer. It therefore also carries no identity at all, which is a stronger property than the pane document's careful URL fragment: there is nothing to leak, and its URL has no fragment."
+        - "[ai] The bridge is the pane bridge's shape (evaluate_script push, once-a-frame drain, over the same PaneSurface trait so it is testable with no SDK) with ONE deliberate difference: latest-wins slots instead of a backlog. Nothing here is one-shot — a LobbyStatePayload is a snapshot of the whole lobby — so an older one has nothing to say the newest does not. It matters because viewscreen_border::push_lobby_state writes a LobbyStateChanged every Update whether or not anything moved, and every push is a synchronous evaluate_script on the Bevy MAIN thread, which is the thread FixedUpdate runs SimSet on. So an identical payload is dropped outright and the reveal flag is pushed only when it changes: a lobby nobody is touching costs the simulation nothing. A failed push is still not lost — it goes back in its slot unless something newer has taken it."
+        - "[ai] THE SURFACE IS PERMANENT, and that is a contract later slices depend on rather than an implementation detail. On mission start it is not torn down: the chrome YIELDS — the page renders nothing (the shared view model already hides the panel outside GamePhase::Lobby), the Bevy node's display goes to None, and the placement leaves the #1124 router so a click over it reaches the viewscreen. F9 reveals and hides it in play. The view is never touched, so a reveal is a display flip rather than a page load, which is what the QR overlay, settings and layout rows that later land on this same surface are entitled to assume."
+        - "[ai] Every phase change clears the manual reveal latch, in BOTH directions. Leaving the lobby is the chrome yielding to the mission; returning to it is the chrome coming back on its own terms. The rule exists for the trap in between: in the lobby phase the key looks inert, because the chrome is already on — and without the clear, an idle keypress there would blank nothing at the time and then spring the lobby open over the viewscreen the moment the crew launched. The whole decision is the pure RevealState, answering three separate questions (composite, route input, force the page's chrome) so that none of them becomes a boolean scattered through a frame loop no CI job compiles."
+        - "[ai] It shares the ONE Ultralight runtime a process may have, so it is driven by PaneHost rather than by a second host of its own, and takes a RESERVED PaneId (u32 MAX) to appear in the #1124 router, focus ring and touch-capture map — the acceptance criterion is that a mouse and a keyboard operate it exactly as they operate a pane. PaneRegistry mints ids from 0 upward and never reuses one, so the reserved value is unreachable; unlike a high-water mark it also cannot collide with a pane RECREATED later in the run (#1125). Everything that treats a PaneId as a participant — the pump, the fault path, the close-and-retire sweep — checks for it and skips, and a copy failure never faults it: it holds no station to fall back to AI control, and faulting a permanent surface is the one thing later slices are told never happens. Its canvas draws beneath every pane on the same window and it is placed LAST in the router, so where a tiled pane overlaps it the pane both draws on top and wins the hit test."
+        - "[ai] No flag turns it on: it is what a windowed authoritative host has in front of it before a mission, and a native host had nothing there between #1121 and this. It needs a build with --features ultralight and a --client-dir bundle whose index.html is a Phoenix host page, and it REPORTS and carries on when either is missing rather than refusing to boot — a host that flies the mission with a blank surface is far better than one that refuses to start over its chrome. The SDK staging consequently moved out of the --pane block, since both embedded surfaces need it; it still exits for a pane, which cannot work without it."
+        - "[ai] The split along the SDK line is #1122's, unchanged: the document assembly, the bridge's rules and the reveal state machine are feature-OFF and run by the ordinary cargo test, together with the renderer's jsdom suite driven against server.html's own lobby markup. Only the compositing itself — the Bevy node, its display, the router placement — needs a window and a GPU, and the real-window proof (tests/native_host_lobby_ultralight.rs) is ignored-by-default and run deliberately, needing a trunk-built dist/ rather than the pane test's build-client.mjs bundle."
+    architecture:
+      kind: service
+      authority: non-authoritative
+      coordinates: [native-delivery-host, native-station-pane]
+      runs_in: [native-host-runtime]
+    implementation:
+      status: declared
+      paths:
+        [
+          src/native_host/host_lobby/mod.rs,
+          src/native_host/host_lobby/document.rs,
+          src/native_host/host_lobby/bridge.rs,
+          src/native_host/host_lobby/reveal.rs,
+          src/native_host/host_lobby/host_lobby_boot.js,
+          src/native_host/host_lobby/host_lobby_link.js,
+          src/native_host/panes/ultralight.rs,
+          src/native_host/app.rs,
+          src/bin/phoenix_host.rs,
+          gui/host-lobby-render.js,
+          gui/host-lobby.css,
+          gui/host-lobby-view.js,
+          server.html,
+        ]
+      symbols:
+        [
+          LocalHostLobby,
+          HostLobbyBridge,
+          HostLobbyPlugin,
+          RevealState,
+          SurfacePresence,
+          build_host_lobby_document,
+          pump_host_lobby,
+          HOST_LOBBY_REVEAL_KEY,
+          HOST_LOBBY_SURFACE_ID,
+          HostLobbyDisplayConfig,
+          renderHostLobby,
+        ]
+      tests: [cargo test, npx vitest run, tests/native_host_lobby_ultralight.rs]

@@ -41,4 +41,79 @@ fn main() {
     if std::env::var("PHOENIX_DEMO_BUILD").as_deref() == Ok(DEMO_VALUE) {
         println!("cargo::rustc-cfg=phoenix_demo_build");
     }
+
+    stage_ultralight_sdk();
+}
+
+/// Copy the Ultralight SDK's shared libraries beside the binary at build time.
+///
+/// `ul-next-sys` links the SDK's import libraries but stages none of its DLLs,
+/// so on Windows a freshly built `phoenix-host.exe` fails to start with a silent
+/// `STATUS_DLL_NOT_FOUND` (0xC0000135) — Windows resolves the imports at load,
+/// before the process can reach `main` to run
+/// `native_host::panes::ultralight::stage_sdk()`. That runtime helper therefore
+/// cannot bootstrap the very first run. Staging the DLLs here, at build time,
+/// closes the gap: the exe always finds them beside itself and starts, and
+/// `stage_sdk()` still stages the SDK `resources/` at runtime and covers test
+/// binaries under `deps/` (which this function does not touch).
+///
+/// Deliberately narrow: only the native host build pulls the SDK (the
+/// `ultralight` feature), and the missing-DLL failure is Windows-only, so this
+/// is a no-op for every other build — wasm, CI on ubuntu, or a plain
+/// `--features headless` run.
+fn stage_ultralight_sdk() {
+    if std::env::var_os("CARGO_FEATURE_ULTRALIGHT").is_none()
+        || std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows")
+    {
+        return;
+    }
+    let Some(out_dir) = std::env::var_os("OUT_DIR").map(std::path::PathBuf::from) else {
+        return;
+    };
+    // OUT_DIR = <target>/<profile>/build/project-phoenix-<hash>/out. The sibling
+    // `ul-next-sys-<hash>/out/ul-sdk/bin` holds the DLLs, and <profile> — two
+    // levels above build/ — is where `phoenix-host.exe` lands.
+    let mut ancestors = out_dir.ancestors();
+    let build_dir = ancestors.nth(2).map(std::path::Path::to_path_buf);
+    let profile_dir = ancestors.next().map(std::path::Path::to_path_buf);
+    let (Some(build_dir), Some(profile_dir)) = (build_dir, profile_dir) else {
+        return;
+    };
+    let sdk_bin = match std::fs::read_dir(&build_dir) {
+        Ok(entries) => entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("ul-next-sys-"))
+            })
+            .map(|p| p.join("out").join("ul-sdk").join("bin"))
+            .find(|bin| bin.join("Ultralight.dll").is_file()),
+        Err(_) => None,
+    };
+    let Some(sdk_bin) = sdk_bin else {
+        println!(
+            "cargo::warning=Ultralight SDK DLLs not found under {}/ul-next-sys-*; \
+             phoenix-host may fail to start — rebuild --features ultralight from this checkout",
+            build_dir.display()
+        );
+        return;
+    };
+    // Re-run if the SDK is re-fetched (a version bump lands under a new hash and
+    // so a different path, which reads as "changed" and re-triggers the copy).
+    println!(
+        "cargo::rerun-if-changed={}",
+        sdk_bin.join("Ultralight.dll").display()
+    );
+    if let Ok(dlls) = std::fs::read_dir(&sdk_bin) {
+        for dll in dlls.flatten() {
+            let path = dll.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("dll") {
+                if let Some(name) = path.file_name() {
+                    let _ = std::fs::copy(&path, profile_dir.join(name));
+                }
+            }
+        }
+    }
 }

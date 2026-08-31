@@ -55,6 +55,8 @@ import {
   isReservedKeyboardBinding,
 } from './semantic-action-registry.js';
 import { createSemanticControlsRemapper } from './semantic-controls-remapper.js';
+import { OPERATOR_PROFILE_FILENAME } from './operator-profile.js';
+import { downloadArtifact, readFileText } from './snapshot-transfer.js';
 export {
   isSemanticModifierEvent,
   semanticModifierCode,
@@ -129,6 +131,42 @@ export const PAUSE_CONTROL_ID = 'pause';
  * `debug_route` branch in `command_admission::policy` to be reachable at all.
  */
 export const GOD_MODE_SYSTEM_ID = 'god-mode';
+
+/** Localised status presentation for explicit profile transfer. */
+export function operatorProfileStatusView(result) {
+  if (!result) return null;
+  if (result.status === 'pending') {
+    return { labelId: 'settings.controls.profile.status_reading', alert: false };
+  }
+  if (result.status === 'exported') {
+    return { labelId: 'settings.controls.profile.status_exported', alert: false };
+  }
+  if (result.status === 'migrated') {
+    return { labelId: 'settings.controls.profile.status_migrated', alert: false };
+  }
+  if (result.status === 'imported') {
+    return {
+      labelId: result.diagnostics && result.diagnostics.length
+        ? 'settings.controls.profile.status_imported_normalized'
+        : 'settings.controls.profile.status_imported',
+      alert: false,
+    };
+  }
+  const code = String(result.code || '');
+  if (code === 'profile-version' || code === 'profile-kind') {
+    return { labelId: 'settings.controls.profile.status_refused_version', alert: true };
+  }
+  if (code.includes('binding') || code.includes('tuning') || code === 'profile-controls') {
+    return { labelId: 'settings.controls.profile.status_refused_controls', alert: true };
+  }
+  if (code.includes('storage') || code === 'profile-export') {
+    return { labelId: 'settings.controls.profile.status_refused_storage', alert: true };
+  }
+  if (code === 'profile-read') {
+    return { labelId: 'settings.controls.profile.status_refused_read', alert: true };
+  }
+  return { labelId: 'settings.controls.profile.status_refused_corrupt', alert: true };
+}
 
 // ── Message builders ────────────────────────────────────────────────────────
 
@@ -394,6 +432,8 @@ function persistMasterVolume(value) {
  *   getGamepadState?: () => object,
  *   onGamepadSelection?: (index: number|null) => object,
  *   onSemanticCapture?: (actionId: string|null, slot: number|null, active: boolean) => void,
+ *   onOperatorProfileExport?: () => string,
+ *   onOperatorProfileImport?: (json: string) => object|Promise<object>,
  *   doc?: Document,
  *   isDemo?: () => boolean,
  * }} opts
@@ -416,6 +456,10 @@ export function mountSettings({
   getGamepadState: _getGamepadState,
   onGamepadSelection: _onGamepadSelection,
   onSemanticCapture: _onSemanticCapture,
+  onOperatorProfileExport: _onOperatorProfileExport,
+  onOperatorProfileImport: _onOperatorProfileImport,
+  downloadOperatorProfile: _downloadOperatorProfile,
+  readOperatorProfileFile: _readOperatorProfileFile,
   doc: _doc,
   isDemo: _isDemo,
 } = {}) {
@@ -431,6 +475,7 @@ export function mountSettings({
   const isDemo = _isDemo || (() => isDemoBuild({ win, doc }));
 
   let activeTab = null;
+  let operatorProfileStatus = null;
 
   // The documentation surface's own state, deliberately NOT `activeTab`.
   //
@@ -468,8 +513,8 @@ export function mountSettings({
     if (typeof _onAccessibility === 'function') _onAccessibility(effect, value);
   };
 
-  // The binding profile is parent-owned and in-memory for this tracer. The
-  // callback updates that registry and explicitly fans it into iframe realms;
+  // The live binding profile is parent-owned; operator-profile.js persists it.
+  // The callback updates that registry and explicitly fans it into iframe realms;
   // this Settings module never assumes module instances share mutable state.
   const setSemanticBinding = (actionId, slot, binding, options = {}) => {
     if (typeof _onSemanticBinding === 'function') {
@@ -730,8 +775,85 @@ export function mountSettings({
     body.appendChild(motionSec);
   }
 
+  function buildOperatorProfileSection(body) {
+    const profileSection = section('settings.controls.profile.heading');
+    profileSection.appendChild(hint('settings.controls.profile.hint'));
+    profileSection.appendChild(hint('settings.controls.profile.private_hint'));
+    const profileRow = row('settings-rating-row');
+    const exportProfile = action(
+      t('settings.controls.profile.export'),
+      null,
+      () => {
+        let text = null;
+        try {
+          text = typeof _onOperatorProfileExport === 'function'
+            ? _onOperatorProfileExport() : null;
+        } catch (_) {
+          text = null;
+        }
+        const download = typeof _downloadOperatorProfile === 'function'
+          ? _downloadOperatorProfile : downloadArtifact;
+        operatorProfileStatus = text && download(doc, OPERATOR_PROFILE_FILENAME, text)
+          ? { status: 'exported' }
+          : { status: 'rejected', code: 'profile-export' };
+        buildContent();
+      },
+    );
+    exportProfile.setAttribute('data-control', 'operator-profile-export');
+    profileRow.appendChild(exportProfile);
+
+    const file = doc.createElement('input');
+    file.type = 'file';
+    file.accept = 'application/json,.json';
+    file.hidden = true;
+    file.setAttribute('data-control', 'operator-profile-file');
+    file.addEventListener('change', async () => {
+      const selected = file.files && file.files[0];
+      if (!selected) return;
+      operatorProfileStatus = { status: 'pending' };
+      const current = overlay.querySelector('[data-control="operator-profile-status"]');
+      const pending = operatorProfileStatusView(operatorProfileStatus);
+      if (current && pending) current.textContent = t(pending.labelId);
+      try {
+        const read = typeof _readOperatorProfileFile === 'function'
+          ? _readOperatorProfileFile : readFileText;
+        const text = await read(selected);
+        operatorProfileStatus = typeof _onOperatorProfileImport === 'function'
+          ? await _onOperatorProfileImport(text)
+          : { status: 'rejected', code: 'profile-import-unavailable' };
+      } catch (_) {
+        operatorProfileStatus = { status: 'rejected', code: 'profile-read' };
+      }
+      if (shell.isOpen()) buildContent();
+    });
+    const importProfile = action(
+      t('settings.controls.profile.import'),
+      null,
+      () => file.click(),
+    );
+    importProfile.setAttribute('data-control', 'operator-profile-import');
+    profileRow.appendChild(importProfile);
+    profileSection.appendChild(profileRow);
+    profileSection.appendChild(file);
+
+    const statusView = operatorProfileStatusView(operatorProfileStatus);
+    if (statusView) {
+      const status = doc.createElement('div');
+      status.className = 'settings-section-hint settings-profile-status';
+      status.setAttribute('data-control', 'operator-profile-status');
+      status.setAttribute('role', statusView.alert ? 'alert' : 'status');
+      status.setAttribute('aria-live', statusView.alert ? 'assertive' : 'polite');
+      status.textContent = t(statusView.labelId);
+      profileSection.appendChild(status);
+    }
+    body.appendChild(profileSection);
+  }
+
   function buildControlsTab(body, view) {
     const gamepad = view.gamepad || {};
+    // Keep Reset All as the final focusable control in this tab. Existing
+    // conflict Escape/Shift+Tab behavior relies on that stable modal boundary.
+    buildOperatorProfileSection(body);
     semanticControls.render(body, {
       actions: view.semanticActions,
       capturing: gamepad.capturing || null,
@@ -767,6 +889,7 @@ export function mountSettings({
         target.appendChild(gamepadSection);
       },
     });
+
   }
 
   function buildGameplayTab(body, view) {

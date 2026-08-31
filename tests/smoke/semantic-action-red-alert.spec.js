@@ -93,12 +93,13 @@ test('remapped Captain Red Alert binding reaches the authoritative command path'
   await holdBinding.press('KeyR');
   await expect(captain.locator('[data-control="semantic-binding-conflict-cancel"]'))
     .toBeFocused();
-  // Conflict Escape is modal-wide: move backward out of the prompt to Reset
-  // All, then cancel without letting the shared Settings trap close the modal.
-  await captain.keyboard.press('Shift+Tab');
-  await captain.keyboard.press('Shift+Tab');
-  await expect(captain.locator('[data-control="semantic-binding-reset-all"]'))
-    .toBeFocused();
+  // Conflict Escape is modal-wide: move focus out of the prompt, then cancel
+  // without letting the shared Settings trap close the modal. Do not encode a
+  // fixed Tab count: the registry and private-profile sections grow as actions
+  // and portable settings are delivered.
+  const resetAll = captain.locator('[data-control="semantic-binding-reset-all"]');
+  await resetAll.focus();
+  await expect(resetAll).toBeFocused();
   await captain.keyboard.press('Escape');
   await expect(captain.locator('#settings-overlay')).toBeVisible();
   await expect(captain.locator('.settings-binding-conflict')).toHaveCount(0);
@@ -166,12 +167,42 @@ test('remapped Captain Red Alert binding reaches the authoritative command path'
     '[data-control="semantic-binding-captain.red-alert-0"]',
   )).toHaveValue('Y');
 
+  // #1279: the same live choices form a private, portable JSON profile. The
+  // download contains no session/Station/save state, and a valid import is
+  // applied as one profile before the next action dispatch.
+  const storedProfile = await captain.evaluate(() => JSON.parse(
+    localStorage.getItem('phoenix-operator-profile-v1'),
+  ));
+  expect(Object.keys(storedProfile).sort()).toEqual([
+    'accessibility', 'bindings', 'feedback', 'gamepad', 'gmConfirmations',
+    'kind', 'version',
+  ]);
+  expect(JSON.stringify(storedProfile)).not.toMatch(/session-token|player-name|station|saveCatalogue/i);
+  const downloadPromise = captain.waitForEvent('download');
+  await captain.click('[data-control="operator-profile-export"]');
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe('phoenix-operator-profile.json');
+  await expect(captain.locator('[data-control="operator-profile-status"]'))
+    .toContainText(ts('settings.controls.profile.status_exported'));
+
+  storedProfile.bindings['captain.red-alert'][0].code = 'KeyU';
+  await captain.locator('[data-control="operator-profile-file"]').setInputFiles({
+    name: 'operator-profile.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(storedProfile)),
+  });
+  await expect(captain.locator('[data-control="operator-profile-status"]'))
+    .toContainText(ts('settings.controls.profile.status_imported'));
+  await expect(captain.locator(
+    '[data-control="semantic-binding-captain.red-alert-0"]',
+  )).toHaveValue('U');
+
   // Close Settings so the key relay may hand the host-page event to the
   // active Captain iframe. The remap capture itself stops propagation, so the
   // capture key above cannot also fire the action.
   await captain.keyboard.press('Escape');
   await expect(captain.locator('#settings-overlay')).toBeHidden();
-  await captain.keyboard.press('KeyY');
+  await captain.keyboard.press('KeyU');
 
   await expect(alertButton).toHaveText(ts('component.red_alert.active'), {
     timeout: 10_000,

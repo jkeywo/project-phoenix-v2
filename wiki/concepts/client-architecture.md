@@ -2,7 +2,7 @@
 title: Client Architecture
 type: concept
 tags: [client, javascript, iframe, console, console-family, state, accessibility, keyboard, gamepad, feedback, vitest]
-sources: [client.html, server.html, gui/mount-plan.js, gui/hero-bar.js, gui/reducer-result.js, gui/lobby-state.js, gui/sim-state.js, gui/comms-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/semantic-controls-remapper.js, gui/host-actions.js, gui/server-settings.js, gui/gamepad-input.js, gui/client-semantic-actions.js, gui/stations/captain-actions.js, gui/stations/helm-actions.js, gui/action-map.js, gui/console-core.js, gui/console-latency.js, gui/iframe-bridge.js, gui/client-router.js, gui/coordination-popup.js, gui/accessibility-profile.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/command_admission/mod.rs, src/console/captain/server.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
+sources: [client.html, server.html, gui/mount-plan.js, gui/hero-bar.js, gui/reducer-result.js, gui/lobby-state.js, gui/sim-state.js, gui/comms-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/semantic-controls-remapper.js, gui/host-actions.js, gui/server-settings.js, gui/gamepad-input.js, gui/client-semantic-actions.js, gui/stations/captain-actions.js, gui/stations/helm-actions.js, gui/operator-profile.js, gui/action-map.js, gui/console-core.js, gui/console-latency.js, gui/iframe-bridge.js, gui/client-router.js, gui/coordination-popup.js, gui/accessibility-profile.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/command_admission/mod.rs, src/console/captain/server.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
 updated: 2026-08-31
 ---
 
@@ -101,8 +101,11 @@ bindings name logical controls (face-bottom, D-pad directions, a left-stick
 axis direction and threshold, or an undirected continuous standard axis), never
 `Gamepad.id`, vendor data or a connection. Continuous action definitions own
 their output range, neutral and dispatch cadence; client-local tuning owns
-deadzone and inversion separately from binding identity. The registry exposes
-serialisable binding and tuning profiles in memory, but persists neither.
+deadzone and inversion separately from binding identity. Two directed bindings
+on the same axis and direction collide even when their trigger thresholds
+differ, because both can fire from one deflection. The registry exposes
+serialisable binding and tuning profiles; `operator-profile.js` persists both
+for the parent browser client.
 Registry conflicts exist only where action context arrays intersect, including
 two slots on the same action. Settings asks the parent registry to propose a
 change; conflicting proposals remain presentation-only until the player chooses
@@ -137,6 +140,23 @@ only `set_helm_steering`; `gui/action-map.js` maps that to the existing
 the Gamepad API or chooses a device, and its pointer/WASD `set_helm` path stays
 unchanged.
 
+`gui/operator-profile.js` is the one current-version private browser profile.
+It whitelists Accessibility effects and assistance, exactly two bindings for
+each known semantic action, the preferred logical gamepad slot and continuous
+tuning, feedback preferences, and sparse future GM confirmation choices. It
+contains no player/session identity, Station ownership, hardware id or save
+data and has no message builder. The parent snapshots it after each supported
+setting change and exports/imports the same JSON from Controls. Import first
+normalises bounded private preferences and validates every supplied binding
+against the registry's reserved-chord and overlapping-context conflict rules.
+Actions absent from an older profile then receive conflict-free authored
+defaults in registry order; a default that would displace an imported remap is
+left empty and reported through the accessible normalized-import status. Only
+the resulting valid candidate is stored and atomically applied. The old
+`phoenix-accessibility-v1` value migrates only when no current profile exists;
+a corrupt current record yields authored defaults rather than silently
+resurrecting the old value.
+
 ## Module inventory (`gui/`)
 
 | Module | Owns |
@@ -151,7 +171,7 @@ unchanged.
 | `console-payload.js` | Metadata-driven flat/keyed normalization plus `familyView`: mirrors flat views only under actual projected ids and selects composite views by Console Family, with no inverse id census. |
 | `action-map.js` | Table-driven `console_action` → `ClientMessage` dispatch |
 | `action-feedback.js` | Pure bounded Pressed → Pending → Applied/Refused/TimedOut presentation lifecycle, exact parent-to-originating-iframe router, and the shared live-status/semantic-cue/vibration transition |
-| `semantic-action-registry.js`, `semantic-controls-remapper.js`, `gamepad-input.js`, `client-semantic-actions.js`, `stations/{captain,helm}-actions.js`, `host-actions.js` | Non-authoritative context/input identity, exactly two keyboard-or-standard-gamepad slots, continuous metadata and in-memory axis tuning, the shared keyboard capture/conflict/reset presenter used by phone and host Settings, explicit one-connection phone gamepad ownership with neutral-gated discrete edges and continuous values, reserved-chord policy, overlap-only conflict replacement and reset operations, plus the real Captain, Helm and host QR adapters above `action-map.js` |
+| `semantic-action-registry.js`, `semantic-controls-remapper.js`, `gamepad-input.js`, `client-semantic-actions.js`, `stations/{captain,helm}-actions.js`, `host-actions.js`, `operator-profile.js` | Non-authoritative context/input identity, exactly two keyboard-or-standard-gamepad slots, continuous metadata and axis tuning, the shared keyboard capture/conflict/reset presenter used by phone and host Settings, explicit one-connection phone gamepad ownership with neutral-gated discrete edges and continuous values, atomic validation plus private browser persistence/export/import, reserved-chord policy, overlap-only conflict replacement and reset operations, plus the real Captain, Helm and host QR adapters above `action-map.js` |
 | `iframe-bridge.js` | `push()` / `wireLoad()` state-push into console iframes (ADR-0001 §2) |
 | `content-switcher.js` | Section visibility over the ship's mounted stations; one human directly holds one station |
 | `station-roster.js` | Pure fold: players + station defs → lobby roster rows + aggregates |

@@ -536,4 +536,20 @@ describe('continuous semantic actions', () => {
       }, null],
     })).toThrow(/conflict/i);
   });
+
+  it('rejects discrete axis defaults that differ only by trigger threshold', () => {
+    const registry = createSemanticActionRegistry();
+    const axisAction = (id, threshold) => ({
+      ...ACTION,
+      id,
+      contexts: ['helm'],
+      bindings: [{
+        type: 'gamepad', input: 'axis', control: 'left-stick-y',
+        direction: 'negative', threshold,
+      }, null],
+    });
+    registry.register(axisAction('helm.axis-low-threshold', 0.5));
+    expect(() => registry.register(axisAction('helm.axis-high-threshold', 0.9)))
+      .toThrow(/conflict/i);
+  });
 });

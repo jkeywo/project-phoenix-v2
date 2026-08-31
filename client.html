@@ -102,7 +102,7 @@
        realm. Logical bindings are copied to console iframes, but only the
        action's owning iframe receives semantic activation. -->
   <script type="module" src="gui/gamepad-input.js"></script>
-  <!-- Parent-realm semantic action metadata + in-memory binding profile. The
+  <!-- Parent-realm semantic action metadata + live private binding profile. The
        active console iframe owns its own registry instance and receives this
        profile through an explicit update seam. -->
   <script type="module" src="gui/stations/captain-actions.js"></script>
@@ -144,6 +144,10 @@
        window.applyAccessibilityProfile / setAccessibilityPresentation for the
        inline script below. Never sent to the host — client-local. -->
   <script type="module" src="gui/accessibility-profile.js"></script>
+  <!-- One portable, private profile now owns Accessibility, semantic bindings,
+       gamepad preference/tuning, feedback preferences and future GM
+       confirmations. It never enters a ClientMessage or a session save. -->
+  <script type="module" src="gui/operator-profile.js"></script>
   <style>
     /* The lobby's vocabulary is gui/tokens.css, linked above — it used to keep
        a parallel `:root` here whose `--edge` was a different colour from the
@@ -1602,10 +1606,13 @@
     /// The mounted settings panel (issue #940), or null before the connection
     /// bootstrap runs. handleMessage repaints it when `DebugState` arrives.
     let settingsPanel = null;
-    /// Parent-owned, client-local semantic binding profile. Console iframe
-    /// module instances are separate realms, so updates are explicitly copied
+    /// Parent-owned, client-local semantic binding profile. The operator
+    /// profile persists it; console iframe module instances are separate
+    /// realms, so updates are explicitly copied
     /// through __updateSemanticActionBindings instead of relying on a singleton.
     let semanticActionRegistry = null;
+    let operatorProfile = null;
+    let preferredGamepadSlot = null;
     let _actionFeedbackRouter = null;
     /// Parent-only gamepad sampler. Iframes never poll navigator.getGamepads(),
     /// so an inactive or disconnected Station cannot receive controller input.
@@ -2751,12 +2758,94 @@
       }
     }
 
+    function operatorProfileStorage() {
+      try { return window.localStorage; } catch (_) { return null; }
+    }
+
+    function snapshotOperatorProfile() {
+      const api = window.OperatorProfile;
+      if (!api || typeof api.createOperatorProfileSnapshot !== 'function') return null;
+      operatorProfile = api.createOperatorProfileSnapshot({
+        accessibility: window.simState ? window.simState.accessibilityProfile : null,
+        bindings: semanticActionRegistry ? semanticActionRegistry.bindingProfile() : {},
+        preferredGamepadSlot,
+        tuning: semanticActionRegistry ? semanticActionRegistry.tuningProfile() : {},
+        feedback: operatorProfile && operatorProfile.feedback,
+        gmConfirmations: operatorProfile && operatorProfile.gmConfirmations,
+      });
+      return operatorProfile;
+    }
+
+    function persistOperatorProfile() {
+      const api = window.OperatorProfile;
+      const profile = snapshotOperatorProfile();
+      if (!api || !profile || typeof api.saveOperatorProfile !== 'function') {
+        return { status: 'rejected', code: 'profile-storage-write' };
+      }
+      return api.saveOperatorProfile(operatorProfileStorage(), profile);
+    }
+
+    // accessibility-profile.js calls this after either Accessibility reducer.
+    // Keeping the hook local avoids turning a private choice into a wire path.
+    window.persistOperatorProfile = persistOperatorProfile;
+
+    function applyPreparedOperatorProfile(prepared) {
+      const api = window.OperatorProfile;
+      if (!api || !prepared || !prepared.profile || !semanticActionRegistry) {
+        return { status: 'rejected', code: 'profile-registry-unavailable' };
+      }
+      const applied = api.applyOperatorProfile(prepared.profile, semanticActionRegistry);
+      if (!applied || applied.status !== 'applied') return applied;
+      operatorProfile = prepared.profile;
+      preferredGamepadSlot = operatorProfile.gamepad.preferredSlot;
+      if (window.simState) {
+        window.simState.accessibilityProfile = operatorProfile.accessibility;
+      }
+      if (gamepadInputRuntime
+          && typeof gamepadInputRuntime.restorePreferred === 'function') {
+        gamepadInputRuntime.restorePreferred(preferredGamepadSlot);
+      }
+      pushSemanticBindingsToConsoles();
+      if (gamepadInputRuntime) gamepadInputRuntime.neutralize();
+      if (typeof window.applyAccessibilityProfile === 'function') {
+        window.applyAccessibilityProfile();
+      }
+      if (typeof window.onAccessibilityAssistanceChanged === 'function') {
+        try { window.onAccessibilityAssistanceChanged(); } catch (_) { /* best-effort */ }
+      }
+      return prepared;
+    }
+
+    function importOperatorProfileJson(text) {
+      const api = window.OperatorProfile;
+      if (!api || !semanticActionRegistry) {
+        return { status: 'rejected', code: 'profile-registry-unavailable' };
+      }
+      const prepared = api.prepareOperatorProfileImport(text, {
+        registry: semanticActionRegistry,
+      });
+      if (prepared.status === 'rejected') return prepared;
+      // Persist first. A quota/privacy-mode refusal leaves every live setting
+      // untouched rather than applying a profile that a reload immediately
+      // forgets.
+      const saved = api.saveOperatorProfile(operatorProfileStorage(), prepared.profile);
+      if (saved.status !== 'saved') return saved;
+      return applyPreparedOperatorProfile(prepared);
+    }
+
+    function exportOperatorProfileJson() {
+      const api = window.OperatorProfile;
+      const profile = snapshotOperatorProfile();
+      return api && profile ? api.serializeOperatorProfile(profile) : null;
+    }
+
     function updateSemanticBinding(actionId, slot, binding, options) {
       if (!semanticActionRegistry) return { status: 'unavailable' };
       const result = semanticActionRegistry.setBinding(actionId, slot, binding, options);
       if (result.status === 'applied') {
         pushSemanticBindingsToConsoles();
         if (gamepadInputRuntime) gamepadInputRuntime.neutralize();
+        persistOperatorProfile();
       }
       return result;
     }
@@ -2767,6 +2856,7 @@
       if (result.status === 'applied') {
         pushSemanticBindingsToConsoles();
         if (gamepadInputRuntime) gamepadInputRuntime.neutralize();
+        persistOperatorProfile();
       }
       return result;
     }
@@ -2777,6 +2867,7 @@
       if (result.status === 'applied') {
         pushSemanticBindingsToConsoles();
         if (gamepadInputRuntime) gamepadInputRuntime.neutralize();
+        persistOperatorProfile();
       }
       return result;
     }
@@ -2787,6 +2878,7 @@
       if (result.status === 'applied' && gamepadInputRuntime) {
         gamepadInputRuntime.neutralize();
       }
+      if (result.status === 'applied') persistOperatorProfile();
       return result;
     }
 
@@ -3273,6 +3365,18 @@
         ? window.createClientSemanticActionRegistry()
         : null;
 
+      if (window.OperatorProfile && semanticActionRegistry) {
+        const loadedProfile = window.OperatorProfile.loadOperatorProfile(
+          operatorProfileStorage(),
+          { registry: semanticActionRegistry },
+        );
+        // Even a refused stored record supplies a fresh authored-default
+        // profile. Applying that result is safe and, critically, never falls
+        // back to a stale Accessibility-only record behind a corrupt current
+        // key.
+        applyPreparedOperatorProfile(loadedProfile);
+      }
+
       gamepadInputRuntime = typeof window.createGamepadInputRuntime === 'function'
         ? window.createGamepadInputRuntime({
             getContext: () => activeConsole,
@@ -3312,6 +3416,10 @@
             },
           })
         : null;
+      if (gamepadInputRuntime
+          && typeof gamepadInputRuntime.restorePreferred === 'function') {
+        gamepadInputRuntime.restorePreferred(preferredGamepadSlot);
+      }
 
       installConsoleKeyRelay();
 
@@ -3355,13 +3463,22 @@
             ? gamepadInputRuntime.state()
             : { devices: [], selectedIndex: null, status: 'none', capturing: null },
           onGamepadSelection: (index) => gamepadInputRuntime
-            ? gamepadInputRuntime.select(index)
+            ? (() => {
+                const result = gamepadInputRuntime.select(index);
+                if (result.status === 'selected' || result.status === 'none') {
+                  preferredGamepadSlot = result.status === 'selected' ? result.index : null;
+                  persistOperatorProfile();
+                }
+                return result;
+              })()
             : { status: 'unavailable' },
           onSemanticCapture: (actionId, slot, active) => {
             if (!gamepadInputRuntime) return;
             if (active) gamepadInputRuntime.beginCapture(actionId, slot);
             else gamepadInputRuntime.endCapture(actionId, slot);
           },
+          onOperatorProfileExport: () => exportOperatorProfileJson(),
+          onOperatorProfileImport: (json) => importOperatorProfileJson(json),
           // Every audio channel this page owns. Master volume scales each
           // element's own authored level rather than replacing it, so adding
           // a channel here needs no other change (issue #940).

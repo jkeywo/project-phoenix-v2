@@ -64,6 +64,21 @@ settings.controls.gamepad.status_disconnected,Assertive warning after the select
 settings.controls.gamepad.deadzone,Accessible label for a continuous gamepad axis deadzone setting,[Axis deadzone]
 settings.controls.gamepad.deadzone_value,Continuous gamepad axis deadzone percentage readout; {value} is an integer percentage,[{value}%]
 settings.controls.gamepad.inverted,Accessible label for a continuous gamepad axis inversion setting,[Invert axis]
+settings.controls.profile.heading,Phone Controls tab heading for portable private operator profile actions,[Operator Profile]
+settings.controls.profile.hint,Phone Controls tab explanation of profile portability,[Move your Accessibility and control choices between devices with a JSON file.]
+settings.controls.profile.private_hint,"Phone Controls tab privacy boundary for profile export/import","[The file contains no player identity, Station ownership, session state, or saves.]"
+settings.controls.profile.export,Phone Controls tab action downloading the private operator profile,[Export Profile]
+settings.controls.profile.import,Phone Controls tab action choosing a private operator profile JSON file,[Import Profile]
+settings.controls.profile.status_reading,Polite status while the selected operator profile file is read,[Reading profile…]
+settings.controls.profile.status_exported,Polite status after an operator profile download begins,[Profile exported.]
+settings.controls.profile.status_imported,Polite status after a current operator profile is imported,[Profile imported.]
+settings.controls.profile.status_imported_normalized,Polite status after supported settings are imported and unsupported fields or conflicting new defaults are ignored,[Profile imported. Unsupported fields or conflicting new defaults were ignored safely.]
+settings.controls.profile.status_migrated,Polite status after an Accessibility-only profile is migrated,[Accessibility profile migrated to the current operator profile.]
+settings.controls.profile.status_refused_version,Assertive status refusing an unknown operator profile kind or version,[This profile version is not supported. No settings were changed.]
+settings.controls.profile.status_refused_controls,Assertive status refusing unsafe or conflicting imported controls,"[The imported controls are invalid, reserved, or conflicting. No settings were changed.]"
+settings.controls.profile.status_refused_storage,Assertive status when private storage or profile download is unavailable,[The profile could not be stored or exported on this device. No settings were changed.]
+settings.controls.profile.status_refused_read,Assertive status when the selected operator profile file cannot be read,[The selected profile file could not be read. No settings were changed.]
+settings.controls.profile.status_refused_corrupt,Assertive status refusing malformed operator profile JSON,[This is not a valid operator profile. No settings were changed.]
 client.gamepad.disconnect_warning,Persistent client-level live warning outside Settings after selected gamepad disconnect,[Selected gamepad disconnected. No other gamepad has taken control. Keyboard controls remain active.]
 world.combat_test.harrow.blood_eagle,assets/worlds/combat_test.toml → scripted Harrow display identity,Blood-Eagle
 world.combat_test.harrow.iron_spear,assets/worlds/combat_test.toml → scripted Harrow display identity,Iron-Spear

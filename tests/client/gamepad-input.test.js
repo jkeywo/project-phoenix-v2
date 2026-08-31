@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   createGamepadInputRuntime,
   enumerateGamepads,
+  gamepadBindingsEqual,
   gamepadBindingPressed,
   normalizeContinuousAxis,
   normalizeGamepadBinding,
@@ -76,6 +77,19 @@ describe('standard gamepad bindings', () => {
     expect(() => normalizeGamepadBinding({
       type: 'gamepad', control: 'left-stick-x', direction: 'positive', threshold: 1.1,
     })).toThrow(/threshold/i);
+  });
+
+  it('treats threshold variants on the same directed axis as one input', () => {
+    const lowerThreshold = {
+      type: 'gamepad', input: 'axis', control: 'left-stick-x',
+      direction: 'positive', threshold: 0.5,
+    };
+    expect(gamepadBindingsEqual(lowerThreshold, {
+      ...lowerThreshold, threshold: 0.9,
+    })).toBe(true);
+    expect(gamepadBindingsEqual(lowerThreshold, {
+      ...lowerThreshold, direction: 'negative', threshold: 0.5,
+    })).toBe(false);
   });
 
   it('samples only standard-mapped snapshots at their standard indices', () => {
@@ -172,6 +186,31 @@ describe('explicit connection ownership and discrete edges', () => {
     snapshot = [pad(0), pad(1, { pressed: [0] })];
     runtime.poll(snapshot);
     snapshot = [pad(0, { pressed: [0] }), pad(1, { pressed: [0] })];
+    runtime.poll(snapshot);
+    expect(activate).toHaveBeenCalledOnce();
+  });
+
+  it('restores a preferred logical slot without granting a replacement connection control', () => {
+    let snapshot = [];
+    const activate = vi.fn();
+    const runtime = createGamepadInputRuntime({
+      getGamepads: () => snapshot, getContext: () => 'captain',
+      getActions: () => [GAMEPAD_ACTION], activate,
+    });
+    expect(runtime.restorePreferred(2)).toEqual({ status: 'disconnected', index: 2 });
+    expect(runtime.state()).toMatchObject({ selectedIndex: 2, status: 'disconnected' });
+
+    // A later device in that browser slot is not silently granted ownership.
+    snapshot = [null, null, pad(2, { pressed: [0] })];
+    runtime.poll(snapshot);
+    expect(runtime.state().status).toBe('disconnected');
+    expect(activate).not.toHaveBeenCalled();
+    runtime.select(2);
+    runtime.poll(snapshot);
+    expect(runtime.state().status).toBe('neutral');
+    snapshot = [null, null, pad(2)];
+    runtime.poll(snapshot);
+    snapshot = [null, null, pad(2, { pressed: [0] })];
     runtime.poll(snapshot);
     expect(activate).toHaveBeenCalledOnce();
   });

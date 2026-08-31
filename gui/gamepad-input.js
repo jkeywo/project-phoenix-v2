@@ -76,7 +76,7 @@ export function gamepadBindingsEqual(left, right) {
     if (a.input === 'axis' && b.input === 'axis' && a.control === b.control
         && (a.direction == null || b.direction == null)) return true;
     return a.input === b.input && a.control === b.control
-      && a.direction === b.direction && a.threshold === b.threshold;
+      && (a.input !== 'axis' || a.direction === b.direction);
   } catch (_) {
     return false;
   }
@@ -372,6 +372,29 @@ export function createGamepadInputRuntime(options = {}) {
     return { status: 'selected', index: slot };
   }
 
+  /**
+   * Restore a persisted logical browser slot without pretending a disconnected
+   * or replacement device already owns input.  A currently connected standard
+   * pad is selected through the ordinary explicit path; otherwise the slot is
+   * retained only for Settings/export and remains disconnected until the
+   * operator selects the connection again.
+   */
+  function restorePreferred(index) {
+    if (index == null || index === '') return select(null);
+    observe(getGamepads());
+    const slot = Number(index);
+    if (!Number.isInteger(slot) || slot < 0) return { status: 'invalid' };
+    const pad = latestSnapshot[slot];
+    if (pad && pad.mapping === 'standard') return select(slot);
+    flushContinuous();
+    selection = { index: slot, generation: -1 };
+    captureTarget = null;
+    previousPressed.clear();
+    neutralGate = true;
+    notify();
+    return { status: pad ? 'unsupported' : 'disconnected', index: slot };
+  }
+
   function beginCapture(actionId, slot) {
     captureTarget = { actionId: String(actionId), slot: Number(slot) };
     neutralize();
@@ -606,7 +629,7 @@ export function createGamepadInputRuntime(options = {}) {
   }
 
   return {
-    poll, start, state, select, beginCapture, endCapture, neutralize,
+    poll, start, state, select, restorePreferred, beginCapture, endCapture, neutralize,
     noteConnected, noteDisconnected,
   };
 }

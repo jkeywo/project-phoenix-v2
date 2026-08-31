@@ -484,6 +484,133 @@ export function createSemanticActionRegistry(options = {}) {
     return profile;
   }
 
+  /**
+   * Validate an untrusted persisted/imported binding+tuning profile without
+   * touching the live registry.  Supplied choices take precedence over
+   * conflict-free authored defaults for missing actions, while unknown future
+   * actions are ignored.  Every supplied known action must carry exactly two
+   * slots; reserved chords and overlapping-context conflicts among those
+   * supplied choices are refused with a machine-readable result.
+   */
+  function validateProfile(profile = {}) {
+    const rawBindings = profile && profile.bindings;
+    const rawTuning = profile && profile.tuning;
+    if (rawBindings != null && (typeof rawBindings !== 'object' || Array.isArray(rawBindings))) {
+      return { status: 'invalid', code: 'bindings-shape' };
+    }
+    if (rawTuning != null && (typeof rawTuning !== 'object' || Array.isArray(rawTuning))) {
+      return { status: 'invalid', code: 'tuning-shape' };
+    }
+
+    const nextBindings = new Map(
+      [...definitions.keys()].map((id) => [id, [null, null]]),
+    );
+    const nextTuning = new Map(
+      [...authoredTuning].map(([id, value]) => [id, { ...value }]),
+    );
+    const suppliedBindings = new Set();
+    const ignoredBindings = [];
+    const ignoredTuning = [];
+    const reconciledDefaults = [];
+
+    for (const id of Object.keys(rawBindings || {})) {
+      if (!definitions.has(id)) {
+        ignoredBindings.push(id);
+        continue;
+      }
+      const slots = rawBindings[id];
+      if (!Array.isArray(slots) || slots.length !== SEMANTIC_BINDING_SLOT_COUNT) {
+        return { status: 'invalid', code: 'binding-slot-count', actionId: id };
+      }
+      try {
+        nextBindings.set(id, normalizeSlotsFor(id, slots));
+        suppliedBindings.add(id);
+      } catch (_) {
+        return { status: 'invalid', code: 'binding-shape', actionId: id };
+      }
+    }
+
+    // Validate the untrusted choices before introducing any authored defaults.
+    // That keeps a valid older remap authoritative when a newer action happens
+    // to gain the same default binding.
+    for (const id of suppliedBindings) {
+      const slots = nextBindings.get(id);
+      for (let slot = 0; slot < SEMANTIC_BINDING_SLOT_COUNT; slot++) {
+        const binding = slots[slot];
+        if (binding && binding.type === 'keyboard' && isReservedKeyboardBinding(binding)) {
+          return { status: 'invalid', code: 'binding-reserved', actionId: id, slot };
+        }
+        const conflicts = conflictsFor(id, slot, binding, nextBindings);
+        if (conflicts.length > 0) {
+          return {
+            status: 'invalid', code: 'binding-conflict', actionId: id, slot,
+            conflicts,
+          };
+        }
+      }
+    }
+
+    // Reconcile actions absent from an older profile in registration order.
+    // Each default slot is accepted only when it does not displace a supplied
+    // choice; a colliding slot stays empty and is reported to the importer.
+    for (const [id, defaults] of authoredDefaults) {
+      if (suppliedBindings.has(id)) continue;
+      const slots = nextBindings.get(id);
+      for (let slot = 0; slot < SEMANTIC_BINDING_SLOT_COUNT; slot++) {
+        const binding = defaults[slot];
+        if (!binding) continue;
+        const conflicts = conflictsFor(id, slot, binding, nextBindings);
+        if (conflicts.length > 0) {
+          reconciledDefaults.push({
+            actionId: id,
+            slot,
+            binding: copyBinding(binding),
+            conflicts,
+          });
+          continue;
+        }
+        slots[slot] = copyBinding(binding);
+      }
+    }
+
+    for (const id of Object.keys(rawTuning || {})) {
+      if (!authoredTuning.has(id)) {
+        ignoredTuning.push(id);
+        continue;
+      }
+      try {
+        nextTuning.set(id, normalizeContinuousTuning(rawTuning[id]));
+      } catch (_) {
+        return { status: 'invalid', code: 'tuning-shape', actionId: id };
+      }
+    }
+
+    const normalizedBindings = {};
+    for (const [id, slots] of nextBindings) normalizedBindings[id] = copySlots(slots);
+    const normalizedTuning = {};
+    for (const [id, value] of nextTuning) normalizedTuning[id] = { ...value };
+    return {
+      status: 'valid',
+      profile: { bindings: normalizedBindings, tuning: normalizedTuning },
+      ignoredBindings,
+      ignoredTuning,
+      reconciledDefaults,
+    };
+  }
+
+  /** Atomically replace live bindings+tuning after complete validation. */
+  function replaceProfile(profile = {}) {
+    const validated = validateProfile(profile);
+    if (validated.status !== 'valid') return validated;
+    for (const [id, slots] of Object.entries(validated.profile.bindings)) {
+      bindings.set(id, normalizeSlotsFor(id, slots));
+    }
+    for (const [id, value] of Object.entries(validated.profile.tuning)) {
+      tuning.set(id, normalizeContinuousTuning(value));
+    }
+    return { ...validated, status: 'applied' };
+  }
+
   /** Apply known entries from a parent-owned in-memory binding profile. */
   function updateBindings(profile) {
     if (!profile || typeof profile !== 'object') return bindingProfile();
@@ -629,6 +756,8 @@ export function createSemanticActionRegistry(options = {}) {
     resetAction,
     resetAllBindings,
     bindingProfile,
+    validateProfile,
+    replaceProfile,
     updateBindings,
     tuningProfile,
     setTuning,

@@ -27,6 +27,7 @@ import {
   GOD_MODE_SYSTEM_ID,
   isSemanticModifierEvent,
   semanticModifierCode,
+  operatorProfileStatusView,
 } from '../../gui/settings-panel.js';
 import { setBuildFlags, isDemoBuild } from '../../gui/build-flags.js';
 import {
@@ -1099,6 +1100,57 @@ describe('semantic controls tab', () => {
       'R', t('input.gamepad.face_bottom'),
     ]);
     expect(captures.every((el) => el.getAttribute('aria-label'))).toBe(true);
+  });
+
+  it('exports and imports the portable private profile with accessible status', async () => {
+    const downloads = [];
+    const imported = [];
+    const { doc } = openControls({
+      onOperatorProfileExport: () => '{"kind":"project-phoenix/operator-profile"}',
+      downloadOperatorProfile: (_doc, name, text) => {
+        downloads.push({ name, text });
+        return true;
+      },
+      readOperatorProfileFile: async (file) => file.contents,
+      onOperatorProfileImport: async (text) => {
+        imported.push(text);
+        return {
+          status: 'imported',
+          diagnostics: [{ code: 'private-or-unsupported-fields-ignored' }],
+        };
+      },
+    });
+    const exportButton = bodyButtons(doc)
+      .find((button) => button.textContent === t('settings.controls.profile.export'));
+    exportButton.click();
+    expect(downloads).toEqual([{
+      name: 'phoenix-operator-profile.json',
+      text: '{"kind":"project-phoenix/operator-profile"}',
+    }]);
+    expect(descendants(bodyOf(doc)).find((el) => el.getAttribute
+      && el.getAttribute('data-control') === 'operator-profile-status').textContent)
+      .toBe(t('settings.controls.profile.status_exported'));
+
+    const file = descendants(bodyOf(doc)).find((el) => el.getAttribute
+      && el.getAttribute('data-control') === 'operator-profile-file');
+    file.files = [{ contents: '{"version":1}' }];
+    file.dispatch('change');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(imported).toEqual(['{"version":1}']);
+    const status = descendants(bodyOf(doc)).find((el) => el.getAttribute
+      && el.getAttribute('data-control') === 'operator-profile-status');
+    expect(status.textContent).toBe(t('settings.controls.profile.status_imported_normalized'));
+    expect(status.getAttribute('role')).toBe('status');
+  });
+
+  it('maps profile refusals to assertive, explicit diagnostics', () => {
+    expect(operatorProfileStatusView({ status: 'rejected', code: 'profile-version' }))
+      .toEqual({ labelId: 'settings.controls.profile.status_refused_version', alert: true });
+    expect(operatorProfileStatusView({ status: 'rejected', code: 'binding-conflict' }))
+      .toEqual({ labelId: 'settings.controls.profile.status_refused_controls', alert: true });
+    expect(operatorProfileStatusView({ status: 'rejected', code: 'profile-json' }))
+      .toEqual({ labelId: 'settings.controls.profile.status_refused_corrupt', alert: true });
   });
 
   it('renders accessible continuous tuning controls and updates only client-local tuning', () => {

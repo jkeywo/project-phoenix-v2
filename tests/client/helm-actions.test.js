@@ -76,6 +76,11 @@ describe('Helm semantic steering action', () => {
       'comms.respond',
       'comms.clear',
       'comms.show-on-screen',
+      'sensors.target-selection',
+      'sensors.scan',
+      'sensors.viewscreen',
+      'sensors.cancel-impulse',
+      'science.shield-focus',
       'editor.mod.import',
       'editor.mod.validate',
       'editor.mod.export',
@@ -100,6 +105,11 @@ describe('Helm semantic steering action', () => {
       'comms.respond',
       'comms.clear',
       'comms.show-on-screen',
+      'sensors.target-selection',
+      'sensors.scan',
+      'sensors.viewscreen',
+      'sensors.cancel-impulse',
+      'science.shield-focus',
     ]);
   });
 });

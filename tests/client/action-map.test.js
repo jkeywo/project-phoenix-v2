@@ -512,6 +512,16 @@ describe('cancel_impulse', () => {
       payload: { type: 'CancelImpulse' },
     });
   });
+
+  it('carries semantic correlation without changing the legacy route', () => {
+    const send = mkSend();
+    ACTION_MAP.cancel_impulse({ correlation: 'cancel-impulse-1' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'cancel-impulse-1',
+      target: 'helm-impulse',
+      payload: { type: 'CancelImpulse' },
+    });
+  });
 });
 
 describe('set_radar_view', () => {
@@ -660,6 +670,18 @@ describe('set_shield_focus', () => {
     });
   });
 
+  it('carries semantic correlation to the selected authored arc', () => {
+    const send = mkSend();
+    ACTION_MAP.set_shield_focus({
+      action: 'set_shield_focus', arc_id: 'fore', focused: true, correlation: 'focus-1',
+    }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'focus-1',
+      target: 'shield-arc-fore',
+      payload: { type: 'SetShieldArcFocus', data: { focused: true } },
+    });
+  });
+
   it('defaults focused to true when the field is omitted', () => {
     const send = mkSend();
     ACTION_MAP.set_shield_focus({ action: 'set_shield_focus', arc_id: 'starboard' }, send);
@@ -686,12 +708,15 @@ describe('set_shield_focus', () => {
 });
 
 describe('set_sensors_target', () => {
-  it('calls mutate with sensorsTarget and send ControlSystem SetScienceTarget', () => {
+  it('sends correlated SetScienceTarget without painting an optimistic selection', () => {
     const send = mkSend();
     const mutate = mkMutate();
-    ACTION_MAP.set_sensors_target({ action: 'set_sensors_target', uuid: 'tgt-42' }, send, mutate);
-    expect(mutate).toHaveBeenCalledWith({ sensorsTarget: 'tgt-42' });
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
+    ACTION_MAP.set_sensors_target({
+      action: 'set_sensors_target', uuid: 'tgt-42', correlation: 'science-target-1',
+    }, send, mutate);
+    expect(mutate).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'science-target-1',
       target: 'sensors',
       payload: { type: 'SetScienceTarget', data: { uuid: 'tgt-42' } },
     });
@@ -702,6 +727,17 @@ describe('set_sensors_target', () => {
     const mutate = mkMutate();
     ACTION_MAP.set_sensors_target({ action: 'set_sensors_target' }, send, mutate);
     expect(send).not.toHaveBeenCalled();
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
+  it('retains the legacy uncorrelated route for non-semantic callers', () => {
+    const send = mkSend();
+    const mutate = mkMutate();
+    ACTION_MAP.set_sensors_target({ action: 'set_sensors_target', uuid: 'tgt-42' }, send, mutate);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'sensors',
+      payload: { type: 'SetScienceTarget', data: { uuid: 'tgt-42' } },
+    });
     expect(mutate).not.toHaveBeenCalled();
   });
 });
@@ -1007,13 +1043,16 @@ describe('select_player_ship', () => {
 // ── The science scan (issue #1032) ────────────────────────────────────────────
 
 describe('scan_target', () => {
-  it('sends ScanTarget at the sensors system with the contact uuid', () => {
+  it('sends correlated ScanTarget at the sensors system with the contact uuid', () => {
     // The sensors system, not a scan one: the suite is the thing aboard the
     // ship that can be commanded and damaged, so a scan rides the same
     // station-tenure admission the science target selection already does.
     const send = mkSend();
-    ACTION_MAP.scan_target({ action: 'scan_target', uuid: 'depot-1' }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
+    ACTION_MAP.scan_target({
+      action: 'scan_target', uuid: 'depot-1', correlation: 'scan-1',
+    }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'scan-1',
       target: 'sensors',
       payload: { type: 'ScanTarget', data: { uuid: 'depot-1' } },
     });
@@ -1023,6 +1062,15 @@ describe('scan_target', () => {
     const send = mkSend();
     ACTION_MAP.scan_target({ action: 'scan_target' }, send);
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it('retains the legacy uncorrelated transport for non-semantic callers', () => {
+    const send = mkSend();
+    ACTION_MAP.scan_target({ action: 'scan_target', uuid: 'depot-1' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'sensors',
+      payload: { type: 'ScanTarget', data: { uuid: 'depot-1' } },
+    });
   });
 });
 
@@ -1086,7 +1134,7 @@ describe('dispatchConsoleAction', () => {
 
   it('provides a no-op mutate when none is given', () => {
     const send = mkSend();
-    // set_sensors_target needs mutate; should not throw even if not provided
+    // Sensor selection has no optimistic patch and does not require mutate.
     expect(() => dispatchConsoleAction({ action: 'set_sensors_target', uuid: 'x' }, send)).not.toThrow();
     expect(send).toHaveBeenCalledWith('ControlSystem', {
       target: 'sensors',

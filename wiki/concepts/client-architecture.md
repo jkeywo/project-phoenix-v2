@@ -2,7 +2,7 @@
 title: Client Architecture
 type: concept
 tags: [client, javascript, iframe, console, console-family, state, accessibility, keyboard, gamepad, feedback, vitest]
-sources: [client.html, server.html, gui/mount-plan.js, gui/hero-bar.js, gui/reducer-result.js, gui/lobby-state.js, gui/sim-state.js, gui/comms-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/semantic-controls-remapper.js, gui/host-actions.js, gui/server-settings.js, gui/gamepad-input.js, gui/client-semantic-actions.js, gui/stations/captain-actions.js, gui/stations/helm-actions.js, gui/operator-profile.js, gui/action-map.js, gui/console-core.js, gui/console-latency.js, gui/iframe-bridge.js, gui/client-router.js, gui/coordination-popup.js, gui/accessibility-profile.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/command_admission/mod.rs, src/console/captain/server.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
+sources: [client.html, server.html, gui/mount-plan.js, gui/hero-bar.js, gui/reducer-result.js, gui/lobby-state.js, gui/sim-state.js, gui/comms-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/semantic-controls-remapper.js, gui/host-actions.js, gui/server-settings.js, gui/gamepad-input.js, gui/client-semantic-actions.js, gui/stations/captain-actions.js, gui/stations/helm-actions.js, gui/stations/sensors-actions.js, gui/operator-profile.js, gui/action-map.js, gui/console-core.js, gui/console-latency.js, gui/iframe-bridge.js, gui/client-router.js, gui/coordination-popup.js, gui/accessibility-profile.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/command_admission/mod.rs, src/console/captain/server.rs, src/science/server.rs, src/ship/helm_admission.rs, src/ship/sensors.rs, src/ship/shields.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
 updated: 2026-08-31
 ---
 
@@ -59,30 +59,35 @@ session authority. Each console iframe owns an isolated registry instance;
 `client.html` owns the current in-memory binding choices and copies them into
 iframes through `__updateSemanticActionBindings` on load and remap. The Captain
 family has four stable adapters: `captain.red-alert`, `captain.weapons-hold`,
-`captain.view`, and `captain.objective-priority`. Every visible Captain control
-and its default/remapped keyboard binding invokes one of those adapters. Boolean
-actions derive an explicit assignment from the latest authoritative view;
-camera and objective controls pass the selected authored identity as ephemeral
-activation detail, while their generic bindings cycle only through choices in
-that same view. Each console iframe then posts its `console_action`, and
+`captain.view`, and `captain.objective-priority`. Sensors and Science add five:
+`sensors.target-selection`, `sensors.scan`, `sensors.viewscreen`,
+`sensors.cancel-impulse`, and `science.shield-focus`. Every visible control in
+those families and its default/remapped binding invokes the same adapter.
+Boolean actions derive an explicit assignment from the latest authoritative
+view; target, scan, camera, objective and shield controls pass only identities
+already present in the projected view, while their generic bindings cycle only
+through choices in that same view. Each console iframe then posts its
+`console_action`, and
 `gui/action-map.js` remains the table-driven dispatcher mapping
 `action.action` values to `ClientMessage`s (mostly
 `ControlSystem { target, payload }`) via `send(type, data?)`.
 
-All four Captain actions use authoritative action feedback. Registry activation
+Captain and Sensors/Science actions use authoritative action feedback. Registry activation
 mints one bounded opaque correlation and records the same-device epoch timestamp
 at `Pressed`, then moves presentation to `Pending` only after its adapter handles
 the activation. The action map sends a `ControlSystemCorrelated` envelope; the
-host accepts only the exact correlated Captain target/payload pairs, keeps
+host accepts only the exact correlated target/payload pairs, keeps
 the correlation out of the payload, command log, mesh and simulation state, and
 replies reliably to the originating session with `ActionFeedback::Applied` only
-after the matching Captain consumer runs, or `Refused` when admission rejects
-it. `client.html` owns the bounded correlation-to-iframe timeout router. It
+after the matching owning consumer runs, or `Refused` when admission or the
+owner rejects it. Science Target, scan availability and protected scan details
+remain authoritative projections; Pending never mutates them optimistically.
+`client.html` owns the bounded correlation-to-iframe timeout router. It
 settles latency and forwards the terminal result only for that exact
 correlation; ordinary blackboard pushes cannot acknowledge it. Every iframe has
 one generic accessible final-status presenter, while specialised controls may
 also expose busy state. Pending never changes Red Alert, Weapons Hold, camera,
-or objective state: only the normal authoritative Captain blackboard does.
+or objective state: only the normal authoritative blackboard does.
 
 The host page uses the same registry and lifecycle without pretending its local
 chrome is a console or a network command. `host.qr-code` is scoped to the
@@ -100,7 +105,7 @@ Rust message or simulation authority.
 
 Each binding slot is a union: `KeyboardEvent.code` plus all four modifiers, or
 a portable control from the browser's standard gamepad mapping. Gamepad
-bindings name logical controls (face-bottom, D-pad directions, a left-stick
+bindings name logical controls (all four face buttons, D-pad directions, a left-stick
 axis direction and threshold, or an undirected continuous standard axis), never
 `Gamepad.id`, vendor data or a connection. Continuous action definitions own
 their output range, neutral and dispatch cadence; client-local tuning owns
@@ -174,7 +179,7 @@ resurrecting the old value.
 | `console-payload.js` | Metadata-driven flat/keyed normalization plus `familyView`: mirrors flat views only under actual projected ids and selects composite views by Console Family, with no inverse id census. |
 | `action-map.js` | Table-driven `console_action` → `ClientMessage` dispatch |
 | `action-feedback.js` | Pure bounded Pressed → Pending → Applied/Refused/TimedOut presentation lifecycle, exact parent-to-originating-iframe router, and the shared live-status/semantic-cue/vibration transition |
-| `semantic-action-registry.js`, `semantic-controls-remapper.js`, `gamepad-input.js`, `client-semantic-actions.js`, `stations/{captain,helm}-actions.js`, `host-actions.js`, `operator-profile.js` | Non-authoritative context/input identity, exactly two keyboard-or-standard-gamepad slots, continuous metadata and axis tuning, the shared keyboard capture/conflict/reset presenter used by phone and host Settings, explicit one-connection phone gamepad ownership with neutral-gated discrete edges and continuous values, atomic validation plus private browser persistence/export/import, reserved-chord policy, overlap-only conflict replacement and reset operations, plus the real Captain, Helm and host QR adapters above `action-map.js` |
+| `semantic-action-registry.js`, `semantic-controls-remapper.js`, `gamepad-input.js`, `client-semantic-actions.js`, `stations/{captain,helm,sensors}-actions.js`, `host-actions.js`, `operator-profile.js` | Non-authoritative context/input identity, exactly two keyboard-or-standard-gamepad slots, continuous metadata and axis tuning, the shared keyboard capture/conflict/reset presenter used by phone and host Settings, explicit one-connection phone gamepad ownership with neutral-gated discrete edges and continuous values, atomic validation plus private browser persistence/export/import, reserved-chord policy, overlap-only conflict replacement and reset operations, plus the real Captain, Helm, Sensors/Science and host QR adapters above `action-map.js` |
 | `iframe-bridge.js` | `push()` / `wireLoad()` state-push into console iframes (ADR-0001 §2) |
 | `content-switcher.js` | Section visibility over the ship's mounted stations; one human directly holds one station |
 | `station-roster.js` | Pure fold: players + station defs → lobby roster rows + aggregates |

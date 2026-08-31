@@ -208,8 +208,10 @@ export class ClientSimState {
      *  a hull that omits the key looks the same as one that authors it. */
     this.hostileArcColor = [1, 0.3, 0.3, 0.07];
     // ── Mirror-only UI fields formerly hand-maintained by client.html (#819) ──
-    /** Sensors console target uuid. Set locally by set_sensors_target (the
-     *  action-map mutate patch lands here), cleared when the entity despawns. */
+    /** Legacy Sensors target mirror retained for flat console-state inputs.
+     *  Shipped selection routes never write it: the authoritative Sensors
+     *  blackboard's `science_target_uuid` drives live consoles. If a legacy
+     *  fixture populates this mirror, entity despawn still clears it. */
     this.sensorsTarget = null;
     /** Authoritative server blips from the latest WeaponsUpdate, when sent. */
     this.weaponsBlips = [];

@@ -1,7 +1,8 @@
 use bevy::prelude::*;
 
 use crate::core::messages::{
-    AdmittedCommands, InterSystemMsg, InterSystemPayload, InterSystemQueue, SystemControlPayload,
+    ActionFeedbackOutcome, AdmittedCommands, InterSystemMsg, InterSystemPayload, InterSystemQueue,
+    SystemControlPayload,
 };
 use crate::regions::server::RegionMembership;
 use crate::server_app::LocalShip;
@@ -100,6 +101,9 @@ pub(crate) fn process_helm_inputs(
         Option<&ShipSystemControlSources>,
         Has<LocalShip>,
     )>,
+    mut outbound: Option<
+        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
+    >,
 ) {
     for (
         entity,
@@ -269,9 +273,13 @@ pub(crate) fn process_helm_inputs(
                 (t, SystemControlPayload::CancelImpulse)
                     if t.as_str() == crate::ship::system_registry::HELM_IMPULSE_SYSTEM_ID =>
                 {
-                    if let Some(ic) = impulse_cmd.as_deref_mut() {
+                    let outcome = if let Some(ic) = impulse_cmd.as_deref_mut() {
                         ic.0 = crate::ship::impulse::ImpulsePhase::Idle;
-                    }
+                        ActionFeedbackOutcome::Applied
+                    } else {
+                        ActionFeedbackOutcome::Refused
+                    };
+                    crate::command_admission::finish_action_feedback(cmd, &mut outbound, outcome);
                 }
                 // Boost (issue #881). The `enabled` guard lives in the arm
                 // guard, so a payload for a boost-less hull falls through to
@@ -409,9 +417,112 @@ pub(crate) fn operate_helm_engine_ai(
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
-    use crate::core::messages::ClientMessage;
+    use crate::core::messages::{
+        ActionCorrelationId, AdmittedCommand, ClientMessage, DeliveryClass, ServerMessage, SystemId,
+    };
+    use crate::lobby::{server::OutboundMessage, Target};
     use crate::ship::control_source::ControlSource;
     use crate::ship::test_support::*;
+
+    fn cancel_command(correlation: &str) -> AdmittedCommand {
+        AdmittedCommand {
+            target: SystemId(crate::ship::system_registry::HELM_IMPULSE_SYSTEM_ID.to_string()),
+            payload: SystemControlPayload::CancelImpulse,
+            response_token: Some("sensors".to_string()),
+            feedback_correlation: Some(
+                ActionCorrelationId::new(correlation).expect("valid test correlation"),
+            ),
+        }
+    }
+
+    fn has_feedback(
+        messages: &[OutboundMessage],
+        correlation: &str,
+        outcome: ActionFeedbackOutcome,
+    ) -> bool {
+        messages.iter().any(|message| {
+            message.target == Target::Token("sensors".to_string())
+                && message.delivery == DeliveryClass::Reliable
+                && matches!(
+                    &message.msg,
+                    ServerMessage::ActionFeedback {
+                        correlation: actual,
+                        outcome: actual_outcome,
+                    } if actual.as_str() == correlation && *actual_outcome == outcome
+                )
+        })
+    }
+
+    fn cancel_feedback_app(
+        impulse: Option<crate::ship::helm::ImpulseCommand>,
+        correlation: &str,
+    ) -> (App, Entity) {
+        let mut app = App::new();
+        app.add_message::<OutboundMessage>()
+            .add_systems(Update, process_helm_inputs);
+        let entity = app
+            .world_mut()
+            .spawn(AdmittedCommands(vec![cancel_command(correlation)]))
+            .id();
+        if let Some(impulse) = impulse {
+            app.world_mut().entity_mut(entity).insert(impulse);
+        }
+        (app, entity)
+    }
+
+    #[test]
+    fn cancel_impulse_reports_applied_only_after_the_owner_cancels_it() {
+        let (mut app, entity) = cancel_feedback_app(
+            Some(crate::ship::helm::ImpulseCommand(
+                crate::ship::impulse::ImpulsePhase::Charging,
+            )),
+            "cancel-applied",
+        );
+        let mut cursor = app
+            .world()
+            .resource::<Messages<OutboundMessage>>()
+            .get_cursor();
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<crate::ship::helm::ImpulseCommand>(entity)
+                .expect("the impulse owner remains present")
+                .0,
+            crate::ship::impulse::ImpulsePhase::Idle,
+        );
+        let feedback: Vec<_> = cursor
+            .read(app.world().resource::<Messages<OutboundMessage>>())
+            .cloned()
+            .collect();
+        assert!(has_feedback(
+            &feedback,
+            "cancel-applied",
+            ActionFeedbackOutcome::Applied,
+        ));
+    }
+
+    #[test]
+    fn cancel_impulse_reports_refused_when_the_owner_component_is_absent() {
+        let (mut app, _) = cancel_feedback_app(None, "cancel-refused");
+        let mut cursor = app
+            .world()
+            .resource::<Messages<OutboundMessage>>()
+            .get_cursor();
+
+        app.update();
+
+        let feedback: Vec<_> = cursor
+            .read(app.world().resource::<Messages<OutboundMessage>>())
+            .cloned()
+            .collect();
+        assert!(has_feedback(
+            &feedback,
+            "cancel-refused",
+            ActionFeedbackOutcome::Refused,
+        ));
+    }
 
     #[test]
     fn control_system_helm_input_updates_last_input_and_moves_ship() {

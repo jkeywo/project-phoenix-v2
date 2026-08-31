@@ -21,11 +21,13 @@ function mount(tag) {
 beforeEach(() => {
   document.body.innerHTML = '';
   window.sendAction = vi.fn();
+  window.activateSemanticAction = vi.fn();
 });
 
 afterEach(() => {
   document.body.innerHTML = '';
   delete window.sendAction;
+  delete window.activateSemanticAction;
 });
 
 // ── ph-power-controls: named roving toolbar of glyph steppers ────────────────
@@ -114,7 +116,9 @@ describe('shield facings: arrow-cycled arc cursor commits the same action a tap 
     expect(cursor).toBeTruthy();
     expect(cursor.getAttribute('data-facing-id')).toBe('fore');
     keydown(el, 'Enter');                          // commit
-    expect(window.sendAction).toHaveBeenCalledWith('set_shield_focus', { arc_id: 'fore', focused: true });
+    expect(window.activateSemanticAction).toHaveBeenCalledWith('science.shield-focus', {
+      source: 'control', detail: { arc_id: 'fore', focused: true },
+    });
   });
 
   it('cycles through facings before committing', () => {
@@ -128,7 +132,9 @@ describe('shield facings: arrow-cycled arc cursor commits the same action a tap 
     keydown(el, 'ArrowDown');                      // → fore
     keydown(el, 'ArrowDown');                      // → port
     keydown(el, 'Enter');
-    expect(window.sendAction).toHaveBeenLastCalledWith('set_shield_focus', { arc_id: 'port', focused: true });
+    expect(window.activateSemanticAction).toHaveBeenLastCalledWith('science.shield-focus', {
+      source: 'control', detail: { arc_id: 'port', focused: true },
+    });
   });
 
   it('the keyboard and the pointer run the SAME commit path (no fork, no double-fire)', () => {
@@ -139,13 +145,13 @@ describe('shield facings: arrow-cycled arc cursor commits the same action a tap 
 
     // Pointer: a tap on the hit-path.
     const pointerFn = vi.fn();
-    window.sendAction = pointerFn;
+    window.activateSemanticAction = pointerFn;
     const a = shields(state);
     a.shadowRoot.querySelector('.hit-path').dispatchEvent(new MouseEvent('click'));
 
     // Keyboard: cursor then Enter.
     const keyFn = vi.fn();
-    window.sendAction = keyFn;
+    window.activateSemanticAction = keyFn;
     const b = shields(state);
     keydown(b, 'ArrowRight');
     keydown(b, 'Enter');
@@ -162,7 +168,9 @@ describe('shield facings: arrow-cycled arc cursor commits the same action a tap 
     });
     keydown(el, 'ArrowRight');
     keydown(el, 'Enter');
-    expect(window.sendAction).toHaveBeenCalledWith('set_shield_focus', { arc_id: 'fore', focused: false });
+    expect(window.activateSemanticAction).toHaveBeenCalledWith('science.shield-focus', {
+      source: 'control', detail: { arc_id: 'fore', focused: false },
+    });
   });
 
   it('Enter with no cursor yet does nothing (no accidental focus change)', () => {
@@ -171,7 +179,7 @@ describe('shield facings: arrow-cycled arc cursor commits the same action a tap 
       focused_facing: null,
     });
     keydown(el, 'Enter');
-    expect(window.sendAction).not.toHaveBeenCalled();
+    expect(window.activateSemanticAction).not.toHaveBeenCalled();
   });
 
   it('in auto mode a keyboard commit sends nothing, mirroring the pointer (AUTO hint instead)', () => {
@@ -182,7 +190,7 @@ describe('shield facings: arrow-cycled arc cursor commits the same action a tap 
     });
     keydown(el, 'ArrowRight');
     keydown(el, 'Enter');
-    expect(window.sendAction).not.toHaveBeenCalled();
+    expect(window.activateSemanticAction).not.toHaveBeenCalled();
   });
 
   it('drops the cursor if its facing leaves the ring', () => {
@@ -199,6 +207,6 @@ describe('shield facings: arrow-cycled arc cursor commits the same action a tap 
     };
     expect(el.shadowRoot.querySelector('.arc-path.kbd-cursor')).toBeFalsy();
     keydown(el, 'Enter');                            // no cursor → no commit
-    expect(window.sendAction).not.toHaveBeenCalled();
+    expect(window.activateSemanticAction).not.toHaveBeenCalled();
   });
 });

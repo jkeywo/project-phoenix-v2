@@ -3123,24 +3123,20 @@
             meter.noteDispatch(action.action, action.console || activeConsole, action.__input_ms);
           }
         }
-        // Only the Science target retains its legacy local presentation patch.
-        // Tactical target selection waits for its authoritative TargetLock /
-        // blackboard projection before altering any displayed gameplay state.
+        // Target selection is authoritative: neither Tactical nor Sensors
+        // paints optimistic gameplay state before the host projects it back.
         window.dispatchConsoleAction(action, send, (patch) => {
           if (window.simState) Object.assign(window.simState, patch);
         });
         return;
       }
       // Fallback for the rare race window before module scripts load.
-      // Only covers set_sensors_target (mutates local state); other actions
-      // are silently deferred (non-critical — they arrive after module load).
-      if (action.action === 'set_sensors_target' && action.uuid) {
-        if (window.simState) window.simState.sensorsTarget = action.uuid;
-        send('ControlSystem', {
-          target: 'sensors',
-          payload: { type: 'SetScienceTarget', data: { uuid: action.uuid } },
-        });
-      } else if (action.action === 'set_navigation_waypoint'
+      // Semantic actions deliberately have no direct-wire fallback: bypassing
+      // action-map would discard their correlation and feedback lifecycle.
+      // Console iframes mount after DOMContentLoaded, when deferred modules are
+      // ready; a synthetic pre-module semantic message is therefore ignored.
+      // These two older Navigation actions remain until their own migration.
+      if (action.action === 'set_navigation_waypoint'
           && Number.isFinite(action.x)
           && Number.isFinite(action.z)) {
         send('ControlSystem', {

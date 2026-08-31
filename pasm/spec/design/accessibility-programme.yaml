@@ -44,10 +44,11 @@ entities:
         - "An increment lands when the owning UI, authority or authoring seam is already changing, avoiding a late retrofit. It need not be fictionally or mechanically tied to the band’s headline content."
         - "Every band still has its own visual/UX polish pass. Accessibility is planned and tested alongside that pass but remains a distinct set of requirements."
         - "PRD #1168 delivered T1's platform interaction tranche through #1170-#1178: shared keyboard conventions, empty structural debt floors, modal focus, high contrast and reduced motion on both console and viewscreen surfaces."
+        - "T2 issue #1285 extends the shared private two-slot bindings and correlated feedback contract across every shipped Sensors and Science action without widening station authority, scan availability or protected information projections."
         - "C9 completes richer authorised spectator monitors and the whole-product audit; it is not the first point at which accessibility work occurs."
     game_design:
       must_not_be: [deferred as one final polish project, treated as identical to difficulty, required to map one-to-one onto scenario fiction]
     implementation:
       status: declared
-      paths: [gui/accessibility-profile.js, gui/focus-trap.js, gui/roving-tabindex.js, gui/tokens.css, src/server/viewscreen_border.rs]
-      tests: [tests/client/interaction-floors.test.js, tests/smoke/modal-focus-keyboard.spec.js, tests/smoke/viewscreen-reduced-motion.render.spec.js]
+      paths: [gui/accessibility-profile.js, gui/focus-trap.js, gui/roving-tabindex.js, gui/stations/sensors-actions.js, gui/tokens.css, src/command_admission/mod.rs, src/science/server.rs, src/server/viewscreen_border.rs, src/ship/sensors.rs]
+      tests: [tests/client/interaction-floors.test.js, tests/client/sensors-actions.test.js, tests/client/sensors-semantic-structure.test.js, tests/smoke/comms-ops-keyboard.spec.js, tests/smoke/modal-focus-keyboard.spec.js, tests/smoke/viewscreen-reduced-motion.render.spec.js]

@@ -76,6 +76,7 @@
     import '../components/ph-sensor-panel.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
+    import { SENSORS_CANCEL_IMPULSE_ACTION_ID } from '../stations/sensors-actions.js';
     // The render lives in gui/battleship/sensors.console.js (issue #1235):
     // the shared Sensors renderer + this hull's variant. s is a
     // SensorsConsolePayload — see the @typedef in gui/console-state.js. The
@@ -85,7 +86,7 @@
     var consoleApi = initConsole({ name: 'sensors', render: renderStation });
 
     document.getElementById('btn-cancel-impulse').addEventListener('click', function() {
-      consoleApi.sendAction('cancel_impulse', {});
+      window.activateSemanticAction(SENSORS_CANCEL_IMPULSE_ACTION_ID, { source: 'control' });
     });
   </script>
 </body>

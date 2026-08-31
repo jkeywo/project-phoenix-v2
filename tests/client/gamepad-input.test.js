@@ -107,6 +107,33 @@ describe('standard gamepad bindings', () => {
       { index: 0, supported: true }, { index: 1, supported: false },
     ]);
   });
+
+  it('maps every portable standard button through index 11', () => {
+    for (const [control, index] of [
+      ['face-bottom', 0], ['face-right', 1], ['face-left', 2], ['face-top', 3],
+      ['left-shoulder', 4], ['right-shoulder', 5],
+      ['left-trigger', 6], ['right-trigger', 7],
+      ['select', 8], ['start', 9],
+      ['left-stick-button', 10], ['right-stick-button', 11],
+    ]) {
+      const binding = { type: 'gamepad', input: 'button', control };
+      expect(gamepadBindingPressed(binding, pad(0, { pressed: [index] }))).toBe(true);
+      expect(gamepadBindingPressed(binding, pad(0, {
+        pressed: [(index + 1) % 12],
+      }))).toBe(false);
+    }
+  });
+
+  it('maps both portable right-stick axes at their standard indices', () => {
+    expect(gamepadBindingPressed({
+      type: 'gamepad', input: 'axis', control: 'right-stick-x',
+      direction: 'positive', threshold: 0.5,
+    }, pad(0, { axes: [0, 0, 0.75, 0] }))).toBe(true);
+    expect(gamepadBindingPressed({
+      type: 'gamepad', input: 'axis', control: 'right-stick-y',
+      direction: 'negative', threshold: 0.5,
+    }, pad(0, { axes: [0, 0, 0, -0.75] }))).toBe(true);
+  });
 });
 
 describe('explicit connection ownership and discrete edges', () => {

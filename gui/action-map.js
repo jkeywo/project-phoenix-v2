@@ -6,7 +6,6 @@
  *
  *   send(type, data?)  — enqueues a ClientMessage to the server
  *   mutate(patch)      — applies a partial update to the local client state
- *                        (currently only needed for `set_sensors_target`)
  *
  * All functions are pure (no side effects, no DOM dependency) so they can be
  * unit-tested in Node via Vitest.
@@ -311,7 +310,9 @@ export const ACTION_MAP = Object.freeze({
    */
   scan_target: (a, send) => {
     if (!a.uuid) return;
-    send('ControlSystem', {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
       target: 'sensors',
       payload: { type: 'ScanTarget', data: { uuid: a.uuid } },
     });
@@ -349,7 +350,16 @@ export const ACTION_MAP = Object.freeze({
 
   /** Cancel an active impulse charge. Targets 'helm-impulse' (issue #801). */
   cancel_impulse: (a, send) => {
-    cancelImpulse(send);
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    if (!correlated) {
+      cancelImpulse(send);
+      return;
+    }
+    send('ControlSystemCorrelated', {
+      correlation: a.correlation,
+      target: 'helm-impulse',
+      payload: { type: 'CancelImpulse' },
+    });
   },
 
   /** Toggle the boost drive on/off. Targets 'helm-boost' (issue #801). */
@@ -456,7 +466,9 @@ export const ACTION_MAP = Object.freeze({
   set_shield_focus: (a, send) => {
     if (!a.arc_id) return;
     const focused = a.focused === undefined ? true : !!a.focused;
-    send('ControlSystem', {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
       target: `shield-arc-${a.arc_id}`,
       payload: { type: 'SetShieldArcFocus', data: { focused } },
     });
@@ -541,14 +553,15 @@ export const ACTION_MAP = Object.freeze({
     });
   },
 
-  /**
-   * Select a science target.  Mutates local `state.sensorsTarget` so the
-   * sensor display updates before the server acks the message.
-   */
-  set_sensors_target: (a, send, mutate) => {
+  /** Select a science target. The authoritative Sensors payload paints it. */
+  set_sensors_target: (a, send) => {
     if (a.uuid) {
-      mutate({ sensorsTarget: a.uuid });
-      send('ControlSystem', { target: 'sensors', payload: { type: 'SetScienceTarget', data: { uuid: a.uuid } } });
+      const correlated = typeof a.correlation === 'string' && a.correlation;
+      send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+        ...(correlated ? { correlation: a.correlation } : {}),
+        target: 'sensors',
+        payload: { type: 'SetScienceTarget', data: { uuid: a.uuid } },
+      });
     }
   },
 

@@ -27,7 +27,8 @@
 use bevy::prelude::*;
 
 use crate::core::messages::{
-    ActionCorrelationId, ActionFeedbackOutcome, ClientMessage, DeliveryClass, ServerMessage,
+    ActionCorrelationId, ActionFeedbackOutcome, AdmittedCommand, ClientMessage, DeliveryClass,
+    ServerMessage,
 };
 use crate::lobby::{InboundMessage, OutboundMessage, Sessions, Target};
 use crate::server_app::LocalShip;
@@ -110,6 +111,42 @@ fn supports_correlated_action_feedback(
                     | SystemControlPayload::ClearComms
                     | SystemControlPayload::ShowOnScreen { .. }
             ))
+        || (target.0 == crate::ship::system_registry::SENSORS_SYSTEM_ID
+            && matches!(
+                payload,
+                SystemControlPayload::SetScienceTarget { .. }
+                    | SystemControlPayload::ScanTarget { .. }
+            ))
+        || (target.0 == crate::ship::system_registry::HELM_IMPULSE_SYSTEM_ID
+            && matches!(payload, SystemControlPayload::CancelImpulse))
+        || (is_shield_arc_target(&target.0)
+            && matches!(payload, SystemControlPayload::SetShieldArcFocus { .. }))
+}
+
+fn is_shield_arc_target(target: &str) -> bool {
+    target.strip_prefix("shield-arc-").is_some_and(|arc| {
+        !arc.is_empty()
+            && arc
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    })
+}
+
+/// Complete one correlated action only after its owning consumer has actually
+/// handled it. AI and legacy commands carry no correlation/token and are a
+/// deliberate no-op here.
+pub(crate) fn finish_action_feedback(
+    cmd: &AdmittedCommand,
+    outbound: &mut Option<ResMut<Messages<OutboundMessage>>>,
+    outcome: ActionFeedbackOutcome,
+) {
+    let (Some(correlation), Some(token)) = (
+        cmd.feedback_correlation.as_ref(),
+        cmd.response_token.as_deref(),
+    ) else {
+        return;
+    };
+    write_action_feedback(outbound, token, correlation, outcome);
 }
 
 impl Plugin for AdmissionPlugin {
@@ -716,6 +753,14 @@ station = "repair"
         let select = SystemControlPayload::SelectCommsMessage {
             message_id: "message-1".into(),
         };
+        let science_target = SystemControlPayload::SetScienceTarget {
+            uuid: "target".into(),
+        };
+        let scan = SystemControlPayload::ScanTarget {
+            uuid: "target".into(),
+        };
+        let cancel_impulse = SystemControlPayload::CancelImpulse;
+        let shield_focus = SystemControlPayload::SetShieldArcFocus { focused: true };
 
         assert!(supports_correlated_action_feedback(
             &crate::ship::system_registry::red_alert_system_id(),
@@ -739,6 +784,22 @@ station = "repair"
                 payload,
             ));
         }
+        assert!(supports_correlated_action_feedback(
+            &crate::ship::system_registry::sensors_system_id(),
+            &science_target,
+        ));
+        assert!(supports_correlated_action_feedback(
+            &crate::ship::system_registry::sensors_system_id(),
+            &scan,
+        ));
+        assert!(supports_correlated_action_feedback(
+            &crate::ship::system_registry::helm_impulse_system_id(),
+            &cancel_impulse,
+        ));
+        assert!(supports_correlated_action_feedback(
+            &crate::ship::system_registry::shield_arc_system_id("fore").expect("fore"),
+            &shield_focus,
+        ));
 
         assert!(!supports_correlated_action_feedback(
             &crate::ship::system_registry::captain_system_id(),
@@ -759,6 +820,22 @@ station = "repair"
         assert!(!supports_correlated_action_feedback(
             &crate::ship::system_registry::captain_system_id(),
             &hail,
+        ));
+        assert!(!supports_correlated_action_feedback(
+            &crate::ship::system_registry::captain_system_id(),
+            &scan,
+        ));
+        assert!(!supports_correlated_action_feedback(
+            &SystemId("shield-arc-FORE".into()),
+            &shield_focus,
+        ));
+        assert!(!supports_correlated_action_feedback(
+            &SystemId("shield-arc-".into()),
+            &shield_focus,
+        ));
+        assert!(!supports_correlated_action_feedback(
+            &crate::ship::system_registry::shield_arc_system_id("fore").expect("fore"),
+            &cancel_impulse,
         ));
     }
 

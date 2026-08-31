@@ -373,6 +373,25 @@ fn tick(app: &mut App) -> Vec<OutboundMessage> {
     out
 }
 
+fn has_feedback(
+    messages: &[OutboundMessage],
+    token: &str,
+    correlation: &str,
+    outcome: ActionFeedbackOutcome,
+) -> bool {
+    messages.iter().any(|message| {
+        message.target == Target::Token(token.to_string())
+            && message.delivery == DeliveryClass::Reliable
+            && matches!(
+                &message.msg,
+                ServerMessage::ActionFeedback {
+                    correlation: actual,
+                    outcome: actual_outcome,
+                } if actual.as_str() == correlation && *actual_outcome == outcome
+            )
+    })
+}
+
 fn drain_coord(app: &mut App) -> Vec<CoordinationEnqueue> {
     let msgs = app.world().resource::<CoordEnqueueBox>().0.clone();
     app.world_mut().resource_mut::<CoordEnqueueBox>().0.clear();
@@ -1165,10 +1184,18 @@ fn handle_set_shield_arc_focus_flips_focus() {
         .push(crate::core::messages::AdmittedCommand {
             target: arc_sid.clone(),
             payload: SystemControlPayload::SetShieldArcFocus { focused: true },
-            response_token: None,
-            feedback_correlation: None,
+            response_token: Some("science".to_string()),
+            feedback_correlation: Some(
+                ActionCorrelationId::new("shield-focus-applied").expect("valid test correlation"),
+            ),
         });
-    tick(&mut app);
+    let messages = tick(&mut app);
+    assert!(has_feedback(
+        &messages,
+        "science",
+        "shield-focus-applied",
+        ActionFeedbackOutcome::Applied,
+    ));
     let shields = app.world().entity(se).get::<ShipShields>().unwrap();
     assert_eq!(shields.0.focused_facing, Some(0), "fore arc focused");
 }

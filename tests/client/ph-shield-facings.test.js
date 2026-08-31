@@ -7,6 +7,9 @@ function setup(opts) {
   if (opts && opts.sendAction) {
     window.sendAction = opts.sendAction;
   }
+  if (opts && opts.activateSemanticAction) {
+    window.activateSemanticAction = opts.activateSemanticAction;
+  }
   document.body.innerHTML = '<ph-shield-facings id="test-el"></ph-shield-facings>';
   const el = document.getElementById('test-el');
   return { el };
@@ -48,11 +51,13 @@ describe('PhShieldFacings', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
     delete window.sendAction;
+    delete window.activateSemanticAction;
   });
 
   afterEach(() => {
     document.body.innerHTML = '';
     delete window.sendAction;
+    delete window.activateSemanticAction;
     vi.useRealTimers();
   });
 
@@ -140,8 +145,8 @@ describe('PhShieldFacings', () => {
   // the enlarged, topmost touch target (#1009) — so interaction tests dispatch
   // on it. The wire payload itself is unchanged.
   it('clicking an unfocused facing arc dispatches set_shield_focus with focused: true', () => {
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
     el.state = {
       facings: [
         { arc_id: 'fore', label: 'Fore', hp: 100, max_hp: 100, online: true },
@@ -152,12 +157,14 @@ describe('PhShieldFacings', () => {
     const hit = el.shadowRoot.querySelector('.hit-path');
     expect(hit).toBeDefined();
     hit.dispatchEvent(new MouseEvent('click'));
-    expect(sendAction).toHaveBeenCalledWith('set_shield_focus', { arc_id: 'fore', focused: true });
+    expect(activateSemanticAction).toHaveBeenCalledWith('science.shield-focus', {
+      source: 'control', detail: { arc_id: 'fore', focused: true },
+    });
   });
 
   it('clicking the already-focused facing arc dispatches set_shield_focus with focused: false', () => {
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
     el.state = {
       facings: [
         { arc_id: 'fore', label: 'Fore', hp: 100, max_hp: 100, online: true },
@@ -167,12 +174,14 @@ describe('PhShieldFacings', () => {
     };
     const hit = el.shadowRoot.querySelector('.hit-path');
     hit.dispatchEvent(new MouseEvent('click'));
-    expect(sendAction).toHaveBeenCalledWith('set_shield_focus', { arc_id: 'fore', focused: false });
+    expect(activateSemanticAction).toHaveBeenCalledWith('science.shield-focus', {
+      source: 'control', detail: { arc_id: 'fore', focused: false },
+    });
   });
 
   it('does not dispatch action when auto=true', () => {
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
     el.state = {
       facings: [
         { arc_id: 'fore', label: 'Fore', hp: 100, max_hp: 100, online: true },
@@ -181,15 +190,15 @@ describe('PhShieldFacings', () => {
     };
     const hit = el.shadowRoot.querySelector('.hit-path');
     hit.dispatchEvent(new MouseEvent('click'));
-    expect(sendAction).not.toHaveBeenCalled();
+    expect(activateSemanticAction).not.toHaveBeenCalled();
   });
 
   // ── #1009: press feedback + enlarged touch target ───────────────────────
 
   it('flashes the arc and shows the AUTO hint on an auto-mode press instead of doing nothing', () => {
     vi.useFakeTimers();
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
     el.state = {
       facings: [{ arc_id: 'fore', label: 'Fore', hp: 100, max_hp: 100, online: true }],
       auto: true,
@@ -205,7 +214,7 @@ describe('PhShieldFacings', () => {
     expect(outline.classList.contains('press-flash')).toBe(true);
     expect(hint.classList.contains('show')).toBe(true);
     expect(hint.textContent).toBe(t('component.shield_facings.auto_hint'));
-    expect(sendAction).not.toHaveBeenCalled();
+    expect(activateSemanticAction).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
 
@@ -248,8 +257,8 @@ describe('PhShieldFacings', () => {
   });
 
   it('also flashes the arc on a normal (non-auto) press, and still sends the unchanged payload', () => {
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
     el.state = {
       facings: [{ arc_id: 'fore', label: 'Fore', hp: 100, max_hp: 100, online: true }],
       focused_facing: null,
@@ -264,8 +273,10 @@ describe('PhShieldFacings', () => {
     expect(outline.classList.contains('press-flash')).toBe(true);
     // The AUTO hint is reserved for the swallowed auto-mode press.
     expect(hint.classList.contains('show')).toBe(false);
-    expect(sendAction).toHaveBeenCalledWith('set_shield_focus', { arc_id: 'fore', focused: true });
-    expect(sendAction).toHaveBeenCalledTimes(1);
+    expect(activateSemanticAction).toHaveBeenCalledWith('science.shield-focus', {
+      source: 'control', detail: { arc_id: 'fore', focused: true },
+    });
+    expect(activateSemanticAction).toHaveBeenCalledTimes(1);
   });
 
   it('enlarges the arc touch target radially, but not angularly (#1009)', () => {
@@ -329,8 +340,8 @@ describe('PhShieldFacings', () => {
   });
 
   it("a click on one facing's hit-path always fires that facing's own arc_id, never a neighbour's", () => {
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
     el.state = {
       facings: [
         { arc_id: 'fore', label: 'Fore', hp: 100, max_hp: 100, online: true },
@@ -344,15 +355,21 @@ describe('PhShieldFacings', () => {
     expect(hits.map(h => h.getAttribute('data-facing-id'))).toEqual(['fore', 'stbd', 'aft']);
 
     hits[0].dispatchEvent(new MouseEvent('click'));
-    expect(sendAction).toHaveBeenLastCalledWith('set_shield_focus', { arc_id: 'fore', focused: true });
+    expect(activateSemanticAction).toHaveBeenLastCalledWith('science.shield-focus', {
+      source: 'control', detail: { arc_id: 'fore', focused: true },
+    });
 
     hits[1].dispatchEvent(new MouseEvent('click'));
-    expect(sendAction).toHaveBeenLastCalledWith('set_shield_focus', { arc_id: 'stbd', focused: true });
+    expect(activateSemanticAction).toHaveBeenLastCalledWith('science.shield-focus', {
+      source: 'control', detail: { arc_id: 'stbd', focused: true },
+    });
 
     hits[2].dispatchEvent(new MouseEvent('click'));
-    expect(sendAction).toHaveBeenLastCalledWith('set_shield_focus', { arc_id: 'aft', focused: true });
+    expect(activateSemanticAction).toHaveBeenLastCalledWith('science.shield-focus', {
+      source: 'control', detail: { arc_id: 'aft', focused: true },
+    });
 
-    expect(sendAction).toHaveBeenCalledTimes(3);
+    expect(activateSemanticAction).toHaveBeenCalledTimes(3);
   });
 
   it('updates when state changes', () => {

@@ -481,6 +481,7 @@ fn a_forged_sender_is_refused_at_the_mesh_boundary() {
                 target: SystemId("helm-steering".into()),
                 payload: steer(0.5),
             }],
+            start_grant: None,
         })
     };
 

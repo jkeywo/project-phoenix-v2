@@ -1,8 +1,8 @@
 ---
 title: Session
 type: entity
-tags: [session, server, identity, reconnect]
-sources: [src/lobby/session.rs, src/lobby/handler.rs, src/lobby/server.rs, src/gm_roster.rs, src/server/bridge.rs]
+tags: [session, server, identity, reconnect, readiness]
+sources: [src/lobby/session.rs, src/lobby/start_policy.rs, src/lobby/handler.rs, src/lobby/server.rs, src/gm_roster.rs, src/server/bridge.rs]
 updated: 2026-08-31
 ---
 
@@ -24,6 +24,19 @@ Each player record carries connection/readiness state, its directly claimed
 station, spectator and AFK state, and the rating snapshots needed to restore a
 seat after Backfill. Disconnected records are retained because the same token
 must find the original identity on reconnect.
+
+`readiness_tally` is the one crew projection used by the local countdown and
+the fleet policy. It counts every connected non-Spectator participant,
+including a participant who has not selected a Station, and counts the ready
+subset separately. Disconnected players and Spectators contribute to neither
+field. GM readiness stays in the separate `GmRoster` and is combined only by
+the fleet start policy.
+
+Fleet technical participants are separate again from both records. The frozen
+private fleet roster names the ordered owner and every simulation participant,
+then lists only the participant slots that also own player ships. This is why a
+GM can contribute a lockstep watermark and start vote without becoming a
+`SessionManager` player or consuming a ship.
 
 `holder_for_station` returns only a connected direct holder. This distinction
 lets a disconnected player retain the station on their record for restoration

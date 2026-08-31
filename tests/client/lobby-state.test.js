@@ -131,9 +131,9 @@ describe('apply Welcome', () => {
       phase: 'Lobby',
       players: [ps('a', 'Alice', 'helm')],
       world: null,
-    }, null, null, [{ id: 7, name: 'Morgan', connected: 1 }]));
+    }, null, null, [{ id: 7, name: 'Morgan', connected: 1, ready: true }]));
     expect(s.players).toHaveLength(1);
-    expect(s.gms).toEqual([{ id: '7', name: 'Morgan', connected: true }]);
+    expect(s.gms).toEqual([{ id: '7', name: 'Morgan', connected: true, ready: true }]);
   });
 });
 
@@ -145,14 +145,14 @@ describe('apply GmRosterChanged', () => {
       type: 'GmRosterChanged',
       data: {
         gms: [
-          { id: 'gm-a', name: 'Ada', connected: true },
-          { id: 'gm-b', name: 'Bo', connected: false },
+          { id: 'gm-a', name: 'Ada', connected: true, ready: true },
+          { id: 'gm-b', name: 'Bo', connected: false, ready: true },
         ],
       },
     });
     expect(s.gms).toEqual([
-      { id: 'gm-a', name: 'Ada', connected: true },
-      { id: 'gm-b', name: 'Bo', connected: false },
+      { id: 'gm-a', name: 'Ada', connected: true, ready: true },
+      { id: 'gm-b', name: 'Bo', connected: false, ready: false },
     ]);
     expect(s.players).toEqual([]);
     expect(result.changedDomains).toContain(CHANGE_DOMAINS.LOBBY);
@@ -164,6 +164,17 @@ describe('apply GmRosterChanged', () => {
     s.gms = [{ id: 'gm-a', name: 'Ada', connected: true }];
     s.apply({ type: 'GmRosterChanged', data: { gms: [] } });
     expect(s.gms).toEqual([]);
+  });
+
+  it('normalises a disconnected GM to not-ready even if a stale row says ready', () => {
+    const s = new LobbyState();
+    s.apply({
+      type: 'GmRosterChanged',
+      data: { gms: [{ id: 'gm-a', name: 'Ada', connected: false, ready: true }] },
+    });
+    expect(s.gms).toEqual([
+      { id: 'gm-a', name: 'Ada', connected: false, ready: false },
+    ]);
   });
 });
 

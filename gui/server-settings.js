@@ -808,6 +808,11 @@ export function mountServerSettings(opts = {}) {
     show(controls.fleet.input, !has);
     show(controls.fleet.join, !has);
     show(controls.fleet.leave, has);
+    if (controls.fleet.leave && has) {
+      const canLeave = state.canLeave !== false;
+      controls.fleet.leave.disabled = !canLeave;
+      controls.fleet.leave.classList.toggle('disabled', !canLeave);
+    }
     show(controls.fleet.admission, has && !!state.owner);
     if (controls.fleet.admission && has && state.owner) {
       const closed = state.admission === 'closed';

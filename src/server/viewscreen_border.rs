@@ -325,7 +325,9 @@ pub(crate) fn push_lobby_state(
         .map(|w| w.0.scenario_description.clone())
         .unwrap_or_default();
 
-    let all_ready = sessions.0.all_ready();
+    let readiness = sessions.0.readiness_tally();
+    let all_ready = readiness.all_ready();
+    let presentation_ready = local_presentation_ready(preload.as_deref());
 
     let loading_progress = if *phase.get() == GamePhase::Loading {
         preload.as_ref().filter(|p| p.started).map(|p| p.fraction())
@@ -345,6 +347,8 @@ pub(crate) fn push_lobby_state(
         max_players: roster.max_players,
         all_stations_filled: roster.all_filled,
         all_ready,
+        readiness,
+        presentation_ready,
         stations: roster.stations,
         spectators,
         gms: gm_roster
@@ -357,6 +361,19 @@ pub(crate) fn push_lobby_state(
 
     if let Ok(json) = codec::encode_lobby_state(&payload) {
         writer.write(LobbyStateChanged { json });
+    }
+}
+
+/// Project the host-local presentation gate into the fleet lobby snapshot.
+///
+/// A present preload resource is ready only after its terminal `complete`
+/// state. `AssetPreloadResource` counts failed render assets as terminal, so a
+/// missing model cannot deadlock the fleet. A rendererless/headless app has no
+/// preload resource and therefore no local presentation work to wait for.
+fn local_presentation_ready(preload: Option<&AssetPreloadResource>) -> bool {
+    match preload {
+        Some(preload) => preload.complete,
+        None => true,
     }
 }
 
@@ -782,6 +799,26 @@ fn push_hud_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn presentation_readiness_requires_terminal_preload_but_not_a_renderer() {
+        let mut preload = AssetPreloadResource::default();
+
+        assert!(
+            local_presentation_ready(None),
+            "a rendererless host has no presentation preload to wait for"
+        );
+        assert!(
+            !local_presentation_ready(Some(&preload)),
+            "an unstarted or in-flight preload is not terminal"
+        );
+
+        preload.started = true;
+        assert!(!local_presentation_ready(Some(&preload)));
+
+        preload.complete = true;
+        assert!(local_presentation_ready(Some(&preload)));
+    }
 
     #[test]
     fn host_lobby_roster_excludes_auxiliary_stations() {

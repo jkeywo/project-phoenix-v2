@@ -37,7 +37,8 @@ roster, consumes no player-ship or Station capacity, and never enters
    explicitly enters or leaves the no-seat Spectator role.
 3. `SetReady` participates in collective lobby readiness. During an active
    round, a seatless participant can claim a free station and then confirm the
-   handoff from Backfill.
+   handoff from Backfill. A connected seatless participant still counts in the
+   lobby tally; Station choice does not decide whether a human is present.
 4. Disconnect marks the player absent, clears readiness, keeps the station id
    for restoration, and applies the station's Backfill rating.
 5. Reconnect restores the remembered seat and rating when the seat is still

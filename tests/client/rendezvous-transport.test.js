@@ -115,7 +115,7 @@ function makeWorld({ queued = false } = {}) {
  * reconnect path depends on: a host dropping a connection has to be observable
  * on the phone as a closed channel, not merely as a local state change.
  */
-function makePeerFactory() {
+function makePeerFactory({ configurePeer = () => {} } = {}) {
   const offerers = new Map();
   const channels = [];
   let n = 0;
@@ -191,6 +191,7 @@ function makePeerFactory() {
       async addIceCandidate() {},
       close() { for (const c of this._channels) c.close(); },
     };
+    configurePeer(pc);
     return pc;
   };
   factory.channels = channels;
@@ -973,6 +974,82 @@ describe('the lossy snapshot channel', () => {
 });
 
 describe('automatic reconnect', () => {
+  it('does not let a stale SDP completion consume the retry candidate queue', async () => {
+    const gates = Array.from({ length: 2 }, () => {
+      let release;
+      const promise = new Promise((resolve) => { release = resolve; });
+      return { promise, release };
+    });
+    const answerPcs = [];
+    const peers = [];
+    const peer = makePeerFactory({
+      configurePeer(pc) {
+        peers.push(pc);
+        pc.addedCandidates = [];
+        const addIceCandidate = pc.addIceCandidate.bind(pc);
+        pc.addIceCandidate = async (candidate) => {
+          pc.addedCandidates.push(candidate);
+          return addIceCandidate(candidate);
+        };
+        const setRemoteDescription = pc.setRemoteDescription.bind(pc);
+        pc.setRemoteDescription = async (description) => {
+          if (description.type === 'answer' && answerPcs.length < gates.length) {
+            const gate = gates[answerPcs.length];
+            answerPcs.push(pc);
+            await gate.promise;
+          }
+          return setRemoteDescription(description);
+        };
+      },
+    });
+    const world = makeWorld();
+    const factories = { socket: world.socket, peer };
+    let host;
+    let joiner;
+    try {
+      const started = await hostOn(world, { factories });
+      host = started.host;
+      const { code } = started;
+      joiner = createRendezvousJoiner({
+        base: 'https://rendezvous.test',
+        data: DATA,
+        code: code.suffix,
+        factories,
+        getIdent: () => ({ token: 'tok-race', name: 'Epoch' }),
+      });
+      await settle();
+      expect(answerPcs).toHaveLength(1);
+
+      // Attempt N loses its channel while its answer SDP is still in flight.
+      // The manual retry starts N+1 before the old browser promise resolves.
+      answerPcs[0]._channels[0].close();
+      await settle();
+      joiner.retryNow();
+      await settle();
+      expect(answerPcs).toHaveLength(2);
+
+      const candidate = { candidate: 'candidate:retry-only', type: 'host' };
+      const secondHostPc = peers.filter((pc) => pc.remoteDescription?.type === 'offer').at(-1);
+      secondHostPc.onicecandidate({ candidate });
+      await settle();
+      expect(answerPcs[1].addedCandidates).toEqual([]);
+
+      // Releasing N must leave N+1's queue alone. Only N+1's own SDP
+      // completion may apply the candidate and finish the link.
+      gates[0].release();
+      await settle();
+      expect(answerPcs[1].addedCandidates).toEqual([]);
+      gates[1].release();
+      await settle();
+      expect(answerPcs[1].addedCandidates).toEqual([candidate]);
+      expect(joiner.connected).toBe(true);
+    } finally {
+      gates.forEach(({ release }) => release());
+      if (joiner) joiner.close();
+      if (host) host.close();
+    }
+  });
+
   it('re-resolves the same code and re-sends Identify with the same token', async () => {
     const world = makeWorld();
     const { code, inbound, announced, factories } = await hostOn(world);

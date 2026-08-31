@@ -429,6 +429,7 @@ pub fn encode_mesh_frame(frame: &crate::lockstep::MeshFrame) -> Result<String, s
                 "from": f.from.0,
                 "tick": f.tick,
                 "ready_through": f.ready_through,
+                "start_grant": f.start_grant,
                 "commands": f
                     .commands
                     .iter()
@@ -531,6 +532,15 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
     let tick = body.get("tick")?.as_u64()?;
     match value.get(MESH_ENVELOPE_TYPE)?.as_str()? {
         crate::lockstep::frame::TYPE_TICK => {
+            let start_grant = match body.get("start_grant")? {
+                serde_json::Value::Null => None,
+                value => {
+                    let grant: crate::lobby::start_policy::StartGrant =
+                        serde_json::from_value(value.clone()).ok()?;
+                    grant.validate().ok()?;
+                    Some(grant)
+                }
+            };
             let mut commands = Vec::new();
             for entry in body.get("commands")?.as_array()? {
                 commands.push(MeshCommand {
@@ -549,6 +559,7 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
                 tick,
                 ready_through: body.get("ready_through")?.as_u64()?,
                 commands,
+                start_grant,
             }))
         }
         crate::lockstep::frame::TYPE_DIGEST => Some(MeshFrame::Digest(DigestFrame {
@@ -589,7 +600,7 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
 /// start (issue #1116).
 ///
 /// ```json
-/// { "local": 2, "delay": 6,
+/// { "local": 2, "owner": 1, "participants": [1, 2, 3], "delay": 6,
 ///   "ships": [ { "host": 1, "ship_path": "assets/entities/alliance_cruiser.toml",
 ///                "crew": [["helm", "Std"], ["tactical", "Std"]] } ] }
 /// ```
@@ -636,15 +647,31 @@ pub fn decode_fleet_roster(raw: &str) -> Option<(crate::lockstep::FleetRoster, O
             crew,
         });
     }
-    if ships.is_empty() {
-        return None;
+    if let Some(entries) = value.get("participants") {
+        let participants = entries
+            .as_array()?
+            .iter()
+            .map(|entry| {
+                let slot = u32::try_from(entry.as_u64()?).ok()?;
+                (slot > 0).then_some(HostSlot(slot))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let owner = HostSlot(u32::try_from(value.get("owner")?.as_u64()?).ok()?);
+        return Some((
+            FleetRoster::with_participants(ships, participants, local, owner)?,
+            delay,
+        ));
     }
-    Some((FleetRoster::new(ships, local), delay))
+    // Compatibility for pre-v7 native fixtures and stored boot identities. A
+    // new browser fleet always supplies the explicit private participant set;
+    // only that exact path may represent a zero-ship GM-only simulation.
+    (!ships.is_empty()).then(|| (FleetRoster::new(ships, local), delay))
 }
 
 /// Decode one complete crew-public GM roster from the host page (issue #1289).
 ///
-/// The accepted wire shape is exactly an array of `{ id, name, connected }`
+/// The accepted wire shape is exactly an array of
+/// `{ id, name, connected, ready }`
 /// rows. [`crate::gm_roster::GmOperator`]'s `deny_unknown_fields` prevents a
 /// private peer id, reconnect credential or authority flag from crossing this
 /// boundary unnoticed; [`crate::gm_roster::GmRoster::try_new`] applies the
@@ -652,6 +679,30 @@ pub fn decode_fleet_roster(raw: &str) -> Option<(crate::lockstep::FleetRoster, O
 pub fn decode_gm_roster(raw: &str) -> Option<crate::gm_roster::GmRoster> {
     let operators: Vec<crate::gm_roster::GmOperator> = serde_json::from_str(raw).ok()?;
     crate::gm_roster::GmRoster::try_new(operators).ok()
+}
+
+/// Decode and validate one host-mesh lobby start grant (issue #1290).
+///
+/// JSON stays confined to this codec seam. The grant itself is exact and
+/// bounded; `StartGrant::validate` additionally checks the `start-N`
+/// idempotency key and the mode/attribution pairing.
+pub fn decode_start_grant(raw: &str) -> Option<crate::lobby::start_policy::StartGrant> {
+    let grant: crate::lobby::start_policy::StartGrant = serde_json::from_str(raw).ok()?;
+    grant.validate().ok()?;
+    Some(grant)
+}
+
+pub fn encode_start_grant_result(
+    result: &crate::lobby::start_policy::StartGrantResult,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(result)
+}
+
+/// Encode the definitive asynchronous result of `wasm_join_fleet` adoption.
+pub fn encode_fleet_join_status(
+    status: &crate::lockstep::FleetJoinStatus,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(status)
 }
 
 /// Encode the fleet-link status the host page's operator surface reads.
@@ -711,6 +762,7 @@ pub fn encode_mesh_status(
 mod mesh_frame_tests {
     use crate::command_admission::{CommandOrder, HostSlot, ShipKey};
     use crate::core::messages::{SystemControlPayload, SystemId};
+    use crate::lobby::start_policy::{StartGrant, StartGrantMode};
     use crate::lockstep::{DigestFrame, HostLossFrame, MeshCommand, MeshFrame, TickFrame};
 
     fn tick_frame() -> MeshFrame {
@@ -734,6 +786,12 @@ mod mesh_frame_tests {
                     payload: SystemControlPayload::SetRedAlert { active: true },
                 },
             ],
+            start_grant: Some(StartGrant {
+                id: "start-7".into(),
+                mode: StartGrantMode::Forced,
+                operator_id: Some("gm-1".into()),
+                apply_tick: 419,
+            }),
         })
     }
 
@@ -743,12 +801,16 @@ mod mesh_frame_tests {
     fn a_tick_frame_round_trips_through_the_shared_envelope() {
         let frame = tick_frame();
         let text = super::encode_mesh_frame(&frame).expect("encodes");
-        assert!(text.contains("\"m\":4"), "the revision travels: {text}");
+        assert!(text.contains("\"m\":7"), "the revision travels: {text}");
         assert!(text.contains("\"t\":\"tick\""), "{text}");
         assert!(
             text.contains("\"tick\":412"),
             "the envelope's own tick stamp — the field #1114 added for exactly \
              this — must carry the tick the frame applies at: {text}"
+        );
+        assert!(
+            text.contains("\"apply_tick\":419"),
+            "the owner-scheduled start boundary travels inside the tick frame: {text}"
         );
         assert_eq!(super::decode_mesh_frame(&text), Some(frame));
     }

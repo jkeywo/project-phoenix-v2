@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use std::collections::VecDeque;
 
 use crate::core::messages::{
     ClientMessage, DeliveryClass, GamePhase, GameState, ServerMessage, ShipClientConfig, WorldData,
@@ -22,6 +23,10 @@ use crate::ship_plugin::{
 pub struct CountdownTimer {
     pub remaining_secs: f32,
     pub pending_phase: Option<GamePhase>,
+    /// False while the browser host mesh owns collective start policy. Local
+    /// `SetReady` handlers may still update crew state, but cannot arm this
+    /// ship's independent countdown.
+    local_start_allowed: bool,
 }
 
 impl Default for CountdownTimer {
@@ -29,8 +34,212 @@ impl Default for CountdownTimer {
         CountdownTimer {
             remaining_secs: 0.0,
             pending_phase: None,
+            local_start_allowed: true,
         }
     }
+}
+
+/// Coordinated lobby state set by the privileged browser host mesh.
+///
+/// Enabling fails closed (`validation_passed = false`) until the page publishes
+/// its current content/peer validation result. Disabling restores the ordinary
+/// single-host lobby behavior.
+#[derive(Resource, Clone, Debug)]
+pub struct FleetManagedLobby {
+    pub enabled: bool,
+    pub validation_passed: bool,
+}
+
+impl Default for FleetManagedLobby {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            validation_passed: true,
+        }
+    }
+}
+
+impl FleetManagedLobby {
+    pub fn set_enabled(&mut self, enabled: bool) {
+        if enabled && !self.enabled {
+            self.validation_passed = false;
+        } else if !enabled {
+            self.validation_passed = true;
+        }
+        self.enabled = enabled;
+    }
+}
+
+pub const MAX_PENDING_START_GRANTS: usize = 32;
+pub const MAX_START_GRANT_RESULTS: usize = 32;
+
+#[derive(Resource, Default)]
+pub struct PendingStartGrants(VecDeque<crate::lobby::start_policy::StartGrant>);
+
+impl PendingStartGrants {
+    pub fn try_push(&mut self, grant: crate::lobby::start_policy::StartGrant) -> bool {
+        if self.0.len() >= MAX_PENDING_START_GRANTS {
+            return false;
+        }
+        self.0.push_back(grant);
+        true
+    }
+
+    fn pop_front(&mut self) -> Option<crate::lobby::start_policy::StartGrant> {
+        self.0.pop_front()
+    }
+
+    fn requeue(&mut self, grant: crate::lobby::start_policy::StartGrant) {
+        debug_assert!(self.0.len() < MAX_PENDING_START_GRANTS);
+        self.0.push_back(grant);
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_full(&self) -> bool {
+        self.0.len() >= MAX_PENDING_START_GRANTS
+    }
+
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+
+    /// Ensure the technical owner's authenticated decision is in the queue.
+    /// An identical early browser proposal already occupies the same logical
+    /// slot; otherwise an untrusted tail proposal is displaced if necessary so
+    /// queue pressure cannot make one peer drop the authoritative boundary.
+    pub fn adopt_canonical(&mut self, grant: crate::lobby::start_policy::StartGrant) {
+        if self.0.iter().any(|queued| queued == &grant) {
+            return;
+        }
+        if self.0.len() == MAX_PENDING_START_GRANTS {
+            self.0.pop_back();
+        }
+        self.0.push_front(grant);
+    }
+}
+
+#[derive(Resource, Default)]
+pub struct StartGrantTracker {
+    last_sequence: u64,
+    canonical: Option<crate::lobby::start_policy::StartGrant>,
+    embedded: bool,
+    failed_closed: bool,
+}
+
+impl StartGrantTracker {
+    pub fn reset(&mut self) {
+        self.last_sequence = 0;
+        self.canonical = None;
+        self.embedded = false;
+        self.failed_closed = false;
+    }
+
+    /// Adopt the decision proven by the technical owner's authenticated tick
+    /// frame (or the local technical owner immediately before sealing it).
+    /// There is exactly one immutable decision per fleet generation.
+    pub fn adopt_canonical(
+        &mut self,
+        grant: &crate::lobby::start_policy::StartGrant,
+    ) -> Result<bool, ()> {
+        match self.canonical.as_ref() {
+            None => {
+                self.canonical = Some(grant.clone());
+                Ok(true)
+            }
+            Some(canonical) if canonical == grant => Ok(false),
+            Some(_) => Err(()),
+        }
+    }
+
+    pub fn is_canonical(&self, grant: &crate::lobby::start_policy::StartGrant) -> bool {
+        self.canonical.as_ref() == Some(grant)
+    }
+
+    pub fn mark_embedded(&mut self) {
+        self.embedded = true;
+    }
+
+    pub fn is_embedded(&self) -> bool {
+        self.embedded
+    }
+
+    pub fn fail_closed(&mut self) {
+        self.failed_closed = true;
+    }
+
+    pub fn is_failed_closed(&self) -> bool {
+        self.failed_closed
+    }
+}
+
+#[derive(Resource, Default)]
+pub struct StartGrantResults(VecDeque<crate::lobby::start_policy::StartGrantResult>);
+
+impl StartGrantResults {
+    pub fn push(&mut self, result: crate::lobby::start_policy::StartGrantResult) {
+        if self.0.len() == MAX_START_GRANT_RESULTS {
+            self.0.pop_front();
+        }
+        self.0.push_back(result);
+    }
+
+    pub fn drain(
+        &mut self,
+    ) -> impl Iterator<Item = crate::lobby::start_policy::StartGrantResult> + '_ {
+        self.0.drain(..)
+    }
+
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum FleetLobbyInput {
+    Managed(bool),
+    Validation(bool),
+    Grant(crate::lobby::start_policy::StartGrant),
+}
+
+/// Apply ordered browser edge input without collapsing a fleet generation.
+/// Returns true when at least one managed-mode transition reset the generation.
+/// If the fixed-tick grant queue is full, the blocked grant and every later
+/// input remain at the front of `inputs` for a later frame.
+pub fn apply_fleet_lobby_inputs(
+    inputs: &mut VecDeque<FleetLobbyInput>,
+    managed: &mut FleetManagedLobby,
+    grants: &mut PendingStartGrants,
+    tracker: &mut StartGrantTracker,
+    results: &mut StartGrantResults,
+) -> bool {
+    let mut generation_changed = false;
+    while let Some(input) = inputs.pop_front() {
+        match input {
+            FleetLobbyInput::Managed(enabled) => {
+                if managed.enabled != enabled {
+                    grants.clear();
+                    tracker.reset();
+                    results.clear();
+                    generation_changed = true;
+                }
+                managed.set_enabled(enabled);
+            }
+            FleetLobbyInput::Validation(valid) => {
+                managed.validation_passed = valid;
+            }
+            FleetLobbyInput::Grant(grant) => {
+                if grants.is_full() {
+                    inputs.push_front(FleetLobbyInput::Grant(grant));
+                    break;
+                }
+                debug_assert!(grants.try_push(grant));
+            }
+        }
+    }
+    generation_changed
 }
 
 /// Cached `GameState` snapshot derived from `Sessions` + `GamePhase` each frame.
@@ -143,7 +352,26 @@ impl Plugin for LobbyPlugin {
             // Host/session membership, not simulation state. Like FleetRoster,
             // this says who is connected where; any later typed GM command is
             // the value that crosses into the deterministic world.
-            app.declare_state::<crate::gm_roster::GmRoster>(StateClass::Timer, "gm-session-state");
+            app.declare_state::<crate::gm_roster::GmRoster>(
+                StateClass::Timer,
+                "gm-operator-admission-and-presence",
+            )
+            .declare_state::<FleetManagedLobby>(
+                StateClass::Timer,
+                "gm-ready-and-force-start-policy",
+            )
+            .declare_state::<PendingStartGrants>(
+                StateClass::Timer,
+                "gm-ready-and-force-start-policy",
+            )
+            .declare_state::<StartGrantTracker>(
+                StateClass::Timer,
+                "gm-ready-and-force-start-policy",
+            )
+            .declare_state::<StartGrantResults>(
+                StateClass::Timer,
+                "gm-ready-and-force-start-policy",
+            );
         }
         if !app.is_plugin_added::<bevy::state::app::StatesPlugin>() {
             app.add_plugins(bevy::state::app::StatesPlugin);
@@ -157,6 +385,10 @@ impl Plugin for LobbyPlugin {
             .insert_resource(initial_cache)
             .insert_resource(LobbyOutbox::default())
             .init_resource::<crate::gm_roster::GmRoster>()
+            .init_resource::<FleetManagedLobby>()
+            .init_resource::<PendingStartGrants>()
+            .init_resource::<StartGrantTracker>()
+            .init_resource::<StartGrantResults>()
             .insert_resource(ShipClientConfigResource::default())
             .insert_resource(ShipManualResource::default())
             .init_resource::<ShipStations>()
@@ -185,7 +417,13 @@ impl Plugin for LobbyPlugin {
             // `GamePhase::InProgress` transition on tick time.
             .add_systems(
                 FixedUpdate,
-                (handle_disconnect, tick_countdown, update_game_state_cache)
+                (
+                    enforce_fleet_managed_countdown,
+                    handle_disconnect,
+                    tick_countdown,
+                    apply_pending_start_grants,
+                    update_game_state_cache,
+                )
                     .chain()
                     .in_set(LobbySystemSet),
             )
@@ -1548,7 +1786,7 @@ fn apply_result(
                 CountdownAction::Start {
                     secs,
                     pending_phase,
-                } if timer.remaining_secs <= 0.0 => {
+                } if timer.local_start_allowed && timer.remaining_secs <= 0.0 => {
                     timer.remaining_secs = *secs as f32;
                     timer.pending_phase = Some(pending_phase.clone());
                     outbox.0.push((
@@ -1583,6 +1821,293 @@ fn apply_result(
     outbox.0.extend(result.outbound);
 }
 
+/// Keep the legacy per-ship countdown dormant while the fleet mesh owns the
+/// collective policy. This runs before every lobby handler, so a `SetReady`
+/// processed later in the same fixed tick sees `local_start_allowed == false`.
+fn enforce_fleet_managed_countdown(
+    managed: Res<FleetManagedLobby>,
+    mut timer: ResMut<CountdownTimer>,
+    mut outbox: ResMut<LobbyOutbox>,
+) {
+    timer.local_start_allowed = !managed.enabled;
+    if managed.enabled && timer.remaining_secs > 0.0 {
+        timer.remaining_secs = 0.0;
+        timer.pending_phase = None;
+        outbox.0.push((
+            Target::All,
+            ServerMessage::GameStartCountdown { remaining_secs: 0 },
+        ));
+    }
+}
+
+pub(crate) fn start_result(
+    grant: &crate::lobby::start_policy::StartGrant,
+    status: crate::lobby::start_policy::StartGrantStatus,
+    reason: Option<crate::lobby::start_policy::StartGrantReason>,
+) -> crate::lobby::start_policy::StartGrantResult {
+    crate::lobby::start_policy::StartGrantResult {
+        status,
+        operator_id: grant.operator_id.clone(),
+        reason,
+        grant_id: Some(grant.id.clone()),
+    }
+}
+
+/// Apply the host mesh's single start decision on a logical tick.
+///
+/// The grant is the readiness decision boundary. In particular, an automatic
+/// grant is **not** rechecked against this host's local crew after receipt: a
+/// late ready withdrawal could otherwise make one peer refuse while its fleet
+/// mates start. The mesh owner orders readiness changes before the grant and
+/// broadcasts that same idempotency key to every simulation peer. Rust still
+/// independently revalidates the conditions that can safely be identical or
+/// local-hard gates at application: managed mode, grant shape/sequence,
+/// authoritative phase, and local content/peer validation. Forced attribution
+/// is likewise frozen by the owner-authenticated grant; re-reading a GM
+/// disconnect here could split peers exactly like re-reading local readiness.
+/// Once that shared validation admits a grant, every peer enters
+/// [`GamePhase::InProgress`] directly. Host-local asset preload state is
+/// projected to the mesh before the grant and must not be re-read afterward,
+/// or render and rendererless peers could choose different phases.
+///
+/// Receipt is not the application boundary. A grant waits in the bounded
+/// queue until its exact `apply_tick`; applying it on "the next tick" would
+/// make async delivery order authoritative. A grant first seen after that tick
+/// is refused rather than shifted, surfacing a broken delivery barrier instead
+/// of quietly forking the fleet. The host mesh/lockstep layer is responsible
+/// for withholding the scheduled tick until every peer has received the grant.
+fn apply_pending_start_grants(
+    state: Res<State<GamePhase>>,
+    mut next_state: ResMut<NextState<GamePhase>>,
+    managed: Res<FleetManagedLobby>,
+    sim_tick: Option<Res<crate::sim_tick::SimTick>>,
+    mut pending: ResMut<PendingStartGrants>,
+    mut tracker: ResMut<StartGrantTracker>,
+    mut results: ResMut<StartGrantResults>,
+    mut outbox: ResMut<LobbyOutbox>,
+    roster: Option<Res<crate::lockstep::FleetRoster>>,
+    fleet: Option<Res<crate::lockstep::FleetLockstep>>,
+    mut mesh_outbox: Option<ResMut<crate::lockstep::MeshOutbox>>,
+) {
+    let mut started_this_tick = false;
+    // Process only the grants present at entry. Future grants are requeued;
+    // walking until empty would immediately pop the same one forever.
+    let queued_at_entry = pending.len();
+    for _ in 0..queued_at_entry {
+        let Some(mut grant) = pending.pop_front() else {
+            break;
+        };
+        let Ok(sequence) = grant.validate() else {
+            results.push(start_result(
+                &grant,
+                crate::lobby::start_policy::StartGrantStatus::Refused,
+                Some(crate::lobby::start_policy::StartGrantReason::InvalidGrant),
+            ));
+            continue;
+        };
+
+        if sequence <= tracker.last_sequence {
+            results.push(start_result(
+                &grant,
+                crate::lobby::start_policy::StartGrantStatus::NoOp,
+                Some(crate::lobby::start_policy::StartGrantReason::AlreadyStarted),
+            ));
+            continue;
+        }
+        let Some(now) = sim_tick.as_ref().map(|tick| tick.0) else {
+            tracker.last_sequence = sequence;
+            results.push(start_result(
+                &grant,
+                crate::lobby::start_policy::StartGrantStatus::Refused,
+                Some(crate::lobby::start_policy::StartGrantReason::InvalidGrant),
+            ));
+            continue;
+        };
+        let local_is_owner = roster
+            .as_deref()
+            .is_none_or(|roster| roster.local() == roster.owner());
+        if !tracker.is_canonical(&grant) && local_is_owner {
+            let refusal = if !managed.enabled {
+                Some((
+                    crate::lobby::start_policy::StartGrantStatus::Refused,
+                    crate::lobby::start_policy::StartGrantReason::FleetNotManaged,
+                ))
+            } else if state.get() != &GamePhase::Lobby {
+                Some((
+                    crate::lobby::start_policy::StartGrantStatus::NoOp,
+                    crate::lobby::start_policy::StartGrantReason::AlreadyStarted,
+                ))
+            } else if !managed.validation_passed {
+                Some((
+                    crate::lobby::start_policy::StartGrantStatus::Refused,
+                    crate::lobby::start_policy::StartGrantReason::ValidationFailed,
+                ))
+            } else {
+                None
+            };
+            if let Some((status, reason)) = refusal {
+                tracker.last_sequence = sequence;
+                results.push(start_result(&grant, status, Some(reason)));
+                continue;
+            }
+        }
+        if !tracker.is_canonical(&grant) && local_is_owner && grant.apply_tick != 0 {
+            tracker.last_sequence = sequence;
+            results.push(start_result(
+                &grant,
+                crate::lobby::start_policy::StartGrantStatus::Refused,
+                Some(crate::lobby::start_policy::StartGrantReason::UnsafeApplyTick),
+            ));
+            continue;
+        }
+        if grant.apply_tick == 0 {
+            if local_is_owner {
+                let assigned = if roster.as_deref().is_some_and(|roster| !roster.is_solo()) {
+                    fleet
+                        .as_deref()
+                        .and_then(|fleet| fleet.ready_through(now).checked_add(1))
+                } else {
+                    Some(now)
+                };
+                let Some(assigned) = assigned
+                    .filter(|tick| *tick <= crate::lobby::start_policy::MAX_SAFE_START_APPLY_TICK)
+                else {
+                    tracker.last_sequence = sequence;
+                    results.push(start_result(
+                        &grant,
+                        crate::lobby::start_policy::StartGrantStatus::Refused,
+                        Some(crate::lobby::start_policy::StartGrantReason::UnsafeApplyTick),
+                    ));
+                    continue;
+                };
+                grant.apply_tick = assigned;
+            }
+        }
+
+        // A browser proposal is not the decision boundary on a member. The
+        // technical owner first seals it into its authenticated TickFrame;
+        // `apply_mesh_inbox` then adopts that exact value as canonical. This
+        // also permits an early control-plane copy to wait harmlessly on a
+        // member until the ordered owner frame arrives.
+        if tracker.canonical.is_some() && !tracker.is_canonical(&grant) {
+            tracker.last_sequence = tracker.last_sequence.max(sequence);
+            results.push(start_result(
+                &grant,
+                crate::lobby::start_policy::StartGrantStatus::Refused,
+                Some(crate::lobby::start_policy::StartGrantReason::ConflictingGrant),
+            ));
+            continue;
+        }
+        if !tracker.is_canonical(&grant) {
+            let multi_participant = roster.as_deref().is_some_and(|roster| !roster.is_solo());
+            if !local_is_owner {
+                if now < grant.apply_tick {
+                    pending.requeue(grant);
+                    continue;
+                }
+                tracker.last_sequence = sequence;
+                results.push(start_result(
+                    &grant,
+                    crate::lobby::start_policy::StartGrantStatus::Refused,
+                    Some(crate::lobby::start_policy::StartGrantReason::UnauthorizedGrant),
+                ));
+                continue;
+            }
+
+            if multi_participant {
+                let Some(fleet) = fleet.as_deref() else {
+                    tracker.last_sequence = sequence;
+                    results.push(start_result(
+                        &grant,
+                        crate::lobby::start_policy::StartGrantStatus::Refused,
+                        Some(crate::lobby::start_policy::StartGrantReason::UnauthorizedGrant),
+                    ));
+                    continue;
+                };
+                let Some(mesh_outbox) = mesh_outbox.as_deref_mut() else {
+                    tracker.last_sequence = sequence;
+                    results.push(start_result(
+                        &grant,
+                        crate::lobby::start_policy::StartGrantStatus::Refused,
+                        Some(crate::lobby::start_policy::StartGrantReason::UnauthorizedGrant),
+                    ));
+                    continue;
+                };
+                // The frame sealed after this system declares readiness through
+                // this watermark. The decision tick must be strictly beyond it,
+                // so every participant has to receive the bearing frame before
+                // the barrier can possibly open the decision boundary.
+                if fleet.is_alone() || grant.apply_tick <= fleet.ready_through(now) {
+                    tracker.last_sequence = sequence;
+                    results.push(start_result(
+                        &grant,
+                        crate::lobby::start_policy::StartGrantStatus::Refused,
+                        Some(crate::lobby::start_policy::StartGrantReason::UnsafeApplyTick),
+                    ));
+                    continue;
+                }
+                if tracker.adopt_canonical(&grant).is_err()
+                    || !mesh_outbox.stage_start_grant(grant.clone())
+                {
+                    tracker.last_sequence = sequence;
+                    results.push(start_result(
+                        &grant,
+                        crate::lobby::start_policy::StartGrantStatus::Refused,
+                        Some(crate::lobby::start_policy::StartGrantReason::ConflictingGrant),
+                    ));
+                    continue;
+                }
+                tracker.mark_embedded();
+            } else if tracker.adopt_canonical(&grant).is_err() {
+                tracker.last_sequence = sequence;
+                results.push(start_result(
+                    &grant,
+                    crate::lobby::start_policy::StartGrantStatus::Refused,
+                    Some(crate::lobby::start_policy::StartGrantReason::ConflictingGrant),
+                ));
+                continue;
+            }
+        }
+        if now < grant.apply_tick {
+            // Do not consume the sequence while waiting. Otherwise this same
+            // queued grant would look like a duplicate on the next tick and
+            // no peer would ever reach its scheduled boundary.
+            pending.requeue(grant);
+            continue;
+        }
+        // Consume every well-shaped id once, including refusals. A caller must
+        // mint a new grant after any condition changes; replaying the same
+        // request later cannot turn a refusal into a mutation.
+        tracker.last_sequence = sequence;
+
+        if now > grant.apply_tick {
+            results.push(start_result(
+                &grant,
+                crate::lobby::start_policy::StartGrantStatus::Refused,
+                Some(crate::lobby::start_policy::StartGrantReason::MissedApplyTick),
+            ));
+            continue;
+        }
+
+        if started_this_tick || state.get() != &GamePhase::Lobby {
+            results.push(start_result(
+                &grant,
+                crate::lobby::start_policy::StartGrantStatus::NoOp,
+                Some(crate::lobby::start_policy::StartGrantReason::AlreadyStarted),
+            ));
+            continue;
+        }
+        next_state.set(GamePhase::InProgress);
+        outbox.0.push((Target::All, ServerMessage::GameStarted));
+        started_this_tick = true;
+        results.push(start_result(
+            &grant,
+            crate::lobby::start_policy::StartGrantStatus::Applied,
+            None,
+        ));
+    }
+}
+
 /// Ticks the pre-game countdown each frame. When the countdown reaches 0,
 /// transitions to the pending phase and broadcasts `GameStarted`. Also
 /// checks `all_ready()` each frame and cancels the countdown if a player
@@ -1595,6 +2120,12 @@ fn tick_countdown(
     sessions: Option<Res<Sessions>>,
 ) {
     if timer.remaining_secs <= 0.0 {
+        return;
+    }
+
+    if !timer.local_start_allowed {
+        timer.remaining_secs = 0.0;
+        timer.pending_phase = None;
         return;
     }
 
@@ -1653,7 +2184,12 @@ impl Plugin for LobbyOutboxPlugin {
         // `.after(tick_countdown)` edge — which is what keeps `GameStarted`
         // from being lost on the transition tick — is only real inside the
         // schedule `tick_countdown` runs in.
-        app.add_systems(FixedUpdate, drain_lobby_outbox.after(tick_countdown));
+        app.add_systems(
+            FixedUpdate,
+            drain_lobby_outbox
+                .after(tick_countdown)
+                .after(apply_pending_start_grants),
+        );
     }
 }
 
@@ -1699,6 +2235,7 @@ mod tests {
             .add_plugins(bevy::time::TimePlugin)
             .init_resource::<Outbox>()
             .add_systems(PostUpdate, collect);
+        crate::sim_tick::register_sim_tick(&mut app);
         // One fixed step per update (issue #895): the lobby runs on the
         // logical tick, and each 1 s harness tick advances it once — the
         // countdown tests count whole seconds per tick.
@@ -1788,6 +2325,7 @@ mod tests {
                 id: "gm-1".into(),
                 name: "Morgan".into(),
                 connected: true,
+                ready: false,
             }])
             .unwrap(),
         );
@@ -2313,5 +2851,541 @@ mod tests {
             ),
             authored_range
         );
+    }
+
+    fn automatic_grant(sequence: u64) -> crate::lobby::start_policy::StartGrant {
+        crate::lobby::start_policy::StartGrant {
+            id: format!("start-{sequence}"),
+            mode: crate::lobby::start_policy::StartGrantMode::Automatic,
+            operator_id: None,
+            apply_tick: 0,
+        }
+    }
+
+    fn forced_grant(sequence: u64, operator_id: &str) -> crate::lobby::start_policy::StartGrant {
+        crate::lobby::start_policy::StartGrant {
+            id: format!("start-{sequence}"),
+            mode: crate::lobby::start_policy::StartGrantMode::Forced,
+            operator_id: Some(operator_id.into()),
+            apply_tick: 0,
+        }
+    }
+
+    fn enable_managed_lobby(app: &mut App, validation_passed: bool) {
+        let mut managed = app.world_mut().resource_mut::<FleetManagedLobby>();
+        managed.set_enabled(true);
+        managed.validation_passed = validation_passed;
+    }
+
+    fn install_two_participant_fleet(app: &mut App, local: u32, owner: u32, delay: u64) {
+        use crate::command_admission::HostSlot;
+
+        app.init_resource::<crate::command_admission::log::PendingCommands>();
+        crate::lockstep::register_lockstep(app);
+        let participants = vec![HostSlot(1), HostSlot(2)];
+        let roster = crate::lockstep::FleetRoster::with_participants(
+            vec![crate::lockstep::FleetShip::new(HostSlot(1))],
+            participants.clone(),
+            HostSlot(local),
+            HostSlot(owner),
+        )
+        .unwrap();
+        app.insert_resource(roster);
+        app.insert_resource(crate::lockstep::FleetLockstep(
+            crate::lockstep::LockstepSession::new_at(HostSlot(local), participants, delay, 0)
+                .unwrap(),
+        ));
+        for peer in [HostSlot(1), HostSlot(2)] {
+            if peer != HostSlot(local) {
+                app.world_mut()
+                    .resource_mut::<crate::lockstep::FleetLockstep>()
+                    .observe(peer, u64::MAX);
+            }
+        }
+    }
+
+    fn install_gm_owner_fleet(app: &mut App, local: u32, delay: u64) {
+        use crate::command_admission::HostSlot;
+
+        app.init_resource::<crate::command_admission::log::PendingCommands>();
+        crate::lockstep::register_lockstep(app);
+        let participants = vec![HostSlot(1), HostSlot(2), HostSlot(3)];
+        let roster = crate::lockstep::FleetRoster::with_participants(
+            vec![
+                crate::lockstep::FleetShip::new(HostSlot(2)),
+                crate::lockstep::FleetShip::new(HostSlot(3)),
+            ],
+            participants.clone(),
+            HostSlot(local),
+            HostSlot(1),
+        )
+        .unwrap();
+        app.insert_resource(roster);
+        let mut session =
+            crate::lockstep::LockstepSession::new_at(HostSlot(local), participants, delay, 0)
+                .unwrap();
+        // Keep every surviving ship peer ahead of this narrow start-boundary
+        // fixture. The GM owner's opening watermark remains exactly `delay`, so
+        // its loss is agreed at the same tick the embedded grant names.
+        for survivor in [HostSlot(2), HostSlot(3)] {
+            if survivor != HostSlot(local) {
+                session.observe(survivor, u64::MAX);
+            }
+        }
+        app.insert_resource(crate::lockstep::FleetLockstep(session));
+    }
+
+    fn take_start_results(app: &mut App) -> Vec<crate::lobby::start_policy::StartGrantResult> {
+        app.world_mut()
+            .resource_mut::<StartGrantResults>()
+            .drain()
+            .collect()
+    }
+
+    #[test]
+    fn managed_automatic_grant_is_the_readiness_boundary_for_an_empty_ship_host() {
+        let mut app = test_app();
+        enable_managed_lobby(&mut app, true);
+        assert_eq!(
+            app.world().resource::<Sessions>().0.readiness_tally(),
+            crate::lobby::start_policy::ReadinessTally::default(),
+            "this peer must not invent a local participant"
+        );
+        assert!(app
+            .world_mut()
+            .resource_mut::<PendingStartGrants>()
+            .try_push(automatic_grant(1)));
+
+        let out = tick(&mut app);
+        assert!(out
+            .iter()
+            .any(|message| matches!(message.msg, ServerMessage::GameStarted)));
+        assert_eq!(
+            take_start_results(&mut app)[0].status,
+            crate::lobby::start_policy::StartGrantStatus::Applied
+        );
+    }
+
+    #[test]
+    fn managed_gm_only_automatic_grant_applies_without_local_crew() {
+        let mut app = test_app();
+        enable_managed_lobby(&mut app, true);
+        app.insert_resource(
+            crate::gm_roster::GmRoster::try_new(vec![crate::gm_roster::GmOperator {
+                id: "gm-1".into(),
+                name: "Morgan".into(),
+                connected: true,
+                ready: true,
+            }])
+            .unwrap(),
+        );
+        assert!(app
+            .world_mut()
+            .resource_mut::<PendingStartGrants>()
+            .try_push(automatic_grant(1)));
+
+        let out = tick(&mut app);
+        assert!(out
+            .iter()
+            .any(|message| matches!(message.msg, ServerMessage::GameStarted)));
+        assert_eq!(
+            take_start_results(&mut app)[0].status,
+            crate::lobby::start_policy::StartGrantStatus::Applied
+        );
+    }
+
+    #[cfg(feature = "server")]
+    #[test]
+    fn managed_grant_enters_the_same_phase_for_different_local_preload_states() {
+        fn peer_with_preload(complete: bool) -> App {
+            let mut app = test_app();
+            enable_managed_lobby(&mut app, true);
+            let mut preload = crate::server::asset_preload::AssetPreloadResource::default();
+            preload.started = true;
+            preload.complete = complete;
+            app.insert_resource(preload);
+            assert!(app
+                .world_mut()
+                .resource_mut::<PendingStartGrants>()
+                .try_push(automatic_grant(1)));
+            app
+        }
+
+        let mut still_loading_assets = peer_with_preload(false);
+        let mut completed_assets = peer_with_preload(true);
+
+        for app in [&mut still_loading_assets, &mut completed_assets] {
+            tick(app);
+            assert_eq!(
+                take_start_results(app)[0].status,
+                crate::lobby::start_policy::StartGrantStatus::Applied
+            );
+            // Apply the NextState scheduled on the fixed tick above.
+            tick(app);
+            assert_eq!(
+                app.world().resource::<State<GamePhase>>().get(),
+                &GamePhase::InProgress
+            );
+        }
+    }
+
+    #[test]
+    fn managed_force_grant_is_immutable_across_a_late_gm_disconnect() {
+        let mut app = test_app();
+        enable_managed_lobby(&mut app, true);
+        app.insert_resource(
+            crate::gm_roster::GmRoster::try_new(vec![crate::gm_roster::GmOperator {
+                id: "gm-1".into(),
+                name: "Morgan".into(),
+                connected: true,
+                ready: false,
+            }])
+            .unwrap(),
+        );
+        app.world_mut()
+            .resource_mut::<Sessions>()
+            .0
+            .register("crew-1".into(), "Alice".into())
+            .unwrap();
+        assert!(app
+            .world_mut()
+            .resource_mut::<PendingStartGrants>()
+            .try_push(forced_grant(1, "gm-1")));
+
+        // The owner authenticated and attributed the force before emitting the
+        // grant. A disconnect observed by only this peer after that decision
+        // must not make it diverge from peers that already applied the grant.
+        app.insert_resource(
+            crate::gm_roster::GmRoster::try_new(vec![crate::gm_roster::GmOperator {
+                id: "gm-1".into(),
+                name: "Morgan".into(),
+                connected: false,
+                ready: false,
+            }])
+            .unwrap(),
+        );
+        tick(&mut app);
+        assert_eq!(
+            take_start_results(&mut app)[0].status,
+            crate::lobby::start_policy::StartGrantStatus::Applied
+        );
+    }
+
+    #[test]
+    fn managed_validation_refuses_auto_and_force() {
+        let mut app = test_app();
+        enable_managed_lobby(&mut app, false);
+        app.insert_resource(
+            crate::gm_roster::GmRoster::try_new(vec![crate::gm_roster::GmOperator {
+                id: "gm-1".into(),
+                name: "Morgan".into(),
+                connected: true,
+                ready: true,
+            }])
+            .unwrap(),
+        );
+        {
+            let mut pending = app.world_mut().resource_mut::<PendingStartGrants>();
+            assert!(pending.try_push(automatic_grant(1)));
+            assert!(pending.try_push(forced_grant(2, "gm-1")));
+        }
+        tick(&mut app);
+        let results = take_start_results(&mut app);
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|result| {
+            result.status == crate::lobby::start_policy::StartGrantStatus::Refused
+                && result.reason
+                    == Some(crate::lobby::start_policy::StartGrantReason::ValidationFailed)
+        }));
+    }
+
+    #[test]
+    fn canonical_grant_does_not_reread_validation_at_apply_tick() {
+        let mut app = test_app();
+        enable_managed_lobby(&mut app, true);
+        install_two_participant_fleet(&mut app, 1, 1, 2);
+        assert!(app
+            .world_mut()
+            .resource_mut::<PendingStartGrants>()
+            .try_push(automatic_grant(1)));
+
+        tick(&mut app);
+        assert!(app
+            .world()
+            .resource::<StartGrantTracker>()
+            .canonical
+            .is_some());
+        app.world_mut()
+            .resource_mut::<FleetManagedLobby>()
+            .validation_passed = false;
+
+        for _ in 0..3 {
+            tick(&mut app);
+        }
+        let results = take_start_results(&mut app);
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            results[0].status,
+            crate::lobby::start_policy::StartGrantStatus::Applied,
+            "validation was frozen when the owner sealed the canonical grant"
+        );
+    }
+
+    #[test]
+    fn member_with_failed_validation_refuses_owner_grant_before_barrier_opens() {
+        use crate::command_admission::HostSlot;
+
+        let mut app = test_app();
+        enable_managed_lobby(&mut app, false);
+        install_two_participant_fleet(&mut app, 2, 1, 2);
+        let mut grant = automatic_grant(1);
+        grant.apply_tick = 3;
+        app.world_mut()
+            .resource_mut::<crate::lockstep::MeshInbox>()
+            .push_from(
+                crate::lockstep::MeshFrame::Tick(crate::lockstep::TickFrame {
+                    from: HostSlot(1),
+                    tick: 0,
+                    ready_through: 2,
+                    commands: Vec::new(),
+                    start_grant: Some(grant),
+                }),
+                crate::lockstep::MeshOrigin::Peer(HostSlot(1)),
+            );
+
+        tick(&mut app);
+        assert!(app
+            .world()
+            .resource::<StartGrantTracker>()
+            .is_failed_closed());
+        assert!(app.world().resource::<PendingStartGrants>().0.is_empty());
+        let results = take_start_results(&mut app);
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            results[0].reason,
+            Some(crate::lobby::start_policy::StartGrantReason::ValidationFailed)
+        );
+        assert_eq!(
+            app.world().resource::<State<GamePhase>>().get(),
+            &GamePhase::Lobby
+        );
+    }
+
+    #[test]
+    fn duplicate_grant_applies_once_and_reports_a_no_op() {
+        let mut app = test_app();
+        enable_managed_lobby(&mut app, true);
+        {
+            let mut pending = app.world_mut().resource_mut::<PendingStartGrants>();
+            assert!(pending.try_push(automatic_grant(1)));
+            assert!(pending.try_push(automatic_grant(1)));
+        }
+        let out = tick(&mut app);
+        assert_eq!(
+            out.iter()
+                .filter(|message| matches!(message.msg, ServerMessage::GameStarted))
+                .count(),
+            1
+        );
+        let results = take_start_results(&mut app);
+        assert_eq!(
+            results
+                .iter()
+                .map(|result| result.status)
+                .collect::<Vec<_>>(),
+            vec![
+                crate::lobby::start_policy::StartGrantStatus::Applied,
+                crate::lobby::start_policy::StartGrantStatus::NoOp
+            ]
+        );
+    }
+
+    #[test]
+    fn local_owner_cannot_propose_a_preselected_nonzero_apply_tick() {
+        let mut app = test_app();
+        enable_managed_lobby(&mut app, true);
+        install_two_participant_fleet(&mut app, 1, 1, 2);
+
+        let mut forged = automatic_grant(1);
+        forged.apply_tick = 99;
+        assert!(app
+            .world_mut()
+            .resource_mut::<PendingStartGrants>()
+            .try_push(forged));
+
+        tick(&mut app);
+        let results = take_start_results(&mut app);
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            results[0].status,
+            crate::lobby::start_policy::StartGrantStatus::Refused
+        );
+        assert_eq!(
+            results[0].reason,
+            Some(crate::lobby::start_policy::StartGrantReason::UnsafeApplyTick)
+        );
+        assert!(app
+            .world()
+            .resource::<crate::lockstep::MeshOutbox>()
+            .pending_frames()
+            .iter()
+            .all(|frame| !matches!(
+                frame,
+                crate::lockstep::MeshFrame::Tick(tick) if tick.start_grant.is_some()
+            )));
+    }
+
+    #[test]
+    fn technical_gm_departure_does_not_strand_an_embedded_start_boundary() {
+        use crate::command_admission::HostSlot;
+
+        let mut owner = test_app();
+        enable_managed_lobby(&mut owner, true);
+        install_gm_owner_fleet(&mut owner, 1, 2);
+        assert!(owner
+            .world_mut()
+            .resource_mut::<PendingStartGrants>()
+            .try_push(automatic_grant(1)));
+        tick(&mut owner);
+        let bearing = owner
+            .world_mut()
+            .resource_mut::<crate::lockstep::MeshOutbox>()
+            .drain()
+            .into_iter()
+            .find(|frame| {
+                matches!(
+                    frame,
+                    crate::lockstep::MeshFrame::Tick(tick) if tick.start_grant.is_some()
+                )
+            })
+            .expect("the technical owner embeds its assigned boundary in a TickFrame");
+        let apply_tick = match &bearing {
+            crate::lockstep::MeshFrame::Tick(tick) => {
+                assert_eq!(tick.from, HostSlot(1));
+                tick.start_grant.as_ref().unwrap().apply_tick
+            }
+            _ => unreachable!(),
+        };
+        assert_eq!(apply_tick, 3);
+
+        let mut survivors = [test_app(), test_app()];
+        for (app, local) in survivors.iter_mut().zip([2, 3]) {
+            enable_managed_lobby(app, true);
+            install_gm_owner_fleet(app, local, 2);
+            let mut inbox = app.world_mut().resource_mut::<crate::lockstep::MeshInbox>();
+            // Stronger than the reliable transport's ordinary ordering: even if
+            // the socket-close observation reaches Rust before the final owner
+            // frame, the roster still authenticates the frozen owner and the
+            // departed wait-set cannot strand its immutable decision.
+            inbox.push_from(
+                crate::lockstep::MeshFrame::HostLoss(crate::lockstep::HostLossFrame {
+                    from: HostSlot(1),
+                    lost: HostSlot(1),
+                    tick: 0,
+                }),
+                crate::lockstep::MeshOrigin::LocalObservation,
+            );
+            inbox.push_from(
+                bearing.clone(),
+                crate::lockstep::MeshOrigin::Peer(HostSlot(1)),
+            );
+        }
+
+        for app in &mut survivors {
+            tick(app);
+            let fleet = app.world().resource::<crate::lockstep::FleetLockstep>();
+            assert!(fleet.has_departed(HostSlot(1)));
+            assert_eq!(fleet.watermark_of(HostSlot(1)), None);
+            assert!(fleet.peers().all(|peer| peer != HostSlot(1)));
+            assert_eq!(
+                app.world()
+                    .resource::<StartGrantTracker>()
+                    .canonical
+                    .as_ref()
+                    .unwrap()
+                    .apply_tick,
+                apply_tick
+            );
+            assert_eq!(
+                app.world().resource::<State<GamePhase>>().get(),
+                &GamePhase::Lobby
+            );
+            for _ in 0..3 {
+                tick(app);
+            }
+            let results = take_start_results(app);
+            assert_eq!(results.len(), 1);
+            assert_eq!(
+                results[0].status,
+                crate::lobby::start_policy::StartGrantStatus::Applied
+            );
+            tick(app);
+            assert_eq!(
+                app.world().resource::<State<GamePhase>>().get(),
+                &GamePhase::InProgress
+            );
+        }
+        assert_eq!(
+            survivors[0]
+                .world()
+                .resource::<crate::sim_tick::SimTick>()
+                .0,
+            survivors[1]
+                .world()
+                .resource::<crate::sim_tick::SimTick>()
+                .0
+        );
+    }
+
+    #[test]
+    fn managed_lobby_never_arms_the_legacy_local_countdown() {
+        let mut app = test_app();
+        enable_managed_lobby(&mut app, true);
+        app.world_mut()
+            .resource_mut::<Sessions>()
+            .0
+            .register("t1".into(), "Alice".into())
+            .unwrap();
+        push(&mut app, "t1", ClientMessage::SetReady { ready: true });
+
+        let out = tick(&mut app);
+        assert_eq!(app.world().resource::<CountdownTimer>().remaining_secs, 0.0);
+        assert!(!out.iter().any(|message| matches!(
+            message.msg,
+            ServerMessage::GameStartCountdown { remaining_secs } if remaining_secs > 0
+        )));
+    }
+
+    #[test]
+    fn same_frame_teardown_and_reopen_resets_start_id_generation() {
+        let mut inputs = VecDeque::from([
+            FleetLobbyInput::Managed(false),
+            FleetLobbyInput::Managed(true),
+            FleetLobbyInput::Validation(true),
+            FleetLobbyInput::Grant(automatic_grant(1)),
+        ]);
+        let mut managed = FleetManagedLobby {
+            enabled: true,
+            validation_passed: true,
+        };
+        let mut grants = PendingStartGrants::default();
+        let mut tracker = StartGrantTracker {
+            last_sequence: 1,
+            ..Default::default()
+        };
+        let mut results = StartGrantResults::default();
+
+        assert!(apply_fleet_lobby_inputs(
+            &mut inputs,
+            &mut managed,
+            &mut grants,
+            &mut tracker,
+            &mut results,
+        ));
+        assert!(inputs.is_empty());
+        assert!(managed.enabled);
+        assert!(managed.validation_passed);
+        assert_eq!(tracker.last_sequence, 0);
+        assert_eq!(grants.pop_front().unwrap().id, "start-1");
     }
 }

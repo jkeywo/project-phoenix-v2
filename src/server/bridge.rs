@@ -15,6 +15,8 @@ use crate::core::debug_surface::DebugSurface;
 #[cfg(all(target_arch = "wasm32", not(phoenix_demo_build)))]
 use std::collections::HashMap;
 
+#[cfg(test)]
+use crate::lobby::FleetLobbyInput;
 #[cfg(any(target_arch = "wasm32", test))]
 use std::collections::{BTreeMap, VecDeque};
 
@@ -38,11 +40,12 @@ use {
     crate::entities::config_cache::ConfigCachePlugin,
     crate::lobby::stations_config::ShipStations,
     crate::lobby::{
-        InboundMessage, LobbyOutbox, LobbyPlugin, OutboundMessage, PlayerDisconnected,
-        SelectedShipResource, Target,
+        FleetLobbyInput, FleetManagedLobby, InboundMessage, LobbyOutbox, LobbyPlugin,
+        OutboundMessage, PendingStartGrants, PlayerDisconnected, SelectedShipResource,
+        StartGrantResults, Target,
     },
     crate::modifiers::coordination::ModifierCoordinationPlugin,
-    crate::server_app::add_simulation_plugins,
+    crate::server_app::{add_simulation_plugins_with, SimPluginOptions},
     crate::ship::config::ShipConfig,
     crate::ship_plugin::PendingShipConfig,
     crate::world::load::WasmReader,
@@ -166,6 +169,25 @@ pub enum RestoreStep {
     Abandon,
 }
 
+#[cfg(target_arch = "wasm32")]
+struct PendingFleetJoin {
+    generation: u64,
+    roster_json: String,
+}
+
+#[cfg(target_arch = "wasm32")]
+enum PendingFleetAdoption {
+    Join(PendingFleetJoin),
+    Leave { generation: u64 },
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug)]
+struct PendingFleetLobbyInput {
+    generation: u64,
+    input: FleetLobbyInput,
+}
+
 /// Decide the next restore action from the observable inputs (issue #1181).
 ///
 /// `waited` is the post-increment frame count (the drain bumps `RestoreWaited`
@@ -248,6 +270,17 @@ pub fn apply_instagib_toggles(count: u32, current: &mut bool) {
     if count % 2 == 1 {
         *current = !*current;
     }
+}
+
+/// Raw host-only mutations are safe only before a participant wait-set exists.
+///
+/// These controls predate fleet lockstep and carry no tick/order/origin. Once a
+/// second simulation participates, applying one locally would fork the world;
+/// the narrow #1290 policy is therefore to consume and refuse them while a
+/// [`crate::lockstep::FleetLockstep`] resource is installed.
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) const fn raw_host_control_allowed(fleet_active: bool) -> bool {
+    !fleet_active
 }
 
 // ── Host teleport-to-waypoint override (issue #770) ─────────────────────────
@@ -442,6 +475,85 @@ impl<T, const LIMIT: usize> BoundedFifo<T, LIMIT> {
     }
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
+const MAX_FLEET_LOBBY_INPUTS: usize = 64;
+
+/// Queue one ordered fleet-lobby edge without silently losing generation state.
+///
+/// Consecutive validation samples are absolute-state projections, so only the
+/// newest one matters and may replace the tail in place. Consecutive identical
+/// managed samples are likewise idempotent. A managed transition, a grant, or
+/// a validation separated from the previous sample by either of those edges is
+/// never displaced: refusal lets the page retry without changing ordering.
+#[cfg(any(target_arch = "wasm32", test))]
+fn queue_fleet_lobby_input_bounded(
+    pending: &mut VecDeque<PendingFleetLobbyInput>,
+    generation: u64,
+    input: FleetLobbyInput,
+    limit: usize,
+) -> bool {
+    if let Some(back) = pending.back_mut() {
+        match (&mut back.input, &input) {
+            (FleetLobbyInput::Validation(queued), FleetLobbyInput::Validation(latest)) => {
+                if back.generation == generation {
+                    *queued = *latest;
+                    return true;
+                }
+            }
+            (FleetLobbyInput::Managed(queued), FleetLobbyInput::Managed(latest))
+                if back.generation == generation && *queued == *latest =>
+            {
+                return true;
+            }
+            _ => {}
+        }
+    }
+    if pending.len() >= limit {
+        return false;
+    }
+    pending.push_back(PendingFleetLobbyInput { generation, input });
+    true
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn rebind_fleet_lobby_projections(
+    pending: &mut VecDeque<PendingFleetLobbyInput>,
+    generation: u64,
+    managed: Option<bool>,
+    validation: Option<bool>,
+) {
+    pending.clear();
+    if let Some(enabled) = managed {
+        debug_assert!(queue_fleet_lobby_input_bounded(
+            pending,
+            generation,
+            FleetLobbyInput::Managed(enabled),
+            MAX_FLEET_LOBBY_INPUTS,
+        ));
+    }
+    if let Some(valid) = validation {
+        debug_assert!(queue_fleet_lobby_input_bounded(
+            pending,
+            generation,
+            FleetLobbyInput::Validation(valid),
+            MAX_FLEET_LOBBY_INPUTS,
+        ));
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn queue_fleet_lobby_input(input: FleetLobbyInput) -> bool {
+    let generation = FLEET_JOIN_GENERATION.with(|counter| *counter.borrow());
+    PENDING_FLEET_LOBBY_INPUTS.with(|pending| {
+        queue_fleet_lobby_input_bounded(
+            &mut pending.borrow_mut(),
+            generation,
+            input,
+            MAX_FLEET_LOBBY_INPUTS,
+        )
+    })
+}
+
 #[cfg(target_arch = "wasm32")]
 thread_local! {
     /// Messages received from JS peers, waiting to be injected into Bevy.
@@ -504,13 +616,39 @@ thread_local! {
     /// roster, applied once on the next frame. Deferred for the same reason
     /// every other JS→Bevy handoff here is — `wasm_join_fleet` is called from a
     /// socket callback, which holds no `World`.
-    static PENDING_FLEET: RefCell<Option<String>> = const { RefCell::new(None) };
+    static PENDING_FLEET_ADOPTIONS: RefCell<VecDeque<PendingFleetAdoption>> =
+        const { RefCell::new(VecDeque::new()) };
+    static FLEET_JOIN_GENERATION: RefCell<u64> = const { RefCell::new(0) };
+    static FLEET_JOIN_STATUS: RefCell<crate::lockstep::FleetJoinStatus> = const {
+        RefCell::new(crate::lockstep::FleetJoinStatus {
+            generation: 0,
+            status: crate::lockstep::FleetJoinStatusKind::Idle,
+            reason: None,
+        })
+    };
 
     /// A validated crew-public GM roster waiting for its full replacement in
     /// Bevy (issue #1289). Decoded at the WASM boundary so no `serde_json`
     /// escapes `core::codec`; latched here because the JS call has no `World`.
     static PENDING_GM_ROSTER: RefCell<Option<crate::gm_roster::GmRoster>> =
         const { RefCell::new(None) };
+
+    /// Ordered, edge-only coordinated-lobby input waiting for the next
+    /// `PreUpdate` drain (issue #1290). One FIFO is essential: a same-frame
+    /// leave(false) -> reopen(true) -> start-1 sequence must not collapse its
+    /// teardown generation or let a pre-teardown grant cross into the new
+    /// fleet.
+    static PENDING_FLEET_LOBBY_INPUTS: RefCell<VecDeque<PendingFleetLobbyInput>> =
+        const { RefCell::new(VecDeque::new()) };
+    /// Latest absolute projections are rebound onto a newly allocated join
+    /// generation. The page commonly publishes managed/validation immediately
+    /// before calling `wasm_join_fleet`; without these mirrors those samples
+    /// would still carry generation zero and be discarded after adoption.
+    static LATEST_FLEET_MANAGED: RefCell<Option<bool>> = const { RefCell::new(None) };
+    static LATEST_FLEET_VALIDATION: RefCell<Option<bool>> = const { RefCell::new(None) };
+
+    /// Fixed-tick start outcomes mirrored back to the World-less JS poller.
+    static START_GRANT_RESULTS: RefCell<VecDeque<String>> = const { RefCell::new(VecDeque::new()) };
 
     /// JS callback registered by the host page to receive outbound messages.
     /// Signature: callback(target: string, payload: string)
@@ -1161,7 +1299,17 @@ pub fn wasm_init() {
     });
     app.add_plugins(LobbyPlugin)
         .add_plugins(crate::lobby::lobby_outbox_broadcaster());
-    add_simulation_plugins(&mut app);
+    // Keep simulation registration on the same renderer axis as boot. The
+    // WebDriver profile has no RenderPlugin, so installing render-coupled
+    // systems here would create an AssetPreloadResource that can never finish
+    // and would leave every fleet start validation permanently false.
+    add_simulation_plugins_with(
+        &mut app,
+        SimPluginOptions {
+            render: !is_automation,
+            ..default()
+        },
+    );
     app.add_plugins(WorldPlugin);
     // Insert the selected ship resource (set by wasm_select_ship before
     // wasm_init was called). Falls back to the legacy default path.
@@ -1227,6 +1375,11 @@ pub fn wasm_init() {
         (
             drain_inbound,
             drain_gm_roster,
+            // A leave and reopen can be queued in one animation frame. Apply
+            // the world teardown/adoption first, then the new generation's
+            // managed/validation edges; otherwise scheduler order could let
+            // teardown erase the newly opened lobby state.
+            drain_fleet_lobby_input.after(drain_mesh_inbound),
             drain_disconnects,
             drain_snapshot_requests,
             drain_host_controls.before(crate::debug::catalogue::refresh_readback),
@@ -1277,6 +1430,7 @@ pub fn wasm_init() {
             // so everything those ticks sealed goes out in one batch.
             flush_mesh_outbound,
             publish_mesh_status,
+            flush_start_grant_results,
         ),
     );
 
@@ -1413,24 +1567,117 @@ pub fn wasm_take_mesh_frames() -> String {
 /// host in the fleet receives the identical roster, which is what lets them
 /// spawn identical ships with identical identities and seed identical ratings.
 ///
-/// Returns `""` on success or a machine reason on refusal, so the page can say
-/// what happened rather than starting a mission that will not agree.
+/// Returns the queued generation on success or a machine reason on immediate
+/// decode refusal. Queueing is not acceptance: the page must poll
+/// [`wasm_fleet_join_status`] and withhold grants until that same generation is
+/// accepted by the Bevy-world drain.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_join_fleet(roster_json: &str) -> String {
-    match crate::core::codec::decode_fleet_roster(roster_json) {
-        Some(_) => {
-            PENDING_FLEET.with(|slot| *slot.borrow_mut() = Some(roster_json.to_string()));
-            String::new()
-        }
-        None => "fleet-roster-unreadable".to_string(),
+    let generation = FLEET_JOIN_GENERATION.with(|counter| {
+        let mut counter = counter.borrow_mut();
+        *counter = counter.wrapping_add(1).max(1);
+        *counter
+    });
+    if crate::core::codec::decode_fleet_roster(roster_json).is_none() {
+        PENDING_FLEET_ADOPTIONS.with(|pending| {
+            let mut pending = pending.borrow_mut();
+            if matches!(pending.back(), Some(PendingFleetAdoption::Join(_))) {
+                pending.pop_back();
+            }
+        });
+        FLEET_JOIN_STATUS.with(|status| {
+            *status.borrow_mut() = crate::lockstep::FleetJoinStatus {
+                generation,
+                status: crate::lockstep::FleetJoinStatusKind::Refused,
+                reason: Some("fleet-roster-unreadable".to_string()),
+            };
+        });
+        return "fleet-roster-unreadable".to_string();
     }
+    PENDING_FLEET_LOBBY_INPUTS.with(|pending| {
+        let mut pending = pending.borrow_mut();
+        // This join supersedes any not-yet-drained control projection from the
+        // previous generation. Rebind the latest absolute values so the common
+        // setters→join ordering cannot leave the freshly adopted World at its
+        // unmanaged/fail-closed defaults.
+        rebind_fleet_lobby_projections(
+            &mut pending,
+            generation,
+            LATEST_FLEET_MANAGED.with(|latest| *latest.borrow()),
+            LATEST_FLEET_VALIDATION.with(|latest| *latest.borrow()),
+        );
+    });
+    PENDING_FLEET_ADOPTIONS.with(|pending| {
+        let mut pending = pending.borrow_mut();
+        // A newer join cancels an older join that Bevy has not adopted yet.
+        // Preserve a preceding Leave: leave→reopen→join in one animation frame
+        // must tear down the old generation before installing the new one.
+        if matches!(pending.back(), Some(PendingFleetAdoption::Join(_))) {
+            pending.pop_back();
+        }
+        pending.push_back(PendingFleetAdoption::Join(PendingFleetJoin {
+            generation,
+            roster_json: roster_json.to_string(),
+        }));
+    });
+    FLEET_JOIN_STATUS.with(|status| {
+        *status.borrow_mut() = crate::lockstep::FleetJoinStatus {
+            generation,
+            status: crate::lockstep::FleetJoinStatusKind::Pending,
+            reason: None,
+        };
+    });
+    generation.to_string()
+}
+
+/// Leave the currently installed fleet at the next safe Bevy-world drain.
+///
+/// The returned decimal generation is polled through
+/// [`wasm_fleet_join_status`], exactly like a join. Calling Leave cancels any
+/// not-yet-adopted join and clears old-generation edge/frame latches. A fresh
+/// Lobby teardown is accepted; a mission that has started is refused with
+/// `fleet-leave-not-lobby` and remains installed.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_leave_fleet() -> String {
+    let generation = FLEET_JOIN_GENERATION.with(|counter| {
+        let mut counter = counter.borrow_mut();
+        *counter = counter.wrapping_add(1).max(1);
+        *counter
+    });
+    PENDING_FLEET_ADOPTIONS.with(|pending| {
+        let mut pending = pending.borrow_mut();
+        pending.clear();
+        pending.push_back(PendingFleetAdoption::Leave { generation });
+    });
+    FLEET_JOIN_STATUS.with(|status| {
+        *status.borrow_mut() = crate::lockstep::FleetJoinStatus {
+            generation,
+            status: crate::lockstep::FleetJoinStatusKind::Pending,
+            reason: None,
+        };
+    });
+    generation.to_string()
+}
+
+/// Poll the latest roster adoption attempt.
+///
+/// Exact JSON: `{generation,status,reason}`, with status one of
+/// `idle|pending|accepted|refused` and a null reason except on refusal.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_fleet_join_status() -> String {
+    FLEET_JOIN_STATUS.with(|status| {
+        crate::core::codec::encode_fleet_join_status(&status.borrow()).unwrap_or_default()
+    })
 }
 
 /// Replace the crew-public Game Master roster on the next frame (issue #1289).
 ///
 /// The host page owns the complete rendezvous projection and therefore sends a
-/// complete array, never deltas. Each row is exactly `{ id, name, connected }`;
+/// complete array, never deltas. Each row is exactly
+/// `{ id, name, connected, ready }`;
 /// the codec rejects duplicate/unbounded rows and any private extra field.
 /// Returns `""` on success or a stable machine reason on refusal.
 #[cfg(target_arch = "wasm32")]
@@ -1443,6 +1690,56 @@ pub fn wasm_set_gm_roster(roster_json: &str) -> String {
         }
         None => "gm-roster-unreadable".to_string(),
     }
+}
+
+/// Enable or disable browser-mesh ownership of collective lobby start.
+/// Enabling fails closed until [`wasm_set_fleet_start_validation`] supplies the
+/// current local content/peer validation result.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_set_fleet_managed_lobby(enabled: bool) -> String {
+    LATEST_FLEET_MANAGED.with(|latest| *latest.borrow_mut() = Some(enabled));
+    if queue_fleet_lobby_input(FleetLobbyInput::Managed(enabled)) {
+        String::new()
+    } else {
+        "fleet-lobby-input-queue-full".to_string()
+    }
+}
+
+/// Publish this host's independent validation gate for the next fixed-tick
+/// grant. Readiness is not sent through this seam; it is ordered by the mesh
+/// owner before the common grant.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_set_fleet_start_validation(valid: bool) -> String {
+    LATEST_FLEET_VALIDATION.with(|latest| *latest.borrow_mut() = Some(valid));
+    if queue_fleet_lobby_input(FleetLobbyInput::Validation(valid)) {
+        String::new()
+    } else {
+        "fleet-lobby-input-queue-full".to_string()
+    }
+}
+
+/// Queue one exact host-mesh start grant for fixed-tick application.
+/// Returns `""` when queued or a stable machine refusal immediately.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_apply_start_grant(grant_json: &str) -> String {
+    let Some(grant) = crate::core::codec::decode_start_grant(grant_json) else {
+        return "start-grant-unreadable".to_string();
+    };
+    if queue_fleet_lobby_input(FleetLobbyInput::Grant(grant)) {
+        String::new()
+    } else {
+        "start-grant-queue-full".to_string()
+    }
+}
+
+/// Drain one local fixed-tick grant result as JSON, or `""` when none waits.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_take_start_result() -> String {
+    START_GRANT_RESULTS.with(|results| results.borrow_mut().pop_front().unwrap_or_default())
 }
 
 /// What this host's fleet link looks like from the simulation's side (issue
@@ -1503,15 +1800,60 @@ pub fn wasm_host_departed(slot: u32) {
 /// per FRAME and the simulation consumes per TICK, so the handoff has to happen
 /// once, before any of the frame's fixed steps.
 #[cfg(target_arch = "wasm32")]
+fn clear_fleet_bridge_latches() {
+    MESH_INBOUND.with(|pending| pending.borrow_mut().clear());
+    MESH_OUTBOUND.with(|pending| pending.borrow_mut().clear());
+    HOST_LOSS_QUEUE.with(|pending| pending.borrow_mut().clear());
+    SLOT_CLAIM_QUEUE.with(|pending| pending.borrow_mut().clear());
+    SLOT_CLAIM_SEQ.with(|sequence| *sequence.borrow_mut() = 0);
+    START_GRANT_RESULTS.with(|pending| pending.borrow_mut().clear());
+    MESH_STATUS.with(|status| status.borrow_mut().clear());
+}
+
+#[cfg(target_arch = "wasm32")]
 fn drain_mesh_inbound(world: &mut World) {
-    if let Some(roster_json) = PENDING_FLEET.with(|slot| slot.borrow_mut().take()) {
-        if let Some((roster, delay)) = crate::core::codec::decode_fleet_roster(&roster_json) {
-            // An authored delay of `None` means "whatever this world says",
-            // which is the ordinary case: the fleet agreed a mission, and the
-            // mission's `[global] command_delay_ticks` is the number.
-            let delay = delay.unwrap_or_else(|| crate::lockstep::authored_delay(world));
-            crate::lockstep::join_fleet(world, roster, delay);
-        }
+    let adoptions = PENDING_FLEET_ADOPTIONS.with(|slot| std::mem::take(&mut *slot.borrow_mut()));
+    for adoption in adoptions {
+        let (generation, accepted, refusal) = match adoption {
+            PendingFleetAdoption::Join(pending) => {
+                let accepted = if let Some((roster, delay)) =
+                    crate::core::codec::decode_fleet_roster(&pending.roster_json)
+                {
+                    // An authored delay of `None` means "whatever this world says",
+                    // which is the ordinary case: the fleet agreed a mission, and the
+                    // mission's `[global] command_delay_ticks` is the number.
+                    let delay = delay.unwrap_or_else(|| crate::lockstep::authored_delay(world));
+                    crate::lockstep::join_fleet(world, roster, delay)
+                } else {
+                    false
+                };
+                (pending.generation, accepted, "fleet-adoption-refused")
+            }
+            PendingFleetAdoption::Leave { generation } => {
+                let accepted = crate::lockstep::leave_fleet(world).is_ok();
+                if accepted {
+                    clear_fleet_bridge_latches();
+                }
+                (generation, accepted, "fleet-leave-not-lobby")
+            }
+        };
+        FLEET_JOIN_STATUS.with(|status| {
+            let mut status = status.borrow_mut();
+            // A cancelled older action can still precede the latest generation
+            // in this same drain (leave→join). Never let its completion regress
+            // the poller to a stale generation.
+            if status.generation == generation {
+                *status = crate::lockstep::FleetJoinStatus {
+                    generation,
+                    status: if accepted {
+                        crate::lockstep::FleetJoinStatusKind::Accepted
+                    } else {
+                        crate::lockstep::FleetJoinStatusKind::Refused
+                    },
+                    reason: (!accepted).then(|| refusal.to_string()),
+                };
+            }
+        });
     }
     // A granted slot claim the owner admitted (issue #1120): mint the next
     // deterministic `claim_seq`, stamp the current tick, and build the fleet-wide
@@ -1604,7 +1946,13 @@ fn drain_mesh_inbound(world: &mut World) {
 /// Apply one full public GM-roster replacement and emit a reliable crew delta
 /// only when its canonical contents actually changed.
 #[cfg(any(target_arch = "wasm32", test))]
-fn apply_gm_roster_replacement(world: &mut World, replacement: crate::gm_roster::GmRoster) -> bool {
+fn apply_gm_roster_replacement(
+    world: &mut World,
+    mut replacement: crate::gm_roster::GmRoster,
+) -> bool {
+    if let Some(current) = world.get_resource::<crate::gm_roster::GmRoster>() {
+        replacement.clear_reconnected_readiness(current);
+    }
     if world
         .get_resource::<crate::gm_roster::GmRoster>()
         .is_some_and(|current| current == &replacement)
@@ -1628,6 +1976,73 @@ fn drain_gm_roster(world: &mut World) {
     if let Some(replacement) = PENDING_GM_ROSTER.with(|pending| pending.borrow_mut().take()) {
         apply_gm_roster_replacement(world, replacement);
     }
+}
+
+/// Drain the browser mesh's edge-only lobby state into typed Bevy resources.
+#[cfg(target_arch = "wasm32")]
+fn drain_fleet_lobby_input(
+    mut managed: ResMut<FleetManagedLobby>,
+    mut grants: ResMut<PendingStartGrants>,
+    mut tracker: ResMut<crate::lobby::server::StartGrantTracker>,
+    mut results: ResMut<StartGrantResults>,
+) {
+    let adoption = FLEET_JOIN_STATUS.with(|status| status.borrow().clone());
+    PENDING_FLEET_LOBBY_INPUTS.with(|pending| {
+        let mut wrapped = pending.borrow_mut();
+        let mut inputs = VecDeque::new();
+        while let Some(row) = wrapped.pop_front() {
+            if row.generation == adoption.generation {
+                inputs.push_back(row.input);
+            }
+        }
+        if adoption.status == crate::lockstep::FleetJoinStatusKind::Pending {
+            for input in inputs.into_iter().rev() {
+                wrapped.push_front(PendingFleetLobbyInput {
+                    generation: adoption.generation,
+                    input,
+                });
+            }
+            return;
+        }
+        if adoption.status == crate::lockstep::FleetJoinStatusKind::Refused {
+            return;
+        }
+        if crate::lobby::apply_fleet_lobby_inputs(
+            &mut inputs,
+            &mut managed,
+            &mut grants,
+            &mut tracker,
+            &mut results,
+        ) {
+            START_GRANT_RESULTS.with(|outbox| outbox.borrow_mut().clear());
+        }
+        // A full fixed-tick grant queue leaves the blocking grant and later
+        // ordered edges in `inputs`. Keep their generation while retrying next
+        // frame; otherwise a queue-pressure retry could cross a fleet reopen.
+        for input in inputs.into_iter().rev() {
+            wrapped.push_front(PendingFleetLobbyInput {
+                generation: adoption.generation,
+                input,
+            });
+        }
+    });
+}
+
+/// Mirror fixed-tick grant outcomes into the bounded JS-facing FIFO.
+#[cfg(target_arch = "wasm32")]
+fn flush_start_grant_results(mut results: ResMut<StartGrantResults>) {
+    START_GRANT_RESULTS.with(|outbox| {
+        let mut outbox = outbox.borrow_mut();
+        for result in results.drain() {
+            let Ok(encoded) = crate::core::codec::encode_start_grant_result(&result) else {
+                continue;
+            };
+            if outbox.len() == crate::lobby::server::MAX_START_GRANT_RESULTS {
+                outbox.pop_front();
+            }
+            outbox.push_back(encoded);
+        }
+    });
 }
 
 /// Encode everything the simulation wants to say to its fleet, for the page to
@@ -3840,7 +4255,9 @@ fn drain_host_controls(world: &mut World) {
     }
 
     let pause_changed = PENDING_PAUSE.with(|pending| std::mem::take(&mut *pending.borrow_mut()));
-    if pause_changed {
+    if pause_changed
+        && raw_host_control_allowed(world.contains_resource::<crate::lockstep::FleetLockstep>())
+    {
         let paused = {
             let mut state = world.resource_mut::<crate::debug_overlay::SimulationPaused>();
             state.0 = !state.0;
@@ -3882,6 +4299,17 @@ fn drain_disconnects(mut writer: MessageWriter<PlayerDisconnected>) {
 #[cfg(target_arch = "wasm32")]
 #[derive(Resource, Default)]
 struct PendingForceStart(bool);
+
+/// The legacy "Launch AI Ship" route is valid only outside coordinated fleet
+/// lobby ownership. Kept pure so the managed-mode bypass guard is covered on
+/// native even though the export itself is wasm-only.
+#[cfg(any(target_arch = "wasm32", test))]
+fn legacy_force_start_allowed(
+    managed: &crate::lobby::FleetManagedLobby,
+    phase: &crate::core::messages::GamePhase,
+) -> bool {
+    !managed.enabled && phase == &crate::core::messages::GamePhase::Lobby
+}
 
 /// Drains the force-start thread-local each frame into [`PendingForceStart`].
 /// The actual phase transition is [`apply_force_start`]'s job — this system
@@ -3926,9 +4354,10 @@ fn apply_force_start(
     mut outbox: ResMut<LobbyOutbox>,
     preload: Option<Res<crate::server::asset_preload::AssetPreloadResource>>,
     mut pending: ResMut<PendingForceStart>,
+    managed: Res<FleetManagedLobby>,
 ) {
     let pending_flag = std::mem::take(&mut pending.0);
-    if !pending_flag || state.get() != &messages::GamePhase::Lobby {
+    if !pending_flag || !legacy_force_start_allowed(&managed, state.get()) {
         return;
     }
     let preload_complete = if crate::debug_overlay::is_playwright_automation() {
@@ -3957,6 +4386,7 @@ fn apply_force_start(
 /// sends the new position next tick — no bespoke broadcast path.
 #[cfg(target_arch = "wasm32")]
 fn drain_teleport_to_waypoint(
+    fleet: Option<Res<crate::lockstep::FleetLockstep>>,
     mut ship_q: Query<
         (
             &mut crate::ship::state::ShipPhysics,
@@ -3970,7 +4400,7 @@ fn drain_teleport_to_waypoint(
         *v.borrow_mut() = false;
         was
     });
-    if !requested {
+    if !requested || !raw_host_control_allowed(fleet.is_some()) {
         return;
     }
     for (mut physics, waypoint) in ship_q.iter_mut() {
@@ -4035,13 +4465,22 @@ fn publish_god_mode(god_mode: Option<Res<crate::server_app::GodMode>>) {
 /// replicated command. The parity logic is [`apply_instagib_toggles`], unit-
 /// tested on native.
 #[cfg(target_arch = "wasm32")]
-fn drain_instagib_toggle(mut instagib: ResMut<crate::server_app::Instagib>) {
+fn drain_instagib_toggle(
+    fleet: Option<Res<crate::lockstep::FleetLockstep>>,
+    mut instagib: ResMut<crate::server_app::Instagib>,
+) {
     let count = PENDING_INSTAGIB_TOGGLES.with(|v| {
         let n = *v.borrow();
         *v.borrow_mut() = 0;
         n
     });
-    apply_instagib_toggles(count, &mut instagib.0);
+    if raw_host_control_allowed(fleet.is_some()) {
+        apply_instagib_toggles(count, &mut instagib.0);
+    } else {
+        // Joining canonicalises the flag off. Keep it neutral even if this
+        // drain happens later in the same PreUpdate as fleet adoption.
+        instagib.0 = false;
+    }
 }
 
 /// Mirrors the authoritative [`crate::server_app::Instagib`] Resource into a thread-local each
@@ -4212,7 +4651,8 @@ mod tests {
     use super::{
         apply_gm_roster_replacement, apply_instagib_toggles, begin_browser_startup_restore,
         browser_restore_bootstrap_started, defer_unloaded_scenario_content, host_channels,
-        import_resume_after_scenario, load_resume_after_scenario, next_restore_step,
+        import_resume_after_scenario, legacy_force_start_allowed, load_resume_after_scenario,
+        next_restore_step, queue_fleet_lobby_input_bounded, rebind_fleet_lobby_projections,
         resolve_browser_startup_restore, save_slot_start_projection, scoped_browser_save_namespace,
         BoundedFifo, BrowserResumeRefusal, PendingBrowserSaves, PendingRestore, RestoreStep,
         RestoreWaited, MAX_PENDING_BROWSER_SAVES,
@@ -4324,11 +4764,13 @@ spawn_on = "game_start"
                 id: "gm-2".into(),
                 name: String::new(),
                 connected: false,
+                ready: false,
             },
             GmOperator {
                 id: "gm-1".into(),
                 name: "Morgan".into(),
                 connected: true,
+                ready: true,
             },
         ])
         .unwrap();
@@ -4351,6 +4793,187 @@ spawn_on = "game_start"
                 if gms.iter().map(|gm| gm.id.as_str()).collect::<Vec<_>>()
                     == vec!["gm-1", "gm-2"]
         ));
+    }
+
+    #[test]
+    fn gm_roster_replacement_clears_ready_on_reconnect() {
+        use crate::gm_roster::{GmOperator, GmRoster};
+        use crate::lobby::OutboundMessage;
+
+        let mut app = App::new();
+        app.add_message::<OutboundMessage>().insert_resource(
+            GmRoster::try_new(vec![GmOperator {
+                id: "gm-1".into(),
+                name: "Morgan".into(),
+                connected: false,
+                ready: false,
+            }])
+            .unwrap(),
+        );
+        let replacement = GmRoster::try_new(vec![GmOperator {
+            id: "gm-1".into(),
+            name: "Morgan".into(),
+            connected: true,
+            ready: true,
+        }])
+        .unwrap();
+
+        assert!(apply_gm_roster_replacement(app.world_mut(), replacement));
+        let gm = &app.world().resource::<GmRoster>().operators()[0];
+        assert!(gm.connected);
+        assert!(!gm.ready, "a reconnect always returns unready");
+    }
+
+    #[test]
+    fn legacy_ai_force_start_is_refused_while_fleet_managed() {
+        let mut managed = crate::lobby::FleetManagedLobby::default();
+        assert!(legacy_force_start_allowed(
+            &managed,
+            &crate::core::messages::GamePhase::Lobby
+        ));
+        managed.set_enabled(true);
+        assert!(!legacy_force_start_allowed(
+            &managed,
+            &crate::core::messages::GamePhase::Lobby
+        ));
+        managed.set_enabled(false);
+        assert!(!legacy_force_start_allowed(
+            &managed,
+            &crate::core::messages::GamePhase::InProgress
+        ));
+    }
+
+    #[test]
+    fn fleet_lobby_queue_coalesces_absolute_samples_without_losing_edges() {
+        use crate::lobby::FleetLobbyInput;
+        use std::collections::VecDeque;
+
+        let mut pending = VecDeque::new();
+        assert!(queue_fleet_lobby_input_bounded(
+            &mut pending,
+            8,
+            FleetLobbyInput::Managed(false),
+            4,
+        ));
+        assert!(queue_fleet_lobby_input_bounded(
+            &mut pending,
+            8,
+            FleetLobbyInput::Managed(true),
+            4,
+        ));
+        assert!(queue_fleet_lobby_input_bounded(
+            &mut pending,
+            8,
+            FleetLobbyInput::Validation(false),
+            4,
+        ));
+        assert!(queue_fleet_lobby_input_bounded(
+            &mut pending,
+            8,
+            FleetLobbyInput::Validation(true),
+            4,
+        ));
+        assert_eq!(
+            pending.len(),
+            3,
+            "only the consecutive validation coalesces"
+        );
+        assert!(matches!(
+            pending.pop_front().map(|row| row.input),
+            Some(FleetLobbyInput::Managed(false))
+        ));
+        assert!(matches!(
+            pending.pop_front().map(|row| row.input),
+            Some(FleetLobbyInput::Managed(true))
+        ));
+        assert!(matches!(
+            pending.pop_front().map(|row| row.input),
+            Some(FleetLobbyInput::Validation(true))
+        ));
+    }
+
+    #[test]
+    fn fleet_lobby_queue_refuses_rather_than_displacing_a_generation_edge() {
+        use crate::lobby::FleetLobbyInput;
+        use std::collections::VecDeque;
+
+        let mut pending = VecDeque::new();
+        assert!(queue_fleet_lobby_input_bounded(
+            &mut pending,
+            2,
+            FleetLobbyInput::Managed(false),
+            2,
+        ));
+        assert!(queue_fleet_lobby_input_bounded(
+            &mut pending,
+            2,
+            FleetLobbyInput::Managed(true),
+            2,
+        ));
+        assert!(!queue_fleet_lobby_input_bounded(
+            &mut pending,
+            2,
+            FleetLobbyInput::Validation(true),
+            2,
+        ));
+        assert_eq!(pending.len(), 2);
+        assert!(matches!(pending[0].input, FleetLobbyInput::Managed(false)));
+        assert!(matches!(pending[1].input, FleetLobbyInput::Managed(true)));
+    }
+
+    #[test]
+    fn prejoin_lobby_projections_rebind_before_the_new_generations_grant() {
+        use crate::lobby::start_policy::{StartGrant, StartGrantMode};
+        use crate::lobby::FleetLobbyInput;
+        use std::collections::VecDeque;
+
+        let mut pending = VecDeque::new();
+        assert!(queue_fleet_lobby_input_bounded(
+            &mut pending,
+            0,
+            FleetLobbyInput::Managed(true),
+            64,
+        ));
+        assert!(queue_fleet_lobby_input_bounded(
+            &mut pending,
+            0,
+            FleetLobbyInput::Validation(true),
+            64,
+        ));
+
+        rebind_fleet_lobby_projections(&mut pending, 1, Some(true), Some(true));
+        assert!(queue_fleet_lobby_input_bounded(
+            &mut pending,
+            1,
+            FleetLobbyInput::Grant(StartGrant {
+                id: "start-1".into(),
+                mode: StartGrantMode::Automatic,
+                operator_id: None,
+                apply_tick: 0,
+            }),
+            64,
+        ));
+        assert_eq!(
+            pending.iter().map(|row| row.generation).collect::<Vec<_>>(),
+            vec![1, 1, 1]
+        );
+
+        let mut inputs = pending.into_iter().map(|row| row.input).collect();
+        let mut managed = crate::lobby::FleetManagedLobby::default();
+        let mut grants = crate::lobby::PendingStartGrants::default();
+        let mut tracker = crate::lobby::server::StartGrantTracker::default();
+        let mut results = crate::lobby::StartGrantResults::default();
+        crate::lobby::apply_fleet_lobby_inputs(
+            &mut inputs,
+            &mut managed,
+            &mut grants,
+            &mut tracker,
+            &mut results,
+        );
+        assert!(inputs.is_empty());
+        assert!(managed.enabled);
+        assert!(managed.validation_passed);
+        assert_eq!(grants.len(), 1);
     }
 
     #[test]

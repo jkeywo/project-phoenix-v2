@@ -2350,7 +2350,13 @@
       // only writes DOM. Boot race: skip the paint until the module loads —
       // the next server message re-renders.
       if (typeof window.lobbyViewModel !== 'function') return;
-      const vm = window.lobbyViewModel(s, myToken, lobbyConsole, {
+      // The reducer owns the public GM list. It is deliberately not duplicated
+      // into the legacy shell mirror, so splice the current authoritative list
+      // into the pure view input at render time.
+      const lobbyProjection = window.lobbyState
+        ? { ...s, gms: window.lobbyState.gms }
+        : s;
+      const vm = window.lobbyViewModel(lobbyProjection, myToken, lobbyConsole, {
         labelFor: stationLabel,
         describeFor: stationDescription,
         stationRatings: window.simState ? window.simState.stationRatings : null,
@@ -2375,7 +2381,9 @@
           row.className = 'gm-presence-pill' + (gm.connected ? '' : ' disconnected');
           row.setAttribute('role', 'listitem');
           row.dataset.gmId = gm.id;
-          row.textContent = t(gm.labelId, { name: gm.name || gm.id });
+          row.dataset.ready = gm.ready ? 'true' : 'false';
+          row.textContent = t(gm.labelId, { name: gm.name || gm.id })
+            + ' · ' + t(gm.readinessLabelId);
           gmList.appendChild(row);
         }
       }

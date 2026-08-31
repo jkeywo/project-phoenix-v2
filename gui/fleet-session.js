@@ -33,7 +33,9 @@
  * Since the fleet became something that RUNS a mission, this link carries two
  * kinds of frame and routes them to two different places:
  *
- *   lobby frames        (hello / welcome / refused / slot / roster / admission)
+ *   lobby/control       (hello / welcome / refused / slot / roster / admission,
+ *                        plus start-state / start-policy / start-force /
+ *                        force-result)
  *                       are decided here, by the model in `gui/host-mesh.js`.
  *   simulation frames   (tick / digest) are handed straight to the wasm
  *                       boundary through `onSimulationFrame`, and their bodies
@@ -78,10 +80,15 @@ import {
   HOST_FRAME_REFUSED,
   HOST_FRAME_ROSTER,
   HOST_FRAME_SLOT,
+  HOST_FRAME_START_FORCE,
+  HOST_FRAME_START_POLICY,
+  HOST_FRAME_START_STATE,
+  HOST_FRAME_FORCE_RESULT,
   HOST_FRAME_WELCOME,
   HOST_ROLE_GM,
   HOST_ROLE_SHIP,
   admissionFrame,
+  adjudicateForceStart,
   admitHost,
   asHostFrame,
   claimSlot,
@@ -89,16 +96,28 @@ import {
   dropHost,
   encodeHostFrame,
   freezeFleet,
+  forceResultFrame,
+  gmForPeer,
+  grantFleetStart,
   helloFrame,
+  hostFrame,
   hostSlotOrdinal,
   isSimulationFrame,
   openFleet,
   refusedFrame,
   rosterFrame,
   rosterOf,
+  simulationRosterOf,
+  setCrewReadiness as updateCrewReadiness,
+  setGmReady as updateGmReady,
   setAdmission,
+  setStartValidation as updateStartValidation,
   slotFrame,
   slotForPeer,
+  startForceFrame,
+  startPolicyFrame,
+  startPolicyOf,
+  startStateFrame,
   updateSlot,
   welcomeFrame,
 } from './host-mesh.js';
@@ -120,6 +139,23 @@ const REFUSE_UNCHECKED = () => ({
   code: 'client-stamp-missing',
   detail: 'this host could not check the joining build',
 });
+
+/**
+ * Reliable simulation frames may arrive after the frozen roster frame but
+ * before this page's Bevy world has definitively adopted that topology. Keep a
+ * small transport-only cushion for that acknowledgement gap; overflowing it is
+ * a terminal refusal, never permission to feed an unbounded queue or skip an
+ * ordered frame.
+ */
+const MAX_PENDING_SIMULATION_FRAMES = 64;
+
+const isThenable = (value) => !!value && typeof value.then === 'function';
+
+const simulationRosterRefusal = (value) => {
+  if (value === false) return 'callback-returned-false';
+  if (typeof value === 'string' && value.length > 0) return value;
+  return null;
+};
 
 /**
  * Whether a simulation frame's declared origin agrees with the slot the delivering
@@ -166,8 +202,17 @@ function defaultAuthenticateFrame(raw, authSlot) {
  * @param {(code:object)=>void} [opts.onCode] the issued fleet code; fires again
  *   with a NEW one if the service was lost and this host re-registered.
  * @param {(roster:object)=>void} [opts.onRoster] every change, owner included.
+ * @param {(roster:{local:number,owner:number,participants:number[],ships:object[]})=>(void|boolean|string|Promise<void|boolean|string>)}
+ *   [opts.onSimulationRoster] private frozen-topology adoption; a Promise keeps
+ *   roster/policy/grant publication pending, while `false` or a non-empty
+ *   refusal string fails closed
  * @param {(identity:{role:string,operatorId:string,reconnectCredential:string})=>void}
  *   [opts.onIdentity] the local GM identity only; never called for another GM
+ * @param {(policy:object)=>void} [opts.onStartPolicy] aggregate readiness and
+ *   validation from the owner; the owner receives the same projection
+ * @param {(grant:{id:string,mode:string,operator_id:string|null})=>void}
+ *   [opts.onStartGrant] the one idempotent fleet-wide start grant
+ * @param {(result:object)=>void} [opts.onForceResult] attributed GM force result
  * @param {(raw:string, authSlot:number)=>void} [opts.onSimulationFrame] a
  *   simulation frame from a member, still encoded, with the fleet slot the
  *   delivering connection was authenticated as (issue #1120) — hand both to
@@ -194,7 +239,11 @@ export function createFleetOwner(opts) {
     credentialFactory,
     onCode = () => {},
     onRoster = () => {},
+    onSimulationRoster = () => {},
     onIdentity = () => {},
+    onStartPolicy = () => {},
+    onStartGrant = () => {},
+    onForceResult = () => {},
     onSimulationFrame = () => {},
     onHostLost = () => {},
     onSlotClaimed = () => {},
@@ -224,13 +273,141 @@ export function createFleetOwner(opts) {
    * centre before it can be relayed to a sibling.
    */
   const connSlots = new Map();
+  let simulationRosterState = 'pending';
+  let simulationRosterPromise = null;
+  let closed = false;
   let code = null;
 
-  const publish = () => {
-    const roster = rosterOf(fleet);
-    const json = encodeHostFrame(rosterFrame(fleet));
+  const refuseSimulationRoster = (detail) => {
+    simulationRosterState = 'refused';
+    simulationRosterPromise = null;
+    onError('simulation-roster-refused', detail);
+    return false;
+  };
+
+  const settleSimulationRoster = (result) => {
+    if (closed || simulationRosterState === 'refused') return false;
+    const refusal = simulationRosterRefusal(result);
+    if (refusal) return refuseSimulationRoster(refusal);
+    simulationRosterState = 'accepted';
+    simulationRosterPromise = null;
+    return true;
+  };
+
+  const deliverSimulationRoster = (roster) => {
+    if (simulationRosterState === 'accepted') return true;
+    if (simulationRosterState === 'delivering') return simulationRosterPromise;
+    if (simulationRosterState !== 'pending') return false;
+    if (!roster || !roster.frozen) return true;
+    const simulationRoster = simulationRosterOf(roster, fleet.owner);
+    if (!simulationRoster) {
+      return refuseSimulationRoster('invalid-topology');
+    }
+    // Latch before entering caller code so a synchronous repaint cannot
+    // deliver the same frozen topology twice.
+    simulationRosterState = 'delivering';
+    let result;
+    try {
+      result = onSimulationRoster(simulationRoster);
+    } catch (_error) {
+      return refuseSimulationRoster('callback-threw');
+    }
+    if (isThenable(result)) {
+      simulationRosterPromise = Promise.resolve(result).then(
+        settleSimulationRoster,
+        () => refuseSimulationRoster('callback-rejected'),
+      );
+      return simulationRosterPromise;
+    }
+    return settleSimulationRoster(result);
+  };
+
+  const emitRoster = (roster) => {
+    const json = encodeHostFrame(hostFrame(HOST_FRAME_ROSTER, { roster }));
     for (const conn of links.values()) conn.send(json);
     onRoster(roster);
+    return true;
+  };
+
+  const publishRoster = () => {
+    const roster = rosterOf(fleet);
+    // At the freeze boundary the owner's own Rust peer must accept the private
+    // topology before any member is told to install a wait-set for it. Sending
+    // first would strand every member in lockstep if the owner then refused.
+    const accepted = deliverSimulationRoster(roster);
+    if (isThenable(accepted)) {
+      return accepted.then((ok) => (ok ? emitRoster(roster) : false));
+    }
+    return accepted ? emitRoster(roster) : false;
+  };
+
+  const publishPolicy = () => {
+    const policy = startPolicyOf(fleet);
+    const json = encodeHostFrame(startPolicyFrame(policy));
+    for (const conn of links.values()) conn.send(json);
+    onStartPolicy(policy);
+    return policy;
+  };
+
+  /**
+   * Hand the one policy decision to the owner's local Rust peer.
+   *
+   * The frozen roster is sent/adopted first. Rust then assigns the apply tick
+   * and carries the grant through the deterministic simulation mesh; JS must
+   * not broadcast an asynchronous control-frame copy to member simulations.
+   */
+  const publishNewGrant = (grant) => {
+    // Freeze closes the model to new slots, while the service stays reachable
+    // for the already-authenticated reconnect paths described by `freeze()`.
+    if (host) host.setAdmission(ADMISSION_OPEN);
+    const rosterAccepted = publishRoster();
+    if (isThenable(rosterAccepted)) {
+      return rosterAccepted.then((accepted) => {
+        if (!accepted) return false;
+        publishPolicy();
+        onStartGrant(grant);
+        return true;
+      });
+    }
+    if (rosterAccepted === false) return false;
+    publishPolicy();
+    onStartGrant(grant);
+    return true;
+  };
+
+  const publish = () => {
+    publishRoster();
+    const policy = publishPolicy();
+    if (policy.can_auto_start) {
+      const granted = grantFleetStart(fleet, { mode: 'automatic' });
+      fleet = granted.fleet;
+      if (granted.created) publishNewGrant(granted.grant);
+    }
+  };
+
+  const publishForceResult = (result) => {
+    const json = encodeHostFrame(forceResultFrame(result));
+    for (const conn of links.values()) conn.send(json);
+    onForceResult(result);
+  };
+
+  const forceFor = (operatorId) => {
+    const verdict = adjudicateForceStart(fleet, operatorId);
+    if (!verdict.ok) return false;
+    const created = !fleet.startGrant && !!verdict.grant;
+    fleet = verdict.fleet;
+    if (created) {
+      const published = publishNewGrant(verdict.grant);
+      if (isThenable(published)) {
+        published.then((accepted) => {
+          if (accepted) publishForceResult(verdict.result);
+        });
+        return true;
+      }
+      if (!published) return false;
+    }
+    publishForceResult(verdict.result);
+    return true;
   };
 
   /**
@@ -314,6 +491,60 @@ export function createFleetOwner(opts) {
     }
     fleet = result.fleet;
     publish();
+  }
+
+  function onStartState(conn, body) {
+    const slot = slotForPeer(fleet, conn.peer);
+    const gm = gmForPeer(fleet, conn.peer);
+    let changed = false;
+
+    if (slot) {
+      // The authenticated connection decides the role. A ship cannot claim a
+      // GM vote, and member-supplied role/operator fields are never inspected.
+      if (Object.prototype.hasOwnProperty.call(body, 'crew')) {
+        const result = updateCrewReadiness(fleet, slot.id, body.crew);
+        if (result.ok) {
+          fleet = result.fleet;
+          changed = true;
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(body, 'validation')) {
+        const result = updateStartValidation(fleet, slot.id, body.validation);
+        if (result.ok) {
+          fleet = result.fleet;
+          changed = true;
+        }
+      }
+    } else if (gm) {
+      // Likewise a GM cannot fabricate a crew tally for the aggregate.
+      if (Object.prototype.hasOwnProperty.call(body, 'gm_ready')) {
+        const result = updateGmReady(fleet, gm.id, body.gm_ready);
+        if (result.ok) {
+          fleet = result.fleet;
+          changed = true;
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(body, 'validation')) {
+        const result = updateStartValidation(fleet, gm.meshSlot, body.validation);
+        if (result.ok) {
+          fleet = result.fleet;
+          changed = true;
+        }
+      }
+    }
+
+    if (changed) publish();
+  }
+
+  function onStartForce(conn) {
+    // The request body is empty. Only the private live connection binding can
+    // identify the equal GM who made it.
+    const gm = gmForPeer(fleet, conn.peer);
+    if (!gm || !gm.connected) {
+      onLog(`[fleet] ignoring a force-start request from non-GM ${conn.peer}`);
+      return;
+    }
+    forceFor(gm.id);
   }
 
   // Declared before the transport because its own callbacks reach back for it;
@@ -406,26 +637,30 @@ export function createFleetOwner(opts) {
         }
         if (frame.t === HOST_FRAME_HELLO) onHello(conn, frame.d);
         else if (frame.t === HOST_FRAME_SLOT) onSlot(conn, frame.d);
+        else if (frame.t === HOST_FRAME_START_STATE) onStartState(conn, frame.d);
+        else if (frame.t === HOST_FRAME_START_FORCE) onStartForce(conn);
         // Everything else is owner-to-member and is noise arriving upstream.
       });
       conn.on('close', () => {
+        const technicalSlot = connSlots.get(conn.peer);
         connSlots.delete(conn.peer);
         if (!links.delete(conn.peer)) return;
         // Before the mission starts, a host closing is just a lobby slot going
         // dark. Once frozen it is a HOST LOSS (issue #1119): the simulation must
-        // flip that ship to Backfill at an agreed tick, so the slot is resolved
-        // and reported to the simulation BEFORE `dropHost` clears its peer. The
+        // depart that technical participant at an agreed tick and flip its ship
+        // to Backfill when it owns one. A GM has no ship row but still occupies
+        // the same lockstep wait-set, so its authenticated mesh slot takes this
+        // path too. The slot is captured BEFORE `dropHost` clears its peer. The
         // simulation mints the tick-stamped host-loss frame from there and this
         // page relays it to the rest of the fleet like any other simulation
         // frame — so a member learns of a sibling's loss without seeing its
         // socket.
-        if (fleet.frozen) {
+        if (fleet.frozen && technicalSlot != null) {
           const slot = slotForPeer(fleet, conn.peer);
-          const ordinal = slot ? hostSlotOrdinal(slot.id) : null;
-          if (ordinal != null) {
-            onLog(`[fleet] ${slot.id} left mid-mission — backfilling its ship`);
-            onHostLost(ordinal);
-          }
+          const gm = gmForPeer(fleet, conn.peer);
+          const label = slot ? slot.id : (gm ? gm.id : `slot-${technicalSlot}`);
+          onLog(`[fleet] ${label} left mid-mission — removing its simulation peer`);
+          onHostLost(technicalSlot);
         }
         fleet = dropHost(fleet, conn.peer);
         publish();
@@ -535,7 +770,45 @@ export function createFleetOwner(opts) {
       return true;
     },
 
+    /** Replace this ship host's spectator-free connected/ready player tally. */
+    setCrewReadiness(tally) {
+      if (ownerGm) return false;
+      const result = updateCrewReadiness(fleet, fleet.owner, tally);
+      if (!result.ok) return false;
+      fleet = result.fleet;
+      publish();
+      return true;
+    },
+
+    /** Set this GM operator's one equal ready vote. */
+    setGmReady(ready) {
+      if (!ownerGm) return false;
+      const result = updateGmReady(fleet, ownerGm.id, ready);
+      if (!result.ok) return false;
+      fleet = result.fleet;
+      publish();
+      return true;
+    },
+
+    /** Publish this host simulation's current non-readiness validation verdict. */
+    setStartValidation(valid) {
+      const result = updateStartValidation(fleet, fleet.owner, valid);
+      if (!result.ok) return false;
+      fleet = result.fleet;
+      publish();
+      return true;
+    },
+
+    /** Ask the pure owner policy to bypass readiness as this authenticated GM. */
+    forceStart() {
+      if (!ownerGm) return false;
+      return forceFor(ownerGm.id);
+    },
+
     close() {
+      closed = true;
+      simulationRosterState = 'refused';
+      simulationRosterPromise = null;
       for (const conn of links.values()) conn.close();
       links.clear();
       host.close();
@@ -564,6 +837,11 @@ export function createFleetOwner(opts) {
  * @param {(slotId:string, roster:object)=>void} [opts.onWelcome]
  * @param {(identity:{role:string,operatorId:string,reconnectCredential:string})=>void}
  *   [opts.onIdentity] this member's own GM identity only
+ * @param {(roster:{local:number,owner:number,participants:number[],ships:object[]})=>(void|boolean|string|Promise<void|boolean|string>)}
+ *   [opts.onSimulationRoster] private frozen-topology adoption; a Promise
+ *   buffers the bounded ordered simulation-frame gap until it settles
+ * @param {(policy:object)=>void} [opts.onStartPolicy] owner-computed aggregate
+ * @param {(result:object)=>void} [opts.onForceResult] attributed GM force result
  * @param {(reason:string, detail?:string)=>void} [opts.onError] a TERMINAL
  *   refusal — of this host's admission, or from the service — as a machine
  *   reason. The link is over by the time this fires.
@@ -589,8 +867,11 @@ export function createFleetMember(opts) {
     role = HOST_ROLE_SHIP,
     reconnectCredential = null,
     onRoster = () => {},
+    onSimulationRoster = () => {},
     onWelcome = () => {},
     onIdentity = () => {},
+    onStartPolicy = () => {},
+    onForceResult = () => {},
     onSimulationFrame = () => {},
     onError = () => {},
     onRefusedSlot = () => {},
@@ -605,11 +886,86 @@ export function createFleetMember(opts) {
   let operatorId = null;
   let privateReconnectCredential = reconnectCredential;
   let announced = { ship, name };
+  let localCrewReadiness = { connected: 0, ready: 0 };
+  let localGmReady = false;
+  let localStartValidation = false;
+  let closed = false;
+  let simulationRosterState = 'pending';
+  let simulationRosterPromise = null;
+  const pendingSimulationFrames = [];
+  /** Last concrete rendezvous attempt this member was admitted over. */
+  let acceptedTransportGeneration = null;
   // Declared before the joiner because its own callbacks reach back for it.
   // They only ever run after an async socket event, so the assignment below has
   // always happened by then — but a `const` in a temporal dead zone is a
   // footgun aimed at whoever next makes one of these paths synchronous.
   let joiner = null;
+
+  const refuseSimulationRoster = (detail) => {
+    if (simulationRosterState === 'refused') return false;
+    closed = true;
+    simulationRosterState = 'refused';
+    simulationRosterPromise = null;
+    pendingSimulationFrames.length = 0;
+    onError('simulation-roster-refused', detail);
+    if (joiner) joiner.close();
+    return false;
+  };
+
+  const flushPendingSimulationFrames = () => {
+    while (pendingSimulationFrames.length > 0) {
+      const { raw, authSlot } = pendingSimulationFrames.shift();
+      onSimulationFrame(raw, authSlot);
+    }
+  };
+
+  const settleSimulationRoster = (result) => {
+    if (closed || simulationRosterState === 'refused') return false;
+    const refusal = simulationRosterRefusal(result);
+    if (refusal) return refuseSimulationRoster(refusal);
+    simulationRosterState = 'accepted';
+    simulationRosterPromise = null;
+    flushPendingSimulationFrames();
+    return true;
+  };
+
+  const deliverSimulationRoster = (candidate) => {
+    if (simulationRosterState === 'accepted') return true;
+    if (simulationRosterState === 'delivering') return simulationRosterPromise;
+    if (simulationRosterState !== 'pending') return false;
+    if (!candidate || !candidate.frozen) return true;
+    if (!mine) {
+      return refuseSimulationRoster('missing-local-slot');
+    }
+    const simulationRoster = simulationRosterOf(candidate, mine);
+    if (!simulationRoster) {
+      return refuseSimulationRoster('invalid-topology');
+    }
+    simulationRosterState = 'delivering';
+    let result;
+    try {
+      result = onSimulationRoster(simulationRoster);
+    } catch (_error) {
+      return refuseSimulationRoster('callback-threw');
+    }
+    if (isThenable(result)) {
+      simulationRosterPromise = Promise.resolve(result).then(
+        settleSimulationRoster,
+        () => refuseSimulationRoster('callback-rejected'),
+      );
+      return simulationRosterPromise;
+    }
+    return settleSimulationRoster(result);
+  };
+
+  const sendLocalStartState = () => {
+    if (!mine || closed || !joiner) return false;
+    const body = acceptedRole === HOST_ROLE_GM
+      ? { gm_ready: localGmReady, validation: localStartValidation }
+      : { crew: localCrewReadiness, validation: localStartValidation };
+    joiner.sendFrame(encodeHostFrame(startStateFrame(body)));
+    return true;
+  };
 
   joiner = createRendezvousJoiner({
     base,
@@ -622,7 +978,18 @@ export function createFleetMember(opts) {
     // A ship host is not a crew member: no Identify, and no string ids to
     // resolve in a vocabulary that carries none.
     localise: false,
-    onAccepted: () => {
+    onAccepted: ({ generation } = {}) => {
+      const realGeneration = Number.isInteger(generation) ? generation : null;
+      const reconnected = realGeneration !== null
+        && acceptedTransportGeneration !== null
+        && realGeneration !== acceptedTransportGeneration;
+      // The owner clears a disconnected GM's vote immediately. Mirror that
+      // generation boundary locally before the recovered Hello/Welcome flush,
+      // otherwise the same handle's cached `true` silently votes again. An
+      // ordinary duplicate acceptance/Welcome on one live generation leaves
+      // the operator's explicit current choice untouched.
+      if (reconnected && acceptedRole === HOST_ROLE_GM) localGmReady = false;
+      if (realGeneration !== null) acceptedTransportGeneration = realGeneration;
       // No stamp travels in the `hello`: the build check already happened on
       // the transport plane, over this very channel, and a second copy of it
       // in the fleet vocabulary would be an unvalidated peer claim sitting
@@ -641,6 +1008,9 @@ export function createFleetMember(opts) {
       const decoded = asHostFrame(frame);
       if (!decoded) return;
       if (isSimulationFrame(decoded)) {
+        // A peer that refused the frozen topology cannot safely consume any
+        // later tick under a wait-set it never adopted.
+        if (simulationRosterState === 'refused') return;
         // Re-encoded rather than passed through: the transport hands this
         // callback an already-PARSED value, and what the wasm boundary takes is
         // text. Encoding the decoded frame (not the raw input) is what makes
@@ -655,7 +1025,16 @@ export function createFleetMember(opts) {
         // authenticated the origin at ITS ingress. `0` (never a real slot) before
         // the welcome names the owner is a "cannot judge" the sim trusts.
         const leadSlot = roster && roster.owner ? hostSlotOrdinal(roster.owner) : 0;
-        onSimulationFrame(encodeHostFrame(decoded), leadSlot || 0);
+        const item = { raw: encodeHostFrame(decoded), authSlot: leadSlot || 0 };
+        if (simulationRosterState === 'delivering') {
+          if (pendingSimulationFrames.length >= MAX_PENDING_SIMULATION_FRAMES) {
+            refuseSimulationRoster('pending-frame-overflow');
+            return;
+          }
+          pendingSimulationFrames.push(item);
+          return;
+        }
+        onSimulationFrame(item.raw, item.authSlot);
         return;
       }
       if (decoded.t === HOST_FRAME_WELCOME) {
@@ -675,11 +1054,18 @@ export function createFleetMember(opts) {
         onWelcome(mine, roster, identity);
         if (acceptedRole === HOST_ROLE_GM) onIdentity(identity);
         onRoster(roster);
+        const simulationRosterAccepted = deliverSimulationRoster(roster);
+        if (roster && roster.frozen && !simulationRosterAccepted) return;
+        // Setters may have been called while rendezvous/compatibility was
+        // still settling. Admission binds this connection first; now flush
+        // the cached role-appropriate state in one authenticated frame.
+        sendLocalStartState();
         return;
       }
       if (decoded.t === HOST_FRAME_ROSTER) {
         roster = decoded.d.roster || null;
         onRoster(roster);
+        deliverSimulationRoster(roster);
         return;
       }
       if (decoded.t === HOST_FRAME_ADMISSION) {
@@ -689,6 +1075,18 @@ export function createFleetMember(opts) {
         if (roster) {
           roster = { ...roster, admission: decoded.d.state };
           onRoster(roster);
+        }
+        return;
+      }
+      if (decoded.t === HOST_FRAME_START_POLICY) {
+        if (decoded.d.policy && typeof decoded.d.policy === 'object') {
+          onStartPolicy(decoded.d.policy);
+        }
+        return;
+      }
+      if (decoded.t === HOST_FRAME_FORCE_RESULT) {
+        if (decoded.d.result && typeof decoded.d.result === 'object') {
+          onForceResult(decoded.d.result);
         }
         return;
       }
@@ -749,7 +1147,47 @@ export function createFleetMember(opts) {
       return true;
     },
 
+    /** Cache/send this ship host's spectator-free player readiness tally. */
+    setCrewReadiness(tally = {}) {
+      if (acceptedRole !== HOST_ROLE_SHIP || closed || (roster && roster.frozen)) return false;
+      localCrewReadiness = {
+        connected: tally && tally.connected,
+        ready: tally && tally.ready,
+      };
+      // `true` means accepted for this role. Before Welcome it is deliberately
+      // queued and flushed by `sendLocalStartState` once the connection binds.
+      if (mine) sendLocalStartState();
+      return true;
+    },
+
+    /** Cache/send this GM operator's one equal ready vote. */
+    setGmReady(ready) {
+      if (acceptedRole !== HOST_ROLE_GM || closed || (roster && roster.frozen)) return false;
+      localGmReady = !!ready;
+      if (mine) sendLocalStartState();
+      return true;
+    },
+
+    /** Cache/send this host simulation's non-readiness validation verdict. */
+    setStartValidation(valid) {
+      if (closed || (roster && roster.frozen)) return false;
+      localStartValidation = !!valid;
+      if (mine) sendLocalStartState();
+      return true;
+    },
+
+    /** Submit an empty authenticated force request; result arrives by callback. */
+    forceStart() {
+      if (closed || acceptedRole !== HOST_ROLE_GM || !mine || !operatorId) return false;
+      joiner.sendFrame(encodeHostFrame(startForceFrame()));
+      return true;
+    },
+
     close() {
+      closed = true;
+      simulationRosterState = 'refused';
+      simulationRosterPromise = null;
+      pendingSimulationFrames.length = 0;
       joiner.close();
     },
   };

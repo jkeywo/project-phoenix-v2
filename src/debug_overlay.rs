@@ -182,6 +182,7 @@ pub fn admitted_pause_toggles<'a>(
 pub fn drain_client_pause(
     mut reader: MessageReader<crate::lobby::InboundMessage>,
     sessions: Res<crate::lobby::Sessions>,
+    fleet: Option<Res<crate::lockstep::FleetLockstep>>,
     mut paused: ResMut<SimulationPaused>,
     mut virtual_time: ResMut<Time<bevy::time::Virtual>>,
 ) {
@@ -191,6 +192,12 @@ pub fn drain_client_pause(
         .map(|ev| ev.token.clone())
         .collect();
     if tokens.is_empty() {
+        return;
+    }
+    // Pause is a raw peer-local clock mutation, not an admitted/tick-stamped
+    // command. Consume but refuse it once a participant wait-set exists; the
+    // lockstep barrier is then the sole owner of `Time<Virtual>` pauses.
+    if fleet.is_some() {
         return;
     }
 

@@ -198,7 +198,11 @@ export function lobbyViewModel(s, myToken, lobbyConsole, opts = {}) {
         id: gm && gm.id != null ? String(gm.id) : '',
         name: gm && gm.name != null ? String(gm.name) : '',
         connected: !!(gm && gm.connected),
+        ready: !!(gm && gm.connected && gm.ready),
         labelId: gm && gm.connected ? 'lobby.gms.connected' : 'lobby.gms.disconnected',
+        readinessLabelId: gm && gm.connected && gm.ready
+          ? 'lobby.gms.ready'
+          : 'lobby.gms.not_ready',
       })),
     },
     allReady: !!s.allReady,

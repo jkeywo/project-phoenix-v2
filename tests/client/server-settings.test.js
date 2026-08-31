@@ -660,6 +660,22 @@ describe('the Fleet section', () => {
     expect(control('fleet-admission').disabled).toBe(true);
   });
 
+  it('keeps Leave visible but disables it outside the fresh Lobby', () => {
+    const bindings = fleetBindings({
+      open: true,
+      owner: true,
+      admission: 'closed',
+      frozen: true,
+      canLeave: false,
+    });
+    openFleetTab(bindings);
+
+    expect(visible('fleet-leave')).toBe(true);
+    expect(control('fleet-leave').disabled).toBe(true);
+    control('fleet-leave').click();
+    expect(bindings.calls.map((c) => c[0])).not.toContain('__hostFleetLeave');
+  });
+
   it('joins with the letters typed into the field, and not with an empty one', () => {
     const bindings = fleetBindings();
     openFleetTab(bindings);

@@ -64,8 +64,19 @@
  * types exist, refuses anything else, and ferries them — the same relationship
  * `gui/connection-manager.js` has with `ClientMessage`.
  *
- * Eight frames, and no more: a frame invented here that nothing sends would be
- * surface #1117–#1120 would have to keep.
+ * ## What revisions 6 and 7 add (issue #1290)
+ *
+ *   host → owner      start-state   role-local crew/GM readiness + validation
+ *   GM → owner        start-force   empty request; identity is the connection
+ *   owner → all       start-policy  one pure aggregate judgement
+ *                     force-result  attributed applied/no-op/refused feedback
+ *
+ * These are control frames, not simulation frames. JavaScript owns the fleet
+ * roster policy, but the resulting grant is delivered only to the owner's local
+ * Rust peer. Rust schedules it through the deterministic mesh; there is no
+ * asynchronous JavaScript `start-grant` broadcast for members to replay.
+ * Revision 7 also carries the connected technical participant slots separately
+ * from ship rows so a GM participates in lockstep without consuming a ship.
  *
  * ## What is pure, and why it matters
  *
@@ -100,8 +111,15 @@
  * deterministic host-mesh peer but not a ship: it owns a private technical
  * `slot-N` for frame authentication and a separate public `gm-N` operator id.
  * A revision-4 host would otherwise silently turn that peer into a player ship.
+ *
+ * `6` added the collective GM/crew start policy (issue #1290). Crew readiness,
+ * GM readiness, validation and force requests are dedicated host-control
+ * frames. `7` removes the asynchronous JavaScript start-grant broadcast and
+ * adds the connected technical participant set to the frozen roster. A
+ * revision-6 host would omit GM peers from Rust's lockstep wait-set and could
+ * apply the decision before every deterministic peer reached its tick.
  */
-export const HOST_MESH_PROTOCOL = 5;
+export const HOST_MESH_PROTOCOL = 7;
 
 /** Frame types this revision speaks. */
 export const HOST_FRAME_HELLO = 'hello';
@@ -110,6 +128,14 @@ export const HOST_FRAME_REFUSED = 'refused';
 export const HOST_FRAME_SLOT = 'slot';
 export const HOST_FRAME_ROSTER = 'roster';
 export const HOST_FRAME_ADMISSION = 'admission';
+/** Revision 6 (#1290): one authenticated host's local readiness/validation. */
+export const HOST_FRAME_START_STATE = 'start-state';
+/** Revision 6 (#1290): the star owner's pure aggregate policy projection. */
+export const HOST_FRAME_START_POLICY = 'start-policy';
+/** Revision 6 (#1290): an authenticated GM asks to bypass readiness only. */
+export const HOST_FRAME_START_FORCE = 'start-force';
+/** Revision 6 (#1290): attributed applied/no-op/refused force feedback. */
+export const HOST_FRAME_FORCE_RESULT = 'force-result';
 /** Revision 2 (issue #1116): one host's input for a tick, and its watermark. */
 export const HOST_FRAME_TICK = 'tick';
 /** Revision 2 (issue #1116): a sampled authoritative fold, for agreement. */
@@ -145,6 +171,10 @@ export const HOST_FRAME_TYPES = [
   HOST_FRAME_SLOT,
   HOST_FRAME_ROSTER,
   HOST_FRAME_ADMISSION,
+  HOST_FRAME_START_STATE,
+  HOST_FRAME_START_POLICY,
+  HOST_FRAME_START_FORCE,
+  HOST_FRAME_FORCE_RESULT,
   HOST_FRAME_TICK,
   HOST_FRAME_DIGEST,
   HOST_FRAME_SNAPSHOT,
@@ -310,6 +340,8 @@ const DEFAULT_MAX_SHIP_PATH_LENGTH = 160;
 const MAX_RECONNECT_CREDENTIAL_LENGTH = 256;
 /** Protocol/memory ceiling matching one rendezvous record, not ship capacity. */
 export const MAX_GM_OPERATORS = 32;
+/** Matches Rust `ReadinessTally`'s u32 aggregate; protocol hygiene, not gameplay. */
+const MAX_READINESS_AGGREGATE = 0xffff_ffff;
 
 /** A bounded, plain string, or '' for anything that is not one. */
 function boundedText(value, limit) {
@@ -346,6 +378,26 @@ function reconnectClaim(value) {
     return null;
   }
   return value;
+}
+
+/**
+ * A crew tally is produced by the authoritative Rust SessionManager on one
+ * ship host. Spectators have already been excluded there. Reduce the crossing
+ * to two safe non-negative integers and never permit `ready > connected`.
+ */
+function crewReadiness(value, maxSlots = 1) {
+  const source = value && typeof value === 'object' ? value : {};
+  // At most `maxSlots` ship tallies and MAX_GM_OPERATORS one-vote rows are
+  // aggregated. Dividing Rust's u32 aggregate ceiling across that authored/
+  // protocol-bounded population guarantees the final policy still fits the
+  // typed Rust contract even when an authenticated but faulty host sends an
+  // absurd tally.
+  const slots = Number.isSafeInteger(maxSlots) && maxSlots > 0 ? maxSlots : 1;
+  const cap = Math.floor(MAX_READINESS_AGGREGATE / (slots + MAX_GM_OPERATORS));
+  const count = (candidate) =>
+    Number.isSafeInteger(candidate) && candidate >= 0 ? Math.min(candidate, cap) : 0;
+  const connected = count(source.connected);
+  return { connected, ready: Math.min(count(source.ready), connected) };
 }
 
 /**
@@ -410,6 +462,8 @@ export function openFleet({
     credentialFactory,
     admission: ADMISSION_OPEN,
     frozen: false,
+    nextStartSeq: 1,
+    startGrant: null,
     slots: [],
     gms: [],
   };
@@ -419,6 +473,8 @@ export function openFleet({
       meshSlot: fleet.owner,
       peer: null,
       connected: true,
+      ready: false,
+      startValidation: false,
       name: boundedText(name, maxNameLength),
       credential: reconnectClaim(credentialFactory()),
     });
@@ -433,6 +489,8 @@ export function openFleet({
       owner: true,
       connected: true,
       ready: false,
+      crew: crewReadiness(null, fleet.maxSlots),
+      startValidation: false,
       // The owner's own fields go through the same bound as a member's. It is
       // this host's own page filling them in, so nothing hostile is expected —
       // but one rule for what a slot may hold is easier to keep true than two.
@@ -516,7 +574,21 @@ export function admitHost(fleet, {
       if (!known || known.connected) {
         return { ok: false, reason: REASON_RECOVERY_ONLY };
       }
-      const rebound = { ...known, peer, connected: true };
+      // Once frozen, the technical slot has joined Rust's deterministic
+      // wait-set. A departed slot cannot safely reappear without transferring
+      // the authoritative snapshot and watermark it missed (including the
+      // one-shot mission-start grant), so recovery remains fail-closed until
+      // that protocol exists.
+      if (fleet.frozen) return { ok: false, reason: REASON_RECOVERY_ONLY };
+      const rebound = {
+        ...known,
+        peer,
+        connected: true,
+        // A disconnected participant never carries a ready vote or a stale
+        // local validation verdict into a new transport session.
+        ready: false,
+        startValidation: false,
+      };
       const nextFleet = {
         ...fleet,
         gms: fleet.gms.map((gm) => (gm.id === known.id ? rebound : gm)),
@@ -549,6 +621,8 @@ export function admitHost(fleet, {
       meshSlot: slotId(fleet.nextSeq),
       peer,
       connected: true,
+      ready: false,
+      startValidation: false,
       name: boundedText(name, fleet.maxNameLength),
       credential,
     };
@@ -581,6 +655,8 @@ export function admitHost(fleet, {
     owner: false,
     connected: true,
     ready: false,
+    crew: crewReadiness(null, fleet.maxSlots),
+    startValidation: false,
     // Bounded and shape-checked at the door. `name` and `ship` are the only
     // two fields a member writes about itself, and they land in every other
     // host's roster on the next publish.
@@ -651,6 +727,175 @@ export function updateSlot(fleet, id, patch = {}) {
 }
 
 /**
+ * Replace one ship host's authoritative connected/ready PLAYER tally.
+ * `slot.ready` remains the loadout/content-ready bit introduced with the fleet
+ * lobby; this separate pair is the crew readiness #1290 aggregates.
+ */
+export function setCrewReadiness(fleet, id, tally = {}) {
+  const slot = slotById(fleet, id);
+  if (!slot || !slot.connected) return { ok: false, reason: 'unknown' };
+  if (fleet.frozen) return { ok: false, reason: REASON_RECOVERY_ONLY };
+  const next = { ...slot, crew: crewReadiness(tally, fleet.maxSlots) };
+  return {
+    ok: true,
+    fleet: { ...fleet, slots: fleet.slots.map((candidate) => candidate.id === id ? next : candidate) },
+  };
+}
+
+/** Set one connected GM's own ready vote; no ship slot is involved. */
+export function setGmReady(fleet, id, ready) {
+  const gm = gmById(fleet, id);
+  if (!gm || !gm.connected) return { ok: false, reason: 'unknown' };
+  if (fleet.frozen) return { ok: false, reason: REASON_RECOVERY_ONLY };
+  const next = { ...gm, ready: !!ready };
+  return {
+    ok: true,
+    fleet: { ...fleet, gms: fleet.gms.map((candidate) => candidate.id === id ? next : candidate) },
+  };
+}
+
+/**
+ * Set the local start-validation verdict for one authenticated technical mesh
+ * slot. Both product roles have one; the slot remains private on a GM row.
+ */
+export function setStartValidation(fleet, meshSlot, valid) {
+  if (fleet.frozen) return { ok: false, reason: REASON_RECOVERY_ONLY };
+  const slot = slotById(fleet, meshSlot);
+  if (slot && slot.connected) {
+    const next = { ...slot, startValidation: !!valid };
+    return {
+      ok: true,
+      fleet: {
+        ...fleet,
+        slots: fleet.slots.map((candidate) => candidate.id === meshSlot ? next : candidate),
+      },
+    };
+  }
+  const gm = (fleet.gms || []).find((candidate) => candidate.meshSlot === meshSlot);
+  if (gm && gm.connected) {
+    const next = { ...gm, startValidation: !!valid };
+    return {
+      ok: true,
+      fleet: {
+        ...fleet,
+        gms: fleet.gms.map((candidate) => candidate.id === gm.id ? next : candidate),
+      },
+    };
+  }
+  return { ok: false, reason: 'unknown' };
+}
+
+/**
+ * The one pure global start judgement. The star owner computes and broadcasts
+ * it because every member connects there, not because the owner has product
+ * authority. Connected player counts come from ship-local Rust tallies;
+ * connected GM rows contribute one vote each. A fleet needs at least one
+ * participant, every participant ready, every connected host validation true,
+ * and every ship loadout/content-ready bit true to autostart.
+ */
+export function startPolicyOf(fleet) {
+  const connectedSlots = fleet.slots.filter((slot) => slot.connected !== false);
+  const connectedGms = (fleet.gms || []).filter((gm) => gm.connected !== false);
+  const playerCounts = connectedSlots.reduce(
+    (sum, slot) => ({
+      connected: sum.connected + crewReadiness(slot.crew, fleet.maxSlots).connected,
+      ready: sum.ready + crewReadiness(slot.crew, fleet.maxSlots).ready,
+    }),
+    { connected: 0, ready: 0 },
+  );
+  const readyGms = connectedGms.filter((gm) => gm.ready).length;
+  const connectedTotal = playerCounts.connected + connectedGms.length;
+  const readyTotal = playerCounts.ready + readyGms;
+  const validationPassed =
+    connectedSlots.every((slot) => !!slot.ready && !!slot.startValidation)
+    && connectedGms.every((gm) => !!gm.startValidation);
+  const allReady = connectedTotal > 0 && readyTotal === connectedTotal;
+  const started = !!fleet.startGrant;
+  return {
+    connected_players: playerCounts.connected,
+    ready_players: playerCounts.ready,
+    connected_gms: connectedGms.length,
+    ready_gms: readyGms,
+    connected_total: connectedTotal,
+    ready_total: readyTotal,
+    all_ready: allReady,
+    validation_passed: validationPassed,
+    can_auto_start: !started && validationPassed && allReady,
+    started,
+  };
+}
+
+/** Create the fleet's single immutable start grant. Repeats return it unchanged. */
+export function grantFleetStart(fleet, { mode = 'automatic', operatorId = null } = {}) {
+  if (fleet.startGrant) return { fleet, grant: fleet.startGrant, created: false };
+  const forced = mode === 'forced';
+  const grant = {
+    id: `start-${fleet.nextStartSeq}`,
+    mode: forced ? 'forced' : 'automatic',
+    operator_id: forced ? operatorId : null,
+  };
+  return {
+    fleet: freezeFleet({
+      ...fleet,
+      nextStartSeq: fleet.nextStartSeq + 1,
+      startGrant: grant,
+    }),
+    grant,
+    created: true,
+  };
+}
+
+/**
+ * Judge a GM force request against current state. Identity is a stable GM id
+ * resolved from the authenticated connection by `fleet-session`, never trusted
+ * from the request body. Force skips readiness and nothing else.
+ */
+export function adjudicateForceStart(fleet, operatorId) {
+  const gm = gmById(fleet, operatorId);
+  if (!gm || !gm.connected) {
+    return { ok: false, fleet, result: null };
+  }
+  if (fleet.startGrant) {
+    return {
+      ok: true,
+      fleet,
+      grant: fleet.startGrant,
+      result: {
+        status: 'no-op',
+        operator_id: gm.id,
+        reason: 'already-started',
+        grant_id: fleet.startGrant.id,
+      },
+    };
+  }
+  if (!startPolicyOf(fleet).validation_passed) {
+    return {
+      ok: true,
+      fleet,
+      grant: null,
+      result: {
+        status: 'refused',
+        operator_id: gm.id,
+        reason: 'validation-failed',
+        grant_id: null,
+      },
+    };
+  }
+  const granted = grantFleetStart(fleet, { mode: 'forced', operatorId: gm.id });
+  return {
+    ok: true,
+    fleet: granted.fleet,
+    grant: granted.grant,
+    result: {
+      status: 'applied',
+      operator_id: gm.id,
+      reason: null,
+      grant_id: granted.grant.id,
+    },
+  };
+}
+
+/**
  * A member host's link ended.
  *
  * Before mission start the slot GOES: the topology is still mutable, and a
@@ -672,7 +917,15 @@ export function dropHost(fleet, peer) {
       // the only capability that may bind this public operator id to a new
       // peer, whether ordinary admission is open or closed.
       gms: fleet.gms.map((candidate) =>
-        candidate.id === gm.id ? { ...candidate, connected: false, peer: null } : candidate,
+        candidate.id === gm.id
+          ? {
+              ...candidate,
+              connected: false,
+              peer: null,
+              ready: false,
+              startValidation: false,
+            }
+          : candidate,
       ),
     };
   }
@@ -684,7 +937,15 @@ export function dropHost(fleet, peer) {
   return {
     ...fleet,
     slots: fleet.slots.map((s) =>
-      s.id === slot.id ? { ...s, connected: false, peer: null } : s,
+      s.id === slot.id
+        ? {
+            ...s,
+            connected: false,
+            peer: null,
+            crew: crewReadiness(null, fleet.maxSlots),
+            startValidation: false,
+          }
+        : s,
     ),
   };
 }
@@ -740,6 +1001,15 @@ export function claimSlot(fleet, { peer, slotId }) {
  * everything but the service itself.
  */
 export function rosterOf(fleet) {
+  const participants = [
+    ...fleet.slots
+      .filter((slot) => slot.connected !== false)
+      .map((slot) => slot.id),
+    ...(fleet.gms || [])
+      .filter((gm) => gm.connected !== false)
+      .map((gm) => gm.meshSlot),
+  ].filter((slot, index, all) => hostSlotOrdinal(slot) != null && all.indexOf(slot) === index)
+    .sort((left, right) => hostSlotOrdinal(left) - hostSlotOrdinal(right));
   return {
     // `owner` is the host-mesh star centre used for deterministic routing. GM
     // rows deliberately carry no corresponding owner/leader/permission bit.
@@ -747,11 +1017,15 @@ export function rosterOf(fleet) {
     admission: fleet.admission,
     frozen: fleet.frozen,
     max_slots: fleet.maxSlots,
+    // Host-only deterministic topology. Public GM rows deliberately do not
+    // reveal which participant slot belongs to which operator identity.
+    participants,
     slots: fleet.slots.map((s) => ({
       id: s.id,
       owner: s.owner,
       connected: s.connected,
       ready: s.ready,
+      crew: crewReadiness(s.crew, fleet.maxSlots),
       name: s.name,
       ship: s.ship,
     })),
@@ -759,8 +1033,46 @@ export function rosterOf(fleet) {
       id: gm.id,
       name: gm.name,
       connected: gm.connected,
+      ready: !!gm.ready,
     })),
   };
+}
+
+/**
+ * Convert the frozen host roster into the private numeric schema Rust adopts.
+ *
+ * Technical participants and player ships are separate on purpose: a GM is a
+ * full deterministic peer but owns no ship. Only connected rows are present in
+ * `roster.participants`, so every emitted ship host is also a participant.
+ * Returns `null` rather than inventing a slot when a foreign/malformed roster
+ * cannot name this peer or the star owner.
+ */
+export function simulationRosterOf(roster, mine) {
+  if (!roster || typeof roster !== 'object') return null;
+  const local = hostSlotOrdinal(mine);
+  const owner = hostSlotOrdinal(roster.owner);
+  const participants = Array.from(new Set(
+    (Array.isArray(roster.participants) ? roster.participants : [])
+      .map(hostSlotOrdinal)
+      .filter((slot) => Number.isSafeInteger(slot) && slot > 0),
+  )).sort((left, right) => left - right);
+  if (local == null || owner == null
+      || !participants.includes(local) || !participants.includes(owner)) return null;
+
+  const participantSet = new Set(participants);
+  const ships = (Array.isArray(roster.slots) ? roster.slots : [])
+    .filter((slot) => slot && slot.connected !== false)
+    .map((slot) => ({
+      host: hostSlotOrdinal(slot.id),
+      ship_path: slot.ship && typeof slot.ship.template_path === 'string'
+        ? slot.ship.template_path
+        : null,
+      crew: [],
+    }))
+    .filter((ship) => Number.isSafeInteger(ship.host) && participantSet.has(ship.host))
+    .sort((left, right) => left.host - right.host);
+
+  return { local, owner, participants, ships };
 }
 
 // ── Frame builders ──────────────────────────────────────────────────────────
@@ -834,6 +1146,18 @@ export const slotFrame = (patch) => hostFrame(HOST_FRAME_SLOT, patch);
 export const rosterFrame = (fleet) => hostFrame(HOST_FRAME_ROSTER, { roster: rosterOf(fleet) });
 
 export const admissionFrame = (state) => hostFrame(HOST_FRAME_ADMISSION, { state });
+
+/** One authenticated host's partial local start state; role is inferred by owner. */
+export const startStateFrame = (state) => hostFrame(HOST_FRAME_START_STATE, state);
+
+/** The owner's pure aggregate projection. */
+export const startPolicyFrame = (policy) => hostFrame(HOST_FRAME_START_POLICY, { policy });
+
+/** No claimed operator travels here; the receiving owner resolves the connection. */
+export const startForceFrame = () => hostFrame(HOST_FRAME_START_FORCE, {});
+
+/** Attributed force feedback, separate from the idempotent fleet-wide grant. */
+export const forceResultFrame = (result) => hostFrame(HOST_FRAME_FORCE_RESULT, { result });
 
 /**
  * Wrap an already-encoded simulation frame body from the Rust side.
@@ -917,6 +1241,10 @@ if (typeof window !== 'undefined') {
     HOST_FRAME_SNAPSHOT,
     HOST_FRAME_HOST_LOSS,
     HOST_FRAME_SLOT_CLAIM,
+    HOST_FRAME_START_STATE,
+    HOST_FRAME_START_POLICY,
+    HOST_FRAME_START_FORCE,
+    HOST_FRAME_FORCE_RESULT,
     isSimulationFrame,
     simulationFrame,
     hostSlotOrdinal,
@@ -944,14 +1272,25 @@ if (typeof window !== 'undefined') {
     setAdmission,
     freezeFleet,
     updateSlot,
+    setCrewReadiness,
+    setGmReady,
+    setStartValidation,
+    startPolicyOf,
+    grantFleetStart,
+    adjudicateForceStart,
     dropHost,
     rosterOf,
+    simulationRosterOf,
     helloFrame,
     welcomeFrame,
     refusedFrame,
     slotFrame,
     rosterFrame,
     admissionFrame,
+    startStateFrame,
+    startPolicyFrame,
+    startForceFrame,
+    forceResultFrame,
     fleetPanelViewModel,
   };
 }

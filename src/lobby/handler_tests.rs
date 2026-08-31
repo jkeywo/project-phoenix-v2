@@ -1981,6 +1981,7 @@ fn welcome_projects_gms_separately_from_players_and_ship_capacity() {
         id: "gm-1".into(),
         name: "Morgan".into(),
         connected: true,
+        ready: false,
     }];
     let result = handle_identify(
         "t1",

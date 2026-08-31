@@ -293,8 +293,8 @@ describe('lobbyViewModel — crew counter', () => {
       maxPlayers: 3,
       stations: [helmRow({ holder_name: 'Ada' })],
       gms: [
-        { id: 'gm-a', name: 'Morgan', connected: true },
-        { id: 'gm-b', name: 'Rin', connected: false },
+        { id: 'gm-a', name: 'Morgan', connected: true, ready: true },
+        { id: 'gm-b', name: 'Rin', connected: false, ready: true },
       ],
     });
     const vm = lobbyViewModel(s, MY, null);
@@ -303,8 +303,14 @@ describe('lobbyViewModel — crew counter', () => {
       visible: true,
       headingId: 'lobby.gms.heading',
       entries: [
-        { id: 'gm-a', name: 'Morgan', connected: true, labelId: 'lobby.gms.connected' },
-        { id: 'gm-b', name: 'Rin', connected: false, labelId: 'lobby.gms.disconnected' },
+        {
+          id: 'gm-a', name: 'Morgan', connected: true, ready: true,
+          labelId: 'lobby.gms.connected', readinessLabelId: 'lobby.gms.ready',
+        },
+        {
+          id: 'gm-b', name: 'Rin', connected: false, ready: false,
+          labelId: 'lobby.gms.disconnected', readinessLabelId: 'lobby.gms.not_ready',
+        },
       ],
     });
   });
@@ -313,7 +319,11 @@ describe('lobbyViewModel — crew counter', () => {
     expect(CLIENT_HTML).toContain('id="gm-presence" role="region" aria-labelledby="gm-presence-heading"');
     expect(CLIENT_HTML).toContain('id="gm-presence-list" role="list"');
     expect(CLIENT_HTML).toContain("row.setAttribute('role', 'listitem')");
+    expect(CLIENT_HTML).toContain("row.dataset.ready = gm.ready ? 'true' : 'false'");
+    expect(CLIENT_HTML).toContain("+ ' · ' + t(gm.readinessLabelId)");
     expect(CLIENT_HTML).not.toContain('fleet-role-gm');
     expect(CLIENT_HTML).not.toContain('__hostSetFleetRole');
+    expect(CLIENT_HTML).not.toContain('gm-force-start-btn');
+    expect(CLIENT_HTML).not.toContain('forceStart()');
   });
 });

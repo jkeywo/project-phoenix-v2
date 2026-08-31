@@ -35,6 +35,20 @@ pub struct GmOperator {
     pub id: String,
     pub name: String,
     pub connected: bool,
+    pub ready: bool,
+}
+
+impl GmOperator {
+    /// Create a newly admitted operator. Readiness is deliberately never
+    /// inherited from admission or reconnect state.
+    pub fn new(id: String, name: String, connected: bool) -> Self {
+        Self {
+            id,
+            name,
+            connected,
+            ready: false,
+        }
+    }
 }
 
 /// Why a host-page GM roster was refused.
@@ -64,7 +78,7 @@ impl GmRoster {
             return Err(GmRosterError::TooManyOperators);
         }
 
-        for operator in &operators {
+        for operator in &mut operators {
             let id_len = operator.id.chars().count();
             if id_len == 0 {
                 return Err(GmRosterError::EmptyId);
@@ -74,6 +88,12 @@ impl GmRoster {
             }
             if operator.name.chars().count() > MAX_GM_OPERATOR_NAME_CHARS {
                 return Err(GmRosterError::NameTooLong);
+            }
+            // A disconnected operator cannot carry readiness into a later
+            // reconnect. Canonicalise at the Rust boundary even when a stale
+            // browser projection accidentally says otherwise.
+            if !operator.connected {
+                operator.ready = false;
             }
         }
 
@@ -98,6 +118,41 @@ impl GmRoster {
     pub fn is_empty(&self) -> bool {
         self.operators.is_empty()
     }
+
+    /// Reconcile a full replacement with the previous public presence. A
+    /// disconnected -> connected transition is a reconnect and always starts
+    /// unready, even if a stale page projection retained the old flag.
+    pub fn clear_reconnected_readiness(&mut self, previous: &Self) {
+        for operator in &mut self.operators {
+            if previous
+                .operators
+                .iter()
+                .any(|old| old.id == operator.id && !old.connected)
+            {
+                operator.ready = false;
+            }
+        }
+    }
+
+    pub fn readiness_tally(&self) -> crate::lobby::start_policy::ReadinessTally {
+        let connected = self
+            .operators
+            .iter()
+            .filter(|operator| operator.connected)
+            .count() as u32;
+        let ready = self
+            .operators
+            .iter()
+            .filter(|operator| operator.connected && operator.ready)
+            .count() as u32;
+        crate::lobby::start_policy::ReadinessTally { connected, ready }
+    }
+
+    pub fn is_connected(&self, id: &str) -> bool {
+        self.operators
+            .iter()
+            .any(|operator| operator.id == id && operator.connected)
+    }
 }
 
 #[cfg(test)]
@@ -109,6 +164,7 @@ mod tests {
             id: id.into(),
             name: name.into(),
             connected,
+            ready: false,
         }
     }
 
@@ -186,5 +242,51 @@ mod tests {
         assert!(sessions.all_ready());
         assert_eq!(fleet.len(), 1);
         assert!(fleet.is_solo());
+    }
+
+    #[test]
+    fn disconnect_and_reconnect_clear_readiness_without_changing_identity() {
+        let connected_ready = GmRoster::try_new(vec![GmOperator {
+            id: "gm-1".into(),
+            name: "Morgan".into(),
+            connected: true,
+            ready: true,
+        }])
+        .unwrap();
+        let disconnected = GmRoster::try_new(vec![GmOperator {
+            id: "gm-1".into(),
+            name: "Morgan".into(),
+            connected: false,
+            ready: true,
+        }])
+        .unwrap();
+        assert!(!disconnected.operators()[0].ready);
+
+        let mut reconnected = connected_ready.clone();
+        reconnected.clear_reconnected_readiness(&disconnected);
+        assert_eq!(reconnected.operators()[0].id, "gm-1");
+        assert!(!reconnected.operators()[0].ready);
+    }
+
+    #[test]
+    fn gm_readiness_counts_only_connected_rows() {
+        let roster = GmRoster::try_new(vec![
+            GmOperator {
+                ready: true,
+                ..operator("gm-1", "One", true)
+            },
+            GmOperator {
+                ready: true,
+                ..operator("gm-2", "Two", false)
+            },
+        ])
+        .unwrap();
+        assert_eq!(
+            roster.readiness_tally(),
+            crate::lobby::start_policy::ReadinessTally {
+                connected: 1,
+                ready: 1
+            }
+        );
     }
 }

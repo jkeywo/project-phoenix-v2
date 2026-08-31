@@ -1112,7 +1112,12 @@ export function createRendezvousJoiner(opts) {
     // Identify; it speaks its own vocabulary, so its frames carry no
     // localisable string ids and it encodes them itself. Three narrow hooks
     // rather than a second copy of the whole dance.
-    /** Called instead of sending `Identify` once the host accepts this build. */
+    /**
+     * Called instead of sending `Identify` once the host accepts this build.
+     * `generation` identifies the concrete transport attempt, so consumers can
+     * distinguish a real reconnect from a duplicate acceptance frame on the
+     * still-live channel.
+     */
     onAccepted = null,
     /** False for a peer whose frames are not ServerMessages. */
     localise = true,
@@ -1346,7 +1351,7 @@ export function createRendezvousJoiner(opts) {
           // on every reconnect, for the same reason the crew path re-sends
           // Identify: the far end restores this peer's slot from what it says
           // here, not from a memory of a connection that has gone.
-          onAccepted();
+          onAccepted({ generation: gen });
           return;
         }
         // Re-sent on EVERY reconnect, not just the first: the host restores
@@ -1562,12 +1567,18 @@ export function createRendezvousJoiner(opts) {
 
   async function onSignal(gen, payload) {
     if (gen !== generation || !pc) return;
+    // This handler crosses browser promises.  Keep the concrete attempt's PC
+    // and candidate queue: teardown() replaces both globals, so an old SDP
+    // completion must never resume against the retry which replaced it.
+    const mine = pc;
+    const mineCandidates = pendingCandidates;
     if (payload && payload.sdp) {
-      await pc.setRemoteDescription(payload.sdp);
-      for (const c of pendingCandidates.splice(0)) await pc.addIceCandidate(c);
+      await mine.setRemoteDescription(payload.sdp);
+      if (gen !== generation || pc !== mine || pendingCandidates !== mineCandidates) return;
+      for (const c of mineCandidates.splice(0)) await mine.addIceCandidate(c);
     } else if (payload && payload.candidate) {
-      if (pc.remoteDescription) await pc.addIceCandidate(payload.candidate);
-      else pendingCandidates.push(payload.candidate);
+      if (mine.remoteDescription) await mine.addIceCandidate(payload.candidate);
+      else mineCandidates.push(payload.candidate);
     }
   }
 

@@ -21,7 +21,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Reconnectable Equal-GM Admission and Presence
-      summary: "The privileged fleet-host path admits either its existing player-ship role or a GM role. Each GM receives a stable public gm-N identity and a private reconnect capability, consumes no ship capacity, has no Station or leader bit, and remains visible as connected or disconnected in a separately projected roster. Crew admission has no GM request surface. Rust validates and full-replaces the bounded public {id, name, connected} roster, then publishes it through Welcome, GmRosterChanged, and the host lobby projection without changing player readiness or ship-slot policy."
+      summary: "The privileged fleet-host path admits either its existing player-ship role or a GM role. Each GM receives a stable public gm-N identity and a private reconnect capability, consumes no ship capacity, has no Station or leader bit, and remains visible in a separately projected roster. Crew admission has no GM request surface. Rust validates and full-replaces the bounded public {id, name, connected, ready} roster, then publishes it through Welcome, GmRosterChanged, and the host lobby projection without changing player ship-slot policy. A Lobby reconnect retains identity and clears readiness; after roster freeze a departed technical GM fails closed until #1294 supplies deterministic snapshot/watermark recovery."
       rationale:
         - "The host-mesh technical slot still authenticates deterministic peer traffic, but it is deliberately absent from the public GM row and grants no operator precedence."
         - "Keeping reconnect capability and rendezvous peer identity out of the authoritative public roster prevents transport bookkeeping from becoming simulation identity or crew-visible authority."
@@ -35,6 +35,31 @@ entities:
       paths: [gui/host-mesh.js, gui/fleet-session.js, src/gm_roster.rs, src/core/messages.rs, src/lobby/server.rs, src/server/bridge.rs, gui/lobby-state.js, gui/host-lobby-view.js, gui/lobby-view.js, server.html, client.html]
       symbols: [GmRoster, GmOperator, wasm_set_gm_roster, createFleetOwner, createFleetMember, admitHost]
       tests: [cargo test, npx vitest run]
+
+  - component: gm-ready-and-force-start-policy
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Collective Crew and GM Start Policy
+      summary: "Each ship host publishes an exact bounded tally of connected non-Spectator crew and its ready subset; each connected GM publishes an independent ready flag. The authenticated mesh owner combines every cohort with every connected GM, requires all participants ready for automatic start, excludes disconnected participants and Spectators, and supports a GM-only roster. Any connected GM may request force-start past readiness, but neither automatic nor forced start bypasses successfully loaded world, hull, Station-map, compatibility, peer, or terminal presentation-preload validation. The browser proposal carries apply_tick 0; only Rust on the technical owner assigns a safe exact tick and embeds the immutable attributed grant in its authenticated TickFrame. Every peer applies that canonical grant once, enters InProgress directly, and returns an applied, no-op, or refused result. The mesh star centre decides ordering only and grants no product authority."
+      rationale:
+        - "One owner-ordered policy is required because independent per-host all-ready answers cannot represent crew and GM participants distributed across several authoritative peers."
+        - "Readiness, authenticated GM attribution, content compatibility, and presentation-preload completion are frozen when the technical owner seals the canonical grant. Re-reading peer-local readiness or frame-paced preload state at apply_tick could split peers when those values straddle local fixed-tick boundaries; Rust therefore revalidates only deterministic managed-mode, phase, generation, and canonical-grant state. There is no asynchronous JavaScript start-grant broadcast."
+        - "The private frozen topology separates owner and technical participants from player ships, so zero-ship GM simulations join the same wait-set without exposing their mesh slots in the public GM roster. Exact-generation asynchronous adoption must be accepted by Rust before JavaScript publishes that topology or releases buffered frames and grants; the pre-adoption frame FIFO and lobby/grant ingress queues are bounded, with absolute projections coalesced and generation edges retained."
+        - "Every multi-participant fresh-Lobby adoption rebases to activation tick 1, a zero-overstep fixed clock at one timestep, the authored world RNG seed, and the tick-1 WorldIdMint boundary before installing the wait-set. A multi-participant render frame may commit at most one whole fixed tick; whole catch-up debt is discarded after sealing while the fractional interpolation remainder survives. Returned-to-Lobby, resume-staged, or already-started worlds fail closed."
+        - "Fresh-Lobby Leave is also asynchronous: browser transport and adopted state remain live until Rust accepts the exact leave generation, while a phase-boundary refusal preserves the fleet. Raw host pause, instagib, and teleport/debug mutation paths are neutralised or refused while FleetLockstep is installed because they are not replicated inputs."
+        - "AssetPreloadResource is presentation state and rendererless peers report the terminal gate ready. ModelMarkers remains renderer-derived authoritative weapon geometry; #1291 must canonicalise or replace it before a rendererless GM can claim full-world convergence."
+        - "The legacy single-ship countdown and unattributed AI launch route remain available outside a managed fleet and are suppressed while the collective policy owns mission start."
+    architecture:
+      kind: session-policy
+      authority: authoritative
+      coordinates: [gm-t2-peer-and-admission-contract, gm-operator-admission-and-presence, gm-milestone-peer-tracer]
+      runs_in: [host-browser-runtime, headless-runtime, phone-browser-runtime]
+    implementation:
+      status: declared
+      paths: [gui/host-mesh.js, gui/fleet-session.js, src/lobby/start_policy.rs, src/gm_roster.rs, src/lobby/session.rs, src/lobby/server.rs, src/lockstep/mod.rs, src/server/bridge.rs, src/server/viewscreen_border.rs, src/server_app/registration.rs, src/debug_overlay.rs, src/regions/server.rs, src/core/codec.rs, src/core/messages.rs, gui/host-lobby-view.js, gui/lobby-state.js, gui/lobby-view.js, server.html, client.html]
+      symbols: [ReadinessTally, evaluate_start_policy, StartGrant, FleetManagedLobby, PendingStartGrants, StartGrantTracker, StartGrantResults, FleetJoinStatus, FLEET_ACTIVATION_TICK, join_fleet, leave_fleet, discard_multi_participant_overstep, local_presentation_ready, wasm_join_fleet, wasm_fleet_join_status, wasm_leave_fleet, wasm_set_fleet_managed_lobby, wasm_set_fleet_start_validation, wasm_apply_start_grant, wasm_take_start_result]
+      tests: [cargo test, npx vitest run, tests/smoke/fleet-start-policy.spec.js, tests/smoke/fleet-lockstep.spec.js]
 
   - decision: gm-t2-join-pause-and-projection-contract
     core:

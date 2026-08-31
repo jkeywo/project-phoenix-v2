@@ -19,6 +19,10 @@ import {
   HOST_FRAME_SNAPSHOT,
   HOST_FRAME_HOST_LOSS,
   HOST_FRAME_SLOT_CLAIM,
+  HOST_FRAME_START_STATE,
+  HOST_FRAME_START_POLICY,
+  HOST_FRAME_START_FORCE,
+  HOST_FRAME_FORCE_RESULT,
   isSimulationFrame,
   simulationFrame,
   hostSlotOrdinal,
@@ -40,8 +44,15 @@ import {
   setAdmission,
   freezeFleet,
   updateSlot,
+  setCrewReadiness,
+  setGmReady,
+  setStartValidation,
+  startPolicyOf,
+  grantFleetStart,
+  adjudicateForceStart,
   dropHost,
   rosterOf,
+  simulationRosterOf,
   slotForPeer,
   helloFrame,
   welcomeFrame,
@@ -49,6 +60,10 @@ import {
   slotFrame,
   rosterFrame,
   admissionFrame,
+  startStateFrame,
+  startPolicyFrame,
+  startForceFrame,
+  forceResultFrame,
   fleetPanelViewModel,
 } from '../../gui/host-mesh.js';
 import {
@@ -86,6 +101,12 @@ describe('the envelope', () => {
       slotFrame({ ship: { template_path: 'b.toml' }, ready: true }),
       rosterFrame(fleetOf()),
       admissionFrame(ADMISSION_CLOSED),
+      startStateFrame({ crew: { connected: 2, ready: 1 }, validation: true }),
+      startPolicyFrame({ connected_total: 2, ready_total: 1 }),
+      startForceFrame(),
+      forceResultFrame({
+        status: 'refused', operator_id: 'gm-1', reason: 'validation-failed', grant_id: null,
+      }),
     ];
     for (const frame of frames) {
       expect(HOST_FRAME_TYPES).toContain(frame.t);
@@ -195,7 +216,7 @@ describe('the envelope', () => {
     // silently fails to agree a tick; refusing an unrecognised `m` is what
     // makes that fail loudly, and this pair of pins is what catches a
     // one-sided bump.
-    expect(HOST_MESH_PROTOCOL).toBe(5);
+    expect(HOST_MESH_PROTOCOL).toBe(7);
     const rust = readFileSync(
       path.join(path.dirname(fileURLToPath(import.meta.url)), '../../src/lockstep/frame.rs'),
       'utf8',
@@ -313,8 +334,8 @@ describe('privileged GM host role (issue #1289)', () => {
     // not a ship row and does not confer public leadership on the GM row.
     expect(fleet.owner).toBe('slot-1');
     expect(fleet.slots).toEqual([]);
-    expect(roster.gms).toEqual([{ id: 'gm-1', name: 'Morgan', connected: true }]);
-    expect(Object.keys(roster.gms[0]).sort()).toEqual(['connected', 'id', 'name']);
+    expect(roster.gms).toEqual([{ id: 'gm-1', name: 'Morgan', connected: true, ready: false }]);
+    expect(Object.keys(roster.gms[0]).sort()).toEqual(['connected', 'id', 'name', 'ready']);
     expect(roster.gms[0]).not.toHaveProperty('owner');
     expect(roster.gms[0]).not.toHaveProperty('permissions');
     expect(JSON.stringify(roster)).not.toContain('owner-private-capability');
@@ -341,8 +362,8 @@ describe('privileged GM host role (issue #1289)', () => {
     });
     expect(fleet.slots).toHaveLength(1);
     expect(rosterOf(fleet).gms).toEqual([
-      { id: 'gm-1', name: 'A', connected: true },
-      { id: 'gm-2', name: 'B', connected: true },
+      { id: 'gm-1', name: 'A', connected: true, ready: false },
+      { id: 'gm-2', name: 'B', connected: true, ready: false },
     ]);
 
     // GM peers are extra host-class simulations, not player-ship rows. Every
@@ -374,12 +395,12 @@ describe('privileged GM host role (issue #1289)', () => {
       reconnectCredential: 'reconnect-me',
     });
     expect(rosterOf(rebound.fleet).gms).toEqual([
-      { id: 'gm-1', name: 'Morgan', connected: true },
+      { id: 'gm-1', name: 'Morgan', connected: true, ready: false },
     ]);
     expect(rebound.fleet.gms).toHaveLength(1);
   });
 
-  it('also rebinds after freeze, but never lets a bad credential hijack or duplicate', () => {
+  it('fails closed on GM recovery after freeze even with the right credential', () => {
     const admitted = admitHost(
       fleetOf({ credentialFactory: credentials('only-real-secret') }),
       { peer: 'old-peer', role: HOST_ROLE_GM },
@@ -400,16 +421,9 @@ describe('privileged GM host role (issue #1289)', () => {
       role: HOST_ROLE_GM,
       reconnectCredential: 'only-real-secret',
     });
-    expect(rebound.ok).toBe(true);
-    expect(rebound.operatorId).toBe('gm-1');
-    expect(rebound.fleet.gms).toHaveLength(1);
-
-    // The same capability cannot displace the now-live replacement.
-    expect(admitHost(rebound.fleet, {
-      peer: 'second-attacker',
-      role: HOST_ROLE_GM,
-      reconnectCredential: 'only-real-secret',
-    })).toEqual({ ok: false, reason: REASON_RECOVERY_ONLY });
+    expect(rebound).toEqual({ ok: false, reason: REASON_RECOVERY_ONLY });
+    expect(frozen.gms).toHaveLength(1);
+    expect(frozen.gms[0]).toMatchObject({ connected: false, peer: null });
   });
 
   it('puts role and reconnect capability only in the privileged host envelope', () => {
@@ -439,6 +453,266 @@ describe('privileged GM host role (issue #1289)', () => {
       reconnect_credential: 'private-capability',
     });
     expect(JSON.stringify(welcome.d.roster)).not.toContain('private-capability');
+  });
+});
+
+describe('private deterministic participant roster (issue #1290)', () => {
+  const credentials = (...values) => {
+    let index = 0;
+    return () => values[index++];
+  };
+
+  it('orders every connected technical peer while keeping GM-slot mapping private', () => {
+    let fleet = fleetOf({
+      ship: { template_path: 'lead.toml' },
+      credentialFactory: credentials('private-gm-capability'),
+    });
+    fleet = admitHost(fleet, {
+      peer: 'gm-secret-peer', role: HOST_ROLE_GM, name: 'Morgan',
+    }).fleet;
+    fleet = admitHost(fleet, {
+      peer: 'ship-three', ship: { template_path: 'three.toml' }, name: 'Three',
+    }).fleet;
+
+    const roster = rosterOf(fleet);
+    expect(roster.participants).toEqual(['slot-1', 'slot-2', 'slot-3']);
+    expect(roster.gms).toEqual([
+      { id: 'gm-1', name: 'Morgan', connected: true, ready: false },
+    ]);
+    expect(roster.gms[0]).not.toHaveProperty('meshSlot');
+    expect(JSON.stringify(roster)).not.toContain('gm-secret-peer');
+    expect(JSON.stringify(roster)).not.toContain('private-gm-capability');
+
+    expect(simulationRosterOf(roster, 'slot-2')).toEqual({
+      local: 2,
+      owner: 1,
+      participants: [1, 2, 3],
+      ships: [
+        { host: 1, ship_path: 'lead.toml', crew: [] },
+        { host: 3, ship_path: 'three.toml', crew: [] },
+      ],
+    });
+  });
+
+  it('emits a valid zero-ship topology for a GM-only owner', () => {
+    const roster = rosterOf(fleetOf({
+      role: HOST_ROLE_GM,
+      credentialFactory: credentials('owner-secret'),
+    }));
+    expect(roster.participants).toEqual(['slot-1']);
+    expect(simulationRosterOf(roster, 'slot-1')).toEqual({
+      local: 1,
+      owner: 1,
+      participants: [1],
+      ships: [],
+    });
+  });
+
+  it('excludes disconnected technical rows and refuses a local slot outside the set', () => {
+    const admitted = admitHost(
+      fleetOf({ credentialFactory: credentials('gm-secret') }),
+      { peer: 'gm-peer', role: HOST_ROLE_GM },
+    );
+    const roster = rosterOf(dropHost(admitted.fleet, 'gm-peer'));
+    expect(roster.participants).toEqual(['slot-1']);
+    expect(simulationRosterOf(roster, 'slot-2')).toBeNull();
+  });
+});
+
+describe('collective GM and crew start policy (issue #1290)', () => {
+  const credentials = (...values) => {
+    let index = 0;
+    return () => values[index++];
+  };
+
+  const apply = (result) => {
+    expect(result.ok).toBe(true);
+    return result.fleet;
+  };
+
+  it('aggregates every ship-local player tally and every equal GM vote separately', () => {
+    let fleet = fleetOf({
+      ship: { template_path: 'lead.toml' },
+      credentialFactory: credentials('gm-a', 'gm-b'),
+    });
+    fleet = admitHost(fleet, {
+      peer: 'ship-two', ship: { template_path: 'two.toml' }, name: 'Two',
+    }).fleet;
+    fleet = admitHost(fleet, { peer: 'gm-a', role: HOST_ROLE_GM, name: 'A' }).fleet;
+    fleet = admitHost(fleet, { peer: 'gm-b', role: HOST_ROLE_GM, name: 'B' }).fleet;
+
+    for (const slot of fleet.slots) {
+      fleet = apply(updateSlot(fleet, slot.id, { ready: true }));
+      fleet = apply(setStartValidation(fleet, slot.id, true));
+    }
+    for (const gm of fleet.gms) fleet = apply(setStartValidation(fleet, gm.meshSlot, true));
+    fleet = apply(setCrewReadiness(fleet, 'slot-1', {
+      connected: 2,
+      ready: 2,
+      // Rust excluded these before producing the tally; an extra field cannot
+      // make the mesh invent participants.
+      spectators: 99,
+    }));
+    fleet = apply(setCrewReadiness(fleet, 'slot-2', { connected: 1, ready: 0 }));
+    fleet = apply(setGmReady(fleet, 'gm-1', true));
+
+    expect(startPolicyOf(fleet)).toEqual({
+      connected_players: 3,
+      ready_players: 2,
+      connected_gms: 2,
+      ready_gms: 1,
+      connected_total: 5,
+      ready_total: 3,
+      all_ready: false,
+      validation_passed: true,
+      can_auto_start: false,
+      started: false,
+    });
+
+    fleet = apply(setCrewReadiness(fleet, 'slot-2', { connected: 1, ready: 1 }));
+    fleet = apply(setGmReady(fleet, 'gm-2', true));
+    expect(startPolicyOf(fleet)).toMatchObject({
+      connected_total: 5,
+      ready_total: 5,
+      all_ready: true,
+      validation_passed: true,
+      can_auto_start: true,
+    });
+  });
+
+  it('starts a GM-only roster by the same rule and clears a disconnected GM vote', () => {
+    let fleet = fleetOf({
+      role: HOST_ROLE_GM,
+      credentialFactory: credentials('owner', 'member'),
+    });
+    fleet = admitHost(fleet, { peer: 'gm-member', role: HOST_ROLE_GM }).fleet;
+    for (const gm of fleet.gms) fleet = apply(setStartValidation(fleet, gm.meshSlot, true));
+    fleet = apply(setGmReady(fleet, 'gm-1', true));
+    fleet = apply(setGmReady(fleet, 'gm-2', true));
+    expect(startPolicyOf(fleet)).toMatchObject({
+      connected_players: 0,
+      connected_gms: 2,
+      all_ready: true,
+      can_auto_start: true,
+    });
+
+    fleet = dropHost(fleet, 'gm-member');
+    expect(rosterOf(fleet).gms[1]).toEqual({
+      id: 'gm-2', name: '', connected: false, ready: false,
+    });
+    expect(startPolicyOf(fleet)).toMatchObject({
+      connected_gms: 1,
+      ready_gms: 1,
+      connected_total: 1,
+      ready_total: 1,
+      all_ready: true,
+      can_auto_start: true,
+    });
+  });
+
+  it('lets a connected GM bypass readiness only, never validation', () => {
+    let fleet = fleetOf({
+      role: HOST_ROLE_GM,
+      credentialFactory: credentials('owner'),
+    });
+    const refused = adjudicateForceStart(fleet, 'gm-1');
+    expect(refused.result).toEqual({
+      status: 'refused',
+      operator_id: 'gm-1',
+      reason: 'validation-failed',
+      grant_id: null,
+    });
+    expect(refused.fleet.startGrant).toBeNull();
+
+    fleet = apply(setStartValidation(fleet, 'slot-1', true));
+    const applied = adjudicateForceStart(fleet, 'gm-1');
+    expect(applied.result).toEqual({
+      status: 'applied',
+      operator_id: 'gm-1',
+      reason: null,
+      grant_id: 'start-1',
+    });
+    expect(applied.grant).toEqual({
+      id: 'start-1', mode: 'forced', operator_id: 'gm-1',
+    });
+    expect(applied.fleet.frozen).toBe(true);
+
+    const duplicate = adjudicateForceStart(applied.fleet, 'gm-1');
+    expect(duplicate.result).toEqual({
+      status: 'no-op',
+      operator_id: 'gm-1',
+      reason: 'already-started',
+      grant_id: 'start-1',
+    });
+    expect(duplicate.grant).toBe(applied.grant);
+
+    // A ship or invented/disconnected public id is not GM authority.
+    expect(adjudicateForceStart(fleetOf(), 'slot-1')).toMatchObject({ ok: false, result: null });
+    expect(adjudicateForceStart(dropHost(fleet, null), 'gm-404'))
+      .toMatchObject({ ok: false, result: null });
+  });
+
+  it('keeps slot.ready as loadout validation, separate from crew readiness', () => {
+    let fleet = fleetOf({ ship: { template_path: 'lead.toml' } });
+    fleet = apply(setCrewReadiness(fleet, 'slot-1', { connected: 1, ready: 1 }));
+    fleet = apply(setStartValidation(fleet, 'slot-1', true));
+    expect(startPolicyOf(fleet)).toMatchObject({
+      all_ready: true,
+      validation_passed: false,
+      can_auto_start: false,
+    });
+    fleet = apply(updateSlot(fleet, 'slot-1', { ready: true }));
+    expect(startPolicyOf(fleet)).toMatchObject({
+      all_ready: true,
+      validation_passed: true,
+      can_auto_start: true,
+    });
+    expect(rosterOf(fleet).slots[0]).toMatchObject({
+      ready: true,
+      crew: { connected: 1, ready: 1 },
+    });
+  });
+
+  it('bounds malformed and enormous crew tallies before exact aggregation', () => {
+    let fleet = withMembers(fleetOf(), MAX - 1);
+    for (const slot of fleet.slots) {
+      fleet = apply(setCrewReadiness(fleet, slot.id, {
+        connected: Number.MAX_SAFE_INTEGER,
+        ready: Number.MAX_SAFE_INTEGER,
+      }));
+    }
+    const policy = startPolicyOf(fleet);
+    expect(Number.isSafeInteger(policy.connected_players)).toBe(true);
+    expect(policy.connected_players).toBeLessThanOrEqual(0xffff_ffff);
+    expect(policy.ready_players).toBe(policy.connected_players);
+
+    fleet = apply(setCrewReadiness(fleet, 'slot-1', {
+      connected: '999', ready: Infinity,
+    }));
+    expect(rosterOf(fleet).slots[0].crew).toEqual({ connected: 0, ready: 0 });
+    fleet = apply(setCrewReadiness(fleet, 'slot-1', { connected: 2, ready: 200 }));
+    expect(rosterOf(fleet).slots[0].crew).toEqual({ connected: 2, ready: 2 });
+  });
+
+  it('makes the first grant the authoritative boundary against a late withdrawal', () => {
+    let fleet = fleetOf({ ship: { template_path: 'lead.toml' } });
+    fleet = apply(updateSlot(fleet, 'slot-1', { ready: true }));
+    fleet = apply(setCrewReadiness(fleet, 'slot-1', { connected: 1, ready: 1 }));
+    fleet = apply(setStartValidation(fleet, 'slot-1', true));
+    expect(startPolicyOf(fleet).can_auto_start).toBe(true);
+
+    const first = grantFleetStart(fleet, { mode: 'automatic' });
+    expect(first.created).toBe(true);
+    expect(first.grant).toEqual({ id: 'start-1', mode: 'automatic', operator_id: null });
+    // A withdrawal that was locally clicked but arrives after the grant is too
+    // late: the frozen owner refuses the state edit and every host keeps the
+    // same immutable grant.
+    expect(setCrewReadiness(first.fleet, 'slot-1', { connected: 1, ready: 0 }))
+      .toEqual({ ok: false, reason: REASON_RECOVERY_ONLY });
+    const repeated = grantFleetStart(first.fleet, { mode: 'automatic' });
+    expect(repeated.created).toBe(false);
+    expect(repeated.grant).toBe(first.grant);
+    expect(startPolicyOf(repeated.fleet)).toMatchObject({ started: true, can_auto_start: false });
   });
 });
 

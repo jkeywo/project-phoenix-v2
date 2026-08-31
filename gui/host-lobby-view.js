@@ -26,11 +26,42 @@
  */
 
 /**
+ * Decide whether this simulation host may contribute a positive validation
+ * vote to the fleet's collective start policy.
+ *
+ * Selection and boot completion are necessary but not sufficient: the Rust
+ * lobby payload owns the final `presentationReady` fact, which moves only once
+ * this host's render preload is terminal. Keeping the fold pure makes the
+ * selected-but-still-preloading boundary directly testable.
+ */
+export function fleetStartValidationState({
+  fleetLinked = false,
+  wasmReady = false,
+  worldLoaded = false,
+  bootReady = false,
+  selectedHull = null,
+  validatedHullPath = null,
+  presentationReady = false,
+} = {}) {
+  const selectedPath = selectedHull && selectedHull.template_path;
+  return !!(
+    fleetLinked
+    && wasmReady
+    && worldLoaded
+    && bootReady
+    && typeof selectedPath === 'string'
+    && selectedPath.length > 0
+    && validatedHullPath === selectedPath
+    && presentationReady
+  );
+}
+
+/**
  * @param {object} s  Parsed `LobbyStatePayload` — { phase, scenario_title,
  *                    scenario_body, crew_count, max_players, all_ready,
  *                    stations: [{ name, short_code, rank, holder_name,
  *                    preset_names, consoles? }], spectators: string[],
- *                    gms: [{ id, name, connected }],
+ *                    gms: [{ id, name, connected, ready }],
  *                    loading_progress?: number, countdown_secs }.
  * @param {string} prevPhase  The phase seen on the previous call (server.html's
  *                    `_lobbyPrevPhase`), used to detect the Loading→InProgress
@@ -178,7 +209,11 @@ export function hostLobbyViewModel(s, prevPhase) {
       id: gm && gm.id != null ? String(gm.id) : '',
       name: gm && gm.name != null ? String(gm.name) : '',
       connected: !!(gm && gm.connected),
+      ready: !!(gm && gm.connected && gm.ready),
       labelId: gm && gm.connected ? 'lobby.gms.connected' : 'lobby.gms.disconnected',
+      readinessLabelId: gm && gm.connected && gm.ready
+        ? 'lobby.gms.ready'
+        : 'lobby.gms.not_ready',
     })),
   };
 
@@ -216,4 +251,5 @@ export function hostLobbyViewModel(s, prevPhase) {
 // Expose for the classic (non-module) script in server.html.
 if (typeof window !== 'undefined') {
   window.hostLobbyViewModel = hostLobbyViewModel;
+  window.fleetStartValidationState = fleetStartValidationState;
 }

@@ -47,10 +47,15 @@ function normalisePlayer(p) {
 }
 
 function normaliseGm(gm) {
+  const connected = !!(gm && gm.connected);
   return {
     id: gm && gm.id != null ? String(gm.id) : '',
     name: gm && gm.name != null ? String(gm.name) : '',
-    connected: !!(gm && gm.connected),
+    connected,
+    // Disconnect is an authoritative un-ready. Keeping that invariant at the
+    // client boundary means no view can accidentally present the last ready
+    // value retained on a reconnectable public roster row as current consent.
+    ready: connected && !!(gm && gm.ready),
   };
 }
 

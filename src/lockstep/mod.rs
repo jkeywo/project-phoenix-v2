@@ -90,6 +90,16 @@ pub use snapshot_relay::{
 };
 pub use transfer::{Accepted, SnapshotChunk, SnapshotReceiver, TransferError};
 
+/// Shared logical epoch at which a browser-booted participant mesh activates.
+///
+/// Lobby pages are free-running before adoption and therefore do not share a
+/// useful `SimTick`. Tick zero is already occupied by Startup's immediate world
+/// entities, while pre-game callbacks, deadlines and GameStart entities are all
+/// gated until `InProgress`. Tick one is therefore the first common, unused
+/// simulation boundary: it avoids reusing tick-zero `WorldId`s without jumping
+/// a fresh lobby clock far enough to expire absolute-tick state.
+pub const FLEET_ACTIVATION_TICK: u64 = 1;
+
 /// The Bevy adapter for the pure [`LockstepSession`] (AGENTS.md rule 10: the
 /// decision module stays Bevy-free and its adapter is a sibling).
 ///
@@ -168,14 +178,54 @@ impl FleetShip {
 #[derive(Resource, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FleetRoster {
     ships: Vec<FleetShip>,
+    /// Every technical simulation participant, including stationless GM hosts.
+    ///
+    /// This is deliberately separate from `ships`: a GM-only participant still
+    /// owns a Rust simulation and therefore must contribute a lockstep watermark,
+    /// while a fleet may contain an authored ship whose original host has left.
+    #[serde(default)]
+    participants: Vec<HostSlot>,
     local: HostSlot,
+    /// The technical owner whose authenticated tick frame may order fleet-wide
+    /// control decisions such as a coordinated start.
+    ///
+    /// `SOLO` is also the backward-compatible sentinel for records written before
+    /// this field existed; [`Self::owner`] then derives the old lowest-slot lead.
+    #[serde(default)]
+    owner: HostSlot,
+}
+
+/// Result of asynchronously adopting a browser-supplied technical roster.
+///
+/// `wasm_join_fleet` can validate and enqueue while no Bevy `World` is
+/// available; only the next `PreUpdate` can actually install the participant
+/// wait-set and canonical activation state. This generation-stamped status is
+/// the acknowledgement boundary that keeps a stale acceptance from blessing a
+/// newer queued roster.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FleetJoinStatusKind {
+    #[default]
+    Idle,
+    Pending,
+    Accepted,
+    Refused,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
+pub struct FleetJoinStatus {
+    pub generation: u64,
+    pub status: FleetJoinStatusKind,
+    pub reason: Option<String>,
 }
 
 impl Default for FleetRoster {
     fn default() -> Self {
         Self {
             ships: vec![FleetShip::new(HostSlot::SOLO)],
+            participants: vec![HostSlot::SOLO],
             local: HostSlot::SOLO,
+            owner: HostSlot::SOLO,
         }
     }
 }
@@ -193,7 +243,51 @@ impl FleetRoster {
         if ships.is_empty() {
             ships.push(FleetShip::new(local));
         }
-        Self { ships, local }
+        let mut participants: Vec<_> = ships.iter().map(|ship| ship.host).collect();
+        participants.push(local);
+        participants.sort_unstable();
+        participants.dedup();
+        let owner = participants.first().copied().unwrap_or(local);
+        Self {
+            ships,
+            participants,
+            local,
+            owner,
+        }
+    }
+
+    /// Build the exact private technical roster supplied by the host mesh.
+    ///
+    /// Unlike [`Self::new`], this constructor never invents a ship. That makes an
+    /// explicitly participant-only GM simulation representable without changing
+    /// the default solo path used by existing fixtures. Every ship host must also
+    /// be a technical participant, and both the local slot and owner must be in
+    /// the bounded, unique participant set.
+    pub fn with_participants(
+        mut ships: Vec<FleetShip>,
+        mut participants: Vec<HostSlot>,
+        local: HostSlot,
+        owner: HostSlot,
+    ) -> Option<Self> {
+        ships.sort_by_key(|ship| ship.host);
+        if ships.windows(2).any(|pair| pair[0].host == pair[1].host) {
+            return None;
+        }
+        participants.sort_unstable();
+        if participants.is_empty()
+            || participants.windows(2).any(|pair| pair[0] == pair[1])
+            || !participants.contains(&local)
+            || !participants.contains(&owner)
+            || ships.iter().any(|ship| !participants.contains(&ship.host))
+        {
+            return None;
+        }
+        Some(Self {
+            ships,
+            participants,
+            local,
+            owner,
+        })
     }
 
     /// The ships, in the order they take the world's GameStart ship spawns.
@@ -213,6 +307,31 @@ impl FleetRoster {
     /// This host's own slot.
     pub fn local(&self) -> HostSlot {
         self.local
+    }
+
+    /// Technical participants in deterministic slot order.
+    ///
+    /// The fallback covers old serialized rosters whose new private field was
+    /// absent. New rosters always carry an explicit non-empty participant set.
+    pub fn participants(&self) -> Vec<HostSlot> {
+        if self.participants.is_empty() {
+            let mut participants: Vec<_> = self.ships.iter().map(|ship| ship.host).collect();
+            participants.push(self.local);
+            participants.sort_unstable();
+            participants.dedup();
+            participants
+        } else {
+            self.participants.clone()
+        }
+    }
+
+    /// Technical owner of the participant mesh.
+    pub fn owner(&self) -> HostSlot {
+        if self.owner == HostSlot::SOLO && self.local != HostSlot::SOLO {
+            self.participants().into_iter().next().unwrap_or(self.local)
+        } else {
+            self.owner
+        }
     }
 
     /// Whether `host` is the slot this host projects to its own crew.
@@ -265,13 +384,19 @@ impl FleetRoster {
         for ship in &mut self.ships {
             ship.crew.clear();
         }
+        // A saved fleet is starting as one new independent simulation. Preserve
+        // its authored ships, but do not retain technical participants whose
+        // transports are deliberately not recreated.
+        self.participants.clear();
+        self.participants.push(self.local);
+        self.owner = self.local;
         self
     }
 
     /// Whether this roster describes a lone host — the shipped single-player
     /// case, and the state every fixture is in.
     pub fn is_solo(&self) -> bool {
-        self.ships.len() <= 1
+        self.participants().len() <= 1
     }
 
     /// The fleet lead: the lowest slot, which `gui/host-mesh.js` always mints as
@@ -280,11 +405,7 @@ impl FleetRoster {
     /// the one slot allowed to relay a sibling's frame. `SOLO` for a solo roster,
     /// which has no peers to authenticate.
     pub fn lead(&self) -> HostSlot {
-        self.ships
-            .iter()
-            .map(|ship| ship.host)
-            .min()
-            .unwrap_or(HostSlot::SOLO)
+        self.owner()
     }
 
     /// Whether `host` is a slot in this frozen roster — a member of the fleet,
@@ -295,7 +416,7 @@ impl FleetRoster {
     /// the barrier waits for, yet it is still a roster member whose frames the
     /// sender-auth check must recognise.
     pub fn is_member(&self, host: HostSlot) -> bool {
-        self.ships.iter().any(|ship| ship.host == host)
+        self.participants().contains(&host)
     }
 }
 
@@ -468,6 +589,7 @@ pub fn order_mesh_inbound(
 #[derive(Resource, Default, Debug)]
 pub struct MeshOutbox {
     staged: Vec<MeshCommand>,
+    staged_start_grant: Option<crate::lobby::start_policy::StartGrant>,
     frames: Vec<MeshFrame>,
 }
 
@@ -478,6 +600,21 @@ impl MeshOutbox {
     /// is not this fleet's business, exactly as it is not the log's.
     pub fn stage(&mut self, command: MeshCommand) {
         self.staged.push(command);
+    }
+
+    /// Attach a coordinated start to the next local tick frame.
+    ///
+    /// Only the lobby's owner-admission path calls this. Refusing a second,
+    /// different grant prevents arrival order from deciding which proposal is
+    /// made authoritative inside the frame.
+    pub fn stage_start_grant(&mut self, grant: crate::lobby::start_policy::StartGrant) -> bool {
+        match self.staged_start_grant.as_ref() {
+            None => {
+                self.staged_start_grant = Some(grant);
+                true
+            }
+            Some(staged) => staged == &grant,
+        }
     }
 
     /// Queue a frame for the transport.
@@ -719,6 +856,18 @@ pub fn register_lockstep(app: &mut App) {
                 .before(crate::sim_tick::advance_sim_tick)
                 .run_if(fleet_is_running),
         )
+        // Bevy normally spends every accumulated fixed step before returning to
+        // PostUpdate. A mesh cannot do that safely: the first step seals its
+        // TickFrame, but the browser transport does not flush that frame until
+        // PostUpdate. Running a second step first would let this host cross a
+        // barrier (including a scheduled start) its peers have not had any
+        // opportunity to observe. After one complete step has committed, discard
+        // only the residual accumulator so the bearing frame leaves before the
+        // next step. No tick is partially skipped or rolled back.
+        .add_systems(
+            FixedLast,
+            discard_multi_participant_overstep.after(crate::sim_tick::advance_sim_tick),
+        )
         // The host-loss Backfill flip (issue #1119). In `SimSet::Input`, at the
         // agreed tick, on the lost ship — the same phase the ordinary rating
         // change and the human-seeking resolver run in. Ordered
@@ -758,12 +907,128 @@ pub fn register_lockstep(app: &mut App) {
 ///
 /// `delay` comes from the world's authored `[global] command_delay_ticks`; see
 /// [`crate::lockstep::authored_delay`].
-pub fn join_fleet(world: &mut World, roster: FleetRoster, delay: u64) {
+pub fn join_fleet(world: &mut World, roster: FleetRoster, delay: u64) -> bool {
     let local = roster.local();
-    let peers: Vec<HostSlot> = roster.ships().iter().map(|ship| ship.host).collect();
+    // The barrier follows simulations, not ships. A stationless GM host still
+    // advances a Rust world and must publish a watermark before any peer may
+    // cross a scheduled control boundary.
+    let peers = roster.participants();
     let alone = roster.is_solo();
+    let activation_tick = if alone { 0 } else { FLEET_ACTIVATION_TICK };
+    let Some(session) = LockstepSession::new_at(local, peers, delay, activation_tick) else {
+        return false;
+    };
+    if let Some(installed) = world.get_resource::<FleetLockstep>() {
+        // A frozen reconnect can replay the same private roster after activation.
+        // Treat that as an acknowledgement, not a second activation that resets
+        // tick/RNG. A different topology or delay is a new fleet generation and
+        // cannot be grafted onto the running wait-set.
+        return installed.local() == local
+            && installed.delay() == delay
+            && world
+                .get_resource::<FleetRoster>()
+                .is_some_and(|current| current == &roster);
+    }
+    if !alone {
+        // Browser pages can finish booting their lobby at different frame rates,
+        // so their pre-adoption SimTicks are not a shared clock. Installing a
+        // wait-set at those unequal values would either deadlock immediately
+        // (peers start ready only through `delay`) or preserve divergent start
+        // ticks. Fleet adoption therefore has one explicit activation boundary:
+        // while still in Lobby, every technical participant rebases to the
+        // reserved fleet epoch before the barrier exists. A faster adopter may
+        // run only to the delay
+        // frontier and then waits for the later adopter's first frames.
+        let lobby = world
+            .get_resource::<State<crate::core::messages::GamePhase>>()
+            .is_none_or(|state| state.get() == &crate::core::messages::GamePhase::Lobby);
+        let no_pending_start = world
+            .get_resource::<NextState<crate::core::messages::GamePhase>>()
+            .is_none_or(|next| {
+                !matches!(
+                    next,
+                    NextState::Pending(phase)
+                        if phase != &crate::core::messages::GamePhase::Lobby
+                )
+            });
+        // A returned-to-lobby or resume-staged App contains authoritative state
+        // from another run. Rebasing only its clock/RNG would not canonicalise
+        // that world, so participant adoption is startup-only and fails closed.
+        #[cfg(feature = "server")]
+        let browser_restore_staged = world
+            .get_resource::<crate::server::bridge::PendingRestore>()
+            .is_some_and(|pending| pending.0.is_some());
+        #[cfg(not(feature = "server"))]
+        let browser_restore_staged = false;
+        let fresh_lobby = !world.contains_resource::<crate::server_app::GameStartEntityUuids>()
+            && !world.contains_resource::<crate::server_app::ResumeGameStartEntityUuids>()
+            && !crate::save_slots_lifecycle::startup_restore_pending(world)
+            && !browser_restore_staged;
+        let authored_seed = world
+            .get_resource::<crate::world::config::WorldConfig>()
+            .and_then(|config| config.global.seed);
+        let Some(timestep) = world
+            .get_resource::<Time<Fixed>>()
+            .map(|fixed| fixed.timestep())
+        else {
+            return false;
+        };
+        let elapsed_nanos = timestep
+            .as_nanos()
+            .checked_mul(u128::from(FLEET_ACTIVATION_TICK))
+            .and_then(|nanos| u64::try_from(nanos).ok());
+        if !lobby
+            || !no_pending_start
+            || !fresh_lobby
+            || authored_seed.is_none()
+            || elapsed_nanos.is_none()
+        {
+            return false;
+        }
+
+        // Validate every fallible input before mutating anything: refusal must
+        // leave a standalone lobby exactly as it was.
+        let elapsed_nanos = elapsed_nanos.expect("checked above");
+        if let Some(mut tick) = world.get_resource_mut::<crate::sim_tick::SimTick>() {
+            tick.0 = FLEET_ACTIVATION_TICK;
+        } else {
+            world.insert_resource(crate::sim_tick::SimTick(FLEET_ACTIVATION_TICK));
+        }
+        // Replace the whole fixed clock: elapsed is exactly tick*timestep and
+        // overstep is exactly zero on every participant. Keeping the pre-
+        // adoption clock would make context-sensitive `Time` reads and mission
+        // anchors differ even though `SimTick` agreed.
+        let mut canonical = Time::<Fixed>::from_duration(timestep);
+        canonical.advance_to(std::time::Duration::from_nanos(elapsed_nanos));
+        world.insert_resource(canonical);
+        // Browser registration starts from OS entropy. That is correct for an
+        // independent host but immediately divergent in a participant mesh,
+        // whose digest folds every stream position. Fleet activation therefore
+        // requires the world's canonical authored seed and replaces the random
+        // resource before any participant frame can be sealed.
+        world.insert_resource(crate::sim_rng::SimRng::new(
+            authored_seed.expect("checked above"),
+            crate::sim_rng::SeedSource::World,
+        ));
+        if let Some(mint) = world.get_resource::<crate::world_id::WorldIdMint>() {
+            mint.begin_tick(FLEET_ACTIVATION_TICK);
+        }
+        // Host-only clock and damage cheats are not replicated inputs. A fleet
+        // adopts from their neutral values, and their drains refuse later raw
+        // mutations while the wait-set is installed.
+        if let Some(mut paused) = world.get_resource_mut::<crate::debug_overlay::SimulationPaused>()
+        {
+            paused.0 = false;
+        }
+        if let Some(mut virtual_time) = world.get_resource_mut::<Time<bevy::time::Virtual>>() {
+            virtual_time.unpause();
+        }
+        if let Some(mut instagib) = world.get_resource_mut::<crate::server_app::Instagib>() {
+            instagib.0 = false;
+        }
+    }
     world.insert_resource(roster);
-    world.insert_resource(FleetLockstep(LockstepSession::new(local, peers, delay)));
+    world.insert_resource(FleetLockstep(session));
     world.insert_resource(MeshAgreement::new(if alone {
         0
     } else {
@@ -776,6 +1041,81 @@ pub fn join_fleet(world: &mut World, roster: FleetRoster, delay: u64) {
     if let Some(mut pending) = world.get_resource_mut::<PendingCommands>() {
         pending.set_origin(local);
     }
+    true
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FleetLeaveError {
+    NotFreshLobby,
+}
+
+/// Tear down one accepted fleet generation without leaving its wait-set behind.
+///
+/// This is deliberately a Lobby-only lifecycle edge. Once GameStart state has
+/// existed, removing only transport/session resources would turn one continuing
+/// authoritative world into an unrelated solo simulation. A fresh Lobby may
+/// leave and reopen freely: all mesh queues, agreement state, delayed commands,
+/// host-loss bookkeeping and coordinated-start state return to their standalone
+/// baselines, and a barrier-paused virtual clock is released.
+pub fn leave_fleet(world: &mut World) -> Result<(), FleetLeaveError> {
+    let lobby = world
+        .get_resource::<State<crate::core::messages::GamePhase>>()
+        .is_none_or(|state| state.get() == &crate::core::messages::GamePhase::Lobby);
+    let no_pending_start = world
+        .get_resource::<NextState<crate::core::messages::GamePhase>>()
+        .is_none_or(|next| {
+            !matches!(
+                next,
+                NextState::Pending(phase) if phase != &crate::core::messages::GamePhase::Lobby
+            )
+        });
+    let fresh = !world.contains_resource::<crate::server_app::GameStartEntityUuids>()
+        && !world.contains_resource::<crate::server_app::ResumeGameStartEntityUuids>()
+        && !crate::save_slots_lifecycle::startup_restore_pending(world);
+    #[cfg(feature = "server")]
+    let browser_restore_staged = world
+        .get_resource::<crate::server::bridge::PendingRestore>()
+        .is_some_and(|pending| pending.0.is_some());
+    #[cfg(not(feature = "server"))]
+    let browser_restore_staged = false;
+    if !lobby || !no_pending_start || !fresh || browser_restore_staged {
+        return Err(FleetLeaveError::NotFreshLobby);
+    }
+
+    world.remove_resource::<FleetLockstep>();
+    world.insert_resource(FleetRoster::default());
+    world.insert_resource(MeshInbox::default());
+    world.insert_resource(MeshOutbox::default());
+    world.insert_resource(MeshAgreement::new(0));
+    world.insert_resource(MeshDiagnostics::default());
+    world.insert_resource(host_loss::PendingHostLoss::default());
+    world.insert_resource(recovery::RecoveryState::default());
+    world.insert_resource(recovery::RecoveryHold::default());
+    world.insert_resource(recovery::RecoveryLog::default());
+    world.insert_resource(slot_recovery::PendingSlotClaims::default());
+    world.insert_resource(slot_recovery::SlotRecoveryState::default());
+    world.insert_resource(slot_recovery::SlotRecoveryHold::default());
+    world.insert_resource(slot_recovery::SlotRecoveryLog::default());
+    world.insert_resource(snapshot_relay::MeshSnapshotReceiver::default());
+    world.insert_resource(snapshot_relay::MeshRestoreArm::default());
+    world.insert_resource(PendingCommands::default());
+    world.insert_resource(CommandDelay(0));
+    if let Some(mut virtual_time) = world.get_resource_mut::<Time<bevy::time::Virtual>>() {
+        virtual_time.unpause();
+    }
+    if let Some(mut managed) = world.get_resource_mut::<crate::lobby::server::FleetManagedLobby>() {
+        managed.set_enabled(false);
+    }
+    if let Some(mut grants) = world.get_resource_mut::<crate::lobby::server::PendingStartGrants>() {
+        grants.clear();
+    }
+    if let Some(mut tracker) = world.get_resource_mut::<crate::lobby::server::StartGrantTracker>() {
+        tracker.reset();
+    }
+    if let Some(mut results) = world.get_resource_mut::<crate::lobby::server::StartGrantResults>() {
+        results.clear();
+    }
+    Ok(())
 }
 
 /// Bootstrap a saved fleet as one peer's new independent local session.
@@ -812,6 +1152,12 @@ pub fn authored_delay(world: &World) -> u64 {
         .unwrap_or_else(|| u64::from(crate::entities::config::default_command_delay_ticks()))
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct StartGrantAdmission<'w> {
+    phase: Option<Res<'w, State<crate::core::messages::GamePhase>>>,
+    managed: Option<Res<'w, crate::lobby::server::FleetManagedLobby>>,
+}
+
 /// Apply everything a transport has delivered: peer input into the future-tick
 /// queue, peer digests into the agreement ledger.
 ///
@@ -834,6 +1180,11 @@ pub fn apply_mesh_inbox(
     mut snapshot_rx: ResMut<MeshSnapshotReceiver>,
     mut outbox: ResMut<MeshOutbox>,
     roster: Option<Res<FleetRoster>>,
+    sim_tick: Option<Res<crate::sim_tick::SimTick>>,
+    mut pending_starts: Option<ResMut<crate::lobby::PendingStartGrants>>,
+    mut start_tracker: Option<ResMut<crate::lobby::server::StartGrantTracker>>,
+    mut start_results: Option<ResMut<crate::lobby::server::StartGrantResults>>,
+    start_admission: StartGrantAdmission,
     fleet_ships: Query<(&FleetSlotOf, &crate::entities::spawner::EntityUuid)>,
     log: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
@@ -912,6 +1263,65 @@ pub fn apply_mesh_inbox(
             MeshFrame::Tick(tick) => {
                 if tick.from == session.local() {
                     continue;
+                }
+                if let Some(grant) = tick.start_grant.as_ref() {
+                    let expected_owner = roster.as_deref().map_or(lead, FleetRoster::owner);
+                    let now = sim_tick.as_deref().map_or(0, |tick| tick.0);
+                    let reason =
+                        if tick.from != expected_owner {
+                            Some(crate::lobby::start_policy::StartGrantReason::UnauthorizedGrant)
+                        } else if grant.validate().is_err() {
+                            Some(crate::lobby::start_policy::StartGrantReason::InvalidGrant)
+                        } else if tick.ready_through != session.ready_through(tick.tick)
+                            || grant.apply_tick <= tick.ready_through
+                        {
+                            Some(crate::lobby::start_policy::StartGrantReason::UnsafeApplyTick)
+                        } else if now > grant.apply_tick {
+                            Some(crate::lobby::start_policy::StartGrantReason::MissedApplyTick)
+                        } else if start_admission
+                            .managed
+                            .as_deref()
+                            .is_none_or(|managed| !managed.enabled)
+                        {
+                            Some(crate::lobby::start_policy::StartGrantReason::FleetNotManaged)
+                        } else if start_admission.phase.as_deref().is_none_or(|phase| {
+                            phase.get() != &crate::core::messages::GamePhase::Lobby
+                        }) {
+                            Some(crate::lobby::start_policy::StartGrantReason::AlreadyStarted)
+                        } else if start_admission
+                            .managed
+                            .as_deref()
+                            .is_none_or(|managed| !managed.validation_passed)
+                        {
+                            Some(crate::lobby::start_policy::StartGrantReason::ValidationFailed)
+                        } else if start_tracker
+                            .as_deref_mut()
+                            .is_none_or(|tracker| tracker.adopt_canonical(grant).is_err())
+                        {
+                            Some(crate::lobby::start_policy::StartGrantReason::ConflictingGrant)
+                        } else {
+                            None
+                        };
+
+                    if let Some(reason) = reason {
+                        if let Some(tracker) = start_tracker.as_deref_mut() {
+                            // An invalid authoritative boundary is not recoverable
+                            // by observing a later watermark: that would allow one
+                            // peer to run past a decision another accepted. Keep the
+                            // barrier closed until this fleet generation is torn
+                            // down explicitly.
+                            tracker.fail_closed();
+                        }
+                        if let Some(results) = start_results.as_deref_mut() {
+                            results.push(crate::lobby::server::start_result(
+                                grant,
+                                crate::lobby::start_policy::StartGrantStatus::Refused,
+                                Some(reason),
+                            ));
+                        }
+                    } else if let Some(pending) = pending_starts.as_deref_mut() {
+                        pending.adopt_canonical(grant.clone());
+                    }
                 }
                 // `tick.from` is now authenticated to the delivering connection at
                 // ingress above (issue #1120 closed the #1118 `TODO`): a frame
@@ -1172,6 +1582,7 @@ pub fn gate_lockstep_ticks(
     mut diagnostics: ResMut<MeshDiagnostics>,
     recovery_hold: Option<Res<recovery::RecoveryHold>>,
     slot_recovery_hold: Option<Res<slot_recovery::SlotRecoveryHold>>,
+    start_tracker: Option<Res<crate::lobby::server::StartGrantTracker>>,
     log: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
     let Some(session) = session else {
@@ -1215,7 +1626,8 @@ pub fn gate_lockstep_ticks(
         .is_some_and(|boundary| next_tick > boundary)
         || slot_recovery_hold
             .and_then(|hold| hold.withhold_beyond)
-            .is_some_and(|boundary| next_tick > boundary);
+            .is_some_and(|boundary| next_tick > boundary)
+        || start_tracker.is_some_and(|tracker| tracker.is_failed_closed());
 
     if stall.is_some() || held {
         if !virtual_time.is_paused() {
@@ -1252,10 +1664,12 @@ pub fn seal_tick_frame(
 ) {
     let Some(session) = session else {
         outbox.staged.clear();
+        outbox.staged_start_grant = None;
         return;
     };
     if session.is_alone() {
         outbox.staged.clear();
+        outbox.staged_start_grant = None;
         return;
     }
     // A replacement bootstrapping and awaiting the transfer (issue #1120) must not
@@ -1264,15 +1678,18 @@ pub fn seal_tick_frame(
     // commands with it — they are pre-restore noise that must never cross.
     if slot_recovery.is_some_and(|s| s.suppresses_egress()) {
         outbox.staged.clear();
+        outbox.staged_start_grant = None;
         return;
     }
     let tick = sim_tick.0;
     let commands = std::mem::take(&mut outbox.staged);
+    let start_grant = outbox.staged_start_grant.take();
     outbox.push(MeshFrame::Tick(TickFrame {
         from: session.local(),
         tick,
         ready_through: session.ready_through(tick),
         commands,
+        start_grant,
     }));
 }
 
@@ -1282,6 +1699,38 @@ pub fn seal_tick_frame(
 /// point for an exchange that would fold nothing anyone receives.
 fn fleet_is_running(session: Option<Res<FleetLockstep>>) -> bool {
     session.is_some_and(|s| !s.is_alone())
+}
+
+/// Limit a multi-participant mesh to one complete fixed step per render frame.
+///
+/// Bevy's fixed runner calls `Time<Fixed>::expend()` before each step and tests
+/// the resource again before the next. Clearing the remaining overstep here,
+/// in `FixedLast` after the completed step's frame/digest have been sealed and
+/// its [`crate::sim_tick::SimTick`] advanced, makes that next test fail. This is
+/// a transport boundary, not a simulation skip: the discarded duration is
+/// frame-time catch-up debt and no authoritative tick was begun from it.
+pub fn discard_multi_participant_overstep(
+    session: Option<Res<FleetLockstep>>,
+    mut fixed: Option<ResMut<Time<Fixed>>>,
+) {
+    if session.is_none_or(|session| session.is_alone()) {
+        return;
+    }
+    let Some(fixed) = fixed.as_deref_mut() else {
+        return;
+    };
+    let remaining = fixed.overstep();
+    let timestep = fixed.timestep();
+    // Preserve the sub-step remainder: render interpolation legitimately reads
+    // it as alpha. Only whole additional simulation steps are unsafe to carry
+    // through this frame before the transport has flushed.
+    let remainder_nanos = remaining.as_nanos() % timestep.as_nanos();
+    let remainder = std::time::Duration::new(
+        u64::try_from(remainder_nanos / 1_000_000_000).unwrap_or(u64::MAX),
+        (remainder_nanos % 1_000_000_000) as u32,
+    );
+    let whole_step_debt = remaining - remainder;
+    fixed.discard_overstep(whole_step_debt);
 }
 
 /// Fold this host's authoritative state at a sampled tick and publish it.
@@ -1434,10 +1883,14 @@ mod tests {
         use crate::command_admission::log::PendingCommands;
 
         let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin);
         app.init_resource::<PendingCommands>();
         register_lockstep(&mut app);
+        let mut config = crate::world::config::WorldConfig::default();
+        config.global.seed = Some(7);
+        app.insert_resource(config);
         let saved = roster();
-        join_fleet(app.world_mut(), saved.clone(), 6);
+        assert!(join_fleet(app.world_mut(), saved.clone(), 6));
         assert!(app.world().contains_resource::<FleetLockstep>());
         assert_eq!(app.world().resource::<CommandDelay>().0, 6);
 
@@ -1449,6 +1902,181 @@ mod tests {
         assert_eq!(restored.len(), 2);
         assert!(restored.is_local(HostSlot(2)));
         assert!(restored.ships().iter().all(|ship| ship.crew.is_empty()));
+    }
+
+    #[test]
+    fn fresh_lobby_leave_clears_the_wait_set_and_can_reopen() {
+        use crate::command_admission::log::PendingCommands;
+
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin);
+        app.init_resource::<PendingCommands>();
+        app.init_resource::<crate::lobby::server::FleetManagedLobby>();
+        app.init_resource::<crate::lobby::server::PendingStartGrants>();
+        app.init_resource::<crate::lobby::server::StartGrantTracker>();
+        app.init_resource::<crate::lobby::server::StartGrantResults>();
+        register_lockstep(&mut app);
+        let mut config = crate::world::config::WorldConfig::default();
+        config.global.seed = Some(11);
+        app.insert_resource(config);
+        let frozen = roster();
+        assert!(join_fleet(app.world_mut(), frozen.clone(), 6));
+        app.world_mut()
+            .resource_mut::<Time<bevy::time::Virtual>>()
+            .pause();
+        app.world_mut()
+            .resource_mut::<crate::lobby::server::FleetManagedLobby>()
+            .set_enabled(true);
+
+        assert_eq!(leave_fleet(app.world_mut()), Ok(()));
+        assert!(!app.world().contains_resource::<FleetLockstep>());
+        assert!(app.world().resource::<FleetRoster>().is_solo());
+        assert_eq!(app.world().resource::<CommandDelay>().0, 0);
+        assert!(
+            !app.world()
+                .resource::<crate::lobby::server::FleetManagedLobby>()
+                .enabled
+        );
+        assert!(!app
+            .world()
+            .resource::<Time<bevy::time::Virtual>>()
+            .is_paused());
+
+        assert!(
+            join_fleet(app.world_mut(), frozen, 6),
+            "the new generation must not inherit the old wait-set identity"
+        );
+        assert!(app.world().contains_resource::<FleetLockstep>());
+    }
+
+    #[test]
+    fn unequal_gm_only_bootstraps_adopt_one_tick_clock_rng_and_mint_epoch() {
+        use crate::command_admission::log::PendingCommands;
+        use crate::sim_rng::{SeedSource, SimRng};
+        use crate::world_id::{IdNamespace, WorldIdMint};
+
+        let period = std::time::Duration::from_millis(20);
+        let mut apps = Vec::new();
+        let mut immediate_ids = Vec::new();
+        for (local, bootstrap_tick, bootstrap_rng) in
+            [(HostSlot(1), 17, 101), (HostSlot(2), 93, 202)]
+        {
+            let mut app = App::new();
+            app.add_plugins(bevy::time::TimePlugin);
+            app.init_resource::<PendingCommands>();
+            register_lockstep(&mut app);
+            let mut config = crate::world::config::WorldConfig::default();
+            config.global.seed = Some(77);
+            app.insert_resource(config);
+            app.insert_resource(crate::sim_tick::SimTick(bootstrap_tick));
+            app.insert_resource(SimRng::new(bootstrap_rng, SeedSource::World));
+            app.insert_resource(WorldIdMint::default());
+            let immediate = app
+                .world()
+                .resource::<WorldIdMint>()
+                .mint(IdNamespace::Entity);
+            immediate_ids.push(immediate);
+            let mut fixed = Time::<Fixed>::from_duration(period);
+            fixed.advance_to(period * u32::try_from(bootstrap_tick).unwrap());
+            app.insert_resource(fixed);
+
+            let roster = FleetRoster::with_participants(
+                Vec::new(),
+                vec![HostSlot(1), HostSlot(2)],
+                local,
+                HostSlot(1),
+            )
+            .unwrap();
+            assert!(join_fleet(app.world_mut(), roster, 6));
+            apps.push(app);
+        }
+
+        for (index, app) in apps.iter_mut().enumerate() {
+            assert_eq!(
+                app.world().resource::<crate::sim_tick::SimTick>().0,
+                FLEET_ACTIVATION_TICK
+            );
+            let fixed = app.world().resource::<Time<Fixed>>();
+            assert_eq!(fixed.timestep(), period);
+            assert_eq!(fixed.elapsed(), period);
+            assert_eq!(fixed.overstep(), std::time::Duration::ZERO);
+            let mint = app.world().resource::<WorldIdMint>();
+            assert_eq!(mint.tick(), FLEET_ACTIVATION_TICK);
+            let game_start = mint.mint(IdNamespace::Entity);
+            assert_ne!(
+                game_start, immediate_ids[index],
+                "the tick-1 fleet epoch must not reuse a live immediate tick-0 id"
+            );
+            assert_eq!(
+                app.world()
+                    .resource::<FleetLockstep>()
+                    .watermark_of(if index == 0 { HostSlot(2) } else { HostSlot(1) }),
+                Some(FLEET_ACTIVATION_TICK + 6),
+                "the first wait-set frontier is based at the shared activation epoch"
+            );
+        }
+        assert_eq!(
+            apps[0].world().resource::<SimRng>().state(),
+            apps[1].world().resource::<SimRng>().state(),
+            "browser-equivalent hosts discard their different entropy and use the authored seed"
+        );
+        assert_eq!(
+            apps[0].world().resource::<WorldIdMint>().state(),
+            apps[1].world().resource::<WorldIdMint>().state(),
+            "the same post-activation mint state produces identical GameStart ids"
+        );
+    }
+
+    #[test]
+    fn fleet_leave_refuses_at_the_start_boundary_without_clearing_live_state() {
+        use crate::command_admission::log::PendingCommands;
+
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin);
+        app.init_resource::<PendingCommands>();
+        register_lockstep(&mut app);
+        let mut config = crate::world::config::WorldConfig::default();
+        config.global.seed = Some(13);
+        app.insert_resource(config);
+        assert!(join_fleet(app.world_mut(), roster(), 6));
+        let retained = MeshFrame::Digest(DigestFrame {
+            from: HostSlot(1),
+            tick: 1,
+            digest: 13,
+        });
+        app.world_mut()
+            .resource_mut::<MeshInbox>()
+            .push(retained.clone());
+        app.world_mut().resource_mut::<MeshOutbox>().push(retained);
+        app.insert_resource(NextState::Pending(
+            crate::core::messages::GamePhase::InProgress,
+        ));
+
+        assert_eq!(
+            leave_fleet(app.world_mut()),
+            Err(FleetLeaveError::NotFreshLobby)
+        );
+        assert!(app.world().contains_resource::<FleetLockstep>());
+        assert_eq!(app.world().resource::<CommandDelay>().0, 6);
+        assert_eq!(app.world().resource::<MeshInbox>().len(), 1);
+        assert_eq!(
+            app.world().resource::<MeshOutbox>().pending_frames().len(),
+            1
+        );
+
+        app.insert_resource(NextState::<crate::core::messages::GamePhase>::Unchanged);
+        app.insert_resource(crate::server_app::GameStartEntityUuids::default());
+
+        assert_eq!(
+            leave_fleet(app.world_mut()),
+            Err(FleetLeaveError::NotFreshLobby)
+        );
+        assert!(app.world().contains_resource::<FleetLockstep>());
+        assert_eq!(app.world().resource::<MeshInbox>().len(), 1);
+        assert_eq!(
+            app.world().resource::<MeshOutbox>().pending_frames().len(),
+            1
+        );
     }
 
     #[test]
@@ -1529,99 +2157,85 @@ mod tests {
         );
     }
 
-    /// A frame that catches up several fixed steps across a checkpoint boundary
-    /// still folds AND publishes that checkpoint (issue #1116).
+    /// A participant mesh commits at most one fixed step before transport
+    /// egress, while a solo simulation retains Bevy's ordinary catch-up loop.
     ///
-    /// The digest exchange samples from inside the fixed schedule, so a
-    /// `SimTick` that jumps past a checkpoint multiple mid-frame — a browser
-    /// under load, a post-stall unpause — cannot skip it. A once-per-frame
-    /// sampler that only read the end-of-frame `SimTick` would never observe
-    /// tick 5 here, and a real divergence at exactly that tick would then go
-    /// unreported until a later checkpoint, if ever.
+    /// The oversized frame is the exact race a scheduled start exposed: without
+    /// the FixedLast overstep cap, its first step could seal the owner's grant
+    /// and four later steps could reach `apply_tick` before PostUpdate had any
+    /// chance to send the bearing TickFrame. The fractional remainder is kept
+    /// for render interpolation; only whole unstarted steps are discarded.
     #[test]
-    fn a_multi_step_frame_samples_every_checkpoint_it_crosses() {
-        use crate::command_admission::log::PendingCommands;
+    fn a_multi_participant_frame_commits_one_step_before_egress() {
         use crate::sim_tick::{register_sim_tick, SimTick};
 
-        const INTERVAL: u64 = 5;
         let period = std::time::Duration::from_millis(10);
 
-        let mut app = App::new();
-        app.add_plugins(bevy::time::TimePlugin);
-        app.init_resource::<PendingCommands>();
-        register_sim_tick(&mut app);
-        // The PRODUCTION wiring: `register_lockstep` is what places the sampler
-        // in the fixed schedule, so this guards that registration, not a stand-in.
-        register_lockstep(&mut app);
-
-        // A running two-host fleet whose peer is already known to be ready far
-        // ahead, so the barrier never withholds a step and this stays a test of
-        // the sampler rather than of the wait.
-        let roster = FleetRoster::new(
-            vec![FleetShip::new(HostSlot(1)), FleetShip::new(HostSlot(2))],
-            HostSlot(1),
-        );
-        join_fleet(app.world_mut(), roster, 0);
-        app.insert_resource(MeshAgreement::new(INTERVAL));
-        app.world_mut()
-            .resource_mut::<FleetLockstep>()
-            .observe(HostSlot(2), u64::MAX);
-        app.world_mut()
+        let mut fleet = App::new();
+        fleet.add_plugins(bevy::time::TimePlugin);
+        register_sim_tick(&mut fleet);
+        fleet.init_resource::<crate::command_admission::log::PendingCommands>();
+        register_lockstep(&mut fleet);
+        fleet.insert_resource(FleetLockstep(
+            LockstepSession::new_at(
+                HostSlot(1),
+                vec![HostSlot(1), HostSlot(2)],
+                6,
+                FLEET_ACTIVATION_TICK,
+            )
+            .unwrap(),
+        ));
+        fleet
+            .world_mut()
             .resource_mut::<Time<Fixed>>()
             .set_timestep(period);
+        // Prime Bevy's first frame, which intentionally carries zero delta.
+        fleet.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::ZERO,
+        ));
+        fleet.update();
+        fleet.world_mut().resource_mut::<MeshOutbox>().drain();
 
-        // A single fixed step per frame up to just below the checkpoint: the
-        // first update carries a zero delta and steps nothing, then four one-step
-        // frames leave `SimTick` at 4 with only tick 0 sampled.
-        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(period));
-        app.update();
-        for _ in 0..4 {
-            app.update();
-        }
+        fleet.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            period * 5 + period / 2,
+        ));
+        fleet.update();
+        assert_eq!(fleet.world().resource::<SimTick>().0, 1);
         assert_eq!(
-            app.world().resource::<SimTick>().0,
-            4,
-            "precondition: at tick 4"
+            fleet.world().resource::<Time<Fixed>>().overstep(),
+            period / 2,
+            "fractional interpolation remainder survives the whole-step cap"
         );
-        assert!(
-            app.world()
-                .resource::<MeshAgreement>()
-                .local
-                .digest_at(INTERVAL)
-                .is_none(),
-            "precondition: the checkpoint tick has not been reached yet"
-        );
-
-        // One frame worth two fixed steps: `SimTick` 4 -> 6, crossing checkpoint
-        // 5 in the MIDDLE of the frame. A sampler reading only the end-of-frame
-        // `SimTick` (6) would never see 5.
-        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(period * 2));
-        app.update();
-        assert_eq!(
-            app.world().resource::<SimTick>().0,
-            6,
-            "the frame ran two steps"
-        );
-
-        assert!(
-            app.world()
-                .resource::<MeshAgreement>()
-                .local
-                .digest_at(INTERVAL)
-                .is_some(),
-            "the mid-frame checkpoint at tick {INTERVAL} was skipped — the \
-             sampler is not folding every checkpoint the frame crosses"
-        );
-        let published = app
+        let ticks: Vec<_> = fleet
             .world()
             .resource::<MeshOutbox>()
             .pending_frames()
             .iter()
-            .any(|f| matches!(f, MeshFrame::Digest(d) if d.tick == INTERVAL));
-        assert!(
-            published,
-            "the crossed checkpoint must be PUBLISHED to the fleet, not just \
-             recorded — a peer that never hears it cannot compare against it"
+            .filter_map(|frame| match frame {
+                MeshFrame::Tick(frame) => Some(frame.tick),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ticks, vec![0], "one committed step seals one bearing frame");
+
+        let mut solo = App::new();
+        solo.add_plugins(bevy::time::TimePlugin);
+        register_sim_tick(&mut solo);
+        solo.init_resource::<crate::command_admission::log::PendingCommands>();
+        register_lockstep(&mut solo);
+        solo.world_mut()
+            .resource_mut::<Time<Fixed>>()
+            .set_timestep(period);
+        solo.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::ZERO,
+        ));
+        solo.update();
+        solo.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(period * 5));
+        solo.update();
+        assert_eq!(
+            solo.world().resource::<SimTick>().0,
+            5,
+            "a standalone simulation retains ordinary fixed-step catch-up"
         );
     }
 }

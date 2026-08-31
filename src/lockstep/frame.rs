@@ -58,6 +58,9 @@ use crate::lockstep::transfer::SnapshotChunk;
 /// fleet resolves the same recovery (issue #1120). `5` adds the host-mesh GM
 /// role and its public operator roster (issue #1289); a GM consumes no ship slot,
 /// so a revision-4 peer would otherwise silently disagree about membership.
+/// `6` added collective GM/crew start policy. `7` makes its immutable start
+/// grant carry the exact logical tick it applies on; a revision-6 peer would
+/// otherwise apply the grant on its next locally observed fixed step.
 /// Bumped rather than
 /// extended-in-place because #1114's decoder refuses a frame whose `m` it does
 /// not recognise, which is precisely the behaviour that makes a mixed-build fleet
@@ -65,7 +68,7 @@ use crate::lockstep::transfer::SnapshotChunk;
 /// silently DROPPED a slot-claim frame would keep the recovered ship on Backfill
 /// while the revision-4 hosts handed it back to the replacement — a split with no
 /// symptom but a divergence.
-pub const HOST_MESH_PROTOCOL: u32 = 5;
+pub const HOST_MESH_PROTOCOL: u32 = 7;
 
 /// One command a host admitted from its own crew, as it crosses to the fleet.
 ///
@@ -143,6 +146,11 @@ pub struct TickFrame {
     /// The commands this host admitted from its own crew since it last spoke,
     /// in its own order.
     pub commands: Vec<MeshCommand>,
+    /// One immutable fleet-wide start decision, carried only by the technical
+    /// owner's authenticated frame. Its `apply_tick` lies beyond this frame's
+    /// watermark, so receiving this frame becomes part of the same barrier that
+    /// must open before any participant can reach the decision tick.
+    pub start_grant: Option<crate::lobby::start_policy::StartGrant>,
 }
 
 /// One host's authoritative-state digest at one tick.
@@ -334,6 +342,7 @@ mod tests {
                 tick: 10,
                 ready_through: 16,
                 commands: vec![command(1, 0), command(1, 1)],
+                start_grant: None,
             }),
             MeshFrame::Digest(DigestFrame {
                 from: HostSlot(2),
@@ -381,7 +390,7 @@ mod tests {
     #[test]
     fn the_protocol_revision_is_pinned() {
         assert_eq!(
-            HOST_MESH_PROTOCOL, 5,
+            HOST_MESH_PROTOCOL, 7,
             "bumping this is a fleet-wide incompatible change: gui/host-mesh.js \
              refuses a frame whose `m` it does not know, so both halves and the \
              Vitest pin move together or a mixed fleet fails to agree a tick"

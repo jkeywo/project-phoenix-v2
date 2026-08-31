@@ -305,6 +305,7 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
                     id: "gm-1".into(),
                     name: "Morgan".into(),
                     connected: true,
+                    ready: true,
                 }],
             },
         ),
@@ -315,6 +316,7 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
                     id: "gm-1".into(),
                     name: "Morgan".into(),
                     connected: true,
+                    ready: true,
                 }],
             },
         ),
@@ -3412,6 +3414,33 @@ fn server_loading_progress_wire_format() {
 }
 
 #[test]
+fn host_lobby_payload_carries_exact_presentation_readiness_boolean() {
+    let payload = LobbyStatePayload {
+        phase: "Lobby".into(),
+        scenario_title: String::new(),
+        scenario_body: String::new(),
+        crew_count: 0,
+        max_players: 0,
+        all_stations_filled: false,
+        all_ready: false,
+        readiness: crate::lobby::start_policy::ReadinessTally::default(),
+        presentation_ready: true,
+        stations: Vec::new(),
+        spectators: Vec::new(),
+        gms: Vec::new(),
+        loading_progress: None,
+        countdown_secs: 0,
+    };
+
+    let encoded = encode_lobby_state(&payload).expect("encode host lobby state");
+    let json: serde_json::Value = serde_json::from_str(&encoded).expect("valid lobby JSON");
+    assert_eq!(
+        json.get("presentation_ready"),
+        Some(&serde_json::Value::Bool(true))
+    );
+}
+
+#[test]
 fn entity_snapshot_shield_fraction_is_present_as_a_number_on_the_wire() {
     // (#471) shield_fraction: Some(0.0..=1.0) must appear as a bare number
     // on the wire, not e.g. wrapped or stringified.
@@ -5116,8 +5145,8 @@ fn ship_client_config_station_tutorials_default_empty_when_missing() {
 fn gm_roster_decoder_canonicalises_a_bounded_full_replacement() {
     let roster = decode_gm_roster(
         r#"[
-            {"id":"gm-2","name":"","connected":false},
-            {"id":"gm-1","name":"Morgan","connected":true}
+            {"id":"gm-2","name":"","connected":false,"ready":false},
+            {"id":"gm-1","name":"Morgan","connected":true,"ready":true}
         ]"#,
     )
     .expect("valid public roster");
@@ -5138,8 +5167,8 @@ fn gm_roster_decoder_canonicalises_a_bounded_full_replacement() {
 fn gm_roster_decoder_rejects_duplicates_bounds_and_private_fields() {
     assert!(decode_gm_roster(
         r#"[
-            {"id":"gm-1","name":"One","connected":true},
-            {"id":"gm-1","name":"Two","connected":false}
+            {"id":"gm-1","name":"One","connected":true,"ready":false},
+            {"id":"gm-1","name":"Two","connected":false,"ready":false}
         ]"#
     )
     .is_none());
@@ -5150,6 +5179,7 @@ fn gm_roster_decoder_rejects_duplicates_bounds_and_private_fields() {
                 id: format!("gm-{index}"),
                 name: String::new(),
                 connected: true,
+                ready: false,
             })
             .collect::<Vec<_>>(),
     )
@@ -5158,7 +5188,7 @@ fn gm_roster_decoder_rejects_duplicates_bounds_and_private_fields() {
 
     for private_field in ["peer", "credential", "owner", "leader", "station"] {
         let raw = format!(
-            r#"[{{"id":"gm-1","name":"Morgan","connected":true,"{private_field}":"secret"}}]"#
+            r#"[{{"id":"gm-1","name":"Morgan","connected":true,"ready":false,"{private_field}":"secret"}}]"#
         );
         assert!(
             decode_gm_roster(&raw).is_none(),
@@ -5168,12 +5198,13 @@ fn gm_roster_decoder_rejects_duplicates_bounds_and_private_fields() {
 }
 
 #[test]
-fn gm_wire_rows_have_only_public_identity_name_and_presence() {
+fn gm_wire_rows_have_only_public_identity_name_presence_and_readiness() {
     let message = ServerMessage::GmRosterChanged {
         gms: vec![crate::gm_roster::GmOperator {
             id: "gm-1".into(),
             name: "Morgan".into(),
             connected: true,
+            ready: true,
         }],
     };
     let encoded = JsonCodec.encode_server(&message).unwrap();
@@ -5185,8 +5216,71 @@ fn gm_wire_rows_have_only_public_identity_name_and_presence() {
             .keys()
             .map(String::as_str)
             .collect::<std::collections::BTreeSet<_>>(),
-        ["connected", "id", "name"].into_iter().collect()
+        ["connected", "id", "name", "ready"].into_iter().collect()
     );
+}
+
+#[test]
+fn gm_roster_decoder_requires_the_exact_ready_field() {
+    assert!(decode_gm_roster(r#"[{"id":"gm-1","name":"Morgan","connected":true}]"#).is_none());
+    let roster =
+        decode_gm_roster(r#"[{"id":"gm-1","name":"Morgan","connected":true,"ready":false}]"#)
+            .unwrap();
+    assert!(!roster.operators()[0].ready);
+}
+
+#[test]
+fn start_grant_codec_enforces_exact_id_mode_and_attribution() {
+    let automatic =
+        decode_start_grant(r#"{"id":"start-1","mode":"automatic","operator_id":null}"#).unwrap();
+    assert_eq!(automatic.validate(), Ok(1));
+    assert_eq!(
+        automatic.apply_tick, 0,
+        "missing means an owner-edge proposal"
+    );
+    let scheduled = decode_start_grant(
+        r#"{"id":"start-2","mode":"forced","operator_id":"gm-1","apply_tick":42}"#,
+    )
+    .unwrap();
+    assert_eq!(scheduled.apply_tick, 42);
+    assert!(
+        decode_start_grant(r#"{"id":"start-3","mode":"automatic","operator_id":"gm-1"}"#).is_none()
+    );
+    assert!(decode_start_grant(r#"{"id":"start-4","mode":"forced","operator_id":null}"#).is_none());
+    assert!(decode_start_grant(
+        r#"{"id":"start-5","mode":"forced","operator_id":"gm-1","owner":true}"#
+    )
+    .is_none());
+    assert!(decode_start_grant(
+        r#"{"id":"start-6","mode":"automatic","operator_id":null,"apply_tick":9007199254740992}"#
+    )
+    .is_none());
+}
+
+#[test]
+fn fleet_join_status_codec_is_exact_and_generation_stamped() {
+    let encoded = encode_fleet_join_status(&crate::lockstep::FleetJoinStatus {
+        generation: 17,
+        status: crate::lockstep::FleetJoinStatusKind::Refused,
+        reason: Some("fleet-leave-not-lobby".into()),
+    })
+    .unwrap();
+    let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(
+        value
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>(),
+        ["generation", "reason", "status"]
+            .into_iter()
+            .map(str::to_string)
+            .collect()
+    );
+    assert_eq!(value["generation"], 17);
+    assert_eq!(value["status"], "refused");
+    assert_eq!(value["reason"], "fleet-leave-not-lobby");
 }
 
 #[test]

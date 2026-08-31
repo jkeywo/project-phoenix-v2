@@ -5308,6 +5308,15 @@ pub struct LobbyStatePayload {
     /// as the launch gate in the per-player Ready flow).
     #[serde(default)]
     pub all_ready: bool,
+    /// This ship host's connected non-spectator crew and ready subset. The
+    /// browser mesh combines one tally per ship; `all_ready` remains the local
+    /// backwards-compatible convenience projection.
+    #[serde(default)]
+    pub readiness: crate::lobby::start_policy::ReadinessTally,
+    /// Whether this host has finished its local render/presentation preload.
+    /// Fleet coordination combines this with the other hosts' values before
+    /// issuing a start grant; it is presentation state, not crew readiness.
+    pub presentation_ready: bool,
     pub stations: Vec<StationPayload>,
     pub spectators: Vec<String>,
     /// Separate equal GM operators. They consume neither a Station nor one of

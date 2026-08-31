@@ -26,7 +26,7 @@ use super::*;
 /// systems registered alongside it (`StarRenderPlugin`, `PlanetRenderPlugin`,
 /// `render_spawned_entities` and friends, the viewscreen radar, the asset
 /// preloader) need meshes, materials and a `GameCamera`. Callers that run
-/// without a `RenderPlugin` — the headless binary, and eventually the WASM
+/// without a `RenderPlugin` — the headless binary and the WASM
 /// automation branch in `bridge.rs` — set `render: false` to skip them.
 #[derive(Clone, Copy, Debug)]
 pub struct SimPluginOptions {
@@ -663,7 +663,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         // `server` on (headless = default + headless).
         #[cfg(feature = "server")]
         app.declare_state::<crate::server::asset_preload::AssetPreloadResource>(
-            StateClass::DeferredFold,
+            StateClass::Presentation,
             "asset-loading-state",
         );
         app.declare_state::<crate::ship::combat_activity::RecentCombatActivity>(

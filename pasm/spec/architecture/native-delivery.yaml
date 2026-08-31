@@ -326,6 +326,54 @@ entities:
         ]
       tests: [cargo test, tests/native_bridge_displays.rs]
 
+  - component: bridge-layout-law
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Bridge Layout Law
+      summary: The runtime transition law every path that rearranges a bridge obeys (issue #1327) — the lobby's monitor buttons and per-station screen rows, a saved per-ship-class layout being pre-applied, and a hand-authored --profile. Exactly one viewscreen; a station console never on the viewscreen's monitor; at most two consoles per screen, split deterministically side by side. Pure and Bevy-free - apply(state, action) answers a NEW layout or a typed refusal, per-monitor occupancy and per-station eligibility are reported so no UI re-derives a rule, and the whole arrangement converts to and from the validated display profile. Where bridge-display-profile judges a FILE, this judges a TRANSITION.
+      rationale:
+        - "[ai] The layout keys stations by StationId, never by participant label. A console the lobby opens on a wall monitor is claimable by anyone — crew symmetry is not decided by where a screen is — so at layout time there IS no participant to name; what is being placed is the ship's own authoring key for a claimable station. The id survives persistence because PaneSlot carries an optional station field beside its label, as a SEPARATE field rather than an overloaded label: label keeps its one meaning (the participant name open_pane_for_name resolves and DuplicatePaneLabel governs), and a pane with no station reads back as exactly the --pane pane it is, instead of being minted into a station whose id happens to be somebody's name. Skipped when absent, so every profile authored before #1327 round-trips byte-identically."
+        - "[ai] BridgeProfile::validate gains MissingViewscreen — a profile that assigns monitors but names no viewscreen. That is the one station-over-viewscreen path a hand-authored profile still had: apply_bridge_profile puts the viewscreen role on the process's PRIMARY window, so with no viewscreen entry that window is never placed and stays wherever the OS opened it, on a monitor a station entry may also name, whereupon a borderless-fullscreen console covers the shared view. Gated on there being displays at all, because a touch/media-only profile opens no Station window and so has nothing to cover the viewscreen with — the shape the #1126 kit ships, and the shape --pane's own profile-less tiling path relies on."
+        - "[ai] A station on the viewscreen's monitor is deliberately NOT a profile refusal: a monitor appears at most once in a profile (DuplicateId), so inside one file it is already structurally impossible. The overlap is a property of a runtime TRANSITION and is refused there, as LayoutRefusal::StationOnViewscreenMonitor. Two refusals for one rule, in two places, is how they start disagreeing."
+        - "[ai] Moving the viewscreen onto a monitor that is holding consoles is REFUSED (ViewscreenMonitorHoldsStations), not resolved by evicting them. Silent eviction is the same failure as a silently re-homed missing display one slice up: an arrangement the operator did not ask for. Unassigning first is two deliberate steps, and the refusal message says so."
+        - "[ai] There is no separate move action. Assigning a station that is already seated IS the move — the PRD's press a different screen button — so the lobby presses one button either way and cannot pick the wrong verb. Capacity is judged AFTER the already-there case, so re-pressing a full monitor's own button for a console already on it is a no-op rather than a MonitorFull refusal counted against occupants that include itself."
+        - "[ai] The viewscreen is a required field, not an Option. The lobby is DRAWN on the viewscreen, so a bridge always has one and a layout can only ever move it. Making it total means every value of BridgeLayout is a lawful bridge, to_profile can never emit the shape MissingViewscreen exists to catch, and the one-monitor case falls out for free — the only monitor is the viewscreen, so every station's row is excluded is-viewscreen and no console opens natively."
+        - "[ai] The model reports WHY a monitor is greyed (is-viewscreen / full) rather than leaving the UI to re-derive it, and marks the station's own monitor Selected rather than Full — a station is one of its own occupants, so full there would tell the operator the opposite of the truth. A screen-button row is a map over eligibility() and contains no rule of its own."
+        - "[ai] adopt_profile places every seat through apply, so a profile cannot smuggle in an arrangement the law forbids: a monitor that is gone, a station off this ship's roster, a monitor that is now the viewscreen, a third console — each meets the same rule a button press would, and is reported as a LayoutAdoption rather than silently dropped. Adoption REPLACES the seating rather than merging into it (a saved layout, or a --profile taking precedence over one, is this arrangement rather than these additions), and write_displays_into leaves the profile's touch and media assignments alone, because a bridge profile is one file with more than displays in it."
+        - "[ai] MAX_STATIONS_PER_MONITOR is defined AS MAX_PANES_PER_STATION rather than as a second 2: a station the layout seats becomes a pane on that monitor's Station surface, so the runtime precondition and the author-time density rule are one legibility bound seen from two ends, with one place to change it. The split is a constant (side by side) rather than a per-monitor choice, because the lobby offers no control for it and a setting nothing sets is a way for two paths to disagree."
+    architecture:
+      kind: policy
+      authority: non-authoritative
+      coordinates: [bridge-display-profile, native-station-pane, native-delivery-host]
+      runs_in: [native-host-runtime]
+    implementation:
+      status: declared
+      paths:
+        [
+          src/native_host/bridge_layout.rs,
+          src/native_host/bridge_layout_tests.rs,
+          src/native_host/bridge_profile.rs,
+          docs/acceptance/1124-input.md,
+          docs/acceptance/1128-accessibility.md,
+        ]
+      symbols:
+        [
+          BridgeLayout,
+          LayoutAction,
+          LayoutRefusal,
+          LayoutAdoption,
+          MonitorOccupancy,
+          StationEligibility,
+          StationMonitorChoice,
+          MonitorChoice,
+          ExclusionReason,
+          MAX_STATIONS_PER_MONITOR,
+          LAYOUT_SPLIT,
+          PaneSlot,
+        ]
+      tests: [cargo test]
+
   - component: bridge-media-profile
     core:
       status: implemented

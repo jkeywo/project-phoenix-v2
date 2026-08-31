@@ -284,10 +284,11 @@ describe('set_view', () => {
 });
 
 describe('set_red_alert', () => {
-  it('sends ControlSystem with the explicit desired active=true state', () => {
+  it('sends correlated ControlSystem with the explicit desired active=true state', () => {
     const send = mkSend();
-    ACTION_MAP.set_red_alert({ action: 'set_red_alert', active: true }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
+    ACTION_MAP.set_red_alert({ action: 'set_red_alert', active: true, correlation: 'alert-1' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'alert-1',
       target: 'red-alert',
       payload: { type: 'SetRedAlert', data: { active: true } },
     });
@@ -296,8 +297,9 @@ describe('set_red_alert', () => {
 
   it('sends the explicit desired active=false state', () => {
     const send = mkSend();
-    ACTION_MAP.set_red_alert({ action: 'set_red_alert', active: false }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
+    ACTION_MAP.set_red_alert({ action: 'set_red_alert', active: false, correlation: 'alert-2' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'alert-2',
       target: 'red-alert',
       payload: { type: 'SetRedAlert', data: { active: false } },
     });
@@ -305,11 +307,18 @@ describe('set_red_alert', () => {
 
   it('coerces a missing active flag to false (never inverts)', () => {
     const send = mkSend();
-    ACTION_MAP.set_red_alert({ action: 'set_red_alert' }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
+    ACTION_MAP.set_red_alert({ action: 'set_red_alert', correlation: 'alert-3' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'alert-3',
       target: 'red-alert',
       payload: { type: 'SetRedAlert', data: { active: false } },
     });
+  });
+
+  it('does not create an untracked Red Alert command without a correlation', () => {
+    const send = mkSend();
+    ACTION_MAP.set_red_alert({ action: 'set_red_alert', active: true }, send);
+    expect(send).not.toHaveBeenCalled();
   });
 });
 
@@ -971,8 +980,9 @@ describe('set_objective_priority', () => {
 describe('dispatchConsoleAction', () => {
   it('routes a known action to its handler', () => {
     const send = mkSend();
-    dispatchConsoleAction({ action: 'set_red_alert', active: true }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
+    dispatchConsoleAction({ action: 'set_red_alert', active: true, correlation: 'alert-dispatch' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'alert-dispatch',
       target: 'red-alert',
       payload: { type: 'SetRedAlert', data: { active: true } },
     });

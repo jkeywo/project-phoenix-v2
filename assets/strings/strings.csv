@@ -4,6 +4,11 @@ semantic_action.captain.red_alert.label,Captain semantic action display name,[Re
 semantic_action.captain.red_alert.accessibility,Captain semantic action accessible description,[Raise or stand down Red Alert from the Captain console.]
 semantic_action.captain.weapons_hold.label,Captain semantic action display name,[Weapons Hold]
 semantic_action.captain.weapons_hold.accessibility,Captain semantic action accessible description,[Hold or release all weapons fire from the Captain console.]
+action_feedback.pressed,Shared semantic action live status immediately after activation,[Pressed]
+action_feedback.pending,Shared semantic action live status while authoritative work is in flight,[Pending]
+action_feedback.applied,Shared semantic action live status after the authoritative consumer applies the request,[Applied]
+action_feedback.refused,Shared semantic action live status after authority refuses the request,[Refused]
+action_feedback.timed_out,Shared semantic action live status after no authoritative response arrives,[Timed out]
 input.modifier.control,Keyboard binding display name for the Control modifier,Ctrl
 input.modifier.shift,Keyboard binding display name for the Shift modifier,Shift
 input.modifier.alt,Keyboard binding display name for the Alt modifier,Alt

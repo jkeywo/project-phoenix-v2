@@ -741,6 +741,7 @@ mod tests {
             target: SystemId(target.into()),
             payload: SystemControlPayload::SetRedAlert { active: true },
             response_token: Some(token.into()),
+            feedback_correlation: None,
         }
     }
 

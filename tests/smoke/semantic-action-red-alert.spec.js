@@ -29,6 +29,8 @@ test('remapped Captain Red Alert binding reaches the authoritative command path'
 
   const alertButton = captain.frameLocator('#captain-iframe')
     .locator('ph-red-alert').locator('#alert-btn');
+  const alertFeedback = captain.frameLocator('#captain-iframe')
+    .locator('ph-red-alert').locator('#feedback-status');
   await expect(alertButton).toBeEnabled();
   await expect(alertButton).toHaveText(ts('component.red_alert.standby'));
 
@@ -146,6 +148,7 @@ test('remapped Captain Red Alert binding reaches the authoritative command path'
     timeout: 10_000,
   });
   await expect(alertButton).toHaveClass(/active/);
+  await expect(alertFeedback).toHaveText(ts('action_feedback.applied'));
 
   await captain.close();
   await serverPage.close();

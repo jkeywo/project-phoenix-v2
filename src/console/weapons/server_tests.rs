@@ -8536,6 +8536,7 @@ fn handle_set_target_rejects_a_vertically_unreachable_operate_target() {
                 uuid: derelict_uuid,
             },
             response_token: None,
+            feedback_correlation: None,
         });
 
     app.world_mut()
@@ -8578,6 +8579,7 @@ fn handle_set_target_retains_the_exact_coupled_operate_target_beyond_all_reach()
                 uuid: derelict_uuid.clone(),
             },
             response_token: None,
+            feedback_correlation: None,
         });
 
     app.world_mut()
@@ -8622,6 +8624,7 @@ fn handle_set_target_rejects_stale_tractor_coupling_for_field_repair() {
                 uuid: derelict_uuid,
             },
             response_token: None,
+            feedback_correlation: None,
         });
 
     app.world_mut()
@@ -10553,6 +10556,7 @@ fn handle_fire_torpedo_launches_from_admitted_command() {
                 target_uuid: Some("target-uuid".into()),
             },
             response_token: None,
+            feedback_correlation: None,
         });
 
     app.world_mut()
@@ -10642,6 +10646,7 @@ fn handle_fire_torpedo_patterned_launch_resolves_barrel_origin() {
                 target: SystemId("torpedo-tube-fore-centre".into()),
                 payload: SystemControlPayload::FireTorpedo { target_uuid: None },
                 response_token: None,
+                feedback_correlation: None,
             }]),
             crate::server_app::ShipSystemBlackboards::default(),
             bevy::prelude::Transform::default(),
@@ -11714,6 +11719,7 @@ fn conservation_fixture(
                 target_uuid: Some("target-uuid".into()),
             },
             response_token: None,
+            feedback_correlation: None,
         });
     (app, ship)
 }
@@ -14499,6 +14505,7 @@ fn handle_fire_blaster_consumes_admitted_charge_start() {
         target: crate::ship::system_registry::blaster_bank_system_id("fore").unwrap(),
         payload: SystemControlPayload::ChargeBlasterStart,
         response_token: None,
+        feedback_correlation: None,
     });
     let npc_entity = app
         .world_mut()
@@ -14605,6 +14612,7 @@ fn handle_fire_blaster_accepts_an_underscore_authored_bank_id() {
         target: crate::ship::system_registry::blaster_bank_system_id("fore_port").unwrap(),
         payload: SystemControlPayload::ChargeBlasterStart,
         response_token: None,
+        feedback_correlation: None,
     });
     let npc_entity = app
         .world_mut()
@@ -15085,6 +15093,7 @@ fn phaser_human_admitted_fire_matches_ai_policy_output() {
         target: crate::ship::system_registry::phaser_bank_system_id("fore").unwrap(),
         payload: crate::core::messages::SystemControlPayload::FirePhaser,
         response_token: None,
+        feedback_correlation: None,
     });
     let npc = app
         .world_mut()
@@ -15734,6 +15743,7 @@ fn spawn_player_hull_firing_all_banks_at(
             target: bank_system,
             payload: SystemControlPayload::FirePhaser,
             response_token: None,
+            feedback_correlation: None,
         });
     }
 

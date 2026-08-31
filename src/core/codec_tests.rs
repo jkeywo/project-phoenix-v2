@@ -198,6 +198,14 @@ fn client_message_table() -> Vec<(ClientMessageDiscriminants, ClientMessage)> {
             },
         ),
         (
+            ClientMessageDiscriminants::ControlSystemCorrelated,
+            ClientMessage::ControlSystemCorrelated {
+                correlation: ActionCorrelationId::new("feedback-1").unwrap(),
+                target: SystemId("red-alert".into()),
+                payload: SystemControlPayload::SetRedAlert { active: true },
+            },
+        ),
+        (
             ClientMessageDiscriminants::ControlSystem,
             ClientMessage::ControlSystem {
                 target: crate::ship::system_registry::helm_steering_system_id(),
@@ -332,6 +340,13 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
             ServerMessage::AfkChanged {
                 token: "tok".into(),
                 afk: true,
+            },
+        ),
+        (
+            ServerMessageDiscriminants::ActionFeedback,
+            ServerMessage::ActionFeedback {
+                correlation: ActionCorrelationId::new("feedback-1").unwrap(),
+                outcome: ActionFeedbackOutcome::Applied,
             },
         ),
         (
@@ -1912,6 +1927,46 @@ fn set_red_alert_control_system_round_trips() {
     };
     assert_client_roundtrip(&JsonCodec, off.clone());
     assert_client_roundtrip(&PrettyJsonCodec, off);
+}
+
+/// The correlated Red Alert tracer has its own additive envelope.  The
+/// correlation is beside target/payload — never inside simulation semantics.
+#[test]
+fn correlated_red_alert_and_action_feedback_round_trip() {
+    let correlation = ActionCorrelationId::new("red-alert-4f4f").unwrap();
+    let request = ClientMessage::ControlSystemCorrelated {
+        correlation: correlation.clone(),
+        target: SystemId("red-alert".into()),
+        payload: SystemControlPayload::SetRedAlert { active: true },
+    };
+    let encoded = JsonCodec.encode_client(&request).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystemCorrelated","data":{"correlation":"red-alert-4f4f","target":"red-alert","payload":{"type":"SetRedAlert","data":{"active":true}}}}"#,
+    );
+    assert_client_roundtrip(&JsonCodec, request);
+
+    let response = ServerMessage::ActionFeedback {
+        correlation,
+        outcome: ActionFeedbackOutcome::Refused,
+    };
+    assert_eq!(
+        JsonCodec.encode_server(&response).unwrap(),
+        r#"{"type":"ActionFeedback","data":{"correlation":"red-alert-4f4f","outcome":"Refused"}}"#,
+    );
+    assert_server_roundtrip(&JsonCodec, response);
+}
+
+#[test]
+fn action_correlation_rejects_empty_invisible_and_oversized_values() {
+    assert!(ActionCorrelationId::new("").is_err());
+    assert!(ActionCorrelationId::new("contains space").is_err());
+    assert!(ActionCorrelationId::new("x".repeat(MAX_ACTION_CORRELATION_BYTES + 1)).is_err());
+    assert!(JsonCodec
+        .decode_client(
+            r#"{"type":"ControlSystemCorrelated","data":{"correlation":"","target":"red-alert","payload":{"type":"SetRedAlert","data":{"active":true}}}}"#,
+        )
+        .is_err());
 }
 
 /// SetRepairPriority command round-trip (issue #739).

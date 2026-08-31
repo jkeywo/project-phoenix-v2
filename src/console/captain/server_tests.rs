@@ -1,6 +1,9 @@
 use super::*;
-use crate::core::messages::{CameraView, ClientMessage};
-use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Sessions};
+use crate::core::messages::{
+    ActionCorrelationId, ActionFeedbackOutcome, CameraView, ClientMessage, DeliveryClass,
+    ServerMessage,
+};
+use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Sessions, Target};
 use crate::server_app::LocalShip;
 use crate::server_app::Ship;
 use crate::ship::control_source::ControlSource;
@@ -122,6 +125,33 @@ fn push(app: &mut App, token: &str, msg: ClientMessage) {
             token: token.into(),
             msg,
         });
+}
+
+fn correlated_red_alert(correlation: &str, active: bool) -> ClientMessage {
+    ClientMessage::ControlSystemCorrelated {
+        correlation: ActionCorrelationId::new(correlation).expect("valid test correlation"),
+        target: crate::ship::system_registry::red_alert_system_id(),
+        payload: SystemControlPayload::SetRedAlert { active },
+    }
+}
+
+fn has_feedback(
+    messages: &[OutboundMessage],
+    token: &str,
+    correlation: &str,
+    outcome: ActionFeedbackOutcome,
+) -> bool {
+    messages.iter().any(|message| {
+        message.target == Target::Token(token.to_string())
+            && message.delivery == DeliveryClass::Reliable
+            && matches!(
+                &message.msg,
+                ServerMessage::ActionFeedback {
+                    correlation: actual,
+                    outcome: actual_outcome,
+                } if actual.as_str() == correlation && *actual_outcome == outcome
+            )
+    })
 }
 
 fn tick(app: &mut App) -> Vec<OutboundMessage> {
@@ -250,6 +280,122 @@ fn captain_set_red_alert_works() {
     );
     tick(&mut app);
     assert!(get_red_alert(&mut app));
+}
+
+#[test]
+fn correlated_red_alert_is_applied_by_the_authoritative_consumer() {
+    let mut app = test_app();
+    start_game(&mut app);
+
+    push(
+        &mut app,
+        "captain",
+        correlated_red_alert("captain-accepted", true),
+    );
+    let messages = tick(&mut app);
+
+    assert!(get_red_alert(&mut app));
+    assert!(has_feedback(
+        &messages,
+        "captain",
+        "captain-accepted",
+        ActionFeedbackOutcome::Applied,
+    ));
+}
+
+#[test]
+fn correlated_red_alert_idempotent_success_is_still_applied() {
+    let mut app = test_app();
+    start_game(&mut app);
+    set_red_alert(&mut app, true);
+
+    push(
+        &mut app,
+        "captain",
+        correlated_red_alert("captain-idempotent", true),
+    );
+    let messages = tick(&mut app);
+
+    assert!(get_red_alert(&mut app));
+    assert!(has_feedback(
+        &messages,
+        "captain",
+        "captain-idempotent",
+        ActionFeedbackOutcome::Applied,
+    ));
+}
+
+#[test]
+fn correlated_red_alert_keeps_its_identity_across_command_delay() {
+    let mut app = test_app();
+    crate::sim_tick::register_sim_tick(&mut app);
+    start_game(&mut app);
+    app.insert_resource(crate::command_admission::CommandDelay(2));
+
+    push(
+        &mut app,
+        "captain",
+        correlated_red_alert("captain-delayed", true),
+    );
+    let accepted = tick(&mut app);
+    assert!(!get_red_alert(&mut app));
+    assert!(!has_feedback(
+        &accepted,
+        "captain",
+        "captain-delayed",
+        ActionFeedbackOutcome::Applied,
+    ));
+
+    let waiting = tick(&mut app);
+    assert!(!get_red_alert(&mut app));
+    assert!(!has_feedback(
+        &waiting,
+        "captain",
+        "captain-delayed",
+        ActionFeedbackOutcome::Applied,
+    ));
+
+    let applied = tick(&mut app);
+    assert!(get_red_alert(&mut app));
+    assert!(has_feedback(
+        &applied,
+        "captain",
+        "captain-delayed",
+        ActionFeedbackOutcome::Applied,
+    ));
+}
+
+#[test]
+fn correlated_red_alert_from_non_captain_is_refused_by_admission() {
+    let mut app = test_app();
+    start_game(&mut app);
+    push(
+        &mut app,
+        "crew",
+        ClientMessage::Identify {
+            token: "crew".into(),
+            name: "Bob".into(),
+        },
+    );
+    tick(&mut app);
+
+    push(&mut app, "crew", correlated_red_alert("crew-refused", true));
+    let messages = tick(&mut app);
+
+    assert!(!get_red_alert(&mut app));
+    assert!(has_feedback(
+        &messages,
+        "crew",
+        "crew-refused",
+        ActionFeedbackOutcome::Refused,
+    ));
+    assert!(!messages.iter().any(|message| matches!(
+        &message.msg,
+        ServerMessage::ActionFeedback {
+            outcome: ActionFeedbackOutcome::Applied,
+            ..
+        }
+    )));
 }
 
 /// Issue #1041 AC1: the hold is a state the captain sets, LAYERED on the

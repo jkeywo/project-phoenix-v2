@@ -6623,6 +6623,7 @@ fn admit(app: &mut App, ship: Entity, payload: SystemControlPayload) {
         target: SystemId(crate::ship::system_registry::GOD_MODE_SYSTEM_ID.into()),
         payload,
         response_token: None,
+        feedback_correlation: None,
     });
 }
 

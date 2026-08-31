@@ -93,6 +93,10 @@
        the issuing console's surface is next handed fresh state — both stamps on
        THIS device, so no cross-clock arithmetic is involved. -->
   <script type="module" src="gui/console-latency.js"></script>
+  <!-- Correlated Pressed/Pending/Applied-or-refused presentation.  This owns
+       only client-local lifecycle state and exact iframe routing; the normal
+       Captain blackboard remains the sole Red Alert gameplay state. -->
+  <script type="module" src="gui/action-feedback.js"></script>
   <script type="module" src="gui/action-map.js"></script>
   <!-- Parent-realm semantic action metadata + in-memory binding profile. The
        active console iframe owns its own registry instance and receives this
@@ -1585,6 +1589,7 @@
     /// module instances are separate realms, so updates are explicitly copied
     /// through __updateSemanticActionBindings instead of relying on a singleton.
     let semanticActionRegistry = null;
+    let _actionFeedbackRouter = null;
     let pendingMidGameClaim = false;
     // #771 AC3: a mid-round station release is a two-step arm→confirm (imitates
     // ph-comms-current-message). First click arms + swaps the button to a
@@ -2578,6 +2583,27 @@
         ? window.iframeIdFor(name) : (name + '-iframe');
     }
 
+    function actionFeedbackRouter() {
+      if (_actionFeedbackRouter) return _actionFeedbackRouter;
+      if (typeof window.ActionFeedbackRouter !== 'function') return null;
+      _actionFeedbackRouter = new window.ActionFeedbackRouter({
+        deliver: (value) => {
+          const iframe = $(consoleIframeId(value.console));
+          try {
+            const update = iframe && iframe.contentWindow
+              && iframe.contentWindow.__updateActionFeedback;
+            if (typeof update === 'function') update(value);
+          } catch (_) { /* cross-origin/not-yet-loaded: the terminal state is safely dropped */ }
+          const meter = latencyMeter();
+          if (meter) {
+            if (value.state === 'TimedOut') meter.noteCorrelatedTimeout(value.correlation);
+            else meter.noteCorrelatedAck(value.correlation);
+          }
+        },
+      });
+      return _actionFeedbackRouter;
+    }
+
     // ── Console input-to-feedback latency (issue #1169, PRD #1144) ───────────
     // The phone measures its OWN round trip: `console-core.sendAction` stamps
     // the input event inside the console document, the dispatch below stamps the
@@ -2924,7 +2950,20 @@
         // outbound `ClientMessage` from named fields, so it never crosses the
         // wire.
         const meter = latencyMeter();
-        if (meter) meter.noteDispatch(action.action, action.console || activeConsole, action.__input_ms);
+        const feedback = actionFeedbackRouter();
+        const correlated = feedback && feedback.track({
+          correlation: action.correlation,
+          actionId: action.semantic_action,
+          console: action.console || activeConsole,
+          inputMs: action.__input_ms,
+        });
+        if (meter) {
+          if (correlated) {
+            meter.noteCorrelatedDispatch(action.correlation, action.action, action.__input_ms);
+          } else {
+            meter.noteDispatch(action.action, action.console || activeConsole, action.__input_ms);
+          }
+        }
         // Optimistic local patches (weaponsTarget / sensorsTarget) land on the
         // one sim store; simState.weaponsTarget has a setter for this path.
         window.dispatchConsoleAction(action, send, (patch) => {
@@ -2989,6 +3028,15 @@
       // #1023 user story 15). Any message counts: the point is that the link
       // is carrying traffic, not which traffic.
       if (msg && !linkHasData) { linkHasData = true; scheduleRender(); }
+      // Targeted authoritative feedback settles only the exact originating
+      // correlation.  It is presentation/measurement, not simulation state,
+      // so it bypasses the reducers and never mutates Red Alert optimistically.
+      if (msg && msg.type === 'ActionFeedback') {
+        const router = actionFeedbackRouter();
+        if (router && msg.data) router.resolve(msg.data);
+        maybeReportConsoleLatency();
+        return;
+      }
       // JS state modules (issue #460) — every inbound ServerMessage is applied
       // to the pure state modules first. window.simState is the ONLY sim
       // store (issue #819): the console builders read it directly. Guards

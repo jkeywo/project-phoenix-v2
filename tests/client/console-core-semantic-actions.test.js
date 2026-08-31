@@ -24,6 +24,7 @@ describe('console-core semantic action runtime', () => {
     runtime.disposeSemanticActions();
     delete window.__sendAction;
     delete window.__updateConsole;
+    delete window.__updateActionFeedback;
     delete window.__updateSemanticActionBindings;
     delete window.activateSemanticAction;
     delete window.sendAction;

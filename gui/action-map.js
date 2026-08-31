@@ -235,7 +235,9 @@ export const ACTION_MAP = Object.freeze({
    *  duplicated, or retried command is idempotent (the host assigns, it does
    *  not invert). */
   set_red_alert: (a, send) => {
-    send('ControlSystem', {
+    if (typeof a.correlation !== 'string' || !a.correlation) return;
+    send('ControlSystemCorrelated', {
+      correlation: a.correlation,
       target: 'red-alert',
       payload: { type: 'SetRedAlert', data: { active: !!a.active } },
     });

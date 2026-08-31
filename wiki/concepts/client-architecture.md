@@ -1,9 +1,9 @@
 ---
 title: Client Architecture
 type: concept
-tags: [client, javascript, iframe, console, console-family, state, accessibility, keyboard, vitest]
-sources: [client.html, server.html, gui/mount-plan.js, gui/hero-bar.js, gui/reducer-result.js, gui/lobby-state.js, gui/sim-state.js, gui/comms-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/semantic-action-registry.js, gui/stations/captain-actions.js, gui/action-map.js, gui/console-core.js, gui/iframe-bridge.js, gui/client-router.js, gui/coordination-popup.js, gui/accessibility-profile.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
-updated: 2026-08-30
+tags: [client, javascript, iframe, console, console-family, state, accessibility, keyboard, feedback, vitest]
+sources: [client.html, server.html, gui/mount-plan.js, gui/hero-bar.js, gui/reducer-result.js, gui/lobby-state.js, gui/sim-state.js, gui/comms-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/stations/captain-actions.js, gui/action-map.js, gui/console-core.js, gui/console-latency.js, gui/iframe-bridge.js, gui/client-router.js, gui/coordination-popup.js, gui/accessibility-profile.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/command_admission/mod.rs, src/console/captain/server.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
+updated: 2026-08-31
 ---
 
 ## Summary
@@ -66,6 +66,21 @@ iframe then posts its `console_action`, and `gui/action-map.js` remains the
 table-driven dispatcher mapping `action.action` values to `ClientMessage`s
 (mostly `ControlSystem { target, payload }`) via `send(type, data?)`.
 
+Red Alert is the first action to opt into authoritative action feedback. Its
+registry activation mints one bounded opaque correlation and records the
+same-device epoch timestamp at `Pressed`, then moves presentation to `Pending`
+only after its adapter handles the activation. The action map sends a
+`ControlSystemCorrelated` envelope; the host keeps the correlation out of the
+payload, command log, mesh and simulation state, and replies reliably to the
+originating session with `ActionFeedback::Applied` only after the due Captain
+consumer runs, or `Refused` when admission rejects it. `client.html` owns the
+bounded correlation-to-iframe timeout router. It settles latency and forwards
+the terminal result only for that exact correlation; ordinary blackboard pushes
+cannot acknowledge it. The iframe's one lifecycle transition supplies the
+visible/live status, semantic cue and optional vibration intent. Pending never
+changes Red Alert's active styling: only the normal authoritative Captain
+blackboard does. Weapons Hold remains on the uncorrelated legacy envelope.
+
 Keyboard binding identity is `KeyboardEvent.code` plus all four modifiers.
 Registry conflicts exist only where action context arrays intersect, including
 two slots on the same action. Settings asks the parent registry to propose a
@@ -90,6 +105,7 @@ binding choices add no Station or command authority.
 | `console-state.js` | Pure view-model builders. One family registry contains all builders, including Command, Tractor and Umbilical; flat and composed consoles carry actual owned `SystemId`s and projected families, while typed blackboard discriminants select semantic data independently of id spelling. |
 | `console-payload.js` | Metadata-driven flat/keyed normalization plus `familyView`: mirrors flat views only under actual projected ids and selects composite views by Console Family, with no inverse id census. |
 | `action-map.js` | Table-driven `console_action` → `ClientMessage` dispatch |
+| `action-feedback.js` | Pure bounded Pressed → Pending → Applied/Refused/TimedOut presentation lifecycle, exact parent-to-originating-iframe router, and the shared live-status/semantic-cue/vibration transition |
 | `semantic-action-registry.js`, `stations/captain-actions.js` | Non-authoritative context/input identity, exactly two binding slots, reserved-chord policy, overlap-only conflict replacement and reset operations, plus the real Captain Red Alert and Weapons Hold adapters above `action-map.js` |
 | `iframe-bridge.js` | `push()` / `wireLoad()` state-push into console iframes (ADR-0001 §2) |
 | `content-switcher.js` | Section visibility over the ship's mounted stations; one human directly holds one station |

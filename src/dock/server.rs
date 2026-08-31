@@ -914,6 +914,7 @@ mod tests {
                         target: SystemId("berthing-clamps".into()),
                         payload: SystemControlPayload::Dock,
                         response_token: None,
+                        feedback_correlation: None,
                     },
                 ]),
             ))

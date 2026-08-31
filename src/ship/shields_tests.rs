@@ -1166,6 +1166,7 @@ fn handle_set_shield_arc_focus_flips_focus() {
             target: arc_sid.clone(),
             payload: SystemControlPayload::SetShieldArcFocus { focused: true },
             response_token: None,
+            feedback_correlation: None,
         });
     tick(&mut app);
     let shields = app.world().entity(se).get::<ShipShields>().unwrap();
@@ -1194,6 +1195,7 @@ fn handle_set_shield_arc_focus_clears_focus_when_target_matches_current() {
             target: arc_sid,
             payload: SystemControlPayload::SetShieldArcFocus { focused: false },
             response_token: None,
+            feedback_correlation: None,
         });
     tick(&mut app);
     let shields = app.world().entity(se).get::<ShipShields>().unwrap();

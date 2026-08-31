@@ -1,7 +1,10 @@
 import { test, expect } from './fixtures';
 import { ts } from './strings';
 
-const CONSOLE_URL = '/gui/battleship/captain.html';
+// Exercise the pure-client bundle built by scripts/build-client.mjs. The
+// sibling /gui path belongs to the separately-built Trunk host bundle and may
+// intentionally be absent/stale when this focused client smoke runs alone.
+const CONSOLE_URL = '/client/gui/battleship/captain.html';
 
 // The battleship's Captain station does not own a sensors system (Sensors is
 // its own dedicated station), so buildCaptainConsoleState — and the state
@@ -88,6 +91,10 @@ test('captain console: camera-select and red alert call __sendAction with correc
     expect(Number.isFinite(envelope.__input_ms)).toBe(true);
     delete envelope.__input_ms;
   }
+  expect(sent[3].correlation).toMatch(/^[\x21-\x7e]{1,64}$/);
+  expect(sent[3].semantic_action).toBe('captain.red-alert');
+  delete sent[3].correlation;
+  delete sent[3].semantic_action;
   expect(sent).toEqual([
     { action: 'set_view', console: 'captain', direction: 'Port' },
     { action: 'set_view', console: 'captain', direction: 'Starboard' },
@@ -95,6 +102,67 @@ test('captain console: camera-select and red alert call __sendAction with correc
     { action: 'set_red_alert', console: 'captain', active: true },
     { action: 'set_weapons_hold', console: 'captain', held: true },
   ]);
+});
+
+test('captain console: Red Alert feedback is correlated and never paints gameplay optimistically', async ({ page }) => {
+  test.setTimeout(20_000);
+  await page.goto(CONSOLE_URL);
+
+  await page.evaluate(() => {
+    window.__sent = [];
+    window.__sendAction = (json) => window.__sent.push(JSON.parse(json));
+  });
+  const standby = {
+    red_alert: false,
+    camera_views: ['Fore', 'Port', 'Starboard', 'Aft'],
+    view_direction: 'Fore',
+    objectives: [],
+    blips: [],
+  };
+  await page.evaluate((state) => window.__updateConsole('captain', JSON.stringify(state)), standby);
+
+  const component = page.locator('ph-red-alert');
+  const button = component.locator('#alert-btn');
+  const status = component.locator('#feedback-status');
+  await button.click();
+  const refusedCorrelation = await page.evaluate(() => window.__sent.at(-1).correlation);
+
+  await expect(status).toHaveText(ts('action_feedback.pending'));
+  await expect(button).toHaveAttribute('aria-busy', 'true');
+  await expect(button).toHaveClass(/standby/);
+  await page.evaluate((correlation) => window.__updateActionFeedback({
+    correlation,
+    state: 'Refused',
+  }), refusedCorrelation);
+  await expect(status).toHaveText(ts('action_feedback.refused'));
+  await expect(button).not.toHaveAttribute('aria-busy');
+  await expect(button).toHaveClass(/standby/);
+
+  await button.click();
+  await page.evaluate(() => {
+    const action = window.__sent.at(-1);
+    const router = new window.ActionFeedbackRouter({
+      timeoutMs: 25,
+      deliver: (value) => window.__updateActionFeedback(value),
+    });
+    router.track({
+      correlation: action.correlation,
+      actionId: action.semantic_action,
+      console: action.console,
+      inputMs: action.__input_ms,
+    });
+    window.__testFeedbackRouter = router;
+  });
+  await expect(status).toHaveText(ts('action_feedback.pending'));
+  await expect(status).toHaveText(ts('action_feedback.timed_out'));
+  await expect(button).toHaveClass(/standby/);
+
+  await page.evaluate((state) => window.__updateConsole(
+    'captain',
+    JSON.stringify({ ...state, red_alert: true }),
+  ), standby);
+  await expect(button).toHaveClass(/active/);
+  await expect(button).toHaveText(ts('component.red_alert.active'));
 });
 
 test('captain console: AI-run Red Alert renders read-only with AUTO badge', async ({ page }) => {

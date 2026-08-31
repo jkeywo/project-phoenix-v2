@@ -182,6 +182,37 @@ describe('ConsoleLatencyMeter — the two segments', () => {
   });
 });
 
+describe('ConsoleLatencyMeter — correlated authoritative feedback', () => {
+  it('uses the original press stamp and only the exact feedback can settle it', () => {
+    const { meter, clock } = meterAt();
+    meter.noteCorrelatedDispatch('corr-red-alert', 'set_red_alert', clock.t - 4);
+    clock.t += 20;
+    meter.noteAck('captain', PUSH_CAUSE.SERVER_MESSAGE);
+    expect(meter.drain().samples).toEqual([]);
+    expect(meter.pendingCount()).toBe(1);
+
+    clock.t += 10;
+    expect(meter.noteCorrelatedAck('another-correlation')).toBe(false);
+    expect(meter.noteCorrelatedAck('corr-red-alert')).toBe(true);
+    expect(meter.drain().samples).toEqual([{
+      action: 'set_red_alert',
+      input_to_send_ms: 4,
+      send_to_ack_ms: 30,
+    }]);
+  });
+
+  it('counts the exact timed-out correlation and ignores a late acknowledgement', () => {
+    const { meter } = meterAt();
+    meter.noteCorrelatedDispatch('corr-timeout', 'set_red_alert', 999);
+    expect(meter.noteCorrelatedTimeout('corr-timeout')).toBe(true);
+    expect(meter.noteCorrelatedAck('corr-timeout')).toBe(false);
+    expect(meter.drain()).toEqual({
+      samples: [],
+      expired: [{ action: 'set_red_alert', count: 1 }],
+    });
+  });
+});
+
 describe('ConsoleLatencyMeter — the host owns the switch', () => {
   it('measures nothing until enabled', () => {
     const clock = { t: 0 };

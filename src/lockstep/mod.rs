@@ -959,6 +959,7 @@ pub fn apply_mesh_inbox(
                         // No reply address: the crew that asked is on another
                         // host, and answering them is that host's job.
                         response_token: None,
+                        feedback_correlation: None,
                     };
                     crate::command_admission::log::stamp_accepted_command(
                         &mut pending,
@@ -1511,6 +1512,7 @@ mod tests {
             target: SystemId("helm".into()),
             payload: SystemControlPayload::SetRedAlert { active: true },
             response_token: Some("session-token-aaaa".into()),
+            feedback_correlation: None,
         };
         let crossed = mesh_command(
             9,

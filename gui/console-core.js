@@ -72,6 +72,10 @@ import {
 // outbound action, so it is the only honest place to stamp "the input event
 // happened". See `__input_ms` in `sendAction` below.
 import { nowMs } from './console-latency.js';
+import {
+  ActionFeedbackLifecycle,
+  emitActionFeedbackTransition,
+} from './action-feedback.js';
 
 export function initConsole({ name, render }) {
   // Resolve the global object: `window` in browsers, `globalThis` in Node/tests.
@@ -83,7 +87,11 @@ export function initConsole({ name, render }) {
   // One registry per console document. The parent page owns the mutable
   // in-memory binding choices and explicitly copies them into each iframe;
   // module instances in separate realms are never treated as shared state.
-  var _semanticActions = createSemanticActionRegistry();
+  var _actionFeedback = new ActionFeedbackLifecycle({
+    now: nowMs,
+    onTransition: function(value) { emitActionFeedbackTransition(_root, value); },
+  });
+  var _semanticActions = createSemanticActionRegistry({ actionFeedback: _actionFeedback });
   if (_actionContext === CAPTAIN_ACTION_CONTEXT) {
     registerCaptainActions(_semanticActions, {
       getState: function() { return _latestState; },
@@ -169,6 +177,14 @@ export function initConsole({ name, render }) {
     _updateTutorialOverlay(s);
   };
 
+  // Parent -> originating iframe final feedback.  The parent routes by the
+  // exact correlation it saw leave this iframe; late and duplicate replies
+  // are ignored by the bounded lifecycle above.
+  _root.__updateActionFeedback = function(value) {
+    if (!value || typeof value !== 'object') return false;
+    return _actionFeedback.settle(value.correlation, value.state);
+  };
+
   // ── BroadcastChannel receive path (ADR-0001 §3 target 4) ───────────────
   if (_bc) {
     _bc.onmessage = function(e) {
@@ -200,7 +216,7 @@ export function initConsole({ name, render }) {
     // Underscore-prefixed and stripped at the shell: every `gui/action-map.js`
     // handler builds its outbound `ClientMessage` from NAMED fields, so this key
     // reaches the shell and stops there. It never crosses the wire.
-    env.__input_ms = nowMs();
+    if (!Number.isFinite(env.__input_ms)) env.__input_ms = nowMs();
     var json = JSON.stringify(env);
     // Re-resolve window each call so tests can swap out global.window per test.
     var _win = (typeof window !== 'undefined') ? window : null;

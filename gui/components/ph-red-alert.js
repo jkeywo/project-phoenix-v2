@@ -33,18 +33,31 @@ export class PhRedAlert extends PhElement {
     .hold-btn.held { background: var(--reloading-deep); border-color: var(--reloading); color: var(--reloading); }
     .hold-btn.held:hover:not(:disabled) { background: var(--reloading-deep); }
     .hold-btn:disabled { opacity: 0.4; cursor: default; }
+    .feedback-status { min-height: 1.2em; color: var(--ink); font-size: var(--text-xs); letter-spacing: 0.12em; text-transform: uppercase; }
+    .feedback-status[data-state="Refused"], .feedback-status[data-state="TimedOut"] { color: var(--fire); }
   </style>
   <div class="header">
     <span>${t('component.red_alert.title')}</span>
     <span class="auto-badge" id="auto-badge" style="display:none">${t('console.common.auto')}</span>
   </div>
   <button class="alert-btn standby" id="alert-btn">${t('component.red_alert.standby')}</button>
+  <span class="feedback-status" id="feedback-status" role="status" aria-live="polite" aria-atomic="true"></span>
   <button class="hold-btn free" id="hold-btn">${t('component.weapons_hold.free')}</button>
 `;
   }
 
   connectedCallback() {
     super.connectedCallback();
+    this._feedback = null;
+    this._onFeedback = (event) => {
+      const value = event && event.detail;
+      if (!value || value.actionId !== CAPTAIN_RED_ALERT_ACTION_ID || value.isCurrent === false) return;
+      this._feedback = value;
+      this._renderFeedback();
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('phoenix-action-feedback', this._onFeedback);
+    }
     const btn = this.shadowRoot.getElementById('alert-btn');
     btn.addEventListener('click', () => {
       if (btn.disabled) return;
@@ -72,6 +85,24 @@ export class PhRedAlert extends PhElement {
     });
   }
 
+  disconnectedCallback() {
+    if (typeof window !== 'undefined' && this._onFeedback) {
+      window.removeEventListener('phoenix-action-feedback', this._onFeedback);
+    }
+    this._onFeedback = null;
+  }
+
+  _renderFeedback() {
+    const status = this.shadowRoot.getElementById('feedback-status');
+    const btn = this.shadowRoot.getElementById('alert-btn');
+    if (!status || !btn) return;
+    const value = this._feedback;
+    status.textContent = value && value.statusId ? t(value.statusId) : '';
+    status.dataset.state = value && value.state ? value.state : '';
+    if (value && value.state === 'Pending') btn.setAttribute('aria-busy', 'true');
+    else btn.removeAttribute('aria-busy');
+  }
+
   render(state) {
     const s = state || {};
     const active = !!s.active;
@@ -82,6 +113,7 @@ export class PhRedAlert extends PhElement {
     btn.textContent = active ? t('component.red_alert.active') : t('component.red_alert.standby');
     btn.className = 'alert-btn' + (active ? ' active' : ' standby');
     btn.disabled = auto;
+    this._renderFeedback();
 
     // The hold reads off the same control source as the alert — one console
     // owns the ship's firing posture — so it greys out together with it.

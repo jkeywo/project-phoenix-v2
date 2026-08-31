@@ -889,6 +889,7 @@ mod tests {
                 order,
             },
             response_token: Some("nav-holder".into()),
+            feedback_correlation: None,
         };
         app.world_mut().spawn(AdmittedCommands(vec![
             console("nobody", CivilianOrder::Hold),

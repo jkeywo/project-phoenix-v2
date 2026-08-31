@@ -598,6 +598,7 @@ mod tests {
                     uuid: uuid.to_string(),
                 },
                 response_token: None,
+                feedback_correlation: None,
             });
     }
 

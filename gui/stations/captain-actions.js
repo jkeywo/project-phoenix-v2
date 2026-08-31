@@ -20,6 +20,7 @@ export const CAPTAIN_RED_ALERT_ACTION = Object.freeze({
   contexts: Object.freeze([CAPTAIN_ACTION_CONTEXT]),
   labelId: 'semantic_action.captain.red_alert.label',
   accessibilityLabelId: 'semantic_action.captain.red_alert.accessibility',
+  authoritativeFeedback: true,
   bindings: Object.freeze([
     Object.freeze({
       type: 'keyboard',
@@ -66,12 +67,18 @@ export function registerCaptainActions(registry, options = {}) {
   const getState = typeof options.getState === 'function' ? options.getState : () => null;
   const sendAction = typeof options.sendAction === 'function' ? options.sendAction : null;
 
-  registry.register(CAPTAIN_RED_ALERT_ACTION, () => {
+  registry.register(CAPTAIN_RED_ALERT_ACTION, ({ actionId, correlation, inputMs } = {}) => {
     const view = captainActionView(getState());
     // `red_alert_auto` is presentation of authoritative Control Source, not a
     // new authority decision. The host remains responsible for admission.
     if (!view || view.red_alert_auto || !sendAction) return false;
-    sendAction('set_red_alert', { active: !Boolean(view.red_alert) });
+    const payload = { active: !Boolean(view.red_alert) };
+    if (typeof correlation === 'string' && correlation) {
+      payload.correlation = correlation;
+      payload.semantic_action = actionId;
+      payload.__input_ms = inputMs;
+    }
+    sendAction('set_red_alert', payload);
     return true;
   });
   registry.register(CAPTAIN_WEAPONS_HOLD_ACTION, () => {
@@ -85,7 +92,9 @@ export function registerCaptainActions(registry, options = {}) {
 
 /** Convenience constructor used independently in parent and iframe realms. */
 export function createCaptainActionRegistry(options = {}) {
-  return registerCaptainActions(createSemanticActionRegistry(), options);
+  return registerCaptainActions(createSemanticActionRegistry({
+    actionFeedback: options.actionFeedback,
+  }), options);
 }
 
 if (typeof window !== 'undefined') {

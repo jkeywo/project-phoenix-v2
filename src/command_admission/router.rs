@@ -315,6 +315,7 @@ mod tests {
                     target: SystemId((*t).into()),
                     payload: SystemControlPayload::SetRedAlert { active: true },
                     response_token: None,
+                    feedback_correlation: None,
                 })
                 .collect(),
         )

@@ -207,11 +207,18 @@ function normalizeDefinition(definition) {
   if (!labelId || !accessibilityLabelId) {
     throw new TypeError('semantic action display and accessibility metadata are required');
   }
+  const feedback = definition.feedback === 'local'
+    ? 'local'
+    : definition.authoritativeFeedback === true
+      ? 'authoritative'
+      : null;
   return Object.freeze({
     id,
     contexts: Object.freeze(contexts),
     labelId,
     accessibilityLabelId,
+    authoritativeFeedback: definition.authoritativeFeedback === true,
+    feedback,
     bindings: normalizeBindingSlots(definition.bindings),
   });
 }
@@ -225,11 +232,12 @@ function copySlots(slots) {
 }
 
 /** Create an isolated registry. No mutable singleton is shared across frames. */
-export function createSemanticActionRegistry() {
+export function createSemanticActionRegistry(options = {}) {
   const definitions = new Map();
   const adapters = new Map();
   const authoredDefaults = new Map();
   const bindings = new Map();
+  const actionFeedback = options.actionFeedback || null;
 
   function assertActionAndSlot(id, slot) {
     if (!definitions.has(id)) throw new Error('unknown semantic action: ' + id);
@@ -401,13 +409,69 @@ export function createSemanticActionRegistry() {
       return { claimed: false, actionId: id || null, handled: false };
     }
     const adapter = adapters.get(id);
-    const handled = adapter ? adapter({
+    const feedback = definition.feedback && actionFeedback
+      && typeof actionFeedback.press === 'function'
+      ? actionFeedback.press(id)
+      : null;
+    // A local adapter may finish synchronously while its activation call is
+    // still on the stack.  Keep that result until handled=true has advanced
+    // the lifecycle to Pending; handled=false still cancels the provisional
+    // press without ever presenting a terminal result.
+    let activationOpen = true;
+    let bufferedLocalFeedback = null;
+    const bufferOrApplyLocalFeedback = (kind, outcome = null) => {
+      if (activationOpen) {
+        if (bufferedLocalFeedback) return false;
+        bufferedLocalFeedback = { kind, outcome };
+        return true;
+      }
+      return kind === 'settle'
+        ? actionFeedback.settle(feedback.correlation, outcome)
+        : actionFeedback.cancel(feedback.correlation);
+    };
+    let handled = false;
+    try {
+      handled = adapter ? adapter({
+        actionId: id,
+        context,
+        source: options.source || 'control',
+        event: options.event || null,
+        correlation: feedback ? feedback.correlation : null,
+        inputMs: feedback ? feedback.inputMs : null,
+        feedbackKind: definition.feedback,
+        settleFeedback: feedback && definition.feedback === 'local'
+          ? (outcome) => bufferOrApplyLocalFeedback('settle', outcome)
+          : null,
+        cancelFeedback: feedback && definition.feedback === 'local'
+          ? () => bufferOrApplyLocalFeedback('cancel')
+          : null,
+      }) !== false : false;
+    } catch (error) {
+      activationOpen = false;
+      if (feedback && typeof actionFeedback.cancel === 'function') {
+        actionFeedback.cancel(feedback.correlation);
+      }
+      throw error;
+    }
+    activationOpen = false;
+    if (feedback) {
+      if (handled && typeof actionFeedback.pending === 'function') {
+        actionFeedback.pending(feedback.correlation);
+        if (bufferedLocalFeedback?.kind === 'settle') {
+          actionFeedback.settle(feedback.correlation, bufferedLocalFeedback.outcome);
+        } else if (bufferedLocalFeedback?.kind === 'cancel') {
+          actionFeedback.cancel(feedback.correlation);
+        }
+      } else if (!handled && typeof actionFeedback.cancel === 'function') {
+        actionFeedback.cancel(feedback.correlation);
+      }
+    }
+    return {
+      claimed: true,
       actionId: id,
-      context,
-      source: options.source || 'control',
-      event: options.event || null,
-    }) !== false : false;
-    return { claimed: true, actionId: id, handled };
+      handled,
+      ...(feedback && handled ? { correlation: feedback.correlation, inputMs: feedback.inputMs } : {}),
+    };
   }
 
   function dispatchKeyboardEvent(event, context) {

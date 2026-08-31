@@ -26,8 +26,10 @@
 
 use bevy::prelude::*;
 
-use crate::core::messages::ClientMessage;
-use crate::lobby::{InboundMessage, Sessions};
+use crate::core::messages::{
+    ActionCorrelationId, ActionFeedbackOutcome, ClientMessage, DeliveryClass, ServerMessage,
+};
+use crate::lobby::{InboundMessage, OutboundMessage, Sessions, Target};
 use crate::server_app::LocalShip;
 
 pub mod ai_emit;
@@ -234,6 +236,7 @@ pub fn validate_command(
         target,
         payload,
         response_token: Some(token.to_string()),
+        feedback_correlation: None,
     })
 }
 
@@ -315,6 +318,7 @@ pub fn admit_system_commands(
     mut command_log: ResMut<log::CommandLog>,
     mut pending: ResMut<log::PendingCommands>,
     mut mesh_outbox: Option<ResMut<crate::lockstep::MeshOutbox>>,
+    mut outbound: Option<ResMut<Messages<OutboundMessage>>>,
     log: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
     use crate::logging::LogCat;
@@ -339,9 +343,34 @@ pub fn admit_system_commands(
         }
     }
     for ev in reader.read() {
-        let ClientMessage::ControlSystem { target, payload } = &ev.msg else {
-            continue;
+        let (target, payload, correlation) = match &ev.msg {
+            ClientMessage::ControlSystem { target, payload } => (target, payload, None),
+            ClientMessage::ControlSystemCorrelated {
+                correlation,
+                target,
+                payload,
+            } => (target, payload, Some(correlation.clone())),
+            _ => continue,
         };
+        // Issue #1276's tracer is deliberately narrow.  Only the exact Captain
+        // Red Alert target/payload pair owns this lifecycle; every other
+        // correlated envelope gets a real refusal rather than being admitted
+        // into a consumer that has no lifecycle contract.
+        if correlation.is_some()
+            && (target.0 != crate::ship::system_registry::RED_ALERT_SYSTEM_ID
+                || !matches!(
+                    payload,
+                    crate::core::messages::SystemControlPayload::SetRedAlert { .. }
+                ))
+        {
+            write_action_feedback(
+                &mut outbound,
+                &ev.token,
+                correlation.as_ref().expect("checked above"),
+                ActionFeedbackOutcome::Refused,
+            );
+            continue;
+        }
         // Route: a registered NPC `ai:` token belongs to its own entity's
         // AdmittedCommands; everything else (humans, host page, unregistered
         // `ai:` backfill tokens) belongs to the LocalShip.
@@ -351,6 +380,14 @@ pub fn admit_system_commands(
             local_ship
         };
         let Some(route) = route else {
+            if let Some(correlation) = correlation.as_ref() {
+                write_action_feedback(
+                    &mut outbound,
+                    &ev.token,
+                    correlation,
+                    ActionFeedbackOutcome::Refused,
+                );
+            }
             continue;
         };
         // Read-only: the accepted command is queued for its apply tick rather
@@ -358,6 +395,14 @@ pub fn admit_system_commands(
         let Ok((ship_entity, control_sources, _, ship_config, _, ship_uuid, seeking_hosts)) =
             ship_query.get(route)
         else {
+            if let Some(correlation) = correlation.as_ref() {
+                write_action_feedback(
+                    &mut outbound,
+                    &ev.token,
+                    correlation,
+                    ActionFeedbackOutcome::Refused,
+                );
+            }
             continue;
         };
         // The log's routing key, taken here because this is where the route was
@@ -374,7 +419,8 @@ pub fn admit_system_commands(
             &ship_config.0,
             seeking_hosts,
         ) {
-            Some(command) => {
+            Some(mut command) => {
+                command.feedback_correlation = correlation.clone();
                 // Accepted: stamped and queued for the tick it applies on. A
                 // refused command reaches neither branch of this — which is the
                 // whole of "a rejection never enters the log", since the log is
@@ -409,6 +455,14 @@ pub fn admit_system_commands(
                 );
             }
             None => {
+                if let Some(correlation) = correlation.as_ref() {
+                    write_action_feedback(
+                        &mut outbound,
+                        &ev.token,
+                        correlation,
+                        ActionFeedbackOutcome::Refused,
+                    );
+                }
                 crate::pwarn!(
                     log,
                     LogCat::Admit,
@@ -432,6 +486,17 @@ pub fn admit_system_commands(
         // fallback for a ship that never had a uuid to be named by.
         let route = by_ship_key.get(&due.ship.0).copied().unwrap_or(due.route);
         let Ok((_, _, mut admitted, _, _, _, _)) = ship_query.get_mut(route) else {
+            if let (Some(correlation), Some(token)) = (
+                due.command.feedback_correlation.as_ref(),
+                due.command.response_token.as_deref(),
+            ) {
+                write_action_feedback(
+                    &mut outbound,
+                    token,
+                    correlation,
+                    ActionFeedbackOutcome::Refused,
+                );
+            }
             crate::pwarn!(
                 log,
                 LogCat::Admit,
@@ -444,6 +509,28 @@ pub fn admit_system_commands(
         };
         admitted.0.push(due.command);
     }
+}
+
+/// Emit one reliable, token-targeted lifecycle result.  `Option` keeps the
+/// admission system valid in reduced apps that do not register outbound
+/// messages; production's LobbyPlugin always does.
+fn write_action_feedback(
+    outbound: &mut Option<ResMut<Messages<OutboundMessage>>>,
+    token: &str,
+    correlation: &ActionCorrelationId,
+    outcome: ActionFeedbackOutcome,
+) {
+    let Some(messages) = outbound.as_deref_mut() else {
+        return;
+    };
+    messages.write(OutboundMessage {
+        target: Target::Token(token.to_string()),
+        msg: ServerMessage::ActionFeedback {
+            correlation: correlation.clone(),
+            outcome,
+        },
+        delivery: DeliveryClass::Reliable,
+    });
 }
 
 #[cfg(test)]
@@ -546,6 +633,26 @@ station = "repair"
             });
     }
 
+    fn send_correlated(
+        app: &mut App,
+        token: &str,
+        correlation: &str,
+        target: SystemId,
+        payload: SystemControlPayload,
+    ) {
+        app.world_mut()
+            .resource_mut::<Messages<InboundMessage>>()
+            .write(InboundMessage {
+                token: token.into(),
+                msg: ClientMessage::ControlSystemCorrelated {
+                    correlation: ActionCorrelationId::new(correlation)
+                        .expect("valid test correlation"),
+                    target,
+                    payload,
+                },
+            });
+    }
+
     fn admitted(app: &mut App, ship: Entity) -> Vec<SystemControlPayload> {
         app.world()
             .entity(ship)
@@ -607,6 +714,76 @@ station = "repair"
              refusal is a hard error"
         );
         assert!(app.world().resource::<log::PendingCommands>().is_empty());
+    }
+
+    #[test]
+    fn correlated_non_red_alert_requests_are_reliably_refused_to_the_origin() {
+        let (mut app, ship) = admission_app(ControlSource::Human);
+        let mut cursor = app
+            .world()
+            .resource::<Messages<OutboundMessage>>()
+            .get_cursor();
+        send_correlated(
+            &mut app,
+            HOLDER,
+            "unsupported-feedback",
+            SystemId("repair".into()),
+            dispatch(0),
+        );
+        app.update();
+
+        assert!(admitted(&mut app, ship).is_empty());
+        assert!(command_log(&app).is_empty());
+        let outbound = app.world().resource::<Messages<OutboundMessage>>();
+        let feedback: Vec<_> = cursor.read(outbound).collect();
+        assert!(feedback.iter().any(|message| {
+            message.target == Target::Token(HOLDER.into())
+                && message.delivery == DeliveryClass::Reliable
+                && matches!(
+                    &message.msg,
+                    ServerMessage::ActionFeedback {
+                        correlation,
+                        outcome: ActionFeedbackOutcome::Refused,
+                    } if correlation.as_str() == "unsupported-feedback"
+                )
+        }));
+    }
+
+    #[test]
+    fn correlated_red_alert_payload_on_wrong_target_is_refused_before_admission() {
+        let (mut app, ship) = admission_app(ControlSource::Human);
+        let mut cursor = app
+            .world()
+            .resource::<Messages<OutboundMessage>>()
+            .get_cursor();
+        // The local console bypasses station authority and `repair` is a real
+        // system in this fixture.  Without the exact-pair protocol gate this
+        // malformed request would therefore be admitted and logged.
+        send_correlated(
+            &mut app,
+            crate::console_bridge::LOCAL_CONSOLE_TOKEN,
+            "wrong-red-alert-target",
+            SystemId("repair".into()),
+            SystemControlPayload::SetRedAlert { active: true },
+        );
+        app.update();
+
+        assert!(admitted(&mut app, ship).is_empty());
+        assert!(command_log(&app).is_empty());
+        assert!(app.world().resource::<log::PendingCommands>().is_empty());
+        let outbound = app.world().resource::<Messages<OutboundMessage>>();
+        let feedback: Vec<_> = cursor.read(outbound).collect();
+        assert!(feedback.iter().any(|message| {
+            message.target == Target::Token(crate::console_bridge::LOCAL_CONSOLE_TOKEN.into())
+                && message.delivery == DeliveryClass::Reliable
+                && matches!(
+                    &message.msg,
+                    ServerMessage::ActionFeedback {
+                        correlation,
+                        outcome: ActionFeedbackOutcome::Refused,
+                    } if correlation.as_str() == "wrong-red-alert-target"
+                )
+        }));
     }
 
     /// Two commands arriving in one tick keep their arrival order in both the

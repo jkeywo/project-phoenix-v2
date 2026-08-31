@@ -3,8 +3,8 @@ use bevy::prelude::*;
 use crate::authoritative::{DeclareState, StateClass};
 use crate::command_admission::ai_emit::emit_ai_command;
 use crate::core::messages::{
-    AdmittedCommands, CameraView, CaptainBlackboard, ObjectiveSnapshot, SystemBlackboard,
-    SystemControlPayload, SystemId, ViewMode,
+    ActionFeedbackOutcome, AdmittedCommands, CameraView, CaptainBlackboard, DeliveryClass,
+    ObjectiveSnapshot, ServerMessage, SystemBlackboard, SystemControlPayload, SystemId, ViewMode,
 };
 use crate::effect_queue::EffectQueue;
 use crate::objectives::WorldConditions;
@@ -124,6 +124,9 @@ fn handle_set_red_alert(
     mut balance_events: Option<
         ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
     >,
+    mut outbound: Option<
+        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
+    >,
 ) {
     for (admitted, mut ra, ship_uuid) in ship_query.iter_mut() {
         for cmd in admitted.for_target(crate::ship::system_registry::RED_ALERT_SYSTEM_ID) {
@@ -131,17 +134,34 @@ fn handle_set_red_alert(
                 // Assign, don't invert — the whole point of the set command
                 // (issue #748). Only emit the balance tracer when the value
                 // actually changes so idempotent retries don't spam telemetry.
-                if ra.0 == active {
-                    continue;
+                if ra.0 != active {
+                    ra.0 = active;
+                    // Balance tracer: every red-alert change, human or AI (both
+                    // route through this same command), on every ship. Skipped
+                    // for a ship with no uuid to key it on.
+                    if let (Some(msgs), Some(uuid)) = (balance_events.as_mut(), ship_uuid) {
+                        msgs.write(crate::core::balance::BalanceEvent::RedAlertChanged {
+                            ship: uuid.0.clone(),
+                            on: ra.0,
+                        });
+                    }
                 }
-                ra.0 = active;
-                // Balance tracer: every red-alert change, human or AI (both
-                // route through this same command), on every ship. Skipped
-                // for a ship with no uuid to key it on.
-                if let (Some(msgs), Some(uuid)) = (balance_events.as_mut(), ship_uuid) {
-                    msgs.write(crate::core::balance::BalanceEvent::RedAlertChanged {
-                        ship: uuid.0.clone(),
-                        on: ra.0,
+                // Applied means this owning consumer actually consumed the due
+                // command, including an idempotent same-value assignment.  The
+                // normal Captain blackboard remains the only gameplay-state
+                // response and may arrive separately.
+                if let (Some(correlation), Some(token), Some(messages)) = (
+                    cmd.feedback_correlation.as_ref(),
+                    cmd.response_token.as_ref(),
+                    outbound.as_deref_mut(),
+                ) {
+                    messages.write(crate::lobby::server::OutboundMessage {
+                        target: crate::lobby::Target::Token(token.clone()),
+                        msg: ServerMessage::ActionFeedback {
+                            correlation: correlation.clone(),
+                            outcome: ActionFeedbackOutcome::Applied,
+                        },
+                        delivery: DeliveryClass::Reliable,
                     });
                 }
             }

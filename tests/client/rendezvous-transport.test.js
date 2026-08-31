@@ -461,6 +461,33 @@ describe('typed join', () => {
     expect(received[0].data.text).not.toBe('client.status_connected');
     expect(received[0].data.text.length).toBeGreaterThan(0);
   });
+
+  it('preserves an ActionFeedback correlation that collides with a string id', async () => {
+    const world = makeWorld();
+    const received = [];
+    const correlation = 'client.status_connected';
+    const { code, factories } = await hostOn(world, {
+      onConnection: (conn) => {
+        conn.on('data', () => conn.send(JSON.stringify({
+          type: 'ActionFeedback',
+          data: { correlation, outcome: 'Applied' },
+        })));
+      },
+    });
+    createRendezvousJoiner({
+      base: 'https://rendezvous.test',
+      data: DATA,
+      code: code.suffix,
+      factories,
+      onData: (message) => received.push(message),
+    });
+    await settle();
+
+    expect(received).toEqual([{
+      type: 'ActionFeedback',
+      data: { correlation, outcome: 'Applied' },
+    }]);
+  });
 });
 
 describe('distinct failures', () => {

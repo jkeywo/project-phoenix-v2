@@ -240,6 +240,61 @@ pub enum DeliveryClass {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct StationId(pub String);
 
+/// Maximum UTF-8 byte length of one opaque semantic-action correlation.
+///
+/// This is a protocol/resource bound, not a gameplay value.  The client mints
+/// UUID-shaped ids today, but every receiver treats the contents as opaque.
+pub const MAX_ACTION_CORRELATION_BYTES: usize = 64;
+
+/// Opaque identity connecting one semantic-action press to its targeted host
+/// acknowledgement (issue #1276).
+///
+/// The value is deliberately absent from [`SystemControlPayload`], command
+/// logs, mesh frames, snapshots and replay.  It is transient reply-routing
+/// metadata, validated at the wire boundary and bounded before it can key any
+/// client/host map.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
+#[serde(transparent)]
+pub struct ActionCorrelationId(String);
+
+impl ActionCorrelationId {
+    pub fn new(value: impl Into<String>) -> Result<Self, &'static str> {
+        let value = value.into();
+        if value.is_empty() {
+            return Err("action correlation must not be empty");
+        }
+        if value.len() > MAX_ACTION_CORRELATION_BYTES {
+            return Err("action correlation is too long");
+        }
+        if !value.bytes().all(|byte| (0x21..=0x7e).contains(&byte)) {
+            return Err("action correlation must contain visible ASCII only");
+        }
+        Ok(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for ActionCorrelationId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::new(value).map_err(serde::de::Error::custom)
+    }
+}
+
+/// Terminal authoritative outcomes carried by [`ServerMessage::ActionFeedback`].
+/// `TimedOut` is client-local: by definition no host response produced it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ActionFeedbackOutcome {
+    Applied,
+    Refused,
+}
+
 /// Explicit destination for a delayed Coordination message.
 ///
 /// Coordination is addressed either to one authored crew Station or to the
@@ -2463,6 +2518,15 @@ pub enum ClientMessage {
         target: SystemId,
         payload: SystemControlPayload,
     },
+    /// A `ControlSystem` request that asks for a targeted authoritative
+    /// lifecycle acknowledgement.  Issue #1276 enables this only for the
+    /// Captain's Red Alert action; the legacy envelope above remains the path
+    /// for every uncorrelated action, including Weapons Hold.
+    ControlSystemCorrelated {
+        correlation: ActionCorrelationId,
+        target: SystemId,
+        payload: SystemControlPayload,
+    },
     /// Change the active rating for the sender's station. The rating name
     /// must match one of the station's defined ratings, or be "Backfill"
     /// (which automates every system owned by the station). When the rating
@@ -2981,6 +3045,12 @@ pub enum ServerMessage {
     AfkChanged {
         token: String,
         afk: bool,
+    },
+    /// Reliable, token-targeted terminal result for one correlated semantic
+    /// action.  Never broadcast: the correlation belongs only to its origin.
+    ActionFeedback {
+        correlation: ActionCorrelationId,
+        outcome: ActionFeedbackOutcome,
     },
     NameChanged {
         token: String,
@@ -4549,6 +4619,10 @@ pub struct AdmittedCommand {
     /// Token used to address a reply back to the originating client.
     /// Handlers must not branch on this for any behavioral decision.
     pub response_token: Option<String>,
+    /// Transient correlated-feedback identity.  It survives command delay so
+    /// the owning consumer can acknowledge actual consumption, but is never
+    /// projected into `LoggedCommand`, mesh traffic, snapshots or replay.
+    pub feedback_correlation: Option<ActionCorrelationId>,
 }
 
 /// Cleared and refilled each tick by `admit_system_commands` (runs before

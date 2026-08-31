@@ -97,10 +97,21 @@ fn station_entry(id: &str, panes: &[&str]) -> DisplayEntry {
         split: None,
         panes: panes
             .iter()
-            .map(|l| PaneSlot {
-                label: l.to_string(),
-            })
+            .copied()
+            .map(PaneSlot::for_participant)
             .collect(),
+    }
+}
+
+/// A `viewscreen` entry for `id`. A profile that assigns monitors must name one
+/// (issue #1327's [`ProfileError::MissingViewscreen`]), so a fixture that is
+/// really about something else — density, labels, identity — still carries one.
+fn viewscreen_entry(id: &str) -> DisplayEntry {
+    DisplayEntry {
+        id: id.to_string(),
+        role: ROLE_VIEWSCREEN.to_string(),
+        split: None,
+        panes: Vec::new(),
     }
 }
 
@@ -115,8 +126,11 @@ fn profile_with(entries: Vec<DisplayEntry>) -> BridgeProfile {
 
 #[test]
 fn a_station_of_one_or_two_panes_validates() {
-    let one = profile_with(vec![station_entry("m1", &["Ada"])]);
-    let two = profile_with(vec![station_entry("m2", &["Ada", "Grace"])]);
+    let one = profile_with(vec![viewscreen_entry("vs"), station_entry("m1", &["Ada"])]);
+    let two = profile_with(vec![
+        viewscreen_entry("vs"),
+        station_entry("m2", &["Ada", "Grace"]),
+    ]);
     assert!(one.validate().is_ok());
     assert!(two.validate().is_ok());
 }
@@ -157,9 +171,7 @@ fn a_viewscreen_may_not_carry_panes() {
         id: "vs".to_string(),
         role: ROLE_VIEWSCREEN.to_string(),
         split: None,
-        panes: vec![PaneSlot {
-            label: "Ada".to_string(),
-        }],
+        panes: vec![PaneSlot::for_participant("Ada")],
     };
     assert_eq!(
         profile_with(vec![entry]).validate().unwrap_err(),
@@ -252,6 +264,140 @@ fn a_single_viewscreen_profile_still_validates() {
     assert!(one.validate().is_ok());
 }
 
+// ── the viewscreen must be named (issue #1327) ──────────────────────────────
+
+#[test]
+fn a_profile_of_stations_with_no_viewscreen_is_refused() {
+    // The one station-over-viewscreen path a hand-authored profile still had:
+    // `apply_bridge_profile` places the viewscreen on the PRIMARY window, so a
+    // profile that names no viewscreen never places it — it stays on whatever
+    // monitor the OS opened it on, which one of these Stations may then cover
+    // with a borderless-fullscreen console.
+    let stations_only = profile_with(vec![
+        station_entry("m1", &["Ada"]),
+        station_entry("m2", &["Grace"]),
+    ]);
+    let err = stations_only.validate().unwrap_err();
+    assert_eq!(
+        err,
+        ProfileError::MissingViewscreen {
+            stations: vec!["m1".to_string(), "m2".to_string()],
+        }
+    );
+    // The message names the monitors, the missing role, and the harm.
+    let msg = err.to_string();
+    assert!(msg.contains("m1"), "{msg}");
+    assert!(msg.contains("m2"), "{msg}");
+    assert!(msg.contains("viewscreen"), "{msg}");
+    assert!(msg.contains("primary window"), "{msg}");
+}
+
+#[test]
+fn a_single_monitor_profile_naming_only_a_station_is_refused_too() {
+    // The most harmful shape of all, and the one an operator with one display
+    // reaches for: the single monitor is both where the primary window is and
+    // where the console would open.
+    let one = profile_with(vec![station_entry("only", &["Ada", "Grace"])]);
+    assert_eq!(
+        one.validate().unwrap_err(),
+        ProfileError::MissingViewscreen {
+            stations: vec!["only".to_string()],
+        }
+    );
+}
+
+#[test]
+fn a_profile_that_assigns_no_monitor_at_all_still_validates() {
+    // Gated on there being displays: a `[[touch]]`/`[[media]]`-only profile (the
+    // shape the #1126 media kit ships) opens no Station window, so it has nothing
+    // to cover the viewscreen with. Refusing it would break `--pane`'s own
+    // profile-less tiling path for no gain.
+    let media_only = BridgeProfile {
+        version: PROFILE_VERSION,
+        displays: Vec::new(),
+        touch: vec![TouchMapping {
+            device: "ELAN Touchscreen".to_string(),
+            monitor: "BenQ EX@1920x1080".to_string(),
+        }],
+        media: Vec::new(),
+    };
+    assert!(media_only.validate().is_ok());
+    assert!(BridgeProfile::empty().validate().is_ok());
+}
+
+// ── a pane slot's station id (issue #1327) ──────────────────────────────────
+
+#[test]
+fn a_pane_slot_carries_its_station_id_through_the_toml_round_trip() {
+    // The layout keys stations by station id, and this is how that id rides in a
+    // `[[display.pane]]` slot: an optional `station = "…"` beside the label.
+    let p = profile_with(vec![
+        viewscreen_entry("vs"),
+        DisplayEntry {
+            id: "m1".to_string(),
+            role: ROLE_STATION.to_string(),
+            split: Some(PaneSplit::SideBySide),
+            panes: vec![
+                PaneSlot::for_station("helm"),
+                PaneSlot::for_station("weapons"),
+            ],
+        },
+    ]);
+    let text = p.to_toml().expect("serialises");
+    assert!(text.contains("station = \"helm\""), "{text}");
+    assert!(text.contains("station = \"weapons\""), "{text}");
+    let reparsed = BridgeProfile::from_toml(&text).expect("parses");
+    assert_eq!(reparsed, p);
+    assert_eq!(
+        reparsed.displays[1].panes[0].station.as_deref(),
+        Some("helm")
+    );
+}
+
+#[test]
+fn a_participant_pane_names_no_station_and_omits_the_field_entirely() {
+    // A `--pane <NAME>` pane belongs to no station: the crew member at it claims
+    // one from inside their own console. Every profile authored before #1327 is
+    // this shape, so the field must be absent from the file, not `station = ""`.
+    let slot = PaneSlot::for_participant("Ada");
+    assert_eq!(slot.label, "Ada");
+    assert_eq!(slot.station, None);
+    let text = profile_with(vec![viewscreen_entry("vs"), station_entry("m1", &["Ada"])])
+        .to_toml()
+        .unwrap();
+    assert!(text.contains("label = \"Ada\""), "{text}");
+    assert!(!text.contains("station ="), "{text}");
+}
+
+#[test]
+fn a_profile_written_before_the_station_field_existed_still_parses() {
+    // Backwards compatibility, stated as a test rather than as a promise: the
+    // exact `[[display.pane]]` shape the #1124 kit ships.
+    let text = r#"
+version = 1
+
+[[display]]
+id = "DELL@3840x2160"
+role = "viewscreen"
+
+[[display]]
+id = "BenQ@1920x1080"
+role = "station"
+split = "side_by_side"
+[[display.pane]]
+label = "Ada"
+[[display.pane]]
+label = "Grace"
+"#;
+    let parsed = BridgeProfile::from_toml(text).expect("parses");
+    let validated = parsed.validate().expect("validates");
+    let DisplayRole::Station { panes, .. } = &validated.displays[1].role else {
+        panic!("the second display is a Station");
+    };
+    assert_eq!(panes[0], PaneSlot::for_participant("Ada"));
+    assert_eq!(panes[1], PaneSlot::for_participant("Grace"));
+}
+
 #[test]
 fn two_panes_sharing_a_participant_label_across_the_profile_is_refused() {
     // A lost monitor's panes are resolved to disconnect by participant NAME, with
@@ -293,6 +439,7 @@ fn distinct_labels_across_stations_still_validate() {
     // The refusal is only for a genuine collision — a bridge of many stations
     // with distinct crew names is the ordinary case and must pass.
     let ok = profile_with(vec![
+        viewscreen_entry("vs"),
         station_entry("m1", &["Ada", "Grace"]),
         station_entry("m2", &["Kay"]),
     ]);
@@ -409,12 +556,8 @@ fn round_trip_fixture() -> BridgeProfile {
                 role: ROLE_STATION.to_string(),
                 split: Some(PaneSplit::SideBySide),
                 panes: vec![
-                    PaneSlot {
-                        label: "Ada".to_string(),
-                    },
-                    PaneSlot {
-                        label: "Grace".to_string(),
-                    },
+                    PaneSlot::for_participant("Ada"),
+                    PaneSlot::for_participant("Grace"),
                 ],
             },
             station_entry("Acer@1280x1024", &["Kay"]),
@@ -603,9 +746,7 @@ fn a_missing_monitor_is_named_and_its_role_is_not_re_homed() {
             id: MonitorIdentity::new("BenQ EX@1920x1080"),
             role: DisplayRole::Station {
                 split: PaneSplit::SideBySide,
-                panes: vec![PaneSlot {
-                    label: "Ada".to_string()
-                }],
+                panes: vec![PaneSlot::for_participant("Ada")],
             }
             .summary(),
         }]
@@ -835,9 +976,12 @@ fn an_unassigned_monitor_appearing_is_neither_a_loss_nor_a_return() {
 // ── stable present-set for identical monitors (issue #1125) ──────────────────
 
 /// A profile of two identical Station monitors, disambiguated by position, each
-/// carrying one participant pane.
+/// carrying one participant pane — plus the viewscreen every assigning profile
+/// must name (issue #1327). The viewscreen is a third, unrelated monitor, so the
+/// twins are still the only thing this fixture is about.
 fn two_identical_stations() -> ValidatedProfile {
     profile_with(vec![
+        viewscreen_entry(DELL),
         station_entry("ACME 1080@1920x1080#0,0", &["Ada"]),
         station_entry("ACME 1080@1920x1080#1920,0", &["Grace"]),
     ])

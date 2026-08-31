@@ -231,9 +231,58 @@ fn base_key(raw: &RawMonitor) -> String {
 /// inside its own console; the profile does not seat it, it only records which
 /// named crew member this physical pane belongs to so the layout reloads the
 /// same way.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// # Why a pane also carries a station id ([ai] issue #1327)
+///
+/// The lobby's bridge layout ([`super::bridge_layout`]) places **stations**, not
+/// participants: a console opened on a wall monitor is claimable by anyone, so
+/// there is no crew member to name at layout time. That layout keys everything
+/// by [`StationId`](crate::core::messages::StationId), and it persists through
+/// this same profile — so the station id has to survive the TOML round-trip, and
+/// this is where it rides: an optional `station = "…"` beside the label in a
+/// `[[display.pane]]` table.
+///
+/// It is a **separate optional field rather than an overloaded `label`** on
+/// purpose. `label` keeps its one meaning (the participant name that
+/// `open_pane_for_name` resolves and that [`ProfileError::DuplicatePaneLabel`]
+/// governs); a pane with no `station` is a hand-authored `--pane` pane and is
+/// read back as exactly that, instead of being silently minted into a station
+/// whose id happens to be somebody's name. Absent from the file it is `None`, and
+/// it is skipped when serialising — so every profile authored before #1327
+/// parses unchanged and round-trips byte-identically.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaneSlot {
     pub label: String,
+    /// The station id whose console this pane shows, when a layout placed it.
+    /// `None` for a hand-authored `--pane <NAME>` pane — see the type note.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub station: Option<String>,
+}
+
+impl PaneSlot {
+    /// A pane opened for a **named participant** — the `--pane <NAME>` shape
+    /// (issue #1122). It belongs to no particular station; the crew member at it
+    /// claims one from inside their own console, exactly as a phone does.
+    pub fn for_participant(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            station: None,
+        }
+    }
+
+    /// A pane opened for a **station** by the lobby layout (issue #1327).
+    ///
+    /// The pane is *named* for the station as well as keyed by it: a
+    /// lobby-opened console has no participant yet (anyone may claim it), and
+    /// station ids are unique across a ship, so naming the pane for its station
+    /// satisfies the whole-profile label-uniqueness rule by construction.
+    pub fn for_station(station: impl Into<String>) -> Self {
+        let station = station.into();
+        Self {
+            label: station.clone(),
+            station: Some(station),
+        }
+    }
 }
 
 /// How a two-pane Station divides its monitor.
@@ -463,9 +512,16 @@ impl BridgeProfile {
     ///
     /// This is where the "refused with a clear explanation" acceptance criterion
     /// lives: a Station with three panes, an unknown role word, a viewscreen that
-    /// carries panes, two displays claiming one monitor, or two displays both
-    /// claiming the viewscreen role are each rejected here with an authored
-    /// message, before any window is opened.
+    /// carries panes, two displays claiming one monitor, two displays both
+    /// claiming the viewscreen role, or a profile that assigns monitors but names
+    /// **no** viewscreen ([`ProfileError::MissingViewscreen`], issue #1327) are
+    /// each rejected here with an authored message, before any window is opened.
+    ///
+    /// Note what is *not* checked here, and does not need to be: "a Station on
+    /// the viewscreen's monitor" is structurally impossible in a profile, because
+    /// a monitor appears at most once ([`ProfileError::DuplicateId`]). The
+    /// overlap the bridge law forbids is a property of a runtime *transition*,
+    /// and it is refused there — see [`super::bridge_layout`].
     pub fn validate(&self) -> Result<ValidatedProfile, ProfileError> {
         if self.version != PROFILE_VERSION {
             return Err(ProfileError::Version {
@@ -540,6 +596,23 @@ impl BridgeProfile {
                 role,
             });
         }
+        // A profile that assigns monitors but names no viewscreen (issue #1327).
+        // The harm is concrete and is the ONE station-over-viewscreen path a
+        // hand-authored profile still has: `apply_bridge_profile` puts the
+        // viewscreen role on the process's primary window, so with no viewscreen
+        // entry that window is never placed and stays on whatever monitor the OS
+        // opened it on — a monitor one of these Station entries may also name,
+        // whereupon a borderless-fullscreen console covers the one surface the
+        // whole bridge watches. Gated on there being displays at all: a profile
+        // that assigns no monitor opens no Station window, so it has nothing to
+        // cover the viewscreen with (a `[[touch]]`/`[[media]]`-only profile is
+        // the shipped shape of that, and stays valid).
+        if !self.displays.is_empty() && viewscreen_id.is_none() {
+            return Err(ProfileError::MissingViewscreen {
+                stations: self.displays.iter().map(|d| d.id.clone()).collect(),
+            });
+        }
+
         // The media assignments (issue #1126) are validated in the same pass, so
         // a wrong-kind device, a duplicate or an unconsented share fails at the
         // prompt exactly as a bad display role does — see `bridge_media`.
@@ -598,6 +671,12 @@ pub enum ProfileError {
     /// `apply_bridge_profile` would silently keep only the last one and leave
     /// every other configured monitor black with no diagnostic.
     MultipleViewscreens { ids: Vec<String> },
+    /// The profile assigns monitors but names **no** viewscreen (issue #1327).
+    /// The viewscreen role is what places the process's primary window, so a
+    /// profile without one leaves that window on whatever monitor the OS opened
+    /// it on — a monitor a `station` entry here may also claim, covering the
+    /// viewscreen with a console. Carries the ids of the displays it does assign.
+    MissingViewscreen { stations: Vec<String> },
     /// A `[[media]]` assignment is invalid (issue #1126): a wrong-kind device in
     /// a slot, a duplicate, an unconsented share, and so on. The wrapped
     /// [`MediaError`](super::bridge_media::MediaError) carries the detail.
@@ -650,6 +729,23 @@ impl std::fmt::Display for ProfileError {
                  has exactly one shared viewscreen; give every monitor but one a \
                  {ROLE_STATION:?} role instead",
                 ids.iter()
+                    .map(|id| format!("{id:?}"))
+                    .collect::<Vec<_>>()
+                    .join(" and ")
+            ),
+            ProfileError::MissingViewscreen { stations } => write!(
+                f,
+                "the profile assigns {} but gives no monitor the {ROLE_VIEWSCREEN:?} role; the \
+                 viewscreen is what places this process's primary window, so without one that \
+                 window stays on whatever monitor the OS opened it on — a monitor {} may also \
+                 claim, covering the shared viewscreen with a console. Give exactly one monitor \
+                 the {ROLE_VIEWSCREEN:?} role",
+                match stations.len() {
+                    1 => "one monitor".to_string(),
+                    n => format!("{n} monitors"),
+                },
+                stations
+                    .iter()
                     .map(|id| format!("{id:?}"))
                     .collect::<Vec<_>>()
                     .join(" and ")

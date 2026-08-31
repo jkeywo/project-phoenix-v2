@@ -42,9 +42,8 @@ fn station(
             split,
             panes: labels
                 .iter()
-                .map(|l| PaneSlot {
-                    label: (*l).to_string(),
-                })
+                .copied()
+                .map(PaneSlot::for_participant)
                 .collect(),
         },
         primary: false,

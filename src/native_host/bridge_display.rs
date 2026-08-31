@@ -715,9 +715,7 @@ mod tests {
                     id: "BenQ EX@1920x1080".to_string(),
                     role: ROLE_STATION.to_string(),
                     split: None,
-                    panes: vec![PaneSlot {
-                        label: station_label.to_string(),
-                    }],
+                    panes: vec![PaneSlot::for_participant(station_label)],
                 },
             ],
             touch: Vec::new(),
@@ -844,21 +842,27 @@ mod tests {
         BridgeProfile {
             version: PROFILE_VERSION,
             displays: vec![
+                // A viewscreen this fixture never connects: a profile that
+                // assigns monitors must name one (issue #1327), and a monitor
+                // that is never present is simply never a runtime loss — which is
+                // what keeps this a test about the two identical Stations.
+                DisplayEntry {
+                    id: "DELL U2720Q@3840x2160".to_string(),
+                    role: ROLE_VIEWSCREEN.to_string(),
+                    split: None,
+                    panes: Vec::new(),
+                },
                 DisplayEntry {
                     id: "ACME 1080@1920x1080#0,0".to_string(),
                     role: ROLE_STATION.to_string(),
                     split: None,
-                    panes: vec![PaneSlot {
-                        label: "Ada".to_string(),
-                    }],
+                    panes: vec![PaneSlot::for_participant("Ada")],
                 },
                 DisplayEntry {
                     id: "ACME 1080@1920x1080#1920,0".to_string(),
                     role: ROLE_STATION.to_string(),
                     split: None,
-                    panes: vec![PaneSlot {
-                        label: "Grace".to_string(),
-                    }],
+                    panes: vec![PaneSlot::for_participant("Grace")],
                 },
             ],
             touch: Vec::new(),

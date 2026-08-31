@@ -188,9 +188,7 @@ fn drive(
                 id: st.identity.as_str().to_string(),
                 role: ROLE_STATION.to_string(),
                 split: None,
-                panes: vec![PaneSlot {
-                    label: "TestOperator".to_string(),
-                }],
+                panes: vec![PaneSlot::for_participant("TestOperator")],
             });
         }
         let profile = BridgeProfile {

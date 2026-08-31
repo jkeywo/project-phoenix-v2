@@ -142,40 +142,48 @@ fn drive(
     let discovered = identify(&raws.iter().map(|(r, _)| r.clone()).collect::<Vec<_>>());
 
     // The viewscreen is the primary monitor (or the first); a Station is any
-    // other monitor, split side by side into two panes. With only one monitor the
-    // single display is the Station of two panes — the single-monitor fallback
-    // the #1124 kit uses — so the check still exercises a two-pane split.
+    // other monitor, split side by side into two panes.
+    //
+    // With only ONE monitor there is no lawful Station at all. The bridge layout
+    // law (issue #1327) forbids a Station on the viewscreen's monitor, and a
+    // profile that assigns monitors but names no viewscreen is refused
+    // (`MissingViewscreen`) precisely because it would leave a console covering
+    // the shared view — which is what the old single-monitor form of this fixture
+    // authored. So on a single-monitor machine this check has no profile to build
+    // and says so, rather than proving a layout the host will not accept.
     let vs_index = raws.iter().position(|(_, p)| *p).unwrap_or(0);
     let vs = &discovered[vs_index];
-    let station = discovered.iter().find(|d| d.identity != vs.identity);
-
-    let mut entries = Vec::new();
-    let station_id = match station {
-        Some(st) => {
-            entries.push(DisplayEntry {
-                id: vs.identity.as_str().to_string(),
-                role: ROLE_VIEWSCREEN.to_string(),
-                split: None,
-                panes: Vec::new(),
-            });
-            st.identity.as_str().to_string()
-        }
-        // One monitor: it is the Station itself.
-        None => vs.identity.as_str().to_string(),
+    let Some(station) = discovered.iter().find(|d| d.identity != vs.identity) else {
+        finish(
+            &outcome,
+            &mut exit,
+            Err(
+                "only one monitor is connected, and a Station may not share the viewscreen's \
+                 monitor — run this check on a machine with two or more displays"
+                    .into(),
+            ),
+        );
+        return;
     };
-    entries.push(DisplayEntry {
-        id: station_id.clone(),
-        role: ROLE_STATION.to_string(),
-        split: Some(PaneSplit::SideBySide),
-        panes: vec![
-            PaneSlot {
-                label: "Ada".to_string(),
-            },
-            PaneSlot {
-                label: "Grace".to_string(),
-            },
-        ],
-    });
+
+    let station_id = station.identity.as_str().to_string();
+    let entries = vec![
+        DisplayEntry {
+            id: vs.identity.as_str().to_string(),
+            role: ROLE_VIEWSCREEN.to_string(),
+            split: None,
+            panes: Vec::new(),
+        },
+        DisplayEntry {
+            id: station_id.clone(),
+            role: ROLE_STATION.to_string(),
+            split: Some(PaneSplit::SideBySide),
+            panes: vec![
+                PaneSlot::for_participant("Ada"),
+                PaneSlot::for_participant("Grace"),
+            ],
+        },
+    ];
 
     let profile = BridgeProfile {
         version: project_phoenix::native_host::bridge_profile::PROFILE_VERSION,

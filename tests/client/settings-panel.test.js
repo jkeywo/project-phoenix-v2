@@ -1,6 +1,6 @@
 // Issue #940 — the phone client's settings cog.
 //
-// The panel is the mirror of the host page's (issue #939): same three tabs,
+// The panel is the mirror of the host page's (issue #939): same shared tabs,
 // same tab gated in a demo build. Everything it decides is a pure exported
 // function, so the interesting cases — which tab survives the build, what a
 // debug button shows before the server has ever reported, what actually goes on
@@ -31,7 +31,6 @@ import {
 import { setBuildFlags, isDemoBuild } from '../../gui/build-flags.js';
 import {
   TABS,
-  CLIENT_INPUT_TABS,
   CLIENT_ACCESSIBILITY_TABS,
   CLIENT_DOCUMENTATION_TABS,
 } from '../../gui/settings-tabs.js';
@@ -229,7 +228,7 @@ describe('mountSettings — cog and overlay', () => {
     const inst = mount(doc);
     inst.open();
     const labels = tabBarOf(doc).children.map((c) => c.getAttribute('data-tab'));
-    expect(labels).toEqual(['audio', 'gameplay', 'debug', 'controls', 'accessibility', 'station-help', 'ship-manual']);
+    expect(labels).toEqual(['audio', 'gameplay', 'controls', 'debug', 'accessibility', 'station-help', 'ship-manual']);
     expect(tabBarOf(doc).children[0].classList.contains('active')).toBe(true);
   });
 
@@ -459,9 +458,9 @@ describe('the demo build gate', () => {
   it('hides exactly the Debug/Cheat tab in a demo build and nothing in a dev build', () => {
     const dev = buildSettingsState({ demo: false }).tabs.map((tb) => tb.id);
     const demo = buildSettingsState({ demo: true }).tabs.map((tb) => tb.id);
-    expect(dev).toEqual(TABS.concat(CLIENT_INPUT_TABS, CLIENT_ACCESSIBILITY_TABS, CLIENT_DOCUMENTATION_TABS).map((tb) => tb.id));
+    expect(dev).toEqual(TABS.concat(CLIENT_ACCESSIBILITY_TABS, CLIENT_DOCUMENTATION_TABS).map((tb) => tb.id));
     expect(demo).toEqual(
-      TABS.filter((tb) => !tb.gated).concat(CLIENT_INPUT_TABS, CLIENT_ACCESSIBILITY_TABS, CLIENT_DOCUMENTATION_TABS).map((tb) => tb.id),
+      TABS.filter((tb) => !tb.gated).concat(CLIENT_ACCESSIBILITY_TABS, CLIENT_DOCUMENTATION_TABS).map((tb) => tb.id),
     );
     expect(dev).toContain('debug');
     expect(demo).not.toContain('debug');
@@ -1486,7 +1485,7 @@ describe('semantic controls tab', () => {
     }
   });
 
-  it('applies a standalone modifier only when its matching keyup arrives', () => {
+  it('keeps a standalone modifier through auto-repeat and applies it only on matching keyup', () => {
     const { doc, registry } = openControls();
     const capture = descendants(bodyOf(doc)).find((el) => el.getAttribute
       && el.getAttribute('data-control') === 'semantic-binding-captain.weapons-hold-0');
@@ -1494,6 +1493,17 @@ describe('semantic controls tab', () => {
       code: 'ControlLeft', key: 'Control', ctrlKey: true, repeat: false,
       preventDefault() {}, stopPropagation() {},
     });
+    expect(registry.action(CAPTAIN_WEAPONS_HOLD_ACTION_ID).bindings[0].code).toBe('KeyH');
+
+    let repeatPrevented = false;
+    let repeatStopped = false;
+    capture.dispatch('keydown', {
+      code: 'ControlLeft', key: 'Control', ctrlKey: true, repeat: true,
+      preventDefault() { repeatPrevented = true; },
+      stopPropagation() { repeatStopped = true; },
+    });
+    expect(repeatPrevented).toBe(false);
+    expect(repeatStopped).toBe(false);
     expect(registry.action(CAPTAIN_WEAPONS_HOLD_ACTION_ID).bindings[0].code).toBe('KeyH');
 
     capture.dispatch('keyup', {

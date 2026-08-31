@@ -1165,6 +1165,20 @@
     }
     #server-settings-btn:hover { background: #162131; color: #c9d8ea; }
     #server-settings-btn[aria-expanded="true"] { background: #1b2940; color: #cfe0f5; }
+    #host-action-feedback {
+      position: fixed;
+      top: 10px; left: 52px;
+      z-index: 210;
+      min-height: 34px; box-sizing: border-box;
+      display: flex; align-items: center;
+      padding: 6px 9px;
+      background: rgba(6, 11, 18, 0.9);
+      border: 1px solid #223246; border-radius: 4px;
+      color: #c9d8ea;
+      font-family: "Chakra Petch", system-ui, sans-serif;
+      font-size: 11px; letter-spacing: 0.06em;
+    }
+    #host-action-feedback:empty { display: none; }
     #server-settings-overlay {
       position: fixed;
       inset: 0;
@@ -1234,6 +1248,37 @@
     .server-settings-control:disabled, .server-settings-control.disabled {
       opacity: 0.35; cursor: not-allowed;
       background: #10171f; border-color: #223246; color: #55697f;
+    }
+    .server-settings-popup .settings-binding-row {
+      display: flex; gap: 6px; margin-bottom: 5px;
+    }
+    .server-settings-popup .settings-binding-label {
+      display: grid; grid-template-columns: minmax(62px, auto) minmax(120px, 1fr);
+      align-items: center; gap: 7px; width: 100%;
+      color: #8ca4c2; font-family: var(--font-mono, monospace); font-size: 11px;
+    }
+    .server-settings-popup .settings-binding-capture {
+      width: 100%; box-sizing: border-box; padding: 6px 9px;
+      background: #10171f; border: 1px solid #223246; color: #dbe8f7;
+      font: inherit; text-align: center; cursor: pointer;
+    }
+    .server-settings-popup .settings-binding-capture:focus {
+      border-color: #5a86bd; outline: 2px solid #5a86bd; outline-offset: 2px;
+    }
+    .server-settings-popup .settings-binding-feedback,
+    .server-settings-popup .settings-binding-conflict {
+      display: flex; flex-direction: column; gap: 5px;
+      padding: 7px; margin-bottom: 10px;
+      border: 1px solid #a77c45; background: #10171f; color: #d4aa71;
+      font-family: var(--font-mono, monospace); font-size: 11px;
+    }
+    .server-settings-popup .settings-binding-conflict-heading {
+      font-family: "Chakra Petch", system-ui, sans-serif;
+      font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+    }
+    .server-settings-popup .settings-binding-conflict-item { color: #c9d8ea; }
+    .server-settings-popup .settings-binding-conflict-actions {
+      display: flex; gap: 5px; flex-wrap: wrap;
     }
     /* The one text field in this panel: the fleet code an operator types off
        another viewscreen (issue #1114). Monospaced and letter-spaced because

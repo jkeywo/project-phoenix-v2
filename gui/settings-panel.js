@@ -2,7 +2,7 @@
  * gui/settings-panel.js — the phone client's settings cog (issue #940).
  *
  * The mirror of the host page's cog (issue #939, `gui/server-settings.js`):
- * a gear top-left opening the same three tabs, gating the same one in a demo
+ * a gear top-left opening the same shared tabs, gating the same one in a demo
  * build. The tab list itself is shared — `gui/settings-tabs.js` — so the two
  * pages cannot disagree about which controls exist.
  *
@@ -52,11 +52,13 @@ import { controlSystemEnvelope } from './command-gateway.js';
 import { renderStationHelp } from './help-panel.js';
 import { renderManual } from './manual-panel.js';
 import {
-  CONTINUOUS_DEADZONE_MAX,
-  formatSemanticBinding,
   isReservedKeyboardBinding,
-  keyboardBindingFromEvent,
 } from './semantic-action-registry.js';
+import { createSemanticControlsRemapper } from './semantic-controls-remapper.js';
+export {
+  isSemanticModifierEvent,
+  semanticModifierCode,
+} from './semantic-controls-remapper.js';
 import { TEXT_SCALE_MIN, TEXT_SCALE_MAX, TEXT_SCALE_STEP } from './accessibility-profile.js';
 import {
   mountOverlayShell,
@@ -70,44 +72,6 @@ import {
 
 /** localStorage key for the master volume. Unchanged from the pre-#940 slider. */
 const STORAGE_KEY = 'phoenix-settings-volume';
-
-const SEMANTIC_MODIFIER_CODES = new Set([
-  'ControlLeft', 'ControlRight',
-  'ShiftLeft', 'ShiftRight',
-  'AltLeft', 'AltRight',
-  'MetaLeft', 'MetaRight',
-]);
-const SEMANTIC_MODIFIER_KEY_CODES = Object.freeze({
-  Control: 'ControlLeft',
-  Shift: 'ShiftLeft',
-  Alt: 'AltLeft',
-  Meta: 'MetaLeft',
-  OS: 'MetaLeft',
-});
-
-/** Resolve a modifier-only event by physical code, with a key-name fallback. */
-export function semanticModifierCode(event) {
-  if (!event) return null;
-  if (SEMANTIC_MODIFIER_CODES.has(event.code)) return event.code;
-  return SEMANTIC_MODIFIER_KEY_CODES[event.key] || null;
-}
-
-/** True when this event is one modifier key rather than a completed chord. */
-export function isSemanticModifierEvent(event) {
-  return semanticModifierCode(event) !== null;
-}
-
-function semanticModifierBindingFromEvent(event) {
-  const code = semanticModifierCode(event);
-  if (!code) return null;
-  return keyboardBindingFromEvent({
-    code,
-    ctrlKey: event.ctrlKey,
-    shiftKey: event.shiftKey,
-    altKey: event.altKey,
-    metaKey: event.metaKey,
-  });
-}
 
 // Master volume's 0..1 range and percent resolution are shared with the host
 // cog — see `gui/settings-overlay-kit.js` — 1.0 is the identity (every
@@ -485,12 +449,6 @@ export function mountSettings({
   // remembered index and reports back when the reader moves.
   let manualStationIndex = 0;
 
-  // Settings owns only this short-lived presentation state. The parent
-  // registry remains the sole source of current bindings and performs every
-  // proposal, replacement and reset atomically.
-  let pendingBindingConflict = null;
-  let bindingFeedback = null;
-
   // Master volume owns every audio channel the page hands it. `audioEl` is the
   // pre-#940 single-element argument, kept working so client.html's existing
   // call site did not have to change in the same commit as the panel.
@@ -534,9 +492,9 @@ export function mountSettings({
     return { status: 'unavailable' };
   };
 
-  const setSemanticTuning = (actionId, value) => {
+  const setSemanticTuning = (actionId, tuning) => {
     if (typeof _onSemanticTuning === 'function') {
-      return _onSemanticTuning(actionId, value);
+      return _onSemanticTuning(actionId, tuning);
     }
     return { status: 'unavailable', actionId };
   };
@@ -559,69 +517,6 @@ export function mountSettings({
   // `buildContent` is a hoisted function declaration, so this may run before
   // its textual definition below.
   shell.buildContent = buildContent;
-
-  const isEscapeEvent = (event) => !!event && (
-    event.code === 'Escape' || event.key === 'Escape' || event.key === 'Esc'
-  );
-  const isPlainEscapeEvent = (event) => isEscapeEvent(event)
-    && !event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey;
-
-  const focusSemanticBinding = (actionId, slot) => {
-    if (!overlay || typeof overlay.querySelector !== 'function') return;
-    const control = overlay.querySelector(
-      `[data-control="semantic-binding-${actionId}-${slot}"]`,
-    );
-    if (control && typeof control.focus === 'function') control.focus();
-  };
-
-  function proposeSemanticBinding(actionId, slot, binding) {
-    // A keyboard proposal rebuilds the capture node. Do not depend on a
-    // removed focused element emitting blur: explicitly end the parallel
-    // gamepad capture before replacing the DOM.
-    if (typeof _onSemanticCapture === 'function') {
-      _onSemanticCapture(actionId, slot, false);
-    }
-    const result = setSemanticBinding(actionId, slot, binding);
-    const reserved = result && result.status === 'reserved';
-    if (reserved) {
-      pendingBindingConflict = null;
-      bindingFeedback = {
-        labelId: 'settings.controls.reserved',
-        values: { binding: formatSemanticBinding(binding, t) },
-      };
-    } else if (result && result.status === 'conflict') {
-      pendingBindingConflict = result;
-      bindingFeedback = null;
-    } else {
-      pendingBindingConflict = null;
-      bindingFeedback = null;
-    }
-    if (shell.isOpen()) {
-      buildContent();
-      if (reserved) focusSemanticBinding(actionId, slot);
-    }
-    return result;
-  }
-
-  const cancelPendingBindingConflict = () => {
-    if (!pendingBindingConflict) return false;
-    const { actionId, slot } = pendingBindingConflict;
-    pendingBindingConflict = null;
-    bindingFeedback = null;
-    buildContent();
-    focusSemanticBinding(actionId, slot);
-    return true;
-  };
-
-  // A conflict belongs to the whole Settings modal, not only to its prompt.
-  // Escape from Reset All, a tab, or any other descendant cancels the pending
-  // proposal before the document-level modal trap can close Settings.
-  overlay.addEventListener('keydown', (event) => {
-    if (!pendingBindingConflict || !isPlainEscapeEvent(event)) return;
-    if (typeof event.preventDefault === 'function') event.preventDefault();
-    if (typeof event.stopPropagation === 'function') event.stopPropagation();
-    cancelPendingBindingConflict();
-  });
 
   // ── Small builders ───────────────────────────────────────────────────────
 
@@ -656,6 +551,24 @@ export function mountSettings({
     });
     return el;
   }
+
+  // Keyboard capture, conflict confirmation and reset behaviour are shared
+  // with the host Settings Controls tab. The parent registry still owns every
+  // binding; this object owns only the modal's transient presentation.
+  const semanticControls = createSemanticControlsRemapper({
+    doc,
+    root: overlay,
+    setBinding: setSemanticBinding,
+    resetAction: resetSemanticAction,
+    resetAll: resetAllSemanticActions,
+    setTuning: setSemanticTuning,
+    onCapture: (actionId, slot, active) => {
+      if (typeof _onSemanticCapture === 'function') {
+        _onSemanticCapture(actionId, slot, active);
+      }
+    },
+    rebuild: () => { if (shell.isOpen()) buildContent(); },
+  });
 
   // ── Tab bodies ───────────────────────────────────────────────────────────
 
@@ -818,288 +731,42 @@ export function mountSettings({
   }
 
   function buildControlsTab(body, view) {
-    const intro = section('settings.controls.heading');
-    intro.appendChild(hint('settings.controls.hint'));
-    const resetAll = action(t('settings.controls.reset_all'), null, () => {
-      const result = resetAllSemanticActions();
-      if (!result || result.status === 'applied') {
-        pendingBindingConflict = null;
-        bindingFeedback = null;
-        buildContent();
-      }
-    });
-    resetAll.setAttribute('data-control', 'semantic-binding-reset-all');
-    intro.appendChild(resetAll);
-    body.appendChild(intro);
-
     const gamepad = view.gamepad || {};
-    const gamepadSection = section('settings.controls.gamepad.heading');
-    gamepadSection.appendChild(hint('settings.controls.gamepad.hint'));
-    const gamepadLabel = doc.createElement('label');
-    gamepadLabel.className = 'settings-binding-label';
-    gamepadLabel.textContent = t('settings.controls.gamepad.selector');
-    const selector = doc.createElement('select');
-    selector.setAttribute('data-control', 'semantic-gamepad-select');
-    selector.setAttribute('aria-label', t('settings.controls.gamepad.selector'));
-    updateGamepadSelector(selector, gamepad);
-    selector.addEventListener('change', () => {
-      if (typeof _onGamepadSelection === 'function') {
-        _onGamepadSelection(selector.value === '' ? null : Number(selector.value));
-      }
-      buildContent();
+    semanticControls.render(body, {
+      actions: view.semanticActions,
+      capturing: gamepad.capturing || null,
+      section,
+      hint,
+      row,
+      action: (label, onClick) => action(label, null, onClick),
+      continuousPressPromptId: 'settings.controls.press_axis',
+      beforeActions: (target) => {
+        const gamepadSection = section('settings.controls.gamepad.heading');
+        gamepadSection.appendChild(hint('settings.controls.gamepad.hint'));
+        const gamepadLabel = doc.createElement('label');
+        gamepadLabel.className = 'settings-binding-label';
+        gamepadLabel.textContent = t('settings.controls.gamepad.selector');
+        const selector = doc.createElement('select');
+        selector.setAttribute('data-control', 'semantic-gamepad-select');
+        selector.setAttribute('aria-label', t('settings.controls.gamepad.selector'));
+        updateGamepadSelector(selector, gamepad);
+        selector.addEventListener('change', () => {
+          if (typeof _onGamepadSelection === 'function') {
+            _onGamepadSelection(selector.value === '' ? null : Number(selector.value));
+          }
+          buildContent();
+        });
+        gamepadLabel.appendChild(selector);
+        gamepadSection.appendChild(gamepadLabel);
+
+        const status = doc.createElement('div');
+        status.className = 'settings-section-hint settings-gamepad-status';
+        status.setAttribute('data-control', 'semantic-gamepad-status');
+        updateGamepadStatus(status, gamepad);
+        gamepadSection.appendChild(status);
+        target.appendChild(gamepadSection);
+      },
     });
-    gamepadLabel.appendChild(selector);
-    gamepadSection.appendChild(gamepadLabel);
-
-    const status = doc.createElement('div');
-    status.className = 'settings-section-hint settings-gamepad-status';
-    status.setAttribute('data-control', 'semantic-gamepad-status');
-    updateGamepadStatus(status, gamepad);
-    gamepadSection.appendChild(status);
-    body.appendChild(gamepadSection);
-
-    if (bindingFeedback) {
-      const feedback = doc.createElement('div');
-      feedback.className = 'settings-binding-feedback';
-      feedback.setAttribute('role', 'alert');
-      feedback.setAttribute('aria-live', 'assertive');
-      feedback.textContent = t(bindingFeedback.labelId, bindingFeedback.values || {});
-      body.appendChild(feedback);
-    }
-
-    if (pendingBindingConflict) {
-      const proposal = pendingBindingConflict;
-      const prompt = doc.createElement('div');
-      prompt.className = 'settings-binding-conflict';
-      prompt.setAttribute('role', 'alert');
-      prompt.setAttribute('aria-live', 'assertive');
-
-      const heading = doc.createElement('div');
-      heading.className = 'settings-binding-conflict-heading';
-      heading.textContent = t('settings.controls.conflict_heading', {
-        binding: formatSemanticBinding(proposal.binding, t),
-      });
-      prompt.appendChild(heading);
-
-      for (const conflict of proposal.conflicts || []) {
-        const conflictAction = view.semanticActions.find(
-          (entry) => entry.id === conflict.actionId,
-        );
-        const item = doc.createElement('div');
-        item.className = 'settings-binding-conflict-item';
-        item.textContent = t('settings.controls.conflict_item', {
-          action: t(conflict.labelId || (conflictAction && conflictAction.labelId) || ''),
-          slot: String(conflict.slot + 1),
-        });
-        prompt.appendChild(item);
-      }
-
-      const controls = row('settings-binding-conflict-actions');
-      const replace = action(t('settings.controls.replace'), null, () => {
-        const result = setSemanticBinding(
-          proposal.actionId,
-          proposal.slot,
-          proposal.binding,
-          { replace: true },
-        );
-        if (!result || result.status === 'applied') {
-          const { actionId, slot } = proposal;
-          pendingBindingConflict = null;
-          bindingFeedback = null;
-          buildContent();
-          focusSemanticBinding(actionId, slot);
-        }
-      });
-      replace.setAttribute('data-control', 'semantic-binding-conflict-replace');
-      const cancel = action(t('settings.controls.cancel'), null, cancelPendingBindingConflict);
-      cancel.setAttribute('data-control', 'semantic-binding-conflict-cancel');
-      controls.appendChild(replace);
-      controls.appendChild(cancel);
-      prompt.appendChild(controls);
-      body.appendChild(prompt);
-      // Destructive replacement is never the default: keyboard and assistive
-      // technology users arrive on Cancel.
-      if (typeof cancel.focus === 'function') cancel.focus();
-    }
-
-    for (const semanticAction of view.semanticActions) {
-      const actionSection = section(semanticAction.labelId);
-      actionSection.appendChild(hint(semanticAction.accessibilityLabelId));
-
-      const slots = Array.isArray(semanticAction.bindings) ? semanticAction.bindings : [];
-      for (let slot = 0; slot < 2; slot++) {
-        const binding = slots[slot] || null;
-        const bindingRow = row('settings-binding-row');
-
-        const label = doc.createElement('label');
-        label.className = 'settings-binding-label';
-        label.textContent = t('settings.controls.slot', { slot: String(slot + 1) });
-
-        const capture = doc.createElement('input');
-        capture.type = 'text';
-        capture.readOnly = true;
-        const capturing = gamepad.capturing
-          && gamepad.capturing.actionId === semanticAction.id
-          && gamepad.capturing.slot === slot;
-        capture.value = capturing
-          ? t(semanticAction.continuous
-            ? 'settings.controls.press_axis'
-            : 'settings.controls.press_key')
-          : formatSemanticBinding(binding, t);
-        capture.className = 'settings-binding-capture';
-        capture.setAttribute('data-control', `semantic-binding-${semanticAction.id}-${slot}`);
-        capture.setAttribute('data-semantic-binding-capture', 'true');
-        capture.setAttribute('aria-label', t('settings.controls.capture_label', {
-          action: t(semanticAction.labelId),
-          slot: String(slot + 1),
-        }));
-        label.appendChild(capture);
-
-        // A browser emits ControlLeft before the R in Ctrl+R. Treating that
-        // first keydown as a complete binding would rebuild this DOM node, so
-        // the subsequent R would land on the page and invoke browser chrome.
-        // Keep the modifier candidate local to this capture until either a
-        // non-modifier completes a chord or the same modifier is released.
-        let pendingModifier = null;
-
-        capture.addEventListener('focus', () => {
-          pendingModifier = null;
-          capture.value = t(semanticAction.continuous
-            ? 'settings.controls.press_axis'
-            : 'settings.controls.press_key');
-          if (typeof _onSemanticCapture === 'function') {
-            _onSemanticCapture(semanticAction.id, slot, true);
-          }
-        });
-        capture.addEventListener('blur', () => {
-          pendingModifier = null;
-          capture.value = formatSemanticBinding(binding, t);
-          if (typeof _onSemanticCapture === 'function') {
-            _onSemanticCapture(semanticAction.id, slot, false);
-          }
-        });
-        capture.addEventListener('keydown', (event) => {
-          const escape = isEscapeEvent(event);
-          const tab = event.code === 'Tab' || event.key === 'Tab';
-          const navigationTab = tab && !event.ctrlKey && !event.altKey && !event.metaKey;
-          const navigationEscape = escape
-            && !event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey;
-          if (navigationTab) {
-            // Tab belongs to the modal focus trap, not to remapping. Let it
-            // bubble untouched so plain Tab/Shift+Tab navigation survives.
-            pendingModifier = null;
-            return;
-          }
-          if (navigationEscape) {
-            pendingModifier = null;
-            // Plain Escape belongs to a parent layer: the Settings overlay
-            // cancels a pending conflict; otherwise the modal trap closes.
-            return;
-          }
-          if (event.repeat) return;
-          if (semanticAction.continuous) {
-            // Continuous actions accept only an undirected standard axis from
-            // the selected pad. Keyboard keys remain owned by the joystick's
-            // existing WASD path and cannot become a scalar binding here.
-            if (typeof event.preventDefault === 'function') event.preventDefault();
-            if (typeof event.stopPropagation === 'function') event.stopPropagation();
-            return;
-          }
-          if (isSemanticModifierEvent(event)) {
-            const candidate = semanticModifierBindingFromEvent(event);
-            if (!candidate) return;
-            if (typeof event.preventDefault === 'function') event.preventDefault();
-            if (typeof event.stopPropagation === 'function') event.stopPropagation();
-            pendingModifier = {
-              code: semanticModifierCode(event),
-              binding: candidate,
-            };
-            return;
-          }
-          // Any ordinary key completes the gesture. Its event already carries
-          // the currently-held modifier flags, so the retained lone-modifier
-          // candidate must never be committed as a second proposal.
-          pendingModifier = null;
-          const next = keyboardBindingFromEvent(event);
-          if (!next) return;
-          if (typeof event.preventDefault === 'function') event.preventDefault();
-          if (typeof event.stopPropagation === 'function') event.stopPropagation();
-          proposeSemanticBinding(semanticAction.id, slot, next);
-        });
-        capture.addEventListener('keyup', (event) => {
-          if (!pendingModifier
-              || semanticModifierCode(event) !== pendingModifier.code) return;
-          if (typeof event.preventDefault === 'function') event.preventDefault();
-          if (typeof event.stopPropagation === 'function') event.stopPropagation();
-          const candidate = pendingModifier.binding;
-          pendingModifier = null;
-          proposeSemanticBinding(semanticAction.id, slot, candidate);
-        });
-
-        bindingRow.appendChild(label);
-        actionSection.appendChild(bindingRow);
-      }
-      if (semanticAction.continuous) {
-        const tuning = semanticAction.tuning || { deadzone: 0, inverted: false };
-        const tuningRow = row('settings-binding-tuning-row');
-
-        const deadzoneLabel = doc.createElement('label');
-        deadzoneLabel.className = 'settings-binding-label';
-        deadzoneLabel.textContent = t('settings.controls.gamepad.deadzone');
-        const deadzone = doc.createElement('input');
-        deadzone.type = 'range';
-        deadzone.min = '0';
-        deadzone.max = String(CONTINUOUS_DEADZONE_MAX);
-        deadzone.step = '0.01';
-        deadzone.value = String(tuning.deadzone);
-        deadzone.setAttribute('data-control', `semantic-tuning-deadzone-${semanticAction.id}`);
-        deadzone.setAttribute('aria-label', t('settings.controls.gamepad.deadzone'));
-        const deadzoneValue = doc.createElement('output');
-        deadzoneValue.setAttribute('data-control', `semantic-tuning-deadzone-value-${semanticAction.id}`);
-        const updateDeadzoneValue = () => {
-          deadzoneValue.textContent = t('settings.controls.gamepad.deadzone_value', {
-            value: String(Math.round(Number(deadzone.value) * 100)),
-          });
-        };
-        updateDeadzoneValue();
-        deadzone.addEventListener('input', () => {
-          const next = Number(deadzone.value);
-          updateDeadzoneValue();
-          setSemanticTuning(semanticAction.id, { deadzone: next });
-        });
-        deadzoneLabel.appendChild(deadzone);
-        deadzoneLabel.appendChild(deadzoneValue);
-        tuningRow.appendChild(deadzoneLabel);
-
-        const inversionLabel = doc.createElement('label');
-        inversionLabel.className = 'settings-binding-label';
-        const inversion = doc.createElement('input');
-        inversion.type = 'checkbox';
-        inversion.checked = tuning.inverted === true;
-        inversion.setAttribute('data-control', `semantic-tuning-inverted-${semanticAction.id}`);
-        inversion.setAttribute('aria-label', t('settings.controls.gamepad.inverted'));
-        inversion.addEventListener('change', () => {
-          setSemanticTuning(semanticAction.id, { inverted: inversion.checked });
-        });
-        inversionLabel.appendChild(inversion);
-        const inversionText = doc.createElement('span');
-        inversionText.textContent = t('settings.controls.gamepad.inverted');
-        inversionLabel.appendChild(inversionText);
-        tuningRow.appendChild(inversionLabel);
-        actionSection.appendChild(tuningRow);
-      }
-      const reset = action(t('settings.controls.reset_action'), null, () => {
-        const result = resetSemanticAction(semanticAction.id);
-        if (!result || result.status === 'applied') {
-          pendingBindingConflict = null;
-          bindingFeedback = null;
-          buildContent();
-        }
-      });
-      reset.setAttribute('data-control', `semantic-binding-reset-${semanticAction.id}`);
-      actionSection.appendChild(reset);
-      body.appendChild(actionSection);
-    }
   }
 
   function buildGameplayTab(body, view) {
@@ -1317,9 +984,7 @@ export function mountSettings({
       // tab, or a later Escape would cancel invisible state instead of closing
       // Settings normally. Current bindings live in the parent registry and
       // are deliberately untouched here.
-      pendingBindingConflict = null;
-      bindingFeedback = null;
-      if (typeof _onSemanticCapture === 'function') _onSemanticCapture(null, null, false);
+      semanticControls.resetTransient();
     }
     activeTab = id;
     if (shell.isOpen()) buildContent();
@@ -1335,7 +1000,7 @@ export function mountSettings({
     close: shell.close,
     isOpen: shell.isOpen,
     selectTab,
-    proposeSemanticBinding,
+    proposeSemanticBinding: semanticControls.proposeBinding,
     updateGamepadState,
     rebuildContent: () => {
       if (shell.isOpen()) buildContent();

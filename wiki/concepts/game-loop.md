@@ -2,7 +2,7 @@
 title: Game Loop
 type: concept
 tags: [loop, ticks, simulation, rates, determinism, lockstep, fleet]
-sources: [src/server_app/registration.rs, src/sim_tick.rs, src/ai/cadence.rs, src/command_admission/log.rs, src/lockstep/mod.rs, src/lockstep/session.rs, src/ship/physics.rs, src/server/bridge.rs, AGENTS.md]
+sources: [src/server_app/registration.rs, src/sim_tick.rs, src/ai/cadence.rs, src/command_admission/log.rs, src/lockstep/mod.rs, src/lockstep/session.rs, src/ship/physics.rs, src/server/bridge.rs, gui/host-actions.js, gui/server-settings.js, AGENTS.md]
 updated: 2026-08-29
 ---
 
@@ -126,12 +126,18 @@ pauses `Time<Virtual>`, which starves the fixed accumulator — `FixedUpdate`
 stops running altogether while paused, not just the `SimSet` chain inside it.
 
 The host settings cog exposes pause on its **Gameplay** tab. It remains
-available in the demo build even though the Debug/Cheat tab is absent. The cog
-is the only host driver; there is no keyboard binding.
+available in the demo build even though the Debug/Cheat tab is absent. That
+pause button is the only host pause driver; pause has no keyboard binding.
 
 The same Gameplay tab exposes the viewscreen join-QR toggle. Phones carry the
-matching control in their Gameplay settings. Both routes change the host page's
-shared QR overlay state.
+matching control in their Gameplay settings. The host's `host.qr-code` semantic
+action has two host-local remappable slots (KeyQ plus an empty slot by default),
+and its visible button, native button keyboard activation and remapped key all
+call the existing page toggle through one adapter. Its shared lifecycle
+completes locally as Pressed → Pending → Applied; no tick, Rust message or
+simulation state is involved. Persistent QR visibility and the host button's
+`aria-pressed` still read the page's shared QR state because lobby and phone
+routes can also change it.
 
 Lobby countdown/readiness, command admission, and the `SimSet` chain all run in
 `FixedUpdate`. Pausing therefore freezes the lobby and stops admitting commands

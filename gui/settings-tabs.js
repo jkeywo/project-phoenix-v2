@@ -13,17 +13,17 @@
  */
 
 /**
- * The three tabs, in display order.
+ * The four shared tabs, in display order.
  *
- * Debug is LAST, deliberately: it is the developer/cheat tab, so the two tabs a
- * player actually reaches for — Audio and Gameplay — come first, and the demo
+ * Debug is LAST, deliberately: it is the developer/cheat tab, so the ordinary
+ * Audio, Gameplay and Controls tabs come first, and the demo
  * build (where Debug is gated away entirely) opens on Audio rather than on a
  * blank where Debug used to be. `resolveActiveTab` falls back to `tabs[0]`, so
  * ordering Debug first would also have made it the default landing tab in dev.
  *
  * `gated` tabs vanish in the demo build. Only Debug/Cheat is gated: Audio and
- * Gameplay must keep working in the demo, which is why nothing built for those
- * two tabs may reach for debug-only plumbing.
+ * Gameplay and Controls must keep working in the demo, which is why nothing
+ * built for those tabs may reach for debug-only plumbing.
  *
  * A tab surviving the demo build does NOT mean every control on it does. The
  * phone's Gameplay tab keeps its station controls there and hides its pause,
@@ -34,6 +34,7 @@
 export const TABS = [
   { id: 'audio', labelId: 'settings.tab.audio', gated: false },
   { id: 'gameplay', labelId: 'settings.tab.gameplay', gated: false },
+  { id: 'controls', labelId: 'settings.tab.controls', gated: false },
   { id: 'debug', labelId: 'settings.tab.debug', gated: true },
 ];
 
@@ -45,11 +46,6 @@ export const TABS = [
  */
 export const CLIENT_ACCESSIBILITY_TABS = [
   { id: 'accessibility', labelId: 'settings.tab.accessibility', gated: false },
-];
-
-/** Client-local semantic input bindings, before presentation/accessibility. */
-export const CLIENT_INPUT_TABS = [
-  { id: 'controls', labelId: 'settings.tab.controls', gated: false },
 ];
 
 /** Client-only documentation tabs, always available including in demo builds. */
@@ -76,7 +72,6 @@ export function visibleTabs(demo) {
  */
 export function visibleClientTabs(demo) {
   return visibleTabs(demo)
-    .concat(CLIENT_INPUT_TABS)
     .concat(CLIENT_ACCESSIBILITY_TABS)
     .concat(CLIENT_DOCUMENTATION_TABS);
 }

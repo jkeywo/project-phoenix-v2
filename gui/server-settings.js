@@ -1,7 +1,7 @@
 /**
  * gui/server-settings.js — the host page's settings cog (issue #939).
  *
- * A gear in the top-left of server.html opens a three-tab panel:
+ * A gear in the top-left of server.html opens a four-tab panel:
  *
  *   - **Debug / Cheat** — the toggles that used to be loose buttons in the
  *     debug dock's toolbar, plus the four debug OUTPUT selectors. Absent
@@ -11,6 +11,9 @@
  *   - **Gameplay** — pause/resume, the viewscreen join QR, and exit-to-lobby.
  *     Deliberately NOT build-gated, so nothing on this tab may reach for
  *     debug-only plumbing.
+ *
+ *   - **Controls** — host-local semantic action bindings. The QR action is the
+ *     tracer; its button and remapped keyboard path share one adapter.
  *
  * Two behaviours are new rather than moved:
  *
@@ -42,6 +45,16 @@ import {
   renderEntityInspectorDebug,
 } from './debug-overlays.js';
 import { TABS, visibleTabs, resolveActiveTab } from './settings-tabs.js';
+import {
+  ActionFeedbackLifecycle,
+  emitActionFeedbackTransition,
+} from './action-feedback.js';
+import {
+  HOST_ACTION_CONTEXT,
+  HOST_QR_CODE_ACTION_ID,
+  createHostActionRegistry,
+} from './host-actions.js';
+import { createSemanticControlsRemapper } from './semantic-controls-remapper.js';
 import {
   mountOverlayShell,
   renderTabBar,
@@ -166,7 +179,7 @@ export const DEBUG_COMMANDS = [
 ];
 
 // The tab list — and the "which tab survives this build" answer — moved to
-// `gui/settings-tabs.js` when the phone client grew the same three tabs (issue
+// `gui/settings-tabs.js` when the phone client grew the same shared tabs (issue
 // #940). Both pages must gate the same tab in the same build, so both import
 // from there; this page keeps no copy of its own. Re-exported here so this
 // module's existing importers are unchanged.
@@ -174,6 +187,7 @@ export { TABS, visibleTabs, resolveActiveTab };
 
 const BUTTON_ID = 'server-settings-btn';
 const OVERLAY_ID = 'server-settings-overlay';
+const ACTION_FEEDBACK_ID = 'host-action-feedback';
 const OUTPUT_HOST_ID = 'debug-dock';
 const OUTPUT_CONTENT_ID = 'debug-content';
 
@@ -271,6 +285,43 @@ export function mountServerSettings(opts = {}) {
   // its textual definition below.
   shell.buildContent = buildPanel;
 
+  // The shared lifecycle's presenter belongs to the host page, not the
+  // Settings modal: a keyboard action can run while Settings is closed, and
+  // closing the modal must not erase its Applied result from visual or live
+  // status. This node is presentation only; QR on/off still comes exclusively
+  // from __hostIsQrVisible in refresh().
+  let actionFeedbackStatus = doc.getElementById(ACTION_FEEDBACK_ID);
+  if (!actionFeedbackStatus) {
+    actionFeedbackStatus = doc.createElement('div');
+    actionFeedbackStatus.id = ACTION_FEEDBACK_ID;
+    actionFeedbackStatus.className = 'host-action-feedback';
+    actionFeedbackStatus.setAttribute('role', 'status');
+    actionFeedbackStatus.setAttribute('aria-live', 'polite');
+    actionFeedbackStatus.setAttribute('aria-atomic', 'true');
+    actionFeedbackStatus.setAttribute(
+      'aria-label',
+      t('semantic_action.host.qr_code.accessibility'),
+    );
+    shell.btn.insertAdjacentElement('afterend', actionFeedbackStatus);
+  }
+
+  const actionFeedback = new ActionFeedbackLifecycle({
+    onTransition: (value) => {
+      emitActionFeedbackTransition(win, value);
+      if (value.actionId !== HOST_QR_CODE_ACTION_ID || value.isCurrent === false) return;
+      actionFeedbackStatus.dataset.state = value.state || '';
+      actionFeedbackStatus.textContent = value.statusId
+        ? t('semantic_action.host.qr_code.feedback', { status: t(value.statusId) })
+        : '';
+    },
+  });
+  const hostActions = createHostActionRegistry({
+    actionFeedback,
+    toggleQrCode: typeof bindings.__hostToggleQrCode === 'function'
+      ? () => bindings.__hostToggleQrCode()
+      : null,
+  });
+
   const outputHost = doc.getElementById(OUTPUT_HOST_ID);
   const outputContent = doc.getElementById(OUTPUT_CONTENT_ID);
 
@@ -297,6 +348,50 @@ export function mountServerSettings(opts = {}) {
     });
     return el;
   }
+
+  /** A plain action button whose already-localised label is supplied by the remapper. */
+  function actionControl(label, onClick) {
+    const el = doc.createElement('button');
+    el.type = 'button';
+    el.className = 'server-settings-control';
+    el.textContent = label;
+    el.addEventListener('click', (event) => {
+      if (event && typeof event.preventDefault === 'function') event.preventDefault();
+      if (!el.disabled) onClick();
+    });
+    return el;
+  }
+
+  function activateQrCode(source = 'control') {
+    const result = hostActions.activate(HOST_QR_CODE_ACTION_ID, {
+      context: HOST_ACTION_CONTEXT,
+      source,
+    });
+    if (result.handled) refresh();
+    return result;
+  }
+
+  // Host bindings are document-scoped so they remain available when the
+  // Settings overlay is closed. Registry input-target guards and the shared
+  // remapper's capture listeners keep typing/capture from leaking into them.
+  const onHostKeydown = (event) => {
+    const result = hostActions.dispatchKeyboardEvent(event, HOST_ACTION_CONTEXT);
+    if (result.claimed && typeof event.stopPropagation === 'function') event.stopPropagation();
+    if (result.handled) refresh();
+  };
+  // Capture before server.html's legacy page shortcuts so a remap keeps its
+  // semantic meaning even when that physical key also has host-page chrome.
+  // Editable/capture targets are still rejected by the registry itself.
+  doc.addEventListener('keydown', onHostKeydown, true);
+
+  const semanticControls = createSemanticControlsRemapper({
+    doc,
+    root: overlay,
+    setBinding: hostActions.setBinding,
+    resetAction: hostActions.resetAction,
+    resetAll: hostActions.resetAllBindings,
+    rebuild: () => { if (shell.isOpen()) buildPanel(); },
+  });
 
   // ── Output panel ───────────────────────────────────────────────────────────
 
@@ -477,10 +572,7 @@ export function mountServerSettings(opts = {}) {
 
     const qrSection = section('settings.qr_code');
     const qrRow = rowHost();
-    const qr = control('qr-code', 'settings.toggle_qr', () => {
-      invoke('__hostToggleQrCode');
-      refresh();
-    });
+    const qr = control('qr-code', 'settings.toggle_qr', () => activateQrCode('control'));
     controls.qr = qr;
     qrRow.appendChild(qr);
     qrSection.appendChild(qrRow);
@@ -500,6 +592,18 @@ export function mountServerSettings(opts = {}) {
     body.appendChild(sessionSection);
 
     buildFleetSection(body);
+  }
+
+  function buildControlsTab(body) {
+    semanticControls.render(body, {
+      actions: hostActions.list(HOST_ACTION_CONTEXT),
+      hintId: 'settings.controls.host_hint',
+      pressPromptId: 'settings.controls.host_press_key',
+      section,
+      hint,
+      row: rowHost,
+      action: actionControl,
+    });
   }
 
   /**
@@ -724,12 +828,14 @@ export function mountServerSettings(opts = {}) {
     if (activeTab === 'debug') buildDebugTab(body);
     else if (activeTab === 'audio') buildAudioTab(body);
     else if (activeTab === 'gameplay') buildGameplayTab(body);
+    else if (activeTab === 'controls') buildControlsTab(body);
 
     paintOutput();
     refresh();
   }
 
   function selectTab(id) {
+    if (id !== activeTab) semanticControls.resetTransient();
     activeTab = id;
     if (shell.isOpen()) buildPanel();
   }
@@ -787,6 +893,8 @@ export function mountServerSettings(opts = {}) {
       win.cancelAnimationFrame(rafHandle);
     }
     rafHandle = null;
+    doc.removeEventListener('keydown', onHostKeydown, true);
+    semanticControls.destroy();
     shell.close();
   }
 

@@ -6,6 +6,9 @@ semantic_action.captain.weapons_hold.label,Captain semantic action display name,
 semantic_action.captain.weapons_hold.accessibility,Captain semantic action accessible description,[Hold or release all weapons fire from the Captain console.]
 semantic_action.helm.steering.label,Helm semantic action display name,[Steering]
 semantic_action.helm.steering.accessibility,Helm semantic action accessible description,[Steer the ship continuously from the Helm console.]
+semantic_action.host.qr_code.label,Host semantic action display name,[QR Code]
+semantic_action.host.qr_code.accessibility,Host semantic action accessible description,[Show or hide the crew join QR code.]
+semantic_action.host.qr_code.feedback,Host semantic action persistent status; {status} is a shared action feedback state,[QR Code: {status}]
 action_feedback.pressed,Shared semantic action live status immediately after activation,[Pressed]
 action_feedback.pending,Shared semantic action live status while authoritative work is in flight,[Pending]
 action_feedback.applied,Shared semantic action live status after the authoritative consumer applies the request,[Applied]
@@ -29,16 +32,18 @@ input.gamepad.left_stick_left,Portable standard-gamepad axis-direction display n
 input.gamepad.left_stick_right,Portable standard-gamepad axis-direction display name; {threshold} is the activation threshold,[Gamepad Left Stick Right at {threshold}]
 input.gamepad.left_stick_up,Portable standard-gamepad axis-direction display name; {threshold} is the activation threshold,[Gamepad Left Stick Up at {threshold}]
 input.gamepad.left_stick_down,Portable standard-gamepad axis-direction display name; {threshold} is the activation threshold,[Gamepad Left Stick Down at {threshold}]
-settings.tab.controls,Phone client settings menu name of the semantic action binding tab,[Controls]
-settings.controls.heading,Phone client Controls tab heading over semantic action bindings,[Action Bindings]
+settings.tab.controls,Shared host and phone settings menu name of the semantic action binding tab,[Controls]
+settings.controls.heading,Shared host and phone Controls tab heading over semantic action bindings,[Action Bindings]
 settings.controls.hint,Phone client Controls tab explanation of the two in-memory remappable slots,[Select either slot and press a key or control on the selected gamepad.]
-settings.controls.slot,Phone client Controls tab binding slot label; {slot} is 1 or 2,Slot {slot}
+settings.controls.host_hint,Host Controls tab explanation of the two in-memory remappable slots,[Select either slot and press a key.]
+settings.controls.slot,Shared host and phone Controls tab binding slot label; {slot} is 1 or 2,Slot {slot}
 settings.controls.slot_value,Station Help current semantic binding; {slot} is 1 or 2 and {binding} is the displayed chord,"Slot {slot}: {binding}"
-settings.controls.capture_label,"Phone client Controls tab accessible remap label; {action} is the display name and {slot} is 1 or 2","Remap {action}, slot {slot}"
+settings.controls.capture_label,"Shared host and phone Controls tab accessible remap label; {action} is the display name and {slot} is 1 or 2","Remap {action}, slot {slot}"
 settings.controls.press_key,Phone client Controls tab prompt shown while a remap slot has focus,[Press a key or gamepad control]
 settings.controls.press_axis,Phone client Controls tab prompt while a continuous gamepad axis slot has focus,[Move a gamepad axis]
-settings.controls.reset_action,Phone client Controls tab button restoring one semantic action to authored defaults,[Reset Action]
-settings.controls.reset_all,Phone client Controls tab button restoring every semantic action to authored defaults,[Reset All]
+settings.controls.host_press_key,Host Controls tab prompt shown while a remap slot has focus,[Press a key]
+settings.controls.reset_action,Shared host and phone Controls tab button restoring one semantic action to authored defaults,[Reset Action]
+settings.controls.reset_all,Shared host and phone Controls tab button restoring every semantic action to authored defaults,[Reset All]
 settings.controls.reserved,Assertive feedback refusing a browser or OS reserved chord; {binding} is the displayed chord,[{binding} is reserved by the browser or operating system. Choose another binding.]
 settings.controls.conflict_heading,Accessible semantic binding conflict heading; {binding} is the displayed chord,[{binding} is already assigned in an overlapping context.]
 settings.controls.conflict_item,"Semantic binding conflict item; {action} is an action name and {slot} is 1 or 2","[{action}, slot {slot}]"

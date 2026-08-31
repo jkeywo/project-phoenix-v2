@@ -3123,8 +3123,9 @@
             meter.noteDispatch(action.action, action.console || activeConsole, action.__input_ms);
           }
         }
-        // Optimistic local patches (weaponsTarget / sensorsTarget) land on the
-        // one sim store; simState.weaponsTarget has a setter for this path.
+        // Only the Science target retains its legacy local presentation patch.
+        // Tactical target selection waits for its authoritative TargetLock /
+        // blackboard projection before altering any displayed gameplay state.
         window.dispatchConsoleAction(action, send, (patch) => {
           if (window.simState) Object.assign(window.simState, patch);
         });

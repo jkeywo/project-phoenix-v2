@@ -30,7 +30,9 @@ export const ACTION_MAP = Object.freeze({
   /** Fire a specific phaser bank (issue #846: via ControlSystem envelope). */
   fire_phaser: (a, send) => {
     if (!a.bank) return;
-    send('ControlSystem', {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
       target: `phaser-${a.bank}`,
       payload: { type: 'FirePhaser' },
     });
@@ -113,7 +115,9 @@ export const ACTION_MAP = Object.freeze({
   /** Fire a specific blaster bank (issue #631). */
   fire_blaster: (a, send) => {
     if (!a.bank) return;
-    send('ControlSystem', {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
       target: `blaster-${a.bank}`,
       payload: { type: 'FireBlaster' },
     });
@@ -128,7 +132,9 @@ export const ACTION_MAP = Object.freeze({
    */
   charge_blaster_start: (a, send) => {
     if (!a.bank) return;
-    send('ControlSystem', {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
       target: `blaster-${a.bank}`,
       payload: { type: 'ChargeBlasterStart' },
     });
@@ -143,7 +149,9 @@ export const ACTION_MAP = Object.freeze({
    */
   charge_blaster_cancel: (a, send) => {
     if (!a.bank) return;
-    send('ControlSystem', {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
       target: `blaster-${a.bank}`,
       payload: { type: 'ChargeBlasterCancel' },
     });
@@ -153,7 +161,9 @@ export const ACTION_MAP = Object.freeze({
   fire_torpedo: (a, send) => {
     var tube = a.tube || 'fore';
     var sysId = 'torpedo-tube-' + String(tube).replace(/_/g, '-');
-    send('ControlSystem', {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
       target: sysId,
       payload: { type: 'FireTorpedo', data: { target_uuid: a.target_uuid || null } },
     });
@@ -185,7 +195,9 @@ export const ACTION_MAP = Object.freeze({
   set_torpedo_volley_target: (a, send) => {
     if (a.tube == null || a.count == null) return;
     const sysId = 'torpedo-tube-' + String(a.tube).replace(/_/g, '-');
-    send('ControlSystem', {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
       target: sysId,
       payload: { type: 'SetTorpedoVolleyTarget', data: { count: a.count } },
     });
@@ -195,10 +207,11 @@ export const ACTION_MAP = Object.freeze({
    *  Wire target is 'tactical-radar' (issue #801): target lock lives on the
    *  tactical radar fine system; the coarse 'tactical' id is a station id,
    *  not a wire target. */
-  set_target: (a, send, mutate) => {
+  set_target: (a, send) => {
     if (a.uuid) {
-      mutate({ weaponsTarget: a.uuid });
-      send('ControlSystem', {
+      const correlated = typeof a.correlation === 'string' && a.correlation;
+      send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+        ...(correlated ? { correlation: a.correlation } : {}),
         target: 'tactical-radar',
         payload: { type: 'SetTarget', data: { uuid: a.uuid } },
       });
@@ -210,10 +223,14 @@ export const ACTION_MAP = Object.freeze({
    *  settings system. */
   set_phaser_mode: (a, send) => {
     if (a.mode)
-      send('ControlSystem', {
+      {
+        const correlated = typeof a.correlation === 'string' && a.correlation;
+        send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+          ...(correlated ? { correlation: a.correlation } : {}),
         target: 'phaser-control',
         payload: { type: 'SetPhaserMode', data: { mode: a.mode } },
-      });
+        });
+      }
   },
 
   /** Switch the view-screen to a named camera marker or non-camera mode. */

@@ -1,10 +1,10 @@
 entities:
   - component: t2-semantic-action-registry
     core:
-      status: accepted
+      status: partially-implemented
       confidence: confirmed
       title: Product-Wide Semantic Action Registry
-      summary: "T2 introduces one context-scoped semantic action registry above the existing client action map for player Stations, client and host chrome, the GM console, save-slot UX, and the existing mod/editor workflow. Actions declare stable identity, contexts, input shape, feedback semantics, confirmation category, and accessibility metadata. M6 reuses the registry rather than creating a Workshop-only command layer."
+      summary: "T2 introduces one context-scoped semantic action registry above the existing client action map for player Stations, client and host chrome, the GM console, save-slot UX, and the existing mod/editor workflow. Actions declare stable identity, contexts, input shape, feedback semantics, confirmation category, and accessibility metadata. #1284 has migrated all shipped Tactical target and weapon controls through that registry without creating a second authority path. M6 reuses the registry rather than creating a Workshop-only command layer."
       rationale:
         - "Conflicts exist only where action contexts overlap. The registry is presentation and dispatch metadata, not a new command-authority path."
         - "PRD #1273 was decomposed on 2026-08-29 into issues #1274-#1288 for the shared input/feedback foundation and concrete console-family adoption, #1315 for configurable GM confirmations, #1321/#1322 for the bounded existing-editor workflow, and HITL exit #1323. Existing save issue #865 is reused and updated rather than duplicated."

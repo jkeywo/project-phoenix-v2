@@ -53,7 +53,7 @@ describe('Helm semantic steering action', () => {
     expect(sendAction).not.toHaveBeenCalled();
   });
 
-  it('retains editor bindings in the parent catalogue but hides them from play Settings', () => {
+  it('publishes play actions while retaining hidden editor bindings in the parent catalogue', () => {
     const registry = createClientSemanticActionRegistry();
     const ids = registry.list().map((action) => action.id);
     expect(ids).toEqual([
@@ -62,6 +62,15 @@ describe('Helm semantic steering action', () => {
       'captain.view',
       'captain.objective-priority',
       HELM_STEERING_ACTION_ID,
+      'tactical.target-selection',
+      'tactical.phaser-mode',
+      'tactical.phaser-fire',
+      'tactical.blaster-charge',
+      'tactical.blaster-fire',
+      'tactical.blaster-cancel',
+      'tactical.torpedo-volley-down',
+      'tactical.torpedo-volley-up',
+      'tactical.torpedo-fire',
       'editor.mod.import',
       'editor.mod.validate',
       'editor.mod.export',
@@ -72,6 +81,15 @@ describe('Helm semantic steering action', () => {
       'captain.view',
       'captain.objective-priority',
       HELM_STEERING_ACTION_ID,
+      'tactical.target-selection',
+      'tactical.phaser-mode',
+      'tactical.phaser-fire',
+      'tactical.blaster-charge',
+      'tactical.blaster-fire',
+      'tactical.blaster-cancel',
+      'tactical.torpedo-volley-down',
+      'tactical.torpedo-volley-up',
+      'tactical.torpedo-fire',
     ]);
   });
 });

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest';
 import { initConsole } from '../../gui/console-core.js';
+import { ActionFeedbackRouter } from '../../gui/action-feedback.js';
 import { renderStation as courierCaptainRender } from '../../gui/courier/captain.console.js';
 import { withConsoleFamilyProjection } from './console-family-fixture.js';
 
@@ -84,6 +85,54 @@ describe('console-core semantic action runtime', () => {
 
     runtime.disposeSemanticActions();
     expect(document.querySelector('.semantic-action-feedback')).toBeNull();
+    delete window.__sendAction;
+    delete window.__updateConsole;
+    delete window.__updateActionFeedback;
+    delete window.__updateSemanticActionBindings;
+    delete window.activateSemanticAction;
+    delete window.sendAction;
+  });
+
+  it('routes an authoritative Tactical refusal through the parent router into its originating iframe lifecycle', () => {
+    document.body.innerHTML = '';
+    const sent = [];
+    window.__sendAction = (json) => sent.push(JSON.parse(json));
+    const runtime = initConsole({ name: 'tactical', render: () => {} });
+    window.__updateConsole('tactical', JSON.stringify({
+      target_uuid: 'enemy-1',
+      banks: [{ id: 'fore', fire_ready: true }],
+      blasters: [],
+      tubes: [],
+    }));
+
+    expect(window.activateSemanticAction('tactical.phaser-fire', {
+      context: 'tactical', source: 'control', detail: { bank: 'fore' },
+    })).toMatchObject({ claimed: true, handled: true });
+    const status = document.querySelector('.semantic-action-feedback');
+    expect(status.dataset.state).toBe('Pending');
+
+    // This mirrors client.html: the parent response router finds the originating
+    // iframe and invokes only its feedback entry point with the terminal result.
+    const iframe = { contentWindow: { __updateActionFeedback: window.__updateActionFeedback } };
+    const router = new ActionFeedbackRouter({
+      schedule: vi.fn(() => 1),
+      cancelSchedule: vi.fn(),
+      deliver: (value) => iframe.contentWindow.__updateActionFeedback(value),
+    });
+    expect(router.track({
+      correlation: sent[0].correlation,
+      actionId: 'tactical.phaser-fire',
+      console: 'tactical',
+      inputMs: sent[0].__input_ms,
+    })).toBe(true);
+    const response = {
+      type: 'ActionFeedback',
+      data: { correlation: sent[0].correlation, outcome: 'Refused' },
+    };
+    expect(router.resolve(response.data)).toBe(true);
+    expect(status.dataset.state).toBe('Refused');
+
+    runtime.disposeSemanticActions();
     delete window.__sendAction;
     delete window.__updateConsole;
     delete window.__updateActionFeedback;

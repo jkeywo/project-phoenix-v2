@@ -71,6 +71,10 @@ import {
   HELM_ACTION_CONTEXT,
   registerHelmActions,
 } from './stations/helm-actions.js';
+import {
+  TACTICAL_ACTION_CONTEXT,
+  registerTacticalActions,
+} from './stations/tactical-actions.js';
 // Console input-to-feedback latency (issue #1169, PRD #1144). `sendAction` is
 // the ONE place in a console document where a control's handler turns into an
 // outbound action, so it is the only honest place to stamp "the input event
@@ -166,6 +170,11 @@ export function initConsole({ name, render }) {
     });
   } else if (_actionContext === HELM_ACTION_CONTEXT) {
     registerHelmActions(_semanticActions, {
+      getState: function() { return _latestState; },
+      sendAction: sendAction,
+    });
+  } else if (_actionContext === TACTICAL_ACTION_CONTEXT) {
+    registerTacticalActions(_semanticActions, {
       getState: function() { return _latestState; },
       sendAction: sendAction,
     });

@@ -221,11 +221,11 @@ describe('unload_tube', () => {
 });
 
 describe('set_target', () => {
-  it('calls mutate with weaponsTarget and send SetTarget with uuid', () => {
+  it('sends SetTarget with uuid without optimistically mutating gameplay state', () => {
     const send = mkSend();
     const mutate = mkMutate();
     ACTION_MAP.set_target({ action: 'set_target', uuid: 'abc' }, send, mutate);
-    expect(mutate).toHaveBeenCalledWith({ weaponsTarget: 'abc' });
+    expect(mutate).not.toHaveBeenCalled();
     expect(send).toHaveBeenCalledWith('ControlSystem', {
       target: 'tactical-radar',
       payload: { type: 'SetTarget', data: { uuid: 'abc' } },

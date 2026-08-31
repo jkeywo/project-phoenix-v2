@@ -84,6 +84,24 @@ fn supports_correlated_action_feedback(
             && matches!(payload, SystemControlPayload::SetView { .. }))
         || (target.0 == crate::ship::system_registry::CAPTAIN_SYSTEM_ID
             && matches!(payload, SystemControlPayload::SetObjectivePriority { .. }))
+        || (target.0 == crate::ship::system_registry::TACTICAL_RADAR_SYSTEM_ID
+            && matches!(payload, SystemControlPayload::SetTarget { .. }))
+        || (target.0 == crate::ship::system_registry::PHASER_CONTROL_SYSTEM_ID
+            && matches!(payload, SystemControlPayload::SetPhaserMode { .. }))
+        || (target.0.starts_with("phaser-") && matches!(payload, SystemControlPayload::FirePhaser))
+        || (target.0.starts_with("blaster-")
+            && matches!(
+                payload,
+                SystemControlPayload::FireBlaster
+                    | SystemControlPayload::ChargeBlasterStart
+                    | SystemControlPayload::ChargeBlasterCancel
+            ))
+        || (target.0.starts_with("torpedo-tube-")
+            && matches!(
+                payload,
+                SystemControlPayload::FireTorpedo { .. }
+                    | SystemControlPayload::SetTorpedoVolleyTarget { .. }
+            ))
 }
 
 impl Plugin for AdmissionPlugin {

@@ -19,6 +19,12 @@ import { t } from '../strings.js';
 import { weaponReadinessView } from '../weapon-readiness.js';
 import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
 import { PhElement, phDefine } from './ph-element.js';
+import {
+  TACTICAL_TORPEDO_FIRE_ACTION_ID,
+  TACTICAL_TORPEDO_VOLLEY_DOWN_ACTION_ID,
+  TACTICAL_TORPEDO_VOLLEY_UP_ACTION_ID,
+} from '../stations/tactical-actions.js';
+import { activateTacticalAction } from '../stations/tactical-action-control.js';
 
 export class PhTorpedoControls extends PhElement {
   #tubeEls = {};
@@ -124,7 +130,8 @@ export class PhTorpedoControls extends PhElement {
     minusBtn.addEventListener('click', () => {
       const tube = (this.state && this.state.tubes || []).find((x) => x.id === tubeId);
       const cur = tube && typeof tube.target_count === 'number' ? tube.target_count : 0;
-      if (cur > 0 && this.sendAction) this.sendAction('set_torpedo_volley_target', { tube: tubeId, count: cur - 1 });
+      if (cur > 0) activateTacticalAction(this, TACTICAL_TORPEDO_VOLLEY_DOWN_ACTION_ID,
+        { tube: tubeId, count: cur - 1 }, 'set_torpedo_volley_target');
     });
 
     const plusBtn = document.createElement('button');
@@ -136,7 +143,8 @@ export class PhTorpedoControls extends PhElement {
       const tube = (this.state && this.state.tubes || []).find((x) => x.id === tubeId);
       const cur = tube && typeof tube.target_count === 'number' ? tube.target_count : 0;
       const max = tube && typeof tube.volley_max === 'number' ? tube.volley_max : 1;
-      if (cur < max && this.sendAction) this.sendAction('set_torpedo_volley_target', { tube: tubeId, count: cur + 1 });
+      if (cur < max) activateTacticalAction(this, TACTICAL_TORPEDO_VOLLEY_UP_ACTION_ID,
+        { tube: tubeId, count: cur + 1 }, 'set_torpedo_volley_target');
     });
 
     const fireBtn = document.createElement('button');
@@ -144,9 +152,10 @@ export class PhTorpedoControls extends PhElement {
     fireBtn.className = 'btn';
     fireBtn.innerHTML = '<span class="btn-bg"></span><span class="led"></span><span class="label">' + t('console.common.fire') + '</span>';
     fireBtn.addEventListener('click', () => {
-      if (fireBtn.disabled || !this.sendAction) return;
+      if (fireBtn.disabled) return;
       const targetUuid = this.state && this.state.target_uuid ? this.state.target_uuid : null;
-      this.sendAction('fire_torpedo', { tube: tubeId, target_uuid: targetUuid });
+      activateTacticalAction(this, TACTICAL_TORPEDO_FIRE_ACTION_ID,
+        { tube: tubeId, target_uuid: targetUuid }, 'fire_torpedo');
     });
 
     const controls = document.createElement('div');

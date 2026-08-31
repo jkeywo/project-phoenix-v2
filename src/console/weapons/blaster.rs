@@ -10,7 +10,10 @@ use bevy::prelude::*;
 use super::shared::{
     any_blaster_bank_operates_ai, live_entity_xz, system_is_registered, DirectFireGeometry,
 };
-use super::{AsteroidDestroyedVfx, ShipDestroyedVfx, DEFAULT_SHIP_EXPLOSION_RADIUS};
+use super::{
+    AsteroidDestroyedVfx, ShipDestroyedVfx, WeaponActionRefusal, WeaponActionResult,
+    DEFAULT_SHIP_EXPLOSION_RADIUS,
+};
 use crate::core::messages::{GamePhase, ServerMessage, SystemBlackboard, SystemControlPayload};
 use crate::lobby::{Sessions, Target, WorldResource};
 
@@ -138,6 +141,9 @@ pub(crate) fn handle_fire_blaster(
     >,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
     entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    mut outbound: Option<
+        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
+    >,
 ) {
     for (control_sources, physics, blackboards_opt, mut blaster_res, admitted) in ship_q.iter_mut()
     {
@@ -161,6 +167,11 @@ pub(crate) fn handle_fire_blaster(
                     .filter(|id| id == &cmd.target)
                     .map(|_| b.config.id.clone())
             }) else {
+                super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::UnknownMount),
+                );
                 continue;
             };
 
@@ -177,6 +188,11 @@ pub(crate) fn handle_fire_blaster(
                 ),
             };
             if !policy.accept_human_input && !policy.operate_ai {
+                super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::Offline),
+                );
                 continue;
             }
 
@@ -186,9 +202,19 @@ pub(crate) fn handle_fire_blaster(
             // cancel needs no target/arc.
             if is_charge_start {
                 let Some(target_uuid) = blaster_combat_lock(blackboards_opt) else {
+                    super::finish_action_feedback(
+                        cmd,
+                        &mut outbound,
+                        WeaponActionResult::Refused(WeaponActionRefusal::MissingCombatLock),
+                    );
                     continue;
                 };
                 let Some((tx, tz)) = live_entity_xz(&target_uuid, &asteroid_q, &entity_q) else {
+                    super::finish_action_feedback(
+                        cmd,
+                        &mut outbound,
+                        WeaponActionResult::Refused(WeaponActionRefusal::MissingTarget),
+                    );
                     continue;
                 };
                 let bank_arc_ok = blaster_res
@@ -212,19 +238,37 @@ pub(crate) fn handle_fire_blaster(
                     })
                     .unwrap_or(false);
                 if !bank_arc_ok {
+                    super::finish_action_feedback(
+                        cmd,
+                        &mut outbound,
+                        WeaponActionResult::Refused(WeaponActionRefusal::OutOfArc),
+                    );
                     continue;
                 }
             }
 
             // Dispatch to the matching bank. `request_charge_start` /
-            // `request_fire` are self-guarding (no-op when the bank is not
-            // fire-ready), so a redundant order is harmless.
+            // `request_fire` are self-guarding. The feedback result mirrors
+            // that factual return value rather than treating a no-op as apply.
             if let Some(bank) = blaster_res.0.iter_mut().find(|b| b.config.id == bank_id) {
-                if is_charge_start {
-                    bank.request_charge_start();
+                let result = if is_charge_start {
+                    if !bank.is_fire_ready() {
+                        WeaponActionResult::Refused(WeaponActionRefusal::ActiveOrCooling)
+                    } else if bank.request_charge_start() {
+                        WeaponActionResult::Applied
+                    } else {
+                        WeaponActionResult::Refused(WeaponActionRefusal::EmptyVolley)
+                    }
                 } else {
+                    let was_charging = bank.volley.charging;
                     bank.request_charge_cancel();
-                }
+                    if was_charging {
+                        WeaponActionResult::Applied
+                    } else {
+                        WeaponActionResult::Refused(WeaponActionRefusal::NotCharging)
+                    }
+                };
+                super::finish_action_feedback(cmd, &mut outbound, result);
             }
         }
     }

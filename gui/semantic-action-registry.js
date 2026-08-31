@@ -18,6 +18,7 @@ import {
 } from './gamepad-input.js';
 
 export const SEMANTIC_BINDING_SLOT_COUNT = 2;
+export const CONTINUOUS_DEADZONE_MAX = 0.95;
 
 const MODIFIER_KEYS = ['ctrlKey', 'shiftKey', 'altKey', 'metaKey'];
 const EDITABLE_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
@@ -85,15 +86,25 @@ export function normalizeKeyboardBinding(value) {
 }
 
 /** Normalize the keyboard/gamepad binding union, or the empty-slot sentinel. */
-export function normalizeSemanticBinding(value) {
+export function normalizeSemanticBinding(value, options = {}) {
   if (value == null || value === '') return null;
+  if (options.continuous === true) {
+    if (!value || value.type !== 'gamepad') {
+      throw new TypeError('continuous semantic action binding must be a gamepad axis');
+    }
+    const binding = normalizeGamepadBinding(value, { continuous: true });
+    if (!binding || binding.input !== 'axis') {
+      throw new TypeError('continuous semantic action binding must be a gamepad axis');
+    }
+    return binding;
+  }
   return value && value.type === 'gamepad'
     ? normalizeGamepadBinding(value)
     : normalizeKeyboardBinding(value);
 }
 
 /** Normalize and pad an action's binding list to exactly two slots. */
-export function normalizeBindingSlots(values) {
+export function normalizeBindingSlots(values, options = {}) {
   if (values != null && !Array.isArray(values)) {
     throw new TypeError('semantic action bindings must be an array');
   }
@@ -103,8 +114,38 @@ export function normalizeBindingSlots(values) {
   }
   return Object.freeze(Array.from(
     { length: SEMANTIC_BINDING_SLOT_COUNT },
-    (_, index) => normalizeSemanticBinding(slots[index]),
+    (_, index) => normalizeSemanticBinding(slots[index], options),
   ));
+}
+
+/** Validate authored continuous output semantics independently of device tuning. */
+export function normalizeContinuousDefinition(value) {
+  if (value == null) return null;
+  if (typeof value !== 'object') throw new TypeError('continuous action metadata must be an object');
+  const min = Number(value.min);
+  const max = Number(value.max);
+  const neutral = Number(value.neutral);
+  const cadenceMs = Number(value.cadenceMs);
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min >= max) {
+    throw new RangeError('continuous action range must have finite min below max');
+  }
+  if (!Number.isFinite(neutral) || neutral <= min || neutral >= max) {
+    throw new RangeError('continuous action neutral must be inside its range');
+  }
+  if (!Number.isFinite(cadenceMs) || cadenceMs <= 0) {
+    throw new RangeError('continuous action cadence must be above zero');
+  }
+  return Object.freeze({ min, max, neutral, cadenceMs });
+}
+
+/** Normalize client-local axis tuning; this is serialisable but not persisted. */
+export function normalizeContinuousTuning(value, fallback = {}) {
+  const source = value && typeof value === 'object' ? value : fallback;
+  const deadzone = Number(source.deadzone);
+  if (!Number.isFinite(deadzone) || deadzone < 0 || deadzone > CONTINUOUS_DEADZONE_MAX) {
+    throw new RangeError(`continuous action deadzone must be between 0 and ${CONTINUOUS_DEADZONE_MAX}`);
+  }
+  return Object.freeze({ deadzone, inverted: source.inverted === true });
 }
 
 /** Convert a KeyboardEvent-shaped object into a canonical binding. */
@@ -239,6 +280,10 @@ function normalizeDefinition(definition) {
     : definition.authoritativeFeedback === true
       ? 'authoritative'
       : null;
+  const continuous = normalizeContinuousDefinition(definition.continuous);
+  const tuning = continuous
+    ? normalizeContinuousTuning(definition.tuning)
+    : null;
   return Object.freeze({
     id,
     contexts: Object.freeze(contexts),
@@ -246,7 +291,8 @@ function normalizeDefinition(definition) {
     accessibilityLabelId,
     authoritativeFeedback: definition.authoritativeFeedback === true,
     feedback,
-    bindings: normalizeBindingSlots(definition.bindings),
+    ...(continuous ? { continuous, tuning } : {}),
+    bindings: normalizeBindingSlots(definition.bindings, { continuous: !!continuous }),
   });
 }
 
@@ -264,6 +310,8 @@ export function createSemanticActionRegistry(options = {}) {
   const adapters = new Map();
   const authoredDefaults = new Map();
   const bindings = new Map();
+  const authoredTuning = new Map();
+  const tuning = new Map();
   const actionFeedback = options.actionFeedback || null;
 
   function assertActionAndSlot(id, slot) {
@@ -275,6 +323,11 @@ export function createSemanticActionRegistry(options = {}) {
 
   function contextsOverlap(left, right) {
     return left.contexts.some((context) => right.contexts.includes(context));
+  }
+
+  function normalizeSlotsFor(id, slots) {
+    const definition = definitions.get(id);
+    return normalizeBindingSlots(slots, { continuous: !!(definition && definition.continuous) });
   }
 
   function conflictsFor(id, slot, binding, source = bindings) {
@@ -312,7 +365,7 @@ export function createSemanticActionRegistry(options = {}) {
     }
     mutableSlots(id)[slot] = copyBinding(binding);
     for (const [actionId, slots] of nextByAction) {
-      bindings.set(actionId, normalizeBindingSlots(slots));
+      bindings.set(actionId, normalizeSlotsFor(actionId, slots));
     }
   }
 
@@ -325,20 +378,28 @@ export function createSemanticActionRegistry(options = {}) {
       throw new TypeError('semantic action adapter must be a function');
     }
     definitions.set(normalized.id, normalized);
-    authoredDefaults.set(normalized.id, normalizeBindingSlots(normalized.bindings));
-    bindings.set(normalized.id, normalizeBindingSlots(normalized.bindings));
+    authoredDefaults.set(normalized.id, normalizeSlotsFor(normalized.id, normalized.bindings));
+    bindings.set(normalized.id, normalizeSlotsFor(normalized.id, normalized.bindings));
+    if (normalized.continuous) {
+      authoredTuning.set(normalized.id, normalized.tuning);
+      tuning.set(normalized.id, normalized.tuning);
+    }
     for (let slot = 0; slot < SEMANTIC_BINDING_SLOT_COUNT; slot++) {
       const binding = normalized.bindings[slot];
       if (binding && binding.type === 'keyboard' && isReservedKeyboardBinding(binding)) {
         definitions.delete(normalized.id);
         authoredDefaults.delete(normalized.id);
         bindings.delete(normalized.id);
+        authoredTuning.delete(normalized.id);
+        tuning.delete(normalized.id);
         throw new Error('semantic action authored default is reserved: ' + normalized.id);
       }
       if (conflictsFor(normalized.id, slot, binding).length > 0) {
         definitions.delete(normalized.id);
         authoredDefaults.delete(normalized.id);
         bindings.delete(normalized.id);
+        authoredTuning.delete(normalized.id);
+        tuning.delete(normalized.id);
         throw new Error('semantic action authored default binding conflicts: ' + normalized.id);
       }
     }
@@ -353,6 +414,7 @@ export function createSemanticActionRegistry(options = {}) {
       ...definition,
       contexts: [...definition.contexts],
       bindings: copySlots(bindings.get(id)),
+      ...(definition.continuous ? { tuning: { ...tuning.get(id) } } : {}),
     };
   }
 
@@ -364,7 +426,9 @@ export function createSemanticActionRegistry(options = {}) {
 
   function setBinding(id, slot, value, options = {}) {
     assertActionAndSlot(id, slot);
-    const binding = normalizeSemanticBinding(value);
+    const binding = normalizeSemanticBinding(value, {
+      continuous: !!definitions.get(id).continuous,
+    });
     if (binding && binding.type === 'keyboard' && isReservedKeyboardBinding(binding)) {
       return { status: 'reserved', actionId: id, slot, binding: copyBinding(binding) };
     }
@@ -399,15 +463,17 @@ export function createSemanticActionRegistry(options = {}) {
         cleared.push(conflict);
       }
     }
-    for (const [actionId, slots] of next) bindings.set(actionId, normalizeBindingSlots(slots));
+    for (const [actionId, slots] of next) bindings.set(actionId, normalizeSlotsFor(actionId, slots));
+    if (authoredTuning.has(id)) tuning.set(id, authoredTuning.get(id));
     return { status: 'applied', actionId: id, action: action(id), cleared };
   }
 
   /** Restore the complete conflict-free authored profile atomically. */
   function resetAllBindings() {
     for (const [id, slots] of authoredDefaults) {
-      bindings.set(id, normalizeBindingSlots(copySlots(slots)));
+      bindings.set(id, normalizeSlotsFor(id, copySlots(slots)));
     }
+    for (const [id, value] of authoredTuning) tuning.set(id, value);
     return { status: 'applied', profile: bindingProfile() };
   }
 
@@ -423,10 +489,35 @@ export function createSemanticActionRegistry(options = {}) {
     if (!profile || typeof profile !== 'object') return bindingProfile();
     for (const id of definitions.keys()) {
       if (Object.prototype.hasOwnProperty.call(profile, id)) {
-        bindings.set(id, normalizeBindingSlots(profile[id]));
+        bindings.set(id, normalizeSlotsFor(id, profile[id]));
       }
     }
     return bindingProfile();
+  }
+
+  /** Plain serialisable continuous-axis tuning map for #1279 persistence. */
+  function tuningProfile() {
+    const profile = {};
+    for (const [id, value] of tuning) profile[id] = { ...value };
+    return profile;
+  }
+
+  function setTuning(id, value) {
+    const definition = definitions.get(id);
+    if (!definition) throw new Error('unknown semantic action: ' + id);
+    if (!definition.continuous) throw new Error('semantic action is not continuous: ' + id);
+    const next = normalizeContinuousTuning({ ...tuning.get(id), ...(value || {}) });
+    tuning.set(id, next);
+    return { status: 'applied', actionId: id, action: action(id) };
+  }
+
+  /** Apply known entries from a future persistence layer without storing here. */
+  function updateTuning(profile) {
+    if (!profile || typeof profile !== 'object') return tuningProfile();
+    for (const id of tuning.keys()) {
+      if (Object.prototype.hasOwnProperty.call(profile, id)) setTuning(id, profile[id]);
+    }
+    return tuningProfile();
   }
 
   function activate(id, options = {}) {
@@ -434,6 +525,15 @@ export function createSemanticActionRegistry(options = {}) {
     const context = options.context;
     if (!definition || !definition.contexts.includes(context)) {
       return { claimed: false, actionId: id || null, handled: false };
+    }
+    let continuousValue = null;
+    if (definition.continuous) {
+      continuousValue = Number(options.value);
+      if (!Number.isFinite(continuousValue)
+          || continuousValue < definition.continuous.min
+          || continuousValue > definition.continuous.max) {
+        return { claimed: true, actionId: id, handled: false };
+      }
     }
     const adapter = adapters.get(id);
     const feedback = definition.feedback && actionFeedback
@@ -466,6 +566,7 @@ export function createSemanticActionRegistry(options = {}) {
         correlation: feedback ? feedback.correlation : null,
         inputMs: feedback ? feedback.inputMs : null,
         feedbackKind: definition.feedback,
+        value: continuousValue,
         settleFeedback: feedback && definition.feedback === 'local'
           ? (outcome) => bufferOrApplyLocalFeedback('settle', outcome)
           : null,
@@ -529,6 +630,9 @@ export function createSemanticActionRegistry(options = {}) {
     resetAllBindings,
     bindingProfile,
     updateBindings,
+    tuningProfile,
+    setTuning,
+    updateTuning,
     activate,
     dispatchKeyboardEvent,
   };

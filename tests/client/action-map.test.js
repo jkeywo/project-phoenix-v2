@@ -8,7 +8,7 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 51 expected action keys', () => {
+  it('contains exactly the 52 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'cancel_impulse',
       'charge_blaster_cancel',
@@ -36,6 +36,7 @@ describe('ACTION_MAP', () => {
       'select_scenario',
       'set_boost',
       'set_helm',
+      'set_helm_steering',
       'set_lateral_thrust',
       'set_navigation_chart',
       'set_navigation_waypoint',
@@ -421,6 +422,24 @@ describe('set_helm', () => {
       target: 'helm-steering',
       payload: { type: 'SetSteering', data: { value: 0.2 } },
     });
+  });
+});
+
+describe('set_helm_steering', () => {
+  it('sends only SetSteering through the existing fine-system route', () => {
+    const send = mkSend();
+    ACTION_MAP.set_helm_steering({ action: 'set_helm_steering', value: -0.4 }, send);
+    expect(send).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'helm-steering',
+      payload: { type: 'SetSteering', data: { value: -0.4 } },
+    });
+  });
+
+  it('refuses a missing or non-finite steering scalar', () => {
+    const send = mkSend();
+    ACTION_MAP.set_helm_steering({ value: Number.NaN }, send);
+    expect(send).not.toHaveBeenCalled();
   });
 });
 

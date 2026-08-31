@@ -52,6 +52,7 @@ import { controlSystemEnvelope } from './command-gateway.js';
 import { renderStationHelp } from './help-panel.js';
 import { renderManual } from './manual-panel.js';
 import {
+  CONTINUOUS_DEADZONE_MAX,
   formatSemanticBinding,
   isReservedKeyboardBinding,
   keyboardBindingFromEvent,
@@ -425,6 +426,7 @@ function persistMasterVolume(value) {
  *     options?: {replace?: boolean}) => object,
  *   onSemanticResetAction?: (actionId: string) => object,
  *   onSemanticResetAll?: () => object,
+ *   onSemanticTuning?: (actionId: string, tuning: object) => object,
  *   getGamepadState?: () => object,
  *   onGamepadSelection?: (index: number|null) => object,
  *   onSemanticCapture?: (actionId: string|null, slot: number|null, active: boolean) => void,
@@ -446,6 +448,7 @@ export function mountSettings({
   onSemanticBinding: _onSemanticBinding,
   onSemanticResetAction: _onSemanticResetAction,
   onSemanticResetAll: _onSemanticResetAll,
+  onSemanticTuning: _onSemanticTuning,
   getGamepadState: _getGamepadState,
   onGamepadSelection: _onGamepadSelection,
   onSemanticCapture: _onSemanticCapture,
@@ -529,6 +532,13 @@ export function mountSettings({
   const resetAllSemanticActions = () => {
     if (typeof _onSemanticResetAll === 'function') return _onSemanticResetAll();
     return { status: 'unavailable' };
+  };
+
+  const setSemanticTuning = (actionId, value) => {
+    if (typeof _onSemanticTuning === 'function') {
+      return _onSemanticTuning(actionId, value);
+    }
+    return { status: 'unavailable', actionId };
   };
 
   // ── Gear button + overlay ────────────────────────────────────────────────
@@ -932,7 +942,10 @@ export function mountSettings({
           && gamepad.capturing.actionId === semanticAction.id
           && gamepad.capturing.slot === slot;
         capture.value = capturing
-          ? t('settings.controls.press_key') : formatSemanticBinding(binding, t);
+          ? t(semanticAction.continuous
+            ? 'settings.controls.press_axis'
+            : 'settings.controls.press_key')
+          : formatSemanticBinding(binding, t);
         capture.className = 'settings-binding-capture';
         capture.setAttribute('data-control', `semantic-binding-${semanticAction.id}-${slot}`);
         capture.setAttribute('data-semantic-binding-capture', 'true');
@@ -951,7 +964,9 @@ export function mountSettings({
 
         capture.addEventListener('focus', () => {
           pendingModifier = null;
-          capture.value = t('settings.controls.press_key');
+          capture.value = t(semanticAction.continuous
+            ? 'settings.controls.press_axis'
+            : 'settings.controls.press_key');
           if (typeof _onSemanticCapture === 'function') {
             _onSemanticCapture(semanticAction.id, slot, true);
           }
@@ -982,6 +997,14 @@ export function mountSettings({
             return;
           }
           if (event.repeat) return;
+          if (semanticAction.continuous) {
+            // Continuous actions accept only an undirected standard axis from
+            // the selected pad. Keyboard keys remain owned by the joystick's
+            // existing WASD path and cannot become a scalar binding here.
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            if (typeof event.stopPropagation === 'function') event.stopPropagation();
+            return;
+          }
           if (isSemanticModifierEvent(event)) {
             const candidate = semanticModifierBindingFromEvent(event);
             if (!candidate) return;
@@ -1015,6 +1038,55 @@ export function mountSettings({
 
         bindingRow.appendChild(label);
         actionSection.appendChild(bindingRow);
+      }
+      if (semanticAction.continuous) {
+        const tuning = semanticAction.tuning || { deadzone: 0, inverted: false };
+        const tuningRow = row('settings-binding-tuning-row');
+
+        const deadzoneLabel = doc.createElement('label');
+        deadzoneLabel.className = 'settings-binding-label';
+        deadzoneLabel.textContent = t('settings.controls.gamepad.deadzone');
+        const deadzone = doc.createElement('input');
+        deadzone.type = 'range';
+        deadzone.min = '0';
+        deadzone.max = String(CONTINUOUS_DEADZONE_MAX);
+        deadzone.step = '0.01';
+        deadzone.value = String(tuning.deadzone);
+        deadzone.setAttribute('data-control', `semantic-tuning-deadzone-${semanticAction.id}`);
+        deadzone.setAttribute('aria-label', t('settings.controls.gamepad.deadzone'));
+        const deadzoneValue = doc.createElement('output');
+        deadzoneValue.setAttribute('data-control', `semantic-tuning-deadzone-value-${semanticAction.id}`);
+        const updateDeadzoneValue = () => {
+          deadzoneValue.textContent = t('settings.controls.gamepad.deadzone_value', {
+            value: String(Math.round(Number(deadzone.value) * 100)),
+          });
+        };
+        updateDeadzoneValue();
+        deadzone.addEventListener('input', () => {
+          const next = Number(deadzone.value);
+          updateDeadzoneValue();
+          setSemanticTuning(semanticAction.id, { deadzone: next });
+        });
+        deadzoneLabel.appendChild(deadzone);
+        deadzoneLabel.appendChild(deadzoneValue);
+        tuningRow.appendChild(deadzoneLabel);
+
+        const inversionLabel = doc.createElement('label');
+        inversionLabel.className = 'settings-binding-label';
+        const inversion = doc.createElement('input');
+        inversion.type = 'checkbox';
+        inversion.checked = tuning.inverted === true;
+        inversion.setAttribute('data-control', `semantic-tuning-inverted-${semanticAction.id}`);
+        inversion.setAttribute('aria-label', t('settings.controls.gamepad.inverted'));
+        inversion.addEventListener('change', () => {
+          setSemanticTuning(semanticAction.id, { inverted: inversion.checked });
+        });
+        inversionLabel.appendChild(inversion);
+        const inversionText = doc.createElement('span');
+        inversionText.textContent = t('settings.controls.gamepad.inverted');
+        inversionLabel.appendChild(inversionText);
+        tuningRow.appendChild(inversionLabel);
+        actionSection.appendChild(tuningRow);
       }
       const reset = action(t('settings.controls.reset_action'), null, () => {
         const result = resetSemanticAction(semanticAction.id);

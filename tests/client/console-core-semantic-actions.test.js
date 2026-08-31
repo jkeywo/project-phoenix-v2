@@ -3,6 +3,28 @@ import { describe, it, expect, vi } from 'vitest';
 import { initConsole } from '../../gui/console-core.js';
 
 describe('console-core semantic action runtime', () => {
+  it('registers Helm steering and emits the narrow action from a continuous activation', () => {
+    const sent = [];
+    window.__sendAction = (json) => sent.push(JSON.parse(json));
+    const runtime = initConsole({ name: 'helm', render: () => {} });
+    window.__updateConsole('helm', JSON.stringify({ helm_auto: false }));
+
+    expect(window.activateSemanticAction('helm.steering', {
+      context: 'helm', source: 'gamepad', value: 0.45,
+    })).toMatchObject({ claimed: true, handled: true });
+    expect(sent).toEqual([expect.objectContaining({
+      action: 'set_helm_steering', console: 'helm', value: 0.45,
+    })]);
+
+    runtime.disposeSemanticActions();
+    delete window.__sendAction;
+    delete window.__updateConsole;
+    delete window.__updateActionFeedback;
+    delete window.__updateSemanticActionBindings;
+    delete window.activateSemanticAction;
+    delete window.sendAction;
+  });
+
   it('routes the second real Captain action through the same semantic runtime', () => {
     const sent = [];
     window.__sendAction = (json) => sent.push(JSON.parse(json));

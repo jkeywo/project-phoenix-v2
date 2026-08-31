@@ -2,7 +2,7 @@
 title: Client Architecture
 type: concept
 tags: [client, javascript, iframe, console, console-family, state, accessibility, keyboard, gamepad, feedback, vitest]
-sources: [client.html, server.html, gui/mount-plan.js, gui/hero-bar.js, gui/reducer-result.js, gui/lobby-state.js, gui/sim-state.js, gui/comms-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/gamepad-input.js, gui/stations/captain-actions.js, gui/action-map.js, gui/console-core.js, gui/console-latency.js, gui/iframe-bridge.js, gui/client-router.js, gui/coordination-popup.js, gui/accessibility-profile.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/command_admission/mod.rs, src/console/captain/server.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
+sources: [client.html, server.html, gui/mount-plan.js, gui/hero-bar.js, gui/reducer-result.js, gui/lobby-state.js, gui/sim-state.js, gui/comms-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/gamepad-input.js, gui/client-semantic-actions.js, gui/stations/captain-actions.js, gui/stations/helm-actions.js, gui/action-map.js, gui/console-core.js, gui/console-latency.js, gui/iframe-bridge.js, gui/client-router.js, gui/coordination-popup.js, gui/accessibility-profile.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/command_admission/mod.rs, src/console/captain/server.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
 updated: 2026-08-31
 ---
 
@@ -83,8 +83,12 @@ blackboard does. Weapons Hold remains on the uncorrelated legacy envelope.
 
 Each binding slot is a union: `KeyboardEvent.code` plus all four modifiers, or
 a portable control from the browser's standard gamepad mapping. Gamepad
-bindings name logical controls (face-bottom, D-pad directions, or a left-stick
-axis direction and threshold), never `Gamepad.id`, vendor data or a connection.
+bindings name logical controls (face-bottom, D-pad directions, a left-stick
+axis direction and threshold, or an undirected continuous standard axis), never
+`Gamepad.id`, vendor data or a connection. Continuous action definitions own
+their output range, neutral and dispatch cadence; client-local tuning owns
+deadzone and inversion separately from binding identity. The registry exposes
+serialisable binding and tuning profiles in memory, but persists neither.
 Registry conflicts exist only where action context arrays intersect, including
 two slots on the same action. Settings asks the parent registry to propose a
 change; conflicting proposals remain presentation-only until the player chooses
@@ -104,9 +108,20 @@ edge state and raises a persistent client-level accessible warning outside
 Settings, and a new device reusing the same index cannot inherit control. The
 Settings mirror updates its selector/status nodes in place so a polling status
 change cannot detach a focused binding-capture control. Selection, reconnection,
-console-context changes and binding capture all require a neutral sample before
-a held discrete control can make a rising edge. Keyboard dispatch remains the
+console-context changes, remapping, tuning and binding capture emit one
+immediate neutral for an active continuous action and then require every bound
+continuous axis to fall within its configured deadzone before input can resume.
+Nonzero values dispatch immediately and then at the action's authored cadence;
+release or disconnect emits neutral exactly once. Multiple bound axes resolve
+by greatest deflection, then binding-slot order. Keyboard dispatch remains the
 independent iframe path throughout.
+
+`helm.steering` is the first continuous semantic action. The parent samples the
+selected standard pad's left-stick X axis, while the Helm iframe adapter emits
+only `set_helm_steering`; `gui/action-map.js` maps that to the existing
+`SetSteering` command on `helm-steering`. The visual joystick no longer reads
+the Gamepad API or chooses a device, and its pointer/WASD `set_helm` path stays
+unchanged.
 
 ## Module inventory (`gui/`)
 
@@ -122,7 +137,7 @@ independent iframe path throughout.
 | `console-payload.js` | Metadata-driven flat/keyed normalization plus `familyView`: mirrors flat views only under actual projected ids and selects composite views by Console Family, with no inverse id census. |
 | `action-map.js` | Table-driven `console_action` → `ClientMessage` dispatch |
 | `action-feedback.js` | Pure bounded Pressed → Pending → Applied/Refused/TimedOut presentation lifecycle, exact parent-to-originating-iframe router, and the shared live-status/semantic-cue/vibration transition |
-| `semantic-action-registry.js`, `gamepad-input.js`, `stations/captain-actions.js` | Non-authoritative context/input identity, exactly two keyboard-or-standard-gamepad slots, explicit one-connection gamepad ownership with neutral-gated edges, reserved-chord policy, overlap-only conflict replacement and reset operations, plus the real Captain Red Alert and Weapons Hold adapters above `action-map.js` |
+| `semantic-action-registry.js`, `gamepad-input.js`, `client-semantic-actions.js`, `stations/{captain,helm}-actions.js` | Non-authoritative context/input identity, exactly two keyboard-or-standard-gamepad slots, continuous metadata and in-memory axis tuning, explicit one-connection gamepad ownership with neutral-gated discrete edges and continuous values, reserved-chord policy, overlap-only conflict replacement and reset operations, plus the real Captain and Helm adapters above `action-map.js` |
 | `iframe-bridge.js` | `push()` / `wireLoad()` state-push into console iframes (ADR-0001 §2) |
 | `content-switcher.js` | Section visibility over the ship's mounted stations; one human directly holds one station |
 | `station-roster.js` | Pure fold: players + station defs → lobby roster rows + aggregates |

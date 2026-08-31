@@ -460,3 +460,80 @@ describe('binding profile seam and display tokens', () => {
     }
   });
 });
+
+describe('continuous semantic actions', () => {
+  const STEERING = {
+    id: 'helm.steering',
+    contexts: ['helm'],
+    labelId: 'semantic_action.helm.steering.label',
+    accessibilityLabelId: 'semantic_action.helm.steering.accessibility',
+    continuous: { min: -1, max: 1, neutral: 0, cadenceMs: 100 },
+    tuning: { deadzone: 0.1, inverted: false },
+    bindings: [
+      { type: 'gamepad', input: 'axis', control: 'left-stick-x' },
+      null,
+    ],
+  };
+
+  it('normalizes undirected axes with authored output metadata and separate tuning', () => {
+    const registry = createSemanticActionRegistry();
+    registry.register(STEERING);
+    expect(registry.action(STEERING.id)).toMatchObject({
+      continuous: { min: -1, max: 1, neutral: 0, cadenceMs: 100 },
+      tuning: { deadzone: 0.1, inverted: false },
+      bindings: [
+        { type: 'gamepad', input: 'axis', control: 'left-stick-x' },
+        null,
+      ],
+    });
+    expect(formatSemanticBinding(registry.action(STEERING.id).bindings[0], t))
+      .toBe(t('input.gamepad.left_stick_x'));
+    expect(() => registry.setBinding(STEERING.id, 1, { code: 'KeyY' }))
+      .toThrow(/gamepad axis/i);
+  });
+
+  it('passes only finite in-range scalars to the adapter', () => {
+    const adapter = vi.fn(() => true);
+    const registry = createSemanticActionRegistry();
+    registry.register(STEERING, adapter);
+    expect(registry.activate(STEERING.id, { context: 'helm', value: 0.4 }))
+      .toMatchObject({ claimed: true, handled: true });
+    expect(adapter).toHaveBeenCalledWith(expect.objectContaining({ value: 0.4 }));
+    registry.activate(STEERING.id, { context: 'helm', value: 1.1 });
+    registry.activate(STEERING.id, { context: 'helm', value: Number.NaN });
+    expect(adapter).toHaveBeenCalledOnce();
+  });
+
+  it('exposes serialisable in-memory tuning and resets authored defaults', () => {
+    const registry = createSemanticActionRegistry();
+    registry.register(STEERING);
+    expect(registry.setTuning(STEERING.id, {
+      deadzone: 0.25, inverted: true,
+    }).status).toBe('applied');
+    expect(registry.tuningProfile()).toEqual({
+      [STEERING.id]: { deadzone: 0.25, inverted: true },
+    });
+    expect(JSON.parse(JSON.stringify(registry.tuningProfile())))
+      .toEqual(registry.tuningProfile());
+    registry.resetAction(STEERING.id);
+    expect(registry.tuningProfile()[STEERING.id]).toEqual({
+      deadzone: 0.1, inverted: false,
+    });
+    expect(() => registry.setTuning(STEERING.id, { deadzone: 1 }))
+      .toThrow(/deadzone/i);
+  });
+
+  it('treats a directed discrete axis as conflicting with its continuous axis', () => {
+    const registry = createSemanticActionRegistry();
+    registry.register(STEERING);
+    expect(() => registry.register({
+      ...ACTION,
+      id: 'helm.discrete-right',
+      contexts: ['helm'],
+      bindings: [{
+        type: 'gamepad', input: 'axis', control: 'left-stick-x',
+        direction: 'positive', threshold: 0.5,
+      }, null],
+    })).toThrow(/conflict/i);
+  });
+});

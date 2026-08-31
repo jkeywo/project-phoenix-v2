@@ -6,25 +6,6 @@ import '../strings-boot.js';
 import { t } from '../strings.js';
 import { PhElement, phDefine } from './ph-element.js';
 
-/** Half-width of the gamepad stick's centre deadzone, in axis units. */
-export const GAMEPAD_DEADZONE = 0.1;
-
-/**
- * Map a raw gamepad axis onto command output through the deadzone.
- *
- * A bare threshold gate (`|v| > dead ? v : 0`) makes the stick jerk: output
- * steps straight from 0 to ±0.1 the instant the pilot crosses the gate, so
- * there is no fine control at low deflection. Rescaling the live band back
- * over the full [0, 1] range instead means output *leaves* zero smoothly
- * while the deadzone still swallows stick drift, and the rails still reach
- * ±1.0.
- */
-export function softenAxis(v) {
-  const a = Math.abs(v);
-  if (a <= GAMEPAD_DEADZONE) return 0;
-  return Math.sign(v) * ((a - GAMEPAD_DEADZONE) / (1 - GAMEPAD_DEADZONE));
-}
-
 export class PhHelmJoystick extends PhElement {
   #px = 0;
   #py = 0;
@@ -119,8 +100,10 @@ export class PhHelmJoystick extends PhElement {
     this.setAttribute('role', 'group');
     this.setAttribute('aria-label', t('component.helm_joystick.label'));
     if (!this.hasAttribute('tabindex')) this.setAttribute('tabindex', '0');
-    // Keyboard (WASD / arrows) + gamepad drive the same set_helm output as the
-    // on-screen thumbstick. This is the DELIBERATE key-relay coexistence
+    // Keyboard (WASD / arrows) drives the same set_helm output as the on-screen
+    // thumbstick. Gamepad axes are owned by the parent semantic input runtime,
+    // so this component never polls or chooses a device. This is the
+    // DELIBERATE key-relay coexistence
     // (issue #1176): the arrow/WASD flight bindings stay a SINGLE document-level
     // handler — the same one gui/key-relay.js relays into the console — so a
     // focused well adds a Tab stop and a name but NOT a second arrow handler,
@@ -134,7 +117,6 @@ export class PhHelmJoystick extends PhElement {
     }
     if (typeof window !== 'undefined') {
       window.addEventListener('blur', this.#onBlur);
-      window.addEventListener('gamepadconnected', this.#onGamepadConnected);
     }
   }
 
@@ -145,7 +127,6 @@ export class PhHelmJoystick extends PhElement {
     }
     if (typeof window !== 'undefined') {
       window.removeEventListener('blur', this.#onBlur);
-      window.removeEventListener('gamepadconnected', this.#onGamepadConnected);
     }
     if (this.#inputRaf) { cancelAnimationFrame(this.#inputRaf); this.#inputRaf = null; }
     if (this.#hbRaf) { cancelAnimationFrame(this.#hbRaf); this.#hbRaf = null; }
@@ -290,33 +271,6 @@ export class PhHelmJoystick extends PhElement {
     this.#startInputLoop();
   };
 
-  #onGamepadConnected = () => {
-    this.#startInputLoop();
-  };
-
-  #getGamepadInput() {
-    if (typeof navigator === 'undefined' || !navigator.getGamepads) return { x: 0, y: 0 };
-    const pads = navigator.getGamepads();
-    // Take the first pad that is actually being pushed. A plain `return` on the
-    // first pad with 2+ axes lets a connected-but-idle controller mask a second
-    // one the pilot is really flying with.
-    for (let i = 0; i < pads.length; i++) {
-      const gp = pads[i];
-      if (!gp || gp.axes.length < 2) continue;
-      const x = softenAxis(gp.axes[0]);
-      const y = softenAxis(gp.axes[1]);
-      if (x !== 0 || y !== 0) return { x, y };
-    }
-    return { x: 0, y: 0 };
-  }
-
-  #hasGamepad() {
-    if (typeof navigator === 'undefined' || !navigator.getGamepads) return false;
-    const pads = navigator.getGamepads();
-    for (let i = 0; i < pads.length; i++) if (pads[i]) return true;
-    return false;
-  }
-
   #startInputLoop() {
     if (this.#inputRaf) return;
     this.#inputRaf = requestAnimationFrame(this.#inputLoop);
@@ -325,7 +279,7 @@ export class PhHelmJoystick extends PhElement {
   #inputLoop = () => {
     this.#inputRaf = null;
     const auto = this.state ? !!this.state.auto : false;
-    const keepPolling = Object.keys(this.#keys).length > 0 || this.#hasGamepad();
+    const keepPolling = Object.keys(this.#keys).length > 0;
 
     // The on-screen thumbstick (pointer drag) and AUTO both take priority.
     if (auto || this.#pointerId !== null) {
@@ -339,9 +293,8 @@ export class PhHelmJoystick extends PhElement {
     if (this.#keys['ArrowUp'] || this.#keys['KeyW']) ky -= 1; // forward thrust
     if (this.#keys['ArrowDown'] || this.#keys['KeyS']) ky += 1;
 
-    const gp = this.#getGamepadInput();
-    let nx = kx !== 0 ? kx : gp.x;
-    let ny = ky !== 0 ? ky : gp.y;
+    let nx = kx;
+    let ny = ky;
     const d = Math.hypot(nx, ny);
     if (d > 1) { nx /= d; ny /= d; }
 
@@ -363,8 +316,6 @@ export class PhHelmJoystick extends PhElement {
         this.#updateReadout();
         this.#sendAction();
       }
-      // Keep polling while a gamepad is present (its stick can re-engage
-      // without a keydown to restart the loop).
       if (keepPolling) this.#inputRaf = requestAnimationFrame(this.#inputLoop);
     }
   };

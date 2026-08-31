@@ -37,6 +37,7 @@ import {
 } from '../../gui/settings-tabs.js';
 import { ClientSimState } from '../../gui/sim-state.js';
 import { createSemanticActionRegistry } from '../../gui/semantic-action-registry.js';
+import { createClientSemanticActionRegistry } from '../../gui/client-semantic-actions.js';
 import {
   CAPTAIN_RED_ALERT_ACTION_ID,
   CAPTAIN_WEAPONS_HOLD_ACTION_ID,
@@ -573,6 +574,16 @@ describe('client.html', () => {
     expect(CLIENT_HTML).toContain('settingsPanel.updateGamepadState(state)');
   });
 
+  it('retains and uses the gamepad runtime disposer while the transport is live', () => {
+    expect(CLIENT_HTML).toContain(
+      'isTransportLive: () => !!(activeLink && activeLink.connected)',
+    );
+    expect(CLIENT_HTML).toContain(
+      'disposeGamepadInput = gamepadInputRuntime.start(window) || null',
+    );
+    expect(CLIENT_HTML).toMatch(/addEventListener\('pagehide',[\s\S]*?dispose\(\);[\s\S]*?\{ once: true \}\)/);
+  });
+
   it('does not add a duplicate fixed station title above the active console', () => {
     expect(CLIENT_HTML).not.toMatch(/id="phase-title"/);
     expect(CLIENT_HTML).not.toMatch(/_consoleTitleEl/);
@@ -1091,6 +1102,92 @@ describe('semantic controls tab', () => {
     expect(captures.every((el) => el.getAttribute('aria-label'))).toBe(true);
   });
 
+  it('renders accessible continuous tuning controls and updates only client-local tuning', () => {
+    const registry = createClientSemanticActionRegistry();
+    const tuningChanges = [];
+    const { doc, sent, inst } = openControls({
+      getSemanticActions: () => registry.list(),
+      onSemanticBinding: (actionId, slot, binding, options) =>
+        registry.setBinding(actionId, slot, binding, options),
+      onSemanticTuning: (actionId, tuning) => {
+        tuningChanges.push({ actionId, tuning });
+        return registry.setTuning(actionId, tuning);
+      },
+    });
+    const deadzone = descendants(bodyOf(doc)).find((el) => el.getAttribute
+      && el.getAttribute('data-control') === 'semantic-tuning-deadzone-helm.steering');
+    const inverted = descendants(bodyOf(doc)).find((el) => el.getAttribute
+      && el.getAttribute('data-control') === 'semantic-tuning-inverted-helm.steering');
+    expect(deadzone.value).toBe('0.1');
+    expect(deadzone.getAttribute('aria-label')).toBe(t('settings.controls.gamepad.deadzone'));
+    expect(inverted.checked).toBe(false);
+    expect(inverted.getAttribute('aria-label')).toBe(t('settings.controls.gamepad.inverted'));
+
+    deadzone.focus();
+    inst.updateGamepadState({
+      devices: [{ index: 0, supported: true }], selectedIndex: 0,
+      status: 'neutral', capturing: null,
+    });
+    expect(doc.activeElement).toBe(deadzone);
+    expect(descendants(bodyOf(doc))).toContain(deadzone);
+
+    deadzone.value = '0.2';
+    deadzone.dispatch('input');
+    inverted.checked = true;
+    inverted.dispatch('change');
+    expect(tuningChanges).toEqual([
+      { actionId: 'helm.steering', tuning: { deadzone: 0.2 } },
+      { actionId: 'helm.steering', tuning: { inverted: true } },
+    ]);
+    expect(registry.tuningProfile()['helm.steering']).toEqual({
+      deadzone: 0.2, inverted: true,
+    });
+    expect(sent).toEqual([]);
+  });
+
+  it('keeps continuous axis capture focused across status updates and accepts an undirected axis', () => {
+    const registry = createClientSemanticActionRegistry();
+    let gamepad = {
+      devices: [{ index: 0, supported: true }], selectedIndex: 0,
+      status: 'ready', capturing: null,
+    };
+    const captures = [];
+    const { doc, inst } = openControls({
+      getSemanticActions: () => registry.list(),
+      onSemanticBinding: (actionId, slot, binding, options) =>
+        registry.setBinding(actionId, slot, binding, options),
+      getGamepadState: () => gamepad,
+      onSemanticCapture: (actionId, slot, active) => {
+        captures.push({ actionId, slot, active });
+        gamepad = {
+          ...gamepad,
+          status: active ? 'neutral' : 'ready',
+          capturing: active ? { actionId, slot } : null,
+        };
+      },
+    });
+    const capture = descendants(bodyOf(doc)).find((el) => el.getAttribute
+      && el.getAttribute('data-control') === 'semantic-binding-helm.steering-1');
+    capture.focus();
+    expect(capture.value).toBe(t('settings.controls.press_axis'));
+    capture.dispatch('keydown', {
+      code: 'KeyY', key: 'y', repeat: false,
+      preventDefault() {}, stopPropagation() {},
+    });
+    expect(registry.action('helm.steering').bindings[1]).toBeNull();
+    inst.updateGamepadState(gamepad);
+    expect(doc.activeElement).toBe(capture);
+    expect(descendants(bodyOf(doc))).toContain(capture);
+
+    inst.proposeSemanticBinding('helm.steering', 1, {
+      type: 'gamepad', input: 'axis', control: 'left-stick-y',
+    });
+    expect(captures.at(-1)).toEqual({ actionId: 'helm.steering', slot: 1, active: false });
+    expect(registry.action('helm.steering').bindings[1]).toEqual({
+      type: 'gamepad', input: 'axis', control: 'left-stick-y',
+    });
+  });
+
   it('shows explicit device selection and accessible unsupported/disconnect states', () => {
     let gamepad = {
       devices: [
@@ -1553,7 +1650,7 @@ describe('semantic controls tab', () => {
   });
 
   it('wires the parent-owned profile to the explicit iframe update seam', () => {
-    expect(CLIENT_HTML).toContain('createCaptainActionRegistry');
+    expect(CLIENT_HTML).toContain('createClientSemanticActionRegistry');
     expect(CLIENT_HTML).toContain('__updateSemanticActionBindings');
     expect(CLIENT_HTML).toContain('pushSemanticBindingsToIframe');
   });

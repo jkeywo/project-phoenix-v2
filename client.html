@@ -100,12 +100,14 @@
   <script type="module" src="gui/action-map.js"></script>
   <!-- One explicitly selected standard gamepad is sampled in this parent
        realm. Logical bindings are copied to console iframes, but only the
-       active iframe receives semantic activation. -->
+       action's owning iframe receives semantic activation. -->
   <script type="module" src="gui/gamepad-input.js"></script>
   <!-- Parent-realm semantic action metadata + in-memory binding profile. The
        active console iframe owns its own registry instance and receives this
        profile through an explicit update seam. -->
   <script type="module" src="gui/stations/captain-actions.js"></script>
+  <script type="module" src="gui/stations/helm-actions.js"></script>
+  <script type="module" src="gui/client-semantic-actions.js"></script>
   <!-- Pure JS client-state modules (issue #460). Each exposes a singleton
        (window.lobbyState / simState / commsState) with an apply(serverMessage)
        method returning a fresh semantic result; handleMessage() feeds every
@@ -1608,6 +1610,7 @@
     /// Parent-only gamepad sampler. Iframes never poll navigator.getGamepads(),
     /// so an inactive or disconnected Station cannot receive controller input.
     let gamepadInputRuntime = null;
+    let disposeGamepadInput = null;
     let pendingMidGameClaim = false;
     // #771 AC3: a mid-round station release is a two-step arm→confirm (imitates
     // ph-comms-current-message). First click arms + swaps the button to a
@@ -2778,6 +2781,15 @@
       return result;
     }
 
+    function updateSemanticTuning(actionId, tuning) {
+      if (!semanticActionRegistry) return { status: 'unavailable' };
+      const result = semanticActionRegistry.setTuning(actionId, tuning);
+      if (result.status === 'applied' && gamepadInputRuntime) {
+        gamepadInputRuntime.neutralize();
+      }
+      return result;
+    }
+
     function updateGamepadClientWarning(state) {
       const warning = $('gamepad-input-alert');
       if (!warning) return;
@@ -3257,8 +3269,8 @@
           })();
       console.log(`[client] session token ${myToken.slice(0, 8)}`);
 
-      semanticActionRegistry = typeof window.createCaptainActionRegistry === 'function'
-        ? window.createCaptainActionRegistry()
+      semanticActionRegistry = typeof window.createClientSemanticActionRegistry === 'function'
+        ? window.createClientSemanticActionRegistry()
         : null;
 
       gamepadInputRuntime = typeof window.createGamepadInputRuntime === 'function'
@@ -3267,8 +3279,15 @@
             getActions: (context) => semanticActionRegistry
               ? semanticActionRegistry.list(context)
               : [],
+            isTransportLive: () => !!(activeLink && activeLink.connected),
             activate: (actionId, options) => {
-              const iframe = activeConsoleIframe();
+              // A safety neutral belongs to the context that emitted the last
+              // nonzero value, even when the operator has already switched
+              // tabs. Never redirect it into whichever iframe is active now.
+              const context = options && options.context;
+              const iframe = context
+                ? $(consoleIframeId(context))
+                : activeConsoleIframe();
               try {
                 const activate = iframe && iframe.contentWindow
                   && iframe.contentWindow.activateSemanticAction;
@@ -3329,6 +3348,9 @@
           },
           onSemanticResetAction: (actionId) => resetSemanticAction(actionId),
           onSemanticResetAll: () => resetAllSemanticActions(),
+          onSemanticTuning: (actionId, tuning) => {
+            return updateSemanticTuning(actionId, tuning);
+          },
           getGamepadState: () => gamepadInputRuntime
             ? gamepadInputRuntime.state()
             : { devices: [], selectedIndex: null, status: 'none', capturing: null },
@@ -3349,7 +3371,15 @@
         });
       }
 
-      if (gamepadInputRuntime) gamepadInputRuntime.start(window);
+      if (gamepadInputRuntime) {
+        disposeGamepadInput = gamepadInputRuntime.start(window) || null;
+        window.addEventListener('pagehide', () => {
+          if (!disposeGamepadInput) return;
+          const dispose = disposeGamepadInput;
+          disposeGamepadInput = null;
+          dispose();
+        }, { once: true });
+      }
 
       // Apply the private Accessibility profile to the shell at boot (issue
       // #1102). Console iframes are (re)covered as they mount and on every

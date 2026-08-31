@@ -4,6 +4,8 @@ semantic_action.captain.red_alert.label,Captain semantic action display name,[Re
 semantic_action.captain.red_alert.accessibility,Captain semantic action accessible description,[Raise or stand down Red Alert from the Captain console.]
 semantic_action.captain.weapons_hold.label,Captain semantic action display name,[Weapons Hold]
 semantic_action.captain.weapons_hold.accessibility,Captain semantic action accessible description,[Hold or release all weapons fire from the Captain console.]
+semantic_action.helm.steering.label,Helm semantic action display name,[Steering]
+semantic_action.helm.steering.accessibility,Helm semantic action accessible description,[Steer the ship continuously from the Helm console.]
 action_feedback.pressed,Shared semantic action live status immediately after activation,[Pressed]
 action_feedback.pending,Shared semantic action live status while authoritative work is in flight,[Pending]
 action_feedback.applied,Shared semantic action live status after the authoritative consumer applies the request,[Applied]
@@ -21,6 +23,8 @@ input.gamepad.dpad_up,Portable standard-gamepad display name for D-pad up,[Gamep
 input.gamepad.dpad_down,Portable standard-gamepad display name for D-pad down,[Gamepad D-pad Down]
 input.gamepad.dpad_left,Portable standard-gamepad display name for D-pad left,[Gamepad D-pad Left]
 input.gamepad.dpad_right,Portable standard-gamepad display name for D-pad right,[Gamepad D-pad Right]
+input.gamepad.left_stick_x,Portable standard-gamepad continuous horizontal axis display name,[Gamepad Left Stick Horizontal]
+input.gamepad.left_stick_y,Portable standard-gamepad continuous vertical axis display name,[Gamepad Left Stick Vertical]
 input.gamepad.left_stick_left,Portable standard-gamepad axis-direction display name; {threshold} is the activation threshold,[Gamepad Left Stick Left at {threshold}]
 input.gamepad.left_stick_right,Portable standard-gamepad axis-direction display name; {threshold} is the activation threshold,[Gamepad Left Stick Right at {threshold}]
 input.gamepad.left_stick_up,Portable standard-gamepad axis-direction display name; {threshold} is the activation threshold,[Gamepad Left Stick Up at {threshold}]
@@ -32,6 +36,7 @@ settings.controls.slot,Phone client Controls tab binding slot label; {slot} is 1
 settings.controls.slot_value,Station Help current semantic binding; {slot} is 1 or 2 and {binding} is the displayed chord,"Slot {slot}: {binding}"
 settings.controls.capture_label,"Phone client Controls tab accessible remap label; {action} is the display name and {slot} is 1 or 2","Remap {action}, slot {slot}"
 settings.controls.press_key,Phone client Controls tab prompt shown while a remap slot has focus,[Press a key or gamepad control]
+settings.controls.press_axis,Phone client Controls tab prompt while a continuous gamepad axis slot has focus,[Move a gamepad axis]
 settings.controls.reset_action,Phone client Controls tab button restoring one semantic action to authored defaults,[Reset Action]
 settings.controls.reset_all,Phone client Controls tab button restoring every semantic action to authored defaults,[Reset All]
 settings.controls.reserved,Assertive feedback refusing a browser or OS reserved chord; {binding} is the displayed chord,[{binding} is reserved by the browser or operating system. Choose another binding.]
@@ -51,6 +56,9 @@ settings.controls.gamepad.status_ready,Accessible gamepad status after a standar
 settings.controls.gamepad.status_neutral,Accessible gamepad status while held controls are gated,[Release the selected gamepad controls to continue.]
 settings.controls.gamepad.status_unsupported,Accessible gamepad status for connected devices without the standard mapping,[Only standard-mapped gamepads are supported.]
 settings.controls.gamepad.status_disconnected,Assertive warning after the selected connection is lost,[Selected gamepad disconnected. Select a device again. Keyboard controls remain active.]
+settings.controls.gamepad.deadzone,Accessible label for a continuous gamepad axis deadzone setting,[Axis deadzone]
+settings.controls.gamepad.deadzone_value,Continuous gamepad axis deadzone percentage readout; {value} is an integer percentage,[{value}%]
+settings.controls.gamepad.inverted,Accessible label for a continuous gamepad axis inversion setting,[Invert axis]
 client.gamepad.disconnect_warning,Persistent client-level live warning outside Settings after selected gamepad disconnect,[Selected gamepad disconnected. No other gamepad has taken control. Keyboard controls remain active.]
 world.combat_test.harrow.blood_eagle,assets/worlds/combat_test.toml → scripted Harrow display identity,Blood-Eagle
 world.combat_test.harrow.iron_spear,assets/worlds/combat_test.toml → scripted Harrow display identity,Iron-Spear

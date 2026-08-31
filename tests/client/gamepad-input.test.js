@@ -3,6 +3,7 @@ import {
   createGamepadInputRuntime,
   enumerateGamepads,
   gamepadBindingPressed,
+  normalizeContinuousAxis,
   normalizeGamepadBinding,
 } from '../../gui/gamepad-input.js';
 import { createSemanticActionRegistry } from '../../gui/semantic-action-registry.js';
@@ -15,6 +16,25 @@ function pad(index, { mapping = 'standard', pressed = [], axes = [0, 0, 0, 0] } 
   return { index, mapping, buttons, axes, id: `hardware-name-${index}` };
 }
 
+function eventTarget(properties = {}) {
+  const listeners = new Map();
+  return Object.assign(properties, {
+    addEventListener(type, listener) {
+      if (!listeners.has(type)) listeners.set(type, new Set());
+      listeners.get(type).add(listener);
+    },
+    removeEventListener(type, listener) {
+      listeners.get(type)?.delete(listener);
+    },
+    emit(type, event = {}) {
+      for (const listener of [...(listeners.get(type) || [])]) listener(event);
+    },
+    listenerCount(type) {
+      return listeners.get(type)?.size || 0;
+    },
+  });
+}
+
 const GAMEPAD_ACTION = {
   id: 'captain.red-alert',
   contexts: ['captain'],
@@ -23,6 +43,19 @@ const GAMEPAD_ACTION = {
   bindings: [
     { type: 'keyboard', code: 'KeyR' },
     { type: 'gamepad', input: 'button', control: 'face-bottom' },
+  ],
+};
+
+const CONTINUOUS_ACTION = {
+  id: 'helm.steering',
+  contexts: ['helm'],
+  labelId: 'semantic_action.helm.steering.label',
+  accessibilityLabelId: 'semantic_action.helm.steering.accessibility',
+  continuous: { min: -1, max: 1, neutral: 0, cadenceMs: 100 },
+  tuning: { deadzone: 0.1, inverted: false },
+  bindings: [
+    { type: 'gamepad', input: 'axis', control: 'left-stick-x' },
+    null,
   ],
 };
 
@@ -190,5 +223,336 @@ describe('explicit connection ownership and discrete edges', () => {
       type: 'keydown', code: 'KeyR', preventDefault() {},
     }, 'captain')).toMatchObject({ claimed: true, handled: true });
     expect(keyboardAdapter).toHaveBeenCalledOnce();
+  });
+});
+
+describe('continuous standard-gamepad axes', () => {
+  it('swallows drift, smoothly rescales the live band, clamps, and inverts', () => {
+    const spec = CONTINUOUS_ACTION.continuous;
+    expect(normalizeContinuousAxis(0.1, { deadzone: 0.1 }, spec)).toBe(0);
+    expect(normalizeContinuousAxis(-0.09, { deadzone: 0.1 }, spec)).toBe(0);
+    expect(normalizeContinuousAxis(0.55, { deadzone: 0.1 }, spec)).toBeCloseTo(0.5, 10);
+    expect(normalizeContinuousAxis(-0.55, {
+      deadzone: 0.1, inverted: true,
+    }, spec)).toBeCloseTo(0.5, 10);
+    expect(normalizeContinuousAxis(2, { deadzone: 0.1 }, spec)).toBe(1);
+  });
+
+  it('sends the selected axis immediately, then at authored cadence, with one release neutral', () => {
+    let snapshot = [pad(0), pad(1, { axes: [1, 0, 0, 0] })];
+    const activate = vi.fn();
+    const runtime = createGamepadInputRuntime({
+      getGamepads: () => snapshot,
+      getContext: () => 'helm',
+      getActions: (context) => context ? [CONTINUOUS_ACTION] : [CONTINUOUS_ACTION],
+      activate,
+    });
+    runtime.select(0);
+    runtime.poll(snapshot, 0);
+
+    snapshot = [pad(0, { axes: [0.55, 0, 0, 0] }), pad(1, { axes: [1, 0, 0, 0] })];
+    runtime.poll(snapshot, 1);
+    expect(activate).toHaveBeenCalledTimes(1);
+    expect(activate.mock.calls[0][0]).toBe('helm.steering');
+    expect(activate.mock.calls[0][1]).toMatchObject({ context: 'helm' });
+    expect(activate.mock.calls[0][1].value).toBeCloseTo(0.5, 10);
+
+    snapshot = [pad(0, { axes: [0.82, 0, 0, 0] }), pad(1, { axes: [-1, 0, 0, 0] })];
+    runtime.poll(snapshot, 50);
+    expect(activate).toHaveBeenCalledTimes(1);
+    runtime.poll(snapshot, 101);
+    expect(activate).toHaveBeenCalledTimes(2);
+    expect(activate.mock.calls[1][1].value).toBeCloseTo(0.8, 10);
+
+    snapshot = [pad(0), pad(1, { axes: [-1, 0, 0, 0] })];
+    runtime.poll(snapshot, 102);
+    runtime.poll(snapshot, 202);
+    expect(activate).toHaveBeenCalledTimes(3);
+    expect(activate).toHaveBeenLastCalledWith('helm.steering', expect.objectContaining({
+      context: 'helm', value: 0, neutral: true,
+    }));
+  });
+
+  it('uses greatest deflection with deterministic slot order on a tie', () => {
+    const action = {
+      ...CONTINUOUS_ACTION,
+      tuning: { deadzone: 0, inverted: false },
+      bindings: [
+        { type: 'gamepad', input: 'axis', control: 'left-stick-x' },
+        { type: 'gamepad', input: 'axis', control: 'left-stick-y' },
+      ],
+    };
+    let snapshot = [pad(0)];
+    const activate = vi.fn();
+    const runtime = createGamepadInputRuntime({
+      getGamepads: () => snapshot, getContext: () => 'helm',
+      getActions: () => [action], activate,
+    });
+    runtime.select(0);
+    runtime.poll(snapshot, 0);
+    snapshot = [pad(0, { axes: [0.4, -0.8, 0, 0] })];
+    runtime.poll(snapshot, 1);
+    expect(activate.mock.calls[0][1].value).toBe(-0.8);
+
+    runtime.neutralize(2);
+    snapshot = [pad(0)];
+    runtime.poll(snapshot, 3);
+    snapshot = [pad(0, { axes: [0.6, -0.6, 0, 0] })];
+    runtime.poll(snapshot, 4);
+    expect(activate).toHaveBeenLastCalledWith('helm.steering', expect.objectContaining({
+      value: 0.6,
+    }));
+  });
+
+  it('neutralizes once on disconnect, never transfers, and gates every bound axis after reselection', () => {
+    const action = {
+      ...CONTINUOUS_ACTION,
+      bindings: [
+        { type: 'gamepad', input: 'axis', control: 'left-stick-x' },
+        { type: 'gamepad', input: 'axis', control: 'left-stick-y' },
+      ],
+    };
+    let snapshot = [pad(0), pad(1)];
+    const activate = vi.fn();
+    const runtime = createGamepadInputRuntime({
+      getGamepads: () => snapshot, getContext: () => 'helm',
+      getActions: () => [action], activate,
+    });
+    runtime.select(0);
+    runtime.poll(snapshot, 0);
+    snapshot = [pad(0, { axes: [0.6, 0, 0, 0] }), pad(1, { axes: [-1, 0, 0, 0] })];
+    runtime.poll(snapshot, 1);
+
+    snapshot = [null, pad(1, { axes: [-1, 0, 0, 0] })];
+    expect(runtime.poll(snapshot, 2).status).toBe('disconnected');
+    runtime.poll(snapshot, 3);
+    expect(activate).toHaveBeenCalledTimes(2);
+    expect(activate).toHaveBeenLastCalledWith('helm.steering', expect.objectContaining({ value: 0 }));
+
+    // A replacement at the same browser index cannot inherit ownership, and
+    // explicit reselection remains gated while either bound axis is displaced.
+    snapshot = [pad(0, { axes: [0.6, 0.7, 0, 0] }), pad(1, { axes: [-1, 0, 0, 0] })];
+    runtime.poll(snapshot, 4);
+    runtime.select(0);
+    runtime.poll(snapshot, 5);
+    snapshot = [pad(0, { axes: [0, 0.7, 0, 0] }), pad(1, { axes: [-1, 0, 0, 0] })];
+    runtime.poll(snapshot, 6);
+    expect(runtime.state().status).toBe('neutral');
+    expect(activate).toHaveBeenCalledTimes(2);
+    snapshot = [pad(0), pad(1, { axes: [-1, 0, 0, 0] })];
+    runtime.poll(snapshot, 7);
+    expect(runtime.state().status).toBe('ready');
+    snapshot = [pad(0, { axes: [-0.55, 0, 0, 0] }), pad(1, { axes: [-1, 0, 0, 0] })];
+    runtime.poll(snapshot, 8);
+    expect(activate).toHaveBeenCalledTimes(3);
+    expect(activate.mock.calls[2][1].value).toBeCloseTo(-0.5, 10);
+  });
+
+  it('neutral-gates tuning, context changes, and continuous axis capture', () => {
+    let context = 'helm';
+    let action = { ...CONTINUOUS_ACTION, tuning: { deadzone: 0.1, inverted: false } };
+    let snapshot = [pad(0)];
+    const activate = vi.fn();
+    const captures = [];
+    const runtime = createGamepadInputRuntime({
+      getGamepads: () => snapshot, getContext: () => context,
+      getActions: () => [action], activate,
+      onCapture: (target, binding) => captures.push({ target, binding }),
+    });
+    runtime.select(0);
+    runtime.poll(snapshot, 0);
+    snapshot = [pad(0, { axes: [0.5, 0, 0, 0] })];
+    runtime.poll(snapshot, 1);
+
+    action = { ...action, tuning: { deadzone: 0.2, inverted: true } };
+    runtime.neutralize(2);
+    runtime.poll(snapshot, 3);
+    expect(runtime.state().status).toBe('neutral');
+    snapshot = [pad(0)];
+    runtime.poll(snapshot, 4);
+    snapshot = [pad(0, { axes: [0.6, 0, 0, 0] })];
+    runtime.poll(snapshot, 5);
+    expect(activate).toHaveBeenLastCalledWith('helm.steering', expect.objectContaining({
+      context: 'helm',
+    }));
+    expect(activate.mock.calls.at(-1)[1].value).toBeCloseTo(-0.5, 10);
+
+    context = 'captain';
+    runtime.poll(snapshot, 6);
+    expect(activate).toHaveBeenLastCalledWith('helm.steering', expect.objectContaining({
+      context: 'helm', value: 0, neutral: true,
+    }));
+    context = 'helm';
+    snapshot = [pad(0)];
+    runtime.poll(snapshot, 7);
+    runtime.beginCapture('helm.steering', 1);
+    runtime.poll(snapshot, 8);
+    snapshot = [pad(0, { axes: [0, -0.8, 0, 0] })];
+    runtime.poll(snapshot, 9);
+    expect(captures).toEqual([{
+      target: { actionId: 'helm.steering', slot: 1 },
+      binding: { type: 'gamepad', input: 'axis', control: 'left-stick-y' },
+    }]);
+  });
+
+  it('emits one immediate neutral when capture, remap/tuning, or deselection interrupts output', () => {
+    let snapshot = [pad(0)];
+    const activate = vi.fn();
+    const runtime = createGamepadInputRuntime({
+      getGamepads: () => snapshot, getContext: () => 'helm',
+      getActions: () => [CONTINUOUS_ACTION], activate,
+    });
+    runtime.select(0);
+    runtime.poll(snapshot, 0);
+    snapshot = [pad(0, { axes: [0.6, 0, 0, 0] })];
+    runtime.poll(snapshot, 1);
+    runtime.beginCapture('helm.steering', 0);
+    runtime.endCapture('helm.steering', 0);
+    expect(activate).toHaveBeenCalledTimes(2);
+    expect(activate.mock.calls[0][1].value).toBeCloseTo(5 / 9, 10);
+    expect(activate.mock.calls[1][1].value).toBe(0);
+
+    snapshot = [pad(0)];
+    runtime.poll(snapshot, 2);
+    snapshot = [pad(0, { axes: [-0.55, 0, 0, 0] })];
+    runtime.poll(snapshot, 3);
+    runtime.neutralize(4); // parent remap/tuning hook
+    runtime.neutralize(5);
+    expect(activate.mock.calls.filter((call) => call[1].value === 0)).toHaveLength(2);
+
+    snapshot = [pad(0)];
+    runtime.poll(snapshot, 6);
+    snapshot = [pad(0, { axes: [0.55, 0, 0, 0] })];
+    runtime.poll(snapshot, 7);
+    runtime.select(null);
+    runtime.select(null);
+    expect(activate.mock.calls.filter((call) => call[1].value === 0)).toHaveLength(3);
+  });
+
+  it('neutralizes once when hidden and requires foreground neutral before fresh output', () => {
+    let snapshot = [pad(0)];
+    const activate = vi.fn();
+    const action = {
+      ...CONTINUOUS_ACTION,
+      bindings: [
+        { type: 'gamepad', input: 'axis', control: 'left-stick-x' },
+        { type: 'gamepad', input: 'axis', control: 'left-stick-y' },
+      ],
+    };
+    const doc = eventTarget({ hidden: false, visibilityState: 'visible' });
+    const win = eventTarget({ document: doc });
+    const runtime = createGamepadInputRuntime({
+      getGamepads: () => snapshot,
+      getContext: () => 'helm',
+      getActions: () => [action],
+      activate,
+      requestAnimationFrame: vi.fn(() => 7),
+      cancelAnimationFrame: vi.fn(),
+    });
+    runtime.select(0);
+    const dispose = runtime.start(win);
+    snapshot = [pad(0, { axes: [0.6, 0, 0, 0] })];
+    runtime.poll(snapshot, 1);
+
+    doc.hidden = true;
+    doc.visibilityState = 'hidden';
+    doc.emit('visibilitychange');
+    doc.emit('visibilitychange');
+    expect(activate).toHaveBeenCalledTimes(2);
+    expect(activate).toHaveBeenLastCalledWith('helm.steering', expect.objectContaining({
+      value: 0, neutral: true,
+    }));
+
+    // Sampling in the background cannot satisfy the gate. Becoming visible
+    // re-arms it, so the still-displaced stick remains inert.
+    snapshot = [pad(0)];
+    runtime.poll(snapshot, 2);
+    snapshot = [pad(0, { axes: [0.6, 0, 0, 0] })];
+    runtime.poll(snapshot, 3);
+    doc.hidden = false;
+    doc.visibilityState = 'visible';
+    doc.emit('visibilitychange');
+    runtime.poll(snapshot, 4);
+    expect(runtime.state().status).toBe('neutral');
+    expect(activate).toHaveBeenCalledTimes(2);
+
+    snapshot = [pad(0, { axes: [0, 0.6, 0, 0] })];
+    runtime.poll(snapshot, 5);
+    expect(runtime.state().status).toBe('neutral');
+    snapshot = [pad(0)];
+    runtime.poll(snapshot, 6);
+    expect(runtime.state().status).toBe('ready');
+    snapshot = [pad(0, { axes: [-0.55, 0, 0, 0] })];
+    runtime.poll(snapshot, 7);
+    expect(activate).toHaveBeenCalledTimes(3);
+    expect(activate.mock.calls.at(-1)[1].value).toBeCloseTo(-0.5, 10);
+    dispose();
+  });
+
+  it('pagehide plus repeated disposer teardown emits one neutral and removes every listener', () => {
+    let snapshot = [pad(0)];
+    const activate = vi.fn();
+    const cancelAnimationFrame = vi.fn();
+    const doc = eventTarget({ hidden: false, visibilityState: 'visible' });
+    const win = eventTarget({ document: doc });
+    const runtime = createGamepadInputRuntime({
+      getGamepads: () => snapshot,
+      getContext: () => 'helm',
+      getActions: () => [CONTINUOUS_ACTION],
+      activate,
+      requestAnimationFrame: vi.fn(() => 11),
+      cancelAnimationFrame,
+    });
+    runtime.select(0);
+    const dispose = runtime.start(win);
+    expect(runtime.start(win)).toBe(dispose);
+    expect(win.listenerCount('gamepadconnected')).toBe(1);
+    expect(win.listenerCount('gamepaddisconnected')).toBe(1);
+    expect(win.listenerCount('pagehide')).toBe(1);
+    expect(doc.listenerCount('visibilitychange')).toBe(1);
+
+    snapshot = [pad(0, { axes: [0.6, 0, 0, 0] })];
+    runtime.poll(snapshot, 1);
+    win.emit('pagehide');
+    dispose();
+    dispose();
+    win.emit('pagehide');
+    expect(activate).toHaveBeenCalledTimes(2);
+    expect(activate.mock.calls.at(-1)[1]).toMatchObject({ value: 0, neutral: true });
+    expect(cancelAnimationFrame).toHaveBeenCalledTimes(1);
+    expect(win.listenerCount('gamepadconnected')).toBe(0);
+    expect(win.listenerCount('gamepaddisconnected')).toBe(0);
+    expect(win.listenerCount('pagehide')).toBe(0);
+    expect(doc.listenerCount('visibilitychange')).toBe(0);
+  });
+
+  it('stop emits one live neutral but no neutral after transport is unavailable', () => {
+    for (const transportLiveAtStop of [true, false]) {
+      let snapshot = [pad(0)];
+      let transportLive = true;
+      const activate = vi.fn();
+      const doc = eventTarget({ hidden: false, visibilityState: 'visible' });
+      const win = eventTarget({ document: doc });
+      const runtime = createGamepadInputRuntime({
+        getGamepads: () => snapshot,
+        getContext: () => 'helm',
+        getActions: () => [CONTINUOUS_ACTION],
+        activate,
+        isTransportLive: () => transportLive,
+        requestAnimationFrame: vi.fn(() => 13),
+        cancelAnimationFrame: vi.fn(),
+      });
+      runtime.select(0);
+      const dispose = runtime.start(win);
+      snapshot = [pad(0, { axes: [0.6, 0, 0, 0] })];
+      runtime.poll(snapshot, 1);
+      transportLive = transportLiveAtStop;
+      dispose();
+      dispose();
+      expect(activate).toHaveBeenCalledTimes(transportLiveAtStop ? 2 : 1);
+      if (transportLiveAtStop) {
+        expect(activate.mock.calls.at(-1)[1]).toMatchObject({ value: 0, neutral: true });
+      }
+    }
   });
 });

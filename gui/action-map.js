@@ -19,6 +19,7 @@
 import { dispatchRepairTeam, setRepairPriority, setRepairTargetPriority } from './repair-dispatch.js';
 import {
   sendHelmInput,
+  sendSteering,
   startImpulseCharge,
   cancelImpulse,
   toggleBoost,
@@ -311,6 +312,12 @@ export const ACTION_MAP = Object.freeze({
    *  maps to the steering axis. */
   set_helm: (a, send) => {
     sendHelmInput(a.thrust, a.yaw, send);
+  },
+
+  /** Continuous semantic steering uses only the existing narrow axis route. */
+  set_helm_steering: (a, send) => {
+    if (!Number.isFinite(a.value)) return;
+    sendSteering(a.value, send);
   },
 
   /** Begin charging the impulse drive. Targets 'helm-impulse' (issue #801). */

@@ -24,9 +24,11 @@ export const STANDARD_GAMEPAD_CONTROLS = Object.freeze({
   'dpad-right': Object.freeze({ input: 'dpad', index: 15,
     labelId: 'input.gamepad.dpad_right' }),
   'left-stick-x': Object.freeze({ input: 'axis', index: 0,
+    labelId: 'input.gamepad.left_stick_x',
     negativeLabelId: 'input.gamepad.left_stick_left',
     positiveLabelId: 'input.gamepad.left_stick_right' }),
   'left-stick-y': Object.freeze({ input: 'axis', index: 1,
+    labelId: 'input.gamepad.left_stick_y',
     negativeLabelId: 'input.gamepad.left_stick_up',
     positiveLabelId: 'input.gamepad.left_stick_down' }),
 });
@@ -34,7 +36,7 @@ export const STANDARD_GAMEPAD_CONTROLS = Object.freeze({
 const CONTROL_ENTRIES = Object.entries(STANDARD_GAMEPAD_CONTROLS);
 
 /** Normalize a portable standard-gamepad binding, or `null`. */
-export function normalizeGamepadBinding(value) {
+export function normalizeGamepadBinding(value, options = {}) {
   if (value == null || value === '') return null;
   if (typeof value !== 'object' || value.type !== 'gamepad') {
     throw new TypeError('semantic gamepad binding requires type gamepad');
@@ -46,6 +48,9 @@ export function normalizeGamepadBinding(value) {
   if (input !== mapped.input) throw new TypeError('semantic gamepad binding input does not match control');
   if (mapped.input !== 'axis') {
     return Object.freeze({ type: 'gamepad', input: mapped.input, control });
+  }
+  if (options.continuous === true) {
+    return Object.freeze({ type: 'gamepad', input: 'axis', control });
   }
   const direction = value.direction === 'negative' ? 'negative'
     : value.direction === 'positive' ? 'positive' : '';
@@ -62,8 +67,14 @@ export function normalizeGamepadBinding(value) {
 export function gamepadBindingsEqual(left, right) {
   if (!left || !right || left.type !== 'gamepad' || right.type !== 'gamepad') return false;
   try {
-    const a = normalizeGamepadBinding(left);
-    const b = normalizeGamepadBinding(right);
+    const a = normalizeGamepadBinding(left, {
+      continuous: left.input === 'axis' && left.direction == null,
+    });
+    const b = normalizeGamepadBinding(right, {
+      continuous: right.input === 'axis' && right.direction == null,
+    });
+    if (a.input === 'axis' && b.input === 'axis' && a.control === b.control
+        && (a.direction == null || b.direction == null)) return true;
     return a.input === b.input && a.control === b.control
       && a.direction === b.direction && a.threshold === b.threshold;
   } catch (_) {
@@ -73,11 +84,13 @@ export function gamepadBindingsEqual(left, right) {
 
 /** Localisable presentation tokens for the generic binding formatter. */
 export function gamepadBindingDisplay(value) {
-  const binding = normalizeGamepadBinding(value);
+  const binding = normalizeGamepadBinding(value, {
+    continuous: value && value.input === 'axis' && value.direction == null,
+  });
   if (!binding) return { labelId: null, values: {} };
   const mapped = STANDARD_GAMEPAD_CONTROLS[binding.control];
   if (binding.input !== 'axis') return { labelId: mapped.labelId, values: {} };
-  return {
+  return binding.direction == null ? { labelId: mapped.labelId, values: {} } : {
     labelId: binding.direction === 'negative'
       ? mapped.negativeLabelId : mapped.positiveLabelId,
     values: { threshold: String(binding.threshold) },
@@ -111,16 +124,23 @@ export function enumerateGamepads(snapshot) {
     .sort((a, b) => a.index - b.index);
 }
 
-function firstCaptureBinding(gamepad) {
+function firstCaptureBinding(gamepad, options = {}) {
   if (!gamepad || gamepad.mapping !== 'standard') return null;
-  for (const [control, mapped] of CONTROL_ENTRIES) {
-    if (mapped.input !== 'axis' && pressedButton((gamepad.buttons || [])[mapped.index])) {
-      return normalizeGamepadBinding({ type: 'gamepad', input: mapped.input, control });
+  if (options.continuous !== true) {
+    for (const [control, mapped] of CONTROL_ENTRIES) {
+      if (mapped.input !== 'axis' && pressedButton((gamepad.buttons || [])[mapped.index])) {
+        return normalizeGamepadBinding({ type: 'gamepad', input: mapped.input, control });
+      }
     }
   }
   for (const [control, mapped] of CONTROL_ENTRIES) {
     if (mapped.input !== 'axis') continue;
     const value = Number((gamepad.axes || [])[mapped.index]) || 0;
+    if (options.continuous === true && Math.abs(value) >= GAMEPAD_AXIS_CAPTURE_THRESHOLD) {
+      return normalizeGamepadBinding({
+        type: 'gamepad', input: 'axis', control,
+      }, { continuous: true });
+    }
     if (value <= -GAMEPAD_AXIS_CAPTURE_THRESHOLD) {
       return normalizeGamepadBinding({
         type: 'gamepad', input: 'axis', control, direction: 'negative',
@@ -137,13 +157,38 @@ function firstCaptureBinding(gamepad) {
   return null;
 }
 
-function isNeutral(gamepad) {
-  return firstCaptureBinding(gamepad) === null;
+function bindingKey(binding) {
+  const normalized = normalizeGamepadBinding(binding, {
+    continuous: binding && binding.input === 'axis' && binding.direction == null,
+  });
+  return normalized ? JSON.stringify(normalized) : '';
 }
 
-function bindingKey(binding) {
-  const normalized = normalizeGamepadBinding(binding);
-  return normalized ? JSON.stringify(normalized) : '';
+/** Smoothly rescale one raw axis around a configurable centre deadzone. */
+export function normalizeContinuousAxis(rawValue, tuning = {}, continuous = {}) {
+  const raw = Math.max(-1, Math.min(1, Number(rawValue) || 0));
+  const deadzone = Number(tuning.deadzone);
+  const safeDeadzone = Number.isFinite(deadzone) && deadzone >= 0 && deadzone < 1
+    ? deadzone : 0;
+  const magnitude = Math.abs(raw);
+  let normalized = magnitude <= safeDeadzone
+    ? 0 : Math.sign(raw) * ((magnitude - safeDeadzone) / (1 - safeDeadzone));
+  if (tuning.inverted === true) normalized = -normalized;
+
+  const min = Number.isFinite(continuous.min) ? continuous.min : -1;
+  const max = Number.isFinite(continuous.max) ? continuous.max : 1;
+  const neutral = Number.isFinite(continuous.neutral) ? continuous.neutral : 0;
+  return normalized >= 0
+    ? neutral + normalized * (max - neutral)
+    : neutral + (-normalized) * (min - neutral);
+}
+
+function continuousDeflection(value, continuous) {
+  const neutral = continuous.neutral;
+  if (value === neutral) return 0;
+  return value > neutral
+    ? (value - neutral) / (continuous.max - neutral)
+    : (neutral - value) / (neutral - continuous.min);
 }
 
 /**
@@ -163,22 +208,30 @@ export function createGamepadInputRuntime(options = {}) {
   const onCapture = typeof options.onCapture === 'function' ? options.onCapture : () => {};
   const onStateChange = typeof options.onStateChange === 'function'
     ? options.onStateChange : () => {};
+  const isTransportLive = typeof options.isTransportLive === 'function'
+    ? options.isTransportLive : () => true;
   const frame = typeof options.requestAnimationFrame === 'function'
     ? options.requestAnimationFrame
     : (callback) => requestAnimationFrame(callback);
   const cancelFrame = typeof options.cancelAnimationFrame === 'function'
     ? options.cancelAnimationFrame
     : (handle) => cancelAnimationFrame(handle);
+  const now = typeof options.now === 'function'
+    ? options.now
+    : () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
   const connections = new Map();
   let devices = [];
   let selection = null;
   let captureTarget = null;
   let previousPressed = new Set();
+  const continuousOutputs = new Map();
   let neutralGate = false;
   let lastContext = null;
   let lastStateKey = '';
   let frameHandle = null;
+  let stopRuntime = null;
+  let visibilitySuspended = false;
   let latestSnapshot = [];
 
   function connection(index) {
@@ -211,6 +264,57 @@ export function createGamepadInputRuntime(options = {}) {
     return pad && Number(pad.index) === selection.index ? pad : null;
   }
 
+  function allActions() {
+    return Array.from(getActions() || []);
+  }
+
+  function actionsFor(context) {
+    return Array.from(getActions(context) || []).filter((action) => action
+      && Array.isArray(action.contexts) && action.contexts.includes(context));
+  }
+
+  function continuousAction(action) {
+    return action && action.continuous && Number.isFinite(action.continuous.neutral);
+  }
+
+  function dispatchContinuous(action, value, timestamp, immediate = false) {
+    const spec = action.continuous;
+    const previous = continuousOutputs.get(action.id);
+    const isNeutral = value === spec.neutral;
+    if (isNeutral && (!previous || previous.value === spec.neutral)) return false;
+    if (!isNeutral && previous && previous.value !== spec.neutral && !immediate
+        && timestamp - previous.lastSentAt < spec.cadenceMs) return false;
+    if (!isTransportLive()) {
+      if (isNeutral) continuousOutputs.delete(action.id);
+      return false;
+    }
+    activate(action.id, {
+      context: action.contexts[0], source: 'gamepad', value,
+      neutral: isNeutral,
+    });
+    continuousOutputs.set(action.id, {
+      value,
+      neutral: spec.neutral,
+      context: action.contexts[0],
+      lastSentAt: timestamp,
+    });
+    return true;
+  }
+
+  function flushContinuous(timestamp = now()) {
+    const transportLive = isTransportLive();
+    for (const [actionId, output] of continuousOutputs) {
+      if (output.value === output.neutral) continue;
+      if (transportLive) {
+        activate(actionId, {
+          context: output.context, source: 'gamepad', value: output.neutral,
+          neutral: true,
+        });
+      }
+    }
+    continuousOutputs.clear();
+  }
+
   function status() {
     if (!selection) return 'none';
     const pad = selectedPad();
@@ -237,7 +341,8 @@ export function createGamepadInputRuntime(options = {}) {
     onStateChange(next);
   }
 
-  function neutralize() {
+  function neutralize(timestamp = now()) {
+    flushContinuous(timestamp);
     previousPressed.clear();
     neutralGate = !!selection;
     notify();
@@ -245,6 +350,7 @@ export function createGamepadInputRuntime(options = {}) {
 
   function select(index) {
     if (index == null || index === '') {
+      flushContinuous();
       selection = null;
       captureTarget = null;
       previousPressed.clear();
@@ -281,6 +387,7 @@ export function createGamepadInputRuntime(options = {}) {
 
   function noteDisconnected(index) {
     const record = connection(Number(index));
+    if (selection && selection.index === Number(index)) flushContinuous();
     record.connected = false;
     previousPressed.clear();
     neutralGate = !!selection;
@@ -292,6 +399,7 @@ export function createGamepadInputRuntime(options = {}) {
     const record = connection(Number(gamepad.index));
     // A browser connection event is a new ephemeral connection even when a
     // missed poll never observed the old slot empty.
+    if (selection && selection.index === Number(gamepad.index)) flushContinuous();
     record.connected = true;
     record.generation += 1;
     previousPressed.clear();
@@ -299,40 +407,136 @@ export function createGamepadInputRuntime(options = {}) {
     notify();
   }
 
-  function poll(snapshot = getGamepads()) {
+  function continuousBindingsNeutral(gamepad) {
+    for (const action of allActions()) {
+      if (!continuousAction(action)) continue;
+      for (const binding of action.bindings || []) {
+        if (!binding || binding.type !== 'gamepad' || binding.input !== 'axis'
+            || binding.direction != null) continue;
+        const mapped = STANDARD_GAMEPAD_CONTROLS[binding.control];
+        if (!mapped || mapped.input !== 'axis') continue;
+        const value = normalizeContinuousAxis(
+          (gamepad.axes || [])[mapped.index], action.tuning, action.continuous,
+        );
+        if (value !== action.continuous.neutral) return false;
+      }
+    }
+    return true;
+  }
+
+  function discreteBindingsNeutral(gamepad) {
+    for (const action of allActions()) {
+      if (continuousAction(action)) continue;
+      for (const binding of action.bindings || []) {
+        if (binding && binding.type === 'gamepad'
+            && gamepadBindingPressed(binding, gamepad)) return false;
+      }
+    }
+    return true;
+  }
+
+  function allBoundInputsNeutral(gamepad) {
+    if (captureTarget) {
+      const targetAction = allActions().find((action) => action.id === captureTarget.actionId);
+      if (firstCaptureBinding(gamepad, {
+        continuous: !!continuousAction(targetAction),
+      }) !== null) return false;
+    }
+    return discreteBindingsNeutral(gamepad) && continuousBindingsNeutral(gamepad);
+  }
+
+  function sampleContinuous(action, gamepad) {
+    let selected = null;
+    for (let slot = 0; slot < (action.bindings || []).length; slot++) {
+      const binding = action.bindings[slot];
+      if (!binding || binding.type !== 'gamepad' || binding.input !== 'axis'
+          || binding.direction != null) continue;
+      const mapped = STANDARD_GAMEPAD_CONTROLS[binding.control];
+      if (!mapped || mapped.input !== 'axis') continue;
+      const value = normalizeContinuousAxis(
+        (gamepad.axes || [])[mapped.index], action.tuning, action.continuous,
+      );
+      const deflection = continuousDeflection(value, action.continuous);
+      if (!selected || deflection > selected.deflection) {
+        selected = { value, deflection, slot };
+      }
+    }
+    return selected ? selected.value : action.continuous.neutral;
+  }
+
+  function poll(snapshot = getGamepads(), timestamp = now()) {
     observe(snapshot);
     const context = getContext() || null;
     if (context !== lastContext) {
+      flushContinuous(timestamp);
       lastContext = context;
-      neutralize();
+      previousPressed.clear();
+      neutralGate = !!selection;
+      notify();
+    }
+    // A background page must not silently satisfy the neutral gate and resume
+    // output before the operator can see it. The visible transition re-arms
+    // the gate, so a displaced axis remains inert until it is deliberately
+    // returned to neutral in the foreground.
+    if (visibilitySuspended) {
+      previousPressed.clear();
+      notify();
+      return state();
     }
     const pad = selectedPad();
     if (!pad || pad.mapping !== 'standard') {
+      flushContinuous(timestamp);
       previousPressed.clear();
       notify();
       return state();
     }
     if (neutralGate) {
-      if (isNeutral(pad)) neutralGate = false;
+      if (allBoundInputsNeutral(pad)) neutralGate = false;
       previousPressed.clear();
       notify();
       return state();
     }
     if (captureTarget) {
-      const binding = firstCaptureBinding(pad);
+      const targetAction = allActions().find((action) => action.id === captureTarget.actionId);
+      const binding = firstCaptureBinding(pad, { continuous: !!continuousAction(targetAction) });
       if (binding) {
         const target = captureTarget;
         captureTarget = null;
-        neutralize();
+        neutralize(timestamp);
         onCapture(target, binding);
       }
       notify();
       return state();
     }
 
+    const contextActions = actionsFor(context);
+    const seenContinuous = new Set();
+    for (const action of contextActions) {
+      if (!continuousAction(action)) continue;
+      seenContinuous.add(action.id);
+      const value = sampleContinuous(action, pad);
+      const previous = continuousOutputs.get(action.id);
+      dispatchContinuous(
+        action,
+        value,
+        timestamp,
+        !previous || previous.value === action.continuous.neutral,
+      );
+    }
+    for (const [actionId, output] of continuousOutputs) {
+      if (seenContinuous.has(actionId)) continue;
+      if (output.value !== output.neutral && isTransportLive()) {
+        activate(actionId, {
+          context: output.context, source: 'gamepad', value: output.neutral,
+          neutral: true,
+        });
+      }
+      continuousOutputs.delete(actionId);
+    }
+
     const nextPressed = new Set();
-    for (const action of getActions(context) || []) {
-      if (!action || !Array.isArray(action.contexts) || !action.contexts.includes(context)) continue;
+    for (const action of contextActions) {
+      if (continuousAction(action)) continue;
       for (const binding of action.bindings || []) {
         if (!binding || binding.type !== 'gamepad' || !gamepadBindingPressed(binding, pad)) continue;
         const key = bindingKey(binding);
@@ -348,27 +552,57 @@ export function createGamepadInputRuntime(options = {}) {
   }
 
   function start(win = typeof window !== 'undefined' ? window : null) {
-    if (frameHandle !== null) return;
+    if (stopRuntime) return stopRuntime;
     const connected = (event) => noteConnected(event && event.gamepad);
     const disconnected = (event) => noteDisconnected(event && event.gamepad && event.gamepad.index);
+    const documentHidden = () => {
+      const doc = win && win.document;
+      return !!(doc && (doc.hidden === true || doc.visibilityState === 'hidden'));
+    };
+    const visibilityChanged = () => {
+      const hidden = documentHidden();
+      if (hidden === visibilitySuspended) return;
+      visibilitySuspended = hidden;
+      neutralize();
+    };
+    const pageHidden = () => {
+      visibilitySuspended = true;
+      neutralize();
+    };
     if (win && win.addEventListener) {
       win.addEventListener('gamepadconnected', connected);
       win.addEventListener('gamepaddisconnected', disconnected);
+      win.addEventListener('pagehide', pageHidden);
     }
-    const tick = () => {
-      poll();
+    if (win && win.document && win.document.addEventListener) {
+      win.document.addEventListener('visibilitychange', visibilityChanged);
+    }
+    visibilitySuspended = documentHidden();
+    if (visibilitySuspended) neutralize();
+    const tick = (timestamp) => {
+      poll(undefined, timestamp);
       frameHandle = frame(tick);
     };
     poll();
     frameHandle = frame(tick);
-    return () => {
+    let stopped = false;
+    stopRuntime = () => {
+      if (stopped) return;
+      stopped = true;
+      neutralize();
       if (frameHandle !== null) cancelFrame(frameHandle);
       frameHandle = null;
       if (win && win.removeEventListener) {
         win.removeEventListener('gamepadconnected', connected);
         win.removeEventListener('gamepaddisconnected', disconnected);
+        win.removeEventListener('pagehide', pageHidden);
       }
+      if (win && win.document && win.document.removeEventListener) {
+        win.document.removeEventListener('visibilitychange', visibilityChanged);
+      }
+      stopRuntime = null;
     };
+    return stopRuntime;
   }
 
   return {

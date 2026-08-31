@@ -12,6 +12,10 @@
 //!   [`BootProfile::NativeHost`](crate::boot::BootProfile::NativeHost), and the
 //!   simulation is [`crate::server_app::add_simulation_plugins_with`] in its
 //!   unchanged registration order.
+//! * [`world_load`] — issue #1326's runtime half: a host given no world boots
+//!   into an empty lobby and takes one from an arbitrated `SelectScenario` +
+//!   `SelectPlayerShip` pair, through the same [`crate::boot::ingest_world`] a
+//!   `--world` boot runs.
 //! * [`transport`] — the seam a transport plugs into: two systems over the
 //!   three `lobby::server` messages, plus the reserved-token gate the browser
 //!   applies at its own ingress.
@@ -27,8 +31,9 @@
 //! * `phoenix-host` (`src/bin/phoenix_host.rs`) — the process. Issue #1121
 //!   **evolves** that binary rather than adding a parallel one, so PRD #855's
 //!   bundle serving, catalogue restriction and startup version pin are shared
-//!   rather than duplicated: `--world` turns the delivery host into an
-//!   authoritative one, and every existing flag keeps its exact meaning.
+//!   rather than duplicated: `--world` (or, since #1326, `--lobby`) turns the
+//!   delivery host into an authoritative one, and every existing flag keeps its
+//!   exact meaning.
 //!
 //! # Content roots
 //!

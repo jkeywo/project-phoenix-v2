@@ -256,10 +256,10 @@ pub enum WorldIngest {
     /// whole ingestion — reset, read, validate, compile, apply, freeze, insert —
     /// to a later runtime load through [`ingest_world`] on the running `World`.
     ///
-    /// The native host boots this way when it is given no `--world`: it opens
-    /// its window on an empty `GamePhase::Lobby`, publishes the scenario
-    /// catalogue, and ingests a world only once a `SelectScenario` +
-    /// `SelectPlayerShip` pair has been arbitrated.
+    /// The native host boots this way under `--lobby`: it opens its window on an
+    /// empty `GamePhase::Lobby`, publishes the scenario catalogue, and ingests a
+    /// world only once a `SelectScenario` + `SelectPlayerShip` pair has been
+    /// arbitrated.
     ///
     /// Boot runs step 1 of [`ingest_world`]'s order and nothing else. It must
     /// NOT freeze: freezing is what seals the content digest for the world that
@@ -819,6 +819,7 @@ fn register_render_contract(app: &mut App) {
 ///    as resources for `WorldPlugin`'s `Startup` to consume; a broken-but-not-
 ///    aborted browser root carries its findings through so the downstream gate
 ///    blocks activation. Static-child compiled sets do not cross this boundary.
+///
 /// # Called twice, deliberately
 ///
 /// [`build`] calls this on the `World` of the `App` it is composing. The native

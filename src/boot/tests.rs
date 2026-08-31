@@ -364,3 +364,42 @@ fn host_preloaded_ingest_neither_reads_the_reader_nor_inserts_the_world() {
     );
     crate::content_ledger::reset();
 }
+
+#[test]
+fn deferred_ingest_reads_nothing_inserts_nothing_and_does_not_freeze(/* issue #1326 */) {
+    use crate::world::config::WorldConfig;
+
+    // The native host's world-less boot. Like `HostPreloaded` it must not read
+    // the reader or insert either resource — but unlike it, it must ALSO leave
+    // the content ledger unfrozen: freezing is what seals the content digest for
+    // the world being loaded, and there is no world yet. The runtime load
+    // (`native_host::world_load`) calls this same `ingest_world` again under
+    // `FromReader`, which resets and freezes in the documented order.
+    crate::content_ledger::reset();
+    let plan = BootPlan {
+        profile: BootProfile::NativeHost,
+        world_ingest: WorldIngest::Deferred,
+        log_filter: "warn".to_string(),
+        world_path: String::new(),
+        reader: Box::new(MemoryReader::new(std::iter::empty::<(String, String)>())),
+        script_resolver: Box::new(NoScriptResolver),
+        single_threaded: false,
+        raw_transform: None,
+        native_surface: NativeRenderSurface::Contract,
+    };
+    let app = build(plan).expect("Deferred must build with no world at all");
+    assert!(
+        !app.world().contains_resource::<WorldConfig>(),
+        "Deferred must not insert a WorldConfig — there is no world to insert"
+    );
+    assert!(
+        !app.world().contains_resource::<PreCompiledScripts>(),
+        "Deferred must not insert PreCompiledScripts"
+    );
+    assert!(
+        !crate::content_ledger::is_frozen(),
+        "Deferred must not freeze an empty content ledger — the runtime load \
+         owns the reset/apply/freeze sequence for the world it actually ingests"
+    );
+    crate::content_ledger::reset();
+}

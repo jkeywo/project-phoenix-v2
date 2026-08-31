@@ -216,8 +216,8 @@ impl NativeHostConfig {
     /// empty [`GamePhase::Lobby`] offering `catalog`, with no world ingested
     /// until a scenario and hull are selected at runtime.
     ///
-    /// What `phoenix-host --client-dir dist` builds when it is given no
-    /// `--world`, and the shape the runtime-load tests start from.
+    /// What `phoenix-host --lobby` builds, and the shape the runtime-load tests
+    /// start from.
     pub fn lobby(catalog: crate::world::manifest::ScenarioCatalog) -> Self {
         Self {
             world_path: None,

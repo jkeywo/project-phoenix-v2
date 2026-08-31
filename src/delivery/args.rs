@@ -154,6 +154,9 @@ SIMULATION
                           waits in the lobby for participants to ready up,
                           which needs --rendezvous below — a host with neither
                           waits for a crew that has no way in, and says so.
+                          With --lobby it starts on the tick the chosen world
+                          lands, not at boot: there is nothing to fly until
+                          someone has picked something.
     --log <SPEC>          Log filter, e.g. info,ai=debug,admit=trace
     --log-entity <NAMES>  Restrict logging to these entity names
 

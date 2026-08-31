@@ -256,6 +256,31 @@ fn the_chosen_hulls_own_configuration_reaches_the_client_config_not_the_default(
          tell a re-read config from a stale one — pick another hull"
     );
 
+    // The same claim on the viewscreen's own presentation: the four radar
+    // widgets `Startup` spawned against the world-less lobby's fallback hull
+    // were taken down and re-spawned against the chosen one, so there are still
+    // exactly four of them and their ranges are this hull's.
+    let widgets: Vec<f32> = app
+        .world_mut()
+        .query::<(
+            &project_phoenix::gui::ConsoleRadar,
+            &project_phoenix::gui::GenericRadarWidget,
+        )>()
+        .iter(app.world())
+        .map(|(_, radar)| radar.range)
+        .collect();
+    assert_eq!(
+        widgets.len(),
+        4,
+        "the runtime load re-seats the viewscreen radar widgets rather than \
+         stacking a second set on top of them"
+    );
+    assert!(
+        widgets.contains(&authored),
+        "the helm widget carries the chosen hull's authored range ({authored}), \
+         not the fallback cruiser's: {widgets:?}"
+    );
+
     // The station roster is the chosen hull's, not the disk fallback's.
     let stations = app
         .world()

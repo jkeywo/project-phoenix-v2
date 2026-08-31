@@ -400,7 +400,7 @@ fn main() {
                         match lobby.publish(&html, &server.hosted_documents()) {
                             Ok(()) => {
                                 eprintln!(
-                                    "phoenix-host: the crew lobby is on the viewscreen                                      (press F9 in play to show or hide it)"
+                                    "phoenix-host: the crew lobby is on the viewscreen (press F9 in play to show or hide it)"
                                 );
                                 host_lobby = Some(lobby);
                             }
@@ -417,7 +417,7 @@ fn main() {
                 }
             }
             ClientSource::Hosted => eprintln!(
-                "phoenix-host: no lobby on the viewscreen — it is built from the host page                  this process serves, and there is no --client-dir"
+                "phoenix-host: no lobby on the viewscreen — it is built from the host page this process serves, and there is no --client-dir"
             ),
         }
     }

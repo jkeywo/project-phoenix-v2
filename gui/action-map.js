@@ -25,6 +25,12 @@ import {
   setBoost,
 } from './helm-dispatch.js';
 
+function controlSystemId(action, fallback) {
+  return typeof action?.control_system_id === 'string' && action.control_system_id
+    ? action.control_system_id
+    : fallback;
+}
+
 export const ACTION_MAP = Object.freeze({
   /** Fire a specific phaser bank (issue #846: via ControlSystem envelope). */
   fire_phaser: (a, send) => {
@@ -38,17 +44,21 @@ export const ACTION_MAP = Object.freeze({
   },
 
   /** Engage the tractor beam against the ship's current lock (issue #1156). */
-  engage_tractor: (_a, send) => {
-    send('ControlSystem', {
-      target: 'tractor',
+  engage_tractor: (a, send) => {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
+      target: controlSystemId(a, 'tractor'),
       payload: { type: 'EngageTractor' },
     });
   },
 
   /** Release the tractor beam, dropping any coupling (issue #1156). */
-  release_tractor: (_a, send) => {
-    send('ControlSystem', {
-      target: 'tractor',
+  release_tractor: (a, send) => {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
+      target: controlSystemId(a, 'tractor'),
       payload: { type: 'ReleaseTractor' },
     });
   },
@@ -75,20 +85,24 @@ export const ACTION_MAP = Object.freeze({
 
   /**
    * Dispatch a repair team to the ship's designated target — a nearby ally or
-   * structure (issue #1161). Targets the `repair` system; the team crosses to
-   * whatever the ship currently has locked, read server-side.
+   * structure (issue #1161). Targets the exact Repair owner carried by the
+   * projection; the team crosses to the server-side current lock.
    */
-  dispatch_external_repair: (_a, send) => {
-    send('ControlSystem', {
-      target: 'repair',
+  dispatch_external_repair: (a, send) => {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
+      target: controlSystemId(a, 'repair'),
       payload: { type: 'DispatchExternalRepair' },
     });
   },
 
   /** Recall a dispatched repair team to the hull's own sweep (issue #1161). */
-  recall_external_repair: (_a, send) => {
-    send('ControlSystem', {
-      target: 'repair',
+  recall_external_repair: (a, send) => {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
+      target: controlSystemId(a, 'repair'),
       payload: { type: 'RecallExternalRepair' },
     });
   },
@@ -96,17 +110,21 @@ export const ACTION_MAP = Object.freeze({
   /** Start the transfer umbilical's flow (issue #1160). The server resolves the
    * two ledgers from the hull's own `[umbilical]` terms and its docked partner;
    * the command carries no argument. */
-  start_transfer: (_a, send) => {
-    send('ControlSystem', {
-      target: 'umbilical',
+  start_transfer: (a, send) => {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
+      target: controlSystemId(a, 'umbilical'),
       payload: { type: 'StartTransfer' },
     });
   },
 
   /** Stop the transfer umbilical's flow (issue #1160). What has moved has moved. */
-  stop_transfer: (_a, send) => {
-    send('ControlSystem', {
-      target: 'umbilical',
+  stop_transfer: (a, send) => {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
+      target: controlSystemId(a, 'umbilical'),
       payload: { type: 'StopTransfer' },
     });
   },
@@ -389,7 +407,11 @@ export const ACTION_MAP = Object.freeze({
    * `RepairTarget::Core` and is sent as `{ type: 'Core' }`.
    */
   dispatch_repair_team: (a, send) => {
-    dispatchRepairTeam(a.team_idx, a.target, send);
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    const route = correlated
+      ? (_type, data) => send('ControlSystemCorrelated', { correlation: a.correlation, ...data })
+      : send;
+    dispatchRepairTeam(a.team_idx, a.target, route, controlSystemId(a, 'repair'));
   },
 
   /**
@@ -405,7 +427,7 @@ export const ACTION_MAP = Object.freeze({
    */
   set_repair_priority: (a, send) => {
     if (a.team_idx != null && a.priority != null) {
-      setRepairPriority(a.team_idx, a.priority, send);
+      setRepairPriority(a.team_idx, a.priority, send, controlSystemId(a, 'repair'));
     }
   },
 
@@ -421,7 +443,11 @@ export const ACTION_MAP = Object.freeze({
    */
   set_repair_target_priority: (a, send) => {
     if (a.system_id) {
-      setRepairTargetPriority(a.system_id, send);
+      const correlated = typeof a.correlation === 'string' && a.correlation;
+      const route = correlated
+        ? (_type, data) => send('ControlSystemCorrelated', { correlation: a.correlation, ...data })
+        : send;
+      setRepairTargetPriority(a.system_id, route, controlSystemId(a, 'repair'));
     }
   },
 
@@ -434,16 +460,16 @@ export const ACTION_MAP = Object.freeze({
    *
    * `{ action: "set_power", console: "Power", target: "helm", level: 3 }`
    *
-   * Wire target is `'power-reactor'` (issue #513): the reactor fine system
-   * owns the allocation surface, and `handle_power_messages` reads only
-   * `AdmittedCommands.for_target("power-reactor")`. Do NOT change back to
-   * `'power'` — the coarse system id is retained only for the aggregate
-   * blackboard, not for control input.
+   * Wire target is the exact authored reactor SystemId carried by the current
+   * projection (issue #513). The canonical literal remains only as a legacy
+   * direct-action fallback; the coarse `power` id is never control input.
    */
   set_power: (a, send) => {
     if (a.target && typeof a.level === 'number') {
-      send('ControlSystem', {
-        target: 'power-reactor',
+      const correlated = typeof a.correlation === 'string' && a.correlation;
+      send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+        ...(correlated ? { correlation: a.correlation } : {}),
+        target: controlSystemId(a, 'power-reactor'),
         payload: { type: 'SetPowerGroupAllocation', data: { group: a.target, level: a.level } },
       });
     }

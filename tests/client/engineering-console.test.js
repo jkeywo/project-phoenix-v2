@@ -83,7 +83,10 @@ describe('cruiser engineering renderStation', () => {
     expect(el('battery-bar').state).toEqual({ level_pct: 40, charging: true, emergency_threshold_pct: 20 });
     expect(el('hull-integrity').state).toEqual({ total_pct: 0.75, destroyed_pct: 0.1 });
     expect(el('core-damage').state).toEqual({ entries: [{ id: 'core-1' }] });
-    expect(el('repair-teams').state).toEqual({ teams: [{ id: 't1' }], auto: true, targets: [{ id: 'dt1' }], damaged: [{ id: 'ds1' }] });
+    expect(el('repair-teams').state).toEqual({
+      teams: [{ id: 't1' }], auto: true, targets: [{ id: 'dt1' }],
+      damaged: [{ id: 'ds1' }], externally_committed_teams: 0,
+    });
     expect(el('station-damage').state).toEqual({ pct: 0.9 });
   });
 

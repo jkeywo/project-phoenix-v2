@@ -258,6 +258,7 @@ export function createGamepadInputRuntime(options = {}) {
   const continuousOutputs = new Map();
   let neutralGate = false;
   let lastContext = null;
+  let lastActionCatalogueSignature = null;
   let lastStateKey = '';
   let frameHandle = null;
   let stopRuntime = null;
@@ -294,13 +295,29 @@ export function createGamepadInputRuntime(options = {}) {
     return pad && Number(pad.index) === selection.index ? pad : null;
   }
 
-  function allActions() {
-    return Array.from(getActions() || []);
+  function readActions(context) {
+    const actions = getActions(context);
+    return actions == null ? null : Array.from(actions);
   }
 
-  function actionsFor(context) {
-    return Array.from(getActions(context) || []).filter((action) => action
+  function actionsFor(context, actions) {
+    return Array.from(actions || []).filter((action) => action
       && Array.isArray(action.contexts) && action.contexts.includes(context));
+  }
+
+  // The identity and live gamepad shape are enough to decide whether a newly
+  // loaded/remapped catalogue can make a held input actionable. Functions and
+  // presentation strings are deliberately excluded so harmless render changes
+  // cannot re-arm ownership.
+  function catalogueSignatureFor(actions) {
+    if (actions == null) return null;
+    return JSON.stringify(actions.map((action) => [
+      action && action.id,
+      action && action.contexts,
+      action && action.bindings,
+      action && action.continuous,
+      action && action.tuning,
+    ]));
   }
 
   function continuousAction(action) {
@@ -460,8 +477,8 @@ export function createGamepadInputRuntime(options = {}) {
     notify();
   }
 
-  function continuousBindingsNeutral(gamepad) {
-    for (const action of allActions()) {
+  function continuousBindingsNeutral(gamepad, actions) {
+    for (const action of actions || []) {
       if (!continuousAction(action)) continue;
       for (const binding of action.bindings || []) {
         if (!binding || binding.type !== 'gamepad' || binding.input !== 'axis'
@@ -477,8 +494,8 @@ export function createGamepadInputRuntime(options = {}) {
     return true;
   }
 
-  function discreteBindingsNeutral(gamepad) {
-    for (const action of allActions()) {
+  function discreteBindingsNeutral(gamepad, actions) {
+    for (const action of actions || []) {
       if (continuousAction(action)) continue;
       for (const binding of action.bindings || []) {
         if (binding && binding.type === 'gamepad'
@@ -488,14 +505,16 @@ export function createGamepadInputRuntime(options = {}) {
     return true;
   }
 
-  function allBoundInputsNeutral(gamepad) {
+  function allBoundInputsNeutral(gamepad, actions) {
     if (captureTarget) {
-      const targetAction = allActions().find((action) => action.id === captureTarget.actionId);
+      const targetAction = (actions || [])
+        .find((action) => action.id === captureTarget.actionId);
       if (firstCaptureBinding(gamepad, {
         continuous: !!continuousAction(targetAction),
       }) !== null) return false;
     }
-    return discreteBindingsNeutral(gamepad) && continuousBindingsNeutral(gamepad);
+    return discreteBindingsNeutral(gamepad, actions)
+      && continuousBindingsNeutral(gamepad, actions);
   }
 
   function sampleContinuous(action, gamepad) {
@@ -520,9 +539,22 @@ export function createGamepadInputRuntime(options = {}) {
   function poll(snapshot = getGamepads(), timestamp = now()) {
     observe(snapshot);
     const context = getContext() || null;
+    const actionCatalogue = readActions(context);
+    const actionCatalogueSignature = catalogueSignatureFor(actionCatalogue);
     if (context !== lastContext) {
       flushContinuous(timestamp);
       lastContext = context;
+      lastActionCatalogueSignature = actionCatalogueSignature;
+      previousPressed.clear();
+      neutralGate = !!selection;
+      notify();
+    } else if (actionCatalogueSignature !== lastActionCatalogueSignature) {
+      // An iframe finishing load (or a live remap) can introduce a binding that
+      // was already held while the previous catalogue was unavailable. Treat
+      // that as a new ownership boundary and require every newly visible input
+      // to return to neutral before it can dispatch.
+      flushContinuous(timestamp);
+      lastActionCatalogueSignature = actionCatalogueSignature;
       previousPressed.clear();
       neutralGate = !!selection;
       notify();
@@ -543,14 +575,24 @@ export function createGamepadInputRuntime(options = {}) {
       notify();
       return state();
     }
+    if (actionCatalogue == null) {
+      // Missing/not-yet-loaded iframe capability is not an empty, neutral
+      // surface. Keep ownership gated until the iframe can expose the bindings
+      // that must be sampled.
+      previousPressed.clear();
+      neutralGate = !!selection;
+      notify();
+      return state();
+    }
     if (neutralGate) {
-      if (allBoundInputsNeutral(pad)) neutralGate = false;
+      if (allBoundInputsNeutral(pad, actionCatalogue)) neutralGate = false;
       previousPressed.clear();
       notify();
       return state();
     }
     if (captureTarget) {
-      const targetAction = allActions().find((action) => action.id === captureTarget.actionId);
+      const targetAction = actionCatalogue
+        .find((action) => action.id === captureTarget.actionId);
       const binding = firstCaptureBinding(pad, { continuous: !!continuousAction(targetAction) });
       if (binding) {
         const target = captureTarget;
@@ -562,7 +604,7 @@ export function createGamepadInputRuntime(options = {}) {
       return state();
     }
 
-    const contextActions = actionsFor(context);
+    const contextActions = actionsFor(context, actionCatalogue);
     const seenContinuous = new Set();
     for (const action of contextActions) {
       if (!continuousAction(action)) continue;

@@ -242,7 +242,10 @@ describe('courier captain renderStation', () => {
     expect(el('power').state).toEqual({ groups: [{ id: 'reactor' }], auto: true });
     expect(el('battery').state).toEqual({ level_pct: 40, charging: true, emergency_threshold_pct: 20 });
     expect(el('hull').state).toEqual({ total_pct: 0.7, destroyed_pct: 0.1 });
-    expect(el('repair').state).toEqual({ teams: [{ id: 't1' }], auto: false, targets: [{ id: 'x' }], damaged: [{ id: 'y' }] });
+    expect(el('repair').state).toEqual({
+      teams: [{ id: 't1' }], auto: false, targets: [{ id: 'x' }],
+      damaged: [{ id: 'y' }], externally_committed_teams: 0,
+    });
   });
 
   it('hides the threat-bearing readout when Sensors holds no threat', () => {

@@ -29,7 +29,8 @@
  *  - BroadcastChannel listener on 'phoenix-console-state', filtering by
  *    `name` — for same-origin separate-tab mode (ADR-0001 §3 target 4).
  *
- * @param {{ name: string, render: function(state: object): void }} opts
+ * @param {{ name: string, render: function(state: object): void,
+ *           actionFamilies?: string[], getActionContext?: function(): string }} opts
  *   name   — lowercase station id (e.g. 'repair', 'helm'). Pre-issue #618
  *            these were PascalCase Console enum variant names.
  *   render — Called with the parsed (and shape-normalised) state object on
@@ -87,6 +88,10 @@ import {
   NAVIGATION_ACTION_CONTEXT,
   registerNavigationActions,
 } from './stations/navigation-actions.js';
+import {
+  ENGINEERING_ACTION_REGISTRATION_CONTEXTS,
+  registerEngineeringActions,
+} from './stations/engineering-actions.js';
 // Console input-to-feedback latency (issue #1169, PRD #1144). `sendAction` is
 // the ONE place in a console document where a control's handler turns into an
 // outbound action, so it is the only honest place to stamp "the input event
@@ -99,17 +104,23 @@ import {
   normalizeActionFeedbackPreferences,
 } from './action-feedback.js';
 
-export function initConsole({ name, render, actionFamilies, navigationActions }) {
+export function initConsole({
+  name,
+  render,
+  actionFamilies = [],
+  getActionContext = null,
+  navigationActions,
+}) {
   // Resolve the global object: `window` in browsers, `globalThis` in Node/tests.
   // Evaluated at call-time so tests can set global.window before calling initConsole.
   var _root = (typeof window !== 'undefined') ? window : globalThis;
   var _actionContext = String(name || '').toLowerCase();
-  var _actionFamilies = new Set(
-    (Array.isArray(actionFamilies) && actionFamilies.length ? actionFamilies : [_actionContext])
-      .map(function(value) { return String(value || '').toLowerCase(); })
+  var _actionContexts = new Set([
+    _actionContext,
+    ...(Array.isArray(actionFamilies) ? actionFamilies : [])
+      .map((value) => String(value || '').toLowerCase())
       .filter(Boolean),
-  );
-  _actionFamilies.add(_actionContext);
+  ]);
   var _latestState = null;
   var _semanticActions = null;
   var _semanticFeedbackEl = null;
@@ -176,7 +187,7 @@ export function initConsole({ name, render, actionFamilies, navigationActions })
     onTransition: _presentActionFeedback,
   });
   _semanticActions = createSemanticActionRegistry({ actionFeedback: _actionFeedback });
-  if (_actionFamilies.has(CAPTAIN_ACTION_CONTEXT)) {
+  if (_actionContexts.has(CAPTAIN_ACTION_CONTEXT)) {
     registerCaptainActions(_semanticActions, {
       getState: function() { return _latestState; },
       getAvailableCameraViews: typeof render.availableCameraViews === 'function'
@@ -187,19 +198,19 @@ export function initConsole({ name, render, actionFamilies, navigationActions })
       sendAction: sendAction,
     });
   }
-  if (_actionFamilies.has(HELM_ACTION_CONTEXT)) {
+  if (_actionContexts.has(HELM_ACTION_CONTEXT)) {
     registerHelmActions(_semanticActions, {
       getState: function() { return _latestState; },
       sendAction: sendAction,
     });
   }
-  if (_actionFamilies.has(TACTICAL_ACTION_CONTEXT)) {
+  if (_actionContexts.has(TACTICAL_ACTION_CONTEXT)) {
     registerTacticalActions(_semanticActions, {
       getState: function() { return _latestState; },
       sendAction: sendAction,
     });
   }
-  if (_actionFamilies.has(COMMS_ACTION_CONTEXT)) {
+  if (_actionContexts.has(COMMS_ACTION_CONTEXT)) {
     registerCommsActions(_semanticActions, {
       getState: function() { return _latestState; },
       // Comms message selection is presentation-only, but it is still a real
@@ -215,13 +226,22 @@ export function initConsole({ name, render, actionFamilies, navigationActions })
       sendAction: sendAction,
     });
   }
-  if (SENSOR_SCIENCE_ACTION_CONTEXTS.includes(_actionContext)) {
+  if (SENSOR_SCIENCE_ACTION_CONTEXTS.some((context) => _actionContexts.has(context))) {
     registerSensorScienceActions(_semanticActions, {
       getState: function() { return _latestState; },
       sendAction: sendAction,
     });
   }
-  if (_actionFamilies.has(NAVIGATION_ACTION_CONTEXT)) {
+  // Composite Stations layer family adapters onto their primary Station
+  // actions. In particular the Courier Captain retains all Captain actions
+  // while gaining the Power/Repair controls mounted in the same document.
+  if (ENGINEERING_ACTION_REGISTRATION_CONTEXTS.some((context) => _actionContexts.has(context))) {
+    registerEngineeringActions(_semanticActions, {
+      getState: function() { return _latestState; },
+      sendAction: sendAction,
+    });
+  }
+  if (_actionContexts.has(NAVIGATION_ACTION_CONTEXT)) {
     registerNavigationActions(_semanticActions, {
       getState: function() { return _latestState; },
       getSurface: function() {
@@ -246,7 +266,7 @@ export function initConsole({ name, render, actionFamilies, navigationActions })
         // station context and can otherwise fire an invisible Navigation
         // control. Cruiser Comms still has an always-visible inline chart, so
         // that legitimate surface is selected by the `visible` arm above.
-        return visible || (_actionFamilies.size === 1 ? maps[0] : null);
+        return visible || (_actionContexts.size === 1 ? maps[0] : null);
       },
       supportsChart: navigationActions && navigationActions.supportsChart != null
         ? navigationActions.supportsChart === true
@@ -404,11 +424,35 @@ export function initConsole({ name, render, actionFamilies, navigationActions })
   // comment) made that repair pass unnecessary; see issue #1237.)
   _root.sendAction = sendAction;
 
+  function _resolvedActionContext(requested) {
+    const explicit = String(requested || '').toLowerCase();
+    if (explicit && _actionContexts.has(explicit)) return explicit;
+    const current = typeof getActionContext === 'function'
+      ? String(getActionContext() || '').toLowerCase()
+      : '';
+    return current && _actionContexts.has(current) ? current : _actionContext;
+  }
+
+  // Parent-visible composite context. The parent gamepad owner reads the
+  // currently open family here, but still routes the activation back to this
+  // same Station iframe through the capability predicate below.
+  _root.__semanticActionContext = function() {
+    return _resolvedActionContext();
+  };
+  _root.__supportsSemanticActionContext = function(context) {
+    return _actionContexts.has(String(context || '').toLowerCase());
+  };
+  _root.__supportsSemanticAction = function(actionId, context) {
+    const entry = _semanticActions.action(String(actionId || ''));
+    if (!entry) return false;
+    return entry.contexts.includes(_resolvedActionContext(context));
+  };
+
   // Semantic activation is a live document seam just like sendAction. Both a
   // visible component and the keyboard matcher call this same identity.
   _root.activateSemanticAction = function(actionId, options) {
     return _semanticActions.activate(actionId, Object.assign({}, options || {}, {
-      context: _actionContext,
+      context: _resolvedActionContext(options && options.context),
     }));
   };
 
@@ -431,7 +475,7 @@ export function initConsole({ name, render, actionFamilies, navigationActions })
   var _semanticKeyHandler = null;
   if (typeof document !== 'undefined' && document.addEventListener) {
     _semanticKeyHandler = function(event) {
-      _semanticActions.dispatchKeyboardEvent(event, _actionContext);
+      _semanticActions.dispatchKeyboardEvent(event, _resolvedActionContext());
     };
     document.addEventListener('keydown', _semanticKeyHandler);
   }

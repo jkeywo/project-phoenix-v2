@@ -32,8 +32,9 @@
 //! # Two gates, not one
 //!
 //! Filtering *rows* is only half of it. The `RepairBlackboard` also carries
-//! `queue_depth` (every damaged system's exact tier and HP deficit) and `teams`
-//! (each team's destination system). Those are Engineering's working state, and
+//! `queue_depth` (every damaged system's exact tier and HP deficit),
+//! `priority_targets` (exact SystemIds reachable by an on-site sweep), and
+//! `teams` (each team's destination system). Those are Engineering's working state, and
 //! fanning the blackboard out to every connected token made the row filter
 //! cosmetic wherever a system was damaged enough to be queued — which is
 //! precisely the case that matters. So there are two gates:
@@ -470,6 +471,7 @@ impl HullVisibility {
     /// | `aggregate_hull_fraction` | recomputed ship-wide | the one whole-ship figure everyone may have |
     /// | `destroyed_hull_fraction` | recomputed ship-wide | a second whole-ship scalar; a reduction over every system names none of them |
     /// | `damageable_systems` | whole | system ids only, no hull detail; Engineering dispatches to systems it cannot see |
+    /// | `priority_targets` | filtered by `can_see` | exact live sweep eligibility only for rows this viewer may see |
     /// | `teams` | whole | this viewer's *own* teams — where it already chose to send them, not a fact about the ship |
     /// | `travel_duration_secs` | whole | a ship constant from `[repair]` TOML |
     ///
@@ -487,6 +489,12 @@ impl HullVisibility {
             aggregate_hull_fraction: self.aggregate_fraction(),
             destroyed_hull_fraction: self.destroyed_fraction(),
             damageable_systems: bb.damageable_systems.clone(),
+            priority_targets: bb
+                .priority_targets
+                .iter()
+                .filter(|system_id| self.can_see(viewer, system_id))
+                .cloned()
+                .collect(),
             teams: bb.teams.clone(),
             travel_duration_secs: bb.travel_duration_secs,
             // External dispatch (issue #1161): whole-ship scalars/ids revealing
@@ -527,6 +535,7 @@ fn withheld_repair_blackboard(bb: &RepairBlackboard) -> RepairBlackboard {
         travel_duration_secs: bb.travel_duration_secs,
         system_hull: vec![],
         damageable_systems: vec![],
+        priority_targets: vec![],
         queue_depth: vec![],
         aggregate_hull_fraction: None,
         destroyed_hull_fraction: None,
@@ -1078,6 +1087,12 @@ mod tests {
                 SystemId("sensors".into()),
                 SystemId("repair".into()),
             ],
+            priority_targets: vec![
+                SystemId("core".into()),
+                SystemId("helm-radar".into()),
+                SystemId("sensors".into()),
+                SystemId("repair".into()),
+            ],
             queue_depth: vec![],
             aggregate_hull_fraction: None,
             destroyed_hull_fraction: None,
@@ -1086,6 +1101,14 @@ mod tests {
         let eng = StationId("engineering".into());
         let projected = v.project_repair_blackboard(Some(&eng), &bb);
         assert_eq!(ids(&projected.system_hull), vec!["core", "repair"]);
+        assert_eq!(
+            projected
+                .priority_targets
+                .iter()
+                .map(|system_id| system_id.0.as_str())
+                .collect::<Vec<_>>(),
+            vec!["core", "repair"]
+        );
         // Dispatch targets are ids only — no hull detail — so they stay whole.
         assert_eq!(projected.damageable_systems.len(), 4);
         assert!(projected.aggregate_hull_fraction.is_some());

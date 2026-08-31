@@ -1314,6 +1314,7 @@ describe('buildRepairConsoleState', () => {
         travel_duration_secs: 5.0,
         system_hull: systemHull,
         damageable_systems: ['core', 'helm-radar', 'repair'],
+        priority_targets: [],
         aggregate_hull_fraction: 0.5,
         ...extra,
       },
@@ -1457,6 +1458,19 @@ describe('buildRepairConsoleState', () => {
       { system_id: 'core', display_name: 'Core', current: 6, max_hp: 10, tier: 'Damaged' },
     ])));
     expect(s.damaged_systems.map(d => d.system_id)).toEqual(['core']);
+  });
+
+  it('damaged_systems echoes exact owner-projected priority eligibility', () => {
+    const s = parse(buildRepairConsoleState(projectedState(
+      [
+        { system_id: 'core', display_name: 'Core', current: 0, max_hp: 10, tier: 'Destroyed' },
+        { system_id: 'repair', display_name: 'Repair', current: 7, max_hp: 10, tier: 'Damaged' },
+      ],
+      { priority_targets: ['repair'] },
+    )));
+    const byId = Object.fromEntries(s.damaged_systems.map(d => [d.system_id, d]));
+    expect(byId.core.prioritisable).toBe(false);
+    expect(byId.repair.prioritisable).toBe(true);
   });
 
   it('damaged_systems echoes the host pin rather than deriving a highlight', () => {
@@ -1643,6 +1657,20 @@ describe('buildPowerConsoleState', () => {
     expect(s.battery_charge).toBe(25);
     // `draining` replaced `locked` when issue #952 retired the brownout lock.
     expect(s.draining).toBe(true);
+  });
+
+  it('carries the exact authored reactor SystemId for allocation commands', () => {
+    const s = parse(buildPowerConsoleState({
+      blackboards: {
+        'reactor-main': { is_online: true },
+        'battery-port': { is_online: true },
+      },
+      blackboardKinds: {
+        'reactor-main': 'PowerReactor',
+        'battery-port': 'PowerBattery',
+      },
+    }, ['reactor-main', 'battery-port']));
+    expect(s.system_id).toBe('reactor-main');
   });
 
   it('falls back to empty consoles when groups is missing', () => {

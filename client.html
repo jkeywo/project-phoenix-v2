@@ -102,6 +102,7 @@
        realm. Logical bindings are copied to console iframes, but only the
        action's owning iframe receives semantic activation. -->
   <script type="module" src="gui/gamepad-input.js"></script>
+  <script type="module" src="gui/composite-action-routing.js"></script>
   <!-- Parent-realm semantic action metadata + live private binding profile. The
        active console iframe owns its own registry instance and receives this
        profile through an explicit update seam. -->
@@ -3399,19 +3400,37 @@
       gamepadInputRuntime = (!operatorSurfaceCapabilities || operatorSurfaceCapabilities.gamepad)
         && typeof window.createGamepadInputRuntime === 'function'
         ? window.createGamepadInputRuntime({
-            getContext: () => activeConsole,
-            getActions: (context) => semanticActionRegistry
-              ? semanticActionRegistry.list(context)
-              : [],
+            getContext: () => window.CompositeActionRouting
+              ? window.CompositeActionRouting.semanticContextForIframe(
+                  activeConsoleIframe(), activeConsole,
+                )
+              : activeConsole,
+            getActions: (context) => {
+              const actions = semanticActionRegistry
+                ? semanticActionRegistry.list(context)
+                : [];
+              return window.CompositeActionRouting
+                ? window.CompositeActionRouting.semanticActionsForIframe(
+                    actions,
+                    activeConsoleIframe(),
+                    context,
+                  )
+                : actions;
+            },
             isTransportLive: () => !!(activeLink && activeLink.connected),
             activate: (actionId, options) => {
               // A safety neutral belongs to the context that emitted the last
               // nonzero value, even when the operator has already switched
               // tabs. Never redirect it into whichever iframe is active now.
               const context = options && options.context;
-              const iframe = context
-                ? $(consoleIframeId(context))
-                : activeConsoleIframe();
+              const activeIframe = activeConsoleIframe();
+              const iframe = context && window.CompositeActionRouting
+                ? window.CompositeActionRouting.iframeForSemanticContext(
+                    context,
+                    activeIframe,
+                    (value) => $(consoleIframeId(value)),
+                  )
+                : context ? $(consoleIframeId(context)) : activeIframe;
               try {
                 const activate = iframe && iframe.contentWindow
                   && iframe.contentWindow.activateSemanticAction;

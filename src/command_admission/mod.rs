@@ -128,6 +128,29 @@ fn supports_correlated_action_feedback(
             && matches!(payload, SystemControlPayload::CancelImpulse))
         || (is_shield_arc_target(&target.0)
             && matches!(payload, SystemControlPayload::SetShieldArcFocus { .. }))
+        || (target.0 == crate::ship::system_registry::POWER_REACTOR_SYSTEM_ID
+            && matches!(
+                payload,
+                SystemControlPayload::SetPowerGroupAllocation { .. }
+            ))
+        || (target.0 == crate::ship::system_registry::REPAIR_SYSTEM_ID
+            && matches!(
+                payload,
+                SystemControlPayload::DispatchRepairTeam { .. }
+                    | SystemControlPayload::SetRepairTargetPriority { .. }
+                    | SystemControlPayload::DispatchExternalRepair
+                    | SystemControlPayload::RecallExternalRepair
+            ))
+        || (target.0 == crate::ship::system_registry::TRACTOR_SYSTEM_ID
+            && matches!(
+                payload,
+                SystemControlPayload::EngageTractor | SystemControlPayload::ReleaseTractor
+            ))
+        || (target.0 == crate::ship::system_registry::UMBILICAL_SYSTEM_ID
+            && matches!(
+                payload,
+                SystemControlPayload::StartTransfer | SystemControlPayload::StopTransfer
+            ))
 }
 
 fn is_shield_arc_target(target: &str) -> bool {
@@ -616,6 +639,23 @@ fn write_action_feedback(
     });
 }
 
+/// Complete one admitted semantic action at the system that owns its gameplay
+/// result. Commands without a response token/correlation are ordinary AI or
+/// legacy traffic and deliberately produce no lifecycle message.
+pub(crate) fn finish_admitted_action_feedback(
+    outbound: &mut Option<ResMut<Messages<OutboundMessage>>>,
+    command: &crate::core::messages::AdmittedCommand,
+    outcome: ActionFeedbackOutcome,
+) {
+    let (Some(token), Some(correlation)) = (
+        command.response_token.as_deref(),
+        command.feedback_correlation.as_ref(),
+    ) else {
+        return;
+    };
+    write_action_feedback(outbound, token, correlation, outcome);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -823,6 +863,51 @@ station = "repair"
                 payload,
             ));
         }
+        for (target, payload) in [
+            (
+                crate::ship::system_registry::power_reactor_system_id(),
+                SystemControlPayload::SetPowerGroupAllocation {
+                    group: crate::core::messages::PowerGroupId("helm".into()),
+                    level: 2,
+                },
+            ),
+            (
+                crate::ship::system_registry::repair_system_id(),
+                dispatch(0),
+            ),
+            (
+                crate::ship::system_registry::repair_system_id(),
+                SystemControlPayload::SetRepairTargetPriority {
+                    system_id: SystemId("power-reactor".into()),
+                },
+            ),
+            (
+                crate::ship::system_registry::repair_system_id(),
+                SystemControlPayload::DispatchExternalRepair,
+            ),
+            (
+                crate::ship::system_registry::repair_system_id(),
+                SystemControlPayload::RecallExternalRepair,
+            ),
+            (
+                crate::ship::system_registry::tractor_system_id(),
+                SystemControlPayload::EngageTractor,
+            ),
+            (
+                crate::ship::system_registry::tractor_system_id(),
+                SystemControlPayload::ReleaseTractor,
+            ),
+            (
+                crate::ship::system_registry::umbilical_system_id(),
+                SystemControlPayload::StartTransfer,
+            ),
+            (
+                crate::ship::system_registry::umbilical_system_id(),
+                SystemControlPayload::StopTransfer,
+            ),
+        ] {
+            assert!(supports_correlated_action_feedback(&target, &payload));
+        }
 
         assert!(!supports_correlated_action_feedback(
             &crate::ship::system_registry::captain_system_id(),
@@ -842,7 +927,17 @@ station = "repair"
         ));
         assert!(!supports_correlated_action_feedback(
             &SystemId("repair".into()),
-            &dispatch(0),
+            &SystemControlPayload::SetRepairPriority {
+                team_idx: 0,
+                priority: 1,
+            },
+        ));
+        assert!(!supports_correlated_action_feedback(
+            &crate::ship::system_registry::repair_system_id(),
+            &SystemControlPayload::SetPowerGroupAllocation {
+                group: crate::core::messages::PowerGroupId("helm".into()),
+                level: 2,
+            },
         ));
         assert!(!supports_correlated_action_feedback(
             &crate::ship::system_registry::comms_system_id(),
@@ -945,7 +1040,10 @@ station = "repair"
             HOLDER,
             "unsupported-feedback",
             SystemId("repair".into()),
-            dispatch(0),
+            SystemControlPayload::SetPowerGroupAllocation {
+                group: crate::core::messages::PowerGroupId("shields".into()),
+                level: 1,
+            },
         );
         app.update();
 

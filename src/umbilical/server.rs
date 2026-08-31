@@ -140,6 +140,14 @@ pub struct UmbilicalSaveState {
     pub running: bool,
 }
 
+/// Transient correlation carried from the start intent to the same tick's
+/// authoritative flow verdict.
+#[derive(Message, Clone)]
+pub struct PendingUmbilicalActionFeedback {
+    entity: Entity,
+    command: crate::core::messages::AdmittedCommand,
+}
+
 /// Registers the umbilical systems and its admitted-command consumer (issue
 /// #1160). Added by `WorldPlugin` alongside `DockPlugin`.
 pub struct UmbilicalPlugin;
@@ -167,7 +175,8 @@ impl Plugin for UmbilicalPlugin {
         app.register_admitted_consumer(ConsumerMatcher::exact(
             crate::ship::system_registry::UMBILICAL_KIND,
             UMBILICAL_SYSTEM_ID,
-        ));
+        ))
+        .add_message::<PendingUmbilicalActionFeedback>();
         app.add_systems(
             FixedUpdate,
             (
@@ -188,6 +197,9 @@ impl Plugin for UmbilicalPlugin {
                     .in_set(crate::sim_sets::SimSet::Modifiers)
                     .after(crate::dock::server::tick_dock)
                     .before(crate::infrastructure::tick_infrastructure_condition),
+                finish_umbilical_action_feedback
+                    .in_set(crate::sim_sets::SimSet::Modifiers)
+                    .after(tick_umbilical),
                 publish_umbilical_blackboard.in_set(crate::sim_sets::SimSet::Publish),
             ),
         );
@@ -207,28 +219,69 @@ impl Plugin for UmbilicalPlugin {
 /// nothing here asks who sent the command (AGENTS.md rule 6).
 pub fn handle_umbilical_commands(
     mut ships: Query<(
+        Entity,
         &crate::core::messages::AdmittedCommands,
         &mut TransferUmbilical,
     )>,
+    mut pending: Option<ResMut<Messages<PendingUmbilicalActionFeedback>>>,
+    mut outbound: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
 ) {
-    for (admitted, mut umbilical) in ships.iter_mut() {
+    for (entity, admitted, mut umbilical) in ships.iter_mut() {
         for cmd in admitted.for_target(UMBILICAL_SYSTEM_ID) {
             match &cmd.payload {
-                SystemControlPayload::StartTransfer if !umbilical.running => {
-                    umbilical.running = true;
-                    // Clear a stale refusal on a fresh start; the tick will
-                    // repopulate it if this start cannot flow.
-                    umbilical.last_refusal = None;
-                    umbilical.carry = 0.0;
+                SystemControlPayload::StartTransfer => {
+                    if !umbilical.running {
+                        umbilical.running = true;
+                        // Clear a stale refusal on a fresh start; the tick will
+                        // repopulate it if this start cannot flow.
+                        umbilical.last_refusal = None;
+                        umbilical.carry = 0.0;
+                    }
+                    if cmd.response_token.is_some() && cmd.feedback_correlation.is_some() {
+                        if let Some(messages) = pending.as_deref_mut() {
+                            messages.write(PendingUmbilicalActionFeedback {
+                                entity,
+                                command: cmd.clone(),
+                            });
+                        }
+                    }
                 }
                 SystemControlPayload::StopTransfer => {
                     umbilical.running = false;
                     umbilical.last_refusal = None;
                     umbilical.carry = 0.0;
+                    crate::command_admission::finish_admitted_action_feedback(
+                        &mut outbound,
+                        cmd,
+                        crate::core::messages::ActionFeedbackOutcome::Applied,
+                    );
                 }
                 _ => {}
             }
         }
+    }
+}
+
+/// Complete start feedback only after the live dock, capacity, power and damage
+/// gates have resolved in `tick_umbilical`.
+fn finish_umbilical_action_feedback(
+    mut pending: MessageReader<PendingUmbilicalActionFeedback>,
+    umbilicals: Query<(&TransferUmbilical, &DockControl, &EntityUuid)>,
+    mut outbound: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
+) {
+    for action in pending.read() {
+        let applied = umbilicals
+            .get(action.entity)
+            .is_ok_and(|(umbilical, _, _)| umbilical.running);
+        crate::command_admission::finish_admitted_action_feedback(
+            &mut outbound,
+            &action.command,
+            if applied {
+                crate::core::messages::ActionFeedbackOutcome::Applied
+            } else {
+                crate::core::messages::ActionFeedbackOutcome::Refused
+            },
+        );
     }
 }
 
@@ -612,6 +665,36 @@ pub fn umbilical_blackboard_key() -> SystemId {
 mod tests {
     use super::*;
 
+    fn correlated_umbilical_command(
+        correlation: &str,
+        payload: SystemControlPayload,
+    ) -> crate::core::messages::AdmittedCommand {
+        crate::core::messages::AdmittedCommand {
+            target: umbilical_system_id(),
+            payload,
+            response_token: Some("engineering-holder".into()),
+            feedback_correlation: Some(
+                crate::core::messages::ActionCorrelationId::new(correlation)
+                    .expect("valid test correlation"),
+            ),
+        }
+    }
+
+    fn capacity(level: i64, ceiling: i64) -> InfrastructureCondition {
+        let config = crate::infrastructure::InfrastructureConfig {
+            capacities: vec![crate::infrastructure::CapacityConfig {
+                id: "reserve_fuel".into(),
+                amount: level,
+                label: None,
+                ceiling: Some(ceiling),
+            }],
+            ..Default::default()
+        };
+        InfrastructureCondition(crate::infrastructure::InfrastructureState::from_config(
+            &config,
+        ))
+    }
+
     fn umbilical() -> TransferUmbilical {
         TransferUmbilical::new(
             UmbilicalConfig {
@@ -622,6 +705,147 @@ mod tests {
             },
             PowerGroupId("umbilical".into()),
         )
+    }
+
+    #[test]
+    fn umbilical_feedback_waits_for_the_authoritative_flow_verdict() {
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin)
+            .add_message::<PendingUmbilicalActionFeedback>()
+            .add_message::<crate::lobby::OutboundMessage>()
+            .add_systems(
+                Update,
+                (
+                    handle_umbilical_commands,
+                    tick_umbilical,
+                    finish_umbilical_action_feedback,
+                )
+                    .chain(),
+            );
+        let mut dock = DockControl::new(
+            crate::ship::system_registry::dock_system_id(),
+            crate::dock::DockConfig {
+                range: 100.0,
+                engage_distance: 100.0,
+                approach_speed: 1.0,
+                mate_tolerance: 1.0,
+                undock_clear_distance: 1.0,
+                min_power_level: 1,
+            },
+            PowerGroupId("dock".into()),
+        );
+        dock.engaged = true;
+        dock.docked = true;
+        dock.docking_target = Some("partner-1".into());
+        let power_config = crate::modifiers::power_system::PowerConfig::default();
+        let power = ShipPowerSystem(
+            crate::modifiers::power_system::PowerSystem::from_authored_groups(
+                &power_config,
+                &[(PowerGroupId("umbilical".into()), 2)],
+            ),
+        );
+        let operator = app
+            .world_mut()
+            .spawn((
+                crate::core::messages::AdmittedCommands(vec![correlated_umbilical_command(
+                    "umbilical-applied",
+                    SystemControlPayload::StartTransfer,
+                )]),
+                umbilical(),
+                dock,
+                power,
+                EntityUuid("operator-1".into()),
+                capacity(10, 10),
+            ))
+            .id();
+        app.world_mut()
+            .spawn((EntityUuid("partner-1".into()), capacity(0, 10)));
+        let mut cursor = app
+            .world()
+            .resource::<Messages<crate::lobby::OutboundMessage>>()
+            .get_cursor();
+        let feedback_count = |messages: &[crate::lobby::OutboundMessage], correlation, expected| {
+            messages
+                .iter()
+                .filter(|message| {
+                    matches!(
+                        (&message.target, &message.msg),
+                        (
+                            crate::lobby::Target::Token(token),
+                            crate::core::messages::ServerMessage::ActionFeedback {
+                                correlation: actual,
+                                outcome,
+                            }
+                        ) if token == "engineering-holder"
+                            && actual.as_str() == correlation
+                            && outcome == &expected
+                    )
+                })
+                .count()
+        };
+
+        app.update();
+        let messages = app
+            .world()
+            .resource::<Messages<crate::lobby::OutboundMessage>>();
+        let first: Vec<_> = cursor.read(messages).cloned().collect();
+        assert_eq!(
+            feedback_count(
+                &first,
+                "umbilical-applied",
+                crate::core::messages::ActionFeedbackOutcome::Applied,
+            ),
+            1
+        );
+        assert!(app
+            .world()
+            .get::<TransferUmbilical>(operator)
+            .is_some_and(|umbilical| umbilical.running));
+
+        app.world_mut()
+            .entity_mut(operator)
+            .insert(crate::core::messages::AdmittedCommands(vec![
+                correlated_umbilical_command("umbilical-stop", SystemControlPayload::StopTransfer),
+            ]));
+        app.update();
+        let messages = app
+            .world()
+            .resource::<Messages<crate::lobby::OutboundMessage>>();
+        let second: Vec<_> = cursor.read(messages).cloned().collect();
+        assert_eq!(
+            feedback_count(
+                &second,
+                "umbilical-stop",
+                crate::core::messages::ActionFeedbackOutcome::Applied,
+            ),
+            1
+        );
+
+        app.world_mut()
+            .get_mut::<DockControl>(operator)
+            .expect("operator dock")
+            .docked = false;
+        app.world_mut()
+            .entity_mut(operator)
+            .insert(crate::core::messages::AdmittedCommands(vec![
+                correlated_umbilical_command(
+                    "umbilical-refused",
+                    SystemControlPayload::StartTransfer,
+                ),
+            ]));
+        app.update();
+        let messages = app
+            .world()
+            .resource::<Messages<crate::lobby::OutboundMessage>>();
+        let third: Vec<_> = cursor.read(messages).cloned().collect();
+        assert_eq!(
+            feedback_count(
+                &third,
+                "umbilical-refused",
+                crate::core::messages::ActionFeedbackOutcome::Refused,
+            ),
+            1
+        );
     }
 
     #[test]

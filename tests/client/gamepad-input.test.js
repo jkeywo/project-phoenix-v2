@@ -80,6 +80,12 @@ describe('standard gamepad bindings', () => {
       type: 'gamepad', input: 'axis', control: 'left-stick-x',
       direction: 'positive', threshold: 0.7,
     });
+    expect(normalizeGamepadBinding({
+      type: 'gamepad', control: 'right-stick-x', direction: 'negative', threshold: 0.65,
+    })).toEqual({
+      type: 'gamepad', input: 'axis', control: 'right-stick-x',
+      direction: 'negative', threshold: 0.65,
+    });
     expect(() => normalizeGamepadBinding({
       type: 'gamepad', control: 'left-stick-x', direction: 'positive', threshold: 1.1,
     })).toThrow(/threshold/i);
@@ -114,6 +120,10 @@ describe('standard gamepad bindings', () => {
       pad(0, { pressed: [11] }),
     )).toBe(true);
     expect(gamepadBindingPressed(axis, pad(0, { axes: [0, -0.7, 0, 0] }))).toBe(true);
+    expect(gamepadBindingPressed({
+      type: 'gamepad', input: 'axis', control: 'right-stick-x',
+      direction: 'positive', threshold: 0.6,
+    }, pad(0, { axes: [0, 0, 0.7, 0] }))).toBe(true);
     expect(gamepadBindingPressed(dpad, pad(0, { mapping: '', pressed: [14] }))).toBe(false);
     expect(enumerateGamepads([
       pad(0), pad(1, { mapping: '' }), null,
@@ -285,6 +295,36 @@ describe('explicit connection ownership and discrete edges', () => {
     context = 'captain';
     runtime.poll(snapshot);
     expect(activate).not.toHaveBeenCalled();
+  });
+
+  it('keeps a held input gated while an iframe catalogue finishes loading', () => {
+    let snapshot = [pad(0)];
+    let actions = null;
+    const activate = vi.fn();
+    const runtime = createGamepadInputRuntime({
+      getGamepads: () => snapshot,
+      getContext: () => 'captain',
+      getActions: () => actions,
+      activate,
+    });
+    runtime.select(0);
+
+    // The seam is absent while the new iframe loads. An empty-looking result
+    // must not satisfy the neutral gate while its future binding is held.
+    snapshot = [pad(0, { pressed: [0] })];
+    runtime.poll(snapshot);
+    expect(runtime.state().status).toBe('neutral');
+    actions = [GAMEPAD_ACTION];
+    runtime.poll(snapshot);
+    expect(runtime.state().status).toBe('neutral');
+    expect(activate).not.toHaveBeenCalled();
+
+    snapshot = [pad(0)];
+    runtime.poll(snapshot);
+    expect(runtime.state().status).toBe('ready');
+    snapshot = [pad(0, { pressed: [0] })];
+    runtime.poll(snapshot);
+    expect(activate).toHaveBeenCalledOnce();
   });
 
   it('leaves the independent keyboard matcher active while the pad is disconnected', () => {

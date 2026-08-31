@@ -636,6 +636,59 @@ fn control_system_set_power_group_allocation_updates_group() {
     );
 }
 
+#[test]
+fn correlated_power_allocation_finishes_at_the_reactor_owner() {
+    let mut app = test_app();
+    start_game_with_power(&mut app);
+
+    let send = |app: &mut App, correlation: &str, level| {
+        push_msg(
+            app,
+            "power",
+            ClientMessage::ControlSystemCorrelated {
+                correlation: ActionCorrelationId::new(correlation).expect("valid test correlation"),
+                target: crate::ship::system_registry::power_reactor_system_id(),
+                payload: SystemControlPayload::SetPowerGroupAllocation {
+                    group: PowerGroupId(SHIELDS_POWER_GROUP.into()),
+                    level,
+                },
+            },
+        );
+    };
+    let feedback_count =
+        |out: &[OutboundMessage], correlation: &str, expected| {
+            out.iter().filter(|message| {
+            matches!(
+                (&message.target, &message.msg),
+                (
+                    Target::Token(token),
+                    ServerMessage::ActionFeedback { correlation: actual, outcome }
+                ) if token == "power" && actual.as_str() == correlation && *outcome == expected
+            )
+        }).count()
+        };
+
+    send(&mut app, "power-applied", 4);
+    assert_eq!(
+        feedback_count(
+            &tick(&mut app),
+            "power-applied",
+            ActionFeedbackOutcome::Applied,
+        ),
+        1
+    );
+
+    send(&mut app, "power-refused", u8::MAX);
+    assert_eq!(
+        feedback_count(
+            &tick(&mut app),
+            "power-refused",
+            ActionFeedbackOutcome::Refused,
+        ),
+        1
+    );
+}
+
 /// Wire-string regression: JS clients send `target: 'power-reactor'`
 /// (see `gui/action-map.js` `set_power` handler). This test pins the
 /// exact string used on the wire, so if either the JS side or the

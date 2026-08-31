@@ -93,6 +93,13 @@ describe('Helm semantic steering action', () => {
       'navigation.map-pan-down',
       'navigation.map-zoom-in',
       'navigation.map-zoom-out',
+      'power.decrease-allocation',
+      'power.increase-allocation',
+      'repair.dispatch-team',
+      'repair.prioritise-system',
+      'engineering.tractor',
+      'engineering.umbilical',
+      'repair.external-dispatch',
       'editor.mod.import',
       'editor.mod.validate',
       'editor.mod.export',
@@ -134,6 +141,13 @@ describe('Helm semantic steering action', () => {
       'navigation.map-pan-down',
       'navigation.map-zoom-in',
       'navigation.map-zoom-out',
+      'power.decrease-allocation',
+      'power.increase-allocation',
+      'repair.dispatch-team',
+      'repair.prioritise-system',
+      'engineering.tractor',
+      'engineering.umbilical',
+      'repair.external-dispatch',
     ]);
   });
 });

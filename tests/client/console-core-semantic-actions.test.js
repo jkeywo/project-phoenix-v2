@@ -55,6 +55,8 @@ describe('console-core semantic action runtime', () => {
     const sent = [];
     window.__sendAction = (json) => sent.push(JSON.parse(json));
     const runtime = initConsole({ name: 'captain', render: () => {} });
+    expect(window.__supportsSemanticAction('captain.red-alert', 'captain')).toBe(true);
+    expect(window.__supportsSemanticAction('power.increase-allocation', 'captain')).toBe(false);
     window.__updateConsole('captain', JSON.stringify({
       red_alert: false,
       weapons_hold: false,
@@ -68,6 +70,8 @@ describe('console-core semantic action runtime', () => {
     expect(sent[0]).toMatchObject({
       action: 'set_weapons_hold', console: 'captain', held: true,
     });
+    expect(runtime.semanticActions.action('power.increase-allocation')).toBeNull();
+    expect(runtime.semanticActions.action('repair.dispatch-team')).toBeNull();
 
     runtime.disposeSemanticActions();
     delete window.__sendAction;
@@ -269,6 +273,85 @@ describe('console-core semantic action runtime', () => {
     delete window.__updateConsole;
     delete window.__updateActionFeedback;
     delete window.__updateSemanticActionBindings;
+    delete window.activateSemanticAction;
+    delete window.sendAction;
+  });
+
+  it('keeps Captain, Comms, Power, and Repair semantic families live in Courier Captain', () => {
+    document.body.innerHTML = '';
+    const sent = [];
+    let context = 'captain';
+    window.__sendAction = (json) => sent.push(JSON.parse(json));
+    const runtime = initConsole({
+      name: 'captain',
+      render: courierCaptainRender,
+      actionFamilies: ['comms', 'power', 'repair'],
+      getActionContext: () => context,
+    });
+    window.__updateConsole('captain', JSON.stringify(withConsoleFamilyProjection({
+      systems: {
+        captain: { red_alert: false, red_alert_auto: false, weapons_hold: false },
+        comms: {
+          contacts: [{ uuid: 'ally-1', in_range: true }],
+          messages: [],
+        },
+        'power-reactor': {
+          power_auto: false,
+          locked: false,
+          consoles: [{
+            id: 'helm', commanded_level: 2, level: 2, min_level: 1, max_level: 4,
+          }],
+        },
+        repair: {
+          repair_auto: false,
+          teams: [{ id: 0, status: 'idle' }],
+          dispatch_targets: [{ id: 'core' }],
+          damaged_systems: [],
+        },
+      },
+    })));
+
+    for (const actionId of [
+      'captain.red-alert', 'comms.hail',
+      'power.increase-allocation', 'repair.dispatch-team',
+    ]) {
+      expect(runtime.semanticActions.action(actionId)).not.toBeNull();
+    }
+    expect(window.__semanticActionContext()).toBe('captain');
+    expect(window.__supportsSemanticActionContext('power')).toBe(true);
+    expect(window.__supportsSemanticAction('captain.red-alert', 'captain')).toBe(true);
+    expect(window.__supportsSemanticAction('power.increase-allocation', 'captain')).toBe(true);
+    expect(window.__supportsSemanticAction('power.increase-allocation', 'power')).toBe(true);
+    expect(window.__supportsSemanticAction('power.increase-allocation', 'comms')).toBe(false);
+
+    context = 'comms';
+    window.activateSemanticAction('comms.hail', {
+      context, source: 'control', detail: { target_uuid: 'ally-1' },
+    });
+    context = 'power';
+    window.activateSemanticAction('power.increase-allocation', {
+      context, source: 'control', detail: { target: 'helm', level: 3 },
+    });
+    context = 'repair';
+    window.activateSemanticAction('repair.dispatch-team', {
+      context, source: 'control', detail: { team_idx: 0, target: 'core' },
+    });
+    context = 'captain';
+    window.activateSemanticAction('captain.red-alert', { context, source: 'control' });
+
+    expect(sent.map((entry) => entry.action)).toEqual([
+      'hail', 'set_power', 'dispatch_repair_team', 'set_red_alert',
+    ]);
+    expect(sent.every((entry) => entry.console === 'captain')).toBe(true);
+
+    runtime.disposeSemanticActions();
+    delete window.__sendAction;
+    delete window.__updateConsole;
+    delete window.__updateActionFeedback;
+    delete window.__updateSemanticActionBindings;
+    delete window.__semanticActionContext;
+    delete window.__supportsSemanticActionContext;
+    delete window.__supportsSemanticAction;
     delete window.activateSemanticAction;
     delete window.sendAction;
   });

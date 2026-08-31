@@ -1276,7 +1276,10 @@ const TIER_SEVERITY = { Operational: 0, Damaged: 1, Disabled: 2, Destroyed: 3 };
  * `system_id` and nothing else; the host decides whether any team can act on it.
  *
  * `prioritised` is a pure echo of the host's resolved pin, so a highlight can
- * only ever show a choice the server actually made.
+ * only ever show a choice the server actually made. `prioritisable` is the
+ * host's current reachability verdict from the same sweep predicate that will
+ * apply a named priority; the client cannot reconstruct station groups from
+ * this deliberately partial hull projection.
  *
  * The `current < max_hp` half of the filter mirrors the host's own candidate
  * guard rather than duplicating a rule for its own sake: a `max_hp = 0` row is
@@ -1289,10 +1292,12 @@ const TIER_SEVERITY = { Operational: 0, Damaged: 1, Disabled: 2, Destroyed: 3 };
  *
  * @param {Array<{system_id,display_name,current,max_hp,tier}>} systemHull
  * @param {Array<{status,system_id,priority_system_id}>} teams normalized slots
+ * @param {string[]} priorityTargets exact currently reachable SystemIds
  */
-export function repairDamagedSystems(systemHull, teams) {
+export function repairDamagedSystems(systemHull, teams, priorityTargets = []) {
   const rows = Array.isArray(systemHull) ? systemHull : [];
   const slots = Array.isArray(teams) ? teams : [];
+  const eligible = new Set(Array.isArray(priorityTargets) ? priorityTargets : []);
   const pinned = new Set(slots.map(s => s && s.priority_system_id).filter(Boolean));
   const onSite = new Set(
     slots.filter(s => s && s.status === 'repairing').map(s => s.system_id).filter(Boolean)
@@ -1313,6 +1318,7 @@ export function repairDamagedSystems(systemHull, teams) {
         damage_pct:   max > 0 ? 1 - current / max : 0,
         prioritised:  pinned.has(h.system_id),
         in_progress:  onSite.has(h.system_id),
+        prioritisable: eligible.has(h.system_id),
       };
     })
     .sort((a, b) =>
@@ -1334,7 +1340,7 @@ export function repairDamagedSystems(systemHull, teams) {
  *             damaged_systems: Array<{system_id: string, display_name: string,
  *               tier: string, current: number, max_hp: number,
  *               damage_pct: number, prioritised: boolean,
- *               in_progress: boolean}>,
+ *               in_progress: boolean, prioritisable: boolean}>,
  *             overall_hull: {current: number, max: number, pct: number,
  *                            destroyed_pct: number},
  *             core_systems: Array, dispatch_targets: Array<{id: string,
@@ -1371,7 +1377,11 @@ export function buildRepairConsoleState(state, systemIds = []) {
       damageable_systems:   damageableSystems,
       // Tap-to-prioritise list (issue #1015) — the visible rows that are
       // actually broken, worst-first.
-      damaged_systems:      repairDamagedSystems(systemHull, teams),
+      damaged_systems:      repairDamagedSystems(
+        systemHull,
+        teams,
+        bb.priority_targets ?? [],
+      ),
       // Authoritative ship-wide hull aggregate from the host — the only
       // whole-ship figures available now that `system_hull` is a projection,
       // and `destroyed_pct` is the share of it that is gone for good (#1014).
@@ -1437,7 +1447,8 @@ export function buildRepairConsoleState(state, systemIds = []) {
  *             battery_charge: number, battery_max: number, draining: boolean,
  *             charging: boolean,
  *             reactor_online: boolean, battery_online: boolean,
- *             own_hull: StationHullAggregate, power_auto: boolean,
+ *             own_hull: StationHullAggregate, system_id: string|null,
+ *             power_auto: boolean,
  *             station_rating: string }} PowerConsolePayload
  */
 
@@ -1484,6 +1495,9 @@ export function buildPowerConsoleState(state, systemIds = []) {
     locked:         bb.locked         || false,
     reactor_online: reactorOnline,
     battery_online: batteryOnline,
+    // The exact authored reactor instance owns allocation commands. Do not
+    // reconstruct it from a family name in the iframe/action map.
+    system_id:      reactorEntry?.systemId ?? null,
     own_hull:       aggregateStationHull('power', state.consoleHull, state.stationSystems),
     power_auto:     systemIds.length > 0
       ? systemIds.every(id => state.controlSources?.[id] === 'Ai')

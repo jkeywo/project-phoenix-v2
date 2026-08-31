@@ -406,6 +406,7 @@ fn publish_repair_blackboard(
         (
             Option<&ShipRepairTeams>,
             Option<&crate::entities::spawner::EntitySystemHull>,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
             Option<&RepairRequestQueue>,
             // External repair-team dispatch (issue #1161). Present only on a
             // hull that authored `[repair.external_dispatch]`; a hull without it
@@ -424,7 +425,8 @@ fn publish_repair_blackboard(
         &crate::entities::spawner::EntityName,
     )>,
 ) {
-    for (teams_opt, hull_opt, repair_queue_ref, external_opt, mut blackboards) in ship_q.iter_mut()
+    for (teams_opt, hull_opt, config_opt, repair_queue_ref, external_opt, mut blackboards) in
+        ship_q.iter_mut()
     {
         let default_teams;
         let teams: &ShipRepairTeams = match teams_opt {
@@ -456,6 +458,10 @@ fn publish_repair_blackboard(
 
         let damageable_systems: Vec<SystemId> =
             system_hull.iter().map(|s| s.system_id.clone()).collect();
+        let priority_targets = match (hull_opt, config_opt) {
+            (Some(hull), Some(config)) => teams.0.prioritisable_systems(&hull.0, &config.0),
+            _ => Vec::new(),
+        };
 
         let queue_depth: Vec<QueueEntryPreview> = repair_queue_ref
             .map(|rq| {
@@ -513,6 +519,7 @@ fn publish_repair_blackboard(
             travel_duration_secs: teams.0.timings().travel_duration,
             system_hull,
             damageable_systems,
+            priority_targets,
             // Host-internal copy: unprojected. `system_hull` and `queue_depth` both
             // carry exact per-system detail and are filtered on the wire by
             // `visibility::project_repair_blackboard`, which also fills in the

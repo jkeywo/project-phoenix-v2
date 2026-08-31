@@ -323,6 +323,132 @@ fn dispatch_sends_team_to_travelling() {
     );
 }
 
+#[test]
+fn correlated_internal_repair_actions_finish_at_the_repair_owner() {
+    let mut app = test_app();
+    start_game(&mut app);
+    damage_owned_fine_systems_to(
+        &mut app,
+        &[("helm-engine-port", 0.2), ("helm-engine-starboard", 0.2)],
+    );
+
+    let send = |app: &mut App, correlation: &str, payload| {
+        push(
+            app,
+            "eng",
+            ClientMessage::ControlSystemCorrelated {
+                correlation: ActionCorrelationId::new(correlation).expect("valid test correlation"),
+                target: crate::ship::system_registry::repair_system_id(),
+                payload,
+            },
+        );
+    };
+    let feedback_count = |out: &[OutboundMessage], correlation: &str, expected| {
+        out.iter()
+            .filter(|message| {
+                matches!(
+                    (&message.target, &message.msg),
+                    (
+                        crate::lobby::Target::Token(token),
+                        ServerMessage::ActionFeedback { correlation: actual, outcome }
+                    ) if token == "eng" && actual.as_str() == correlation && outcome == &expected
+                )
+            })
+            .count()
+    };
+
+    send(
+        &mut app,
+        "repair-dispatch-applied",
+        SystemControlPayload::DispatchRepairTeam {
+            team_idx: 0,
+            target: RepairTarget::Station(StationId("helm".into())),
+        },
+    );
+    assert_eq!(
+        feedback_count(
+            &tick(&mut app),
+            "repair-dispatch-applied",
+            ActionFeedbackOutcome::Applied,
+        ),
+        1,
+    );
+
+    // The fixture's authored/default travel is five seconds and this test app
+    // advances 0.2s per tick. Leave headroom for the dispatch tick itself and
+    // floating-point accumulation rather than baking an off-by-one boundary.
+    for _ in 0..40 {
+        if matches!(
+            local_teams(&mut app).0.slots()[0],
+            TeamSlot::Repairing { .. }
+        ) {
+            break;
+        }
+        tick(&mut app);
+    }
+    let teams = local_teams(&mut app);
+    let current = match &teams.0.slots()[0] {
+        TeamSlot::Repairing {
+            system_id: Some(system_id),
+            ..
+        } => system_id.0.clone(),
+        slot => panic!("team must be on site before priority, got {slot:?}"),
+    };
+    let next = if current == "helm-engine-port" {
+        "helm-engine-starboard"
+    } else {
+        "helm-engine-port"
+    };
+    send(
+        &mut app,
+        "repair-priority-applied",
+        SystemControlPayload::SetRepairTargetPriority {
+            system_id: SystemId(next.into()),
+        },
+    );
+    assert_eq!(
+        feedback_count(
+            &tick(&mut app),
+            "repair-priority-applied",
+            ActionFeedbackOutcome::Applied,
+        ),
+        1,
+    );
+
+    send(
+        &mut app,
+        "repair-priority-refused",
+        SystemControlPayload::SetRepairTargetPriority {
+            system_id: SystemId("missing-system".into()),
+        },
+    );
+    assert_eq!(
+        feedback_count(
+            &tick(&mut app),
+            "repair-priority-refused",
+            ActionFeedbackOutcome::Refused,
+        ),
+        1,
+    );
+
+    send(
+        &mut app,
+        "repair-dispatch-refused",
+        SystemControlPayload::DispatchRepairTeam {
+            team_idx: u8::MAX,
+            target: RepairTarget::Core,
+        },
+    );
+    assert_eq!(
+        feedback_count(
+            &tick(&mut app),
+            "repair-dispatch-refused",
+            ActionFeedbackOutcome::Refused,
+        ),
+        1,
+    );
+}
+
 /// A station dispatch must resolve to an owned fine hull system so a team
 /// can finish travelling and restore HP instead of immediately returning.
 #[test]

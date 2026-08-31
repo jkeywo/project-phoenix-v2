@@ -72,6 +72,20 @@ semantic_action.navigation.zoom_in.label,Navigation semantic action display name
 semantic_action.navigation.zoom_in.accessibility,Navigation semantic action accessible description,[Zoom in on the Navigation chart.]
 semantic_action.navigation.zoom_out.label,Navigation semantic action display name,[Zoom Map Out]
 semantic_action.navigation.zoom_out.accessibility,Navigation semantic action accessible description,[Zoom out from the Navigation chart.]
+semantic_action.power.decrease_allocation.label,Power semantic action display name,[Decrease Power Allocation]
+semantic_action.power.decrease_allocation.accessibility,Power semantic action accessible description,[Decrease an available authored power-group allocation.]
+semantic_action.power.increase_allocation.label,Power semantic action display name,[Increase Power Allocation]
+semantic_action.power.increase_allocation.accessibility,Power semantic action accessible description,[Increase an available authored power-group allocation.]
+semantic_action.repair.dispatch_team.label,Repair semantic action display name,[Dispatch Repair Team]
+semantic_action.repair.dispatch_team.accessibility,Repair semantic action accessible description,[Dispatch an idle repair team to an available station or core target.]
+semantic_action.repair.prioritise_system.label,Repair semantic action display name,[Prioritise Damaged System]
+semantic_action.repair.prioritise_system.accessibility,Repair semantic action accessible description,[Prioritise an eligible damaged system for an on-site repair team.]
+semantic_action.engineering.tractor.label,Engineering semantic action display name,[Tractor Beam]
+semantic_action.engineering.tractor.accessibility,Engineering semantic action accessible description,[Engage or release the tractor beam using the authoritative current state.]
+semantic_action.engineering.umbilical.label,Engineering semantic action display name,[Transfer Umbilical]
+semantic_action.engineering.umbilical.accessibility,Engineering semantic action accessible description,[Start or stop the transfer umbilical using the authoritative current state.]
+semantic_action.repair.external_dispatch.label,Repair semantic action display name,[External Repair Dispatch]
+semantic_action.repair.external_dispatch.accessibility,Repair semantic action accessible description,[Dispatch or recall the external repair team using the authoritative current state.]
 semantic_action.host.qr_code.label,Host semantic action display name,[QR Code]
 semantic_action.host.qr_code.accessibility,Host semantic action accessible description,[Show or hide the crew join QR code.]
 semantic_action.host.qr_code.feedback,Host semantic action persistent status; {status} is a shared action feedback state,[QR Code: {status}]
@@ -596,6 +610,7 @@ component.repair_teams.title,Repair teams panel heading,REPAIR TEAMS
 component.repair_teams.empty,Repair panel when the ship has no repair teams,[NO REPAIR TEAMS]
 component.repair_teams.no_targets,Repair team row when nothing needs repair,[No repair targets]
 component.repair_teams.target,Repair team row: current assignment. {target} is the system name,Target: {target}
+component.repair_teams.external_commitment,Repair team row when its otherwise-idle slot is reserved by a live field-repair dispatch,[Committed to field repair]
 component.sensor_panel.no_target,Sensor detail panel when no target is locked,NO TARGET
 component.sensor_panel.brg,Sensor readout key: bearing to target,BRG
 component.sensor_panel.rng,Sensor readout key: range to target,RNG
@@ -647,6 +662,7 @@ component.repair_teams.working,Flag on the damaged-systems row a repair team is 
 component.repair_teams.prioritise_title,Tooltip on a tappable damaged-systems row. {name} is the system name,[Fix {name} next]
 component.repair_teams.prioritised_title,Tooltip on the damaged-systems row already queued to be fixed next. {name} is the system name,[{name} is queued next]
 component.repair_teams.working_title,Tooltip on the damaged-systems row a repair team is already on site at. That row is not tappable — it is nobody's NEXT job. {name} is the system name,[A team is already on {name}]
+component.repair_teams.unavailable_title,Tooltip on a damaged system outside every on-site repair team's current sweep group. {name} is the system name,[No on-site team can take {name} next]
 component.ship_picker.class.battleship,Lobby ship picker — hull class badge on a battleship card,[BATTLESHIP]
 component.ship_picker.class.courier,Lobby ship picker — hull class badge on a courier card,[COURIER]
 component.ship_picker.class.cruiser,Lobby ship picker — hull class badge on a cruiser card,[CRUISER]

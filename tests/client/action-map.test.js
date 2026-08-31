@@ -660,6 +660,38 @@ describe('set_power', () => {
   });
 });
 
+describe('Engineering semantic owner identities', () => {
+  it('carries each authoritative control SystemId into the wire target', () => {
+    const cases = [
+      ['engage_tractor', { control_system_id: 'tractor-primary' }, 'tractor-primary', 'EngageTractor'],
+      ['release_tractor', { control_system_id: 'tractor-primary' }, 'tractor-primary', 'ReleaseTractor'],
+      ['start_transfer', { control_system_id: 'umbilical-port' }, 'umbilical-port', 'StartTransfer'],
+      ['stop_transfer', { control_system_id: 'umbilical-port' }, 'umbilical-port', 'StopTransfer'],
+      ['dispatch_external_repair', { control_system_id: 'repair-control' }, 'repair-control', 'DispatchExternalRepair'],
+      ['recall_external_repair', { control_system_id: 'repair-control' }, 'repair-control', 'RecallExternalRepair'],
+      ['set_power', {
+        control_system_id: 'reactor-main', target: 'helm', level: 3,
+      }, 'reactor-main', 'SetPowerGroupAllocation'],
+      ['dispatch_repair_team', {
+        control_system_id: 'repair-control', team_idx: 0, target: 'core',
+      }, 'repair-control', 'DispatchRepairTeam'],
+      ['set_repair_target_priority', {
+        control_system_id: 'repair-control', system_id: 'reactor-main',
+      }, 'repair-control', 'SetRepairTargetPriority'],
+    ];
+
+    for (const [name, action, target, payloadType] of cases) {
+      const send = mkSend();
+      ACTION_MAP[name]({ ...action, correlation: `owner-${name}` }, send);
+      expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', expect.objectContaining({
+        correlation: `owner-${name}`,
+        target,
+        payload: expect.objectContaining({ type: payloadType }),
+      }));
+    }
+  });
+});
+
 describe('set_shield_focus', () => {
   it('sends SetShieldArcFocus targeted at shield-arc-<arc_id> (issue #514)', () => {
     const send = mkSend();

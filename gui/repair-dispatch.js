@@ -64,10 +64,12 @@ export function dispatchRepairTeamPayload(teamIdx, target) {
  * @param {string} target station id or `'core'`
  * @param {((type: string, data?: object) => void)} [send] explicit transport;
  *   omitted when called from a context that has the page's live link.
+ * @param {string} [controlSystemId] exact authored Repair owner; the canonical
+ *   id remains the compatibility default for legacy direct actions.
  * @returns {object|null} the envelope that was sent, or null when offline.
  */
-export function dispatchRepairTeam(teamIdx, target, send) {
-  return sendControlSystem(REPAIR_SYSTEM_ID, dispatchRepairTeamPayload(teamIdx, target), send);
+export function dispatchRepairTeam(teamIdx, target, send, controlSystemId = REPAIR_SYSTEM_ID) {
+  return sendControlSystem(controlSystemId, dispatchRepairTeamPayload(teamIdx, target), send);
 }
 
 /**
@@ -102,10 +104,16 @@ export function setRepairPriorityPayload(teamIdx, priority) {
  * @param {number} teamIdx
  * @param {number} priority
  * @param {((type: string, data?: object) => void)} [send]
+ * @param {string} [controlSystemId] exact authored Repair owner
  * @returns {object|null} the envelope that was sent, or null when offline.
  */
-export function setRepairPriority(teamIdx, priority, send) {
-  return sendControlSystem(REPAIR_SYSTEM_ID, setRepairPriorityPayload(teamIdx, priority), send);
+export function setRepairPriority(
+  teamIdx,
+  priority,
+  send,
+  controlSystemId = REPAIR_SYSTEM_ID,
+) {
+  return sendControlSystem(controlSystemId, setRepairPriorityPayload(teamIdx, priority), send);
 }
 
 /**
@@ -151,8 +159,13 @@ export function setRepairTargetPriorityPayload(systemId) {
  *
  * @param {string} systemId
  * @param {((type: string, data?: object) => void)} [send]
+ * @param {string} [controlSystemId] exact authored Repair owner
  * @returns {object|null} the envelope that was sent, or null when offline.
  */
-export function setRepairTargetPriority(systemId, send) {
-  return sendControlSystem(REPAIR_SYSTEM_ID, setRepairTargetPriorityPayload(systemId), send);
+export function setRepairTargetPriority(
+  systemId,
+  send,
+  controlSystemId = REPAIR_SYSTEM_ID,
+) {
+  return sendControlSystem(controlSystemId, setRepairTargetPriorityPayload(systemId), send);
 }

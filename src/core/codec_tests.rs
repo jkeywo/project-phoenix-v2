@@ -4270,6 +4270,7 @@ fn system_blackboard_repair_round_trips() {
             ),
         ],
         damageable_systems: vec![SystemId("core".into()), SystemId("helm-radar".into())],
+        priority_targets: vec![SystemId("core".into())],
         queue_depth: vec![
             QueueEntryPreview {
                 station_id: "core".into(),
@@ -4301,6 +4302,10 @@ fn system_blackboard_repair_round_trips() {
         json.contains("\"destroyed_hull_fraction\":0.2"),
         "got: {json}"
     );
+    assert!(
+        json.contains("\"priority_targets\":[\"core\"]"),
+        "got: {json}"
+    );
     let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
     assert_eq!(bb, decoded);
 
@@ -4316,6 +4321,7 @@ fn system_blackboard_repair_round_trips() {
     };
     assert_eq!(legacy_bb.destroyed_hull_fraction, None);
     assert_eq!(legacy_bb.aggregate_hull_fraction, Some(0.75));
+    assert!(legacy_bb.priority_targets.is_empty());
 
     // ...and through the envelope it actually ships in. Post-#737 this is
     // sent per token (`Target::Token`), not broadcast, but the encoding is

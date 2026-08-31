@@ -4825,6 +4825,11 @@ pub struct RepairBlackboard {
     /// Systems that can be targeted for repair dispatch (in display order).
     #[serde(default)]
     pub damageable_systems: Vec<SystemId>,
+    /// Exact SystemIds a named priority order can currently reach through an
+    /// on-site team's sweep. Derived by the Repair owner from the same
+    /// `RepairTeams::prioritise_system` candidate rule that applies the order.
+    #[serde(default)]
+    pub priority_targets: Vec<SystemId>,
     /// Priority-queue preview entries (worst-first) for human repair UI (issue #682).
     #[serde(default)]
     pub queue_depth: Vec<QueueEntryPreview>,

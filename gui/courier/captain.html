@@ -100,8 +100,14 @@
     initConsole({
       name: 'captain',
       render: renderStation,
-      actionFamilies: ['captain', 'navigation'],
+      // The compact bridge mounts these family controls in the Captain realm.
+      // Declaring them layers their adapters onto Captain; it does not create
+      // another Station or alter server-side ownership.
+      actionFamilies: ['captain', 'navigation', 'comms', 'power', 'repair'],
       navigationActions: { supportsChart: false, supportsCivilianOrders: false },
+      getActionContext: () => document.getElementById('comms-overlay').classList.contains('open')
+        ? 'comms'
+        : 'captain',
     });
     document.getElementById('nav-toggle').onclick = () => toggle('nav');
     document.getElementById('comms-toggle').onclick = () => toggle('comms');

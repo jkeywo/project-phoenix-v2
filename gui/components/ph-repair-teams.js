@@ -4,6 +4,11 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import {
+  REPAIR_DISPATCH_ACTION_ID,
+  REPAIR_PRIORITY_ACTION_ID,
+} from '../stations/engineering-actions.js';
+import { activateEngineeringAction } from '../stations/engineering-action-control.js';
 import { PhElement, phDefine } from './ph-element.js';
 
 export class PhRepairTeams extends PhElement {
@@ -127,9 +132,9 @@ export class PhRepairTeams extends PhElement {
    *
    * `state.damaged` is `RepairConsolePayload.damaged_systems` — the visible hull
    * rows that are broken, already worst-first, each flagged with the host's own
-   * verdict (`prioritised`, `in_progress`). Nothing here re-derives any of that:
-   * a tap sends the row's `system_id` and the host decides which team, if any,
-   * can act on it, so a highlight always reflects a choice the server made.
+   * verdict (`prioritised`, `in_progress`, `prioritisable`). Nothing here
+   * re-derives any of that: a tap sends the row's `system_id`, and the same host
+   * predicate that applies it also decides whether the row is a live control.
    *
    * A row is only rendered as a CONTROL when tapping it could actually do
    * something. Rows a team is already on site at are the exception the host's
@@ -161,12 +166,14 @@ export class PhRepairTeams extends PhElement {
         el.innerHTML = '<span class="name"></span><span class="flag"></span><span class="tier-chip"></span><span class="pct"></span>';
         el.addEventListener('click', () => {
           if (el.disabled) return;
-          if (this.sendAction) {
-            // System-targeted on purpose: the ordinal the sweep consumes is
-            // resolved host-side, because #737 hides most of the candidates
-            // this console would have to rank. See repair-dispatch.js.
-            this.sendAction('set_repair_target_priority', { system_id: row.system_id });
-          }
+          // System-targeted on purpose: the ordinal the sweep consumes is
+          // resolved host-side, because #737 hides most of the candidates.
+          activateEngineeringAction(
+            this,
+            REPAIR_PRIORITY_ACTION_ID,
+            { system_id: row.system_id },
+            'set_repair_target_priority',
+          );
         });
         list.appendChild(el);
       }
@@ -183,7 +190,10 @@ export class PhRepairTeams extends PhElement {
       // is structurally incapable of doing so is a lie the player pays for in
       // taps. A prioritised row stays live regardless — that highlight IS a
       // choice the host made.
-      const noop = !!row.in_progress && !row.prioritised;
+      // The client sees only a projection and cannot infer which on-site team
+      // can sweep which station group. `prioritisable` is projected from the
+      // owner's exact candidate predicate, so it is the sole enablement fact.
+      const noop = row.prioritisable !== true;
       el.className = 'dmg-row' + (row.prioritised ? ' prioritised' : '');
       el.disabled = auto || noop;
       el.querySelector('.name').textContent = name;
@@ -196,9 +206,11 @@ export class PhRepairTeams extends PhElement {
         : row.in_progress ? t('component.repair_teams.working') : '';
       el.title = row.prioritised
         ? t('component.repair_teams.prioritised_title', { name })
-        : noop
+        : row.in_progress
           ? t('component.repair_teams.working_title', { name })
-          : t('component.repair_teams.prioritise_title', { name });
+          : noop
+            ? t('component.repair_teams.unavailable_title', { name })
+            : t('component.repair_teams.prioritise_title', { name });
     });
   }
 
@@ -206,6 +218,14 @@ export class PhRepairTeams extends PhElement {
     const s = this.#state || {};
     const teams = Array.isArray(s.teams) ? s.teams : [];
     const auto = !!s.auto;
+    const idleTeams = teams.filter((team) => team && team.status === 'idle');
+    const committed = Math.min(
+      idleTeams.length,
+      Math.max(0, Math.trunc(Number(s.externally_committed_teams) || 0)),
+    );
+    const externallyCommittedIds = new Set(
+      idleTeams.slice(idleTeams.length - committed).map((team) => team.id),
+    );
     const container = this.shadowRoot.getElementById('teams-container');
     const badge = this.shadowRoot.getElementById('auto-badge');
     badge.style.display = auto ? 'inline' : 'none';
@@ -250,6 +270,7 @@ export class PhRepairTeams extends PhElement {
       }
 
       const status = team.status || 'idle';
+      const externallyCommitted = status === 'idle' && externallyCommittedIds.has(team.id);
       card.querySelector('.team-label').textContent = team.label || t('component.repair_teams.team', { n: team.id });
       const badgeEl = card.querySelector('.status-badge');
       badgeEl.textContent = t('component.repair_teams.status.' + status);
@@ -262,7 +283,7 @@ export class PhRepairTeams extends PhElement {
       const label = card.querySelector('.target-label');
       const drow = card.querySelector('.dispatch-row');
 
-      if (isIdle) {
+      if (isIdle && !externallyCommitted) {
         const hasTargets = targets.length > 0;
         label.style.display = hasTargets ? 'none' : 'block';
         if (!hasTargets) label.textContent = t('component.repair_teams.no_targets');
@@ -280,17 +301,24 @@ export class PhRepairTeams extends PhElement {
             b.querySelector('.label').textContent = t.label;
             b.addEventListener('click', () => {
               if (b.disabled) return;
-              if (this.sendAction) {
-                // target is a station id (lowercase) or 'core'; action-map
-                // wraps it into RepairTarget::{Station|Core}.
-                this.sendAction('dispatch_repair_team', { team_idx: team.id, target: t.id });
-              }
+              // target is a station id (lowercase) or 'core'; action-map wraps
+              // it into RepairTarget::{Station|Core}.
+              activateEngineeringAction(
+                this,
+                REPAIR_DISPATCH_ACTION_ID,
+                { team_idx: team.id, target: t.id },
+                'dispatch_repair_team',
+              );
             });
             drow.appendChild(b);
           });
           drow.dataset.sig = sig;
         }
         drow.querySelectorAll('.btn').forEach(b => { b.disabled = auto; });
+      } else if (externallyCommitted) {
+        drow.style.display = 'none';
+        label.style.display = 'block';
+        label.textContent = t('component.repair_teams.external_commitment');
       } else {
         // Busy team: show its current target; dispatch is not offered.
         // Ordering the team's work is not offered HERE either since issue

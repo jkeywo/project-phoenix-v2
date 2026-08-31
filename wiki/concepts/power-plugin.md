@@ -1,9 +1,9 @@
 ---
 title: Power Runtime
 type: concept
-tags: [power, battery, brownout, modifiers, ai]
-sources: [src/ship/power.rs, src/modifiers/power_system.rs, src/console_ai/server.rs, src/server_app/registration.rs, src/modifiers/coordination.rs]
-updated: 2026-08-27
+tags: [power, battery, brownout, modifiers, ai, semantic-actions, feedback]
+sources: [src/ship/power.rs, src/modifiers/power_system.rs, src/console_ai/server.rs, src/server_app/registration.rs, src/modifiers/coordination.rs, src/command_admission/mod.rs, gui/stations/engineering-actions.js, gui/components/ph-power-controls.js, gui/action-map.js]
+updated: 2026-08-31
 ---
 
 # Power Runtime
@@ -13,6 +13,16 @@ updated: 2026-08-27
 ## Command and tick path
 
 Human Power controls and `ai_power_allocation` emit the same admitted `SetPowerGroupAllocation` payload. `handle_power_messages` is the shared applier. `tick_power_system` advances battery drain/recharge and applies the exhaustion lock; `tick_power_brownout_advisory` sends typed coordination facts when a draining allocation is unsafe.
+
+`power.decrease-allocation` and `power.increase-allocation` are the shared
+semantic entries for dedicated Power, composite Engineering and Courier Captain.
+Pointer controls preserve the selected authored group and absolute requested
+level; a binding steps the first operable group from its authoritative
+`commanded_level` within its published limits. The family projection carries the
+exact authored reactor SystemId into the action map; it is not reconstructed from
+the Power family name. A correlated request completes `Applied` only
+when `PowerSystem::set_group_allocation` accepts it, otherwise `Refused`; the
+client never changes allocation before the next authoritative projection.
 
 The primary runtime state is per ship (`ShipPowerSystem`, `PowerConfigResource`, and `PowerMultiplierResource` components). Resource fallbacks remain for isolated fixtures and compatibility paths; production ships use their own authored components.
 

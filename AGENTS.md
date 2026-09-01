@@ -247,7 +247,27 @@ cargo build --release --features host --bin phoenix-host
 #     consoles need a second screen. Unplugging a screen closes the consoles on
 #     it — through bridge_layout::reconcile plus
 #     bridge_display::follow_layout_stations, NOT through the #1125 watcher's
-#     pane_labels, which stay the AUTHORED profile's participant panes.
+#     pane_labels, which are the AUTHORED profile's PARTICIPANT panes only.
+#     assigned_surfaces EXCLUDES a station-bearing PaneSlot from pane_labels to
+#     keep that true: PaneSlot::for_station names its pane for its station, so
+#     an authored station slot otherwise put a station id into a boot-time list
+#     the watcher resolves against the LIVE bus — and unplugging the monitor the
+#     profile named then closed a console the lobby had since moved elsewhere.
+#     A station's console is the LAW's on every host, authored or not.
+#     follow_layout_stations follows BOTH its inputs — the layout AND the
+#     monitors — and drops a Station surface only when the LAYOUT stops naming
+#     its monitor, never on a single absent winit frame; a frame reporting no
+#     monitors at all does nothing and leaves the pass owed.
+#     bridge_display::reconcile_seated_consoles then checks that the applier's
+#     work LANDED: a seated station with no console on the bus, or with no
+#     BridgeStationSurfaces slot to be composited onto, is rebuilt boundedly on
+#     the same token (#1125's own budget) and, when that is spent, has its SEAT
+#     GIVEN BACK through the law with a LayoutNotice the row renders — an honest
+#     Backfill instead of a station card claiming a screen that is black.
+#     A --pane <NAME> colliding with a station id on the loaded hull is REFUSED
+#     (app::install_world_selection): pane names and station ids are one
+#     namespace on the pane bus since #1331, so a screen row's off button would
+#     otherwise close that person's console instead of the station's.
 #   --manifest also narrows what this process FLIES, not only what it publishes:
 #     with a curating manifest in force the default hull is drawn from that
 #     manifest's allowlist (issue #917). An explicit --ship still wins.

@@ -74,6 +74,10 @@ pub enum NativeHostError {
     /// The chosen hull could not be read, parsed, or carries no `[[station]]`
     /// blocks.
     Ship(String),
+    /// One or more `--pane <NAME>` labels are also **station ids** on the hull
+    /// this host is about to fly (issue #1331) — see
+    /// [`pane_labels_shadowing_stations`].
+    PaneShadowsStation(Vec<String>),
 }
 
 impl std::fmt::Display for NativeHostError {
@@ -84,6 +88,20 @@ impl std::fmt::Display for NativeHostError {
             NativeHostError::Boot(e) => write!(f, "{e}"),
             NativeHostError::NoShip(m) => write!(f, "no playable hull: {m}"),
             NativeHostError::Ship(m) => write!(f, "ship: {m}"),
+            NativeHostError::PaneShadowsStation(labels) => write!(
+                f,
+                "--pane {} names a station this hull has, and a pane name and a station id are \
+                 one namespace on the pane bus (issue #1331): the lobby's screen rows open a \
+                 station's console under its own id, so closing that station's console would \
+                 close this person's instead. Rename the pane — `--pane {}-crew` — or drop it \
+                 and open that station's console from the lobby's screen row",
+                labels
+                    .iter()
+                    .map(|l| format!("{l:?}"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                labels.first().map(String::as_str).unwrap_or("name"),
+            ),
         }
     }
 }
@@ -344,6 +362,42 @@ pub(crate) struct HullChoice<'a> {
     pub seed: Option<u64>,
 }
 
+/// The `--pane <NAME>` labels this host was launched with (issue #1331).
+///
+/// Inserted by [`build_native_host_app`] whenever a pane bus exists, so that
+/// [`install_world_selection`] can check them against the hull's station ids —
+/// on the `--world` path and on the runtime `--lobby` world load alike, which
+/// are the only two places a roster is ever chosen. Empty for a host given a
+/// `--client-dir` but no `--pane`, which is the ordinary console host.
+#[derive(Resource, Clone, Debug, Default)]
+pub struct AuthoredPaneLabels(pub Vec<String>);
+
+/// The `--pane <NAME>` labels that are also station ids on `stations`
+/// (issue #1331).
+///
+/// **A pane name and a station id are one namespace.** `PaneBus` resolves a pane
+/// by participant name (`open_pane_for_name`), and since #1331 the lobby's
+/// screen rows open a station's console under the *station id* as its name —
+/// deliberately, because that is what lets the layout law and the pane bus talk
+/// about the same console by the same key. A hand-authored `--pane helm` on a
+/// hull that has a `helm` station therefore collides: unassigning `helm` from a
+/// screen row resolves the name to the human's pane and closes **their**
+/// console, and seating `helm` finds a pane already open and never builds one.
+///
+/// Comparison is exact and case-sensitive, matching `open_pane_for_name`'s own
+/// `==` — a guard that judged by a different rule than the lookup it protects
+/// would pass a name the lookup then confuses.
+pub(crate) fn pane_labels_shadowing_stations(
+    labels: &[String],
+    stations: &[crate::core::messages::StationId],
+) -> Vec<String> {
+    labels
+        .iter()
+        .filter(|label| stations.iter().any(|s| &s.0 == *label))
+        .cloned()
+        .collect()
+}
+
 /// Resolve the hull, gate it against the native template cache, and insert the
 /// two ship resources `LobbyPlugin` reads — returning the [`SimRng`] this run
 /// should adopt.
@@ -440,6 +494,28 @@ pub(crate) fn install_world_selection(
     let ship_config = ship_entity_config
         .ship_config
         .ok_or_else(|| NativeHostError::Ship(format!("{ship_path:?} has no [[station]] blocks")))?;
+
+    // The one place a `--pane` label and a station id can be compared: the
+    // labels were fixed at the prompt, and this is where the roster is finally
+    // known — at boot for a `--world` host, and at the pick for a `--lobby` one,
+    // which is why the guard lives here rather than in `phoenix_host`'s main.
+    // Refused rather than warned: the two names resolve to one pane on the bus,
+    // so whichever of the two the operator meant, one of them is going to close
+    // the other's console (see `pane_labels_shadowing_stations`). Refusing
+    // BEFORE `PendingShipConfig` lands leaves the world-less lobby's unwind
+    // nothing extra to undo.
+    let stations: Vec<crate::core::messages::StationId> =
+        ship_config.stations.iter().map(|s| s.id.clone()).collect();
+    let shadowed = pane_labels_shadowing_stations(
+        &world
+            .get_resource::<AuthoredPaneLabels>()
+            .map(|l| l.0.clone())
+            .unwrap_or_default(),
+        &stations,
+    );
+    if !shadowed.is_empty() {
+        return Err(NativeHostError::PaneShadowsStation(shadowed));
+    }
     world.insert_resource(PendingShipConfig(ship_config));
     // Store the CANONICAL key, not the raw `--ship` string: every downstream
     // reader (`lobby::server::update_session_with_config`, `server::radar`,
@@ -500,6 +576,22 @@ pub fn build_native_host_app(
     // Crate-side `plog!` filtering, separate from boot's bevy `LogPlugin`.
     app.insert_resource(cfg.log.clone())
         .add_plugins(LoggingPlugin);
+
+    // The `--pane` labels, BEFORE the world selection below — that is where they
+    // are checked against the hull's station ids (issue #1331), and the runtime
+    // `--lobby` load reaches the same check through the same resource on a
+    // running `World`.
+    app.insert_resource(AuthoredPaneLabels(
+        cfg.panes
+            .as_ref()
+            .map(|p| {
+                p.opened
+                    .iter()
+                    .map(|pane| pane.identity.name().to_string())
+                    .collect()
+            })
+            .unwrap_or_default(),
+    ));
 
     // The world half — everything below is skipped for a world-less host, which
     // does it at runtime instead. `install_world_selection` is the shared body:
@@ -791,4 +883,56 @@ fn solo_auto_start(
 /// binary's `main` does.
 pub fn run(mut app: App) {
     app.run();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::messages::StationId;
+
+    fn stations(ids: &[&str]) -> Vec<StationId> {
+        ids.iter().map(|id| StationId(id.to_string())).collect()
+    }
+
+    #[test]
+    fn a_pane_named_for_a_station_on_this_hull_is_refused_at_the_prompt() {
+        // Issue #1331 opened a collision that could not exist before it: the
+        // lobby's screen rows open a station's console under the STATION ID as
+        // its pane name, and `PaneBus::open_pane_for_name` resolves by exactly
+        // that name. So a hand-authored `--pane helm` on a hull with a `helm`
+        // station is two participants under one key — and the screen row's off
+        // button, resolving "helm", would close the person's console instead of
+        // the station's.
+        let shadowed = pane_labels_shadowing_stations(
+            &["Ada".to_string(), "helm".to_string()],
+            &stations(&["helm", "weapons"]),
+        );
+        assert_eq!(shadowed, vec!["helm".to_string()], "only the collision");
+
+        // And it is REFUSED, in a sentence that says what to do instead — a
+        // warning would leave the operator's own console to be closed by
+        // somebody pressing a button about a station.
+        let refusal = NativeHostError::PaneShadowsStation(shadowed).to_string();
+        assert!(refusal.contains("\"helm\""), "{refusal}");
+        assert!(refusal.contains("one namespace"), "{refusal}");
+        assert!(refusal.contains("--pane helm-crew"), "{refusal}");
+    }
+
+    #[test]
+    fn a_pane_that_names_nobody_on_the_roster_is_left_alone() {
+        // The ordinary `--pane <NAME>` this must not disturb: a crew member's
+        // own name, on a hull whose stations are named for jobs. It is also
+        // exact and case-sensitive, because `open_pane_for_name` is — a guard
+        // that judged by a looser rule than the lookup it protects would refuse
+        // a name the lookup never confuses.
+        assert!(pane_labels_shadowing_stations(
+            &["Ada".to_string(), "Grace".to_string()],
+            &stations(&["helm", "weapons"]),
+        )
+        .is_empty());
+        assert!(
+            pane_labels_shadowing_stations(&["Helm".to_string()], &stations(&["helm"]),).is_empty()
+        );
+        assert!(pane_labels_shadowing_stations(&[], &stations(&["helm"])).is_empty());
+    }
 }

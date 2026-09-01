@@ -46,8 +46,9 @@ export function hostLobbyViewModel(s, prevPhase) {
   const countdownSecs = s.countdown_secs || 0;
 
   // ── Phase transitions (loading overlay, audio, panel/QR visibility) ────
-  // Pure decisions only — starting/stopping audio and touching the shared
-  // `qrVisible` classic-script variable are side effects the glue performs.
+  // Pure decisions only — starting or stopping audio, and carrying the join
+  // panel's action out through `gui/host-qr.js`, are side effects the glue
+  // performs. Both surfaces perform them; only this file decides them.
   const showLoadingOverlay = phase === 'Loading';
   const loadingPct = (showLoadingOverlay && typeof s.loading_progress === 'number')
     ? Math.round(s.loading_progress * 100) + '%'
@@ -62,8 +63,11 @@ export function hostLobbyViewModel(s, prevPhase) {
   const menuMusic = phase === 'Lobby' ? 'start'
     : (phase === 'InProgress' || phase === 'Loading') ? 'stop'
     : null;
-  // During InProgress the settings menus are the sole QR-overlay controllers
-  // — this transition leaves it untouched (null).
+  // During InProgress the toggles are the sole join-panel controllers — this
+  // transition leaves it untouched (null), which is what lets an operator open
+  // the code for a late arrival and have it stay open. The toggles are the host
+  // page's settings cog, a phone's ToggleQrCode, and (issue #1329) the native
+  // surface's own control.
   const qrOverlayAction = isLobby ? 'show'
     : (phase === 'Loading' || phase === 'GameOver') ? 'hide'
     : null;

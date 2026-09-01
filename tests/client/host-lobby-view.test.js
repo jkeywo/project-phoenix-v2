@@ -69,10 +69,21 @@ describe('hostLobbyViewModel — phase transitions', () => {
   });
 
   it('QR overlay: show in Lobby, hide in Loading/GameOver, untouched in InProgress', () => {
+    // The law BOTH surfaces obey since issue #1329: the native host's lobby
+    // document applies this same action through the same gui/host-qr.js the
+    // host page applies it through, so there is one answer here rather than a
+    // native opinion about when a QR is on screen.
     expect(hostLobbyViewModel(payload({ phase: 'Lobby' }), 'Lobby').transitions.qrOverlayAction).toBe('show');
     expect(hostLobbyViewModel(payload({ phase: 'Loading' }), 'Lobby').transitions.qrOverlayAction).toBe('hide');
     expect(hostLobbyViewModel(payload({ phase: 'GameOver' }), 'InProgress').transitions.qrOverlayAction).toBe('hide');
     expect(hostLobbyViewModel(payload({ phase: 'InProgress' }), 'Loading').transitions.qrOverlayAction).toBeNull();
+    // Every entry into InProgress, not only the one from Loading: a direct
+    // start never passes through it, and a `hide` here would shut the panel an
+    // operator had opened. This is the case the native surface leans on hardest
+    // — its only in-play control is behind F9, so a spurious hide is a QR the
+    // operator cannot get back without noticing it went.
+    expect(hostLobbyViewModel(payload({ phase: 'InProgress' }), 'Lobby').transitions.qrOverlayAction).toBeNull();
+    expect(hostLobbyViewModel(payload({ phase: 'InProgress' }), 'InProgress').transitions.qrOverlayAction).toBeNull();
   });
 
   it('hides the game-over overlay whenever the phase is not GameOver', () => {

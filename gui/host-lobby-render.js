@@ -17,13 +17,18 @@
  * badge, the countdown, the station-card grid, the aggregate RESERVED chip,
  * the connected-pill list, the status hint and the AI-launch button.
  *
- * It does NOT touch the host page's other surfaces: the asset-loading
- * overlay, the QR overlay and the game-over overlay are viewscreen chrome
- * that a lobby push happens to be a convenient moment to reconcile, they are
- * coupled to page-lifetime state `server.html` owns (`qrVisible`, the audio
- * graph, the fleet freeze), and the native lobby document has none of them.
- * Those stay in `server.html`'s glue, beside the audio and fleet side effects
- * that were never render at all.
+ * It does NOT touch the viewscreen's other surfaces: the asset-loading
+ * overlay, the join panel and the game-over overlay are viewscreen chrome that
+ * a lobby push happens to be a convenient moment to reconcile, and they outlive
+ * the lobby — the join panel especially, which is toggled back on mid-mission
+ * when there is no lobby panel on screen at all.
+ *
+ * The join panel got the same treatment this module did, in its own module:
+ * `gui/host-qr.js` owns its draw and its visibility, both surfaces call it, and
+ * both are handed the same `transitions.qrOverlayAction` this module's view
+ * model decides (issue #1329). What is left in `server.html`'s glue is what is
+ * genuinely that page's: the audio graph, the fleet freeze, the mesh pump, and
+ * what a click on the QR does in a desktop browser.
  *
  * Every write is guarded on the element existing, which is what lets one
  * renderer serve two documents: the native lobby document carries the panel

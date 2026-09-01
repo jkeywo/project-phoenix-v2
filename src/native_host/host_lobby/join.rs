@@ -76,14 +76,28 @@ pub enum JoinInvite {
         /// service's URL is deliberately ONE literal (a deploy-time sweep can
         /// only find a literal), which is in that module.
         ///
-        /// **A non-default service and a LAN phone do not combine**, and that is
-        /// #1112's decision rather than this one's: the `?rendezvous=` override
-        /// the URL then carries is honoured only for a LOOPBACK page origin, so
-        /// a phone opening `http://192.168.…/client/…?rendezvous=…` ignores it
-        /// and dials the built-in service. A host on a local `wrangler dev` is
-        /// therefore reachable by the machine it runs on and by nothing else,
-        /// with or without this QR. Nothing here papers over that; the code is
-        /// carried honestly and the constraint lives where the gate does.
+        /// **A non-default service and a LAN phone do not combine**, and that
+        /// is #1112's decision rather than this one's. The gate reads the
+        /// PARAMETER's own host, not the page's origin
+        /// (`rendezvousBaseFromLocation` in `gui/rendezvous-transport.js`), so
+        /// it splits into two cases and only one of them looks like a failure:
+        ///
+        /// * a **loopback value** — `http://127.0.0.1:8788`, a `wrangler dev` —
+        ///   IS honoured, from any page, including one served over the LAN. It
+        ///   then resolves on the *phone*, where nothing is listening. Such a
+        ///   host is reachable from the machine it runs on and from nowhere
+        ///   else, with or without this QR.
+        /// * a **non-loopback value** — a deployed worker, a staging URL — is
+        ///   silently replaced with the client bundle's built-in service
+        ///   ([`CLIENT_DEFAULT_RENDEZVOUS`]). The phone joins *something*; just
+        ///   not the service the host that printed the code registered with,
+        ///   and nothing on the wall says so.
+        ///
+        /// Nothing here papers over either: the code is carried honestly, the
+        /// gate stays where it is, and [`phone_rendezvous`] is what lets
+        /// `phoenix-host` say at the prompt which of the two an operator has
+        /// walked into. Changing the gate is a security-posture call that
+        /// belongs to #1112 and to a follow-up issue, not to this module.
         rendezvous: Option<String>,
     },
 }
@@ -152,6 +166,202 @@ pub fn shareable_host_addr(bound: &str, discovered: Option<IpAddr>) -> String {
     }
 }
 
+/// What a phone in the room can do with the address the QR names.
+///
+/// `discover_lan_addr` answers "which interface would this machine route out
+/// of", and on a laptop that is not always an interface the room is on: a VPN
+/// (Tailscale hands out `100.64.0.0/10`), a network with no DHCP server
+/// (`169.254.0.0/16`), or a machine with a public address on the default route
+/// all produce a QR that is perfectly well-formed and unreachable from every
+/// phone standing in front of it. Loopback was the only one `phoenix-host`
+/// warned about; the rest looked exactly like success.
+///
+/// Only [`JoinAddrReach::Lan`] means "a phone on the room's Wi-Fi can open
+/// this". Everything else has [`JoinAddrReach::unreachable_reason`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JoinAddrReach {
+    /// A private address (RFC 1918, or an IPv6 unique-local `fc00::/7`) — or a
+    /// name, which is the operator's own answer and not this module's to
+    /// second-guess. The ordinary, working case.
+    Lan,
+    /// `127.0.0.0/8` or `::1`: opens on this machine and nowhere else. What a
+    /// `--addr 127.0.0.1` bind asks for, and where a machine with no route
+    /// falls back to.
+    Loopback,
+    /// `100.64.0.0/10`. Carrier-grade NAT by RFC 6598, and in a room almost
+    /// always a VPN interface — Tailscale's `100.x` is the common one — which
+    /// the default route prefers precisely because it is a tunnel.
+    CarrierGrade,
+    /// `169.254.0.0/16` or `fe80::/10`: link-local, which means nothing
+    /// answered DHCP. There is a network, and it is one nobody else is on.
+    LinkLocal,
+    /// Routable and not private: a public address, or some other interface a
+    /// phone on the room's Wi-Fi has no path to.
+    NotPrivate,
+}
+
+impl JoinAddrReach {
+    /// Why no phone in the room can open this address, or `None` if one can.
+    ///
+    /// The words rather than the format string, so the reason is unit-testable
+    /// here and the recourse sentence is written once, at the prompt that adds
+    /// it (`src/bin/phoenix_host.rs`). Operator text, not player text.
+    pub fn unreachable_reason(self) -> Option<&'static str> {
+        match self {
+            JoinAddrReach::Lan => None,
+            JoinAddrReach::Loopback => {
+                Some("which is a loopback address, so no phone can open it.")
+            }
+            JoinAddrReach::CarrierGrade => Some(
+                "which is a carrier-grade NAT address (100.64.0.0/10) — usually a VPN interface \
+                 such as Tailscale — so a phone on the room's Wi-Fi has no path to it.",
+            ),
+            JoinAddrReach::LinkLocal => Some(
+                "which is a link-local address (169.254.0.0/16 or fe80::/10), so nothing answered \
+                 DHCP and no phone in the room is on that network.",
+            ),
+            JoinAddrReach::NotPrivate => Some(
+                "which is not a private LAN address, so it is probably an interface the phones in \
+                 the room are not on.",
+            ),
+        }
+    }
+}
+
+/// Classify the base URL the QR is built from — see [`JoinAddrReach`].
+///
+/// Takes the *join base* rather than an `IpAddr` because that is what the
+/// binary is holding by the time it can warn (`LocalHostLobby::join_base`), and
+/// because the string is where a bracketed IPv6 authority has to be undone.
+/// A base whose host is not an IP literal is [`JoinAddrReach::Lan`]: an
+/// operator who bound a name has answered this question themselves.
+pub fn join_addr_reach(join_base: &str) -> JoinAddrReach {
+    let Some(host) = url_host(join_base) else {
+        return JoinAddrReach::Lan;
+    };
+    let Ok(ip) = host.trim_start_matches('[').trim_end_matches(']').parse() else {
+        return JoinAddrReach::Lan;
+    };
+    ip_reach(ip)
+}
+
+/// The classification itself, over a parsed address.
+///
+/// Written out rather than leaning on `std`, because the two ranges that matter
+/// most here are the two `std` will not answer for on stable: `Ipv4Addr::is_shared`
+/// (100.64/10) and `Ipv6Addr::is_unique_local` are both unstable.
+fn ip_reach(ip: IpAddr) -> JoinAddrReach {
+    match ip {
+        IpAddr::V4(v4) => {
+            let [a, b, ..] = v4.octets();
+            if v4.is_loopback() {
+                JoinAddrReach::Loopback
+            } else if v4.is_link_local() {
+                JoinAddrReach::LinkLocal
+            } else if a == 100 && (64..=127).contains(&b) {
+                JoinAddrReach::CarrierGrade
+            } else if v4.is_private() {
+                JoinAddrReach::Lan
+            } else {
+                JoinAddrReach::NotPrivate
+            }
+        }
+        IpAddr::V6(v6) => {
+            let head = v6.segments()[0];
+            if v6.is_loopback() {
+                JoinAddrReach::Loopback
+            } else if head & 0xffc0 == 0xfe80 {
+                JoinAddrReach::LinkLocal
+            } else if head & 0xfe00 == 0xfc00 {
+                JoinAddrReach::Lan
+            } else {
+                JoinAddrReach::NotPrivate
+            }
+        }
+    }
+}
+
+/// The rendezvous service a client page dials when its URL names none.
+///
+/// A **mirror** of `DEV_RENDEZVOUS_URL` in `gui/join-url.js`, and deliberately
+/// not a second source of truth: that module owns the literal, because a
+/// deploy-time sweep can only find a literal and it rewrites `dist/` rather
+/// than this checkout. The mirror exists for one reason — Rust cannot otherwise
+/// tell an operator whether the `--rendezvous` they passed is one the phones
+/// will honour — and `the_built_in_service_is_the_one_the_client_bundle_dials`
+/// below reads the JS off disk, so the two cannot drift without failing here.
+pub const CLIENT_DEFAULT_RENDEZVOUS: &str =
+    "https://phoenix-rendezvous.project-phoenix.workers.dev";
+
+/// What a scanning phone actually does with the `?rendezvous=` a QR carries.
+///
+/// See [`JoinInvite`]'s `rendezvous` field for the gate this reads off. Three
+/// outcomes, and the operator can act on only the third — which is the one
+/// with nothing on screen to show for it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PhoneRendezvous {
+    /// The phone lands on the service this host registered with. Either
+    /// `gui/join-url.js` put no override in the URL (the exact default), or it
+    /// put one in that the gate discards in favour of the same service (the
+    /// default spelled with a trailing slash). Both end in the right place.
+    BuiltIn,
+    /// A loopback service. The override IS honoured — the gate reads the
+    /// value's host, not the page's — and resolves on the phone, where nothing
+    /// is listening. A dev lever behaving exactly as documented.
+    HonouredLoopback,
+    /// Non-default and non-loopback: the override rides in the URL and the
+    /// phone silently swaps it for [`CLIENT_DEFAULT_RENDEZVOUS`]. Every phone
+    /// scanning the wall dials a service this host never registered with.
+    SilentlyIgnored,
+}
+
+/// Classify a `--rendezvous` value — see [`PhoneRendezvous`].
+///
+/// A value that is not an `http(s)` URL is [`PhoneRendezvous::SilentlyIgnored`]
+/// for the same reason a public one is: the client's gate falls back to the
+/// built-in service for anything it cannot parse, so the phone ends up
+/// somewhere other than where the host is. (Such a host does not usually get
+/// this far — `relay_socket::host_socket_url` refuses it at the prompt — but
+/// this classifies the value, not the process.)
+pub fn phone_rendezvous(rendezvous: &str) -> PhoneRendezvous {
+    let value = rendezvous.trim();
+    if value.trim_end_matches('/') == CLIENT_DEFAULT_RENDEZVOUS.trim_end_matches('/') {
+        return PhoneRendezvous::BuiltIn;
+    }
+    let scheme_ok = value.starts_with("http://") || value.starts_with("https://");
+    match url_host(value) {
+        Some(host) if scheme_ok && is_loopback_host(host) => PhoneRendezvous::HonouredLoopback,
+        _ => PhoneRendezvous::SilentlyIgnored,
+    }
+}
+
+/// The hostnames `isLoopbackHost` in `gui/rendezvous-transport.js` accepts.
+///
+/// Mirrored spelling for spelling, brackets included: `new URL('http://[::1]')`
+/// keeps them in `hostname`, so both forms are listed there and both here.
+fn is_loopback_host(host: &str) -> bool {
+    let h = host.to_ascii_lowercase();
+    h == "localhost" || h == "127.0.0.1" || h == "[::1]" || h == "::1" || h.ends_with(".localhost")
+}
+
+/// The host of a `scheme://host[:port]/…` URL, port and brackets kept.
+///
+/// Enough of a URL parser for the two questions above and no more — this crate
+/// has no `url` dependency, and `relay_socket::host_socket_url` splits on
+/// `://` for the same reason.
+fn url_host(url: &str) -> Option<&str> {
+    let rest = url.trim().split_once("://")?.1;
+    let authority = rest.split(['/', '?', '#']).next()?;
+    let authority = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    // A bracketed IPv6 authority's colons are part of the address; only the
+    // port after the closing bracket may be stripped.
+    let host = match authority.rsplit_once(']') {
+        Some((head, _)) => &authority[..head.len() + 1],
+        None => authority.rsplit_once(':').map_or(authority, |(h, _)| h),
+    };
+    (!host.is_empty()).then_some(host)
+}
+
 /// Which of this machine's addresses a phone on the LAN could reach it at.
 ///
 /// The standard trick, and worth spelling out because it looks like it does
@@ -170,6 +380,18 @@ pub fn shareable_host_addr(bound: &str, discovered: Option<IpAddr>) -> String {
 /// `203.0.113.1` is TEST-NET-3 (RFC 5737), reserved for documentation and
 /// routable to nobody — chosen over a real public resolver precisely so that
 /// nothing here can be mistaken for, or turn into, a call home.
+///
+/// # Two edges, both deliberate, both reported rather than solved
+///
+/// * **The probe is IPv4-only.** It binds `0.0.0.0:0`, so it can only ever name
+///   an IPv4 interface. A host bound to `[::]` therefore gets an IPv4 answer
+///   for a v6 listener — usually right, because such a bind is dual-stack, but
+///   not on a platform where `IPV6_V6ONLY` defaults on — and a host with only
+///   IPv6 routes gets `None` and falls back to `[::1]`.
+/// * **The default route is not always the room.** A VPN, a link-local
+///   interface or a public address answers here exactly as a LAN address does.
+///   [`join_addr_reach`] classifies what came back and `phoenix-host` says so
+///   at the prompt, with `--addr` as the recourse in every case.
 pub fn discover_lan_addr() -> Option<IpAddr> {
     let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.connect("203.0.113.1:9").ok()?;
@@ -288,6 +510,115 @@ mod tests {
     #[test]
     fn a_host_nobody_can_join_says_so_rather_than_offering_an_empty_code() {
         assert_eq!(JoinInvite::Off.to_json(), r#"{"kind":"off"}"#);
+    }
+
+    #[test]
+    fn only_a_private_address_is_one_a_phone_in_the_room_can_open() {
+        // The classification the boot warning branches on. Before this, only
+        // loopback was warned about — a Tailscale `100.x`, an address from a
+        // network with no DHCP, or a public interface on the default route all
+        // produced a QR that looked exactly like success and could not be
+        // scanned by anybody standing in front of it.
+        for lan in [
+            "http://192.168.1.5:8080/",
+            "http://10.0.0.9:8080/",
+            "http://172.16.4.4:8080/",
+            "http://[fd00::5]:8080/",
+        ] {
+            assert_eq!(join_addr_reach(lan), JoinAddrReach::Lan, "{lan}");
+            assert_eq!(join_addr_reach(lan).unreachable_reason(), None, "{lan}");
+        }
+        for (base, expected) in [
+            ("http://127.0.0.1:8080/", JoinAddrReach::Loopback),
+            ("http://[::1]:8080/", JoinAddrReach::Loopback),
+            ("http://100.101.102.103:8080/", JoinAddrReach::CarrierGrade),
+            ("http://100.64.0.1:8080/", JoinAddrReach::CarrierGrade),
+            ("http://169.254.13.9:8080/", JoinAddrReach::LinkLocal),
+            ("http://[fe80::1]:8080/", JoinAddrReach::LinkLocal),
+            ("http://203.0.113.7:8080/", JoinAddrReach::NotPrivate),
+            ("http://[2001:db8::1]:8080/", JoinAddrReach::NotPrivate),
+        ] {
+            assert_eq!(join_addr_reach(base), expected, "{base}");
+            assert!(
+                join_addr_reach(base).unreachable_reason().is_some(),
+                "{base} must be warned about at the prompt"
+            );
+        }
+        // 100.128.x is OUTSIDE 100.64/10 and is ordinary public space; a /10
+        // read as a /8 would have swallowed it.
+        assert_eq!(
+            join_addr_reach("http://100.128.0.1:8080/"),
+            JoinAddrReach::NotPrivate
+        );
+        // A name is the operator's own answer to "which interface", and this
+        // module does not second-guess one it cannot classify.
+        assert_eq!(
+            join_addr_reach("http://host.local:8080/"),
+            JoinAddrReach::Lan
+        );
+        assert_eq!(join_addr_reach("not a url"), JoinAddrReach::Lan);
+    }
+
+    #[test]
+    fn a_deployed_service_in_the_qr_is_the_one_a_phone_silently_discards() {
+        // Issue #1329's F1. The `?rendezvous=` gate reads the PARAMETER's host,
+        // not the page's origin, so a non-loopback override rides in the QR and
+        // is swapped for the built-in service on arrival — every scanned phone
+        // dials a service this host never registered with, with nothing on the
+        // wall saying so. This is the predicate `phoenix-host` warns on.
+        assert_eq!(
+            phone_rendezvous("https://phoenix-rendezvous-demo.example.workers.dev"),
+            PhoneRendezvous::SilentlyIgnored
+        );
+        assert_eq!(
+            phone_rendezvous("https://staging.kiwigamedesign.co.uk"),
+            PhoneRendezvous::SilentlyIgnored
+        );
+        // `localhost.attacker.example` is not a loopback host, and the mirrored
+        // spelling of the client's own check is what keeps that true here.
+        assert_eq!(
+            phone_rendezvous("https://localhost.attacker.example"),
+            PhoneRendezvous::SilentlyIgnored
+        );
+
+        // …and the two the warning must stay quiet about.
+        assert_eq!(
+            phone_rendezvous(CLIENT_DEFAULT_RENDEZVOUS),
+            PhoneRendezvous::BuiltIn
+        );
+        assert_eq!(
+            phone_rendezvous(&format!("{CLIENT_DEFAULT_RENDEZVOUS}/")),
+            PhoneRendezvous::BuiltIn,
+            "a trailing slash is the same service, not a second one"
+        );
+        for dev in [
+            "http://127.0.0.1:8788",
+            "http://localhost:8787/",
+            "http://[::1]:8787",
+            "http://phoenix.localhost:8787",
+        ] {
+            assert_eq!(
+                phone_rendezvous(dev),
+                PhoneRendezvous::HonouredLoopback,
+                "{dev}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_built_in_service_is_the_one_the_client_bundle_dials() {
+        // The mirror's only justification: `gui/join-url.js` owns the literal,
+        // and this const is worth having ONLY while it says the same thing. A
+        // deploy sweep rewrites `dist/`, never this checkout, so a difference
+        // here is drift rather than a deployment.
+        let js = std::fs::read_to_string("gui/join-url.js")
+            .expect("the client's join-URL module is checked in");
+        assert!(
+            js.contains(&format!(
+                "export const DEV_RENDEZVOUS_URL = '{CLIENT_DEFAULT_RENDEZVOUS}'"
+            )),
+            "CLIENT_DEFAULT_RENDEZVOUS must mirror DEV_RENDEZVOUS_URL in gui/join-url.js"
+        );
     }
 
     #[test]

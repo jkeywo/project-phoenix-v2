@@ -91,7 +91,10 @@ use crate::native_host::panes::PaneId;
 
 pub use bridge::{pump_host_lobby, HostLobbyBridge, HostLobbyPumpReport};
 pub use document::{build_host_lobby_document, HostLobbyDocumentError};
-pub use join::JoinInvite;
+pub use join::{
+    join_addr_reach, phone_rendezvous, JoinAddrReach, JoinInvite, PhoneRendezvous,
+    CLIENT_DEFAULT_RENDEZVOUS,
+};
 pub use reveal::{RevealState, SurfacePresence};
 
 /// The host key that reveals and hides the lobby surface during play.

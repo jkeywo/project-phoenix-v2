@@ -751,6 +751,49 @@ mod tests {
         assert!(!html.contains("id=\"canvas\""));
         assert!(!html.contains("id=\"fleet-panel\""));
         assert!(!html.contains("<button"));
+
+        // Nothing in either borrowed subtree reaches the internet. This is the
+        // half `the_encoder_is_the_local_copy_because_a_bridge_has_no_internet`
+        // cannot hold: that one runs against the stub above, which has no CDN
+        // link in it to find, so it proves the assembly rather than the page. A
+        // bridge machine is not assumed to have a network, so a `<script>`, an
+        // `<img>` or a webfont added inside #lobby-panel or #qr-panel would
+        // arrive here silently and be a lobby that could show a crew everything
+        // except how to join. Scoped to the subtrees, because this document's
+        // own head is written above and asserted for elsewhere.
+        for (marker, missing, unbalanced) in [
+            (
+                LOBBY_PANEL_MARKER,
+                HostLobbyDocumentError::NoLobbyPanel,
+                HostLobbyDocumentError::UnbalancedLobbyPanel,
+            ),
+            (
+                JOIN_PANEL_MARKER,
+                HostLobbyDocumentError::NoJoinPanel,
+                HostLobbyDocumentError::UnbalancedJoinPanel,
+            ),
+        ] {
+            let subtree = extract_element(&page, marker, missing, unbalanced).unwrap();
+            assert!(
+                !subtree.contains("https://"),
+                "{marker} carries an off-machine URL, which a native host cannot fetch"
+            );
+            assert!(!subtree.contains("http://"));
+        }
+    }
+
+    #[test]
+    fn a_join_panel_that_never_closes_is_refused_by_its_own_name() {
+        // The lobby's twin, and it needs its own case: both unbalanced errors
+        // exist so an operator is told WHICH panel of the bundle is malformed,
+        // and an error variant nothing constructs in a test is a name that can
+        // quietly stop being reachable.
+        let unbalanced = "<body><div id=\"lobby-panel\">x</div>\
+                          <div id=\"qr-panel\"><div class=\"y\"></div></body>";
+        assert_eq!(
+            build_host_lobby_document(unbalanced),
+            Err(HostLobbyDocumentError::UnbalancedJoinPanel)
+        );
     }
 
     #[test]

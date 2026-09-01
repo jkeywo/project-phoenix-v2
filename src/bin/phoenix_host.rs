@@ -509,14 +509,39 @@ fn main() {
                 "phoenix-host: the join QR is on the viewscreen, pointing phones at {}",
                 lobby.join_base
             );
-            if lobby.join_base.contains("127.0.0.1") || lobby.join_base.contains("[::1]") {
-                // Loopback is what a bind of `127.0.0.1` asks for, and what a
-                // machine with no route falls back to. Either way the QR on the
-                // wall opens on this machine and nowhere else, which is worth
-                // saying at the prompt rather than discovering with a phone.
+            // Everything the QR can be wrong about, said here rather than
+            // discovered with a phone in front of a wall. Both checks are pure
+            // and classified in `host_lobby::join`; this is only the wording.
+            //
+            // WHERE it points: loopback is what a `--addr 127.0.0.1` bind asks
+            // for and where a machine with no route falls back to, but the
+            // default route can equally hand back a VPN address, a link-local
+            // one, or a public one — all of which look like success and none of
+            // which a phone in the room can open.
+            if let Some(reason) =
+                native_host::host_lobby::join_addr_reach(&lobby.join_base).unreachable_reason()
+            {
                 eprintln!(
-                    "phoenix-host: …which is a loopback address, so no phone can open it. Bind \
-                     the LAN address explicitly with --addr <ip>:<port> if this machine has one."
+                    "phoenix-host: …{reason} Bind the LAN address explicitly with \
+                     --addr <ip>:<port> if this machine has one."
+                );
+            }
+            // WHICH SERVICE it names: the client's `?rendezvous=` gate reads the
+            // parameter's own host, so a non-loopback override is swapped for
+            // the built-in service on arrival. The QR still scans, the phone
+            // still joins something, and it is not this host. Saying so is all
+            // this slice does — the gate itself is #1112's security posture and
+            // a follow-up issue's to revisit.
+            if sim.rendezvous.as_deref().is_some_and(|base| {
+                native_host::host_lobby::phone_rendezvous(base)
+                    == native_host::host_lobby::PhoneRendezvous::SilentlyIgnored
+            }) {
+                eprintln!(
+                    "phoenix-host: …but a scanning phone will IGNORE the --rendezvous service in \
+                     that QR and dial the client bundle's built-in one ({}) instead, so it will \
+                     not find this host. Use the built-in service, or reach this host from a \
+                     browser on this machine. A follow-up issue tracks the gate itself.",
+                    native_host::host_lobby::CLIENT_DEFAULT_RENDEZVOUS
                 );
             }
         }

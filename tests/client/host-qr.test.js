@@ -199,10 +199,16 @@ describe('where a native host QR sends a phone', () => {
   // join URL a phone needs. The physical scan belongs to the #1335 kit; this is
   // the half a test can hold.
   //
-  // `page_base` comes from `native_host::host_lobby::join`, which pins the same
-  // literal in `an_invitation_carries_the_letters_the_code_and_where_to_go` —
-  // and the URL is built by the very function the browser host builds its own
-  // from, so "the native QR points somewhere else" is not a shape this can take.
+  // What the boundary actually is, so this is not read as more than it is:
+  // Rust supplies only `page_base` (`native_host::host_lobby::join` decides
+  // which address a phone is sent to, and tests that decision on its own side);
+  // gui/join-url.js is the SOLE builder of the URL, for this host and the
+  // browser one alike. So the value below is a stand-in for what crosses, not a
+  // cross-boundary pin — the real end-to-end proof is the ignored SDK test
+  // (tests/native_host_lobby_ultralight.rs), which drives the whole chain
+  // against a real window. What this block does hold is the half that matters
+  // most and needs no GPU: given a page base, the URL is the client page beside
+  // the host bundle, and the QR and the printed text carry one value.
   const PAGE_BASE = 'http://192.168.1.5:8080/';
 
   it('is the client page beside the host bundle, with the code in the fragment', () => {
@@ -263,5 +269,13 @@ describe('server.html still reaches the draw (issue #1329 AC5)', () => {
     // The `qrVisible` flag four handlers used to keep in step. The state is
     // #overlay, and gui/host-qr.js is the only thing that reads or writes it.
     expect(SERVER_HTML).not.toMatch(/^\s*let qrVisible/m);
+    // …and the settings cog's two entry points really do land on the module
+    // rather than on a flag of their own. This is the seam the deleted flag
+    // used to sit behind: `__hostToggleQrCode` set `display` and flipped
+    // `qrVisible`, and mission start set `display` WITHOUT flipping it, so the
+    // first cog press after a launch was a no-op the operator had to press
+    // twice. Reading the DOM is what makes that unrepresentable.
+    expect(SERVER_HTML).toMatch(/__hostToggleQrCode[\s\S]{0,120}?hostQr\.toggleQr\(/);
+    expect(SERVER_HTML).toMatch(/__hostIsQrVisible[\s\S]{0,120}?hostQr\.isQrVisible\(/);
   });
 });

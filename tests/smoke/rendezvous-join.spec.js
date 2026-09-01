@@ -51,8 +51,15 @@ test('the host shows five letters a guest can read across the room', async ({ co
   expect(code).toMatch(/^[A-Z]{5}$/);
   // The link the QR encodes carries the whole structured identifier, so a
   // camera scan and a typed suffix are the same join by two routes.
-  expect(await joinLinkOn(host)).toContain(`#`);
-  expect((await joinLinkOn(host)).split('#')[1]).toMatch(new RegExp(`_${code}$`));
+  const link = await joinLinkOn(host);
+  expect(link).toContain(`#`);
+  expect(link.split('#')[1]).toMatch(new RegExp(`_${code}$`));
+  // …and the draw was actually REACHED, with that URL. The stub encoder in
+  // fixtures.js records every draw it is asked for, so this pins the pixels a
+  // phone points a camera at to the link the page prints beneath them — issue
+  // #1329's AC5, where the draw used to sit in a PeerJS callback #1112 deleted
+  // and nothing since had checked its replacement was on the boot path.
+  expect(await host.evaluate(() => window.__qrDraws)).toContain(link);
 });
 
 test('typing the five letters reaches Welcome over a direct channel', async ({ context }) => {

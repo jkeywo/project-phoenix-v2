@@ -126,8 +126,14 @@
   text-transform: uppercase; color: var(--ink);
   cursor: pointer; user-select: none;
 }
-/* #1128's bar: a visible focus ring, from the shared token, on a surface a
-   keyboard can reach. */
+/* #1128's bar: a visible focus ring, from the shared tokens, on a surface a
+   keyboard can reach. The trio and not a literal - gui/tokens.css defines
+   --focus-ring / --focus-ring-width / --focus-ring-offset, and
+   gui/accessibility-profile.js swaps the colour for a data-contrast="more"
+   reader. A hard-coded outline here would not follow that swap, which is
+   exactly the drift the vocabulary exists to end. Same pattern as the shared
+   control family, gui/components/ph-console-styles.js. */
 #host-lobby-qr-toggle:focus-visible {
-  outline: 2px solid var(--cyan-bright); outline-offset: 2px;
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }

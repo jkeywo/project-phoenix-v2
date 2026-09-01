@@ -263,14 +263,21 @@ impl FocusRing {
     /// An empty order focuses nothing.
     ///
     /// The host-lobby surface (issue #1325) is in the order but is **never
-    /// seeded**: it is not a pane, and it carries no typeable control, so
-    /// framing it in the reticle would advertise a keyboard target that accepts
-    /// nothing — which is precisely the blank promise the seeding exists to
-    /// avoid. On `phoenix-host --client-dir dist --world <w>` with no `--pane`
-    /// the surface is the only entry, and the honest initial state there is *no*
-    /// focus and no reticle. It stays in the order, so a deliberate Ctrl+Tab
-    /// still reaches it (acceptance criterion 5's keyboard operability), and the
-    /// seeding returns on its own once a later slice puts a control on it.
+    /// seeded**: it is not a pane, and framing it in the reticle would advertise
+    /// a keyboard target for the first keystroke when the surface has nothing to
+    /// type into — precisely the blank promise the seeding exists to avoid. On
+    /// `phoenix-host --client-dir dist --world <w>` with no `--pane` the surface
+    /// is the only entry, and the honest initial state there is *no* focus and
+    /// no reticle. It stays in the order, so a deliberate Ctrl+Tab still reaches
+    /// it (acceptance criterion 5's keyboard operability).
+    ///
+    /// Issue #1329 then put a control on that surface — the QR toggle — and the
+    /// seeding **deliberately still skips it**. The decision is made, not
+    /// pending: one activatable control is not a reason to open a host with a
+    /// whole-primary-window focus frame around its chrome, and Ctrl+Tab reaches
+    /// the toggle in one keystroke from a state that promises nothing. A future
+    /// slice that gives the surface a typing target — a field, a picker — is
+    /// what would reopen this, not the next button.
     pub fn focused_on_first_pane(order: Vec<PaneId>) -> Self {
         let focused = order
             .iter()

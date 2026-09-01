@@ -131,6 +131,16 @@ fn select(app: &mut App, token: &str, scenario_id: &str, template_path: &str) {
 /// several entities that share one template. Neither moves in `GamePhase::Lobby`
 /// — the simulation sets are gated on `InProgress` — so it is a stable key on
 /// both hosts.
+///
+/// Two residual blind spots, stated rather than papered over. Two entities that
+/// are BOTH anonymous (no `EntityId`, no `EntityName`) and at IDENTICAL
+/// coordinates collapse onto one `<unnamed>@x,y,z` key, so a swap confined to
+/// that pair would not be seen — not a live gap in `combat_test`, whose
+/// anonymous spawns are stars and planets at distinct positions, but a real one
+/// in a world that authors coincident anonymous entities. And an `EntityUuid`
+/// holder with no `Transform` is excluded from this half entirely (the query
+/// requires one); named entities are covered by [`world_name_to_uuid`] below
+/// regardless of whether they carry a transform.
 fn entity_identities(app: &mut App) -> Vec<(String, String)> {
     use project_phoenix::entities::spawner::{EntityId, EntityName, EntityUuid};
     let mut rows: Vec<(String, String)> = app
@@ -458,6 +468,21 @@ fn a_load_that_fails_after_the_ingest_leaves_a_pickable_lobby() {
         &GamePhase::Lobby,
         "and the host is still in the lobby"
     );
+    // This failure point is BETWEEN the two freezes: `ingest_world` has frozen
+    // the content ledger over the refused world's file set, and
+    // `install_world_selection` refuses the hull before it re-records and
+    // freezes again. Neither of the two ingest-time failure classes below
+    // (unreadable file, malformed file) reaches a frozen ledger at all, so
+    // without this assertion the middle point is unpinned and only
+    // `a_hull_with_no_station_blocks_leaves_a_pickable_lobby` (the latest point,
+    // past BOTH freezes) covers the unwind's ledger reset.
+    assert!(
+        !project_phoenix::content_ledger::is_frozen(),
+        "a refused hull must unfreeze the ledger too — `frozen_or_live` is what \
+         `snapshot::versions` answers a fleet peer's content check with, and \
+         what a save is bound to, so a ledger left frozen over the refused \
+         world answers for a world this host does not have"
+    );
 
     // Now a hull that IS cached: the same host loads normally, which is the
     // whole point of unwinding rather than latching.
@@ -732,6 +757,124 @@ fn a_participant_picks_the_scenario_and_readies_the_mission_through_the_ordinary
     );
 }
 
+#[test]
+fn a_runtime_load_clears_the_ready_flags_the_world_less_lobby_collected() {
+    // The fourth of `handle_return_to_lobby`'s four lines, and the one with
+    // teeth. `republish_loaded_world` wipes the seats because the roster is
+    // being replaced wholesale — but `SessionManager::all_ready` does not look
+    // at seats at all: it asks only whether every connected non-spectator is
+    // ready. So a ready flag set against the pre-load fallback roster survives
+    // a seat-only wipe, and the very next `SetReady` from anyone else starts a
+    // mission with a crew holding no stations.
+    //
+    // The shipped phone client cannot reach that state today (it readies from a
+    // console it has already claimed, and a runtime load is round one), which
+    // is exactly why this is a test rather than a bug report: what is being
+    // pinned is the PARITY claim `republish_loaded_world` makes with
+    // `handle_return_to_lobby`, and parity means all four lines plus the
+    // per-player `ReadyChanged`.
+    let preload = preload();
+    let mut cfg = lobby_config();
+    cfg.solo = false;
+    let mut app = build_native_host_app(&cfg, &preload).expect("a world-less host assembles");
+
+    let handle = LoopbackHandle::default();
+    app.insert_resource(NativeTransportLink::new(handle.transport()));
+
+    const TOKEN: &str = "3f1a6c2e-0a11-4b3c-9d55-000000000756";
+    handle.send(
+        TOKEN,
+        ClientMessage::Identify {
+            token: TOKEN.to_string(),
+            name: "Ada".to_string(),
+        },
+    );
+    pump(&mut app, 8);
+
+    // The flag is set on the session directly rather than through a `SetReady`
+    // message, because the handler would ALSO start the five-second auto-start
+    // countdown and this test is about the flag outliving the load, not about
+    // that countdown. The state reached is identical either way — one bool on
+    // one `Player`.
+    app.world_mut()
+        .resource_mut::<project_phoenix::lobby::Sessions>()
+        .0
+        .set_ready(TOKEN, true);
+    let ready_before = app
+        .world()
+        .resource::<project_phoenix::lobby::Sessions>()
+        .0
+        .players()
+        .iter()
+        .find(|p| p.token == TOKEN)
+        .map(|p| p.ready);
+    assert_eq!(
+        ready_before,
+        Some(true),
+        "the participant is genuinely ready before the world lands, or this \
+         test proves nothing"
+    );
+    let _ = handle.drain_outbound(); // everything from before the pick
+
+    let (scenario_id, hull) = pick();
+    handle.send(TOKEN, ClientMessage::SelectScenario { scenario_id });
+    handle.send(
+        TOKEN,
+        ClientMessage::SelectPlayerShip {
+            template_path: hull,
+        },
+    );
+    pump(&mut app, 60);
+    assert!(
+        app.world().get_resource::<WorldConfig>().is_some(),
+        "the selection loaded the world"
+    );
+
+    assert_eq!(
+        app.world()
+            .resource::<project_phoenix::lobby::Sessions>()
+            .0
+            .players()
+            .iter()
+            .find(|p| p.token == TOKEN)
+            .map(|p| p.ready),
+        Some(false),
+        "a runtime world load must reset the ready flags with the seats — \
+         `all_ready` ignores seats, so a flag left set against the pre-load \
+         fallback roster can start a mission with a seatless crew"
+    );
+    assert!(
+        !app.world()
+            .resource::<project_phoenix::lobby::Sessions>()
+            .0
+            .all_ready(),
+        "and the host is therefore not sitting one message away from starting"
+    );
+
+    // And the clients are told, per player, exactly as `handle_return_to_lobby`
+    // tells them. The re-`Welcome` carries the cleared flag in its roster too,
+    // but `ReadyChanged` is the arm `gui/lobby-state.js` raises
+    // `REDUCER_EFFECTS.READY_CHANGED` from, which is what a console's own ready
+    // control redraws off.
+    let dispatched = handle.drain_outbound();
+    assert!(
+        dispatched.iter().any(|(_, msg, _)| matches!(
+            msg,
+            ServerMessage::ReadyChanged { token, ready: false } if token.as_str() == TOKEN
+        )),
+        "the load must broadcast `ReadyChanged {{ ready: false }}` for every \
+         player on the roster, the way `handle_return_to_lobby` does. \
+         `ReadyChanged` messages actually seen: {:?}",
+        dispatched
+            .iter()
+            .filter_map(|(_, msg, _)| match msg {
+                ServerMessage::ReadyChanged { token, ready } => Some((token.clone(), *ready)),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    );
+}
+
 /// A world-less host that has loaded its world — the state both schedules have
 /// been initialized in, which `Schedule::systems` requires.
 fn loaded_lobby_host() -> App {
@@ -811,13 +954,33 @@ fn the_runtime_spawn_pass_cannot_silently_fall_behind_the_startup_chain() {
         "these `world::server` systems run at Startup on a --world host but \
          NOT on the runtime path, so a runtime-loaded host would silently skip \
          them — add them to `RuntimeWorldLoad` in src/native_host/world_load.rs \
-         at the position `Startup`'s topological order gives them: {missing:?}"
+         at the position `Startup`'s topological order gives them: {missing:?}\n\
+         There is deliberately no boot-only escape hatch under this prefix. A \
+         `world::server` system that genuinely must not re-run on the runtime \
+         path is not exempted here by an allow-list — fail-loud is the policy, \
+         because an exemption list is a second hand-kept duplicate of the same \
+         chain and would silently absorb the next system that really does need \
+         to run. The decision gets made in `RuntimeWorldLoad` itself, in the \
+         open, with the reason written beside it"
     );
 
     // 2. The systems pinned INTO that chain from outside `world::server` —
     //    `setup_world`'s three ordering edges in `server_app::registration`, and
     //    the three hull-reading tail systems. The prefix test above cannot see
     //    them, so they are named.
+    //
+    //    THIS LIST IS THE GUARD'S RESIDUAL, and it is honest about it: unlike
+    //    check 1 (a module prefix, so nothing to keep up to date) this is a
+    //    hand-kept list of four names, merely displaced from `world_load.rs`
+    //    into a test. A NEW `Startup` system added outside `world::server` and
+    //    ordered into the world chain slips all three checks here — check 1
+    //    filters it out by prefix, this list does not name it, and check 3 only
+    //    looks for runtime-only systems, which it is the opposite of. What the
+    //    three checks together DO cover is the failure that has actually
+    //    happened: `world::server` growing a system the runtime pass never
+    //    learned about. Closing the residual properly needs the registration
+    //    itself to name its members, which is `world_load.rs`'s to give, not a
+    //    test's to infer.
     for pinned in [
         "::setup_world",
         "::update_session_with_config",
@@ -879,6 +1042,23 @@ fn catalog_plus(id: &str, world: &str, ships: &[String]) -> ScenarioCatalog {
 /// The shared body of the failure-class tests below: what every one of them
 /// claims is the same claim — a refused world leaves a clean lobby, not a host
 /// wedged holding half a world.
+///
+/// **Read the three callers as one graded set, not three independent tests.**
+/// Only the last of them exercises the whole of `unwind_failed_load`:
+///
+///  * `a_world_file_that_cannot_be_read…` and `a_malformed_world_file…` are two
+///    different ERROR CLASSES arriving at the SAME call site and the same point
+///    in `boot::ingest_world` — after its ledger reset, before its freeze. So
+///    neither of them can fail if the unwind's `content_ledger::reset` is
+///    deleted: at that point there is nothing frozen and nothing inserted. They
+///    are kept as a pair anyway because they pin the two *refusal* shapes a
+///    participant can provoke from the catalogue, and a regression that turned
+///    one into a panic rather than a refusal would show up in exactly one of
+///    them. They do not pin the unwind.
+///  * The unwind's ledger reset is pinned at the two later points instead:
+///    between the freezes by `a_load_that_fails_after_the_ingest_leaves_a_
+///    pickable_lobby`, and past both by
+///    `a_hull_with_no_station_blocks_leaves_a_pickable_lobby`.
 fn a_refused_pick_then_a_good_one(app: &mut App, bad_id: &str, bad_hull: &str) {
     select(app, "phone-1", bad_id, bad_hull);
     pump(app, 30);
@@ -1017,6 +1197,9 @@ fn an_explicit_hull_outranks_the_lobbys_pick() {
     cfg.solo = true;
     cfg.ship_path = Some(pinned.clone());
     let mut app = build_native_host_app(&cfg, &preload).expect("a world-less host assembles");
+
+    let handle = LoopbackHandle::default();
+    app.insert_resource(NativeTransportLink::new(handle.transport()));
     pump(&mut app, 4);
     select(&mut app, "phone-1", &entry.id, &picked);
     pump(&mut app, 60);
@@ -1027,6 +1210,30 @@ fn an_explicit_hull_outranks_the_lobbys_pick() {
             .0,
         project_phoenix::entities::include_resolve::canonical_template_path(&pinned),
         "--ship outranks the arbitrated hull"
+    );
+
+    // And the catalogue every phone folds has to SAY so. This is the one
+    // combination where the two answers differ — a pinned hull and an
+    // arbitrated one that is not it — so it is the only place the reported
+    // `locked_ship` can lie, and the lie is the exact one the field exists to
+    // prevent: the host flying `pinned` while every picker shows `picked` as
+    // the settled choice. Asserting `SelectedShipResource` alone walks straight
+    // past it, because that resource is right and only the wire is wrong.
+    let locked_ship = handle
+        .drain_outbound()
+        .into_iter()
+        .filter_map(|(_, msg, _)| match msg {
+            ServerMessage::ScenarioCatalog { locked_ship, .. } => Some(locked_ship),
+            _ => None,
+        })
+        .next_back()
+        .expect("the lobby publishes its catalogue");
+    assert_eq!(
+        locked_ship.as_deref(),
+        Some(pinned.as_str()),
+        "the broadcast catalogue must report the PINNED hull as locked — it is \
+         the hull this host is flying. Reporting the arbitrated `{picked}` \
+         instead is a picker showing a choice the host has already overruled"
     );
 }
 

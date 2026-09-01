@@ -226,6 +226,16 @@ impl Plugin for NativeWorldLoadPlugin {
                 // (`SimSet::Input` already orders itself after
                 // `LobbySystemSet`, so this pair of edges cannot cycle.)
                 .before(crate::sim_sets::SimSet::Input)
+                // And before the outbox drain, so the re-`Welcome`
+                // [`republish_loaded_world`] queues reaches the wire on the tick
+                // the world lands rather than on whichever tick the executor's
+                // ambiguity resolution happens to put the drain after. This is
+                // the same edge `server_app::registration` gives
+                // `refresh_caches_on_midgame_reconnect`, and for the same
+                // reason. It cannot cycle: `drain_lobby_outbox` orders itself
+                // only `.after(tick_countdown)`, which is *inside*
+                // `LobbySystemSet` — already upstream of this set.
+                .before(crate::lobby::server::drain_lobby_outbox)
                 .run_if(awaiting_world),
         );
     }
@@ -337,6 +347,13 @@ fn drain_scenario_selection(
 /// `pinned_ship` is `--ship`. It is reported as the locked hull because it *is*
 /// the hull this host will fly whatever a phone picks, and a picker offering a
 /// choice the host has already overruled is a lie the phone acts on.
+///
+/// Which makes the precedence load-bearing rather than cosmetic: `pinned_ship`
+/// FIRST, exactly as [`drain_scenario_selection`] resolves the hull it actually
+/// loads (`pinned_ship.or_else(|| selection.ship())`). Reported the other way
+/// round, `--lobby --ship B` with a phone picking A would fly B while telling
+/// every phone the locked hull is A — the precise lie this field exists to
+/// prevent, on the one combination where the two answers differ.
 fn catalog_message(
     catalog: &ScenarioCatalog,
     selection: &ScenarioSelection,
@@ -345,10 +362,9 @@ fn catalog_message(
     ServerMessage::ScenarioCatalog {
         scenarios: scenario_arbiter::catalog_wire(catalog),
         locked_scenario: selection.scenario().map(str::to_string),
-        locked_ship: selection
-            .ship()
+        locked_ship: pinned_ship
             .map(str::to_string)
-            .or_else(|| pinned_ship.map(str::to_string)),
+            .or_else(|| selection.ship().map(str::to_string)),
     }
 }
 
@@ -480,11 +496,28 @@ fn unwind_failed_load(world: &mut World) {
 /// The roster is being replaced wholesale, so any seat claimed against the
 /// pre-load fallback was claimed on a ship this host is not flying. That is the
 /// same situation issue #756's `handle_return_to_lobby` is in when a new round
-/// picks a new hull, and it gets the same three-line answer: drop the seats, the
-/// lobby-chosen ratings and the per-token eligibility reports, and let every
-/// client re-report against the hull that is actually loaded. No separate
-/// `StationAssigned` broadcast is needed — the `Welcome` below carries the whole
-/// cleared roster to everyone at once.
+/// picks a new hull, and it gets the same four-line answer: drop the ready
+/// flags, the seats, the lobby-chosen ratings and the per-token eligibility
+/// reports, and let every client re-report against the hull that is actually
+/// loaded.
+///
+/// The ready flags are the one of the four that is easy to leave out and the one
+/// with teeth. `SessionManager::all_ready` ignores seats entirely — it asks only
+/// whether every connected non-spectator is ready — so a ready flag set against
+/// the pre-load fallback roster survives the seat wipe and can start a mission
+/// with a crew holding no stations at all. Today the shipped phone client cannot
+/// reach that state (it readies from a console it has already claimed, and a
+/// runtime load is round one), but "cannot reach it through this client" is not
+/// the claim this function makes: it claims parity with `handle_return_to_lobby`,
+/// and parity means all four.
+///
+/// So the per-player `ReadyChanged { ready: false }` broadcasts come with them,
+/// exactly as `handle_return_to_lobby` emits them. No separate `StationAssigned`
+/// broadcast is needed and none is sent — the `Welcome` below carries the whole
+/// cleared roster, ready flags included, to everyone at once. The `ReadyChanged`
+/// pair is not carrying the state (the `Welcome` already does): it is the
+/// `REDUCER_EFFECTS.READY_CHANGED` edge `gui/lobby-state.js` raises only from
+/// that arm, which is what a console's own ready control redraws off.
 ///
 /// # Idempotence
 ///
@@ -497,14 +530,25 @@ fn unwind_failed_load(world: &mut World) {
 /// `Welcome` it produces (issue #772), and it is re-sent for this one's reason:
 /// it is built from the selected hull and the selected hull has just changed.
 fn republish_loaded_world(world: &mut World) {
-    {
+    let roster: Vec<String> = {
         let Some(mut sessions) = world.get_resource_mut::<crate::lobby::Sessions>() else {
             return;
         };
+        // Captured before the wipe, because the `ReadyChanged` broadcasts below
+        // are per player and `handle_return_to_lobby` sends one for everybody on
+        // the roster, not only for whoever happened to be ready.
+        let roster = sessions
+            .0
+            .players()
+            .iter()
+            .map(|p| p.token.clone())
+            .collect();
+        sessions.0.reset_ready();
         sessions.0.clear_all_stations();
         sessions.0.clear_all_pending_ratings();
         sessions.0.clear_all_eligibility();
-    }
+        roster
+    };
 
     // The ratings the `Welcome` reports, resolved the way
     // `handle_identify_system` resolves them: the live ship's if it has spawned,
@@ -545,6 +589,15 @@ fn republish_loaded_world(world: &mut World) {
     );
 
     let mut outbox = world.resource_mut::<LobbyOutbox>();
+    for token in roster {
+        outbox.0.push((
+            Target::All,
+            ServerMessage::ReadyChanged {
+                token,
+                ready: false,
+            },
+        ));
+    }
     outbox.0.push((Target::All, welcome));
     outbox
         .0

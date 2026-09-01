@@ -109,6 +109,12 @@ locks, so the alternative was making a scripted run wait for a
 `SelectPlayerShip` whose content cannot matter, and showing phones a picker
 offering a choice the host has already overruled.
 
+That report resolves in the **same precedence order the load does** — pinned
+first, arbitrated second. The one combination where the two answers differ is
+exactly the one the field exists for: `--lobby --ship B` with a phone picking A.
+Resolved the other way round the host flies B while telling every phone the
+locked hull is A.
+
 ### Why the runtime load is the boot load
 
 The claim rests on reuse, and the guards are tests rather than comments — all in
@@ -164,8 +170,14 @@ pick was welcomed by a host with no world, so its roster came from
 re-publishes a fresh `Welcome` (built by the one `handler::welcome_message`, plus
 the `ShipManual` that always accompanies one) to every connected participant, and
 clears the seats first because the roster is being replaced wholesale — the same
-three lines `handle_return_to_lobby` runs when issue #756's round two picks a new
-hull.
+four lines `handle_return_to_lobby` runs when issue #756's round two picks a new
+hull (ready flags, seats, pending ratings, eligibility reports), plus its
+per-player `ReadyChanged { ready: false }`. The ready flags are the easy one to
+leave out and the one with teeth: `all_ready` ignores seats entirely, so a flag
+set against the pre-load fallback survives a seat-only wipe and could start a
+mission with a seatless crew. The shipped phone client cannot reach that state
+today — it readies from a console it has already claimed — but the claim here is
+parity with `handle_return_to_lobby`, and parity means all four.
 
 The browser host gets that refresh for free and therefore never needed the code:
 its phones are welcomed by a Bevy app that does not exist until `wasm_init`, i.e.

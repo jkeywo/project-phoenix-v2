@@ -2048,3 +2048,146 @@ fn sensor_radar_alert_none_for_non_ship_target() {
         "non-ship contact has no red-alert capability → no alert field"
     );
 }
+
+// ── publish_sensor_radar_blackboard: selected-target relative velocity
+//    (issue #1339) ─────────────────────────────────────────────────────────
+
+/// Minimal app that runs only `publish_sensor_radar_blackboard`, with the
+/// scanning ship's own `ShipPhysics` set to `own_physics`. Returns the
+/// scanning ship's `Entity` so the caller can read back its blackboard and
+/// drive its `SensorRadarSelection`.
+fn velocity_publisher_app(own_physics: crate::ship::state::ShipPhysics) -> (App, Entity) {
+    let mut app = App::new();
+    crate::ai::host::register_ai_host_env(&mut app);
+    app.add_systems(Update, publish_sensor_radar_blackboard);
+    let scanner = app
+        .world_mut()
+        .spawn((
+            crate::server_app::Ship,
+            crate::server_app::ShipSystemBlackboards::default(),
+            SensorRadarSelection::default(),
+            own_physics,
+        ))
+        .id();
+    (app, scanner)
+}
+
+/// Read the `selected_target_relative_velocity` replica off a ship's
+/// sensor-radar blackboard.
+fn published_relative_velocity(app: &App, ship: Entity) -> Option<[f32; 2]> {
+    match app
+        .world()
+        .entity(ship)
+        .get::<crate::server_app::ShipSystemBlackboards>()
+        .and_then(|bbs| {
+            bbs.0
+                .get(&crate::ship::system_registry::sensor_radar_system_id())
+                .cloned()
+        }) {
+        Some(SystemBlackboard::SensorRadar(bb)) => bb.selected_target_relative_velocity,
+        _ => panic!("sensor-radar blackboard missing"),
+    }
+}
+
+#[test]
+fn sensor_radar_velocity_none_when_no_selection() {
+    let (mut app, scanner) = velocity_publisher_app(crate::ship::state::ShipPhysics::default());
+    app.update();
+    assert_eq!(
+        published_relative_velocity(&app, scanner),
+        None,
+        "no selection → no relative-velocity field"
+    );
+}
+
+#[test]
+fn sensor_radar_velocity_known_for_stationary_observer() {
+    // Scanner stationary at yaw 0; target flying forward (yaw 0, +20
+    // forward_speed) → world velocity (0, -20) (forward is -Z at yaw 0), and
+    // with a stationary observer the relative velocity equals the target's
+    // own world velocity exactly.
+    let (mut app, scanner) = velocity_publisher_app(crate::ship::state::ShipPhysics::default());
+    app.world_mut().spawn((
+        crate::server_app::Ship,
+        crate::entities::spawner::EntityUuid("target-ship".into()),
+        crate::ship::state::ShipPhysics {
+            forward_speed: 20.0,
+            ..Default::default()
+        },
+    ));
+    set_selection(&mut app, scanner, Some("target-ship"));
+    app.update();
+    assert_eq!(
+        published_relative_velocity(&app, scanner),
+        Some([0.0, -20.0]),
+        "stationary observer → relative velocity equals the target's world velocity"
+    );
+}
+
+#[test]
+fn sensor_radar_velocity_accounts_for_observers_own_motion() {
+    // Both ships flying forward at yaw 0: relative velocity is the
+    // difference of their forward speeds, not the target's raw speed —
+    // this is the check that the observer's own motion is actually
+    // subtracted, not just plumbed through as a stub.
+    let (mut app, scanner) = velocity_publisher_app(crate::ship::state::ShipPhysics {
+        forward_speed: 5.0,
+        ..Default::default()
+    });
+    app.world_mut().spawn((
+        crate::server_app::Ship,
+        crate::entities::spawner::EntityUuid("target-ship".into()),
+        crate::ship::state::ShipPhysics {
+            forward_speed: 20.0,
+            ..Default::default()
+        },
+    ));
+    set_selection(&mut app, scanner, Some("target-ship"));
+    app.update();
+    assert_eq!(
+        published_relative_velocity(&app, scanner),
+        Some([0.0, -15.0]),
+        "relative velocity subtracts the observer's own world velocity"
+    );
+}
+
+#[test]
+fn sensor_radar_velocity_none_for_non_ship_target() {
+    // An asteroid: carries a uuid but no `ShipPhysics` and no `Ship` marker →
+    // structurally velocity-ineligible, same shape as the alert boundary
+    // above — no scenario-specific branch needed to exclude it.
+    let (mut app, scanner) = velocity_publisher_app(crate::ship::state::ShipPhysics::default());
+    app.world_mut()
+        .spawn(crate::entities::spawner::EntityUuid("asteroid-9".into()));
+    set_selection(&mut app, scanner, Some("asteroid-9"));
+    app.update();
+    assert_eq!(
+        published_relative_velocity(&app, scanner),
+        None,
+        "non-ship contact carries no velocity → no relative-velocity field"
+    );
+}
+
+#[test]
+fn sensor_radar_velocity_none_when_scanner_has_no_physics() {
+    // Defensive path: a scanning ship with no `ShipPhysics` of its own (never
+    // true in production — every spawned ship carries it — but guarded here
+    // since `alert_publisher_app`'s fixture omits it) cannot report a relative
+    // velocity for anything, regardless of the target.
+    let (mut app, scanner) = alert_publisher_app();
+    app.world_mut().spawn((
+        crate::server_app::Ship,
+        crate::entities::spawner::EntityUuid("target-ship".into()),
+        crate::ship::state::ShipPhysics {
+            forward_speed: 20.0,
+            ..Default::default()
+        },
+    ));
+    set_selection(&mut app, scanner, Some("target-ship"));
+    app.update();
+    assert_eq!(
+        published_relative_velocity(&app, scanner),
+        None,
+        "scanner with no ShipPhysics of its own → no relative-velocity field"
+    );
+}

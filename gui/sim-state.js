@@ -389,6 +389,9 @@ export class ClientSimState {
         this.weaponsRadarRange = sc.tactical_radar_range ?? 300.0;
         this.helmRadarRange    = sc.helm_radar_range    ?? 500.0;
         this.sensorsRadarRange = sc.sensors_radar_range ?? 500.0;
+        // Selected-contact trajectory projection tunables (issue #1339).
+        this.sensorsProjectionHorizonSecs = sc.sensors_projection_horizon_secs ?? 60.0;
+        this.sensorsProjectionMarkerIntervalSecs = sc.sensors_projection_marker_interval_secs ?? 10.0;
         this.tacticalRadarShows   = sc.tactical_radar_shows   || [];
         this.tacticalRadarSelects = sc.tactical_radar_selects || [];
         this.sensorsRadarShows    = sc.sensors_radar_shows    || [];

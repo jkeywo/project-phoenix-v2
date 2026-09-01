@@ -81,7 +81,20 @@ describe('PhSensorRadar', () => {
       ship_heading: 90,
       config: { max_range: 5000 },
       selected_target_uuid: null,
+      target_projection: null,
     });
+  });
+
+  it('passes target_projection through to inner ph-radar (issue #1339)', () => {
+    const { el, innerRadar } = setup();
+    const projection = [{ radar_x: 0.1, radar_y: 0.2, t: 10 }];
+    el.state = {
+      blips: [],
+      scan_range: 1000,
+      ship_heading: 0,
+      target_projection: projection,
+    };
+    expect(innerRadar.state.target_projection).toEqual(projection);
   });
 
   // ── One ring, not two (PRD #1023's defect list) ────────────────────

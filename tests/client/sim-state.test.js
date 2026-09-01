@@ -454,6 +454,23 @@ describe('apply Welcome', () => {
     expect(s.repairTeams).toEqual([]); // no pre-seed during lobby
   });
 
+  it('threads the Sensors trajectory projection tunables from ship_config (issue #1339)', () => {
+    const s = new ClientSimState();
+    s.apply(welcome(null, {
+      sensors_projection_horizon_secs: 30,
+      sensors_projection_marker_interval_secs: 5,
+    }));
+    expect(s.sensorsProjectionHorizonSecs).toBe(30);
+    expect(s.sensorsProjectionMarkerIntervalSecs).toBe(5);
+  });
+
+  it('defaults the Sensors trajectory projection tunables to 60s/10s when ship_config omits them', () => {
+    const s = new ClientSimState();
+    s.apply(welcome(null, {}));
+    expect(s.sensorsProjectionHorizonSecs).toBe(60.0);
+    expect(s.sensorsProjectionMarkerIntervalSecs).toBe(10.0);
+  });
+
   it('folds the complete System and reserved-blackboard Console Family projections', () => {
     const s = new ClientSimState();
     expect(s.systemConsoleFamilies).toEqual({});

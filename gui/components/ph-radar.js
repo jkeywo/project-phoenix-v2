@@ -263,6 +263,12 @@ export class PhRadar extends PhElement {
       this.#projectedBlips.push({ uuid: b.uuid, bx, by, dotR });
     }
 
+    // Selected-target trajectory projection (issue #1339). Drawn after the
+    // blips so the marker trail isn't hidden under an icon it happens to
+    // pass behind; absent/`null` when the Science Target's velocity is
+    // unknown, so a stationary or non-ship contact draws nothing here.
+    this.#drawProjection(octx, cx, cy, R, px, state.target_projection);
+
     this.#drawLabels(octx, labels, px);
 
     if (this.#offscreen) {
@@ -429,6 +435,32 @@ export class PhRadar extends PhElement {
       if (m && Number.isFinite(m.width) && m.width > 0) return m.width;
     }
     return String(text).length * font * 0.6;
+  }
+
+  /**
+   * Selected-target trajectory projection markers (issue #1339).
+   *
+   * Small ticks along the Science Target's future relative path, fading with
+   * distance into the future so the near-term markers (where a manoeuvre
+   * decision actually gets made) read strongest. `markers` is `null`/absent
+   * whenever the target's velocity is unknown — no selection, a non-ship
+   * contact, or an unresolvable target — in which case nothing is drawn.
+   */
+  #drawProjection(ctx, cx, cy, R, px, markers) {
+    if (!markers || markers.length === 0) return;
+    const dotR = 2.5 * px;
+    ctx.save();
+    ctx.fillStyle = phColor(this, 'var(--science)');
+    markers.forEach((m, i) => {
+      const bx = cx + (m.radar_x != null ? m.radar_x : 0) * R;
+      const by = cy - (m.radar_y != null ? m.radar_y : 0) * R;
+      // Fades from ~0.85 at the nearest marker to ~0.25 at the furthest.
+      ctx.globalAlpha = Math.max(0.25, 0.85 - (i / markers.length) * 0.6);
+      ctx.beginPath();
+      ctx.arc(bx, by, dotR, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.restore();
   }
 
   #drawRing(ctx, x, y, r, lineWidth, color) {

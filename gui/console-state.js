@@ -500,6 +500,62 @@ export function buildTargetBlip(targetUuid, entities, shipX, shipZ, shipYaw, ran
 }
 
 /**
+ * Project the selected Science Target's future relative path on the Sensors
+ * radar (issue #1339).
+ *
+ * Relative velocity is already target-minus-own (world-space X/Z), so the
+ * future *relative* position at `t` seconds out is simply the current
+ * relative offset plus `relativeVelocity * t` — no re-subtraction of a future
+ * ship position is needed, and no persistent client-side simulation is
+ * introduced: each tick's snapshot re-derives the whole path from scratch,
+ * consistent with the rest of this file. Each future offset is then rotated
+ * into ship-relative radar space with the exact same transform `buildBlips`/
+ * `buildWaypointBlip`/`buildTargetBlip` use for the *current* tick, so a
+ * projection marker and a live blip agree pixel-for-pixel when time catches
+ * up to them.
+ *
+ * Returns `null` when velocity is unknown (no selection, a non-ship contact,
+ * or a stationary contact reporting `[0, 0]` still projects — a real zero
+ * relative velocity is a legitimate "holding station" projection, distinct
+ * from *unknown* velocity, which is the `null`/absent case) — satisfies
+ * "unknown velocity renders no projection".
+ *
+ * @param {number|null} targetDx   Current target X minus ship X (world space)
+ * @param {number|null} targetDz   Current target Z minus ship Z (world space)
+ * @param {[number,number]|null} relativeVelocity  World-space X/Z, target minus own
+ * @param {number} shipYaw
+ * @param {number} range           Radar scan range (normalises radar_x/radar_y)
+ * @param {number} horizonSecs     How far ahead to project, in seconds
+ * @param {number} markerIntervalSecs  Spacing between markers, in seconds
+ * @returns {Array<{radar_x:number, radar_y:number, t:number}>|null}
+ */
+export function buildTargetProjection(
+  targetDx, targetDz, relativeVelocity, shipYaw, range, horizonSecs, markerIntervalSecs
+) {
+  if (targetDx == null || targetDz == null || !relativeVelocity) return null;
+  const safeRange = Math.max(Number(range) || 0, 0.001);
+  const horizon = Number(horizonSecs) || 0;
+  const interval = Number(markerIntervalSecs) || 0;
+  if (horizon <= 0 || interval <= 0) return null;
+  const [vx, vz] = relativeVelocity;
+  if (!Number.isFinite(vx) || !Number.isFinite(vz)) return null;
+
+  const cosY = Math.cos(shipYaw || 0);
+  const sinY = Math.sin(shipYaw || 0);
+  const markers = [];
+  for (let t = interval; t <= horizon + 1e-6; t += interval) {
+    const dx = targetDx + vx * t;
+    const dz = targetDz + vz * t;
+    markers.push({
+      radar_x: (dx * cosY + dz * sinY) / safeRange,
+      radar_y: (dx * sinY - dz * cosY) / safeRange,
+      t,
+    });
+  }
+  return markers;
+}
+
+/**
  * Fold the server's torpedo-capability fact into a display badge (issue #957).
  *
  * The server decides WHO is torpedo-armed — `RadarBlip.torpedo_armed` is set
@@ -1638,12 +1694,15 @@ export function buildSensorsConsoleState(state, systemIds = []) {
   let targetClass = null, targetHullPct = null, targetHeading = null, targetSpeed = null;
   let targetThreat = null, targetShieldFreq = null, targetShields = [];
   let targetShieldFraction = null;
+  let targetDx = null, targetDz = null;
 
   if (state.sensorsTarget && entities) {
     const tgt = entities.find(a => a.uuid === state.sensorsTarget);
     if (tgt) {
       const dx   = entityX(tgt) - (state.shipX || 0);
       const dz   = entityZ(tgt) - (state.shipZ || 0);
+      targetDx = dx;
+      targetDz = dz;
       targetBearing   = (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360;
       targetRange     = Math.sqrt(dx * dx + dz * dz);
       targetName      = tgt.name      || state.sensorsTarget;
@@ -1677,6 +1736,19 @@ export function buildSensorsConsoleState(state, systemIds = []) {
   // absent field (non-ship/incapable/no selection) reads as `null` → no row.
   const sensorRadarBb = blackboardOfKind(state, 'SensorRadar', systemIds)?.data;
   const targetAlert = sensorRadarBb?.selected_target_alert ?? null;
+
+  // Selected-target trajectory projection (issue #1339). Relative velocity is
+  // authoritative, read the same way as the alert above — only from this
+  // ship's own sensor-radar blackboard, `null` for no selection/non-ship
+  // contact/unresolvable target. `null` velocity renders no projection; the
+  // authored horizon/marker spacing come from the ship's own client config
+  // (data-driven, 60s/10s parse defaults when a hull omits the TOML table).
+  const targetRelativeVelocity = sensorRadarBb?.selected_target_relative_velocity ?? null;
+  const targetProjection = buildTargetProjection(
+    targetDx, targetDz, targetRelativeVelocity, state.shipYaw || 0, range,
+    state.sensorsProjectionHorizonSecs ?? 60.0,
+    state.sensorsProjectionMarkerIntervalSecs ?? 10.0,
+  );
 
   // Shared target markers (tactical target + navigation waypoint)
   const shipX = state.shipX || 0, shipZ = state.shipZ || 0, shipYaw = state.shipYaw || 0;
@@ -1726,6 +1798,10 @@ export function buildSensorsConsoleState(state, systemIds = []) {
     target_shields:     targetShields,
     target_shield_fraction: targetShieldFraction,
     target_alert:       targetAlert,
+    // Selected-target trajectory projection (issue #1339). `null` when
+    // velocity is unknown (no selection, non-ship contact, or unresolvable
+    // target) — the client draws no projection in that case.
+    target_projection:  targetProjection,
     // The last scan reading (issue #1032) — a blackboard of its own, so it is
     // read from its own channel key rather than off the sensors one.
     scan:               scanPayload(state),

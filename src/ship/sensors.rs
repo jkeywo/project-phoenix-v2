@@ -699,6 +699,7 @@ pub fn publish_sensor_radar_blackboard(
     mut ships_q: Query<
         (
             Option<&SensorRadarSelection>,
+            Option<&crate::ship::state::ShipPhysics>,
             &mut crate::server_app::ShipSystemBlackboards,
         ),
         With<crate::server_app::Ship>,
@@ -714,8 +715,20 @@ pub fn publish_sensor_radar_blackboard(
         ),
         With<crate::server_app::Ship>,
     >,
+    // Read-only lookup of ship physics by uuid, for the relative-velocity
+    // projection (issue #1339). Only ship entities carry `ShipPhysics` — no
+    // non-ship contact (asteroid/station/planet/region) is ever velocity-
+    // eligible, so a selection naming one resolves to `None` for free, with no
+    // scenario-specific branch (same eligibility shape as `alert_q`).
+    physics_q: Query<
+        (
+            &crate::entities::spawner::EntityUuid,
+            &crate::ship::state::ShipPhysics,
+        ),
+        With<crate::server_app::Ship>,
+    >,
 ) {
-    for (sensors_target, mut bbs) in ships_q.iter_mut() {
+    for (sensors_target, own_physics, mut bbs) in ships_q.iter_mut() {
         let selected_target = sensors_target.and_then(|st| st.0.clone());
         // Resolve the selected target's authoritative Red Alert state. `Some(..)`
         // only when the selection names a Red-Alert-capable ship; `None` for no
@@ -726,14 +739,54 @@ pub fn publish_sensor_radar_blackboard(
                 .find(|(uuid, _)| uuid.0 == selected)
                 .map(|(_, red_alert)| red_alert.0)
         });
+        // Resolve the selected target's world-space relative velocity
+        // (target minus own), X/Z. `Some(..)` only when the selection names a
+        // ship this tick's publisher can resolve `ShipPhysics` for AND this
+        // ship itself has `ShipPhysics`; `None` for no selection, a non-ship
+        // contact, or (defensively) a scanning ship with no physics of its own
+        // — every production ship has `ShipPhysics`, so this only guards test
+        // fixtures that omit it (issue #1339).
+        let own_velocity = own_physics.map(|p| ship_world_velocity(p));
+        let selected_target_relative_velocity = selected_target.as_deref().and_then(|selected| {
+            let own_velocity = own_velocity?;
+            physics_q
+                .iter()
+                .find(|(uuid, _)| uuid.0 == selected)
+                .map(|(_, target_physics)| {
+                    let target_velocity = ship_world_velocity(target_physics);
+                    [
+                        target_velocity[0] - own_velocity[0],
+                        target_velocity[1] - own_velocity[1],
+                    ]
+                })
+        });
         bbs.0.insert(
             crate::ship::system_registry::sensor_radar_system_id(),
             SystemBlackboard::SensorRadar(crate::core::messages::SensorRadarBlackboard {
                 selected_target,
                 selected_target_alert,
+                selected_target_relative_velocity,
             }),
         );
     }
+}
+
+/// A ship's true world-space velocity (X/Z), combining forward and lateral
+/// motion (issue #1339).
+///
+/// At yaw 0 the ship faces `-Z`, so forward is `(sin y, -cos y)` and
+/// starboard is its right-hand perpendicular, `(cos y, sin y)` — the same
+/// convention `crate::server::pfx::ship_velocity` uses for the dust field,
+/// derived here in plain `[f32; 2]` X/Z rather than a `bevy::math::Vec3` since
+/// this module has no 3D-vector dependency otherwise. Uses `simmath` rather
+/// than `f32::sin_cos` for the same determinism reason the rest of this
+/// module's bearing math does (see the `simmath::atan2` use above).
+fn ship_world_velocity(physics: &crate::ship::state::ShipPhysics) -> [f32; 2] {
+    let sin_y = simmath::sin(physics.yaw);
+    let cos_y = simmath::cos(physics.yaw);
+    let vx = sin_y * physics.forward_speed + cos_y * physics.lateral_speed;
+    let vz = -cos_y * physics.forward_speed + sin_y * physics.lateral_speed;
+    [vx, vz]
 }
 
 /// Build a [`crate::ai::selector::SelectorCandidate`] for a detectable,

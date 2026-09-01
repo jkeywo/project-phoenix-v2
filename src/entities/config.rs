@@ -2972,6 +2972,12 @@ pub struct SensorsConsoleConfig {
     /// [`default_sensors_target_selector_config`] is synthesised at spawn.
     #[serde(default)]
     pub selector: Option<FineSystemAiSelectorToml>,
+    /// Selected-contact trajectory projection tuning (issue #1339). Loaded
+    /// from `[sensors_console.projection]`; absent ⇒ the 60s/10s defaults in
+    /// [`SensorsProjectionConfig::default`] apply, so every hull that omits
+    /// this table still gets a working projection.
+    #[serde(default)]
+    pub projection: Option<SensorsProjectionConfig>,
 }
 
 /// AI tuning parameters for the Sensors frequency-hint controller
@@ -2989,6 +2995,42 @@ pub struct SensorsAiConfigToml {
 
 fn default_sensors_ai_frequency_hint_delay_secs() -> f32 {
     3.0
+}
+
+/// Selected-contact trajectory projection tuning for the Sensors radar
+/// (issue #1339).
+///
+/// Loaded from `[sensors_console.projection]` in the ship entity TOML. Purely
+/// a presentation tunable — it controls how far ahead and how densely the
+/// client draws the Science Target's projected relative path when its
+/// velocity is known; it does not touch Science Target or Combat Lock
+/// authority.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SensorsProjectionConfig {
+    /// How far into the future the projection extends, in seconds.
+    #[serde(default = "default_sensors_projection_horizon_secs")]
+    pub horizon_secs: f32,
+    /// Spacing between successive projection markers, in seconds.
+    #[serde(default = "default_sensors_projection_marker_interval_secs")]
+    pub marker_interval_secs: f32,
+}
+
+impl Default for SensorsProjectionConfig {
+    fn default() -> Self {
+        Self {
+            horizon_secs: default_sensors_projection_horizon_secs(),
+            marker_interval_secs: default_sensors_projection_marker_interval_secs(),
+        }
+    }
+}
+
+pub fn default_sensors_projection_horizon_secs() -> f32 {
+    60.0
+}
+
+pub fn default_sensors_projection_marker_interval_secs() -> f32 {
+    10.0
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]

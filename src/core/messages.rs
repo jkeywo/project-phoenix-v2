@@ -1449,6 +1449,17 @@ pub struct ShipClientConfig {
     /// `[sensors_console.long_range_radar] selects`.
     #[serde(default)]
     pub sensors_radar_selects: Vec<String>,
+    /// How far into the future the Sensors selected-contact trajectory
+    /// projection extends, in seconds (issue #1339). Sourced from
+    /// `[sensors_console.projection] horizon_secs`; defaults to 60s when the
+    /// hull omits the table.
+    #[serde(default = "crate::entities::config::default_sensors_projection_horizon_secs")]
+    pub sensors_projection_horizon_secs: f32,
+    /// Spacing between successive projection markers, in seconds (issue
+    /// #1339). Sourced from `[sensors_console.projection]
+    /// marker_interval_secs`; defaults to 10s when the hull omits the table.
+    #[serde(default = "crate::entities::config::default_sensors_projection_marker_interval_secs")]
+    pub sensors_projection_marker_interval_secs: f32,
     /// Targetability filter for the Navigation system chart. Sourced from
     /// `[navigation_console.system_chart] selects`.
     #[serde(default)]
@@ -1631,6 +1642,10 @@ impl Default for ShipClientConfig {
             sensors_radar_range: default_sensors_radar_range(),
             sensors_radar_shows: Vec::new(),
             sensors_radar_selects: Vec::new(),
+            sensors_projection_horizon_secs:
+                crate::entities::config::default_sensors_projection_horizon_secs(),
+            sensors_projection_marker_interval_secs:
+                crate::entities::config::default_sensors_projection_marker_interval_secs(),
             nav_chart_shows: Vec::new(),
             nav_chart_selects: Vec::new(),
             nav_chart_range: default_nav_chart_range(),
@@ -3607,6 +3622,16 @@ pub struct SensorRadarBlackboard {
     /// this intelligence to the Sensors operator.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_target_alert: Option<bool>,
+    /// World-space relative velocity (target minus this ship's own velocity,
+    /// X/Z) of the selected target, in world units/sec (issue #1339).
+    /// `Some(..)` only when the selection names a ship (player or NPC) whose
+    /// `ShipPhysics` this tick's publisher can resolve; `None` for no
+    /// selection, a non-ship contact (asteroid/station/planet/region), or an
+    /// unresolvable target. `None` is the "unknown velocity" signal the client
+    /// uses to suppress the trajectory projection entirely — same shape as
+    /// `selected_target_alert` above.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_target_relative_velocity: Option<[f32; 2]>,
 }
 
 /// One visible mission deadline, as the Captain console reads it (issue #1024).

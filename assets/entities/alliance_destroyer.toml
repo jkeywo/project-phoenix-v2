@@ -599,6 +599,16 @@ range = 250
 shows = [ "player", "asteroid_field", "ship", "station", "planet", "star" ]
 selects = [ "ship", "station", "planet" ]
 
+# Selected-contact trajectory projection (issue #1339). Renders the Science
+# Target's projected relative path whenever its velocity is known (every
+# ship contact; non-ship contacts carry no velocity and project nothing).
+# These are the initial authored defaults from the approved plan — a hull
+# tunes them without a code change, and a hull that omits this table entirely
+# still gets the same 60s/10s behaviour from the parse defaults.
+[sensors_console.projection]
+horizon_secs = 60.0
+marker_interval_secs = 10.0
+
 # The survey suite (issue #1032). What comes back from a scan is DERIVED from
 # the subject's own [infrastructure] condition track — there is no authored
 # scan text anywhere in this file or any other — so everything authored here is

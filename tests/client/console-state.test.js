@@ -2103,6 +2103,139 @@ describe('buildSensorsConsoleState', () => {
     };
     expect(parse(buildSensorsConsoleState(state)).target_alert).toBeNull();
   });
+
+  // ── target_projection (#1339) — trajectory projection geometry ────────────
+
+  it('target_projection is null when there is no selection', () => {
+    const state = { shipX: 0, shipZ: 0, shipYaw: 0 };
+    expect(parse(buildSensorsConsoleState(state)).target_projection).toBeNull();
+  });
+
+  it('target_projection is null when the blackboard omits relative velocity (unknown)', () => {
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'a1',
+      asteroids: [{ uuid: 'a1', x: 50, z: 0, tags: ['asteroid'] }],
+      blackboards: { 'sensor-radar': { selected_target: 'a1' } },
+    };
+    expect(parse(buildSensorsConsoleState(state)).target_projection).toBeNull();
+  });
+
+  it('target_projection is null for a non-ship contact even if somehow selected', () => {
+    // Structural eligibility, not a scenario branch: a stationary/non-ship
+    // contact never carries relative velocity on the wire, so it never
+    // projects — same no-leak shape as target_alert above.
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'station-1',
+      asteroids: [{ uuid: 'station-1', x: 50, z: 0, tags: ['station'] }],
+      blackboards: { 'sensor-radar': { selected_target: 'station-1' } },
+    };
+    expect(parse(buildSensorsConsoleState(state)).target_projection).toBeNull();
+  });
+
+  it('target_projection renders markers at the authored default horizon/spacing (60s/10s)', () => {
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'e1',
+      asteroids: [{ uuid: 'e1', x: 100, z: 0, tags: ['ship'] }],
+      blackboards: {
+        'sensor-radar': { selected_target: 'e1', selected_target_relative_velocity: [0, -20] },
+      },
+    };
+    const markers = parse(buildSensorsConsoleState(state)).target_projection;
+    // Default horizon 60s / marker interval 10s → 6 markers (t = 10..60).
+    expect(markers).toHaveLength(6);
+    // range defaults to SENSORS_RADAR_RANGE (500) with no Sensors blackboard.
+    // dx(t) = 100 (vx=0); dz(t) = -20*t. At yaw 0: radar_x = dx/range,
+    // radar_y = -dz/range.
+    expect(markers[0].radar_x).toBeCloseTo(100 / SENSORS_RADAR_RANGE, 6);
+    expect(markers[0].radar_y).toBeCloseTo(200 / SENSORS_RADAR_RANGE, 6);
+    expect(markers[5].radar_x).toBeCloseTo(100 / SENSORS_RADAR_RANGE, 6);
+    expect(markers[5].radar_y).toBeCloseTo(1200 / SENSORS_RADAR_RANGE, 6);
+  });
+
+  it('target_projection respects an authored non-default horizon and marker spacing', () => {
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsProjectionHorizonSecs: 20,
+      sensorsProjectionMarkerIntervalSecs: 5,
+      sensorsTarget: 'e1',
+      asteroids: [{ uuid: 'e1', x: 0, z: 0, tags: ['ship'] }],
+      blackboards: {
+        'sensor-radar': { selected_target: 'e1', selected_target_relative_velocity: [10, 0] },
+      },
+    };
+    const markers = parse(buildSensorsConsoleState(state)).target_projection;
+    // 20s horizon / 5s spacing → 4 markers (t = 5, 10, 15, 20).
+    expect(markers).toHaveLength(4);
+    expect(markers.map(m => m.t)).toEqual([5, 10, 15, 20]);
+  });
+
+  it('target_projection is relative to ship yaw, matching the shared blip rotation', () => {
+    // Ship facing +90deg (PI/2): the same rotation buildBlips/buildTargetBlip
+    // use. A target directly ahead in world +X with no relative velocity
+    // motion in X should still rotate consistently with a live blip at the
+    // same offset.
+    const shipYaw = Math.PI / 2;
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw,
+      sensorsTarget: 'e1',
+      asteroids: [{ uuid: 'e1', x: 100, z: 0, tags: ['ship'] }],
+      blackboards: {
+        'sensor-radar': { selected_target: 'e1', selected_target_relative_velocity: [0, 0] },
+      },
+    };
+    const result = parse(buildSensorsConsoleState(state));
+    const marker = result.target_projection[0];
+    const liveBlip = buildTargetBlip('e1', state.asteroids, 0, 0, shipYaw, SENSORS_RADAR_RANGE);
+    // Zero relative velocity → every marker sits exactly on the live position.
+    expect(marker.radar_x).toBeCloseTo(liveBlip.radar_x, 6);
+    expect(marker.radar_y).toBeCloseTo(liveBlip.radar_y, 6);
+  });
+
+  it('target_projection clears when the Science Target selection changes to an unknown-velocity contact', () => {
+    const withVelocity = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'e1',
+      asteroids: [
+        { uuid: 'e1', x: 100, z: 0, tags: ['ship'] },
+        { uuid: 'a1', x: 50, z: 0, tags: ['asteroid'] },
+      ],
+      blackboards: {
+        'sensor-radar': { selected_target: 'e1', selected_target_relative_velocity: [0, -20] },
+      },
+    };
+    expect(parse(buildSensorsConsoleState(withVelocity)).target_projection).not.toBeNull();
+
+    const afterReselect = {
+      ...withVelocity,
+      sensorsTarget: 'a1',
+      blackboards: { 'sensor-radar': { selected_target: 'a1' } },
+    };
+    expect(parse(buildSensorsConsoleState(afterReselect)).target_projection).toBeNull();
+  });
+
+  it('target_projection does not disturb existing target_* payload fields (payload compatibility)', () => {
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'e1',
+      asteroids: [{ uuid: 'e1', x: 100, z: 0, tags: ['ship'], name: 'Raider' }],
+      blackboards: {
+        'sensor-radar': {
+          selected_target: 'e1',
+          selected_target_alert: true,
+          selected_target_relative_velocity: [0, -20],
+        },
+      },
+    };
+    const result = parse(buildSensorsConsoleState(state));
+    expect(result.target_name).toBe('Raider');
+    expect(result.target_kind).toBe('ship');
+    expect(result.target_alert).toBe(true);
+    expect(result.target_range).toBe(100);
+    expect(Array.isArray(result.target_projection)).toBe(true);
+  });
 });
 
 // ── science station (generic system-id-keyed payload, issue #825) ─────────────

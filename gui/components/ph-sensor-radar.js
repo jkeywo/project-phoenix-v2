@@ -77,6 +77,10 @@ export class PhSensorRadar extends PhElement {
         //
         // Sensors owns a selection, not a lock. Cyan only.
         selected_target_uuid: val?.target_uuid || null,
+        // Selected-contact trajectory projection (issue #1339). `null`/absent
+        // when the Science Target's velocity is unknown — ph-radar draws
+        // nothing in that case.
+        target_projection: val?.target_projection || null,
       };
     }
 

@@ -357,7 +357,10 @@ mod tests {
             &[LayoutNotice::Refused(refusal)],
         );
         assert_eq!(payload.notices.len(), 1);
-        assert_eq!(payload.notices[0].id, "server.bridge_layout.unknown_monitor");
+        assert_eq!(
+            payload.notices[0].id,
+            "server.bridge_layout.unknown_monitor"
+        );
         assert_eq!(
             payload.notices[0].params.get("monitor").map(String::as_str),
             Some("Gone@1920x1080")

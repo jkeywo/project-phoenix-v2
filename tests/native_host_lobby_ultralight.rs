@@ -198,8 +198,8 @@ fn lobby_payload(phase: &str, holder: Option<&str>) -> String {
 /// A two-monitor bridge, in the shape `host_lobby::layout::monitor_row_payload`
 /// builds from a live [`BridgeLayout`] (issue #1330).
 fn monitor_row(viewscreen_is_second: bool, notices: Vec<LayoutNoticePayload>) -> String {
-    let monitor = |identity: &str, name: &str, w: u32, h: u32, primary, viewscreen| {
-        MonitorButtonPayload {
+    let monitor =
+        |identity: &str, name: &str, w: u32, h: u32, primary, viewscreen| MonitorButtonPayload {
             identity: identity.to_string(),
             name: Some(name.to_string()),
             width: w,
@@ -207,8 +207,7 @@ fn monitor_row(viewscreen_is_second: bool, notices: Vec<LayoutNoticePayload>) ->
             primary,
             viewscreen,
             stations: Vec::new(),
-        }
-    };
+        };
     codec::encode_bridge_layout(&BridgeLayoutPayload {
         monitors: vec![
             monitor(

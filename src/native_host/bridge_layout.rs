@@ -1045,9 +1045,7 @@ impl LayoutAdoption {
             LayoutAdoption::PaneNamesNoStation { .. } => {
                 "server.bridge_layout.adopt_pane_no_station"
             }
-            LayoutAdoption::StationNamedTwice { .. } => {
-                "server.bridge_layout.adopt_station_twice"
-            }
+            LayoutAdoption::StationNamedTwice { .. } => "server.bridge_layout.adopt_station_twice",
             LayoutAdoption::SeatRefused { .. } => "server.bridge_layout.adopt_seat_refused",
             LayoutAdoption::ViewscreenMonitorGone { .. } => {
                 "server.bridge_layout.adopt_viewscreen_gone"

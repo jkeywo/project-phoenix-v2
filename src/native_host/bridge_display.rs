@@ -1304,7 +1304,8 @@ mod tests {
             .id();
         app.world_mut()
             .spawn((monitor("DELL U2720Q", 3840, 2160, 0, 0), PrimaryMonitor));
-        app.world_mut().spawn(monitor("BenQ EX", 1920, 1080, 3840, 0));
+        app.world_mut()
+            .spawn(monitor("BenQ EX", 1920, 1080, 3840, 0));
         app.update();
         (app, window)
     }
@@ -1493,7 +1494,8 @@ mod tests {
         // rather than only on losses: a display that arrives has to appear as a
         // button, or the operator cannot choose it.
         let (mut app, _) = booted(None);
-        app.world_mut().spawn(monitor("Acer VG", 1280, 1024, 5760, 0));
+        app.world_mut()
+            .spawn(monitor("Acer VG", 1280, 1024, 5760, 0));
         for _ in 0..DISPLAY_LOSS_DEBOUNCE_FRAMES {
             app.update();
         }

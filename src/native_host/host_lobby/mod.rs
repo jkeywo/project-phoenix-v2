@@ -1037,10 +1037,12 @@ mod tests {
             .world()
             .resource::<BridgeLayoutResource>()
             .layout
-            .apply(&crate::native_host::bridge_layout::LayoutAction::AssignStation {
-                station: crate::core::messages::StationId("helm".to_string()),
-                monitor: crate::native_host::bridge_profile::MonitorIdentity::new(BENQ),
-            })
+            .apply(
+                &crate::native_host::bridge_layout::LayoutAction::AssignStation {
+                    station: crate::core::messages::StationId("helm".to_string()),
+                    monitor: crate::native_host::bridge_profile::MonitorIdentity::new(BENQ),
+                },
+            )
             .expect("a free non-viewscreen monitor takes a console");
         app.world_mut()
             .resource_mut::<BridgeLayoutResource>()
@@ -1098,7 +1100,12 @@ mod tests {
         // press — rendering it as feedback would tell the crew their button is
         // broken when what is broken is the bundle.
         let (mut app, bridge, mut surface) = app_with_layout();
-        press(&mut app, &bridge, &mut surface, r#"{"monitor":"BenQ EX@1920x1080"}"#);
+        press(
+            &mut app,
+            &bridge,
+            &mut surface,
+            r#"{"monitor":"BenQ EX@1920x1080"}"#,
+        );
 
         assert_eq!(viewscreen(&app), DELL);
         assert!(app

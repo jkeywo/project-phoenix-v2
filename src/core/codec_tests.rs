@@ -263,6 +263,13 @@ fn client_message_table() -> Vec<(ClientMessageDiscriminants, ClientMessage)> {
             ClientMessageDiscriminants::TogglePause,
             ClientMessage::TogglePause,
         ),
+        // NOT `#[cfg]`ed, unlike the two around it (issue #1329): showing the
+        // code that lets somebody else join is what the join panel is for, and
+        // a demo wants it more than anything else does.
+        (
+            ClientMessageDiscriminants::ToggleQrCode,
+            ClientMessage::ToggleQrCode,
+        ),
         // The client half of console input-to-feedback latency (issue #1169) —
         // durations only, measured on the reporting client's own clock, never
         // timestamps. Same `#[cfg]` as its two neighbours above.
@@ -2650,6 +2657,27 @@ fn client_settings_menu_wire_shapes_are_pinned() {
             "`data: {{}}` is not this message — settings-panel.js sends no data at all"
         );
     }
+
+    // The join-QR toggle (issue #1329), pinned in the same way and for a
+    // sharper reason: a browser host answers this message in JavaScript and
+    // never decodes it, so THIS is the only place the wire shape a native host
+    // must understand is checked against the shape the phone sends.
+    let qr = ClientMessage::ToggleQrCode;
+    assert_client_roundtrip(&JsonCodec, qr.clone());
+    assert_eq!(
+        JsonCodec.encode_client(&qr).unwrap(),
+        r#"{"type":"ToggleQrCode"}"#,
+        "ToggleQrCode wire shape must match what settings-panel.js sends"
+    );
+    assert!(JsonCodec
+        .decode_client(r#"{"type":"ToggleQrCode","data":null}"#)
+        .is_ok());
+    assert!(
+        JsonCodec
+            .decode_client(r#"{"type":"ToggleQrCode","data":{}}"#)
+            .is_err(),
+        "`data: {{}}` is not this message — settings-panel.js must send no data at all"
+    );
 
     let report = ServerMessage::DebugState {
         flags: vec![

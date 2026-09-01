@@ -299,6 +299,7 @@ impl Plugin for HostLobbyPlugin {
                 // `Res<ButtonInput<_>>` there is a panic rather than an inert
                 // system — the same trap `PaneDisplayPlugin` gates against.
                 toggle_reveal_key.run_if(resource_exists::<ButtonInput<KeyCode>>),
+                drain_client_qr_toggle,
                 publish_reveal,
             )
                 .chain(),
@@ -325,6 +326,55 @@ fn feed_lobby_state(
         return;
     };
     bridge.0.push_lobby_state(json);
+}
+
+/// Carry a phone's join-QR toggle to the surface (issue #1329).
+///
+/// The other end of a button a browser host answers in its own JavaScript. A
+/// native host has no page in front of its simulation, so the frame decodes
+/// into `ClientMessage::ToggleQrCode` and arrives here, on the same
+/// `InboundMessage` stream `debug_overlay::drain_client_pause` reads and in the
+/// same frame-driven way — this changes no simulation outcome a replay must
+/// re-derive, so it stays out of command admission and out of the command log.
+///
+/// **Every press is carried, not "somebody asked"**: two taps are two flips,
+/// and a phone with a slow thumb landing both in one frame means the operator
+/// ends where they started, which is what the person pressing it expects.
+///
+/// No station, captaincy or `GamePhase` check, deliberately. The panel says how
+/// to join this ship; anyone already admitted to it can show it to somebody
+/// standing next to them, and gating that on holding a seat would mean a full
+/// bridge cannot let a latecomer in.
+///
+/// What it does NOT do is reveal the surface. In play the lobby surface is
+/// composited only while F9 says so (see the module note on why an opaque
+/// texture leaves no third option), and a phone in a player's pocket must not
+/// be able to drop a black sheet over a running viewscreen. The press sets what
+/// the operator finds when they reveal it.
+fn drain_client_qr_toggle(
+    bridge: Option<Res<HostLobbyBridgeResource>>,
+    mut inbound: MessageReader<crate::lobby::InboundMessage>,
+    log: Option<Res<LogFilterConfig>>,
+) {
+    // Read first, unconditionally, for the reason `feed_lobby_state` gives.
+    let presses = inbound
+        .read()
+        .filter(|ev| matches!(ev.msg, crate::core::messages::ClientMessage::ToggleQrCode))
+        .count();
+    let Some(bridge) = bridge else {
+        return;
+    };
+    if presses == 0 {
+        return;
+    }
+    for _ in 0..presses {
+        bridge.0.push_qr_toggle();
+    }
+    crate::pinfo!(
+        log,
+        LogCat::Lobby,
+        "host lobby: join QR toggled from a phone ({presses})"
+    );
 }
 
 /// Follow the simulation's phase, so the chrome yields at mission start and
@@ -393,6 +443,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(bevy::state::app::StatesPlugin)
             .add_message::<LobbyStateChanged>()
+            .add_message::<crate::lobby::InboundMessage>()
             .init_state::<GamePhase>()
             .insert_resource(HostLobbyBridgeResource(bridge.clone()))
             .add_plugins(HostLobbyPlugin);
@@ -456,6 +507,97 @@ mod tests {
         app.update();
         app.update();
         assert!(!bridge.has_pending(), "an unchanged reveal says nothing");
+    }
+
+    #[test]
+    fn a_phones_qr_toggle_reaches_the_surface() {
+        // Issue #1329's AC3, end to end on the Rust side: the same button on
+        // the same phone that a browser host answers in JavaScript arrives here
+        // as a decoded message and leaves as a push the document answers.
+        let (mut app, bridge) = app_with_lobby();
+        app.update();
+        // Drain the baseline reveal the first frame states.
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        pump_host_lobby(&bridge, &mut surface);
+        surface.pushed.clear();
+
+        app.world_mut().write_message(crate::lobby::InboundMessage {
+            token: "phone-1".to_string(),
+            msg: crate::core::messages::ClientMessage::ToggleQrCode,
+        });
+        app.update();
+        pump_host_lobby(&bridge, &mut surface);
+        assert_eq!(
+            surface.pushed,
+            vec!["window.__phoenixHostLobbyQrToggle()".to_string()]
+        );
+    }
+
+    #[test]
+    fn two_phone_presses_in_one_frame_are_two_flips() {
+        // Which is a no-op, and is exactly what the person pressing twice
+        // expects. Collapsing them to "somebody asked" would turn a double-tap
+        // into a single flip.
+        let (mut app, bridge) = app_with_lobby();
+        app.update();
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        pump_host_lobby(&bridge, &mut surface);
+        surface.pushed.clear();
+
+        for _ in 0..2 {
+            app.world_mut().write_message(crate::lobby::InboundMessage {
+                token: "phone-1".to_string(),
+                msg: crate::core::messages::ClientMessage::ToggleQrCode,
+            });
+        }
+        app.update();
+        pump_host_lobby(&bridge, &mut surface);
+        assert_eq!(surface.pushed.len(), 2);
+    }
+
+    #[test]
+    fn a_phones_qr_toggle_does_not_uncover_the_surface_mid_mission() {
+        // A phone in a player's pocket must not be able to drop a black sheet
+        // over a running viewscreen: the surface composites into an OPAQUE
+        // texture, so revealing it in play covers the mission. F9 stays the
+        // only thing that uncovers it; the press sets what the operator finds
+        // when they do.
+        let (mut app, _bridge) = app_with_lobby();
+        app.world_mut()
+            .resource_mut::<NextState<GamePhase>>()
+            .set(GamePhase::InProgress);
+        app.update();
+        app.update();
+
+        app.world_mut().write_message(crate::lobby::InboundMessage {
+            token: "phone-1".to_string(),
+            msg: crate::core::messages::ClientMessage::ToggleQrCode,
+        });
+        app.update();
+        assert!(
+            !app.world()
+                .resource::<HostLobbyRevealResource>()
+                .0
+                .presence()
+                .composited
+        );
+    }
+
+    #[test]
+    fn other_client_messages_are_not_mistaken_for_the_qr_toggle() {
+        let (mut app, bridge) = app_with_lobby();
+        app.update();
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        pump_host_lobby(&bridge, &mut surface);
+        surface.pushed.clear();
+
+        app.world_mut().write_message(crate::lobby::InboundMessage {
+            token: "phone-1".to_string(),
+            msg: crate::core::messages::ClientMessage::ReleaseStation,
+        });
+        app.update();
+        pump_host_lobby(&bridge, &mut surface);
+        assert!(surface.pushed.is_empty());
     }
 
     #[test]

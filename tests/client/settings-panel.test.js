@@ -916,12 +916,16 @@ describe('gameplay tab — rating, QR and leave station', () => {
       String(b.getAttribute('data-control') || '').startsWith('rating-'))).toBe(false);
   });
 
-  it('sends ToggleQrCode from the QR button', () => {
+  it('sends ToggleQrCode from the QR button, with no data at all', () => {
+    // The absent `data` is the assertion (issue #1329). A browser host reads
+    // this frame in JavaScript, but a native host DECODES it — into a unit
+    // variant, which `{"data":{}}` is not — so the shape here decides whether
+    // the same button works against the same crew's other host.
     openGameplay(withStation);
     const qr = bodyButtons(doc).find((b) => b.textContent === t('settings.toggle_qr'));
     expect(qr).toBeDefined();
     qr.click();
-    expect(sent).toEqual([{ type: 'ToggleQrCode', data: {} }]);
+    expect(sent).toEqual([{ type: 'ToggleQrCode', data: undefined }]);
   });
 
   it('sends ReleaseStation and closes when Leave Station is used', () => {

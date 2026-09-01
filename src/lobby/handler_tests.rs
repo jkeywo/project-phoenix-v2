@@ -83,7 +83,13 @@ fn dispatch(
         | ClientMessage::SelectScenario { .. }
         | ClientMessage::SelectPlayerShip { .. }
         | ClientMessage::ReportStationEligibility { .. }
-        | ClientMessage::StationVisited { .. } => LobbyHandlerResult {
+        | ClientMessage::StationVisited { .. }
+        // `ToggleQrCode` (issue #1329) is not a lobby concern either: it moves
+        // a panel on whichever surface is showing one, and is drained
+        // frame-driven by `native_host::host_lobby` (a browser host answers it
+        // in JavaScript and never decodes it at all). Unlike its two toggle
+        // siblings below it exists in every build, so it belongs in this arm.
+        | ClientMessage::ToggleQrCode => LobbyHandlerResult {
             new_phase: None,
             outbound: Vec::new(),
             station_rating_update: None,

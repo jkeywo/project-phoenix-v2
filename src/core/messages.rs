@@ -2578,6 +2578,34 @@ pub enum ClientMessage {
     /// instead — the same schedule the host page's own pause toggle uses.
     #[cfg(not(phoenix_demo_build))]
     TogglePause,
+    /// Show or hide the join QR on the host's viewscreen, from a connected
+    /// phone's settings menu (issue #1329).
+    ///
+    /// The oldest button in the settings panel and the newest variant here, and
+    /// the gap is the whole story: on a BROWSER host this message never reaches
+    /// Rust at all. `server.html` intercepts it in the per-connection handler
+    /// and flips its own overlay, because the panel is a page's chrome and the
+    /// page is right there. A NATIVE host has no page in front of its
+    /// simulation — the viewscreen is a composited surface fed by
+    /// `native_host::host_lobby` — so the same button on the same phone needs a
+    /// wire shape to arrive as, and this is it.
+    ///
+    /// **In every build**, unlike its `TogglePause` and `ToggleDebugFlag`
+    /// neighbours. Those are compiled out of a demo because N strangers on N
+    /// phones must not be able to freeze a mission or open a cheat surface.
+    /// Showing the code that lets somebody else join is not that: it is what
+    /// the panel is FOR, and a late arrival asking a seated player to press it
+    /// is the intended use.
+    ///
+    /// Carries nothing, and is not a "set visible" with a value: the panel's
+    /// visibility lives in the DOM of whichever surface is showing it
+    /// (`gui/host-qr.js` reads `#overlay`), so a boolean here would be a second
+    /// opinion about a state the sender cannot see and the two would drift.
+    ///
+    /// Never crosses command admission — it changes no simulation outcome a
+    /// replay must re-derive — for the same reason `ToggleDebugFlag` and
+    /// `StationVisited` do not.
+    ToggleQrCode,
     /// A client's own console input-to-feedback measurements (issue #1169,
     /// PRD #1144).
     ///

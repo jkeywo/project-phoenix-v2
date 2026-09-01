@@ -689,7 +689,14 @@ export function mountSettings({
 
     const qrSection = section('settings.qr_code');
     qrSection.appendChild(
-      action(t('settings.toggle_qr'), null, () => emit('ToggleQrCode', {})),
+      // No data, and that is now load-bearing rather than tidy (issue #1329).
+      // A browser host answers this button in its own JavaScript and the frame
+      // never reaches Rust; a NATIVE host has no page in front of its
+      // simulation, so the same frame decodes into `ClientMessage::ToggleQrCode`
+      // — a unit variant, which `data: {}` is NOT. Same shape as `TogglePause`
+      // and `ReleaseStation`; pinned by
+      // `codec::client_settings_menu_wire_shapes_are_pinned`.
+      action(t('settings.toggle_qr'), null, () => emit('ToggleQrCode')),
     );
     body.appendChild(qrSection);
 

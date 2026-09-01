@@ -746,7 +746,7 @@ pub fn publish_sensor_radar_blackboard(
         // contact, or (defensively) a scanning ship with no physics of its own
         // — every production ship has `ShipPhysics`, so this only guards test
         // fixtures that omit it (issue #1339).
-        let own_velocity = own_physics.map(|p| ship_world_velocity(p));
+        let own_velocity = own_physics.map(ship_world_velocity);
         let selected_target_relative_velocity = selected_target.as_deref().and_then(|selected| {
             let own_velocity = own_velocity?;
             physics_q

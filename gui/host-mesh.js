@@ -117,9 +117,10 @@
  * frames. `7` removes the asynchronous JavaScript start-grant broadcast and
  * adds the connected technical participant set to the frozen roster. A
  * revision-6 host would omit GM peers from Rust's lockstep wait-set and could
- * apply the decision before every deterministic peer reached its tick.
+ * apply the decision before every deterministic peer reached its tick. `8`
+ * adds the paused-safe typed GM-action frame.
  */
-export const HOST_MESH_PROTOCOL = 7;
+export const HOST_MESH_PROTOCOL = 8;
 
 /** Frame types this revision speaks. */
 export const HOST_FRAME_HELLO = 'hello';
@@ -162,6 +163,8 @@ export const HOST_FRAME_HOST_LOSS = 'host-loss';
  * module ferries it opaquely.
  */
 export const HOST_FRAME_SLOT_CLAIM = 'slot-claim';
+/** Revision 8 (#1292): one authenticated, attributed typed GM action. */
+export const HOST_FRAME_GM_ACTION = 'gm-action';
 
 /** Every type a receiver will accept. Read by the coverage tests. */
 export const HOST_FRAME_TYPES = [
@@ -180,6 +183,7 @@ export const HOST_FRAME_TYPES = [
   HOST_FRAME_SNAPSHOT,
   HOST_FRAME_HOST_LOSS,
   HOST_FRAME_SLOT_CLAIM,
+  HOST_FRAME_GM_ACTION,
 ];
 
 /**
@@ -199,6 +203,7 @@ export const HOST_SIMULATION_FRAME_TYPES = [
   HOST_FRAME_SNAPSHOT,
   HOST_FRAME_HOST_LOSS,
   HOST_FRAME_SLOT_CLAIM,
+  HOST_FRAME_GM_ACTION,
 ];
 
 /** True when this frame belongs to the running simulation rather than the lobby. */
@@ -1020,6 +1025,11 @@ export function rosterOf(fleet) {
     // Host-only deterministic topology. Public GM rows deliberately do not
     // reveal which participant slot belongs to which operator identity.
     participants,
+    // Private simulation-plane authentication. This outer field is consumed
+    // only by `simulationRosterOf`; crew/public GM rows below remain slot-free.
+    gm_bindings: (fleet.gms || [])
+      .filter((gm) => gm.connected !== false)
+      .map((gm) => ({ host: gm.meshSlot, operator_id: gm.id })),
     slots: fleet.slots.map((s) => ({
       id: s.id,
       owner: s.owner,
@@ -1072,7 +1082,16 @@ export function simulationRosterOf(roster, mine) {
     .filter((ship) => Number.isSafeInteger(ship.host) && participantSet.has(ship.host))
     .sort((left, right) => left.host - right.host);
 
-  return { local, owner, participants, ships };
+  const gms = (Array.isArray(roster.gm_bindings) ? roster.gm_bindings : [])
+    .map((gm) => ({
+      host: hostSlotOrdinal(gm && gm.host),
+      operator_id: gm && typeof gm.operator_id === 'string' ? gm.operator_id : '',
+    }))
+    .filter((gm) => Number.isSafeInteger(gm.host)
+      && participantSet.has(gm.host) && gm.operator_id.length > 0)
+    .sort((left, right) => left.host - right.host);
+
+  return { local, owner, participants, ships, gms };
 }
 
 // ── Frame builders ──────────────────────────────────────────────────────────

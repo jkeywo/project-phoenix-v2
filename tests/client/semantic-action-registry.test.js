@@ -52,6 +52,18 @@ describe('semantic action registration and normalization', () => {
     expect(() => registry.register({ ...ACTION, accessibilityLabelId: '' })).toThrow(/metadata/i);
   });
 
+  it('preserves an optional stable confirmation category and rejects malformed ids', () => {
+    const registry = createSemanticActionRegistry();
+    registry.register({ ...ACTION, confirmationCategory: ' session.pause ' });
+    expect(registry.action(ACTION.id).confirmationCategory).toBe('session.pause');
+
+    for (const confirmationCategory of ['', 'Session.pause', 'session pause', 42]) {
+      const invalid = createSemanticActionRegistry();
+      expect(() => invalid.register({ ...ACTION, confirmationCategory }))
+        .toThrow(/confirmation category/i);
+    }
+  });
+
   it('rejects duplicate semantic identities', () => {
     const registry = createSemanticActionRegistry();
     registry.register(ACTION);

@@ -30,7 +30,7 @@
 
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 
-use bevy::prelude::{App, With};
+use bevy::prelude::{App, FixedUpdate, ResMut, Resource, With};
 
 use project_phoenix::command_admission::HostSlot;
 use project_phoenix::content_ledger;
@@ -313,6 +313,84 @@ fn a_record_transfers_between_hosts_and_the_two_agree_after_restore() {
     assert!(
         ticks > CAPTURE_AT,
         "the receiver continued past the restore tick"
+    );
+}
+
+#[derive(Resource, Default)]
+struct RestoreFrameFixedSteps(u64);
+
+fn count_restore_frame_fixed_steps(mut count: ResMut<RestoreFrameFixedSteps>) {
+    count.0 += 1;
+}
+
+#[test]
+fn an_armed_paused_mesh_restore_cannot_spend_the_restore_frames_delta() {
+    use bevy::time::{Fixed, Time, TimeUpdateStrategy, Virtual};
+
+    let mut live = boot();
+    step(&mut live, 40);
+    live.world_mut()
+        .insert_resource(project_phoenix::gm_action::SimulationPaused(true));
+    let mut gm_actions = project_phoenix::gm_action::GmActionJournal::default();
+    gm_actions.adopt_initial_pause(true);
+    live.world_mut().insert_resource(gm_actions);
+    live.world_mut().resource_mut::<Time<Virtual>>().pause();
+    let (payload, captured_digest, frames) = capture_and_frame(&live, None);
+    assert!(payload.paused);
+    let stored_overstep = std::time::Duration::from_nanos(
+        payload
+            .fixed_overstep_nanos
+            .expect("a real host captures its fixed interpolation remainder"),
+    );
+
+    let mut receiver = boot_to_restore_point(&payload);
+    receiver
+        .init_resource::<RestoreFrameFixedSteps>()
+        .add_systems(FixedUpdate, count_restore_frame_fixed_steps);
+    for chunk in chunks_over_the_wire(&frames) {
+        receiver
+            .world_mut()
+            .resource_mut::<MeshSnapshotReceiver>()
+            .accept_chunk(&chunk)
+            .expect("the paused record chunk is accepted");
+    }
+    assert!(receiver
+        .world()
+        .resource::<MeshSnapshotReceiver>()
+        .has_staged_record());
+    arm_receiver(&mut receiver, SLOT_SENDER);
+
+    let period = receiver.world().resource::<Time<Fixed>>().timestep();
+    receiver.insert_resource(TimeUpdateStrategy::ManualDuration(period * 5));
+    receiver.update();
+
+    assert_eq!(
+        receiver
+            .world()
+            .resource::<MeshSnapshotReceiver>()
+            .last_outcome(),
+        Some(&MeshRestoreOutcome::Committed {
+            tick: payload.tick,
+            digest: captured_digest,
+        })
+    );
+    assert_eq!(receiver.world().resource::<SimTick>().0, payload.tick);
+    assert_eq!(
+        receiver.world().resource::<RestoreFrameFixedSteps>().0,
+        0,
+        "the oversized current-frame delta must not enter FixedUpdate after restore"
+    );
+    assert_eq!(
+        receiver.world().resource::<Time<Fixed>>().overstep(),
+        {
+            let remainder_nanos = stored_overstep.as_nanos() % period.as_nanos();
+            std::time::Duration::new(
+                u64::try_from(remainder_nanos / 1_000_000_000)
+                    .expect("a fixed-step remainder fits Duration seconds"),
+                (remainder_nanos % 1_000_000_000) as u32,
+            )
+        },
+        "restore preserves only the captured interpolation remainder"
     );
 }
 

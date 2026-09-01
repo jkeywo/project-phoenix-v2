@@ -610,8 +610,8 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 "weapons-target-state",
             )
             .declare_state::<crate::debug_overlay::SimulationPaused>(
-                StateClass::DeferredFold,
-                "host-debug-simulation-override-state",
+                StateClass::Folded,
+                "gm-action-state",
             )
             .declare_state::<crate::entities::model_rig::ModelMarkers>(
                 StateClass::DeferredFold,
@@ -902,6 +902,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 // kind of thing — per-run state that a multi-game session has to
                 // hand back.
                 crate::command_admission::reset_command_log,
+                crate::gm_action::reset,
                 reset_broadcast_caches_on_start,
                 crate::world::server::seed_ship_power_counter,
                 spawn_game_start_entities,

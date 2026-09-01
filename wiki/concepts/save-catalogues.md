@@ -2,8 +2,8 @@
 title: Peer-Local Save Catalogues
 type: concept
 tags: [save, snapshot, persistence, autosave, browser, native, catalogue]
-sources: [src/save_slots.rs, src/save_slots_lifecycle.rs, src/save_slots_store.rs, src/snapshot.rs, src/server/bridge.rs, src/server_app/world_setup.rs, src/lockstep/mod.rs, src/ship/coordination_systems.rs, src/bin/phoenix_host.rs, src/delivery/args.rs, src/entities/config.rs, src/world/config.rs, gui/save-slots.js, gui/browser-save-identity.js, gui/browser-save-identity-worker.js, server.html, tests/save_slots_persistence.rs]
-updated: 2026-08-30
+sources: [src/save_slots.rs, src/save_slots_lifecycle.rs, src/save_slots_store.rs, src/snapshot.rs, src/gm_action.rs, src/sim_digest.rs, src/headless/replay.rs, src/server/bridge.rs, src/server_app/world_setup.rs, src/lockstep/mod.rs, src/ship/coordination_systems.rs, src/bin/phoenix_host.rs, src/delivery/args.rs, src/entities/config.rs, src/world/config.rs, gui/save-slots.js, gui/browser-save-identity.js, gui/browser-save-identity-worker.js, server.html, tests/save_slots_persistence.rs]
+updated: 2026-09-01
 ---
 
 # Peer-Local Save Catalogues
@@ -78,13 +78,23 @@ loaded content digest. A pre-scenario catalogue may defer only the content
 answer until the row's scenario has loaded; damaged records and format/rules
 movement are hard refusals immediately.
 
-Current snapshot format 15 also requires a `BootIdentity`: the selected hull,
+Current snapshot format 16 also requires a `BootIdentity`: the selected hull,
 the frozen `FleetRoster`, and the authored-order UUID identity of every entity
 that actually spawned at `GameStart`. Startup validates the scenario and hull,
 checks the saved fleet against any already-staged fleet, and verifies that each
 saved authored index still names a `GameStart` row before those UUIDs are used
 to build the fresh world. Restore then proceeds through the ordinary snapshot
 roster/layer readiness and digest checks.
+
+The same format preserves the session-pause bit, complete canonical GM action
+journal, and exact `applied_grants` reducer frontier. That frontier cannot be
+inferred from `SimTick`: a grant at the continuation tick may have arrived but
+not yet passed through `apply_due_actions`. Restore reinstalls the journal and
+frontier, derives the current log from only the applied prefix, and rejects a
+snapshot whose applied prefix contains a grant beyond its capture tick. A
+paused save therefore restores at the exact frozen boundary with its
+operator-scoped idempotency and attributed history intact; Resume remains a new
+typed GM action rather than an implicit side effect of loading.
 
 A saved multi-peer roster reconstructs its ship count, hull choices, authored
 spawns and this saving peer's local ship, but not the old live host mesh. The

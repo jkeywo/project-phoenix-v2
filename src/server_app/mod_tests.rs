@@ -1991,6 +1991,272 @@ fn host_return_to_lobby_aborts_a_mission_in_progress_in_the_real_app() {
     );
 }
 
+#[test]
+fn host_return_to_lobby_remains_live_while_a_fleet_session_is_product_paused() {
+    use crate::command_admission::HostSlot;
+    use bevy::time::{Time, Virtual};
+
+    let mut app = test_app();
+    start_game(&mut app);
+    let local = HostSlot(1);
+    app.insert_resource(crate::lockstep::FleetLockstep(
+        crate::lockstep::LockstepSession::new(local, [local], 6),
+    ));
+    app.init_resource::<crate::gm_action::SimulationPaused>()
+        .init_resource::<crate::gm_action::GmActionJournal>()
+        .init_resource::<crate::gm_action::GmActionLog>()
+        .init_resource::<crate::gm_action::LocalGmActionRefusals>()
+        .init_resource::<crate::gm_action::LastGmSessionProjection>()
+        .add_systems(
+            PreUpdate,
+            crate::gm_action::apply_due_actions.in_set(crate::lockstep::MeshSet),
+        );
+    let first_tick = app.world().resource::<crate::sim_tick::SimTick>().0;
+    app.world_mut()
+        .resource_mut::<crate::gm_action::GmActionJournal>()
+        .insert(crate::gm_action::GmActionGrant {
+            from: local,
+            sequenced_by: local,
+            operator_id: "gm-one".into(),
+            correlation: crate::gm_action::GmActionId::new("round-one-pause").unwrap(),
+            apply_tick: first_tick,
+            order: crate::gm_action::GmActionOrder::new(local, 1),
+            action: crate::gm_action::GmAction::SetSessionPaused { active: true },
+        })
+        .unwrap();
+
+    app.update();
+    assert!(
+        app.world()
+            .resource::<crate::gm_action::SimulationPaused>()
+            .0
+    );
+    assert!(app.world().resource::<Time<Virtual>>().is_paused());
+    assert_eq!(
+        app.world()
+            .resource::<crate::gm_action::GmActionLog>()
+            .entries()[0]
+            .outcome,
+        crate::gm_action::GmActionOutcome::Applied,
+        "without ReturnToLobby the genuine typed Pause remains authoritative"
+    );
+    push(
+        &mut app,
+        crate::console_bridge::LOCAL_CONSOLE_TOKEN,
+        ClientMessage::ReturnToLobby,
+    );
+
+    // PreUpdate and StateTransition remain frame-driven while FixedUpdate is
+    // starved. More than one repaint keeps the assertion independent of which
+    // side of this frame's StateTransition the inbound message entered.
+    for _ in 0..3 {
+        app.update();
+    }
+
+    assert_eq!(phase_of(&app), GamePhase::Lobby);
+    assert!(
+        !app.world()
+            .resource::<crate::gm_action::SimulationPaused>()
+            .0
+    );
+    assert!(!app.world().resource::<Time<Virtual>>().is_paused());
+    assert!(app
+        .world()
+        .resource::<crate::gm_action::GmActionJournal>()
+        .is_empty());
+    assert!(app
+        .world()
+        .resource::<crate::gm_action::GmActionLog>()
+        .entries()
+        .is_empty());
+    assert!(app
+        .world()
+        .resource::<crate::gm_action::LocalGmActionRefusals>()
+        .entries()
+        .is_empty());
+
+    // A genuine second round starts with a fresh sequence/capacity frontier.
+    push(
+        &mut app,
+        "captain",
+        ClientMessage::SelectStation {
+            station: "Captain".into(),
+        },
+    );
+    tick(&mut app);
+    push(&mut app, "captain", ClientMessage::SetReady { ready: true });
+    tick(&mut app);
+    fast_forward_countdown(&mut app);
+    tick(&mut app);
+    tick(&mut app);
+    assert_eq!(phase_of(&app), GamePhase::InProgress);
+
+    let second_tick = app.world().resource::<crate::sim_tick::SimTick>().0;
+    app.world_mut()
+        .resource_mut::<crate::gm_action::GmActionJournal>()
+        .insert(crate::gm_action::GmActionGrant {
+            from: local,
+            sequenced_by: local,
+            operator_id: "gm-one".into(),
+            correlation: crate::gm_action::GmActionId::new("round-two-pause").unwrap(),
+            apply_tick: second_tick,
+            order: crate::gm_action::GmActionOrder::new(local, 1),
+            action: crate::gm_action::GmAction::SetSessionPaused { active: true },
+        })
+        .expect("round two accepts sequence one after the run reset");
+    app.update();
+    assert_eq!(
+        app.world()
+            .resource::<crate::gm_action::GmActionLog>()
+            .entries()[0]
+            .outcome,
+        crate::gm_action::GmActionOutcome::Applied
+    );
+}
+
+#[test]
+fn same_frame_typed_pause_and_return_cannot_repause_the_lobby() {
+    use crate::command_admission::HostSlot;
+
+    let mut app = test_app();
+    start_game(&mut app);
+    crate::lockstep::register_lockstep(&mut app);
+    let owner = HostSlot(1);
+    let local = HostSlot(2);
+    app.insert_resource(
+        crate::lockstep::FleetRoster::with_participants_and_gms(
+            Vec::new(),
+            vec![owner, local],
+            vec![crate::lockstep::FleetGm {
+                host: local,
+                operator_id: "gm-one".into(),
+            }],
+            local,
+            owner,
+        )
+        .unwrap(),
+    );
+    app.insert_resource(crate::lockstep::FleetLockstep(
+        crate::lockstep::LockstepSession::new(local, [owner, local], 6),
+    ));
+    let now = app.world().resource::<crate::sim_tick::SimTick>().0;
+    app.world_mut()
+        .resource_mut::<crate::lockstep::MeshInbox>()
+        .push_from(
+            crate::lockstep::MeshFrame::GmAction(crate::gm_action::GmActionFrame::Granted(
+                crate::gm_action::GmActionGrant {
+                    from: local,
+                    sequenced_by: owner,
+                    operator_id: "gm-one".into(),
+                    correlation: crate::gm_action::GmActionId::new("same-frame-pause").unwrap(),
+                    apply_tick: now,
+                    order: crate::gm_action::GmActionOrder::new(local, 1),
+                    action: crate::gm_action::GmAction::SetSessionPaused { active: true },
+                },
+            )),
+            crate::lockstep::MeshOrigin::Peer(owner),
+        );
+    push(
+        &mut app,
+        crate::console_bridge::LOCAL_CONSOLE_TOKEN,
+        ClientMessage::ReturnToLobby,
+    );
+
+    for _ in 0..3 {
+        app.update();
+    }
+    assert_eq!(phase_of(&app), GamePhase::Lobby);
+    assert!(
+        !app.world()
+            .resource::<crate::gm_action::SimulationPaused>()
+            .0
+    );
+    assert!(app
+        .world()
+        .resource::<crate::gm_action::GmActionJournal>()
+        .is_empty());
+    assert!(app
+        .world()
+        .resource::<crate::gm_action::GmActionLog>()
+        .entries()
+        .is_empty());
+}
+
+#[test]
+fn same_frame_gm_proposal_and_return_leave_the_reset_lane_empty() {
+    use crate::command_admission::HostSlot;
+
+    let mut app = test_app();
+    start_game(&mut app);
+    crate::lockstep::register_lockstep(&mut app);
+    let owner = HostSlot(1);
+    let gm = HostSlot(2);
+    app.insert_resource(
+        crate::lockstep::FleetRoster::with_participants_and_gms(
+            Vec::new(),
+            vec![owner, gm],
+            vec![crate::lockstep::FleetGm {
+                host: gm,
+                operator_id: "gm-one".into(),
+            }],
+            owner,
+            owner,
+        )
+        .unwrap(),
+    );
+    app.insert_resource(crate::lockstep::FleetLockstep(
+        crate::lockstep::LockstepSession::new(owner, [owner, gm], 6),
+    ));
+    app.world_mut()
+        .resource_mut::<crate::lockstep::MeshOutbox>()
+        .drain();
+    app.world_mut()
+        .resource_mut::<crate::lockstep::MeshInbox>()
+        .push_from(
+            crate::lockstep::MeshFrame::GmAction(crate::gm_action::GmActionFrame::Proposal(
+                crate::gm_action::GmActionProposal {
+                    from: gm,
+                    operator_id: "gm-one".into(),
+                    correlation: crate::gm_action::GmActionId::new("same-frame-proposal").unwrap(),
+                    action: crate::gm_action::GmAction::SetSessionPaused { active: true },
+                },
+            )),
+            crate::lockstep::MeshOrigin::Peer(gm),
+        );
+    push(
+        &mut app,
+        crate::console_bridge::LOCAL_CONSOLE_TOKEN,
+        ClientMessage::ReturnToLobby,
+    );
+
+    app.update();
+
+    assert!(app
+        .world()
+        .resource::<crate::gm_action::GmActionJournal>()
+        .is_empty());
+    assert!(app
+        .world()
+        .resource::<crate::gm_action::GmActionLog>()
+        .entries()
+        .is_empty());
+    assert!(app
+        .world()
+        .resource::<crate::gm_action::LocalGmActionRefusals>()
+        .entries()
+        .is_empty());
+    let pending = app
+        .world()
+        .resource::<crate::lockstep::MeshOutbox>()
+        .pending_frames();
+    assert!(
+        pending
+            .iter()
+            .all(|frame| !matches!(frame, crate::lockstep::MeshFrame::GmAction(_))),
+        "reset emitted a GM decision after the run ended: {pending:?}"
+    );
+}
+
 /// The reach added above is the host page's alone. A phone sending the
 /// same un-gated `ReturnToLobby` mid-mission must be ignored by the real
 /// app, or the settings-cog feature would hand every handset an abort.

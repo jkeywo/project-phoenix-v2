@@ -477,11 +477,9 @@ impl Plugin for LobbyPlugin {
             // the mid-mission abort host-only — this registration is only about
             // which phases the system is allowed to look at the message in.
             .add_systems(
-                FixedUpdate,
+                PreUpdate,
                 handle_return_to_lobby_system
-                    .in_set(LobbySystemSet)
-                    .after(handle_disconnect)
-                    .before(tick_countdown)
+                    .before(crate::lockstep::MeshSet)
                     .run_if(in_state(GamePhase::GameOver).or(in_state(GamePhase::InProgress))),
             );
     }
@@ -1202,9 +1200,16 @@ pub fn handle_return_to_lobby_system(
         With<crate::server_app::LocalShip>,
     >,
     mut countdown: Option<ResMut<CountdownTimer>>,
+    mut gm_journal: Option<ResMut<crate::gm_action::GmActionJournal>>,
+    mut gm_log: Option<ResMut<crate::gm_action::GmActionLog>>,
+    mut gm_results: Option<ResMut<crate::gm_action::LocalGmActionRefusals>>,
+    mut gm_projection: Option<ResMut<crate::gm_action::LastGmSessionProjection>>,
+    mut paused: Option<ResMut<crate::gm_action::SimulationPaused>>,
+    mut virtual_time: Option<ResMut<Time<bevy::time::Virtual>>>,
 ) {
     let phase = state.get().clone();
     let events: Vec<_> = inbound.read().cloned().collect();
+    let mut returned = false;
     for ev in events {
         let ClientMessage::ReturnToLobby = &ev.msg else {
             continue;
@@ -1212,6 +1217,7 @@ pub fn handle_return_to_lobby_system(
         let authority = handler::return_to_lobby_authority(&ev.token);
         if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
             let result = handler::handle_return_to_lobby(&mut sessions.0, phase.clone(), authority);
+            returned |= result.new_phase == Some(GamePhase::Lobby);
             apply_result(
                 result,
                 &mut outbox,
@@ -1223,6 +1229,7 @@ pub fn handle_return_to_lobby_system(
             );
         } else {
             let result = handler::handle_return_to_lobby(&mut sessions.0, phase.clone(), authority);
+            returned |= result.new_phase == Some(GamePhase::Lobby);
             let mut fallback_ratings = ActiveStationRatings::default();
             apply_result(
                 result,
@@ -1233,6 +1240,34 @@ pub fn handle_return_to_lobby_system(
                 &mut fallback_ratings,
                 countdown.as_deref_mut(),
             );
+        }
+    }
+    if returned {
+        // Clear the complete per-run lane synchronously before MeshSet. An old
+        // due Pause must not reassert itself in `apply_due_actions`, and a GM
+        // request queued later in this frame is either cleared here or refused
+        // as WrongPhase on the next frame. The technical fleet remains intact.
+        if let Some(journal) = gm_journal.as_deref_mut() {
+            *journal = Default::default();
+        }
+        if let Some(log) = gm_log.as_deref_mut() {
+            *log = Default::default();
+        }
+        if let Some(results) = gm_results.as_deref_mut() {
+            *results = Default::default();
+        }
+        if let Some(projection) = gm_projection.as_deref_mut() {
+            *projection = Default::default();
+        }
+        if let Some(paused) = paused.as_deref_mut() {
+            paused.0 = false;
+        }
+        // Return-to-lobby is frame-driven specifically so a paused fixed clock
+        // cannot deadlock the host's escape route. This system is ordered before
+        // MeshSet: it releases the product hold, then the mesh/model gate gets
+        // the final say and may immediately re-pause the shared clock.
+        if let Some(virtual_time) = virtual_time.as_deref_mut() {
+            virtual_time.unpause();
         }
     }
 }

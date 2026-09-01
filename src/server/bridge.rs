@@ -34,7 +34,7 @@ use {
     crate::boot::{BootPlan, BootProfile, WorldIngest},
     crate::console_bridge::{
         AiChatterEvent, AudioConfigChanged, AudioCueEvent, GmEntityProjectionChanged,
-        HudStateChanged, LobbyStateChanged,
+        GmSessionChanged, HudStateChanged, LobbyStateChanged,
     },
     crate::core::codec::{self, JsonCodec, MessageCodec},
     crate::core::messages::{self, DeliveryClass},
@@ -637,6 +637,11 @@ thread_local! {
     static PENDING_GM_ROSTER: RefCell<Option<crate::gm_roster::GmRoster>> =
         const { RefCell::new(None) };
 
+    /// Validated privileged GM requests waiting for the next frame-driven
+    /// admission pass. This lane remains live while FixedUpdate is paused.
+    static PENDING_GM_ACTIONS: RefCell<VecDeque<crate::gm_action::GmActionRequest>> =
+        const { RefCell::new(VecDeque::new()) };
+
     /// Explicit production GM-page boot request. This is set by the page before
     /// `wasm_init` and takes precedence over the WebDriver probe.
     static GM_HOST_BOOT_REQUESTED: RefCell<bool> = const { RefCell::new(false) };
@@ -1033,10 +1038,12 @@ pub mod host_channels {
     /// Rendererless GM peer's absolute one-entity projection. This callback is
     /// page-local and never enters the peer transport.
     pub const GM_ENTITY: &str = "gm_entity";
+    /// Authoritative pause state plus attributed typed-action results.
+    pub const GM_SESSION: &str = "gm_session";
 
     /// Every registered host channel name. The JS dispatcher table in
     /// `server.html` must have a handler per entry.
-    pub const ALL: [&str; 8] = [
+    pub const ALL: [&str; 9] = [
         HUD,
         LOBBY,
         CHATTER,
@@ -1045,6 +1052,7 @@ pub mod host_channels {
         SHAKE,
         AUDIO_LEVEL,
         GM_ENTITY,
+        GM_SESSION,
     ];
 }
 
@@ -1451,6 +1459,17 @@ pub fn wasm_init() {
             .chain()
             .before(crate::lockstep::MeshSet),
     )
+    .add_systems(
+        PreUpdate,
+        // Mesh input establishes the owner's latest canonical sequence first;
+        // local GM ingress then joins that order before the reducer and before
+        // any fixed step. This is what makes an apply-at-now standalone Pause
+        // incapable of leaking one forbidden simulation tick.
+        drain_gm_action_input
+            .after(crate::lockstep::apply_mesh_inbox)
+            .before(crate::gm_action::apply_due_actions)
+            .in_set(crate::lockstep::MeshSet),
+    )
     // `apply_force_start` writes `NextState<GamePhase>`, so it lives in
     // `FixedUpdate` rather than alongside its own input drain above — see the
     // #907 review note on `apply_force_start` for why.
@@ -1468,7 +1487,7 @@ pub fn wasm_init() {
         PostUpdate,
         (
             flush_outbound,
-            flush_host_channels,
+            flush_host_channels.after(crate::gm_action::publish_session_projection),
             publish_sim_tick,
             publish_god_mode,
             publish_instagib,
@@ -1744,6 +1763,25 @@ pub fn wasm_set_gm_roster(roster_json: &str) -> String {
         }
         None => "gm-roster-unreadable".to_string(),
     }
+}
+
+/// Queue one typed, attributed GM action for privileged frame-driven
+/// admission. The browser never receives a generic mutation route.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_submit_gm_action(request_json: &str) -> bool {
+    const LIMIT: usize = 64;
+    let Some(request) = crate::core::codec::decode_gm_action_request(request_json) else {
+        return false;
+    };
+    PENDING_GM_ACTIONS.with(|pending| {
+        let mut pending = pending.borrow_mut();
+        if pending.len() >= LIMIT {
+            return false;
+        }
+        pending.push_back(request);
+        true
+    })
 }
 
 /// Enable or disable browser-mesh ownership of collective lobby start.
@@ -2029,6 +2067,37 @@ fn apply_gm_roster_replacement(
 fn drain_gm_roster(world: &mut World) {
     if let Some(replacement) = PENDING_GM_ROSTER.with(|pending| pending.borrow_mut().take()) {
         apply_gm_roster_replacement(world, replacement);
+    }
+}
+
+/// Admit queued browser-GM requests only after this frame's authenticated mesh
+/// input has updated the canonical sequence frontier and immediately before
+/// `gm_action::apply_due_actions`. A standalone Pause/Resume at the current
+/// boundary therefore takes effect before this frame can spend a fixed step.
+#[cfg(target_arch = "wasm32")]
+fn drain_gm_action_input(world: &mut World) {
+    let requests = PENDING_GM_ACTIONS.with(|pending| {
+        let mut pending = pending.borrow_mut();
+        pending.drain(..).collect::<Vec<_>>()
+    });
+    for request in requests {
+        let operator_id = request.operator_id.clone();
+        let correlation = request.correlation.clone();
+        let requested_active = request.action.requested_pause();
+        if let Err(reason) = crate::gm_action::submit_local(world, request) {
+            let tick = world
+                .get_resource::<crate::sim_tick::SimTick>()
+                .map_or(0, |tick| tick.0);
+            world
+                .resource_mut::<crate::gm_action::LocalGmActionRefusals>()
+                .push(crate::gm_action::LoggedGmAction::refused(
+                    operator_id,
+                    correlation,
+                    requested_active,
+                    tick,
+                    reason,
+                ));
+        }
     }
 }
 
@@ -4630,10 +4699,11 @@ fn flush_host_channels(
     mut audio_config: MessageReader<AudioConfigChanged>,
     mut audio_cue: MessageReader<AudioCueEvent>,
     mut gm_entity: MessageReader<GmEntityProjectionChanged>,
+    mut gm_session: MessageReader<GmSessionChanged>,
 ) {
     // Declarative channel table: name → drained JSON payloads. Adding a
     // message channel = one row here (see `host_channels`).
-    let message_batches: [(&str, Vec<String>); 6] = [
+    let message_batches: [(&str, Vec<String>); 7] = [
         (
             host_channels::HUD,
             hud.read().map(|m| m.json.clone()).collect(),
@@ -4662,6 +4732,13 @@ fn flush_host_channels(
             gm_entity
                 .read()
                 .filter_map(|event| codec::encode_gm_entity_projection(&event.payload).ok())
+                .collect(),
+        ),
+        (
+            host_channels::GM_SESSION,
+            gm_session
+                .read()
+                .filter_map(|event| codec::encode_gm_session_projection(&event.payload).ok())
                 .collect(),
         ),
     ];
@@ -5408,6 +5485,7 @@ spawn_on = "game_start"
                 host_channels::SHAKE,
                 host_channels::AUDIO_LEVEL,
                 host_channels::GM_ENTITY,
+                host_channels::GM_SESSION,
             ]
         );
     }

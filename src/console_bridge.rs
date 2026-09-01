@@ -85,3 +85,10 @@ pub struct AudioCueEvent {
 pub struct GmEntityProjectionChanged {
     pub payload: crate::gm_projection::GmEntityProjectionPayload,
 }
+
+/// Absolute GM session state and bounded attributed result feed. Local Host
+/// Channel only; the grants themselves cross the typed host mesh.
+#[derive(Message, Clone, Debug)]
+pub struct GmSessionChanged {
+    pub payload: crate::gm_action::GmSessionProjection,
+}

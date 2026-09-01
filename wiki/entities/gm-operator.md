@@ -1,8 +1,8 @@
 ---
 title: GM Operator
 type: entity
-tags: [gm, operator, identity, reconnect, roster, readiness, force-start, host-mesh]
-sources: [src/gm_roster.rs, src/gm_projection.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/messages.rs, src/lobby/server.rs, src/server/bridge.rs, gui/gm-local-projection.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html]
+tags: [gm, operator, identity, reconnect, roster, readiness, force-start, action, pause, host-mesh]
+sources: [src/gm_roster.rs, src/gm_action.rs, src/gm_projection.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/messages.rs, src/core/codec.rs, src/lobby/server.rs, src/lockstep/frame.rs, src/lockstep/mod.rs, src/server/bridge.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/gm-local-projection.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html]
 updated: 2026-09-01
 ---
 
@@ -64,6 +64,38 @@ the page's local `gm_entity` Host Channel. Despawn or world reset sends an
 explicit null projection so stale identity cannot remain. The projection is
 not a `ServerMessage`, `MeshFrame`, or `SimOutbox`; peer state transfer remains
 the snapshot-recovery path.
+
+## Typed session actions
+
+`SetSessionPaused { active }` is the first complete GM action. The page submits
+an absolute value plus the public operator id and a bounded durable
+`GmActionId`; it never calls the local/debug toggle. Rust binds that identity to
+the authenticated GM slot in the frozen private `FleetRoster`. Any GM may send
+a proposal, but only the frozen technical owner assigns its exact logical
+boundary and canonical `(apply_tick, GmActionOrder { sequence, origin })` key.
+The proposal's `from` remains the requester and a decision's `sequenced_by`
+names the technical owner; neither field grants operator precedence. Exact
+retransmission is inert and a new id that requests the current value records an
+explicit No-op. JavaScript relays the opaque Proposal, Granted, and Refused
+frames without interpreting the Rust-owned action protocol.
+
+The complete bounded `GmActionJournal` is snapshotted as authoritative input
+and the whole journal remains the operator-scoped idempotency record. Current
+state and digest fold only `initial_paused`, the exact `applied_prefix()`, and
+`SimulationPaused`; future grants received early are not current state.
+`apply_due_actions` advances the durable `applied_grants` reducer frontier in
+`PreUpdate`, so Resume remains consumable while Pause has starved `FixedUpdate`.
+Its derived log supplies attributed Applied/No-op results; canonical or local
+admission failures add Refused results without becoming successful history.
+The existing lockstep gate still owns the combined virtual-time decision, so a
+GM resume cannot release a peer, recovery, or model-readiness hold.
+
+Replay installs a one-shot `ReplayGmSeed` after the ordinary run-start reset.
+It loads only the source run's applied prefix into an empty live journal with a
+zero frontier, then re-applies those recorded boundaries through the production
+reducer; an unapplied suffix never extends replay beyond the artifact's final
+tick. The GM page receives only an absolute local `gm_session` Host Channel
+projection and does not optimistically change the displayed pause state.
 
 ## Related
 

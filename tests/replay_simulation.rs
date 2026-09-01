@@ -18,9 +18,14 @@
 
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 
-use project_phoenix::command_admission::log::{CommandOrder, LoggedCommand, ShipKey};
+use project_phoenix::command_admission::log::{CommandOrder, HostSlot, LoggedCommand, ShipKey};
 use project_phoenix::core::messages::{SystemControlPayload, SystemId};
-use project_phoenix::headless::replay::{drive_run, PhoenixSim, ReplayError};
+use project_phoenix::gm_action::{
+    GmAction, GmActionGrant, GmActionId, GmActionJournal, GmActionOrder, GmActionOutcome,
+};
+use project_phoenix::headless::replay::{
+    drive_run, drive_run_with_gm_actions, PhoenixSim, ReplayError,
+};
 use project_phoenix::headless::{verify_artifact, HeadlessArgs, ReplayArtifact};
 
 /// How often the runs here sample a digest, in logical ticks.
@@ -99,6 +104,30 @@ fn script() -> Vec<LoggedCommand> {
     ]
 }
 
+fn gm_grant(sequence: u64, apply_tick: u64, correlation: &str, active: bool) -> GmActionGrant {
+    let from = HostSlot(2);
+    GmActionGrant {
+        from,
+        sequenced_by: HostSlot(1),
+        operator_id: "gm-replay".into(),
+        correlation: GmActionId::new(correlation).expect("valid correlation"),
+        apply_tick,
+        order: GmActionOrder::new(from, sequence),
+        action: GmAction::SetSessionPaused { active },
+    }
+}
+
+fn gm_journal(grants: impl IntoIterator<Item = GmActionGrant>) -> GmActionJournal {
+    let mut journal = GmActionJournal::default();
+    for grant in grants {
+        journal.insert(grant).expect("canonical GM fixture");
+    }
+    journal
+        .restore_applied_frontier(journal.len())
+        .expect("the fixture applies every supplied grant");
+    journal
+}
+
 /// Record a run under `script`, and capture it as an artifact.
 fn record() -> ReplayArtifact {
     let args = args();
@@ -118,7 +147,10 @@ fn record() -> ReplayArtifact {
         "precondition: admission must have resolved every entry to a ship by \
          uuid — that key is the whole of what makes an entry re-routable"
     );
-    ReplayArtifact::capture(&args, log, sim.seal()).expect("a seeded run captures")
+    let gm_actions = sim.recorded_gm_actions();
+    let final_tick = sim.tick();
+    ReplayArtifact::capture(&args, log, gm_actions, final_tick, sim.seal())
+        .expect("a seeded run captures")
 }
 
 /// AC1 + the contract: `vellum_replay`'s own checks, run against the REAL
@@ -250,6 +282,146 @@ fn a_recorded_run_replays_to_the_same_digest() {
          commands — the commands changed nothing the digest can see, so the \
          equality above is not a replay",
         recorded.log.len()
+    );
+}
+
+/// Issue #1292: typed GM input is part of the replay script, not a UI-side
+/// mutation. Pause and Resume share one frozen logical boundary (wall frames
+/// spent paused are deliberately absent), retain their explicit terminal
+/// outcomes, and reproduce the recording's digest from the artifact alone.
+#[test]
+fn attributed_pause_and_resume_replay_through_the_canonical_journal() {
+    let args = args();
+    let gm_actions = gm_journal([
+        gm_grant(1, 120, "pause-replay", true),
+        gm_grant(2, 120, "resume-replay", false),
+    ]);
+    let mut sim = drive_run_with_gm_actions(&args, &[], &gm_actions, CHECKPOINT_EVERY)
+        .expect("the GM recording should drive");
+
+    let outcomes: Vec<_> = sim
+        .app_mut()
+        .world()
+        .resource::<project_phoenix::gm_action::GmActionLog>()
+        .entries()
+        .iter()
+        .map(|entry| entry.outcome)
+        .collect();
+    assert_eq!(
+        outcomes,
+        [GmActionOutcome::Applied, GmActionOutcome::Applied]
+    );
+
+    let recorded_actions = sim.recorded_gm_actions();
+    let final_tick = sim.tick();
+    let artifact = ReplayArtifact::capture(
+        &args,
+        sim.recorded_log(),
+        recorded_actions,
+        final_tick,
+        sim.seal(),
+    )
+    .expect("the GM run captures");
+
+    assert_eq!(artifact.gm_actions, gm_actions);
+    assert_eq!(
+        verify_artifact(&artifact).expect("the GM artifact should replay"),
+        None,
+        "the same seed and canonical GM grants must reproduce the recording"
+    );
+}
+
+#[test]
+fn an_adopted_restore_pause_resumes_through_the_real_build_and_artifact_path() {
+    let mut args = args();
+    args.max_ticks = 40;
+    let mut gm_actions = GmActionJournal::default();
+    gm_actions.adopt_initial_pause(true);
+    gm_actions
+        .insert(gm_grant(1, 0, "restored-resume", false))
+        .unwrap();
+    gm_actions.restore_applied_frontier(1).unwrap();
+
+    let mut sim = drive_run_with_gm_actions(&args, &[], &gm_actions, CHECKPOINT_EVERY)
+        .expect("the restored session should resume through PhoenixSim::build");
+    assert!(
+        sim.tick() > 0,
+        "the typed Resume must reopen the fixed clock"
+    );
+    assert_eq!(
+        sim.app_mut()
+            .world()
+            .resource::<project_phoenix::gm_action::GmActionLog>()
+            .entries()[0]
+            .outcome,
+        GmActionOutcome::Applied
+    );
+    let final_tick = sim.tick();
+    let artifact = ReplayArtifact::capture(
+        &args,
+        sim.recorded_log(),
+        sim.recorded_gm_actions(),
+        final_tick,
+        sim.seal(),
+    )
+    .expect("the restored run captures");
+    assert_eq!(verify_artifact(&artifact).unwrap(), None);
+}
+
+#[test]
+fn replay_cannot_skip_an_interior_pause_on_a_multi_step_frame() {
+    let mut args = args();
+    args.max_ticks = 20;
+    args.dt = 5.0 / 60.0;
+    let gm_actions = gm_journal([gm_grant(1, 3, "interior-pause", true)]);
+    let mut sim = drive_run_with_gm_actions(&args, &[], &gm_actions, 0)
+        .expect("the multi-step recording should stop on its typed boundary");
+    assert_eq!(
+        sim.tick(),
+        3,
+        "the fixed catch-up loop must not cross an interior Pause boundary"
+    );
+    assert_eq!(sim.recorded_gm_actions().applied_grants(), 1);
+    let final_tick = sim.tick();
+    let artifact = ReplayArtifact::capture(
+        &args,
+        sim.recorded_log(),
+        sim.recorded_gm_actions(),
+        final_tick,
+        sim.seal(),
+    )
+    .expect("the stopped run captures");
+    assert_eq!(verify_artifact(&artifact).unwrap(), None);
+}
+
+/// A recording that ends paused spends its remaining wall-frame allowance at
+/// one logical tick. Artifact replay therefore terminates at that recorded
+/// logical boundary after consuming the pause, instead of waiting for a tick
+/// that can never occur or treating the paused frames as simulation steps.
+#[test]
+fn a_replay_that_ends_paused_terminates_at_the_recorded_logical_tick() {
+    let args = args();
+    let gm_actions = gm_journal([gm_grant(1, 120, "terminal-pause", true)]);
+    let mut sim = drive_run_with_gm_actions(&args, &[], &gm_actions, CHECKPOINT_EVERY)
+        .expect("the paused recording should drive");
+    let final_tick = sim.tick();
+    assert_eq!(
+        final_tick, 120,
+        "the boundary-120 pause applies before tick 120 can be left behind"
+    );
+
+    let artifact = ReplayArtifact::capture(
+        &args,
+        sim.recorded_log(),
+        sim.recorded_gm_actions(),
+        final_tick,
+        sim.seal(),
+    )
+    .expect("the paused run captures");
+
+    assert_eq!(
+        verify_artifact(&artifact).expect("the paused artifact should terminate"),
+        None
     );
 }
 
@@ -408,7 +580,10 @@ fn a_duel_recording_replays_with_its_side_rosters_intact() {
     let args = duel_args();
     let mut sim = drive_run(&args, &[], CHECKPOINT_EVERY).expect("the duel run should drive");
     let log = sim.recorded_log();
-    let recorded = ReplayArtifact::capture(&args, log, sim.seal()).expect("a seeded run captures");
+    let gm_actions = sim.recorded_gm_actions();
+    let final_tick = sim.tick();
+    let recorded = ReplayArtifact::capture(&args, log, gm_actions, final_tick, sim.seal())
+        .expect("a seeded run captures");
 
     assert_eq!(recorded.side_a, args.side_a, "the roster must round-trip");
     assert_eq!(recorded.side_b, args.side_b);

@@ -2,8 +2,8 @@
 title: World Data
 type: entity
 tags: [world, scenario, transform, ambient_light, snapshot, includes]
-sources: [src/world/config.rs, src/world/server.rs, src/world/server_tests.rs, src/world/layers.rs, src/world/validate.rs, src/world/deadlines.rs, src/world/script/load.rs, src/world/script/schedule.rs, src/comms/scripted.rs, src/entities/config_cache.rs, src/snapshot.rs, src/server/bridge.rs, server.html, src/server/renderer.rs, src/entities/config.rs, src/entities/entity_override.rs, src/entities/include_resolve.rs, src/objectives/directive.rs, tests/snapshot_resume.rs, assets/worlds/default.toml]
-updated: 2026-08-30
+sources: [src/world/config.rs, src/world/server.rs, src/world/server_tests.rs, src/world/layers.rs, src/world/validate.rs, src/world/deadlines.rs, src/world/script/load.rs, src/world/script/schedule.rs, src/comms/scripted.rs, src/entities/config_cache.rs, src/snapshot.rs, src/gm_action.rs, src/sim_digest.rs, src/headless/replay.rs, src/server/bridge.rs, server.html, src/server/renderer.rs, src/entities/config.rs, src/entities/entity_override.rs, src/entities/include_resolve.rs, src/objectives/directive.rs, tests/snapshot_resume.rs, assets/worlds/default.toml]
+updated: 2026-09-01
 ---
 
 # World Data
@@ -142,11 +142,18 @@ and Helm clearance latch are exact replacement state. Weapons' global phaser
 mode and each ship's arc-request debounce/pending request also preserve present
 defaults, so restore clears bootstrap-only requests rather than merging them.
 
-Current snapshot format 15 additionally records the pre-world `BootIdentity`:
+Current snapshot format 16 additionally records the pre-world `BootIdentity`:
 the selected hull, frozen fleet roster, and authored-order UUIDs of every
 `GameStart` entity that spawned. A fresh-session restore validates and stages
 that identity before the world is rebuilt; see [Peer-Local Save
 Catalogues](../concepts/save-catalogues.md).
+
+Format 16 also captures the authoritative session-pause bit, complete canonical
+GM action journal, and exact `applied_grants` reducer frontier. The whole
+journal is the idempotency record; the frontier identifies only the prefix that
+has reached current state and digest. Restoring a paused run retains the frozen
+logical-tick boundary and attributed action history needed for exact Resume and
+replay.
 
 ## TransformConfig (`src/world/config.rs`)
 

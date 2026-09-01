@@ -4,12 +4,15 @@ import { ACTION_FEEDBACK_STATE } from './action-feedback.js';
 import { createSemanticActionRegistry } from './semantic-action-registry.js';
 
 export const HOST_ACTION_CONTEXT = 'host';
+export const HOST_GM_ACTION_CONTEXT = 'gm';
 export const HOST_QR_CODE_ACTION_ID = 'host.qr-code';
 
 export const HOST_ACTION_DEFINITIONS = Object.freeze([
   Object.freeze({
     id: HOST_QR_CODE_ACTION_ID,
-    contexts: Object.freeze([HOST_ACTION_CONTEXT]),
+    // QR belongs to both host roles. The overlap with `gm` also makes the one
+    // shared registry detect/remap conflicts against privileged GM actions.
+    contexts: Object.freeze([HOST_ACTION_CONTEXT, HOST_GM_ACTION_CONTEXT]),
     labelId: 'semantic_action.host.qr_code.label',
     accessibilityLabelId: 'semantic_action.host.qr_code.accessibility',
     feedback: 'local',
@@ -34,7 +37,7 @@ export function registerHostActions(registry, { toggleQrCode } = {}) {
   }
   registry.register(HOST_ACTION_DEFINITIONS[0], ({ settleFeedback }) => {
     if (typeof toggleQrCode !== 'function' || typeof settleFeedback !== 'function') return false;
-    toggleQrCode();
+    if (toggleQrCode() === false) return false;
     settleFeedback(ACTION_FEEDBACK_STATE.APPLIED);
     return true;
   });

@@ -2,8 +2,8 @@
 title: Game Loop
 type: concept
 tags: [loop, ticks, simulation, rates, determinism, lockstep, fleet]
-sources: [src/server_app/registration.rs, src/sim_tick.rs, src/ai/cadence.rs, src/command_admission/log.rs, src/lockstep/mod.rs, src/lockstep/session.rs, src/ship/physics.rs, src/server/bridge.rs, gui/host-actions.js, gui/server-settings.js, AGENTS.md]
-updated: 2026-08-29
+sources: [src/server_app/registration.rs, src/sim_tick.rs, src/ai/cadence.rs, src/command_admission/log.rs, src/gm_action.rs, src/lockstep/mod.rs, src/lockstep/session.rs, src/ship/physics.rs, src/server/bridge.rs, gui/host-actions.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/server-settings.js, AGENTS.md]
+updated: 2026-09-01
 ---
 
 # Game Loop
@@ -119,15 +119,24 @@ inside the fixed loop, so any frame rate covers the same logical ticks per
 sim-second. The browser exposes the counter as `wasm_sim_tick()` for the
 smoke tests (`tests/smoke/sim-tick.spec.js`).
 
-## Simulation pause (settings cog)
+## Simulation pause
 
 `wasm_toggle_pause()` (`drain_host_controls` in `src/server/bridge.rs`)
 pauses `Time<Virtual>`, which starves the fixed accumulator — `FixedUpdate`
 stops running altogether while paused, not just the `SimSet` chain inside it.
 
-The host settings cog exposes pause on its **Gameplay** tab. It remains
-available in the demo build even though the Debug/Cheat tab is absent. That
-pause button is the only host pause driver; pause has no keyboard binding.
+The host settings cog exposes that raw local pause on its **Gameplay** tab. It
+remains available in the demo build even though the Debug/Cheat tab is absent;
+it is local, unbound, and separate from deterministic GM authority.
+
+GM Pause and Resume use typed attributed `SetSessionPaused { active }` actions,
+with KeyP/KeyR defaults and two keyboard-or-standard-gamepad slots per command.
+They are absolute state-setting commands ordered through the host mesh, and the
+GM surface changes its displayed pause state only from the authoritative
+projection. Applying a typed Pause in `PreUpdate` zeroes the current virtual
+frame delta and discards unbegun whole fixed overstep so no catch-up step leaks
+past its logical boundary; Resume removes only the GM hold and cannot release a
+lockstep, recovery, or model-readiness hold.
 
 The same Gameplay tab exposes the viewscreen join-QR toggle. Phones carry the
 matching control in their Gameplay settings. The host's `host.qr-code` semantic

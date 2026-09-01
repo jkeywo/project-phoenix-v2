@@ -65,6 +65,7 @@ const RESERVED_CTRL_SHIFT_CODES = new Set([
   'KeyM',   // Browser profile/window command.
   'KeyQ',   // Browser/window quit command.
 ]);
+const CONFIRMATION_CATEGORY_ID = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 const RESERVED_ALT_CODES = new Set([
   // Browser menus, address/location, window switching and navigation.
   'KeyD', 'KeyE', 'KeyF', 'F4', 'Tab', 'Home', 'Space', 'Enter',
@@ -301,6 +302,15 @@ function normalizeDefinition(definition) {
   if (!labelId || !accessibilityLabelId) {
     throw new TypeError('semantic action display and accessibility metadata are required');
   }
+  let confirmationCategory = null;
+  if (definition.confirmationCategory != null) {
+    confirmationCategory = typeof definition.confirmationCategory === 'string'
+      ? definition.confirmationCategory.trim()
+      : '';
+    if (!CONFIRMATION_CATEGORY_ID.test(confirmationCategory)) {
+      throw new TypeError('semantic action confirmation category must be a stable id');
+    }
+  }
   const feedback = definition.feedback === 'local'
     ? 'local'
     : definition.authoritativeFeedback === true
@@ -319,6 +329,7 @@ function normalizeDefinition(definition) {
     contexts: Object.freeze(contexts),
     labelId,
     accessibilityLabelId,
+    ...(confirmationCategory ? { confirmationCategory } : {}),
     authoritativeFeedback: definition.authoritativeFeedback === true,
     feedback,
     hold,

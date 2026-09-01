@@ -54,6 +54,8 @@ import {
   HOST_QR_CODE_ACTION_ID,
   createHostActionRegistry,
 } from './host-actions.js';
+import { GM_ACTION_CONTEXT } from './gm-session-actions.js';
+import { createGamepadInputRuntime } from './gamepad-input.js';
 import { createSemanticControlsRemapper } from './semantic-controls-remapper.js';
 import {
   mountOverlayShell,
@@ -305,22 +307,29 @@ export function mountServerSettings(opts = {}) {
     shell.btn.insertAdjacentElement('afterend', actionFeedbackStatus);
   }
 
-  const actionFeedback = new ActionFeedbackLifecycle({
-    onTransition: (value) => {
-      emitActionFeedbackTransition(win, value);
-      if (value.actionId !== HOST_QR_CODE_ACTION_ID || value.isCurrent === false) return;
-      actionFeedbackStatus.dataset.state = value.state || '';
-      actionFeedbackStatus.textContent = value.statusId
-        ? t('semantic_action.host.qr_code.feedback', { status: t(value.statusId) })
-        : '';
-    },
-  });
-  const hostActions = createHostActionRegistry({
-    actionFeedback,
-    toggleQrCode: typeof bindings.__hostToggleQrCode === 'function'
-      ? () => bindings.__hostToggleQrCode()
-      : null,
-  });
+  const presentHostActionFeedback = (value) => {
+    if (!value || value.actionId !== HOST_QR_CODE_ACTION_ID || value.isCurrent === false) return;
+    actionFeedbackStatus.dataset.state = value.state || '';
+    actionFeedbackStatus.textContent = value.statusId
+      ? t('semantic_action.host.qr_code.feedback', { status: t(value.statusId) })
+      : '';
+  };
+  const onHostActionFeedback = (event) => presentHostActionFeedback(event && event.detail);
+  if (win && typeof win.addEventListener === 'function') {
+    win.addEventListener('phoenix-action-feedback', onHostActionFeedback);
+  }
+  const actionFeedback = opts.actionFeedback || bindings.__hostActionFeedback
+    || new ActionFeedbackLifecycle({
+      onTransition: (value) => emitActionFeedbackTransition(win, value),
+    });
+  // server.html supplies one page-scoped registry already carrying GM
+  // Pause/Resume. The fallback keeps isolated tests and old embeddings useful.
+  const hostActions = opts.semanticActions || bindings.__hostSemanticActions
+    || createHostActionRegistry({
+      actionFeedback,
+      toggleQrCode: () => (typeof bindings.__hostToggleQrCode === 'function'
+        ? bindings.__hostToggleQrCode() : false),
+    });
 
   const outputHost = doc.getElementById(OUTPUT_HOST_ID);
   const outputContent = doc.getElementById(OUTPUT_CONTENT_ID);
@@ -362,9 +371,18 @@ export function mountServerSettings(opts = {}) {
     return el;
   }
 
+  function currentHostActionContext() {
+    try {
+      return typeof bindings.__hostLocalGm === 'function' && bindings.__hostLocalGm()
+        ? GM_ACTION_CONTEXT : HOST_ACTION_CONTEXT;
+    } catch (_) {
+      return HOST_ACTION_CONTEXT;
+    }
+  }
+
   function activateQrCode(source = 'control') {
     const result = hostActions.activate(HOST_QR_CODE_ACTION_ID, {
-      context: HOST_ACTION_CONTEXT,
+      context: currentHostActionContext(),
       source,
     });
     if (result.handled) refresh();
@@ -375,7 +393,7 @@ export function mountServerSettings(opts = {}) {
   // Settings overlay is closed. Registry input-target guards and the shared
   // remapper's capture listeners keep typing/capture from leaking into them.
   const onHostKeydown = (event) => {
-    const result = hostActions.dispatchKeyboardEvent(event, HOST_ACTION_CONTEXT);
+    const result = hostActions.dispatchKeyboardEvent(event, currentHostActionContext());
     if (result.claimed && typeof event.stopPropagation === 'function') event.stopPropagation();
     if (result.handled) refresh();
   };
@@ -384,14 +402,56 @@ export function mountServerSettings(opts = {}) {
   // Editable/capture targets are still rejected by the registry itself.
   doc.addEventListener('keydown', onHostKeydown, true);
 
-  const semanticControls = createSemanticControlsRemapper({
+  let semanticControls = null;
+  const gamepad = opts.gamepadRuntime || createGamepadInputRuntime({
+    getGamepads: typeof opts.getGamepads === 'function'
+      ? opts.getGamepads
+      : () => (bindings.navigator && typeof bindings.navigator.getGamepads === 'function'
+        ? bindings.navigator.getGamepads() : []),
+    getContext: currentHostActionContext,
+    getActions: (context) => hostActions.list(context),
+    activate: (actionId, activation) => {
+      const result = hostActions.activate(actionId, activation);
+      if (result && result.handled) refresh();
+      return result;
+    },
+    onCapture: (target, binding) => {
+      if (semanticControls) semanticControls.proposeBinding(target.actionId, target.slot, binding);
+    },
+    onStateChange: () => {
+      // Beginning capture changes runtime state synchronously from the input's
+      // focus handler. Rebuilding there would detach the very control waiting
+      // for a keyboard/gamepad choice. The remapper rebuilds after a completed
+      // capture; connection/status changes outside capture still repaint here.
+      const focused = doc.activeElement;
+      const capturing = focused && typeof focused.getAttribute === 'function'
+        && focused.getAttribute('data-semantic-binding-capture') != null;
+      if (!capturing && shell.isOpen() && activeTab === 'controls') buildPanel();
+    },
+    isTransportLive: () => true,
+    ...(win && typeof win.requestAnimationFrame === 'function'
+      ? { requestAnimationFrame: (callback) => win.requestAnimationFrame(callback) }
+      : {}),
+    ...(win && typeof win.cancelAnimationFrame === 'function'
+      ? { cancelAnimationFrame: (handle) => win.cancelAnimationFrame(handle) }
+      : {}),
+  });
+  semanticControls = createSemanticControlsRemapper({
     doc,
     root: overlay,
     setBinding: hostActions.setBinding,
     resetAction: hostActions.resetAction,
     resetAll: hostActions.resetAllBindings,
+    onCapture: (actionId, slot, active) => {
+      if (active) gamepad.beginCapture(actionId, slot);
+      else gamepad.endCapture(actionId, slot);
+    },
     rebuild: () => { if (shell.isOpen()) buildPanel(); },
   });
+  const stopGamepad = opts.startGamepad !== false && autoRefresh
+    && win && typeof win.requestAnimationFrame === 'function'
+    ? gamepad.start(win)
+    : null;
 
   // ── Output panel ───────────────────────────────────────────────────────────
 
@@ -595,14 +655,76 @@ export function mountServerSettings(opts = {}) {
   }
 
   function buildControlsTab(body) {
+    const gamepadState = gamepad.state();
     semanticControls.render(body, {
-      actions: hostActions.list(HOST_ACTION_CONTEXT),
+      // One page-scoped catalogue means GM remaps use the same two-slot
+      // profile and conflict replacement path as ordinary host chrome.
+      actions: hostActions.list(),
+      capturing: gamepadState.capturing || null,
       hintId: 'settings.controls.host_hint',
       pressPromptId: 'settings.controls.host_press_key',
       section,
       hint,
       row: rowHost,
       action: actionControl,
+      beforeActions: (target) => {
+        const gamepadSection = section('settings.controls.gamepad.heading');
+        gamepadSection.appendChild(hint('settings.controls.gamepad.hint'));
+
+        const label = doc.createElement('label');
+        label.className = 'settings-binding-label';
+        label.textContent = t('settings.controls.gamepad.selector');
+        const selector = doc.createElement('select');
+        selector.setAttribute('data-control', 'semantic-gamepad-select');
+        selector.setAttribute('aria-label', t('settings.controls.gamepad.selector'));
+        const none = doc.createElement('option');
+        none.value = '';
+        none.textContent = t('settings.controls.gamepad.none');
+        selector.appendChild(none);
+        const seen = new Set();
+        for (const device of gamepadState.devices || []) {
+          const option = doc.createElement('option');
+          option.value = String(device.index);
+          option.disabled = !device.supported;
+          option.textContent = t(
+            device.supported
+              ? 'settings.controls.gamepad.device'
+              : 'settings.controls.gamepad.device_unsupported',
+            { slot: String(Number(device.index) + 1) },
+          );
+          seen.add(Number(device.index));
+          selector.appendChild(option);
+        }
+        if (gamepadState.selectedIndex != null
+            && !seen.has(Number(gamepadState.selectedIndex))) {
+          const disconnected = doc.createElement('option');
+          disconnected.value = String(gamepadState.selectedIndex);
+          disconnected.textContent = t('settings.controls.gamepad.device_disconnected', {
+            slot: String(Number(gamepadState.selectedIndex) + 1),
+          });
+          selector.appendChild(disconnected);
+        }
+        selector.value = gamepadState.selectedIndex == null
+          ? '' : String(gamepadState.selectedIndex);
+        selector.addEventListener('change', () => {
+          gamepad.select(selector.value === '' ? null : Number(selector.value));
+          buildPanel();
+        });
+        label.appendChild(selector);
+        gamepadSection.appendChild(label);
+
+        const status = doc.createElement('div');
+        status.className = 'server-settings-hint settings-gamepad-status';
+        status.setAttribute('data-control', 'semantic-gamepad-status');
+        status.setAttribute('role', gamepadState.status === 'disconnected' ? 'alert' : 'status');
+        status.setAttribute(
+          'aria-live',
+          gamepadState.status === 'disconnected' ? 'assertive' : 'polite',
+        );
+        status.textContent = t(`settings.controls.gamepad.status_${gamepadState.status || 'none'}`);
+        gamepadSection.appendChild(status);
+        target.appendChild(gamepadSection);
+      },
     });
   }
 
@@ -940,6 +1062,10 @@ export function mountServerSettings(opts = {}) {
     }
     rafHandle = null;
     doc.removeEventListener('keydown', onHostKeydown, true);
+    if (win && typeof win.removeEventListener === 'function') {
+      win.removeEventListener('phoenix-action-feedback', onHostActionFeedback);
+    }
+    if (typeof stopGamepad === 'function') stopGamepad();
     semanticControls.destroy();
     shell.close();
   }
@@ -950,6 +1076,8 @@ export function mountServerSettings(opts = {}) {
     isOpen: shell.isOpen,
     refresh,
     selectTab,
+    semanticActions: hostActions,
+    gamepad,
     destroy,
   };
 }

@@ -116,6 +116,103 @@ fn spawn_rock(world: &mut World, uuid: &str, x: f32) {
     ));
 }
 
+fn gm_grant(operator: &str, correlation: &str) -> crate::gm_action::GmActionGrant {
+    let origin = crate::command_admission::HostSlot(1);
+    crate::gm_action::GmActionGrant {
+        from: origin,
+        sequenced_by: origin,
+        operator_id: operator.to_string(),
+        correlation: crate::gm_action::GmActionId::new(correlation).unwrap(),
+        apply_tick: 20,
+        order: crate::gm_action::GmActionOrder::new(origin, 1),
+        action: crate::gm_action::GmAction::SetSessionPaused { active: true },
+    }
+}
+
+#[test]
+fn only_the_applied_gm_action_frontier_moves_the_digest() {
+    let mut baseline = fold_world();
+    baseline.insert_resource(SimTick(10));
+    baseline.insert_resource(crate::gm_action::SimulationPaused(false));
+    baseline.insert_resource(crate::gm_action::GmActionJournal::default());
+    let baseline_digest = world_digest(&baseline);
+
+    let mut paused = fold_world();
+    paused.insert_resource(SimTick(10));
+    paused.insert_resource(crate::gm_action::SimulationPaused(true));
+    paused.insert_resource(crate::gm_action::GmActionJournal::default());
+    assert_ne!(world_digest(&paused), baseline_digest);
+
+    let mut pending = fold_world();
+    pending.insert_resource(SimTick(10));
+    pending.insert_resource(crate::gm_action::SimulationPaused(false));
+    let mut journal = crate::gm_action::GmActionJournal::default();
+    journal.insert(gm_grant("gm-one", "future-pause")).unwrap();
+    pending.insert_resource(journal);
+    let pending_digest = world_digest(&pending);
+    assert_eq!(
+        pending_digest, baseline_digest,
+        "receipt of a future owner commit is not current simulation state"
+    );
+
+    let mut different_attribution = fold_world();
+    different_attribution.insert_resource(SimTick(10));
+    different_attribution.insert_resource(crate::gm_action::SimulationPaused(false));
+    let mut journal = crate::gm_action::GmActionJournal::default();
+    journal.insert(gm_grant("gm-two", "future-pause")).unwrap();
+    different_attribution.insert_resource(journal);
+    assert_eq!(
+        world_digest(&different_attribution),
+        pending_digest,
+        "unapplied attribution is retained for replay but not folded yet"
+    );
+
+    let mut exact_boundary = fold_world();
+    exact_boundary.insert_resource(SimTick(20));
+    exact_boundary.insert_resource(crate::gm_action::SimulationPaused(false));
+    let mut journal = crate::gm_action::GmActionJournal::default();
+    journal.insert(gm_grant("gm-one", "future-pause")).unwrap();
+    exact_boundary.insert_resource(journal);
+    let exact_pending_digest = world_digest(&exact_boundary);
+
+    let mut boundary_control = fold_world();
+    boundary_control.insert_resource(SimTick(20));
+    boundary_control.insert_resource(crate::gm_action::SimulationPaused(false));
+    boundary_control.insert_resource(crate::gm_action::GmActionJournal::default());
+    assert_eq!(
+        exact_pending_digest,
+        world_digest(&boundary_control),
+        "after FixedLast advances to tick 20, its grant still awaits PreUpdate"
+    );
+
+    let mut applied = fold_world();
+    applied.insert_resource(SimTick(20));
+    applied.insert_resource(crate::gm_action::SimulationPaused(true));
+    let mut applied_journal = crate::gm_action::GmActionJournal::default();
+    applied_journal
+        .insert(gm_grant("gm-one", "future-pause"))
+        .unwrap();
+    applied_journal.restore_applied_frontier(1).unwrap();
+    applied.insert_resource(applied_journal);
+    let applied_digest = world_digest(&applied);
+    assert_ne!(applied_digest, exact_pending_digest);
+
+    let mut applied_by_other = fold_world();
+    applied_by_other.insert_resource(SimTick(20));
+    applied_by_other.insert_resource(crate::gm_action::SimulationPaused(true));
+    let mut other_journal = crate::gm_action::GmActionJournal::default();
+    other_journal
+        .insert(gm_grant("gm-two", "future-pause"))
+        .unwrap();
+    other_journal.restore_applied_frontier(1).unwrap();
+    applied_by_other.insert_resource(other_journal);
+    assert_ne!(
+        world_digest(&applied_by_other),
+        applied_digest,
+        "operator attribution becomes part of the fold once applied"
+    );
+}
+
 /// A structure with one threshold, at `condition` of 100 points.
 fn spawn_structure(world: &mut World, uuid: &str, condition: f32) {
     let config = crate::infrastructure::InfrastructureConfig {

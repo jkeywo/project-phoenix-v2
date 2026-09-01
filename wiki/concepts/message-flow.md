@@ -1,9 +1,9 @@
 ---
 title: Message Flow
 type: concept
-tags: [messages, bridge, wasm, bevy, events, routing, delivery-class, snapshot, coordination]
-sources: [src/core/debug_surface.rs, src/debug/catalogue.rs, src/server/bridge.rs, src/core/codec.rs, src/core/messages.rs, src/core/broadcast/, src/lobby/server.rs, src/lobby/handler.rs, src/command_admission/, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/server_app/registration.rs, src/ship/shields.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/console/helm/server.rs, src/console/weapons/server.rs, src/console/repair/server.rs, src/console_bridge.rs, server.html, client.html, gui/client-router.js, gui/debug-surfaces.generated.js, gui/debug-surface-adapters.js, gui/server-settings.js, gui/settings-panel.js, gui/sim-state.js, gui/console-state.js, gui/coordination-popup.js, scripts/generate-debug-surfaces.mjs, scripts/build-client.mjs, AGENTS.md]
-updated: 2026-08-28
+tags: [messages, bridge, wasm, bevy, events, routing, delivery-class, snapshot, coordination, gm]
+sources: [src/core/debug_surface.rs, src/debug/catalogue.rs, src/server/bridge.rs, src/core/codec.rs, src/core/messages.rs, src/core/broadcast/, src/lobby/server.rs, src/lobby/handler.rs, src/command_admission/, src/gm_action.rs, src/lockstep/frame.rs, src/lockstep/mod.rs, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/server_app/registration.rs, src/ship/shields.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/console/helm/server.rs, src/console/weapons/server.rs, src/console/repair/server.rs, src/console_bridge.rs, server.html, client.html, gui/client-router.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/debug-surfaces.generated.js, gui/debug-surface-adapters.js, gui/server-settings.js, gui/settings-panel.js, gui/sim-state.js, gui/console-state.js, gui/coordination-popup.js, scripts/generate-debug-surfaces.mjs, scripts/build-client.mjs, AGENTS.md]
+updated: 2026-09-01
 ---
 
 # Message Flow
@@ -37,6 +37,18 @@ The host simulation is authoritative. Clients submit intent and render projected
 Lobby/session variants are handled by dedicated systems in `src/lobby/server.rs`, with pure state transitions in `src/lobby/handler.rs`. Identification and station selection remain available where reconnect/seat changes require them.
 
 In-game actions use `ClientMessage::ControlSystem { target: SystemId, payload }`. `command_admission` resolves token tenure, station ownership, system damage/availability, control source, and special host-only routes once per logical tick. Accepted commands enter the owning ship's `AdmittedCommands`; the domain applier then treats human and AI emissions identically.
+
+Host-class GM actions use a separate typed control-plane lane. The GM page
+queues `GmActionRequest`; Rust authenticates its operator against the frozen
+GM-slot binding and any GM peer may send a `GmActionProposal`. Only the frozen
+technical owner assigns the canonical sequence and apply tick, then emits a
+`Granted` or `Refused` decision. JavaScript ferries the Rust-owned
+`GmActionFrame` opaquely: Proposal, Granted, and Refused frames cross between
+simulation peers, while omniscient projection data does not. The owner has an
+ordering responsibility, not product authority over the equal GMs. `PreUpdate`
+applies the due journal prefix and derives pause and the terminal action log
+even while the fixed schedule is paused; results return locally over the
+`gm_session` Host Channel.
 
 ## Outbound routing
 

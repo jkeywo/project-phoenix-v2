@@ -168,6 +168,16 @@ impl FleetShip {
     }
 }
 
+/// Private binding between one authenticated technical slot and the public GM
+/// identity it may use for privileged actions. This never enters the crew
+/// roster projection; every simulation peer needs it to reject a ship host
+/// claiming an operator id it does not own.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct FleetGm {
+    pub host: HostSlot,
+    pub operator_id: String,
+}
+
 /// The frozen fleet, as the simulation sees it.
 ///
 /// Present in every app, because "one host, flying its own ship" is a fleet of
@@ -185,6 +195,9 @@ pub struct FleetRoster {
     /// while a fleet may contain an authored ship whose original host has left.
     #[serde(default)]
     participants: Vec<HostSlot>,
+    /// Privileged operator bindings, sorted by technical slot.
+    #[serde(default)]
+    gms: Vec<FleetGm>,
     local: HostSlot,
     /// The technical owner whose authenticated tick frame may order fleet-wide
     /// control decisions such as a coordinated start.
@@ -224,6 +237,7 @@ impl Default for FleetRoster {
         Self {
             ships: vec![FleetShip::new(HostSlot::SOLO)],
             participants: vec![HostSlot::SOLO],
+            gms: Vec::new(),
             local: HostSlot::SOLO,
             owner: HostSlot::SOLO,
         }
@@ -251,6 +265,7 @@ impl FleetRoster {
         Self {
             ships,
             participants,
+            gms: Vec::new(),
             local,
             owner,
         }
@@ -264,8 +279,19 @@ impl FleetRoster {
     /// be a technical participant, and both the local slot and owner must be in
     /// the bounded, unique participant set.
     pub fn with_participants(
+        ships: Vec<FleetShip>,
+        participants: Vec<HostSlot>,
+        local: HostSlot,
+        owner: HostSlot,
+    ) -> Option<Self> {
+        Self::with_participants_and_gms(ships, participants, Vec::new(), local, owner)
+    }
+
+    /// Build the frozen topology plus its private GM-slot bindings.
+    pub fn with_participants_and_gms(
         mut ships: Vec<FleetShip>,
         mut participants: Vec<HostSlot>,
+        mut gms: Vec<FleetGm>,
         local: HostSlot,
         owner: HostSlot,
     ) -> Option<Self> {
@@ -274,17 +300,30 @@ impl FleetRoster {
             return None;
         }
         participants.sort_unstable();
+        gms.sort_by(|left, right| {
+            (left.host, left.operator_id.as_str()).cmp(&(right.host, right.operator_id.as_str()))
+        });
         if participants.is_empty()
             || participants.windows(2).any(|pair| pair[0] == pair[1])
             || !participants.contains(&local)
             || !participants.contains(&owner)
             || ships.iter().any(|ship| !participants.contains(&ship.host))
+            || gms.iter().any(|gm| {
+                !participants.contains(&gm.host)
+                    || gm.operator_id.is_empty()
+                    || gm.operator_id.chars().count() > crate::gm_roster::MAX_GM_OPERATOR_ID_CHARS
+                    || ships.iter().any(|ship| ship.host == gm.host)
+            })
+            || gms.windows(2).any(|pair| {
+                pair[0].host == pair[1].host || pair[0].operator_id == pair[1].operator_id
+            })
         {
             return None;
         }
         Some(Self {
             ships,
             participants,
+            gms,
             local,
             owner,
         })
@@ -323,6 +362,19 @@ impl FleetRoster {
         } else {
             self.participants.clone()
         }
+    }
+
+    /// The public operator identity authenticated to `host`, if that technical
+    /// participant is a GM rather than a ship host.
+    pub fn gm_operator(&self, host: HostSlot) -> Option<&str> {
+        self.gms
+            .iter()
+            .find(|gm| gm.host == host)
+            .map(|gm| gm.operator_id.as_str())
+    }
+
+    pub fn gms(&self) -> &[FleetGm] {
+        &self.gms
     }
 
     /// Technical owner of the participant mesh.
@@ -389,6 +441,7 @@ impl FleetRoster {
         // transports are deliberately not recreated.
         self.participants.clear();
         self.participants.push(self.local);
+        self.gms.retain(|gm| gm.host == self.local);
         self.owner = self.local;
         self
     }
@@ -772,12 +825,12 @@ pub struct MeshSet;
 /// fleet of one, [`LockstepSession`] is absent until a fleet forms, and every
 /// system below is inert without one.
 pub fn register_lockstep(app: &mut App) {
-    // The #894 digest-boundary declarations (issue #1220's registry). Every type
-    // this module registers is a digest EXCLUSION, and each for a different
-    // reason — see `authoritative::StateClass` for the classes and
-    // `tests/authoritative_state_enumeration.rs` for the census that enforces
-    // them. Nothing here is folded, and nothing here is a second copy of
-    // anything that is.
+    // The #894 digest-boundary declarations (issue #1220's registry). Transport
+    // and diagnostic types remain explicit exclusions; the typed GM journal is
+    // the deliberate exception because it is durable simulation input,
+    // captured and folded in full. See `authoritative::StateClass` for the
+    // classes and `tests/authoritative_state_enumeration.rs` for the census that
+    // enforces them.
     {
         use crate::authoritative::{DeclareState, StateClass};
         app
@@ -803,6 +856,24 @@ pub fn register_lockstep(app: &mut App) {
             // at the fold point on any correctly-running host.
             .declare_state::<MeshInbox>(StateClass::ClearedAtFold, "fleet-lockstep-state")
             .declare_state::<MeshOutbox>(StateClass::ClearedAtFold, "fleet-lockstep-state")
+            // The full canonical journal, including future grants and their
+            // attribution/idempotency keys, is captured for snapshot/replay.
+            // `state_digest` folds only the durable applied prefix: receipt time
+            // for an owner commit at a future/exact-next boundary is not current
+            // state.
+            .declare_state::<crate::gm_action::GmActionJournal>(
+                StateClass::Folded,
+                "gm-action-state",
+            )
+            .declare_state::<crate::gm_action::GmActionLog>(StateClass::Derived, "gm-action-state")
+            .declare_state::<crate::gm_action::LocalGmActionRefusals>(
+                StateClass::Presentation,
+                "gm-action-state",
+            )
+            .declare_state::<crate::gm_action::LastGmSessionProjection>(
+                StateClass::Presentation,
+                "gm-action-state",
+            )
             // The digest exchange's own records. `Derived` — they are folds OF
             // the authoritative state and a count of the barrier's decisions, so
             // folding them would fold their inputs a second time, and a peer's
@@ -824,6 +895,12 @@ pub fn register_lockstep(app: &mut App) {
         .init_resource::<MeshDiagnostics>()
         .init_resource::<MeshAgreement>()
         .init_resource::<host_loss::PendingHostLoss>()
+        .init_resource::<crate::gm_action::SimulationPaused>()
+        .init_resource::<crate::gm_action::GmActionJournal>()
+        .init_resource::<crate::gm_action::GmActionLog>()
+        .init_resource::<crate::gm_action::LocalGmActionRefusals>()
+        .init_resource::<crate::gm_action::LastGmSessionProjection>()
+        .add_message::<crate::console_bridge::GmSessionChanged>()
         .add_systems(
             PreUpdate,
             // `drive_recovery` (issue #1118) sits between applying the inbox and
@@ -833,6 +910,7 @@ pub fn register_lockstep(app: &mut App) {
             // rather than a change to it.
             (
                 apply_mesh_inbox,
+                crate::gm_action::apply_due_actions,
                 recovery::drive_recovery,
                 slot_recovery::drive_slot_recovery,
                 gate_lockstep_ticks,
@@ -866,8 +944,14 @@ pub fn register_lockstep(app: &mut App) {
         // next step. No tick is partially skipped or rolled back.
         .add_systems(
             FixedLast,
-            discard_multi_participant_overstep.after(crate::sim_tick::advance_sim_tick),
+            (
+                discard_gm_boundary_overstep,
+                discard_multi_participant_overstep,
+            )
+                .chain()
+                .after(crate::sim_tick::advance_sim_tick),
         )
+        .add_systems(PostUpdate, crate::gm_action::publish_session_projection)
         // The host-loss Backfill flip (issue #1119). In `SimSet::Input`, at the
         // agreed tick, on the lost ship — the same phase the ordinary rating
         // change and the human-seeking resolver run in. Ordered
@@ -929,6 +1013,7 @@ pub fn join_fleet(world: &mut World, roster: FleetRoster, delay: u64) -> bool {
                 .get_resource::<FleetRoster>()
                 .is_some_and(|current| current == &roster);
     }
+    crate::gm_action::reset(world);
     if !alone {
         // Browser pages can finish booting their lobby at different frame rates,
         // so their pre-adoption SimTicks are not a shared clock. Installing a
@@ -1155,7 +1240,11 @@ pub fn authored_delay(world: &World) -> u64 {
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct StartGrantAdmission<'w> {
     phase: Option<Res<'w, State<crate::core::messages::GamePhase>>>,
+    next_phase: Option<Res<'w, NextState<crate::core::messages::GamePhase>>>,
     managed: Option<Res<'w, crate::lobby::server::FleetManagedLobby>>,
+    gm_journal: ResMut<'w, crate::gm_action::GmActionJournal>,
+    gm_paused: Res<'w, crate::gm_action::SimulationPaused>,
+    gm_results: ResMut<'w, crate::gm_action::LocalGmActionRefusals>,
 }
 
 /// Apply everything a transport has delivered: peer input into the future-tick
@@ -1184,7 +1273,7 @@ pub fn apply_mesh_inbox(
     mut pending_starts: Option<ResMut<crate::lobby::PendingStartGrants>>,
     mut start_tracker: Option<ResMut<crate::lobby::server::StartGrantTracker>>,
     mut start_results: Option<ResMut<crate::lobby::server::StartGrantResults>>,
-    start_admission: StartGrantAdmission,
+    mut start_admission: StartGrantAdmission,
     fleet_ships: Query<(&FleetSlotOf, &crate::entities::spawner::EntityUuid)>,
     log: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
@@ -1555,6 +1644,136 @@ pub fn apply_mesh_inbox(
                 // reads this and opens the recovery.
                 pending_claims.observe(claim.slot, claim.claim_seq, claim.tick);
             }
+            MeshFrame::GmAction(action_frame) => {
+                if roster.as_deref().is_some_and(|roster| {
+                    crate::gm_action::validate_fleet_frame(&action_frame, roster).is_err()
+                }) {
+                    crate::pwarn!(
+                        log,
+                        LogCat::Admit,
+                        "refused GM frame whose proposal/owner authority did not match the frozen roster",
+                    );
+                    continue;
+                }
+                let gm_run_active =
+                    start_admission.phase.as_deref().is_none_or(|phase| {
+                        phase.get() == &crate::core::messages::GamePhase::InProgress
+                    }) && start_admission.next_phase.as_deref().is_none_or(|next| {
+                        !matches!(
+                            next,
+                            NextState::Pending(phase)
+                                if phase != &crate::core::messages::GamePhase::InProgress
+                        )
+                    });
+                match action_frame {
+                    crate::gm_action::GmActionFrame::Proposal(proposal) => {
+                        // A run-exit reset is authoritative for this frame. Drop
+                        // every GM lane variant symmetrically once that boundary
+                        // is pending so a co-arriving Proposal cannot recreate a
+                        // refusal projection or outbound decision after reset.
+                        if !gm_run_active {
+                            continue;
+                        }
+                        let bound = roster
+                            .as_deref()
+                            .and_then(|roster| roster.gm_operator(proposal.from));
+                        if bound != Some(proposal.operator_id.as_str()) {
+                            crate::pwarn!(
+                                log,
+                                LogCat::Admit,
+                                "{} proposed GM action as {:?}; frozen binding is {:?} — dropped",
+                                proposal.from.slot_id(),
+                                proposal.operator_id,
+                                bound,
+                            );
+                            continue;
+                        }
+                        let owner = roster.as_deref().map_or(lead, FleetRoster::owner);
+                        // The star relays opaque proposals to every peer. Only the
+                        // technical owner turns one into a canonical decision.
+                        if session.local() != owner {
+                            continue;
+                        }
+                        let now = sim_tick.as_deref().map_or(0, |tick| tick.0);
+                        let sequenced = crate::gm_action::sequence_owner_proposal(
+                            &mut start_admission.gm_journal,
+                            &proposal,
+                            owner,
+                            now,
+                            session.ready_through(now),
+                            start_admission.gm_paused.0,
+                        );
+                        let decision = match sequenced {
+                            Ok(grant) => crate::gm_action::GmActionFrame::Granted(grant),
+                            Err(reason) => {
+                                let refusal = crate::gm_action::GmActionRefusal {
+                                    sequenced_by: owner,
+                                    requester: proposal.from,
+                                    operator_id: proposal.operator_id.clone(),
+                                    correlation: proposal.correlation.clone(),
+                                    requested_active: proposal.action.requested_pause(),
+                                    tick: now,
+                                    reason,
+                                };
+                                start_admission.gm_results.push(refusal.logged());
+                                crate::gm_action::GmActionFrame::Refused(refusal)
+                            }
+                        };
+                        outbox.push(MeshFrame::GmAction(decision));
+                    }
+                    crate::gm_action::GmActionFrame::Granted(grant) => {
+                        if !gm_run_active {
+                            continue;
+                        }
+                        let owner = roster.as_deref().map_or(lead, FleetRoster::owner);
+                        let bound = roster
+                            .as_deref()
+                            .and_then(|roster| roster.gm_operator(grant.from));
+                        if grant.sequenced_by != owner || bound != Some(grant.operator_id.as_str())
+                        {
+                            crate::pwarn!(
+                            log,
+                            LogCat::Admit,
+                            "refused GM grant sequenced by {} for {} as {:?}; owner/binding are {}/{:?}",
+                            grant.sequenced_by.slot_id(),
+                            grant.from.slot_id(),
+                            grant.operator_id,
+                            owner.slot_id(),
+                            bound,
+                        );
+                            continue;
+                        }
+                        if let Err(reason) = start_admission.gm_journal.insert(grant) {
+                            crate::pwarn!(
+                                log,
+                                LogCat::Admit,
+                                "refused replicated GM action: {reason:?}",
+                            );
+                        }
+                    }
+                    crate::gm_action::GmActionFrame::Refused(refusal) => {
+                        if !gm_run_active {
+                            continue;
+                        }
+                        let owner = roster.as_deref().map_or(lead, FleetRoster::owner);
+                        let bound = roster
+                            .as_deref()
+                            .and_then(|roster| roster.gm_operator(refusal.requester));
+                        if refusal.sequenced_by != owner
+                            || bound != Some(refusal.operator_id.as_str())
+                        {
+                            crate::pwarn!(
+                                log,
+                                LogCat::Admit,
+                                "refused unauthenticated GM refusal from {}",
+                                refusal.sequenced_by.slot_id(),
+                            );
+                            continue;
+                        }
+                        start_admission.gm_results.push(refusal.logged());
+                    }
+                }
+            }
             // Peeled off above, before the fleet-session gate, so it never reaches
             // this loop — but the match stays exhaustive rather than resting on
             // that being remembered.
@@ -1741,6 +1960,35 @@ pub fn discard_multi_participant_overstep(
     let Some(fixed) = fixed.as_deref_mut() else {
         return;
     };
+    discard_whole_fixed_overstep(fixed);
+}
+
+/// Stop a rendered frame exactly when it reaches the next unapplied GM
+/// boundary, including in a one-participant GM fleet. `apply_due_actions` runs
+/// in PreUpdate, so spending another catch-up step here would skip over a Pause
+/// before the reducer had any frame in which to close the clock.
+pub fn discard_gm_boundary_overstep(
+    journal: Option<Res<crate::gm_action::GmActionJournal>>,
+    tick: Option<Res<crate::sim_tick::SimTick>>,
+    mut fixed: Option<ResMut<Time<Fixed>>>,
+) {
+    let Some(journal) = journal else {
+        return;
+    };
+    let Some(next) = journal.grants().get(journal.applied_grants()) else {
+        return;
+    };
+    let now = tick.as_deref().map_or(0, |tick| tick.0);
+    if next.apply_tick > now {
+        return;
+    }
+    let Some(fixed) = fixed.as_deref_mut() else {
+        return;
+    };
+    discard_whole_fixed_overstep(fixed);
+}
+
+fn discard_whole_fixed_overstep(fixed: &mut Time<Fixed>) {
     let remaining = fixed.overstep();
     let timestep = fixed.timestep();
     // Preserve the sub-step remainder: render interpolation legitimately reads
@@ -1876,6 +2124,53 @@ mod tests {
         assert_eq!(roster.len(), 1);
         assert!(roster.is_local(HostSlot::SOLO));
         assert_eq!(roster.ship(0).unwrap().ship_path, None);
+    }
+
+    #[test]
+    fn private_gm_bindings_are_bounded_unique_and_stationless() {
+        let roster = FleetRoster::with_participants_and_gms(
+            Vec::new(),
+            vec![HostSlot(1), HostSlot(2)],
+            vec![FleetGm {
+                host: HostSlot(2),
+                operator_id: "gm-1".into(),
+            }],
+            HostSlot(2),
+            HostSlot(1),
+        )
+        .expect("GM-only participants are valid");
+        assert_eq!(roster.gm_operator(HostSlot(2)), Some("gm-1"));
+        assert!(roster.ships().is_empty());
+
+        let ship_and_gm_same_slot = FleetRoster::with_participants_and_gms(
+            vec![FleetShip::new(HostSlot(2))],
+            vec![HostSlot(1), HostSlot(2)],
+            vec![FleetGm {
+                host: HostSlot(2),
+                operator_id: "gm-1".into(),
+            }],
+            HostSlot(2),
+            HostSlot(1),
+        );
+        assert!(ship_and_gm_same_slot.is_none());
+
+        let duplicate_operator = FleetRoster::with_participants_and_gms(
+            Vec::new(),
+            vec![HostSlot(1), HostSlot(2)],
+            vec![
+                FleetGm {
+                    host: HostSlot(1),
+                    operator_id: "gm-1".into(),
+                },
+                FleetGm {
+                    host: HostSlot(2),
+                    operator_id: "gm-1".into(),
+                },
+            ],
+            HostSlot(2),
+            HostSlot(1),
+        );
+        assert!(duplicate_operator.is_none());
     }
 
     /// The frozen crewing is per slot, so a host can answer "is slot 2's Helm
@@ -2290,5 +2585,138 @@ mod tests {
             5,
             "a standalone simulation retains ordinary fixed-step catch-up"
         );
+    }
+
+    #[test]
+    fn a_solo_gm_pause_boundary_cannot_be_skipped_by_fixed_catch_up() {
+        use crate::sim_tick::{register_sim_tick, SimTick};
+
+        let period = std::time::Duration::from_millis(10);
+        let local = HostSlot(1);
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin);
+        register_sim_tick(&mut app);
+        app.init_resource::<crate::command_admission::log::PendingCommands>();
+        register_lockstep(&mut app);
+        app.insert_resource(FleetLockstep(LockstepSession::new(local, [local], 6)));
+        app.world_mut()
+            .resource_mut::<crate::gm_action::GmActionJournal>()
+            .insert(crate::gm_action::GmActionGrant {
+                from: local,
+                sequenced_by: local,
+                operator_id: "solo-gm".into(),
+                correlation: crate::gm_action::GmActionId::new("catch-up-pause").unwrap(),
+                apply_tick: 1,
+                order: crate::gm_action::GmActionOrder::new(local, 1),
+                action: crate::gm_action::GmAction::SetSessionPaused { active: true },
+            })
+            .unwrap();
+        app.world_mut()
+            .resource_mut::<Time<Fixed>>()
+            .set_timestep(period);
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::ZERO,
+        ));
+        app.update();
+
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(period * 5));
+        app.update();
+        assert_eq!(
+            app.world().resource::<SimTick>().0,
+            1,
+            "the oversized frame stops on the unapplied GM boundary"
+        );
+        assert_eq!(
+            app.world()
+                .resource::<crate::gm_action::GmActionJournal>()
+                .applied_grants(),
+            0,
+            "the boundary is not misreported as applied before its next PreUpdate"
+        );
+
+        app.update();
+        assert_eq!(app.world().resource::<SimTick>().0, 1);
+        assert!(
+            app.world()
+                .resource::<crate::gm_action::SimulationPaused>()
+                .0
+        );
+        assert_eq!(
+            app.world()
+                .resource::<crate::gm_action::GmActionJournal>()
+                .applied_grants(),
+            1
+        );
+        assert_eq!(
+            app.world()
+                .resource::<crate::gm_action::GmActionLog>()
+                .entries()[0]
+                .outcome,
+            crate::gm_action::GmActionOutcome::Applied
+        );
+    }
+
+    #[test]
+    fn applying_pause_consumes_the_current_frame_delta_standalone_and_in_a_fleet() {
+        use crate::sim_tick::{register_sim_tick, SimTick};
+
+        let period = std::time::Duration::from_millis(10);
+        for fleet in [false, true] {
+            let local = HostSlot(1);
+            let mut app = App::new();
+            app.add_plugins(bevy::time::TimePlugin);
+            register_sim_tick(&mut app);
+            app.init_resource::<crate::command_admission::log::PendingCommands>();
+            register_lockstep(&mut app);
+            if fleet {
+                let mut session = LockstepSession::new(local, [local, HostSlot(2)], 6);
+                session.observe(HostSlot(2), 100);
+                app.insert_resource(FleetLockstep(session));
+            }
+            app.world_mut()
+                .resource_mut::<Time<Fixed>>()
+                .set_timestep(period);
+            app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::ZERO,
+            ));
+            app.update();
+
+            app.world_mut()
+                .resource_mut::<crate::gm_action::GmActionJournal>()
+                .insert(crate::gm_action::GmActionGrant {
+                    from: local,
+                    sequenced_by: local,
+                    operator_id: "gm".into(),
+                    correlation: crate::gm_action::GmActionId::new(if fleet {
+                        "fleet-now-pause"
+                    } else {
+                        "standalone-now-pause"
+                    })
+                    .unwrap(),
+                    apply_tick: 0,
+                    order: crate::gm_action::GmActionOrder::new(local, 1),
+                    action: crate::gm_action::GmAction::SetSessionPaused { active: true },
+                })
+                .unwrap();
+            app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(period * 5));
+            app.update();
+
+            assert_eq!(
+                app.world().resource::<SimTick>().0,
+                0,
+                "an apply-at-now Pause leaked fixed work (fleet={fleet})"
+            );
+            assert!(
+                app.world()
+                    .resource::<crate::gm_action::SimulationPaused>()
+                    .0
+            );
+            assert_eq!(
+                app.world()
+                    .resource::<crate::gm_action::GmActionJournal>()
+                    .applied_grants(),
+                1
+            );
+        }
     }
 }

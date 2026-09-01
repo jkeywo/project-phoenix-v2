@@ -34,6 +34,8 @@
 //! | `world_digest` folds | [`PhoenixSnapshot`] carries |
 //! |---|---|
 //! | `SimTick` | [`PhoenixSnapshot::tick`] |
+//! | `SimulationPaused` | [`PhoenixSnapshot::paused`] |
+//! | `GmActionJournal` | [`PhoenixSnapshot::gm_actions`] |
 //! | `SimRng`'s six stream positions | [`PhoenixSnapshot::rng`] (`SimRngState`) |
 //! | `WorldIdMint`'s tick + per-namespace counters | [`PhoenixSnapshot::mint`] |
 //! | `GamePhase` | [`PhoenixSnapshot::phase`] |
@@ -497,7 +499,15 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// apply a snapshot captured from another. There is no honest migration for a
 /// format-14 artifact because the missing choices cannot be inferred from world
 /// state, so the format gate refuses it rather than guessing.
-pub const SNAPSHOT_FORMAT: u32 = 15;
+///
+/// Format 16 carries the typed GM action frontier: the absolute session pause
+/// state and the complete bounded action journal that supplies ordering,
+/// idempotency, attribution, and future scheduled actions. A format-15 record
+/// cannot distinguish an unpaused run with no GM actions from a paused run (or
+/// one with an already-received future action), so defaulting those fields would
+/// silently resume or forget authoritative work. The format gate refuses that
+/// ambiguity rather than inventing a migration.
+pub const SNAPSHOT_FORMAT: u32 = 16;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -528,7 +538,13 @@ pub const SNAPSHOT_FORMAT: u32 = 15;
 /// `StoredRun`'s continuation log element gained a `CommandOrder`. A pre-#1116
 /// save restores intact and then diverges on its first continuation tick, which
 /// is precisely the failure the rules dimension exists to name.
-pub const SIMULATION_RULES: &str = "0.3";
+///
+/// `"0.4"` — issue #1292 makes typed, attributed GM actions part of the
+/// authoritative run. Session pause now participates in the fold and its
+/// ordered journal can change both the current clock state and future logical
+/// boundaries. A pre-#1292 save recorded a narrower digest even when its payload
+/// otherwise parses, so the rules dimension names that change explicitly.
+pub const SIMULATION_RULES: &str = "0.4";
 
 /// The authored data, computed rather than remembered.
 ///
@@ -2332,6 +2348,16 @@ pub struct PhoenixSnapshot {
     /// through seconds can move the next fixed-step boundary by one update.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fixed_overstep_nanos: Option<u64>,
+    /// The authoritative product pause value at this boundary. This is stored
+    /// separately from the journal because raw trusted-host pause remains a
+    /// valid solo-host writer, while a coordinated fleet derives the same value
+    /// from [`PhoenixSnapshot::gm_actions`].
+    pub paused: bool,
+    /// The complete bounded GM action/idempotency journal, including actions
+    /// already received for a future logical boundary and its exact applied
+    /// prefix. The prefix cannot be inferred from `tick`: immediately after
+    /// FixedLast advances it, a grant at that new value still awaits PreUpdate.
+    pub gm_actions: crate::gm_action::GmActionJournal,
     pub rng: Option<SimRngState>,
     pub mint: Option<WorldIdMintState>,
     pub phase: Option<GamePhase>,
@@ -2458,6 +2484,14 @@ pub struct TrackedEntitiesState {
 /// step have drawn and others have not, so "all six streams right now" is not a
 /// point any system agrees on.
 pub fn capture(world: &World) -> PhoenixSnapshot {
+    let paused = world
+        .get_resource::<crate::gm_action::SimulationPaused>()
+        .is_some_and(|paused| paused.0);
+    let mut gm_actions = world
+        .get_resource::<crate::gm_action::GmActionJournal>()
+        .cloned()
+        .unwrap_or_default();
+    gm_actions.adopt_initial_pause(paused);
     PhoenixSnapshot {
         tick: world.get_resource::<SimTick>().map_or(0, |t| t.0),
         boot_identity: world
@@ -2474,6 +2508,8 @@ pub fn capture(world: &World) -> PhoenixSnapshot {
         fixed_overstep_nanos: world
             .get_resource::<Time<bevy::time::Fixed>>()
             .and_then(|time| u64::try_from(time.overstep().as_nanos()).ok()),
+        paused,
+        gm_actions,
         rng: world.get_resource::<SimRng>().map(SimRng::state),
         mint: world.get_resource::<WorldIdMint>().map(WorldIdMint::state),
         phase: world
@@ -4758,6 +4794,17 @@ pub fn required_boot_identity(run: &StoredRun) -> Result<&BootIdentity, LoadRefu
         .snapshot
         .as_ref()
         .expect("a boot identity can only be reached through a snapshot");
+    if snapshot
+        .state
+        .gm_actions
+        .applied_prefix()
+        .iter()
+        .any(|grant| grant.apply_tick > snapshot.state.tick)
+    {
+        return Err(LoadRefusal::Unparsable(
+            "the snapshot's applied GM frontier crosses its capture tick".to_string(),
+        ));
+    }
     let mut seen = std::collections::BTreeSet::new();
     for row in &identity.game_start_entity_uuids {
         let uuid = &row.entity_uuid;
@@ -5251,6 +5298,30 @@ fn rebuild_ai_world_snapshot(world: &mut World) {
 fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut RestoreReport) {
     world.insert_resource(SimTick(snapshot.tick));
 
+    world.insert_resource(crate::gm_action::SimulationPaused(snapshot.paused));
+    let mut gm_actions = snapshot.gm_actions.clone();
+    gm_actions.adopt_initial_pause(snapshot.paused);
+    world.insert_resource(gm_actions.clone());
+    // The journal's terminal result log is derived, never stored. Replace a
+    // bootstrap's stale projection immediately so host-channel readers cannot
+    // observe pre-restore results before the next PreUpdate recomputes them.
+    world.insert_resource(gm_actions.applied_log());
+    if snapshot.paused {
+        // Pausing is always safe and must take effect before this frame can enter
+        // FixedUpdate. Do not symmetrically unpause here: lockstep recovery,
+        // model readiness, and peer stalls share Time<Virtual>, their gate ran
+        // earlier in this PreUpdate frame, and releasing their hold here could
+        // admit one forbidden tick. The next gate frame unpauses iff every hold
+        // (including this restored product pause) is clear.
+        if let Some(mut virtual_time) = world.get_resource_mut::<Time<bevy::time::Virtual>>() {
+            virtual_time.pause();
+            // `TimeSystem` already computed this rendered frame's delta in
+            // First. Pausing prevents later frames, but RunFixedMainLoop would
+            // still accumulate the current delta unless restore consumes it.
+            virtual_time.advance_by(std::time::Duration::ZERO);
+        }
+    }
+
     if let (Some(stored_nanos), Some(mut fixed)) = (
         snapshot.fixed_overstep_nanos,
         world.get_resource_mut::<Time<bevy::time::Fixed>>(),
@@ -5261,6 +5332,19 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
         let bootstrap_overstep = fixed.overstep();
         fixed.discard_overstep(bootstrap_overstep);
         fixed.accumulate_overstep(std::time::Duration::from_nanos(stored_nanos));
+        if snapshot.paused {
+            // A canonical capture carries only interpolation remainder here.
+            // Preserve that exact fraction while refusing any malformed whole
+            // step of pre-restore debt from running in the restore frame.
+            let restored = fixed.overstep();
+            let timestep = fixed.timestep();
+            let remainder_nanos = restored.as_nanos() % timestep.as_nanos();
+            let remainder = std::time::Duration::new(
+                u64::try_from(remainder_nanos / 1_000_000_000).unwrap_or(u64::MAX),
+                (remainder_nanos % 1_000_000_000) as u32,
+            );
+            fixed.discard_overstep(restored - remainder);
+        }
     }
 
     if let Some(mode) = snapshot.phaser_mode {
@@ -7439,3 +7523,7 @@ fn apply_hull(hull: &mut crate::ship::damage::SystemHull, rows: &[(String, f32, 
         hull.set_hp(&SystemId(id.clone()), *current);
     }
 }
+
+#[cfg(test)]
+#[path = "snapshot_tests.rs"]
+mod tests;

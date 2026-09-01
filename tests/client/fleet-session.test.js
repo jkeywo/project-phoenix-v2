@@ -688,6 +688,10 @@ describe('collective GM and crew start transport (issue #1290)', () => {
       local: 1,
       owner: 1,
       participants: [1, 2, 3, 4],
+      gms: [
+        { host: 3, operator_id: 'gm-1' },
+        { host: 4, operator_id: 'gm-2' },
+      ],
       ships: [
         { host: 1, ship_path: 'lead.toml', crew: [] },
         { host: 2, ship_path: 'two.toml', crew: [] },
@@ -725,7 +729,11 @@ describe('collective GM and crew start transport (issue #1290)', () => {
       { id: 'start-1', mode: 'automatic', operator_id: null },
     ]);
     expect(lead.simulationRosters).toEqual([{
-      local: 1, owner: 1, participants: [1], ships: [],
+      local: 1,
+      owner: 1,
+      participants: [1],
+      gms: [{ host: 1, operator_id: 'gm-1' }],
+      ships: [],
     }]);
     expect(lead.policies.at(-1)).toMatchObject({
       connected_players: 0,

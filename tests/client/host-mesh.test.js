@@ -216,7 +216,7 @@ describe('the envelope', () => {
     // silently fails to agree a tick; refusing an unrecognised `m` is what
     // makes that fail loudly, and this pair of pins is what catches a
     // one-sided bump.
-    expect(HOST_MESH_PROTOCOL).toBe(7);
+    expect(HOST_MESH_PROTOCOL).toBe(8);
     const rust = readFileSync(
       path.join(path.dirname(fileURLToPath(import.meta.url)), '../../src/lockstep/frame.rs'),
       'utf8',
@@ -487,6 +487,7 @@ describe('private deterministic participant roster (issue #1290)', () => {
       local: 2,
       owner: 1,
       participants: [1, 2, 3],
+      gms: [{ host: 2, operator_id: 'gm-1' }],
       ships: [
         { host: 1, ship_path: 'lead.toml', crew: [] },
         { host: 3, ship_path: 'three.toml', crew: [] },
@@ -504,6 +505,7 @@ describe('private deterministic participant roster (issue #1290)', () => {
       local: 1,
       owner: 1,
       participants: [1],
+      gms: [{ host: 1, operator_id: 'gm-1' }],
       ships: [],
     });
   });

@@ -25,8 +25,20 @@ import {
 } from '../../gui/server-settings.js';
 import { isDemoBuild, setBuildFlags, demoFromMeta } from '../../gui/build-flags.js';
 import { CLIENT_DEBUG_FLAGS } from '../../gui/settings-panel.js';
-import { ACTION_FEEDBACK_STATE } from '../../gui/action-feedback.js';
-import { HOST_QR_CODE_ACTION_ID } from '../../gui/host-actions.js';
+import {
+  ACTION_FEEDBACK_STATE,
+  ActionFeedbackLifecycle,
+  emitActionFeedbackTransition,
+} from '../../gui/action-feedback.js';
+import {
+  HOST_QR_CODE_ACTION_ID,
+  createHostActionRegistry,
+} from '../../gui/host-actions.js';
+import {
+  GM_PAUSE_ACTION_ID,
+  GM_RESUME_ACTION_ID,
+} from '../../gui/gm-session-actions.js';
+import { createGmSessionControls } from '../../gui/gm-session-controls.js';
 
 const SERVER_HTML = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -139,6 +151,20 @@ function pressKey(code, key = code) {
   });
   document.body.dispatchEvent(event);
   return event;
+}
+
+function standardPad(pressed = []) {
+  return {
+    id: 'test-standard-pad',
+    index: 0,
+    connected: true,
+    mapping: 'standard',
+    buttons: Array.from({ length: 16 }, (_, index) => ({
+      pressed: pressed.includes(index),
+      value: pressed.includes(index) ? 1 : 0,
+    })),
+    axes: [0, 0, 0, 0],
+  };
 }
 
 let mounted = null;
@@ -537,6 +563,89 @@ describe('the host QR semantic action', () => {
     expect(control('semantic-binding-host.qr-code-0')).not.toBeNull();
     expect(control('semantic-binding-host.qr-code-1')).not.toBeNull();
     expect(control('godmode')).toBeNull();
+  });
+
+  it('shares GM bindings, conflict replacement, keyboard dispatch and gamepad runtime', () => {
+    document.body.insertAdjacentHTML('beforeend', `
+      <section id="gm-session-controls">
+        <h2 id="gm-session-heading"></h2>
+        <button id="gm-session-pause"></button>
+        <button id="gm-session-resume"></button>
+        <p id="gm-session-state"></p>
+        <p id="gm-session-feedback"></p>
+        <ol id="gm-session-log"></ol>
+      </section>
+    `);
+    const correlations = ['gm-keyboard', 'gm-gamepad'];
+    const actionFeedback = new ActionFeedbackLifecycle({
+      correlation: () => correlations.shift(),
+      onTransition: (value) => emitActionFeedbackTransition(window, value),
+    });
+    const bindings = makeBindings();
+    const hostActions = createHostActionRegistry({
+      actionFeedback,
+      toggleQrCode: bindings.__hostToggleQrCode,
+    });
+    const submitSessionPaused = vi.fn(() => true);
+    const gmControls = createGmSessionControls({
+      doc: document,
+      win: window,
+      t,
+      actions: hostActions,
+      actionFeedback,
+      submitSessionPaused,
+      getOperator: () => ({ id: 'gm-a', name: 'Alex' }),
+    });
+    let pads = [standardPad()];
+    Object.assign(bindings, {
+      __hostSemanticActions: hostActions,
+      __hostActionFeedback: actionFeedback,
+      __hostLocalGm: () => ({ id: 'gm-a', name: 'Alex' }),
+      navigator: { getGamepads: () => pads },
+    });
+    ({ menu: mounted } = mount({ bindings }));
+    mounted.gamepad.poll(pads);
+    mounted.open();
+    mounted.selectTab('controls');
+
+    expect(control(`semantic-binding-${GM_PAUSE_ACTION_ID}-0`)).not.toBeNull();
+    expect(control(`semantic-binding-${GM_PAUSE_ACTION_ID}-1`)).not.toBeNull();
+    expect(control(`semantic-binding-${GM_RESUME_ACTION_ID}-0`)).not.toBeNull();
+    const sharedProfile = mounted.semanticActions.bindingProfile();
+    expect(sharedProfile[GM_PAUSE_ACTION_ID]).toHaveLength(2);
+    expect(mounted.semanticActions.validateProfile({
+      bindings: sharedProfile,
+      tuning: mounted.semanticActions.tuningProfile(),
+    })).toMatchObject({ status: 'valid' });
+    expect(control('semantic-gamepad-select')).not.toBeNull();
+
+    // QR and GM share the active GM context, so the remapper detects rather
+    // than silently accepting a competing host-page chord.
+    const pauseCapture = control(`semantic-binding-${GM_PAUSE_ACTION_ID}-0`);
+    pauseCapture.focus();
+    pauseCapture.dispatchEvent(new KeyboardEvent('keydown', {
+      code: 'KeyQ', key: 'q', bubbles: true, cancelable: true,
+    }));
+    expect(control('semantic-binding-conflict-replace')).not.toBeNull();
+    control('semantic-binding-conflict-cancel').click();
+
+    mounted.semanticActions.setBinding(GM_PAUSE_ACTION_ID, 0, {
+      type: 'keyboard', code: 'KeyY',
+    });
+    mounted.semanticActions.setBinding(GM_PAUSE_ACTION_ID, 1, {
+      type: 'gamepad', input: 'button', control: 'face-bottom',
+    });
+    mounted.close();
+    expect(pressKey('KeyY', 'y').defaultPrevented).toBe(true);
+    expect(submitSessionPaused).toHaveBeenNthCalledWith(1, true, 'gm-keyboard');
+
+    mounted.gamepad.select(0);
+    mounted.gamepad.poll(pads); // explicit neutral gate
+    pads = [standardPad([0])];
+    mounted.gamepad.poll(pads);
+    expect(submitSessionPaused).toHaveBeenNthCalledWith(2, true, 'gm-gamepad');
+
+    gmControls.destroy();
   });
 });
 

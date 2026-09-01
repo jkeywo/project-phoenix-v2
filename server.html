@@ -168,7 +168,24 @@
     html.phoenix-gm-page #gm-console { display: flex; }
     html.phoenix-gm-page #canvas,
     html.phoenix-gm-page #hud-overlay { display: none; }
-    #gm-console h1, #gm-console h2 { margin: 0; }
+    #gm-console h1, #gm-console h2, #gm-console h3 { margin: 0; }
+    #gm-session-controls {
+      max-width: 44rem; padding: 1.5rem; border: 1px solid var(--edge-control);
+      display: grid; gap: .9rem;
+    }
+    #gm-session-actions { display: flex; flex-wrap: wrap; gap: .75rem; }
+    #gm-session-actions button {
+      min-width: 8rem; padding: .65rem 1rem; color: var(--ink-primary);
+      background: var(--surface-panel-up); border: 1px solid var(--edge-control);
+      font: inherit; cursor: pointer;
+    }
+    #gm-session-actions button:disabled { opacity: .45; cursor: default; }
+    #gm-session-state[data-paused="true"] { color: var(--tactical-bright); }
+    #gm-session-feedback[data-state="Refused"] { color: var(--fire-bright); }
+    #gm-session-log { margin: 0; padding-left: 1.5rem; max-height: 12rem; overflow-y: auto; }
+    .gm-session-log-entry[data-outcome="pending"] { color: var(--ink-muted); }
+    .gm-session-log-entry[data-outcome="refused"],
+    .gm-session-log-entry[data-outcome="timed-out"] { color: var(--fire-bright); }
     #gm-entity-card { max-width: 44rem; padding: 1.5rem; border: 1px solid var(--edge-control); }
     #gm-entity-card dl { display: grid; grid-template-columns: max-content 1fr; gap: .75rem 1.5rem; }
     #gm-entity-card dt { color: var(--ink-muted); }
@@ -1717,6 +1734,20 @@
           <h1 id="gm-console-title" data-i18n="server.gm.console.title"></h1>
           <p data-i18n="server.gm.console.local_truth"></p>
         </header>
+        <section id="gm-session-controls" role="region" aria-labelledby="gm-session-heading">
+          <h2 id="gm-session-heading" data-i18n="server.gm.session.heading"></h2>
+          <div id="gm-session-actions">
+            <button id="gm-session-pause" type="button"
+              data-i18n="semantic_action.gm.session_pause.label"></button>
+            <button id="gm-session-resume" type="button"
+              data-i18n="semantic_action.gm.session_resume.label"></button>
+          </div>
+          <p id="gm-session-state" role="status" aria-live="polite" aria-atomic="true"></p>
+          <p id="gm-session-feedback" role="status" aria-live="polite" aria-atomic="true"></p>
+          <h3 id="gm-session-log-heading" data-i18n="server.gm.session.log_heading"></h3>
+          <ol id="gm-session-log" role="log" aria-labelledby="gm-session-log-heading"
+            aria-live="polite" aria-relevant="additions text"></ol>
+        </section>
         <p id="gm-entity-pending" role="status" data-i18n="server.gm.entity.pending"></p>
         <article id="gm-entity-card" hidden aria-live="polite">
           <h2 id="gm-entity-name"></h2>
@@ -2113,8 +2144,42 @@
   <script type="module">
     import { createHostChannel } from './gui/host-channel.js';
     import { createGmLocalProjection } from './gui/gm-local-projection.js';
+    import { createGmSessionControls } from './gui/gm-session-controls.js';
+    import {
+      ActionFeedbackLifecycle,
+      emitActionFeedbackTransition,
+    } from './gui/action-feedback.js';
+    import { createHostActionRegistry } from './gui/host-actions.js';
     import { t, has, localiseTree } from './gui/strings.js';
     const gmProjection = createGmLocalProjection({ doc: document, t });
+    const hostActionFeedback = new ActionFeedbackLifecycle({
+      onTransition: (value) => emitActionFeedbackTransition(window, value),
+    });
+    const hostSemanticActions = createHostActionRegistry({
+      actionFeedback: hostActionFeedback,
+      // Resolve at activation time: the classic page seam binds after this
+      // module island, while the registry itself is page-scoped from boot.
+      toggleQrCode: () => typeof window.__hostToggleQrCode === 'function'
+        ? window.__hostToggleQrCode() : false,
+    });
+    const gmSessionControls = createGmSessionControls({
+      doc: document,
+      t,
+      actions: hostSemanticActions,
+      actionFeedback: hostActionFeedback,
+      submitSessionPaused: (active, correlation) =>
+        typeof window.__hostSetSessionPaused === 'function'
+          && window.__hostSetSessionPaused(active, correlation),
+      getOperator: () => typeof window.__hostLocalGm === 'function'
+        ? window.__hostLocalGm() : null,
+      getOperatorName: (id) => typeof window.__hostGmName === 'function'
+        ? window.__hostGmName(id) : id,
+    });
+    window.__hostGmSessionRefresh = gmSessionControls.refreshAdmission;
+    window.__hostGmSessionReset = gmSessionControls.reset;
+    window.__hostGmSessionState = gmSessionControls.state;
+    window.__hostSemanticActions = hostSemanticActions;
+    window.__hostActionFeedback = hostActionFeedback;
     const hostChannelDispatch = createHostChannel({
       handlers: {
         hud:          function(p) { window.__updateHud(p); },
@@ -2125,6 +2190,7 @@
         audio_level:  function(p) { window.__audioLevel(p); },
         shake:        function(p) { window.__applyShake(p[0], p[1]); },
         gm_entity:    function(p) { gmProjection.update(p); },
+        gm_session:   function(p) { gmSessionControls.update(p); },
       },
       strings: { t, has, localiseTree },
     });
@@ -2395,6 +2461,13 @@
   window.__updateLobby = function(json) {
     let s;
     try { s = JSON.parse(json); } catch (e) { console.warn('[Phoenix] bad lobby state json', e); return; }
+    // Entering authoritative Lobby is the GM activity run boundary. It is the
+    // only place local Pending rows are reset; a bounded absolute result window
+    // becoming empty is not enough evidence to invent a new run.
+    if (s.phase === 'Lobby' && _lobbyPrevPhase !== 'Lobby'
+        && typeof window.__hostGmSessionReset === 'function') {
+      window.__hostGmSessionReset();
+    }
     // Manual capture is a running-World affordance. Drive it from Rust's
     // authoritative phase before any optional view-model module can defer the
     // rest of this paint; PhoenixReady fires before App::run and is too early.
@@ -3028,6 +3101,35 @@
       return (row && (row.name || row.id)) || operatorId || '';
     }
 
+    /** Read-only public operator projection for the pure GM controls module. */
+    window.__hostLocalGm = function() {
+      const gm = localGm();
+      return gm ? { id: gm.id, name: gm.name || gm.id } : null;
+    };
+    window.__hostGmName = gmName;
+
+    /**
+     * Submit one explicit, attributed GM session state command.
+     *
+     * This is intentionally not `wasm_toggle_pause`: the typed command carries
+     * the absolute state and crosses deterministic GM Admission in Rust.
+     */
+    window.__hostSetSessionPaused = function(active, correlation) {
+      const gm = localGm();
+      if (!gm || typeof correlation !== 'string' || correlation.length === 0
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      try {
+        return window.wasm_submit_gm_action(JSON.stringify({
+          operator_id: gm.id,
+          correlation,
+          action: 'set_session_paused',
+          active: !!active,
+        })) !== false;
+      } catch (_) {
+        return false;
+      }
+    };
+
     /** Local content/boot validation contributed to the collective policy. */
     function fleetStartValidation() {
       const evaluate = window.fleetStartValidationState;
@@ -3431,6 +3533,9 @@
       const forceBtn = document.getElementById('gm-force-start-btn');
       const policyEl = document.getElementById('gm-start-policy');
       const resultEl = document.getElementById('gm-start-result');
+      if (typeof window.__hostGmSessionRefresh === 'function') {
+        window.__hostGmSessionRefresh();
+      }
       if (!controls || !readyBtn || !forceBtn) return;
       const gm = localGm();
       controls.setAttribute('aria-hidden', gm ? 'false' : 'true');
@@ -5688,6 +5793,9 @@ function finishInit() {
   window.wasm_fleet_join_status = wasmBindings.wasm_fleet_join_status;
   window.wasm_leave_fleet = wasmBindings.wasm_leave_fleet;
   window.wasm_set_gm_roster = wasmBindings.wasm_set_gm_roster;
+  // First typed GM action tracer (#1292). The page supplies the admitted
+  // operator and semantic-action correlation; Rust owns admission and result.
+  window.wasm_submit_gm_action = wasmBindings.wasm_submit_gm_action;
   // Collective lobby start coordination (#1290). The mesh decides one policy;
   // Rust admits the resulting typed, attributed grant on a fixed tick.
   window.wasm_set_fleet_managed_lobby = wasmBindings.wasm_set_fleet_managed_lobby;

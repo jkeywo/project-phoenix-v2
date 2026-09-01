@@ -76,6 +76,11 @@ entities:
       authority: authoritative
       coordinates: [gm-milestone-peer-tracer]
       runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/gm_action.rs, src/core/codec.rs, src/lockstep/frame.rs, src/lockstep/mod.rs, src/lockstep/recovery.rs, src/server/bridge.rs, src/server_app/registration.rs, src/console_bridge.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/host-mesh.js, gui/host-actions.js, gui/semantic-action-registry.js, gui/semantic-controls-remapper.js, gui/gamepad-input.js, gui/server-settings.js, gui/action-feedback.js, gui/gm-session-actions.js, gui/gm-session-controls.js, assets/strings/strings.csv, server.html]
+      symbols: [SimulationPaused, GmAction, GmActionId, GmActionRequest, GmActionProposal, GmActionOrder, GmActionGrant, GmActionRefusal, GmActionFrame, GmActionSubmission, GmActionJournal, GmActionLog, GmSessionProjection, sequence_owner_proposal, validate_fleet_frame, applied_prefix, apply_through, submit_local, apply_due_actions, publish_session_projection, GmSessionChanged, discard_gm_boundary_overstep, ReplayGmSeed, seed_replay_on_run_start, RecoveryDiagnostic, gm_action_window, wasm_submit_gm_action, HOST_ACTION_DEFINITIONS, createHostActionRegistry, GM_SESSION_ACTION_DEFINITIONS, registerGmSessionActions, createGmSessionControls, parseGmSessionPayload, createSemanticActionRegistry, createGamepadInputRuntime, mountServerSettings]
+      tests: [cargo test gm_action::tests, cargo test core::codec, cargo test lockstep, cargo test lockstep::recovery, cargo test sim_digest, cargo test snapshot::tests, cargo test server_app::mod_tests, cargo test --test replay_simulation, npx vitest run tests/client/gm-session-actions.test.js tests/client/gm-session-controls.test.js tests/client/gm-session-page.test.js tests/client/host-actions.test.js tests/client/semantic-action-registry.test.js tests/client/server-settings.test.js]
 
   - component: gm-t2-map-feed-and-inspector-shell
     core:
@@ -94,7 +99,7 @@ entities:
 
   - decision: gm-t2-action-result-contract
     core:
-      status: accepted
+      status: partially-implemented
       confidence: confirmed
       title: Typed, Attributed, Idempotent GM Actions
       summary: "Every GM mutation is a named typed command carrying operator identity, idempotency key, stable target identities, and a structured applied/no-op/refused result. Targets and preconditions are revalidated at the agreed apply tick and simultaneous equal-GM actions use deterministic ordering. GM actions use the same scenario-authorable vocabulary where one exists and never expose raw ECS mutation, arbitrary components, teleportation, arbitrary asset paths, or a generic expected-version transaction in T2."
@@ -106,6 +111,11 @@ entities:
       authority: authoritative
       coordinates: [gm-milestone-directing, gm-milestone-integrated-workshop]
       runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/gm_action.rs, src/core/codec.rs, src/lockstep/frame.rs, src/lockstep/mod.rs, src/lockstep/recovery.rs, src/server/bridge.rs, src/server_app/registration.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/host-mesh.js, gui/host-actions.js, gui/semantic-action-registry.js, gui/semantic-controls-remapper.js, gui/gamepad-input.js, gui/server-settings.js, gui/action-feedback.js, gui/gm-session-actions.js, gui/gm-session-controls.js, assets/strings/strings.csv]
+      symbols: [SimulationPaused, GmActionProposal, GmActionOrder, GmActionGrant, GmActionRefusal, GmActionFrame, GmActionSubmission, GmActionOutcome, GmActionRefusalReason, LoggedGmAction, GmActionJournal, GmActionLog, GmSessionProjection, LocalGmActionRefusals, sequence_owner_proposal, validate_fleet_frame, applied_prefix, apply_through, publish_session_projection, discard_gm_boundary_overstep, ReplayGmSeed, seed_replay_on_run_start, RecoveryDiagnostic, gm_action_window, HOST_ACTION_DEFINITIONS, createHostActionRegistry, GM_SESSION_ACTION_DEFINITIONS, registerGmSessionActions, createGmSessionControls, parseGmSessionPayload, createSemanticActionRegistry, createGamepadInputRuntime, mountServerSettings]
+      tests: [cargo test gm_action::tests, cargo test core::codec, cargo test lockstep, cargo test lockstep::recovery, cargo test sim_digest, cargo test snapshot::tests, cargo test server_app::mod_tests, cargo test --test replay_simulation, npx vitest run tests/client/gm-session-actions.test.js tests/client/gm-session-controls.test.js tests/client/host-actions.test.js tests/client/semantic-action-registry.test.js tests/client/server-settings.test.js]
 
   - mechanic: gm-t2-event-control-contract
     core:

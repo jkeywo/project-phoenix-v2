@@ -1,9 +1,9 @@
 ---
 title: Client Architecture
 type: concept
-tags: [client, javascript, iframe, console, console-family, state, accessibility, keyboard, gamepad, feedback, vitest]
-sources: [client.html, server.html, gui/mount-plan.js, gui/hero-bar.js, gui/reducer-result.js, gui/lobby-state.js, gui/sim-state.js, gui/comms-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/semantic-controls-remapper.js, gui/host-actions.js, gui/server-settings.js, gui/gamepad-input.js, gui/client-semantic-actions.js, gui/composite-action-routing.js, gui/stations/captain-actions.js, gui/stations/helm-actions.js, gui/stations/tactical-actions.js, gui/stations/comms-actions.js, gui/stations/sensors-actions.js, gui/stations/navigation-actions.js, gui/stations/navigation-action-control.js, gui/stations/engineering-actions.js, gui/stations/engineering-action-control.js, gui/components/ph-navigation-map.js, gui/components/ph-civilian-traffic.js, gui/operator-profile.js, gui/action-map.js, gui/console-core.js, gui/console-latency.js, gui/iframe-bridge.js, gui/client-router.js, gui/coordination-popup.js, gui/accessibility-profile.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/command_admission/mod.rs, src/console/captain/server.rs, src/console/navigation/server.rs, src/console/repair/dispatch.rs, src/console/repair/external_server.rs, src/civilian/server.rs, src/science/server.rs, src/ship/helm_admission.rs, src/ship/sensors.rs, src/ship/shields.rs, src/ship/power.rs, src/tractor/server.rs, src/umbilical/server.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
-updated: 2026-08-31
+tags: [client, javascript, iframe, console, console-family, state, accessibility, keyboard, gamepad, feedback, gm, host-channel, vitest]
+sources: [client.html, server.html, gui/mount-plan.js, gui/hero-bar.js, gui/reducer-result.js, gui/lobby-state.js, gui/sim-state.js, gui/comms-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/semantic-controls-remapper.js, gui/host-actions.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/server-settings.js, gui/gamepad-input.js, gui/client-semantic-actions.js, gui/composite-action-routing.js, gui/stations/captain-actions.js, gui/stations/helm-actions.js, gui/stations/tactical-actions.js, gui/stations/comms-actions.js, gui/stations/sensors-actions.js, gui/stations/navigation-actions.js, gui/stations/navigation-action-control.js, gui/stations/engineering-actions.js, gui/stations/engineering-action-control.js, gui/components/ph-navigation-map.js, gui/components/ph-civilian-traffic.js, gui/operator-profile.js, gui/action-map.js, gui/console-core.js, gui/console-latency.js, gui/iframe-bridge.js, gui/client-router.js, gui/coordination-popup.js, gui/accessibility-profile.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/command_admission/mod.rs, src/gm_action.rs, src/server/bridge.rs, src/console/captain/server.rs, src/console/navigation/server.rs, src/console/repair/dispatch.rs, src/console/repair/external_server.rs, src/civilian/server.rs, src/science/server.rs, src/ship/helm_admission.rs, src/ship/sensors.rs, src/ship/shields.rs, src/ship/power.rs, src/tractor/server.rs, src/umbilical/server.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
+updated: 2026-09-01
 ---
 
 ## Summary
@@ -121,19 +121,35 @@ path mutates gameplay state locally. Correlated Power/Repair
 mutations settle only at their owning server validator; Tractor/Umbilical starts
 settle after their same-tick live hold/flow verdict.
 
-The host page uses the same registry and lifecycle without pretending its local
-chrome is a console or a network command. `host.qr-code` is scoped to the
-`host` context with the same two binding slots (KeyQ plus an empty slot by
-default). The visible Gameplay button, its native Enter/Space activation and
-the document-level remapped keyboard route all invoke the one adapter in
-`gui/host-actions.js`; that adapter calls only server.html's existing
-`__hostToggleQrCode` seam and completes local feedback synchronously through
-Pressed → Pending → Applied. `gui/server-settings.js` keeps the final visual and
-aria-live feedback outside the modal so a closed Settings panel cannot hide it,
-but paints persistent QR visibility and `aria-pressed` only from
-`__hostIsQrVisible`, since lobby and phone routes can also change that state.
-The binding profile remains host-page memory: it adds no persistence, gamepad,
-Rust message or simulation authority.
+The host page uses one page-scoped semantic registry and feedback lifecycle
+without pretending its chrome is a console. The registry contains the
+`host.qr-code`, `gm.pause`, and `gm.resume` definitions, each with the same two
+keyboard-or-standard-gamepad binding slots and shared remapper/conflict path.
+QR and GM contexts overlap, so the registry detects their conflicts together.
+Its document-level keyboard dispatcher and explicitly selected
+`mapping === "standard"` gamepad runtime are the only remapped input paths;
+`gm-session-controls` installs no competing private listener.
+
+The visible QR button, native Enter/Space activation, and remapped input all
+invoke the one adapter in `gui/host-actions.js`; that adapter calls only
+server.html's existing `__hostToggleQrCode` seam and completes local feedback
+synchronously through Pressed → Pending → Applied. `gui/server-settings.js`
+keeps the final visual and aria-live feedback outside the modal so a closed
+Settings panel cannot hide it, but paints persistent QR visibility and
+`aria-pressed` only from `__hostIsQrVisible`, since lobby and phone routes can
+also change that state. These host-page bindings remain in page memory and add
+no Rust message or simulation authority.
+
+The GM pause surface uses the same registry but not the QR action's synchronous
+local settlement. `gui/gm-session-actions.js` creates a durable
+operator-scoped action id and submits an absolute `SetSessionPaused` request;
+`gui/gm-session-controls.js` shows Pending until the `gm_session` Host Channel
+projects the authoritative Applied, No-op, or Refused result. Every projection
+is an absolute replacement of `paused` and its ordered terminal results: it
+settles the exact `(operator_id, correlation)` pending row and clears obsolete
+local terminal rows. Persistent Pause and `aria-pressed` always come from that
+projection, never from the click, so equal peers and retries cannot invent
+local state while lockstep decides the canonical order.
 
 Each binding slot is a union: `KeyboardEvent.code` plus all four modifiers, or
 a portable control from the browser's standard gamepad mapping. Gamepad
@@ -224,7 +240,7 @@ resurrecting the old value.
 | `console-payload.js` | Metadata-driven flat/keyed normalization plus `familyView`: mirrors flat views only under actual projected ids and selects composite views by Console Family, with no inverse id census. |
 | `action-map.js` | Table-driven `console_action` → `ClientMessage` dispatch |
 | `action-feedback.js` | Pure bounded Pressed → Pending → Applied/Refused/TimedOut presentation lifecycle, exact parent-to-originating-iframe router, and the shared live-status/semantic-cue/vibration transition |
-| `semantic-action-registry.js`, `semantic-controls-remapper.js`, `gamepad-input.js`, `client-semantic-actions.js`, `composite-action-routing.js`, `stations/{captain,helm,tactical,comms,sensors,navigation,engineering}-actions.js`, `host-actions.js`, `operator-profile.js` | Non-authoritative context/input identity, exactly two keyboard-or-standard-gamepad slots, continuous metadata and axis tuning, the shared keyboard capture/conflict/reset presenter used by phone and host Settings, explicit one-connection phone gamepad ownership with neutral-gated discrete edges and continuous values, composite-family subcontext routing back to the owning Station iframe, atomic validation plus private browser persistence/export/import, reserved-chord policy, overlap-only conflict replacement and reset operations, plus the real Captain, Helm, Tactical, Comms, Sensors/Science, Navigation, Engineering/Power/Repair and host QR adapters above `action-map.js` |
+| `semantic-action-registry.js`, `semantic-controls-remapper.js`, `gamepad-input.js`, `client-semantic-actions.js`, `composite-action-routing.js`, `stations/{captain,helm,tactical,comms,sensors,navigation,engineering}-actions.js`, `host-actions.js`, `gm-session-actions.js`, `gm-session-controls.js`, `server-settings.js`, `operator-profile.js` | Non-authoritative context/input identity, exactly two keyboard-or-standard-gamepad slots, continuous metadata and axis tuning, the shared keyboard capture/conflict/reset presenter used by phone and host/GM Settings, explicit selected-standard-gamepad ownership with neutral-gated discrete edges and continuous values, composite-family subcontext routing back to the owning Station iframe, atomic validation plus private browser persistence/export/import, reserved-chord policy, overlap-only conflict replacement and reset operations, plus the real Captain, Helm, Tactical, Comms, Sensors/Science, Navigation, Engineering/Power/Repair, host QR, and attributed GM Pause/Resume adapters above `action-map.js` |
 | `iframe-bridge.js` | `push()` / `wireLoad()` state-push into console iframes (ADR-0001 §2) |
 | `content-switcher.js` | Section visibility over the ship's mounted stations; one human directly holds one station |
 | `station-roster.js` | Pure fold: players + station defs → lobby roster rows + aggregates |

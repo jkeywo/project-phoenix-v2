@@ -5,6 +5,7 @@ import {
 } from '../../gui/action-feedback.js';
 import {
   HOST_ACTION_CONTEXT,
+  HOST_GM_ACTION_CONTEXT,
   HOST_QR_CODE_ACTION_ID,
   createHostActionRegistry,
 } from '../../gui/host-actions.js';
@@ -15,7 +16,7 @@ describe('host semantic actions', () => {
     expect(registry.list(HOST_ACTION_CONTEXT)).toEqual([
       expect.objectContaining({
         id: HOST_QR_CODE_ACTION_ID,
-        contexts: [HOST_ACTION_CONTEXT],
+        contexts: [HOST_ACTION_CONTEXT, HOST_GM_ACTION_CONTEXT],
         feedback: 'local',
         bindings: [expect.objectContaining({ type: 'keyboard', code: 'KeyQ' }), null],
       }),

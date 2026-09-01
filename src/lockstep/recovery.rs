@@ -53,6 +53,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::command_admission::log::{CommandLog, HostSlot, LoggedCommand};
+use crate::gm_action::{GmActionGrant, GmActionJournal};
 use crate::logging::LogCat;
 use crate::sim_tick::SimTick;
 use crate::world::server::BridgeWorldSource;
@@ -69,7 +70,12 @@ use super::{FleetLockstep, FleetRoster, MeshAgreement};
 /// different build is refused by [`parse_recovery_artifact`] rather than
 /// mis-parsed — the same discipline `headless::replay`'s `ARTIFACT_VERSION` keeps
 /// for the replay artifact.
-pub const RECOVERY_ARTIFACT_VERSION: u32 = 1;
+///
+/// `2` (from `1`): adds the typed GM-action grants whose application boundary
+/// falls inside the divergence window. Without them the diagnostic carried
+/// only crew commands and could not replay or explain a split caused by a GM
+/// pause/resume action.
+pub const RECOVERY_ARTIFACT_VERSION: u32 = 2;
 
 /// How far past the boundary this host must withhold ticks while a recovery it has
 /// not yet resolved is in flight (issue #1118).
@@ -179,6 +185,10 @@ pub struct RecoveryDiagnostic {
     /// Every command that applied in the window between the last agreement and the
     /// divergence — the input a replay reads to explain the split.
     pub command_window: Vec<LoggedCommand>,
+    /// Every typed GM grant whose application boundary falls in the same
+    /// window. Grants, rather than derived outcomes, are the authoritative
+    /// replay input: outcomes are recomputed from their canonical order.
+    pub gm_action_window: Vec<GmActionGrant>,
     /// How the event resolved, from this host's vantage.
     pub result: RecoveryResult,
 }
@@ -596,6 +606,7 @@ fn plan_diagnostic(
         canonical_digest: Some(plan.canonical_digest),
         recovering: plan.recovering.clone(),
         command_window: command_window(world, plan.last_agreed_tick, plan.divergence_tick),
+        gm_action_window: gm_action_window(world, plan.last_agreed_tick, plan.divergence_tick),
         result,
     }
 }
@@ -622,6 +633,7 @@ fn failure_diagnostic(
         canonical_digest: None,
         recovering: Vec::new(),
         command_window: command_window(world, window.last_agreed, window.tick),
+        gm_action_window: gm_action_window(world, window.last_agreed, window.tick),
         result: RecoveryResult::NoSafeLeader {
             largest_group: *largest_group,
             fleet: *fleet,
@@ -643,6 +655,28 @@ fn command_window(
         .iter()
         .filter(|entry| {
             entry.tick <= divergence_tick && last_agreed.is_none_or(|edge| entry.tick > edge)
+        })
+        .cloned()
+        .collect()
+}
+
+/// The typed GM grants applied in the same diagnostic window as
+/// [`command_window`]. The journal is already canonical, so no arrival-order
+/// sorting or outcome reconstruction belongs in the recovery adapter.
+fn gm_action_window(
+    world: &World,
+    last_agreed: Option<u64>,
+    divergence_tick: u64,
+) -> Vec<GmActionGrant> {
+    let Some(journal) = world.get_resource::<GmActionJournal>() else {
+        return Vec::new();
+    };
+    journal
+        .applied_prefix()
+        .iter()
+        .filter(|grant| {
+            grant.apply_tick <= divergence_tick
+                && last_agreed.is_none_or(|edge| grant.apply_tick > edge)
         })
         .cloned()
         .collect()
@@ -671,6 +705,22 @@ pub fn register_recovery(app: &mut App) {
 mod tests {
     use super::*;
 
+    fn gm_grant(sequence: u64, apply_tick: u64) -> GmActionGrant {
+        let from = HostSlot(2);
+        GmActionGrant {
+            from,
+            sequenced_by: HostSlot(1),
+            operator_id: "gm-recovery".into(),
+            correlation: crate::gm_action::GmActionId::new(format!("gm-{sequence}"))
+                .expect("valid correlation"),
+            apply_tick,
+            order: crate::gm_action::GmActionOrder::new(from, sequence),
+            action: crate::gm_action::GmAction::SetSessionPaused {
+                active: sequence % 2 == 1,
+            },
+        }
+    }
+
     /// The diagnostic artifact round-trips through RON and refuses a foreign
     /// version — the AC5 record is a real, replayable artifact, not a debug print.
     #[test]
@@ -690,6 +740,7 @@ mod tests {
             canonical_digest: Some(0xAA),
             recovering: vec![HostSlot(2)],
             command_window: Vec::new(),
+            gm_action_window: Vec::new(),
             result: RecoveryResult::Recovered {
                 record_tick: 361,
                 digest: 0xAA,
@@ -703,6 +754,50 @@ mod tests {
         future.version = RECOVERY_ARTIFACT_VERSION + 1;
         let text = export_recovery_artifact(&future).expect("serialises");
         assert!(parse_recovery_artifact(&text).is_err());
+
+        let mut pre_gm = future;
+        pre_gm.version = 1;
+        let text = export_recovery_artifact(&pre_gm).expect("serialises");
+        assert!(
+            parse_recovery_artifact(&text).is_err(),
+            "a v1 diagnostic has no typed GM action window"
+        );
+    }
+
+    #[test]
+    fn the_recovery_window_carries_canonical_gm_replay_input() {
+        let mut world = World::new();
+        let before = gm_grant(1, 120);
+        let inside = gm_grant(2, 240);
+        let after = gm_grant(3, 300);
+        let mut journal = GmActionJournal::default();
+        for grant in [before, inside.clone(), after] {
+            journal.insert(grant).expect("canonical fixture");
+        }
+        journal.restore_applied_frontier(2).unwrap();
+        world.insert_resource(journal);
+
+        assert_eq!(gm_action_window(&world, Some(180), 240), vec![inside]);
+    }
+
+    #[test]
+    fn the_recovery_window_excludes_a_due_but_still_unapplied_gm_grant() {
+        let mut world = World::new();
+        let applied = gm_grant(1, 239);
+        let exact_boundary_unapplied = gm_grant(2, 240);
+        let mut journal = GmActionJournal::default();
+        journal.insert(applied.clone()).expect("canonical fixture");
+        journal
+            .insert(exact_boundary_unapplied)
+            .expect("canonical exact-boundary fixture");
+        journal.restore_applied_frontier(1).unwrap();
+        world.insert_resource(journal);
+
+        assert_eq!(
+            gm_action_window(&world, Some(180), 240),
+            vec![applied],
+            "recovery replay input is the durable applied prefix, not every due receipt"
+        );
     }
 
     /// The transfer id is a stable function of the shared plan, so every host that

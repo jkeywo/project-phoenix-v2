@@ -36,8 +36,7 @@ pub struct DebugOverlayEnabled(pub bool);
 /// everything that drives it must survive into a demo build where the
 /// Debug/Cheat tab is absent. Pause has its own bridge pending flag and never
 /// enters the Debug Surface catalogue.
-#[derive(Resource, Default)]
-pub struct SimulationPaused(pub bool);
+pub use crate::gm_action::SimulationPaused;
 
 /// Resource indicating whether the damage debug overlay is enabled.
 #[derive(Resource, Default)]

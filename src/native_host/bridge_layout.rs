@@ -23,10 +23,14 @@
 //!    **authored** profile opened counts too, even though this layout cannot
 //!    move it — see [`BridgeLayout::reserved_on`].
 //! 3. **Two per screen.** A non-viewscreen monitor holds at most
-//!    [`MAX_STATIONS_PER_MONITOR`] stations, split deterministically side by
+//!    [`MAX_STATIONS_PER_MONITOR`] **consoles**, split deterministically side by
 //!    side. That is [`MAX_PANES_PER_STATION`] — the same legibility bound the
 //!    profile enforces at author time, restated as a runtime precondition rather
-//!    than duplicated as a second number.
+//!    than duplicated as a second number. A console is a console whoever opened
+//!    it (issue #1332): the stations this layout seated *and* the authored
+//!    surfaces it merely knows about ([`BridgeLayout::reserved_on`]) are counted
+//!    together, so a screen carrying a hand-authored `--pane` has one free slot
+//!    and one carrying two has none.
 //!
 //! # Stations are keyed by station id, not by participant name
 //!
@@ -139,7 +143,15 @@ pub enum LayoutRefusal {
     /// The monitor already holds [`MAX_STATIONS_PER_MONITOR`] consoles.
     MonitorFull {
         monitor: MonitorIdentity,
+        /// The consoles this layout seated there.
         occupants: Vec<StationId>,
+        /// The labels of surfaces an authored profile opened there that this
+        /// layout does not own — see [`BridgeLayout::reserved_on`]. Named beside
+        /// the seats for [`ViewscreenMonitorHoldsStations`](Self::ViewscreenMonitorHoldsStations)'s
+        /// reason, and counted with them since issue #1332: a console occupies a
+        /// screen whoever opened it, so a refusal that named only the seats would
+        /// report "1 console" on a screen the operator can see two on.
+        panes: Vec<String>,
     },
     /// The viewscreen was asked to move onto a monitor that is holding station
     /// consoles. Refused rather than evicting them: the operator unassigns them
@@ -177,13 +189,17 @@ impl std::fmt::Display for LayoutRefusal {
                  move the viewscreen first",
                 station.0
             ),
-            LayoutRefusal::MonitorFull { monitor, occupants } => write!(
+            LayoutRefusal::MonitorFull {
+                monitor,
+                occupants,
+                panes,
+            } => write!(
                 f,
                 "monitor {monitor} already holds {} console(s) ({}), which is the maximum of \
                  {MAX_STATIONS_PER_MONITOR}: a console is authored to be read one, or \
                  side-by-side two, to a screen. Free a slot or pick another screen",
-                occupants.len(),
-                station_list(occupants),
+                occupants.len() + panes.len(),
+                occupant_list(occupants, panes),
             ),
             LayoutRefusal::ViewscreenMonitorHoldsStations {
                 monitor,
@@ -238,9 +254,13 @@ impl LayoutRefusal {
                 ("station", station.0.clone()),
                 ("monitor", monitor.as_str().to_string()),
             ],
-            LayoutRefusal::MonitorFull { monitor, occupants } => vec![
+            LayoutRefusal::MonitorFull {
+                monitor,
+                occupants,
+                panes,
+            } => vec![
                 ("monitor", monitor.as_str().to_string()),
-                ("stations", station_params(occupants)),
+                ("stations", occupant_params(occupants, panes)),
                 ("max", MAX_STATIONS_PER_MONITOR.to_string()),
             ],
             LayoutRefusal::ViewscreenMonitorHoldsStations {
@@ -255,30 +275,16 @@ impl LayoutRefusal {
     }
 }
 
-/// `"helm", "weapons"` — station ids, quoted and joined, for a refusal message.
-fn station_list(stations: &[StationId]) -> String {
-    stations
-        .iter()
-        .map(|s| format!("{:?}", s.0))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-/// `helm, weapons` — station ids joined for a **player-visible** parameter.
-///
-/// Unquoted, unlike [`station_list`]: the quotes in an operator log line read as
-/// "this is a machine key", and on the lobby's own surface they read as stray
-/// punctuation in a sentence.
-fn station_params(stations: &[StationId]) -> String {
-    stations
-        .iter()
-        .map(|s| s.0.as_str())
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
 /// Everything on one monitor, for an operator log line: its seated consoles
-/// then the authored surfaces it also carries.
+/// then the authored surfaces it also carries — `"helm", "Ada"`.
+///
+/// Quoted, unlike [`occupant_params`]: an operator log line is naming machine
+/// keys, and the quotes say so.
+///
+/// Both refusals that name a monitor's occupants go through this **one** pair of
+/// functions (issue #1332 brought [`LayoutRefusal::MonitorFull`] here from a
+/// seats-only formatter). A refusal that counted or listed only the seats would
+/// tell an operator a screen holds one console while they are looking at two.
 fn occupant_list(stations: &[StationId], panes: &[String]) -> String {
     join_occupants(
         stations.iter().map(|s| format!("{:?}", s.0)),
@@ -286,8 +292,10 @@ fn occupant_list(stations: &[StationId], panes: &[String]) -> String {
     )
 }
 
-/// Everything on one monitor, for a **player-visible** parameter. See
-/// [`station_params`] for why nothing is quoted here.
+/// Everything on one monitor, for a **player-visible** parameter — `helm, Ada`.
+///
+/// Unquoted: the quotes in an operator log line read as "this is a machine key",
+/// and on the lobby's own surface they read as stray punctuation in a sentence.
 fn occupant_params(stations: &[StationId], panes: &[String]) -> String {
     join_occupants(stations.iter().map(|s| s.0.clone()), panes.iter().cloned())
 }
@@ -346,15 +354,27 @@ pub struct BridgeLayout {
     /// let the viewscreen move on top of somebody's live console. That is rule
     /// 2's whole point, defeated by a bookkeeping gap.
     ///
-    /// A reserved label is therefore an occupant for the purpose of rule 2's
-    /// mirror ([`set_viewscreen`](Self::set_viewscreen)) and nothing else. It is
-    /// **not** a seat: it is not on the roster, it has no
-    /// [`eligibility`](Self::eligibility) row, no action can move or free it, and
-    /// it does not consume a monitor's console capacity — seating a station
-    /// beside an authored pane is the pane host's compositing question
-    /// (issue #1124), not this law's, and the viewscreen is the only surface this
-    /// module actually moves today. Faking a `StationId` for one instead would
-    /// have put a station no ship has on the roster-driven rows.
+    /// A reserved label is therefore an occupant for **both** density rules. It
+    /// blocks the viewscreen moving onto its screen (rule 2's mirror,
+    /// [`set_viewscreen`](Self::set_viewscreen)) and it **consumes one of that
+    /// screen's two console slots** (rule 3, issue #1332): a monitor carrying one
+    /// authored pane has one free slot, one carrying two has none, and
+    /// [`assign`](Self::assign), [`occupancy`](Self::occupancy) and
+    /// [`eligibility`](Self::eligibility) all count it.
+    ///
+    /// It took #1332 to make that true, and the gap it closed was not
+    /// theoretical: #1331 counted only `seats`, so the screen row *offered* a
+    /// monitor already holding an authored console, the law *accepted* the press,
+    /// and the adapter then laid the new console out across the whole monitor —
+    /// the two consoles **overlapping** rather than tiling. Counting is half the
+    /// fix; the other half is that the adapter lays every pane on a monitor out
+    /// together, reserved ones included (`bridge_display::follow_layout_stations`).
+    ///
+    /// It is still **not a seat**: it is not on the roster, it has no
+    /// [`eligibility`](Self::eligibility) row of its own, and no
+    /// [`LayoutAction`] can move or free it — only the `--profile` that authored
+    /// it, and only by being re-adopted. Faking a `StationId` for one instead
+    /// would have put a station no ship has on the roster-driven rows.
     ///
     /// # It does not survive a round trip through a profile (issue #1334)
     ///
@@ -554,10 +574,11 @@ impl BridgeLayout {
         // Capacity is judged AFTER the no-op case above, so re-pressing a full
         // monitor's own button for a station already on it is not a refusal —
         // the station is one of the occupants it would be counted against.
-        if self.seats[index].len() >= MAX_STATIONS_PER_MONITOR {
+        if self.is_full(index) {
             return Err(LayoutRefusal::MonitorFull {
                 monitor: monitor.clone(),
                 occupants: self.seats[index].clone(),
+                panes: self.reserved[index].clone(),
             });
         }
         let mut next = self.clone();
@@ -606,6 +627,23 @@ impl BridgeLayout {
         self.seats.iter().position(|s| s.contains(station))
     }
 
+    /// How many consoles a monitor is carrying — its seats **and** the authored
+    /// surfaces it holds (issue #1332).
+    ///
+    /// The one arithmetic behind rule 3, so [`assign`](Self::assign)'s refusal,
+    /// [`eligibility`](Self::eligibility)'s greying and
+    /// [`occupancy`](Self::occupancy)'s `free_slots` cannot come to disagree
+    /// about what "full" means. See the [`reserved`](Self::reserved) note.
+    fn occupant_count(&self, index: usize) -> usize {
+        self.seats[index].len() + self.reserved[index].len()
+    }
+
+    /// Whether a monitor can take no further console — see
+    /// [`occupant_count`](Self::occupant_count).
+    fn is_full(&self, index: usize) -> bool {
+        self.occupant_count(index) >= MAX_STATIONS_PER_MONITOR
+    }
+
     // ── reporting ───────────────────────────────────────────────────────────
 
     /// What every monitor is holding, in monitor order.
@@ -628,7 +666,7 @@ impl BridgeLayout {
             stations: self.seats[index].clone(),
             reserved: self.reserved[index].clone(),
             free_slots: (!is_viewscreen)
-                .then(|| MAX_STATIONS_PER_MONITOR - self.seats[index].len()),
+                .then(|| MAX_STATIONS_PER_MONITOR.saturating_sub(self.occupant_count(index))),
         }
     }
 
@@ -660,7 +698,7 @@ impl BridgeLayout {
                         MonitorChoice::Selected
                     } else if i == self.viewscreen {
                         MonitorChoice::Excluded(ExclusionReason::IsViewscreen)
-                    } else if self.seats[i].len() >= MAX_STATIONS_PER_MONITOR {
+                    } else if self.is_full(i) {
                         MonitorChoice::Excluded(ExclusionReason::Full)
                     } else {
                         MonitorChoice::Eligible
@@ -670,21 +708,66 @@ impl BridgeLayout {
         }
     }
 
-    /// Where each of `monitor`'s seated consoles is drawn on it, in seat order.
+    /// Where **everything** on `monitor` is drawn on it: the authored surfaces
+    /// it carries first, then its seated consoles in seat order (issue #1332).
     ///
     /// The deterministic split, resolved against real geometry: one console is
     /// the whole monitor, two divide it side by side with no gap and no overlap.
     /// Empty for the viewscreen and for a monitor this bridge lacks.
+    ///
+    /// # One tiling for both kinds of console, and why
+    ///
+    /// It is **one** [`pane_rects`] call over the whole occupancy, not a seat
+    /// tiling laid beside a reserved one. Two calls is exactly the shape that
+    /// produced the #1331 overlap this replaces: an authored pane spawned at boot
+    /// across its whole monitor, a station later seated on the same screen, and
+    /// both handed the full rectangle. Since rule 3 now counts the two together
+    /// ([`reserved`](Self::reserved)) their count is bounded by
+    /// [`MAX_STATIONS_PER_MONITOR`] like any other pair, so the *existing* split
+    /// geometry tiles them with nothing new invented.
+    ///
+    /// **Reserved first** is the deliberate order: an authored pane was on that
+    /// screen from boot, so it keeps the left half and a station seated beside it
+    /// arrives on the right — the same "the console that stayed put is the
+    /// earlier of the two" rule seat order already follows, extended to the one
+    /// occupant seat order cannot express.
+    pub fn surface_rects(
+        &self,
+        monitor: &MonitorIdentity,
+        geometry: &MonitorGeometry,
+    ) -> Vec<(SurfaceOccupant, PaneRect)> {
+        let reserved = self.reserved_on(monitor);
+        let stations = self.stations_on(monitor);
+        reserved
+            .iter()
+            .cloned()
+            .map(SurfaceOccupant::Reserved)
+            .chain(stations.iter().cloned().map(SurfaceOccupant::Station))
+            .zip(pane_rects(
+                geometry,
+                LAYOUT_SPLIT,
+                reserved.len() + stations.len(),
+            ))
+            .collect()
+    }
+
+    /// Where each of `monitor`'s **seated** consoles is drawn on it, in seat
+    /// order — [`surface_rects`](Self::surface_rects) with the authored surfaces
+    /// filtered out, *not* a tiling of its own.
+    ///
+    /// A caller that has to place every pane on a screen wants `surface_rects`;
+    /// this is for one that only asks where the stations are.
     pub fn station_rects(
         &self,
         monitor: &MonitorIdentity,
         geometry: &MonitorGeometry,
     ) -> Vec<(StationId, PaneRect)> {
-        let stations = self.stations_on(monitor);
-        stations
-            .iter()
-            .cloned()
-            .zip(pane_rects(geometry, LAYOUT_SPLIT, stations.len()))
+        self.surface_rects(monitor, geometry)
+            .into_iter()
+            .filter_map(|(occupant, rect)| match occupant {
+                SurfaceOccupant::Station(station) => Some((station, rect)),
+                SurfaceOccupant::Reserved(_) => None,
+            })
             .collect()
     }
 
@@ -1032,6 +1115,43 @@ fn dedup<T: PartialEq>(items: impl IntoIterator<Item = T>) -> Vec<T> {
 
 // ── reporting types ─────────────────────────────────────────────────────────
 
+/// One console occupying a slot on a monitor (issue #1332) — what
+/// [`BridgeLayout::surface_rects`] hands back a rectangle for.
+///
+/// The two kinds are kept apart rather than flattened to a name, because the
+/// adapter has to *treat* them differently: a station's console is the layout's
+/// to open, move and close, and an authored one is only ever laid out. Flattening
+/// them would have made the display layer re-derive which is which from a string.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SurfaceOccupant {
+    /// A console this layout seated, keyed by its station.
+    Station(StationId),
+    /// A surface a hand-authored `--profile` opened, by its participant label —
+    /// see [`BridgeLayout::reserved_on`].
+    Reserved(String),
+}
+
+impl SurfaceOccupant {
+    /// The name a person reads for this console — the station id, or the
+    /// participant label. The same string [`BridgeLayout::occupants_on`] lists
+    /// and the same one a `PaneSlot`'s `label` carries, which is what lets the
+    /// pane bus resolve either kind by one key.
+    pub fn name(&self) -> &str {
+        match self {
+            SurfaceOccupant::Station(station) => &station.0,
+            SurfaceOccupant::Reserved(label) => label,
+        }
+    }
+
+    /// The station this console belongs to, or `None` for an authored one.
+    pub fn station(&self) -> Option<&StationId> {
+        match self {
+            SurfaceOccupant::Station(station) => Some(station),
+            SurfaceOccupant::Reserved(_) => None,
+        }
+    }
+}
+
 /// What one monitor is holding — see [`BridgeLayout::occupancy`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MonitorOccupancy {
@@ -1041,9 +1161,11 @@ pub struct MonitorOccupancy {
     /// The stations seated on it, in the order their panes are laid out.
     pub stations: Vec<StationId>,
     /// The labels of authored surfaces on it this layout does not own — see
-    /// [`BridgeLayout::reserved_on`]. They block the viewscreen moving here and
-    /// nothing else, so they are reported beside `free_slots` rather than
-    /// subtracted from it.
+    /// [`BridgeLayout::reserved_on`]. Since issue #1332 they are consoles for
+    /// every purpose but ownership: they block the viewscreen moving here **and**
+    /// they are already subtracted from `free_slots`. Reported beside it all the
+    /// same, because a consumer that wants to *name* what a screen is holding
+    /// needs both lists and neither is derivable from the count.
     pub reserved: Vec<String>,
     /// How many more consoles it can take — `None` for the viewscreen, which
     /// takes none at all.
@@ -1063,7 +1185,8 @@ pub struct MonitorOccupancy {
 pub enum ExclusionReason {
     /// It is showing the shared viewscreen; a console never covers it.
     IsViewscreen,
-    /// It already holds [`MAX_STATIONS_PER_MONITOR`] consoles.
+    /// It already holds [`MAX_STATIONS_PER_MONITOR`] consoles — the stations
+    /// seated on it *and* the authored surfaces it carries (issue #1332).
     Full,
 }
 
@@ -1234,6 +1357,37 @@ pub enum LayoutAdoption {
         station: StationId,
         monitor: MonitorIdentity,
     },
+    /// A console **nobody moved** is being rebuilt, because the screen it is on
+    /// gained or lost a neighbour and its half of that screen changed
+    /// (issue #1332).
+    ///
+    /// Raised by `bridge_display::follow_layout_stations`, like
+    /// [`ConsoleCouldNotOpen`](Self::ConsoleCouldNotOpen) and for the same
+    /// reason: it is the adapter reporting a consequence the law cannot see.
+    ///
+    /// # Why this is a notice at all
+    ///
+    /// An Ultralight view is built at one size on one window, so a pane whose
+    /// rectangle changes cannot be re-placed — it goes through `close` +
+    /// `recreate` on the **same session token**, and the page reloads. Whoever
+    /// was at that console therefore spends a page load disconnected, their
+    /// station on `Backfill`, and their seat is claimable by somebody else for
+    /// exactly that long. The reconnect restores it (`handle_identify`'s
+    /// reconnect-yield) *if* nobody took it in the gap.
+    ///
+    /// For the console the operator **moved**, that is the cost of the move and
+    /// it needs no announcement. For its *neighbour* — a person who pressed
+    /// nothing and whose screen is about to blink — it is a surprise, and the
+    /// PRD's "reassignment must not steal seats gratuitously" is the reason the
+    /// blink is announced rather than absorbed. The variant carries the console's
+    /// name rather than a [`StationId`] because an authored `--pane` participant
+    /// is re-tiled by the same rule and has no station id to carry.
+    ConsoleRetiling {
+        /// The station id, or the participant label of an authored surface —
+        /// [`SurfaceOccupant::name`].
+        console: String,
+        monitor: MonitorIdentity,
+    },
     /// [`reconcile`](BridgeLayout::reconcile) was handed no monitors at all. A
     /// bridge is at least one screen, so the layout was kept exactly as it was;
     /// these are the monitors it still names.
@@ -1269,6 +1423,7 @@ impl LayoutAdoption {
             LayoutAdoption::ConsoleCouldNotOpen { .. } => {
                 "server.bridge_layout.adopt_console_could_not_open"
             }
+            LayoutAdoption::ConsoleRetiling { .. } => "server.bridge_layout.adopt_console_retiling",
             LayoutAdoption::NoMonitorsReported { .. } => "server.bridge_layout.adopt_no_monitors",
         }
     }
@@ -1295,6 +1450,10 @@ impl LayoutAdoption {
             | LayoutAdoption::StationOffRoster { station, monitor }
             | LayoutAdoption::ConsoleCouldNotOpen { station, monitor } => vec![
                 ("station", station.0.clone()),
+                ("monitor", monitor.as_str().to_string()),
+            ],
+            LayoutAdoption::ConsoleRetiling { console, monitor } => vec![
+                ("console", console.clone()),
                 ("monitor", monitor.as_str().to_string()),
             ],
             LayoutAdoption::ViewscreenMonitorGone {
@@ -1401,6 +1560,12 @@ impl std::fmt::Display for LayoutAdoption {
                  given back and the screen is free again; open it on another screen, or try \
                  that one again",
                 station.0
+            ),
+            LayoutAdoption::ConsoleRetiling { console, monitor } => write!(
+                f,
+                "monitor {monitor}'s split changed, so {console:?}'s console — which nobody asked \
+                 to move — is rebuilt at its new half; whoever is at it reconnects on the same \
+                 identity once the page loads, and their station is on AI control until it does",
             ),
             LayoutAdoption::NoMonitorsReported { kept } => write!(
                 f,

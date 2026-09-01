@@ -152,6 +152,7 @@ fn two_consoles_share_a_monitor_but_a_third_is_refused() {
         LayoutRefusal::MonitorFull {
             monitor: m(LEFT),
             occupants: vec![s("helm"), s("weapons")],
+            panes: Vec::new(),
         }
     );
     let msg = err.to_string();
@@ -531,6 +532,68 @@ fn one_console_is_the_whole_screen_and_two_divide_it_side_by_side() {
         .is_empty());
 }
 
+#[test]
+fn moving_one_console_out_of_a_shared_screen_gives_the_other_the_whole_of_it() {
+    // The 2-up boundary a move crosses (issue #1332). Pressing another screen's
+    // button for a station already seated IS the move — the law has no move
+    // action — and what it leaves behind is the interesting half: the screen it
+    // left goes back to one console at full width, and un-greys for every OTHER
+    // station's row at the same moment.
+    let two = assign(&assign(&bridge(), "helm", LEFT), "weapons", LEFT);
+    assert_eq!(
+        two.eligibility_of(&s("comms"))
+            .unwrap()
+            .choice_for(&m(LEFT)),
+        Some(MonitorChoice::Excluded(ExclusionReason::Full)),
+        "while it holds two, it is greyed on the third station's row"
+    );
+
+    let moved = assign(&two, "weapons", RIGHT);
+    assert_eq!(moved.stations_on(&m(LEFT)), &[s("helm")]);
+    assert_eq!(moved.stations_on(&m(RIGHT)), &[s("weapons")]);
+    assert_eq!(
+        moved.station_rects(&m(LEFT), &geometry(1920, 1080)),
+        vec![(
+            s("helm"),
+            PaneRect {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1080
+            }
+        )],
+        "the console that stayed grows back to the whole screen"
+    );
+    assert_eq!(
+        moved.station_rects(&m(RIGHT), &geometry(1280, 1024))[0].1,
+        PaneRect {
+            x: 0,
+            y: 0,
+            width: 1280,
+            height: 1024
+        },
+        "and the one that moved has the whole of its new screen"
+    );
+
+    // The un-greying, on EVERY other station's row rather than only the one
+    // that moved — the acceptance criterion, asked of the law.
+    for station in ["comms", "engineering"] {
+        assert_eq!(
+            moved
+                .eligibility_of(&s(station))
+                .unwrap()
+                .choice_for(&m(LEFT)),
+            Some(MonitorChoice::Eligible),
+            "{station}'s row offers the vacated slot"
+        );
+    }
+    assert_eq!(
+        moved.occupancy_of(&m(LEFT)).unwrap().free_slots,
+        Some(1),
+        "one slot back"
+    );
+}
+
 // ── the profile round-trip, keyed by station id ─────────────────────────────
 
 #[test]
@@ -830,9 +893,9 @@ fn an_authored_console_is_an_occupant_but_never_a_station() {
     assert_eq!(occupancy.reserved, vec!["Ada".to_string()]);
     assert_eq!(
         occupancy.free_slots,
-        Some(MAX_STATIONS_PER_MONITOR),
-        "an authored console blocks the VIEWSCREEN, not a console's capacity — whether a \
-         station may share that window is the pane host's question, not this law's"
+        Some(MAX_STATIONS_PER_MONITOR - 1),
+        "and it fills one of that screen's two slots (issue #1332) — it is a console on the \
+         glass whoever opened it, so the screen has room for exactly one more"
     );
     assert_eq!(
         layout
@@ -843,6 +906,168 @@ fn an_authored_console_is_an_occupant_but_never_a_station() {
         vec!["helm", "weapons", "comms", "engineering"],
         "and no screen row appeared for it"
     );
+}
+
+// ── an authored console fills a slot too (issue #1332) ──────────────────────
+//
+// #1331's carried defect, and the whole of it: `assign` and `Excluded(Full)`
+// counted only `seats`. So a screen already holding a hand-authored `--pane`
+// console offered a station a slot, the law took the press, and the display
+// adapter laid the new console across the whole monitor on top of the old one.
+// Counting is half the fix (here); the other half is that the adapter lays every
+// pane on a screen out together (`surface_rects`, below).
+
+#[test]
+fn a_station_may_share_a_screen_with_an_authored_console_but_not_crowd_it() {
+    // One slot left, and exactly one. The first press is lawful — two consoles
+    // on a screen is what the screen is for — and the second is the density
+    // refusal, reached by the same rule two seated stations reach it by.
+    let layout = with_an_authored_console();
+    assert_eq!(
+        layout
+            .eligibility_of(&s("helm"))
+            .unwrap()
+            .choice_for(&m(LEFT)),
+        Some(MonitorChoice::Eligible),
+        "one authored console leaves room for one more"
+    );
+
+    let shared = assign(&layout, "helm", LEFT);
+    assert_eq!(
+        shared.occupancy_of(&m(LEFT)).unwrap().free_slots,
+        Some(0),
+        "and then the screen is full"
+    );
+    assert_eq!(
+        shared
+            .eligibility_of(&s("weapons"))
+            .unwrap()
+            .choice_for(&m(LEFT)),
+        Some(MonitorChoice::Excluded(ExclusionReason::Full)),
+        "so every OTHER station's row greys it, on the law's own answer"
+    );
+    assert_eq!(
+        shared
+            .eligibility_of(&s("helm"))
+            .unwrap()
+            .choice_for(&m(LEFT)),
+        Some(MonitorChoice::Selected),
+        "while the station that is on it still reads as selected — capacity is judged \
+         after the no-op case, so re-pressing its own button is not a refusal"
+    );
+}
+
+#[test]
+fn the_third_console_on_a_screen_is_refused_whoever_opened_the_first_two() {
+    // The refusal itself, and the sentence it carries: it counts and names BOTH
+    // kinds, because an operator looking at that screen can see two consoles on
+    // it and a message saying "already holds 1" would read as a bug in the host.
+    let shared = assign(&with_an_authored_console(), "helm", LEFT);
+    let err = assign_err(&shared, "weapons", LEFT);
+    assert_eq!(
+        err,
+        LayoutRefusal::MonitorFull {
+            monitor: m(LEFT),
+            occupants: vec![s("helm")],
+            panes: vec!["Ada".to_string()],
+        }
+    );
+    let msg = err.to_string();
+    assert!(msg.contains("2 console(s)"), "{msg}");
+    assert!(msg.contains("\"helm\", \"Ada\""), "{msg}");
+    let params = err.params();
+    let stations = &params.iter().find(|(k, _)| *k == "stations").unwrap().1;
+    assert_eq!(
+        stations, "helm, Ada",
+        "and the player-visible parameter names both, unquoted"
+    );
+}
+
+#[test]
+fn a_screen_with_two_authored_consoles_offers_no_slot_at_all() {
+    // The other end of the count: `MAX_PANES_PER_STATION` authored panes fill
+    // the screen on their own, so no station is ever offered it.
+    let mut profile = BridgeProfile::empty();
+    profile.displays = vec![
+        DisplayEntry {
+            id: TV.to_string(),
+            role: ROLE_VIEWSCREEN.to_string(),
+            split: None,
+            panes: Vec::new(),
+        },
+        DisplayEntry {
+            id: LEFT.to_string(),
+            role: ROLE_STATION.to_string(),
+            split: Some(LAYOUT_SPLIT),
+            panes: vec![
+                PaneSlot::for_participant("Ada"),
+                PaneSlot::for_participant("Grace"),
+            ],
+        },
+    ];
+    let layout = bridge().adopt_profile(&profile.validate().unwrap()).0;
+    assert_eq!(layout.occupancy_of(&m(LEFT)).unwrap().free_slots, Some(0));
+    assert_eq!(
+        layout
+            .eligibility_of(&s("helm"))
+            .unwrap()
+            .choice_for(&m(LEFT)),
+        Some(MonitorChoice::Excluded(ExclusionReason::Full))
+    );
+    assert_eq!(
+        assign_err(&layout, "helm", LEFT),
+        LayoutRefusal::MonitorFull {
+            monitor: m(LEFT),
+            occupants: Vec::new(),
+            panes: vec!["Ada".to_string(), "Grace".to_string()],
+        }
+    );
+}
+
+#[test]
+fn a_seated_station_tiles_beside_an_authored_console_rather_than_over_it() {
+    // The geometry half. `surface_rects` is ONE `pane_rects` call over the whole
+    // occupancy, so the two consoles cover the screen exactly once — which is
+    // the bug this closes: two tilings each handed the full rectangle.
+    let shared = assign(&with_an_authored_console(), "helm", LEFT);
+    let rects = shared.surface_rects(&m(LEFT), &geometry(1920, 1080));
+    assert_eq!(
+        rects
+            .iter()
+            .map(|(o, _)| o.name().to_string())
+            .collect::<Vec<_>>(),
+        vec!["Ada".to_string(), "helm".to_string()],
+        "the authored console was there from boot, so it keeps the left half"
+    );
+    assert_eq!((rects[0].1.x, rects[0].1.width), (0, 960));
+    assert_eq!((rects[1].1.x, rects[1].1.width), (960, 960));
+    assert_eq!(rects[0].1.height, 1080);
+    assert_eq!(rects[1].1.height, 1080);
+
+    // And which kind each is survives the trip, because the adapter treats them
+    // differently: one is the layout's to close, the other only to place.
+    assert_eq!(rects[0].0.station(), None);
+    assert_eq!(rects[1].0.station(), Some(&s("helm")));
+
+    // `station_rects` is that same tiling filtered, NOT a tiling of its own —
+    // so a caller that only wants the stations still gets the honest half.
+    assert_eq!(
+        shared.station_rects(&m(LEFT), &geometry(1920, 1080)),
+        vec![(s("helm"), rects[1].1)]
+    );
+}
+
+#[test]
+fn an_authored_console_alone_still_covers_its_whole_screen() {
+    // The one-console case, so the count that changed cannot have quietly
+    // shrunk an authored pane that has the screen to itself.
+    let layout = with_an_authored_console();
+    let rects = layout.surface_rects(&m(LEFT), &geometry(1920, 1080));
+    assert_eq!(rects.len(), 1);
+    assert_eq!((rects[0].1.x, rects[0].1.width), (0, 1920));
+    assert!(layout
+        .station_rects(&m(LEFT), &geometry(1920, 1080))
+        .is_empty());
 }
 
 #[test]
@@ -1423,6 +1648,7 @@ fn every_refusal_names_a_string_id_and_the_parameters_that_id_interpolates() {
             LayoutRefusal::MonitorFull {
                 monitor: m(LEFT),
                 occupants: vec![s("helm"), s("weapons")],
+                panes: Vec::new(),
             },
             "server.bridge_layout.monitor_full",
             vec!["monitor", "stations", "max"],
@@ -1536,6 +1762,25 @@ fn every_adoption_note_names_a_string_id_and_the_parameters_that_id_interpolates
             },
             "server.bridge_layout.adopt_station_off_roster",
             vec!["station", "monitor"],
+        ),
+        (
+            LayoutAdoption::ConsoleCouldNotOpen {
+                station: s("helm"),
+                monitor: m(LEFT),
+            },
+            "server.bridge_layout.adopt_console_could_not_open",
+            vec!["station", "monitor"],
+        ),
+        (
+            // The one note whose subject is NOT a station id (issue #1332): an
+            // authored `--pane` participant is re-tiled by the same rule, so the
+            // parameter is `console` and carries either kind of name.
+            LayoutAdoption::ConsoleRetiling {
+                console: "Ada".to_string(),
+                monitor: m(LEFT),
+            },
+            "server.bridge_layout.adopt_console_retiling",
+            vec!["console", "monitor"],
         ),
         (
             LayoutAdoption::NoMonitorsReported {

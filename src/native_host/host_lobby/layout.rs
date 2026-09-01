@@ -563,6 +563,7 @@ mod tests {
             refusal: LayoutRefusal::MonitorFull {
                 monitor: MonitorIdentity::new("BenQ EX@1920x1080"),
                 occupants: vec![StationId("weapons".to_string())],
+                panes: Vec::new(),
             },
         };
         let payload =
@@ -610,6 +611,7 @@ mod tests {
             &[LayoutNotice::Refused(LayoutRefusal::MonitorFull {
                 monitor: MonitorIdentity::new("BenQ EX@1920x1080"),
                 occupants: vec![StationId("helm".to_string())],
+                panes: Vec::new(),
             })],
         ))
         .unwrap();
@@ -619,6 +621,7 @@ mod tests {
             &[LayoutNotice::Refused(LayoutRefusal::MonitorFull {
                 monitor: MonitorIdentity::new("BenQ EX@1920x1080"),
                 occupants: vec![StationId("helm".to_string())],
+                panes: Vec::new(),
             })],
         ))
         .unwrap();
@@ -747,6 +750,63 @@ mod tests {
         assert_eq!(
             screen_for(row_for(&payload, "helm"), "BenQ EX@1920x1080").choice,
             "selected"
+        );
+    }
+
+    #[test]
+    fn a_screen_an_authored_console_shares_offers_one_slot_and_then_none() {
+        // The carried #1331 defect at the WIRE (issue #1332). The screen row is
+        // built from the law's eligibility, so counting an authored `--pane`
+        // console against the two-per-screen cap has to reach the page as a
+        // greyed button — and the button has to be able to say who is on it,
+        // which is why the monitor entry lists the authored label beside the
+        // seats. A participant has no station row of their own, so without that
+        // list the screen would grey for no visible reason at all.
+        use crate::native_host::bridge_profile::{BridgeProfile, DisplayEntry, PaneSlot};
+        use crate::native_host::bridge_profile::{ROLE_STATION, ROLE_VIEWSCREEN};
+
+        let mut profile = BridgeProfile::empty();
+        profile.displays = vec![
+            DisplayEntry {
+                id: "BRAVIA@3840x2160".to_string(),
+                role: ROLE_VIEWSCREEN.to_string(),
+                split: None,
+                panes: Vec::new(),
+            },
+            DisplayEntry {
+                id: "BenQ EX@1920x1080".to_string(),
+                role: ROLE_STATION.to_string(),
+                split: None,
+                panes: vec![PaneSlot::for_participant("Ada")],
+            },
+        ];
+        let base = BridgeLayout::from_discovered(&three_monitors(), two_station_roster())
+            .expect("three monitors are a bridge");
+        let (adopted, _) = base.adopt_profile(&profile.validate().unwrap());
+
+        // One authored console: the screen still has a slot, so it is offered.
+        let payload = bridge_layout_payload(&adopted, &three_monitors(), &[]);
+        assert_eq!(
+            screen_for(row_for(&payload, "helm"), "BenQ EX@1920x1080").choice,
+            "eligible"
+        );
+
+        // Take it, and the screen is full for everybody else — the state that
+        // used to read `eligible`, and used to let the two consoles overlap.
+        let shared = adopted
+            .apply(&LayoutAction::AssignStation {
+                station: StationId("helm".to_string()),
+                monitor: MonitorIdentity::new("BenQ EX@1920x1080"),
+            })
+            .expect("a screen with one authored console takes one station");
+        let payload = bridge_layout_payload(&shared, &three_monitors(), &[]);
+        let weapons = screen_for(row_for(&payload, "weapons"), "BenQ EX@1920x1080");
+        assert_eq!(weapons.choice, "excluded");
+        assert_eq!(weapons.excluded.as_deref(), Some("full"));
+        assert_eq!(
+            payload.monitors[1].stations,
+            vec!["helm".to_string(), "Ada".to_string()],
+            "and the button names both, so the greying has a visible reason"
         );
     }
 

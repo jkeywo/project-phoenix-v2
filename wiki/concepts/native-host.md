@@ -33,6 +33,7 @@ authoritative host with **no world**, waiting for a scenario to be picked. See
 | App builder | `src/native_host/app.rs` |
 | Runtime world load + selection arbitration | `src/native_host/world_load.rs` |
 | The pure first-valid-wins rule | `src/lobby/scenario_arbiter.rs` |
+| The viewscreen's own picker | `src/native_host/host_lobby/scenario.rs`, `gui/host-scenario-render.js` |
 | Transport seam | `src/native_host/transport.rs` |
 | Content-root pin | `src/native_host/mod.rs` (`pin_content_root`) |
 | Boot profile + render surface | `src/boot/mod.rs` (`BootProfile::NativeHost`, `NativeRenderSurface`, `WorldIngest`) |
@@ -77,9 +78,10 @@ profile has:
 Issue #1326. The host opens its viewscreen on an **empty
 `GamePhase::Lobby`** holding the merged scenario catalogue, and ingests a world
 only when a `SelectScenario` + `SelectPlayerShip` pair has been arbitrated —
-from a phone, a local Station pane, or (slice #1328) the host's own on-screen
-picker. `--world` is the same decision made at the prompt; the two flags are
-refused together.
+from a phone, a local Station pane, or (since issue #1328) the host's own
+on-screen picker, described under [Picking from the
+viewscreen](#picking-from-the-viewscreen-issue-1328). `--world` is the same
+decision made at the prompt; the two flags are refused together.
 
 The browser host arbitrates this in **JavaScript** (`gui/scenario-arbiter.js`,
 driven by `server.html`) and gets away with it because its Bevy app does not
@@ -1056,6 +1058,7 @@ covers the mission, and F9 stays the only thing that does that.
 
 ### The monitor row (issue #1330)
 
+
 **Revert hazard.** This surface only drains its *own* outbound queue because of a
 fix that landed in **issue #1330's `cfbff20b`**, not in any #1325 commit. #1325
 installed `phoenixHostLobbyOut` on the page and left `UltralightPaneSurface`
@@ -1094,13 +1097,121 @@ viewscreen moving onto them, and the row draws them on the button. Labels rather
 than minted `StationId`s: a faked id would appear on the roster-driven rows as a
 station no ship has.
 
+### Picking from the viewscreen (issue #1328)
+
+`phoenix-host --client-dir dist --lobby` boots onto the **scenario panel** on
+the viewscreen. The operator picks the world, then the hull — the host page's
+own two-stage flow, single-hull auto-resolve included — the world loads, and the
+crew lobby appears underneath. `run-native.bat lobby` is the Windows wrapper;
+plain `run-native.bat` is the delivery host, unchanged.
+
+**One picker, not two**, by the third application of the same extraction the
+lobby and the join panel got. `gui/host-scenarios.js` already held the stage
+decision (#1230); `gui/host-scenario-render.js` now holds every DOM write
+`renderScenarioLockState()` made inside `#world-list`, and
+`gui/host-scenarios.css` its rules. The native document carries the served
+page's own `#scenario-panel` markup, minus its two host-tooling blocks — the
+mod-pack upload and the save importer are file inputs with page-lifetime
+handlers this document does not carry — and starts `display: none`, because a
+`--world` host never publishes a picker and a panel covering *its* lobby would
+be a viewscreen that never moves.
+
+What crosses the bridge is exactly `scenarioCatalogView`'s three arguments:
+
+```text
+world_load::published_catalog             ONE derivation, two audiences
+  ├─ .wire()    → ServerMessage::ScenarioCatalog   → every phone in the room
+  └─ .surface() → ScenarioPanelPayload             → the viewscreen
+        ▼
+host_lobby::feed_scenario_panel → HostLobbyBridge::push_scenario
+        ▼
+window.__phoenixHostLobbyScenario(json)   host_lobby_boot.js
+        ▼
+scenarioCatalogView → renderHostScenarios
+   gui/host-scenarios.js   gui/host-scenario-render.js
+```
+
+and what comes back is a `HostLobbyRecord` — a closed **four**-tag vocabulary
+(`select_scenario`, `select_ship`, `force_start`, and #1330's
+`set-viewscreen`), deliberately **not** a `ClientMessage`, on the page→host
+namespace that has always been distinct from the pane bus's.
+`drain_surface_records` turns a pick into an `InboundMessage` under
+`LOCAL_CONSOLE_TOKEN` — the token `server.html`'s own picker submits under — so
+the arbiter sees one participant among the phones under first-valid-wins, with
+no priority. The token is reserved, so no network peer can claim it, and both
+selection variants are explicit no-ops in the lobby handler.
+
+#### One vocabulary, one drain, one reader
+
+That fourth tag is where #1328 and #1330 meet, and the rule it encodes is a
+correctness constraint rather than tidiness. `HostLobbyBridge::take_records` is
+`records.drain(..)`: what it returns, nobody else will see. The two slices were
+built in parallel and each shaped its own record type and its own reader; they
+merge with **zero textual conflicts** into a build where the monitor row
+silently stops working. Whichever system ran first would take *every* record,
+warn "the surface sent something this bridge does not speak" about the other's,
+and leave the second reading an empty queue for the rest of the run — with a
+clean log at both ends.
+
+So there is one enum and one reader. `drain_surface_records` runs in
+`PreUpdate` — where every other participant's input enters the app, and before
+the fixed loop that arbitrates it — and dispatches on the tag; what each verb
+*does* still belongs to the module that owns it (`layout::set_viewscreen_action`
+is the layout half). `publish_bridge_layout` stays in `Update`, so a press
+applied in `PreUpdate` and the row that answers it are one frame and one
+repaint. **A new page→host control is a variant here, never a second record type
+and never a second `take_records` caller.** The host→page direction has no such
+rule and splits per concern freely: those are latest-wins snapshot slots, and a
+slot costs at most one push a frame.
+
+One wart is deliberate: `set-viewscreen` is **kebab** where its three siblings
+are snake_case, kept by an explicit `serde(rename)`. It shipped that way in
+#1330, `gui/host-lobby-view.js` writes it by hand, and the page is assembled
+from a bundle that may be older than the host — so the fold was not worth a wire
+break. A test pins both directions: the kebab spelling decodes and the
+snake_case one does *not*.
+
+**A refused pick repaints nothing**, which is exactly what the host page does
+with one: `arbiterSelectScenario` returns before its render on any non-accepted
+outcome, so on both surfaces the panel goes on showing the stage that is
+actually true. It is not silent — `drain_scenario_selection` logs it at warn
+level on both hosts.
+
+**Force-start is host policy now, not browser glue.** `PendingForceStart` and
+`apply_force_start` were `#[cfg(target_arch = "wasm32")]`, so a native lobby
+whose crew are all on phones could not be launched at all. Both are de-gated,
+and `native_host::app` registers the system on the same two edges `wasm_init`
+gives it — `.before(SimSet::Input)` for #907's tick-scoped transition, and
+`.after(NativeWorldLoadSet)` so a press on the tick a runtime world lands sees
+that world. Only `drain_force_start_input`, which reads a thread-local
+JavaScript sets, is still wasm-only. The rule gained one guard: refuse with no
+`WorldConfig`, which is inert in the browser (the world is loaded before
+`wasm_init` composes the `App`) and is what stops a viewscreen press starting a
+mission over nothing. The lobby's `#ai-launch-btn` — stripped by #1325 because
+nothing answered it — is therefore back, shown by the same `vm.aiLaunchVisible`
+the host page's is.
+
+Each flag still skips exactly the stage it decides: `--world` the scenario
+stage, `--world --ship` both, `--lobby --ship` the hull (the pinned hull is
+reported as `locked_ship`, so the picker shows a settled choice rather than one
+the host has already overruled). `--solo`, `--pane` and `--profile` behave as
+they did.
+
+While the picker is up it covers the crew lobby (`#scenario-panel` is `z-index:
+200`, the host page's own stacking), and the **join QR has to stay above it** —
+showing the code during selection is how a crew joins while the operator is
+still choosing. `server.html` does that in JavaScript (`showJoinQrOverPanel()`,
+undone by `resetJoinQrLayer()`, because that page has a HUD and a canvas whose
+stacking it must return to). This document has neither, so the lift is two lines
+of its ground CSS and there is nothing to restore.
+
 ## Tests
 
 | File | Claim |
 |---|---|
-| `src/native_host/host_lobby/*` | The lobby surface (#1325), all feature-**off**: the document assembles from the repository's own `server.html` and carries every element id the shared renderer writes into, stops at the panel (a comment mentioning a `div` cannot unbalance the count), drops the AI-launch button, links the shared stylesheet, refuses a page with no lobby by name; the bridge's latest-wins collapse, its identical-snapshot drop, its deferral of a failed push and the newer-wins restore; and the reveal state machine — boot showing, mission start yielding invisible *and* input-transparent, F9 both ways, a return to the lobby restoring it, and a latch that cannot survive a phase change |
+| `src/native_host/host_lobby/*` | The lobby surface (#1325), all feature-**off**: the document assembles from the repository's own `server.html` and carries every element id the shared renderers write into, stops at each panel (a comment mentioning a `div` cannot unbalance the count), links the shared stylesheets, refuses a page with no lobby, no join panel or no picker by name; the bridge's latest-wins collapse, its identical-snapshot drop, its deferral of a failed push and the newer-wins restore; and the reveal state machine — boot showing, mission start yielding invisible *and* input-transparent, F9 both ways, a return to the lobby restoring it, and a latch that cannot survive a phase change. **#1328:** the picker is carried minus its host tooling and starts hidden, the AI-launch button is kept and its `data-i18n` with it, the assembled document's controls are exactly `{ai-launch-btn, host-lobby-qr-toggle}` (an allowlist over both the stub and the repository's own `server.html`), the join panel is lifted above the picker, a surface record becomes the host page's own `LOCAL_CONSOLE_TOKEN` `ClientMessage` while an unrecognised one reaches no bus at all, a launch sets the same latch the browser button sets, and a host with no catalogue never publishes a picker. **#1330 + the fold:** one `set-viewscreen` record through the *same* drain moves the live layout and publishes the row that reports it, a stale monitor is refused with a `LayoutNotice` the row renders, an accepted press clears the refusal before it, a press arriving before a layout exists is dropped rather than queued, the four record tags round-trip (and the kebab `set-viewscreen` decodes where `set_viewscreen` does not), and one frame carrying all six bridge slots pins the documented pump order |
 | `tests/client/host-lobby-render.test.js` | The extracted renderer, in jsdom, driven against `server.html`'s own `#lobby-panel` subtree: cards, avatars, chips, pills, the ready badge's `go` class, the countdown, a re-render replacing rather than appending — and the two documents, one with the AI-launch button and one (the native lobby's) without |
-| `tests/native_host_lobby_ultralight.rs` | The real lobby document in a real Ultralight view over this process's own HTTP: a real `LobbyStatePayload` fills the station grid through the shared modules, the chrome yields on mission start and comes back on the reveal flag with no reload, the surface rasterises, (#1329) the vendored encoder loads from this process's own server and rasterises a join QR whose printed URL is the join URL a phone needs, which a phone's toggle and the surface's own control both hide and show, and which gives way to "joining is off" for a host nobody can join, and (#1330) the monitor row draws real `<button>`s through the shared renderer, a real click comes back as a `set-viewscreen` record over the real bridge, and a refusal renders as a sentence the operator can read. `#[ignore]`d: needs the SDK and a `trunk build`ed `dist/`, which CI has neither of |
+| `tests/native_host_lobby_ultralight.rs` | The real lobby document in a real Ultralight view over this process's own HTTP: a real `LobbyStatePayload` fills the station grid through the shared modules, the chrome yields on mission start and comes back on the reveal flag with no reload, the surface rasterises, and (#1329) the vendored encoder loads from this process's own server and rasterises a join QR whose printed URL is the join URL a phone needs, which a phone's toggle and the surface's own control both hide and show, and which gives way to "joining is off" for a host nobody can join. **#1328:** a scenario payload builds the picker's buttons through the shared renderer, a real click queues the record on the queue *this* surface drains, and a loaded world closes the panel. **#1330:** the monitor row draws real `<button>`s through the shared renderer, a real click comes back as a `set-viewscreen` record over the same bridge and the same drain, and a refusal renders as a sentence the operator can read. `#[ignore]`d: needs the SDK and a `trunk build`ed `dist/`, which CI has neither of |
 | `tests/client/host-qr.test.js` + `tests/client/qr-encoder.test.js` | The shared join panel in jsdom against `server.html`'s own `#overlay` subtree — the visibility law (including the null that leaves a mid-mission QR alone), the draw, the native surface's link-less variant, the joining-off caption — plus the browser host's draw site pinned from `onCode` to the shared module (#1329 AC5), and the vendored encoder loaded from disk with no network and pinned to a known code |
 | `src/native_host/bridge_profile.rs` | The pure model: stable identity across a simulated OS-settings rearrange, identical-monitor disambiguation (including a TOML round-trip of a position-suffixed id), the one/two-pane geometry math (even and odd, side-by-side and stacked), the >2 density refusal, the one-viewscreen refusal (`ProfileError::MultipleViewscreens`, naming both monitors), the TOML round-trip (Windows backslash ids included), the missing/unassigned/changed-display reporting, and (#1125) the runtime loss/return detection — a lost Station names its panes, a lost viewscreen names none, a return is for explicit repair only. **#1330:** `identify_stable` — nothing known is exactly `identify`, a known display keeps its short key when its twin arrives and its suffixed key when its twin leaves, a renegotiated mode is matched by name and place while the geometry follows, a display that only moved is still matched, one that moved *and* re-moded is honestly treated as new, a newcomer never takes a carried key, and an unplug still reads as an unplug. All feature-agnostic, run by the ordinary `cargo test` |
 | `src/native_host/bridge_display.rs` | A Bevy `Monitor` lifts into a `RawMonitor` and carries the documented identity; `--setup`'s exit code is clean only when a supplied profile both validates and resolves with no problems against the connected displays (`setup_profile_is_clean`); and (#1125) `watch_runtime_displays` itself — driven with *fake* `Monitor` entities spawned and despawned as bevy_winit does on hot-plug, so it runs in CI without a display — closes a lost Station's pane (→ Backfill) and no pane for a lost viewscreen. **#1330:** the whole apply-on-change loop on the same fake hardware — a no-`--profile` host gains a config and a layout and keeps its `Windowed` window on every later frame, a press moves the window once, an unplug rebuilds the row and the viewscreen follows its note; and the three roster changes that must move **nothing** (an identical twin plugged in, an identical twin unplugged with the viewscreen on the survivor, the viewscreen's own display renegotiating its resolution), plus the invariant that an unplug on a no-`--profile` host closes no pane and that the viewscreen may not move onto an authored participant's console |
@@ -1131,6 +1242,6 @@ shared binary is a claim about whoever won that race.
 
 - [Build & Deployment](./build-and-deployment.md) · [Networking](./networking.md) · [Architecture](./architecture.md)
 - [Server HTML Lobby UI](./server-lobby-ui.md) — the lobby this surface renders, and the modules both surfaces share
-- Issue #1121 — the host. Issue #1122 — local Ultralight panes. Issue #1325 — the host lobby on the native viewscreen (above). Issue #1329 — the join QR on that lobby, the vendored encoder, and `ToggleQrCode` as a wire message (above). Issue #1123 — bridge display profiles (above). Issue #1125 — recovering a failed pane and a lost display (above). Issue #1112 — the transport. Issue #1124 — input routing between displays + pane→Station-window compositing (above). Issue #1126 — bridge media profiles: per-surface camera/microphone/output assignment (above).
+- Issue #1121 — the host. Issue #1122 — local Ultralight panes. Issue #1325 — the host lobby on the native viewscreen (above). Issue #1329 — the join QR on that lobby, the vendored encoder, and `ToggleQrCode` as a wire message (above). Issue #1328 — the scenario/hull picker and the AI launch on that same surface, and force-start ceasing to be wasm-only (above). Issue #1123 — bridge display profiles (above). Issue #1125 — recovering a failed pane and a lost display (above). Issue #1112 — the transport. Issue #1124 — input routing between displays + pane→Station-window compositing (above). Issue #1126 — bridge media profiles: per-surface camera/microphone/output assignment (above).
 - [vellum](https://github.com/jkeywo/vellum) `crates/vellum-ultralight` — the extracted plumbing; `docs/handbook/dependencies.md` records why `ul-next` stopped being a per-game exception
 - `pasm/spec/architecture/native-delivery.yaml` — PRD #855's delivery declarations

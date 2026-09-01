@@ -66,13 +66,22 @@
 //!    *encodes* is settled without a browser, in
 //!    `native_host::host_lobby::join` and `tests/client/host-qr.test.js`, which
 //!    pin the same join-URL literal this file asserts on screen.
-//! 6. **The monitor row draws, and a press comes back** (issue #1330). A real
+//! 6. **The scenario picker builds, answers a click, and closes** (issue
+//!    #1328). The shared renderer's dynamic
+//!    `import('./components/ph-ship-picker.js')` resolving from this document's
+//!    own depth is a claim only a real module loader can settle; so is a real
+//!    click reaching the page→host queue THIS surface drains, which is not the
+//!    pane bus's. The AI-launch control is asserted present and driven by the
+//!    same `aiLaunchVisible` the host page's is.
+//! 7. **The monitor row draws, and a press comes back** (issue #1330). A real
 //!    `BridgeLayoutPayload` builds real `<button>` elements through the shared
 //!    renderer, and clicking one puts a `set-viewscreen` record on the page's
-//!    own queue, which the host drains over the real bridge. That is the whole
-//!    page→host direction, in the engine that actually runs it — and it is
-//!    where a namespace mistake would surface, because the lobby drains
-//!    `phoenixHostLobbyOut` and a pane drains `phoenixPaneOut`.
+//!    own queue, which the host drains over the real bridge. Together with (6)
+//!    that is the whole page→host direction, in the engine that actually runs
+//!    it — and it is where a namespace mistake would surface, because the lobby
+//!    drains `phoenixHostLobbyOut` and a pane drains `phoenixPaneOut`. Both
+//!    kinds ride ONE queue and one drain, so a test that saw only one of them
+//!    arrive would be the first sign of a second reader.
 //!
 //! The half this cannot reach is the compositing itself — the Bevy node, its
 //! `display`, and the router placement. Those need a window and a GPU adapter;
@@ -90,14 +99,16 @@
 use std::time::{Duration, Instant};
 
 use project_phoenix::core::codec;
-use project_phoenix::core::messages::{LobbyStatePayload, StationPayload};
+use project_phoenix::core::messages::{LobbyStatePayload, ScenarioCatalogWire, StationPayload};
 use project_phoenix::core::rendezvous::JoinCode;
 use project_phoenix::delivery::args::{ClientSource, HostArgs};
 use project_phoenix::delivery::serve::{HostServer, ShutdownSignal};
 use project_phoenix::native_host::host_lobby::layout::{
     BridgeLayoutPayload, LayoutNoticePayload, MonitorButtonPayload,
 };
-use project_phoenix::native_host::host_lobby::{pump_host_lobby, JoinInvite, LocalHostLobby};
+use project_phoenix::native_host::host_lobby::{
+    pump_host_lobby, JoinInvite, LocalHostLobby, ScenarioPanelPayload,
+};
 use project_phoenix::native_host::panes::surface::PaneSurface;
 use project_phoenix::native_host::panes::ultralight::{stage_sdk, UltralightPaneSurface};
 use vellum_ultralight::runtime::{PaneSession, PaneSpec, RuntimeOptions, UltralightRuntime};
@@ -266,9 +277,9 @@ fn the_native_lobby_renders_the_web_hosts_own_lobby_over_the_bridge() {
         .expect("the view is created");
     // `for_host_lobby`, not `new`: the lobby document installs the
     // `phoenixHostLobbyOut` queue, and a surface built for a pane would drain
-    // `phoenixPaneOut` — a function this page never defines — so every button
-    // press would vanish with a clean log. That is the exact mistake section 5
-    // below would otherwise not catch.
+    // `phoenixPaneOut` — a function this page never defines — so every pick and
+    // every button press would vanish with a clean log. That is the exact
+    // mistake sections 6 and 7 below would otherwise not catch.
     let mut surface = UltralightPaneSurface::for_host_lobby(view);
     surface.load(&lobby.url()).expect("the document loads");
 
@@ -397,18 +408,119 @@ fn the_native_lobby_renders_the_web_hosts_own_lobby_over_the_bridge() {
         "…still showing the state it was last given — the surface was never rebuilt"
     );
 
-    // Nothing on this surface can launch a mission: the document slice strips
-    // the AI-launch button, the one control the document itself carries (the QR
-    // toggle, issue #1329) is a div rather than a `<button>` a lobby renderer
-    // would find, and no monitor row has been pushed yet.
+    // The surface's launch control (issue #1328). It exists — #1325 stripped it
+    // because nothing answered it, and `apply_force_start` stopping being
+    // wasm-only removed that reason — and its visibility is the shared view
+    // model's `aiLaunchVisible`, exactly as it is on the host page. The payload
+    // above has a connected player, so it is hidden.
     assert_eq!(
         probe(
             &mut surface,
-            "String(document.querySelectorAll('button').length)"
+            "String(document.getElementById('ai-launch-btn') !== null)"
         )
         .as_deref(),
-        Some("0"),
-        "the lobby document carries no control it was not given data for"
+        Some("true"),
+        "the lobby document carries the launch control the shared renderer drives"
+    );
+    assert_eq!(
+        probe(
+            &mut surface,
+            "document.getElementById('ai-launch-btn').style.display"
+        )
+        .as_deref(),
+        Some("none"),
+        "…hidden while somebody is connected, from the same view model the page uses"
+    );
+
+    // ── 6. The scenario picker, in a real browser engine (issue #1328) ──────
+    //
+    // The half no unit test can reach: the shared renderer's dynamic
+    // `import('./components/ph-ship-picker.js')` actually resolving from this
+    // document's own depth, and the picker's buttons actually appearing on a
+    // page a viewscreen is showing.
+    bridge.push_scenario(
+        ScenarioPanelPayload {
+            scenarios: vec![ScenarioCatalogWire {
+                id: "combat_test".to_string(),
+                world: "assets/worlds/combat_test.toml".to_string(),
+                label: Some("Combat Test".to_string()),
+                description: None,
+                ships: Vec::new(),
+            }],
+            locked_scenario: None,
+            locked_ship: None,
+            locked: false,
+        }
+        .to_json(),
+    );
+    let deadline = Instant::now() + PATIENCE;
+    let mut entries = String::new();
+    while Instant::now() < deadline {
+        frame(&mut surface);
+        if let Some(count) = probe(
+            &mut surface,
+            "String(document.querySelectorAll('#world-list .scenario-entry').length)",
+        ) {
+            if count != "0" && !count.is_empty() {
+                entries = count;
+                break;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(16));
+    }
+    assert_eq!(
+        entries, "1",
+        "the shared picker builds one button per catalogue entry from the payload"
+    );
+    assert_eq!(
+        probe(
+            &mut surface,
+            "document.getElementById('scenario-panel').style.display"
+        )
+        .as_deref(),
+        Some(""),
+        "and the panel it builds them into is on screen while the pick is open"
+    );
+    // A click is what an operator makes, and it must reach the host's own
+    // page→host queue — the one this surface drains, not the pane bus's.
+    //
+    // Read through `bridge.take_records()`, not `surface.drain()`, because
+    // `frame` above already ran `pump_host_lobby`, which is what moves the
+    // page's queue into the bridge — the surface's own queue is empty by now.
+    // Taking here also leaves the bridge clean for section 7, which asserts on
+    // exactly what ITS press queued: one drain, one reader, in the test too.
+    probe(
+        &mut surface,
+        "document.querySelector('#world-list .scenario-entry').click()",
+    );
+    frame(&mut surface);
+    let picked = bridge.take_records();
+    assert!(
+        picked
+            .iter()
+            .any(|r| r.contains("select_scenario") && r.contains("combat_test")),
+        "a click on the viewscreen's picker queues the record the host arbitrates: {picked:?}"
+    );
+
+    // …and a world landing takes the picker off the screen.
+    bridge.push_scenario(
+        ScenarioPanelPayload {
+            locked: true,
+            ..Default::default()
+        }
+        .to_json(),
+    );
+    for _ in 0..8 {
+        frame(&mut surface);
+    }
+    assert_eq!(
+        probe(
+            &mut surface,
+            "document.getElementById('scenario-panel').style.display"
+        )
+        .as_deref(),
+        Some("none"),
+        "a loaded world closes the picker and uncovers the crew lobby"
     );
 
     // ── 5. The join QR, in a real browser engine (issue #1329) ──────────────
@@ -520,7 +632,7 @@ fn the_native_lobby_renders_the_web_hosts_own_lobby_over_the_bridge() {
          showing a dead QR"
     );
 
-    // ── 6. The monitor row draws, and a press comes back (issue #1330) ───────
+    // ── 7. The monitor row draws, and a press comes back (issue #1330) ───────
     bridge.push_layout(monitor_row(false, Vec::new()));
     for _ in 0..8 {
         frame(&mut surface);

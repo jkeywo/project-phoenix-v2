@@ -457,24 +457,38 @@ const QR_TOGGLE_MARKUP: &str = "<div id=\"host-lobby-qr-toggle\" role=\"button\"
 
 /// The page ground this document supplies, because a fragment cannot.
 ///
-/// Two declarations, and both are load-bearing:
+/// Three declarations, and all of them are load-bearing:
 ///
 /// * `html, body` reset — the shared lobby sheet positions `.lobby-panel` at
 ///   `inset: 0`, which needs a viewport-sized ground with no default margin.
 /// * the black background — the host copies this view's pixels into an opaque
 ///   texture, so an unpainted body would composite as white over the viewscreen
 ///   for the frames before the first push arrives.
+/// * the join panel's layer, above the scenario picker (issue #1328). This is
+///   the surface's own answer to a decision `server.html` makes in JavaScript:
+///   `#scenario-panel` is `z-index: 200` and `#overlay` is `190`, so while the
+///   picker is up the join code would be behind it — and the whole point of
+///   showing the QR *during* selection is that the crew join while the operator
+///   is still choosing. The host page lifts the overlay in
+///   `showJoinQrOverPanel()` and drops it back in `resetJoinQrLayer()`, because
+///   that page has a HUD and a canvas underneath whose stacking it has to
+///   return to. This document has neither — the picker is the only thing above
+///   `190` on it — so the lift is unconditional, and there is nothing to
+///   restore.
 ///
 /// What is deliberately NOT here is `--settings-cog-keepout`.
 /// `gui/host-lobby.css` floors `.lobby-panel-wrap`'s left padding at the host
-/// PAGE's settings-cog corner, and names the token with a `0px` fallback. There
-/// is no cog on the viewscreen window, so leaving the property undefined *is*
-/// this surface's answer — and defining it to zero here would be a second way of
-/// saying the same thing, in the document rather than in the sheet that knows
-/// why the floor exists.
+/// PAGE's settings-cog corner, and `gui/host-scenarios.css` floors
+/// `#world-list`'s top padding at the same token; both name it with a `0px`
+/// fallback. There is no cog on the viewscreen window, so leaving the property
+/// undefined *is* this surface's answer — and defining it to zero here would be
+/// a second way of saying the same thing, in the document rather than in the
+/// sheets that know why the floor exists.
 const GROUND_CSS: &str = "\
 html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }\n\
-body { font-family: monospace; }\n";
+body { font-family: monospace; }\n\
+#overlay { z-index: 210; }\n\
+#host-lobby-qr-toggle { z-index: 211; }\n";
 
 /// One `<div>` element of `html`, opening tag to closing tag.
 ///
@@ -644,6 +658,24 @@ mod tests {
         assert!(html.contains("id=\"world-list-label\""));
         assert!(html.contains("id=\"scenario-loading\""));
         assert!(html.contains("href=\"gui/host-scenarios.css\""));
+    }
+
+    #[test]
+    fn the_join_code_stays_above_the_picker_that_would_otherwise_cover_it() {
+        // `#scenario-panel` is z-index 200 and `#overlay` is 190, so without
+        // this the join QR is behind the picker for the whole of selection —
+        // which is precisely the window in which showing it matters, because a
+        // crew join while the operator is still choosing. The host page lifts
+        // the overlay in JavaScript and puts it back; this document has nothing
+        // to put it back for.
+        let html = build_host_lobby_document(HOST_PAGE).unwrap();
+        assert!(html.contains("#overlay { z-index: 210; }"));
+        assert!(html.contains("#host-lobby-qr-toggle { z-index: 211; }"));
+        // …and it is written AFTER the linked sheets, so the later rule wins on
+        // equal specificity rather than relying on source order in one file.
+        let sheet = html.find("href=\"gui/host-qr.css\"").unwrap();
+        let lift = html.find("#overlay { z-index: 210; }").unwrap();
+        assert!(sheet < lift);
     }
 
     #[test]

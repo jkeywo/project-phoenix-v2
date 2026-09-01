@@ -138,9 +138,24 @@ cargo build --release --features host --bin phoenix-host
 # gui/scenario-arbiter.js, transcribed into the pure src/lobby/scenario_arbiter.rs.
 # --world is that same decision made at the prompt, and the two are refused
 # together. A BARE invocation (neither flag) is still PRD #855's delivery-only
-# host, unchanged. There is no on-screen picker yet (that is issue #1328), so a
-# --lobby host needs a phone or a --pane to pick for it.
+# host, unchanged.
+#
+# Since issue #1328 the picker is ON THE VIEWSCREEN: with a --client-dir the
+# lobby surface opens on server.html's own #scenario-panel, driven by
+# gui/host-scenarios.js + gui/host-scenario-render.js — the same view model and
+# the same renderer the host page uses — so the operator picks the world and
+# then the hull with a mouse. The picks travel back over the host-lobby bridge
+# as HostLobbyRecords and enter the arbiter as ClientMessages under
+# LOCAL_CONSOLE_TOKEN, exactly as server.html's own picker submits them, so a
+# phone and the viewscreen are equal senders under first-valid-wins. The lobby's
+# AI-launch button works natively too: server::bridge::apply_force_start is no
+# longer wasm-gated, so a crew who are all on phones can be launched from the
+# viewscreen. Each flag still skips exactly the stage it decides — --world skips
+# the scenario stage, --world --ship skips both, --lobby --ship skips the hull.
 ./target/release/phoenix-host --client-dir dist --lobby --rendezvous <URL> --origin <URL>
+#   run-native.bat is the Windows wrapper for the two invocations above: no
+#   argument runs the delivery-only host, `run-native.bat lobby` adds --lobby.
+#   The default invocation is unchanged and the acceptance kits depend on it.
 #   src/native_host/world_load.rs is the whole of it. The runtime load calls the
 #   SAME boot::ingest_world a --world boot calls (it takes a &mut World for
 #   exactly that reason) and the SAME app::install_world_selection, then runs a
@@ -164,11 +179,13 @@ cargo build --release --features host --bin phoenix-host
 #                   waiting for.
 #   --seed <N>      overrides the world's [global] seed
 #   --solo          start with nobody connected, every station on Backfill.
-#                   WITH NEITHER IT NOR --pane, NOTHING REACHES A RUNNING
-#                   MISSION: the host waits in a lobby nothing can enter (see
-#                   the #1112 note below), and it says so loudly in the log at
-#                   boot rather than refusing — the mode is correct, it is the
-#                   transport that is missing.
+#                   WITH NEITHER IT NOR --pane NOR A LOBBY SURFACE, NOTHING
+#                   REACHES A RUNNING MISSION: the host waits in a lobby nothing
+#                   can enter (see the #1112 note below), and it says so loudly
+#                   in the log at boot rather than refusing — the mode is
+#                   correct, it is the transport that is missing. A --client-dir
+#                   host DOES have a third route since issue #1328: the lobby
+#                   surface's own AI-launch control.
 #   --pane <NAME>   open a local Station pane for a participant of this name —
 #                   an embedded Ultralight view showing the ordinary console
 #                   surface (issue #1122). Repeatable. NEEDS a build with

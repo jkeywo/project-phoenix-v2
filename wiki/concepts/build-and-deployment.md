@@ -213,12 +213,23 @@ evolved this binary instead of adding a second one.
   --client-dir dist --solo
 ```
 
-`--solo` is currently the only mode that reaches a running mission: browser crew
-clients cannot join a native host until the Phoenix transport (issue #1112)
-replaces PeerJS, so without it the host waits in a lobby nothing can enter. It
-warns loudly at boot rather than refusing — the mode becomes correct the day
-#1112 lands. `--manifest` also narrows the **default hull** this process flies,
-not only the catalogue it publishes.
+Browser crew clients cannot join a native host until the Phoenix transport
+(issue #1112) replaces PeerJS, so a host with none of `--solo`, `--pane` or a
+lobby surface waits in a lobby nothing can enter — and says so loudly at boot
+rather than refusing, because the mode becomes correct the day #1112 lands.
+Since issue #1328 a `--client-dir` host has a third route to a running mission:
+the AI-launch control on the viewscreen's own lobby surface. `--manifest` also
+narrows the **default hull** this process flies, not only the catalogue it
+publishes.
+
+```bash
+# Boot onto the scenario picker instead of naming a world, and choose on screen
+# (issue #1328). --world skips the scenario stage; --world --ship skips both.
+./target/release/phoenix-host --client-dir dist --lobby
+# On Windows, the wrapper: no argument is the delivery host above, `lobby` adds
+# --lobby, and anything after the mode is forwarded verbatim.
+run-native.bat lobby
+```
 
 The packaged Windows demo bundle is `phoenix-host.exe`, `dist/` and `assets/`
 side by side, so both of its README invocations run from that folder with the

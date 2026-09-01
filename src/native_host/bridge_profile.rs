@@ -1129,18 +1129,41 @@ pub struct AssignedSurface {
     pub identity: MonitorIdentity,
     /// A one-line role summary, for the operator report.
     pub role: String,
-    /// The participant labels whose panes live on this monitor — empty for the
-    /// viewscreen, one or two for a Station.
+    /// The **participant** labels whose panes live on this monitor — empty for
+    /// the viewscreen, one or two for a Station.
+    ///
+    /// A [`PaneSlot`] that names a `station` contributes **nothing** here (issue
+    /// #1331) — see [`ValidatedProfile::assigned_surfaces`] for why.
     pub pane_labels: Vec<String>,
 }
 
 impl ValidatedProfile {
     /// The monitors this profile assigns, each with its role summary and the
-    /// participant panes it carries (issue #1125).
+    /// **participant** panes it carries (issue #1125).
     ///
     /// The runtime display watcher diffs this against the monitors actually
     /// present, so a monitor that was driving panes and is unplugged mid-mission
     /// names both its role (to report) and its panes (to fail).
+    ///
+    /// # A station-bearing slot contributes no label (issue #1331)
+    ///
+    /// [`PaneSlot::for_station`] sets `label == station_id`, so copying every
+    /// label would put a **station id** into a list the watcher resolves against
+    /// the LIVE pane bus. That list is the boot profile's, and it never moves;
+    /// the console does. An operator who seats `helm` in a `--profile` and then
+    /// moves it to another screen from the lobby leaves this list still naming
+    /// the boot monitor — so unplugging *that* monitor would resolve "helm"
+    /// against the bus, find the console on its NEW screen, and close it. The
+    /// unplug of a display the console is not on would end a human's watch, and
+    /// the open sweep would then mint a fresh token in its place.
+    ///
+    /// A station's console is **the law's**, not this list's. It is closed on an
+    /// unplug all the same, and by the layout: `BridgeLayout::reconcile` unseats
+    /// a station whose monitor is gone and
+    /// `bridge_display::follow_layout_stations` closes exactly what the layout no
+    /// longer seats — the same debounce window, the same `PaneBus::close`, the
+    /// same flip to `Backfill`. Excluding it here is what makes that ONE rule
+    /// rather than two that disagree.
     pub fn assigned_surfaces(&self) -> Vec<AssignedSurface> {
         self.displays
             .iter()
@@ -1149,9 +1172,11 @@ impl ValidatedProfile {
                 role: d.role.summary(),
                 pane_labels: match &d.role {
                     DisplayRole::Viewscreen => Vec::new(),
-                    DisplayRole::Station { panes, .. } => {
-                        panes.iter().map(|p| p.label.clone()).collect()
-                    }
+                    DisplayRole::Station { panes, .. } => panes
+                        .iter()
+                        .filter(|p| p.station.is_none())
+                        .map(|p| p.label.clone())
+                        .collect(),
                 },
             })
             .collect()

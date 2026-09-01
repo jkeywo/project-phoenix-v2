@@ -1006,6 +1006,57 @@ fn assigned_surfaces_carry_each_stations_pane_labels_and_the_viewscreen_none() {
 }
 
 #[test]
+fn a_station_bearing_slot_contributes_no_pane_label_to_the_watcher() {
+    // Issue #1331. `PaneSlot::for_station` sets `label == station_id`, so
+    // copying every label would put a STATION ID into the list the #1125
+    // watcher resolves against the live pane bus — and that list is the BOOT
+    // profile's, which never moves while the console does. An operator who
+    // seats `helm` in a `--profile` and then moves it from the lobby would have
+    // an unplug of the OLD screen close a console that is not on it.
+    //
+    // A station's console is the LAW's: `reconcile` unseats it and
+    // `follow_layout_stations` closes it. So the watcher's list is participants
+    // only, which is exactly what its own documentation has always claimed.
+    let profile = profile_with(vec![
+        viewscreen_entry(DELL),
+        DisplayEntry {
+            id: BENQ.to_string(),
+            role: ROLE_STATION.to_string(),
+            split: None,
+            panes: vec![
+                PaneSlot::for_station("helm"),
+                PaneSlot::for_participant("Ada"),
+            ],
+        },
+    ])
+    .validate()
+    .expect("a station and a participant on one screen is a lawful two-pane profile");
+
+    let assigned = profile.assigned_surfaces();
+    let benq = assigned
+        .iter()
+        .find(|a| a.identity.as_str() == BENQ)
+        .expect("the Station monitor is assigned");
+    assert_eq!(
+        benq.pane_labels,
+        vec!["Ada".to_string()],
+        "the participant rides on the watcher's list; the station's console does not"
+    );
+
+    // And therefore an unplug of that screen names Ada's pane and nothing else.
+    let losses = runtime_display_losses(&assigned, &present(&[DELL, BENQ]), &present(&[DELL]));
+    assert_eq!(losses.len(), 1);
+    assert_eq!(losses[0].pane_labels, vec!["Ada".to_string()]);
+    // The role SUMMARY still names both slots — it describes the profile — but
+    // the list of panes that disconnect names only the one that does.
+    assert!(
+        losses[0].to_string().contains("the panes it carried (Ada)"),
+        "the report cannot list a console it does not close: {}",
+        losses[0]
+    );
+}
+
+#[test]
 fn losing_a_station_monitor_names_it_and_the_panes_that_must_disconnect() {
     // The runtime extension of the #1123 missing-display report: a monitor that
     // WAS present and driving a pane is unplugged mid-mission. It is named

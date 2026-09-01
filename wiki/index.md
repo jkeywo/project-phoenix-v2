@@ -71,7 +71,7 @@ Current implementation orientation only. For intended design use
 - [Codec Seam](./concepts/codec-seam.md)
 - [Asset Preload](./concepts/asset-preload.md)
 - [Build and Deployment](./concepts/build-and-deployment.md)
-- [Native Host](./concepts/native-host.md) — the Windows authoritative host: fourth boot profile, native wgpu viewscreen, transport seam, local Ultralight Station panes
+- [Native Host](./concepts/native-host.md) — the Windows authoritative host: fourth boot profile, native wgpu viewscreen, transport seam, local Ultralight Station panes, per-ship-class saved bridge layouts
 - [Testing Strategy](./concepts/testing-strategy.md)
 - [Model Viewer](./concepts/model-viewer.md)
 - [LOD Generation](./concepts/lod-generation.md)

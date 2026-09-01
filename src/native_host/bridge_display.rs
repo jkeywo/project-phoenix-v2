@@ -129,6 +129,14 @@ pub struct BridgeDisplayConfig {
     /// of behaviour nobody asked for and the one thing issue #1330's second
     /// acceptance criterion forbids. So this decides whether the viewscreen is
     /// *placed* at boot or merely *recorded*.
+    ///
+    /// Since issue #1334 it decides a second thing, and that one is a data
+    /// guard rather than a placement question: it is the gate on the saved
+    /// per-ship-class layouts ([`super::layout_store_systems`]). An authored run
+    /// has nothing pre-applied over its profile and **writes nothing back** —
+    /// the operator's file wins for that run, and a save would silently drop its
+    /// `--pane` participant slots. See
+    /// [`BridgeLayout::reserved_on`](super::bridge_layout::BridgeLayout::reserved_on).
     pub authored: bool,
 }
 
@@ -251,7 +259,10 @@ impl BridgeStationSurfaces {
 /// Seeded by [`apply_bridge_profile`] the frame winit first reports its
 /// monitors, edited by the lobby's monitor row
 /// (`host_lobby::drain_surface_records`), rebuilt by
-/// [`watch_runtime_displays`] when a cable moves, and read by
+/// [`watch_runtime_displays`] when a cable moves, re-seated once from this ship
+/// class's remembered bridge the moment the hull becomes known
+/// ([`super::layout_store_systems`], issue #1334 — which also files every
+/// accepted change back to that class's saved layout), and read by
 /// [`follow_layout_viewscreen`] to decide whether a window has to move.
 ///
 /// It is the single place a live arrangement lives, so the row the operator is

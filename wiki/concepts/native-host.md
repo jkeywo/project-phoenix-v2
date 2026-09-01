@@ -1,8 +1,8 @@
 ---
 title: Native Host
 type: concept
-tags: [native, viewscreen, lobby, scenario-selection, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile, media-devices, camera, microphone]
-sources: [src/native_host/mod.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs]
+tags: [native, viewscreen, lobby, scenario-selection, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile, saved-layouts, media-devices, camera, microphone]
+sources: [src/native_host/mod.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs]
 updated: 2026-09-01
 ---
 
@@ -1583,6 +1583,117 @@ nothing for the viewscreen to catch. Bringing it back is the operator's press on
 the screen row, which opens a fresh console on the replugged monitor — never a
 silent re-home, which is #1123's doctrine held at runtime.
 
+### Remembering the bridge, per ship class (issue #1334)
+
+An accepted lobby arrangement is **filed under the hull it was built for**, in
+the operator's own settings directory, and pre-applied the next time they pick
+that class.
+
+```text
+%APPDATA%\ProjectPhoenix\bridge-layouts\alliance_destroyer.toml
+%APPDATA%\ProjectPhoenix\bridge-layouts\alliance_cruiser.toml
+```
+
+| Piece | Where |
+|---|---|
+| The store — class key, atomic write, load + re-validate. Bevy-free, location injected | `src/native_host/layout_store.rs` |
+| The two systems — pre-apply at the hull-known moment, file on every accepted change | `src/native_host/layout_store_systems.rs` |
+| The `BridgeLayoutStore` resource, inserted only for a run the lobby may remember | `src/native_host/app.rs` (`build_native_host_app`) |
+
+**The class key is the hull template's file stem.** There is no authored class
+identity to key on — `ShipConfig` carries stations, systems and power groups and
+no class id — so the only stable name a hull answers to is the template it was
+loaded from, which is exactly what `SelectedShipResource` already holds on both
+world-arrival paths, in the canonical form `install_world_selection` stored.
+The *stem* rather than the whole path because the directory is one an operator
+opens, copies between machines and deletes single entries from;
+`assets_entities_alliance_destroyer.toml` is not that directory. The trade is
+that two hulls of the same file name in different directories (a mod pack
+shipping its own `alliance_destroyer.toml`) share one saved layout — a
+degradation rather than a fault, because the file is adopted through
+`reconcile` + `adopt_profile` against the hull actually flying, so stations the
+other hull lacks simply arrive unassigned and are reported.
+
+**Pre-apply happens at the hull-known moment, not at boot.** A layout is filed
+per class, so it cannot be applied until the class is known — and the two
+world-arrival paths learn that at different times: a `--world` host in
+`install_world_selection` before the `App` runs, a `--lobby` host (#1326) at the
+pick. `adopt_remembered_layout` is written against the *state* rather than
+against either path, firing the frame `SelectedShipResource` first names a class
+this host is not already remembering. It does two things there, and the first is
+not optional: it **reconciles onto the hull's roster** (a world-less host was
+seeded with none, so without this its per-station screen rows — a `map` over
+`eligibility()` — would stay empty for the whole run), and then adopts the saved
+file through `adopt_profile`, the same door a hand-authored `--profile` comes
+through. So a saved layout gets no privileges a written one does not have: a
+monitor that is no longer plugged in is a `SeatRefused` note and an unassigned
+station, and a saved viewscreen whose screen is gone leaves the bridge on the
+one it booted with. Both are logged rather than pushed to the lobby's notice
+row, for the reason boot-time adoption notes already are — this is a bridge
+arriving, not an answer to a press.
+
+**Write on every accepted change** ([ai]). Not debounced and not deferred to
+shutdown: a saved layout is a handful of `[[display]]` tables written through one
+atomic rename, so the cost per press is a rounding error beside the frame that
+press already caused, while both alternatives carry a lossy window — a debounce
+loses the arrangement the operator just made if the host dies inside it, and a
+write-on-exit needs a shutdown hook a windowed process is not guaranteed to
+reach (closed from the taskbar, or taken down with a display driver). The
+trigger is the law's change detection *plus* a value compare against what the
+file holds, because change detection answers "did somebody hold a `ResMut`",
+not "is the bridge different" — a press the no-op doctrine accepted, or a
+reconcile that rebuilt an identical layout, must not rewrite the file. A failed
+write leaves that record alone, so the next accepted change retries.
+
+**The write is atomic**: temp file beside the target, `sync_all`, rename over
+the top. A host killed mid-write leaves either the old layout or the new one,
+never half a TOML file the next boot would report as corrupt. On Windows
+`std::fs::rename` is `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING`, so it does
+replace an existing destination; it can fail with a sharing violation while
+another process holds the target open, and that surfaces as an ordinary warning
+with the **previous file untouched**.
+
+**`--profile` wins for its run and never writes — and that is a data-loss
+guard.** `to_validated_profile` emits seats and only seats, so the authored
+`--pane` participant surfaces a layout merely knows about
+(`BridgeLayout::reserved_on`) do not come back out of a file. Persisting a
+`--profile`-seeded layout would therefore drop the operator's
+`[[display.pane]]` entries silently, and the *next* boot would read those
+screens as free and move the viewscreen on top of a crew member's live console
+— the exact failure `reserved` exists to prevent, re-introduced by the save.
+#1334 had two answers available (re-emit the slots, or refuse to persist such a
+layout) and took the second, in three places because the failure is silent and
+permanent:
+
+1. `build_native_host_app` gives a `--profile` run **no store resource**, so
+   both systems are inert.
+2. Both systems are additionally gated on `BridgeDisplayConfig::authored` being
+   false, so a composition that inserted one anyway still writes nothing.
+3. `LayoutStore::save` **refuses** a reservation-carrying layout outright, at
+   the only door onto the disk, so a caller added later inherits the guard
+   rather than having to remember it.
+
+Which leaves the invariant worth stating positively: **a saved layout is only
+ever a lobby-built one, and a lobby-built layout is reservation-free by
+construction** — nothing but `adopt_profile` populates `reserved`, and nothing
+but an authored `--profile` reaches it.
+
+**A saved layout that no longer works is ignored with a warning, never fatal.**
+`load` parses *and* re-validates, so a file edited by hand, written by an older
+schema version, or truncated by a full disk meets exactly the refusals a
+`--profile` meets — and the caller's whole answer is a `pwarn!` naming the file
+and the bridge it already has. The file is left where it is rather than deleted:
+an operator who hand-edited it wants to see what they wrote.
+
+**The location is injectable.** A `LayoutStore` is a directory and nothing else;
+`LayoutStore::user()` is the only function that consults the environment, and it
+is never on a test's path. `BaseDirs::data_dir()` rather than `ProjectDirs`
+([ai]) because `ProjectDirs` appends its own `config`/`data` leaf on Windows
+(`%APPDATA%\<Org>\<App>\data`), which is neither the authored path nor a
+directory an operator would look in; `data_dir()` is `%APPDATA%` exactly, and
+Linux (`~/.local/share`) and macOS (`~/Library/Application Support`) get their
+own conventional root rather than a Windows-shaped one.
+
 ## Tests
 
 | File | Claim |
@@ -1596,6 +1707,8 @@ silent re-home, which is #1123's doctrine held at runtime.
 | `src/native_host/bridge_display.rs` | A Bevy `Monitor` lifts into a `RawMonitor` and carries the documented identity; `--setup`'s exit code is clean only when a supplied profile both validates and resolves with no problems against the connected displays (`setup_profile_is_clean`); and (#1125) `watch_runtime_displays` itself — driven with *fake* `Monitor` entities spawned and despawned as bevy_winit does on hot-plug, so it runs in CI without a display — closes a lost Station's pane (→ Backfill) and no pane for a lost viewscreen. **#1330:** the whole apply-on-change loop on the same fake hardware — a no-`--profile` host gains a config and a layout and keeps its `Windowed` window on every later frame, a press moves the window once, an unplug rebuilds the row and the viewscreen follows its note; and the three roster changes that must move **nothing** (an identical twin plugged in, an identical twin unplugged with the viewscreen on the survivor, the viewscreen's own display renegotiating its resolution), plus the invariant that the viewscreen may not move onto an authored participant's console. **#1331:** the runtime open/close transitions on that same fake hardware — seating a station opens a Station window and a console pane on an ordinary token, unassigning closes it and shuts the window and frees the screen everywhere, a move keeps whoever claimed it (a rebuilt handle on the same token, queued for the pane host against the surfaces this pass rewrote), two consoles divide a screen with the first rebuilt at its new half and the survivor of a close grown back to fill it, a bridge nobody rearranged opens and closes nothing forever, a replugged monitor takes its console back on an explicit press, and a host with no pane bus declines rather than opening a black window; plus the #1330 tripwire split into its two halves — an unplug with no console on that screen closes no pane, and an unplug of a screen holding a runtime console closes exactly it. **#1331 fix round:** a surface is dropped only when the LAW stops naming its monitor — an unplug plus a lobby press inside the settle window leaves the console alone until the reconcile unseats it, and then closes it with one Disconnected; a frame reporting no monitors at all closes nothing; a re-seat afterwards gets a real slot and a queued view; an unplug of the screen an AUTHORED console has left does not touch it (the same handle, the same token, nobody disconnected); and the seat reconciler — a healthy console is never touched, a console with nowhere to be built is rebuilt on its own identity exactly MAX_RECREATIONS_PER_WINDOW times and then has its seat given back with a notice the row renders, and an injected view failure serviced through #1125's own fault path ends on an honest Backfill. **#1332:** a station seated beside a hand-authored `--pane` console TILES with it on the one Station window each takes half of, rather than covering it; the authored pane is rebuilt at its new half on its own session token; the console nobody asked to move earns a `ConsoleRetiling` notice on the row and the one the operator moved between screens earns none; moving a console off a shared screen regrows the survivor to the whole of it, keeps its token and un-greys the vacated slot; and the notice settles rather than rebuilding a console once a frame for the rest of the run. **#1332 fix round:** a pure boot frame draws the authored arrangement and re-tiles **nothing** — `[helm, Ada]` boots helm-left and stays there with the row owed no notice and the participant's own pane handle untouched, `[Ada, helm]` boots the other way round, and an authored `stacked` screen boots stacked and is not re-carved; a console rebuilt because its display renegotiated its resolution is told the screen changed **size**, not that the split changed; and the settled re-tile is exactly one notice, not "at most one" **#1333:** the placement rule asked of a *real* running bridge, every case handed a tempting primary-window tile under the console's own name — a crashed seated console is rebuilt on its own Station window on the same token with exactly one view queued; a crash landing in a move's gap leaves one open pane, one buildable view and the same token, on the screen it moved to; a seated console with no slot is `Nowhere(SeatedButUnplaced)` and is then repaired-or-surrendered rather than tiled; the one-frame interleaving that would strand it (the reconciler rebuilds and resets its strike counter, the drain finds no slot, the slot returns and the health check reads healthy over a black screen) ends in a retry rather than in that stuck state, because the answer is faulted rather than dropped; every hop of a bounded flap goes back to the same screen and the give-up surrenders the seat; an unplug queues *no* view at all and an operator's row press puts the console back on the replugged monitor; and a legacy tiled `--pane` still rebuilds on its own tile across the crash path |
 | `src/native_host/bridge_layout_tests.rs` | The pure layout law (#1327): the three rules, the no-op doctrine, the profile round-trip keyed by station id, adoption and reconcile with every degradation named, and (#1330) an authored `--pane` surface counting as an occupant for rule 2's mirror. **#1332:** it counts for rule 3 too — a screen holding one authored console offers exactly one more slot and greys for every other station once taken, two authored consoles offer none, `MonitorFull` counts and names both kinds, `surface_rects` tiles the pair with no gap and no overlap (and `station_rects` is that tiling filtered, not a second one), and moving a console out of a 2-up regrows the survivor to full width while the vacated slot comes back on every other station's row. **#1332 fix round:** the law tiles an authored screen exactly as its file authored it, over every shape a `--profile` can take (one station, one participant, two participants, two stations, station-then-participant and participant-then-station, side by side and stacked) — the same names in the same order at the same rectangles on the same axis; an authored station keeps the half its file gave it and `occupants_on` reports that order; an authored `stacked` screen is not re-carved, and a station the lobby seats on it lands on the authored axis in the slot the authored console did not take; and an authored index past the end of a shrunken screen still lands somewhere rather than dropping a live console |
 | `src/native_host/bridge_media.rs` + `bridge_media_tests.rs` | The pure media model (#1126): stable `kind:name` identity (recovered to its kind, stable across a re-enumeration, kind keeps a same-named camera/mic distinct, identical devices disambiguated by hardware id or ordinal); the validate failure taxonomy (wrong-kind, malformed id, duplicate-on-surface, duplicate-surface, shared-without-consent); the consented-share warning; resolve naming a missing vs a denied device while the surface stays usable; the deterministic default (OS-default/first per kind, denied skipped, forced share consented); and the setup report. Also the `[[media]]` TOML round-trip in `bridge_profile_tests.rs`. All feature-agnostic, run by the ordinary `cargo test` |
+| `src/native_host/layout_store_tests.rs` | The saved layouts (#1334), pure and against an injected scratch directory: the class key (the hull's file stem, identical whichever separator or case the path was spelled with, and reduced so it can never name a file outside the store — `..` and a bare `/` are `None`); the save/load round trip adopted onto a *fresh* bridge rather than compared in memory; two classes filed independently and a re-arrange of one leaving the other exactly as it was; a class nobody has arranged reading `Ok(None)` and creating no directory; a saved station whose monitor is gone coming back unassigned while everything else applies, and a saved viewscreen whose monitor is gone leaving the boot layout's choice; the three revalidation refusals (density, unparseable half-a-file, a newer schema version) each naming the file; the reservation refusal with nothing written; a second save replacing the first and leaving no `.tmp` behind; and the written file being a profile `--profile` itself would take |
+| `src/native_host/layout_store_systems_tests.rs` | The same slice against a **real running host** — `BridgeDisplayPlugin` seeding the law from injected `Monitor` entities, the store plugin beside it: the file is created on the first press and not at boot; arrange-quit-relaunch puts the viewscreen and both consoles back; a `--lobby` host has no roster and no class until the pick and gains both from it; two classes stay independent and neither inherits the other's; closing a console is filed like opening one; a bridge nobody touched is not rewritten (the same press eight times leaves the file's mtime alone); a station whose remembered monitor is missing comes back unassigned and re-assigning writes the update; an unusable file leaves the host running on the displays as found with the file untouched; and the data-loss guard from both ends — an authored run is given no store, pre-applies nothing over its profile and leaves an existing saved file byte-for-byte identical after a lobby edit, a store handed to an authored run anyway is *still* never written (the run condition alone), and the store refuses that run's live layout by name |
 | `tests/native_bridge_displays.rs` | On the real machine's monitors, a profile opens one borderless-fullscreen surface per monitor at the monitor's geometry — the viewscreen on the primary window, a Station on its own. `#[ignore]`d: it opens real winit windows, which CI has no display for. Verified once locally |
 | `src/delivery/args.rs` | `--setup` is a standalone diagnostic needing no world and refuses every simulation/crew flag (`--world`, `--ship`, `--seed`, `--solo`, `--pane`, `--log`, `--log-entity`, `--rendezvous`, `--origin`) rather than silently discarding them; `--profile` applies with a world or validates with `--setup`, and is refused alone |
 | `src/boot/tests.rs` | Four-profile parity; only the render-stack profiles take that path; a native host refuses a configless boot, including a hull declared only by a static child |
@@ -1622,6 +1735,6 @@ shared binary is a claim about whoever won that race.
 
 - [Build & Deployment](./build-and-deployment.md) · [Networking](./networking.md) · [Architecture](./architecture.md)
 - [Server HTML Lobby UI](./server-lobby-ui.md) — the lobby this surface renders, and the modules both surfaces share
-- Issue #1121 — the host. Issue #1122 — local Ultralight panes. Issue #1325 — the host lobby on the native viewscreen (above). Issue #1329 — the join QR on that lobby, the vendored encoder, and `ToggleQrCode` as a wire message (above). Issue #1328 — the scenario/hull picker and the AI launch on that same surface, and force-start ceasing to be wasm-only (above). Issue #1123 — bridge display profiles (above). Issue #1125 — recovering a failed pane and a lost display (above). Issue #1112 — the transport. Issue #1124 — input routing between displays + pane→Station-window compositing (above). Issue #1126 — bridge media profiles: per-surface camera/microphone/output assignment (above).
+- Issue #1121 — the host. Issue #1122 — local Ultralight panes. Issue #1325 — the host lobby on the native viewscreen (above). Issue #1329 — the join QR on that lobby, the vendored encoder, and `ToggleQrCode` as a wire message (above). Issue #1328 — the scenario/hull picker and the AI launch on that same surface, and force-start ceasing to be wasm-only (above). Issue #1123 — bridge display profiles (above). Issue #1125 — recovering a failed pane and a lost display (above). Issue #1112 — the transport. Issue #1124 — input routing between displays + pane→Station-window compositing (above). Issue #1126 — bridge media profiles: per-surface camera/microphone/output assignment (above). Issue #1334 — the saved per-ship-class bridge layouts (above).
 - [vellum](https://github.com/jkeywo/vellum) `crates/vellum-ultralight` — the extracted plumbing; `docs/handbook/dependencies.md` records why `ul-next` stopped being a per-game exception
 - `pasm/spec/architecture/native-delivery.yaml` — PRD #855's delivery declarations

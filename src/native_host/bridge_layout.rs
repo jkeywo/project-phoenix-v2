@@ -461,24 +461,38 @@ pub struct BridgeLayout {
     /// free (`server.station_row.full_authored`), rather than the law quietly
     /// changing the arrangement.
     ///
-    /// # It does not survive a round trip through a profile (issue #1334)
+    /// # It does not survive a round trip through a profile, and a saved layout
+    /// is therefore never a `--profile`-seeded one (issue #1334)
     ///
     /// [`write_displays_into`](Self::write_displays_into) emits seats and only
     /// seats, so `adopt_profile(to_validated_profile(L))` is **not** `L` whenever
     /// `L` reserves anything: the participant panes go in and do not come back
-    /// out. That is harmless today, and only today — the one production caller
-    /// that writes a profile ([`super::bridge_display`]'s synthesised runtime
-    /// config) does it on a boot layout whose `reserved` is empty, and there is
-    /// no save-layout path at all for an operator to lose anything through.
+    /// out.
     ///
-    /// The moment one lands it becomes DATA LOSS with a face: an operator saves a
-    /// bridge that was seeded from a hand-authored `--profile`, the participant
-    /// panes are silently dropped from the file, and the next boot reads those
-    /// screens as free and moves the viewscreen onto a crew member's live
-    /// console — the exact failure `reserved` exists to prevent, re-introduced by
-    /// the save. Issue #1334 must therefore do one of two things: re-emit the
-    /// participant slots it read, or refuse to persist a `--profile`-seeded
-    /// layout at all. It may not simply write the file.
+    /// Issue #1334 is the save-layout path that turns that from an oddity into
+    /// DATA LOSS with a face — an operator arranges a bridge that was seeded
+    /// from a hand-authored `--profile`, the participant panes are silently
+    /// dropped from the file, and the next boot reads those screens as free and
+    /// moves the viewscreen onto a crew member's live console, the exact failure
+    /// this field exists to prevent, re-introduced by the save. It had two
+    /// answers available (re-emit the participant slots, or refuse to persist a
+    /// `--profile`-seeded layout at all) and **took the second**, in two places
+    /// rather than one because the failure is silent and permanent:
+    ///
+    ///  * [`super::layout_store_systems`]'s two systems are gated on the run
+    ///    *not* being authored, so a `--profile` host pre-applies nothing and
+    ///    files nothing. That is also #1334's precedence rule, so one gate
+    ///    serves both.
+    ///  * [`super::layout_store::LayoutStore::save`] **refuses** a layout
+    ///    carrying reservations outright, at the only door onto the disk, so a
+    ///    caller added later inherits the guard instead of having to remember
+    ///    it.
+    ///
+    /// Which leaves the invariant worth stating positively: **a saved layout is
+    /// only ever a lobby-built one, and a lobby-built layout is reservation-free
+    /// by construction** — nothing but [`adopt_profile`](Self::adopt_profile)
+    /// populates this field, and nothing but an authored `--profile` reaches it.
+    /// Re-emitting the slots remains the answer if that ever stops being true.
     reserved: Vec<Vec<Reservation>>,
 }
 
@@ -1044,8 +1058,12 @@ impl BridgeLayout {
     /// participant slots are not re-emitted, so
     /// [`adopt_profile`](Self::adopt_profile) of what this writes differs from
     /// the layout it was written from whenever that layout reserves anything.
-    /// See [`reserved`](Self::reserved) — nothing today can reach the loss, and
-    /// issue #1334 is where it stops being free. A screen's
+    /// See [`reserved`](Self::reserved): issue #1334's save-layout path closes
+    /// that off by never persisting a `--profile`-seeded layout at all, in the
+    /// systems' run condition *and* at
+    /// [`LayoutStore::save`](super::layout_store::LayoutStore::save)'s door, so
+    /// the only layouts this writes for the disk are lobby-built and therefore
+    /// reservation-free. A screen's
     /// [`split_on`](Self::split_on) is lossy in the same one direction and for
     /// the file's own reason: a `[[display]]` holding fewer than two panes has no
     /// split to write (a one-pane Station's is ignored by definition), so a

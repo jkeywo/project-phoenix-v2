@@ -1220,6 +1220,20 @@ pub enum LayoutAdoption {
         station: StationId,
         monitor: MonitorIdentity,
     },
+    /// A station was seated, but its console could not be put on screen and the
+    /// bounded rebuild budget is spent, so the seat was **given back**
+    /// (issue #1331).
+    ///
+    /// Raised by `bridge_display::reconcile_seated_consoles` rather than by
+    /// [`reconcile`](BridgeLayout::reconcile) or
+    /// [`adopt_profile`](BridgeLayout::adopt_profile) — it is the adapter
+    /// reporting that it cannot honour a lawful arrangement, which is the one
+    /// degradation the law itself cannot see. Reported because the alternative
+    /// is a station card claiming a screen that is black.
+    ConsoleCouldNotOpen {
+        station: StationId,
+        monitor: MonitorIdentity,
+    },
     /// [`reconcile`](BridgeLayout::reconcile) was handed no monitors at all. A
     /// bridge is at least one screen, so the layout was kept exactly as it was;
     /// these are the monitors it still names.
@@ -1252,6 +1266,9 @@ impl LayoutAdoption {
             LayoutAdoption::StationOffRoster { .. } => {
                 "server.bridge_layout.adopt_station_off_roster"
             }
+            LayoutAdoption::ConsoleCouldNotOpen { .. } => {
+                "server.bridge_layout.adopt_console_could_not_open"
+            }
             LayoutAdoption::NoMonitorsReported { .. } => "server.bridge_layout.adopt_no_monitors",
         }
     }
@@ -1275,7 +1292,8 @@ impl LayoutAdoption {
                 station, monitor, ..
             }
             | LayoutAdoption::StationMonitorGone { station, monitor }
-            | LayoutAdoption::StationOffRoster { station, monitor } => vec![
+            | LayoutAdoption::StationOffRoster { station, monitor }
+            | LayoutAdoption::ConsoleCouldNotOpen { station, monitor } => vec![
                 ("station", station.0.clone()),
                 ("monitor", monitor.as_str().to_string()),
             ],
@@ -1375,6 +1393,13 @@ impl std::fmt::Display for LayoutAdoption {
                 f,
                 "station {:?} is not on this ship's roster, so its console on monitor {monitor} is \
                  closed",
+                station.0
+            ),
+            LayoutAdoption::ConsoleCouldNotOpen { station, monitor } => write!(
+                f,
+                "station {:?}'s console could not be put on monitor {monitor}, so its seat is \
+                 given back and the screen is free again; open it on another screen, or try \
+                 that one again",
                 station.0
             ),
             LayoutAdoption::NoMonitorsReported { kept } => write!(

@@ -46,7 +46,16 @@
 //!   and only when — those differ;
 //! * [`follow_layout_stations`] compares the layout's **seating** against
 //!   [`BridgeStationSurfaces`], opens a Station window and a console pane for a
-//!   station the layout has just seated, and closes them for one it has not.
+//!   station the layout has just seated, and closes them for one it has not. It
+//!   runs on a change to *either* of its two inputs — the layout, and the
+//!   monitors a seat is made of — because a display that left and came back has
+//!   to get its Station window rebuilt for a console the layout never stopped
+//!   seating.
+//! * [`reconcile_seated_consoles`] then checks that the applier's work actually
+//!   landed: a seated station whose console is not open on the bus, or has no
+//!   surface to be composited onto, is rebuilt boundedly and — when that budget
+//!   is spent — has its seat given back through the law, with a notice. It is
+//!   what stops a failure below this layer showing as a lit black screen.
 //!
 //! Station windows are therefore spawned and despawned *while the host runs*,
 //! which is what makes "press a screen button and a console opens on that
@@ -294,6 +303,12 @@ impl Plugin for BridgeDisplayPlugin {
                 // it first would leave that console open for a frame on a
                 // display that is gone.
                 follow_layout_stations.run_if(resource_exists::<BridgeDisplayApplied>),
+                // And LAST of all: the applier above says what should be on
+                // screen, this checks that it is. Ordered after it so a console
+                // opened this frame is never judged before it exists — the
+                // grace window makes that safe either way, but the order makes
+                // it true rather than merely tolerated.
+                reconcile_seated_consoles.run_if(resource_exists::<BridgeDisplayApplied>),
             )
                 .chain(),
         );
@@ -455,6 +470,17 @@ pub fn apply_bridge_profile(world: &mut World) {
             // `unplugging_a_monitor_with_no_console_on_it_closes_no_pane` and
             // `unplugging_a_monitor_holding_a_runtime_console_closes_exactly_it`
             // — read them before changing this.
+            //
+            // WHAT THAT DOES NOT MEAN, and what a first reading of it got wrong:
+            // that the two lists cannot *overlap*. They can, and a `--profile`
+            // is how — `PaneSlot::for_station` names its pane for its station,
+            // so an AUTHORED station slot put a station id straight into
+            // `pane_labels` and the watcher then resolved it against the LIVE
+            // bus, closing a console that had since been moved to another
+            // screen. The lists are kept apart at the SOURCE instead:
+            // `assigned_surfaces` excludes a station-bearing slot outright
+            // (issue #1331), so `pane_labels` really is participants only, and a
+            // station's console is the law's on every host — authored or not.
             let config = BridgeDisplayConfig {
                 profile: layout.to_validated_profile(),
                 authored: false,
@@ -787,6 +813,13 @@ fn follow_layout_stations(
     // long as it takes the pane host to notice. Draining a list next frame costs
     // an `is_empty` on every other frame of the run.
     mut pending_close: Local<Vec<Entity>>,
+    // A pass that was owed and could not be run — see the deferral note below.
+    // `Res::is_changed` is answered against the frame this system last *ran*,
+    // so a change observed on a frame this pass declines to act on is gone by
+    // the next one unless it is remembered here.
+    mut pass_due: Local<bool>,
+    // The monitor identities this pass last placed against.
+    mut placed_against: Local<Vec<String>>,
 ) {
     for window in pending_close.drain(..) {
         commands.entity(window).try_despawn();
@@ -794,10 +827,43 @@ fn follow_layout_stations(
     let (Some(layout), Some(mut surfaces)) = (layout, surfaces) else {
         return;
     };
-    // Apply-on-change, like the viewscreen follower: a seat only moves through a
-    // lawful transition on this resource, so a host nobody has rearranged takes
-    // this return on every frame of its life.
-    if !layout.is_changed() {
+
+    // Resolved against the identities the LAYOUT knows rather than freshly
+    // derived ones, for `follow_layout_viewscreen`'s reason: a display whose
+    // identity was carried across a twin arriving or a mode change answers to
+    // the key the row published and the press named.
+    let present = identify_present(
+        monitors
+            .iter()
+            .map(|(e, m, is_primary)| (e, raw_from_monitor(m, is_primary), geometry_of(m)))
+            .collect(),
+        &layout.monitors,
+    );
+    let live: Vec<String> = present
+        .iter()
+        .map(|(_, d, _)| d.identity.as_str().to_string())
+        .collect();
+
+    // Apply-on-change, like the viewscreen follower — but on a change to
+    // EITHER of this pass's two inputs, because it has two. The layout says
+    // which station sits where; the monitors say what a seat is made of (which
+    // window, at what geometry), and a display that left and came back has to
+    // get its Station window rebuilt or the console the layout still seats has
+    // nowhere to be composited. A host nobody has rearranged, whose displays
+    // nobody has touched, still takes this return on every frame of its life.
+    if layout.is_changed() || *placed_against != live {
+        *pass_due = true;
+    }
+    if !*pass_due {
+        return;
+    }
+
+    // A frame with NO monitors at all is winit between hot-plug events, not a
+    // bridge that lost every display — the same judgement `watch_runtime_displays`
+    // makes on the same observation. Acting on it would tear down every Station
+    // window on the machine. The pass stays owed, so the change that made it due
+    // is not lost with the frame.
+    if present.is_empty() {
         return;
     }
 
@@ -807,6 +873,8 @@ fn follow_layout_stations(
     // but the layout is still lawful, and spawning a borderless-fullscreen
     // window showing nothing would be worse than saying so.
     let Some(bus) = bus else {
+        *pass_due = false;
+        *placed_against = live;
         let seated: Vec<&crate::core::messages::StationId> = layout
             .layout
             .monitors()
@@ -824,6 +892,8 @@ fn follow_layout_stations(
         }
         return;
     };
+    *pass_due = false;
+    *placed_against = live;
 
     // Every console the surfaces are carrying, and **where** — the monitor and
     // the rectangle its view was built for. Both halves matter: a console that
@@ -838,18 +908,6 @@ fn follow_layout_stations(
                 .filter_map(|p| p.station.clone().map(|st| (st, s.identity.clone(), p.rect)))
         })
         .collect();
-
-    // Resolved against the identities the LAYOUT knows rather than freshly
-    // derived ones, for `follow_layout_viewscreen`'s reason: a display whose
-    // identity was carried across a twin arriving or a mode change answers to
-    // the key the row published and the press named.
-    let present = identify_present(
-        monitors
-            .iter()
-            .map(|(e, m, is_primary)| (e, raw_from_monitor(m, is_primary), geometry_of(m)))
-            .collect(),
-        &layout.monitors,
-    );
 
     // ── the layout's seating, monitor by monitor ────────────────────────────
     //
@@ -929,16 +987,29 @@ fn follow_layout_stations(
         }
     }
 
-    // A monitor the layout no longer has — unplugged, and the reconcile
-    // believed it — keeps no surface: its window went with the display. The
-    // consoles it was carrying are closed by the sweep below, because they are
-    // in `carried` and the reconcile has already unseated them.
-    let live: Vec<&str> = present
+    // A monitor the LAW no longer names — unplugged, and the reconcile believed
+    // it — keeps no surface: its window went with the display.
+    //
+    // The judgement is the LAYOUT'S, and deliberately not this frame's winit
+    // report. Every other reader of a lost display waits out
+    // [`DISPLAY_LOSS_DEBOUNCE_FRAMES`] before believing it, because winit's
+    // monitor list blips through a GPU reset, a display waking and a dock;
+    // dropping a surface on a single absent frame would despawn a live console's
+    // window under a crew member, leave a camera rendering to a window that is
+    // gone, and leave the layout still seating a station the adapter has no
+    // surface for. The reconcile already does that waiting, so following it —
+    // rather than re-deciding beside it on different evidence — is what makes
+    // the two agree by construction. A monitor absent for a blip keeps its
+    // surface and its panes untouched; when the reconcile finally unseats its
+    // consoles, this drops the surface and the sweep below closes them.
+    let lawful: Vec<&str> = layout
+        .layout
+        .monitors()
         .iter()
-        .map(|(_, d, _)| d.identity.as_str())
+        .map(|m| m.as_str())
         .collect();
     surfaces.0.retain(|surface| {
-        if live.contains(&surface.identity.as_str()) {
+        if lawful.contains(&surface.identity.as_str()) {
             return true;
         }
         pending_close.push(surface.window);
@@ -946,35 +1017,48 @@ fn follow_layout_stations(
     });
 
     // ── close what the layout no longer seats ───────────────────────────────
+    //
+    // Asked of the BUS ∩ the LAW — every station on this bridge's roster that
+    // the layout does not seat, whose console the bus still has open — rather
+    // than of `carried`, which is this adapter's own bookkeeping and can have
+    // been emptied by the retain above before the reconcile got round to
+    // unseating what was on it. A console outliving its seat is the one failure
+    // with no way back: the pane never closes, so its station never flips to
+    // `Backfill`, and the open sweep below finds a pane already open and never
+    // rebuilds a view for it. Asking the two sources of truth directly cannot
+    // miss it.
+    //
+    // (The roster is the layout's, so a `--pane <NAME>` participant is out of
+    // scope by construction — a hand-authored label that shadowed a station id
+    // would put it back in, which is why `app::install_world_selection` refuses
+    // one at boot.)
     let seated: Vec<&crate::core::messages::StationId> = layout
         .layout
         .monitors()
         .iter()
         .flat_map(|m| layout.layout.stations_on(m))
         .collect();
-    for (station, _, _) in carried.iter().filter(|(s, _, _)| !seated.contains(&s)) {
+    for station in layout
+        .layout
+        .roster()
+        .iter()
+        .filter(|s| !seated.contains(s))
+    {
+        let Some(pane) = bus.0.open_pane_for_name(&station.0) else {
+            continue;
+        };
         // The dropped-phone path, deliberately: a plain `close`, which owes the
         // lobby one `PlayerDisconnected` and flips the station to `Backfill`.
         // NOT a fault — a fault asks the pane host to rebuild the view, and this
         // console was closed on purpose.
-        match bus.0.open_pane_for_name(&station.0) {
-            Some(pane) => {
-                bus.0.close(pane);
-                crate::pinfo!(
-                    log,
-                    LogCat::Lobby,
-                    "bridge display: station {:?}'s console is closed; its station falls back \
-                     to AI control until somebody claims it again",
-                    station.0
-                );
-            }
-            None => crate::pdebug!(
-                log,
-                LogCat::Lobby,
-                "bridge display: station {:?}'s console was unseated with no pane open for it",
-                station.0
-            ),
-        }
+        bus.0.close(pane);
+        crate::pinfo!(
+            log,
+            LogCat::Lobby,
+            "bridge display: station {:?}'s console is closed; its station falls back \
+             to AI control until somebody claims it again",
+            station.0
+        );
     }
 
     // ── rebuild what moved, on the same identity ────────────────────────────
@@ -1007,11 +1091,21 @@ fn follow_layout_stations(
                  rebuilt as {rebuilt} on the same identity, so whoever claimed it keeps it",
                 station.0
             ),
+            // `recreate` refuses a pane the registry cannot resolve, or one that
+            // is not `Closed` — neither of which the line above can produce, so
+            // this is a defensive arm rather than a reachable state. What it says
+            // is nonetheless what the CODE then does, which is the only thing an
+            // operator log may say: the console was closed, so the open sweep
+            // immediately below finds the layout seating a station with no pane
+            // and mints a FRESH one. The console comes back on the screen the
+            // operator chose; what does not come back is the identity, so
+            // whoever had claimed it has to claim it again.
             None => crate::pwarn!(
                 log,
                 LogCat::Lobby,
-                "bridge display: station {:?}'s console moved to monitor {monitor} but could not \
-                 be rebuilt; it stays closed on AI control",
+                "bridge display: station {:?}'s console moved to monitor {monitor} but its own \
+                 identity could not be carried across; a fresh console opens there instead, so \
+                 whoever had claimed it must claim it again",
                 station.0
             ),
         }
@@ -1062,6 +1156,167 @@ fn follow_layout_stations(
         );
         false
     });
+}
+
+/// How many consecutive frames a seated station may have no console on screen
+/// before [`reconcile_seated_consoles`] acts on it (issue #1331).
+///
+/// The same window every other reader of a transient waits, and for the same
+/// reason: the systems that open a console, build its view and place its Station
+/// window are unordered against each other within `Update`, so a station is
+/// legitimately half-seated for a frame or two after every press. Acting inside
+/// that window would tear down a console that was about to work.
+const CONSOLE_MISSING_GRACE_FRAMES: u32 = DISPLAY_LOSS_DEBOUNCE_FRAMES;
+
+/// Reconcile what the **law** seats against what is actually **on screen**, and
+/// surrender a seat the adapter cannot honour (issue #1331).
+///
+/// [`follow_layout_stations`] applies the layout; it does not check that the
+/// application worked. Two things below it can fail after it has returned
+/// happily, and both leave the same picture — a station card showing a screen,
+/// a black borderless-fullscreen window, and nobody able to say why:
+///
+///  * the pane host's `make_pane_view` can fail (Ultralight refuses the view, the
+///    document will not load), which leaves the pane open on the bus with no
+///    surface behind it;
+///  * a station can be seated on a monitor that is not present at the moment the
+///    pass runs, which leaves the console with no [`BridgeStationSurfaces`] slot
+///    to be composited into.
+///
+/// So this asks the only question that matters and asks it of reality: does every
+/// seated station have a console *open on the bus* AND *a slot on a Station
+/// surface*? A station that fails that for [`CONSOLE_MISSING_GRACE_FRAMES`]
+/// consecutive frames is repaired the way issue #1125 repairs a crashed view —
+/// `close` + `recreate` on the same session token, **bounded** by
+/// [`PaneBus::record_recreation_within_budget`](crate::native_host::panes::transport::PaneBus::record_recreation_within_budget),
+/// so a console that cannot be built does not flap forever.
+///
+/// # And when the budget is spent, the seat is given back
+///
+/// The bound has to end somewhere, and "leave it closed for the operator" —
+/// which is the right answer for a `--pane` — would here leave the LAW still
+/// seating a station whose card claims a screen it is not on. So the seat is
+/// surrendered through the law itself (`UnassignStation`), which frees the
+/// screen everywhere at once: the row draws it as free, the Station window
+/// closes, the viewscreen may move onto it, and the station is on `Backfill`
+/// honestly rather than by accident. The operator is told with a
+/// [`LayoutNotice`] the row renders — the same channel an unplugged viewscreen
+/// reports through — because a console that silently never appeared is exactly
+/// the failure this whole slice exists to make impossible.
+fn reconcile_seated_consoles(
+    layout: Option<ResMut<BridgeLayoutResource>>,
+    surfaces: Option<Res<BridgeStationSurfaces>>,
+    bus: Option<Res<crate::native_host::panes::PaneBusResource>>,
+    log: Option<Res<LogFilterConfig>>,
+    // Consecutive frames each seated station has been missing its console.
+    mut missing: Local<std::collections::HashMap<crate::core::messages::StationId, u32>>,
+) {
+    let (Some(mut layout), Some(surfaces), Some(bus)) = (layout, surfaces, bus) else {
+        return;
+    };
+    let seated: Vec<crate::core::messages::StationId> = layout
+        .layout
+        .monitors()
+        .iter()
+        .flat_map(|m| layout.layout.stations_on(m))
+        .cloned()
+        .collect();
+    // A bridge nobody has put a console on has nothing to reconcile, which is
+    // every frame of a host nobody rearranged.
+    if seated.is_empty() {
+        if !missing.is_empty() {
+            missing.clear();
+        }
+        return;
+    }
+    missing.retain(|station, _| seated.contains(station));
+
+    let mut surrender: Vec<(crate::core::messages::StationId, MonitorIdentity)> = Vec::new();
+    for station in &seated {
+        let pane = bus.0.open_pane_for_name(&station.0);
+        // BOTH halves, because either alone is a lie: a pane with no slot is
+        // built on the wrong window (or not at all), and a slot with no pane is
+        // a lit screen with nothing on it.
+        if pane.is_some() && surfaces.slot_for(&station.0).is_some() {
+            missing.remove(station);
+            continue;
+        }
+        let strikes = missing.entry(station.clone()).or_insert(0);
+        *strikes += 1;
+        if *strikes < CONSOLE_MISSING_GRACE_FRAMES {
+            continue;
+        }
+        missing.remove(station);
+        let monitor = layout
+            .layout
+            .monitor_of(station)
+            .cloned()
+            .expect("a seated station is on one of this bridge's monitors");
+        let Some(pane) = pane else {
+            // Nothing on the bus at all. Either the rebuilds above have already
+            // spent the budget and the pane host left it closed, or a fault did
+            // — both are "this console is not coming back on its own".
+            surrender.push((station.clone(), monitor));
+            continue;
+        };
+        // Issue #1125's crash path, used deliberately: the same session token
+        // survives, so a console that DOES come back is still the same
+        // participant. The budget is the same per-identity one a flapping view
+        // crash is held to, and it is what stops this becoming a rebuild loop.
+        bus.0.close(pane);
+        if !bus.0.record_recreation_within_budget(pane) {
+            surrender.push((station.clone(), monitor));
+            continue;
+        }
+        match bus.0.recreate(pane) {
+            Some((rebuilt, _url)) => crate::pwarn!(
+                log,
+                LogCat::Lobby,
+                "bridge display: station {:?}'s console is seated on monitor {monitor} but has \
+                 nothing on screen; rebuilding it as {rebuilt} on the same identity",
+                station.0
+            ),
+            None => surrender.push((station.clone(), monitor)),
+        }
+    }
+
+    if surrender.is_empty() {
+        return;
+    }
+    let mut notices: Vec<LayoutNotice> = Vec::new();
+    for (station, monitor) in surrender {
+        let unseated = layout
+            .layout
+            .apply(&super::bridge_layout::LayoutAction::UnassignStation {
+                station: station.clone(),
+            });
+        match unseated {
+            Ok(next) => {
+                layout.layout = next;
+                crate::pwarn!(
+                    log,
+                    LogCat::Lobby,
+                    "bridge display: station {:?}'s console could not be put on monitor \
+                     {monitor} after {} attempt(s), so its seat is given back and the screen \
+                     is free again; the station is on AI control until somebody opens it \
+                     somewhere that works",
+                    station.0,
+                    crate::native_host::panes::recovery::MAX_RECREATIONS_PER_WINDOW
+                );
+                notices.push(LayoutNotice::Adopted(
+                    super::bridge_layout::LayoutAdoption::ConsoleCouldNotOpen { station, monitor },
+                ));
+            }
+            // Unreachable: unassigning a station this layout seats is always
+            // lawful. Reported rather than swallowed, because a seat that could
+            // be neither honoured nor given back is worth a sentence.
+            Err(refusal) => {
+                crate::pwarn!(log, LogCat::Lobby, "bridge display: {refusal}");
+                notices.push(LayoutNotice::Refused(refusal));
+            }
+        }
+    }
+    layout.notices = notices;
 }
 
 // ── runtime display loss (issue #1125) ──────────────────────────────────────
@@ -1128,7 +1383,22 @@ const DISPLAY_LOSS_DEBOUNCE_FRAMES: u32 = 10;
 /// sharper reason: a reconcile whose viewscreen monitor is missing moves the
 /// viewscreen to the primary, and acting on a one-frame winit blip would
 /// therefore drag the shared view across the room and back.
-// Eight parameters, and every one is a distinct thing this frame's observation
+///
+/// # The two debounces count the same observation, and in a fixed order
+///
+/// This system runs two windows over one frame's monitor list — the roster
+/// settle above, and the per-monitor absence streak the pane closures wait for —
+/// and they used to reset on *different* events: the settle restarted whenever
+/// the roster changed, while a streak only cleared when its own monitor came
+/// back. On a roster still churning around a genuinely absent display, the
+/// streak could therefore cross its threshold while the settle kept restarting,
+/// and a pane would be closed for a monitor the layout still seated.
+///
+/// So both now restart on the same thing — **the observed roster changing** —
+/// which makes them reach their thresholds on the same frame, and
+/// [`reconcile_layout`] runs first within that frame. The unseat always precedes
+/// the close, rather than usually preceding it.
+// Nine parameters, and every one is a distinct thing this frame's observation
 // is judged against or written to. A Bevy system's parameter list IS its
 // dependency declaration to the scheduler, so bundling them into a struct would
 // hide what it reads rather than simplify anything.
@@ -1142,6 +1412,9 @@ fn watch_runtime_displays(
     mut baseline: Local<Option<std::collections::HashSet<MonitorIdentity>>>,
     mut absent_streak: Local<std::collections::HashMap<MonitorIdentity, u32>>,
     mut settling_roster: Local<Option<(Vec<MonitorIdentity>, u32)>>,
+    // The previous frame's observed roster, which is what both windows restart
+    // on — see the note above.
+    mut last_observed: Local<Option<Vec<MonitorIdentity>>>,
 ) {
     let mut raws: Vec<RawMonitor> = monitors
         .iter()
@@ -1159,7 +1432,27 @@ fn watch_runtime_displays(
     // sorting changes nothing about the #1125 half.
     raws.sort_by_key(|r| (r.position_x, r.position_y));
 
-    reconcile_layout(layout, &raws, &log, &mut settling_roster);
+    // Derived ONCE, here, and handed to both halves: the roster settle and the
+    // absence streak must be counting the same observation, or they reach their
+    // thresholds on different frames — see the note on this system.
+    let known: Vec<DiscoveredMonitor> = layout
+        .as_ref()
+        .map(|l| l.monitors.clone())
+        .unwrap_or_default();
+    let discovered = identify_stable(&raws, &known);
+    let observed: Vec<MonitorIdentity> = discovered.iter().map(|d| d.identity.clone()).collect();
+
+    reconcile_layout(layout, discovered, &log, &mut settling_roster);
+
+    // A roster that CHANGED restarts every absence streak, exactly as it
+    // restarts the settle above. The whole point of both windows is "wait until
+    // the hardware picture has stopped moving before acting on it", and a streak
+    // that survived a change would let a pane close for a monitor the layout was
+    // still, lawfully, seating a console on.
+    if last_observed.as_ref() != Some(&observed) {
+        absent_streak.clear();
+    }
+    *last_observed = Some(observed);
 
     // The BOOT profile's assignments, deliberately — this is #1125's question
     // ("was a monitor this host was configured for lost, and whose panes were on
@@ -1173,9 +1466,10 @@ fn watch_runtime_displays(
     //
     // A console the LOBBY opened on a screen that is unplugged is closed all the
     // same, and by the layout rather than by this: `reconcile_layout` above
-    // unseats it and `follow_layout_stations` closes it on the same frame. See
-    // the settled note in `apply_bridge_profile` for why the two lists are kept
-    // apart instead of merged.
+    // unseats it and `follow_layout_stations` closes it on the same frame. And
+    // an AUTHORED profile's station console goes the same way, because
+    // `assigned_surfaces` excludes a station-bearing slot from `pane_labels`
+    // (issue #1331) — see the settled note in `apply_bridge_profile`.
     let assigned = config.profile.assigned_surfaces();
     // The assigned monitors present THIS frame, matched STABLY against the raw
     // monitors rather than re-derived with `identify` — so the survivor of two
@@ -1284,7 +1578,7 @@ fn watch_runtime_displays(
 /// fullscreen. On a host nobody touched. That is precisely the promise in this
 /// module's [note](self#boot-is-once-the-viewscreen-is-apply-on-change-issue-1330).
 ///
-/// So this rebuilds against [`identify_stable`], which matches the layout's
+/// So `discovered` is built by [`identify_stable`], which matches the layout's
 /// existing identities to the monitors present *by form* — the same technique
 /// [`present_assigned_identities`] uses on the pane side, and for the same
 /// reason — and carries a survivor's identity forward. Only a display no known
@@ -1293,16 +1587,19 @@ fn watch_runtime_displays(
 /// [`BridgeLayoutResource::monitors`], because the row is drawn from those and
 /// the button's round trip is exact string equality: the row must serve the key
 /// the layout will judge the press against.
+///
+/// It is derived by the CALLER and handed in, rather than derived here, so that
+/// the absence streak beside it is counting the very same observation — see
+/// [`watch_runtime_displays`]'s note on the two windows.
 fn reconcile_layout(
     layout: Option<ResMut<BridgeLayoutResource>>,
-    raws: &[RawMonitor],
+    discovered: Vec<DiscoveredMonitor>,
     log: &Option<Res<LogFilterConfig>>,
     settling: &mut Local<Option<(Vec<MonitorIdentity>, u32)>>,
 ) {
     let Some(mut layout) = layout else {
         return;
     };
-    let discovered = identify_stable(raws, &layout.monitors);
     let identities: Vec<MonitorIdentity> = discovered.iter().map(|d| d.identity.clone()).collect();
     if identities == layout.layout.monitors() {
         **settling = None;
@@ -2838,6 +3135,169 @@ mod tests {
         assert_eq!(surfaces(&app), vec![BENQ.to_string()]);
     }
 
+    // ── a surface is the LAW's to drop, not this frame's winit report ────────
+    //
+    // Every other reader of a lost display waits out the debounce window before
+    // believing it. The surface sweep did not: it retained on the monitors winit
+    // reported THIS frame, so a single absent frame despawned a live console's
+    // Station window. It was masked by the apply-on-change gate, and any lobby
+    // press unmasked it — `apply_lobby_layout_actions` writes its notices on
+    // every record, so every press marks the layout changed whether or not
+    // anything moved.
+
+    /// A lobby press that only *reports* — the state every refused press, and
+    /// every press for something already true, leaves behind: nothing moved,
+    /// and `BridgeLayoutResource` was written to all the same.
+    fn press_that_only_reports(app: &mut App) {
+        let notices = app
+            .world()
+            .resource::<BridgeLayoutResource>()
+            .notices
+            .clone();
+        app.world_mut()
+            .resource_mut::<BridgeLayoutResource>()
+            .notices = notices;
+    }
+
+    #[test]
+    fn an_unplug_and_a_press_inside_the_settle_window_does_not_strand_a_console() {
+        // The blocker, exactly as it happens: a console is open on the BenQ, the
+        // BenQ is unplugged, and the operator presses ANY button before the
+        // reconcile has believed the unplug.
+        //
+        // The surface must survive the blip — the law still names that monitor —
+        // and the console with it. Then, when the reconcile does unseat it, the
+        // console closes through the ordinary dropped-participant path. Before
+        // this fix the surface was dropped on the press, and the close sweep,
+        // driven by the surfaces it had just emptied, then had nothing to close:
+        // the pane stayed open forever, its station never reached Backfill, and
+        // the camera went on rendering to a despawned window.
+        use crate::native_host::transport::NativeTransport;
+
+        let (mut app, bus) = console_host();
+        seat(&mut app, "helm", BENQ);
+        app.update();
+        let pane = bus.open_pane_for_name("helm").unwrap();
+        bus.mark_live(pane);
+        let token = bus.token_of(pane).unwrap();
+        bus.take_pending_views();
+
+        let benq = benq_entity(&mut app);
+        app.world_mut().entity_mut(benq).despawn();
+
+        // Inside the settle window, and pressing all the way through it.
+        for _ in 1..DISPLAY_LOSS_DEBOUNCE_FRAMES {
+            press_that_only_reports(&mut app);
+            app.update();
+            assert_eq!(
+                surfaces(&app),
+                vec![BENQ.to_string()],
+                "the law still names that monitor, so its surface stands"
+            );
+            assert!(
+                bus.open_pane_for_name("helm").is_some(),
+                "and the console on it is untouched: a blip is not an unplug"
+            );
+            assert!(
+                bus.transport().poll().is_empty(),
+                "nobody has been disconnected yet"
+            );
+        }
+
+        // The reconcile believes it, and NOW the console closes — once.
+        settle(&mut app);
+        assert!(
+            app.world()
+                .resource::<BridgeLayoutResource>()
+                .layout
+                .monitor_of(&station("helm"))
+                .is_none(),
+            "the law unseated it"
+        );
+        assert_eq!(bus.open_count(), 0, "and the adapter closed it");
+        assert_eq!(
+            bus.transport().poll(),
+            vec![crate::native_host::transport::TransportEvent::Disconnected { token }],
+            "through the ordinary dropped-participant path, so its station goes to Backfill"
+        );
+        assert!(surfaces(&app).is_empty(), "and the surface went with it");
+    }
+
+    #[test]
+    fn a_frame_reporting_no_monitors_at_all_closes_nothing() {
+        // winit between hot-plug events, not a bridge that lost every display —
+        // the judgement `watch_runtime_displays` already made on the same
+        // observation, which the surface sweep did not. Acting on it would tear
+        // down every Station window on the machine.
+        let (mut app, bus) = console_host();
+        seat(&mut app, "helm", BENQ);
+        app.update();
+        let window = app.world().resource::<BridgeStationSurfaces>().0[0].window;
+
+        let monitors: Vec<Entity> = {
+            let mut query = app.world_mut().query_filtered::<Entity, With<Monitor>>();
+            query.iter(app.world()).collect()
+        };
+        for monitor in monitors {
+            app.world_mut().entity_mut(monitor).despawn();
+        }
+        for _ in 0..DISPLAY_LOSS_DEBOUNCE_FRAMES + 1 {
+            press_that_only_reports(&mut app);
+            app.update();
+        }
+
+        assert_eq!(surfaces(&app), vec![BENQ.to_string()]);
+        assert_eq!(bus.open_count(), 1);
+        assert!(
+            app.world().get_entity(window).is_ok(),
+            "the Station window is still there, because nothing was reported to be gone"
+        );
+    }
+
+    #[test]
+    fn re_seating_after_a_stranded_unplug_gives_a_console_a_real_seat_again() {
+        // The other end of the blocker. The stranded console left a pane open
+        // under the station's own name, so the open sweep — which asks the bus
+        // whether a seated station already has one — found it and opened
+        // nothing, and no view was ever built for the new Station window: a
+        // permanently black screen a press could not repair. With the console
+        // closed honestly, a re-seat is an ordinary open with a real slot and a
+        // view queued against it.
+        let (mut app, bus) = console_host();
+        seat(&mut app, "helm", BENQ);
+        app.update();
+        bus.mark_live(bus.open_pane_for_name("helm").unwrap());
+        bus.take_pending_views();
+
+        let benq = benq_entity(&mut app);
+        app.world_mut().entity_mut(benq).despawn();
+        press_that_only_reports(&mut app);
+        settle(&mut app);
+        assert_eq!(bus.open_count(), 0, "the stranding is over");
+
+        seat(&mut app, "helm", ACME);
+        app.update();
+
+        assert_eq!(surfaces(&app), vec![ACME.to_string()]);
+        let reopened = bus
+            .open_pane_for_name("helm")
+            .expect("a seated station has a console");
+        assert_eq!(
+            bus.take_pending_views()
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect::<Vec<_>>(),
+            vec![reopened],
+            "and a view is queued for it, which is what a LIVE console is"
+        );
+        let surface = app.world().resource::<BridgeStationSurfaces>();
+        let (seat, slot) = surface
+            .slot_for("helm")
+            .expect("built against a real Station surface, not a black window");
+        assert_eq!(seat.identity, ACME);
+        assert_eq!((slot.rect.width, slot.rect.height), (1920, 1080));
+    }
+
     #[test]
     fn a_host_with_no_pane_bus_says_so_rather_than_opening_a_black_window() {
         // A host with no `--client-dir` bundle has nothing to load a console
@@ -2875,6 +3335,328 @@ mod tests {
         assert!(
             surfaces(&app).is_empty(),
             "no bus, no console — and therefore no window"
+        );
+    }
+
+    // ── an authored station console belongs to the LAW, not the watcher ─────
+
+    /// A three-screen host booted from an AUTHORED `--profile` that seats
+    /// `helm` on the BenQ, with a pane bus and a two-station hull — the one
+    /// shape in which the boot profile and the live layout can disagree about
+    /// where a console is.
+    fn authored_console_host() -> (App, crate::native_host::panes::transport::PaneBus) {
+        use crate::native_host::bridge_profile::{PaneSlot, ROLE_STATION};
+        use crate::native_host::panes::transport::PaneBus;
+        use crate::native_host::panes::PaneBusResource;
+
+        let profile = BridgeProfile {
+            version: PROFILE_VERSION,
+            displays: vec![
+                DisplayEntry {
+                    id: DELL.to_string(),
+                    role: ROLE_VIEWSCREEN.to_string(),
+                    split: None,
+                    panes: Vec::new(),
+                },
+                DisplayEntry {
+                    id: BENQ.to_string(),
+                    role: ROLE_STATION.to_string(),
+                    split: None,
+                    panes: vec![PaneSlot::for_station("helm")],
+                },
+            ],
+            touch: Vec::new(),
+            media: Vec::new(),
+        }
+        .validate()
+        .expect("a viewscreen and a one-station display validate");
+
+        let mut app = App::new();
+        app.add_plugins(BridgeDisplayPlugin);
+        let bus = PaneBus::default();
+        app.insert_resource(PaneBusResource(bus.clone()));
+        app.insert_resource(BridgeDisplayConfig {
+            profile,
+            authored: true,
+        });
+        app.insert_resource(crate::ship::components::PendingShipConfig(
+            toml::from_str(
+                r#"
+                [[station]]
+                id = "helm"
+                name = "Helm"
+                description = "-"
+                rank = "Crew"
+
+                [[station]]
+                id = "weapons"
+                name = "Tactical"
+                description = "-"
+                rank = "Crew"
+                "#,
+            )
+            .expect("a two-station hull parses"),
+        ));
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+        app.world_mut()
+            .spawn((monitor("DELL U2720Q", 3840, 2160, 0, 0), PrimaryMonitor));
+        app.world_mut()
+            .spawn(monitor("BenQ EX", 1920, 1080, 3840, 0));
+        app.world_mut()
+            .spawn(monitor("ACME 1080", 1920, 1080, 5760, 0));
+        app.update();
+        (app, bus)
+    }
+
+    #[test]
+    fn unplugging_the_screen_an_authored_console_has_left_does_not_close_it() {
+        // `PaneSlot::for_station` names its pane for its station, so an authored
+        // station slot used to put a STATION ID into the #1125 watcher's
+        // `pane_labels`. That list is the BOOT profile's and never moves; the
+        // console does. So unplugging the monitor the profile named resolved
+        // "helm" against the LIVE bus, found the console on the screen the
+        // operator had since moved it to, and closed it — ending a human's watch
+        // over a display their console was not on, and minting a fresh token in
+        // its place.
+        use crate::native_host::transport::NativeTransport;
+
+        let (mut app, bus) = authored_console_host();
+        let booted = bus
+            .open_pane_for_name("helm")
+            .expect("the authored seat opened its console at boot");
+        bus.mark_live(booted);
+        let token = bus.token_of(booted).expect("an ordinary session token");
+        bus.take_pending_views();
+
+        // The lobby moves it. A move IS a rebuild, on the same identity.
+        seat(&mut app, "helm", ACME);
+        app.update();
+        let moved = bus
+            .open_pane_for_name("helm")
+            .expect("the console survived the move");
+        assert_eq!(
+            bus.token_of(moved).as_deref(),
+            Some(token.as_str()),
+            "whoever claimed it kept it across the move"
+        );
+        bus.take_pending_views();
+        let _ = bus.transport().poll();
+
+        // Now unplug the screen it is NOT on — the one the boot profile named.
+        let benq = benq_entity(&mut app);
+        app.world_mut().entity_mut(benq).despawn();
+        settle(&mut app);
+
+        assert_eq!(
+            app.world()
+                .resource::<BridgeLayoutResource>()
+                .layout
+                .monitor_of(&station("helm"))
+                .map(|m| m.as_str()),
+            Some(ACME),
+            "the law never unseated it: its screen is still there"
+        );
+        assert_eq!(bus.open_count(), 1);
+        assert_eq!(
+            bus.open_pane_for_name("helm"),
+            Some(moved),
+            "the same handle — not closed, not even rebuilt"
+        );
+        assert_eq!(
+            bus.token_of(moved).as_deref(),
+            Some(token.as_str()),
+            "and therefore the same identity: the token guarantee holds"
+        );
+        assert!(
+            bus.transport().poll().is_empty(),
+            "nobody was disconnected by the unplug of a screen they were not on"
+        );
+    }
+
+    // ── the law and the adapter are reconciled (issue #1331) ────────────────
+    //
+    // `follow_layout_stations` applies the layout; it cannot see whether the
+    // application worked. A view that will not build, or a seat with no surface
+    // to be composited onto, leaves a station card claiming a screen that is
+    // black, with nothing retrying and nothing saying so. These pin the repair:
+    // a bounded rebuild on the same identity, and then an honest Backfill.
+
+    #[test]
+    fn a_healthy_console_is_never_touched_by_the_reconciler() {
+        // First, the frames it must NOT act on — which is all of them, on a
+        // bridge where everything worked.
+        let (mut app, bus) = console_host();
+        seat(&mut app, "helm", BENQ);
+        app.update();
+        let pane = bus.open_pane_for_name("helm").unwrap();
+        bus.mark_live(pane);
+        bus.take_pending_views();
+
+        for _ in 0..(CONSOLE_MISSING_GRACE_FRAMES * 4) {
+            app.update();
+        }
+
+        assert_eq!(
+            bus.open_pane_for_name("helm"),
+            Some(pane),
+            "the same handle, never rebuilt"
+        );
+        assert_eq!(surfaces(&app), vec![BENQ.to_string()]);
+        assert!(
+            bus.take_pending_views().is_empty(),
+            "and nothing was queued to rebuild"
+        );
+        assert!(app
+            .world()
+            .resource::<BridgeLayoutResource>()
+            .notices
+            .is_empty());
+    }
+
+    #[test]
+    fn a_console_with_nowhere_to_be_built_is_rebuilt_boundedly_then_gives_its_seat_back() {
+        // A seated station whose console has no `BridgeStationSurfaces` slot:
+        // the pane host has no window and no rectangle for it, so it builds the
+        // view on the wrong window or not at all. Poked in directly, because the
+        // ways to reach it — a seat made while its monitor was between hot-plug
+        // frames, a placement that failed — all leave exactly this state.
+        use crate::native_host::panes::recovery::MAX_RECREATIONS_PER_WINDOW;
+
+        let (mut app, bus) = console_host();
+        seat(&mut app, "helm", BENQ);
+        app.update();
+        let mut current = bus.open_pane_for_name("helm").unwrap();
+        let token = bus.token_of(current).unwrap();
+        bus.mark_live(current);
+        bus.take_pending_views();
+
+        app.world_mut()
+            .resource_mut::<BridgeStationSurfaces>()
+            .0
+            .iter_mut()
+            .for_each(|s| s.panes.clear());
+
+        let mut rebuilds = 0u32;
+        for _ in 0..(MAX_RECREATIONS_PER_WINDOW + 1) {
+            for _ in 0..CONSOLE_MISSING_GRACE_FRAMES {
+                app.update();
+            }
+            let Some(next) = bus.open_pane_for_name("helm") else {
+                break;
+            };
+            assert_ne!(next, current, "a rebuild is a new handle");
+            assert_eq!(
+                bus.token_of(next).as_deref(),
+                Some(token.as_str()),
+                "rebuilt on the SAME identity, so a console that does come back is \
+                 the same participant"
+            );
+            rebuilds += 1;
+            current = next;
+        }
+
+        assert_eq!(
+            rebuilds, MAX_RECREATIONS_PER_WINDOW,
+            "bounded by #1125's own per-identity budget, not retried forever"
+        );
+        assert_eq!(bus.open_count(), 0, "and then left closed");
+
+        // The seat is GIVEN BACK, which is the half a `--pane` does not need:
+        // the law must stop claiming a screen the adapter cannot use.
+        let live = app.world().resource::<BridgeLayoutResource>();
+        assert!(
+            live.layout.monitor_of(&station("helm")).is_none(),
+            "the station is on Backfill honestly, not by accident"
+        );
+        let [LayoutNotice::Adopted(note)] = live.notices.as_slice() else {
+            panic!("the operator is told, in a sentence: {:?}", live.notices);
+        };
+        assert_eq!(
+            note.string_id(),
+            "server.bridge_layout.adopt_console_could_not_open"
+        );
+
+        // …and the row renders it, which is the only place an operator sees it.
+        let row = row(&app);
+        let notice = row
+            .notices
+            .iter()
+            .find(|n| n.id == "server.bridge_layout.adopt_console_could_not_open")
+            .expect("the notice crosses to the surface");
+        assert_eq!(
+            notice.params.get("station").map(String::as_str),
+            Some("helm")
+        );
+        assert_eq!(notice.params.get("monitor").map(String::as_str), Some(BENQ));
+        assert!(
+            row.monitors[1].stations.is_empty(),
+            "and the screen reads as free again, so it can be used for something"
+        );
+
+        // The Station window goes with the seat.
+        app.update();
+        app.update();
+        assert!(surfaces(&app).is_empty());
+    }
+
+    #[test]
+    fn a_console_whose_view_will_not_build_reaches_backfill_rather_than_a_black_screen() {
+        // The pane host's half, at the seam #1125 built for exactly this: a
+        // failed `make_pane_view` faults the pane, `service_faults` closes it
+        // (one honest disconnect) and rebuilds it on the same token, and past
+        // the budget it stays closed. Injected here, as #1125's own tests inject
+        // one, because building a real Ultralight view needs an SDK and a GPU.
+        //
+        // What this adds is the end of that story: the LAW still seated a
+        // station whose console the pane host has given up on, and something has
+        // to say so.
+        use crate::native_host::panes::recovery::{
+            service_faults, PaneFault, MAX_RECREATIONS_PER_WINDOW,
+        };
+
+        let (mut app, bus) = console_host();
+        seat(&mut app, "helm", BENQ);
+        app.update();
+        let mut current = bus.open_pane_for_name("helm").unwrap();
+
+        let mut exhausted = false;
+        for _ in 0..(MAX_RECREATIONS_PER_WINDOW + 1) {
+            bus.fault(current, PaneFault::ViewCrashed);
+            let outcome = service_faults(&bus).pop().expect("one fault serviced");
+            match outcome.recreated {
+                Some((next, _url)) => current = next,
+                None => exhausted = outcome.recreation_exhausted,
+            }
+            app.update();
+        }
+        assert!(exhausted, "the pane host gave up, as #1125 says it must");
+        assert_eq!(bus.open_count(), 0);
+        assert!(
+            app.world()
+                .resource::<BridgeLayoutResource>()
+                .layout
+                .monitor_of(&station("helm"))
+                .is_some(),
+            "and the law is still seating it — which is the divergence"
+        );
+
+        for _ in 0..CONSOLE_MISSING_GRACE_FRAMES {
+            app.update();
+        }
+
+        let live = app.world().resource::<BridgeLayoutResource>();
+        assert!(
+            live.layout.monitor_of(&station("helm")).is_none(),
+            "the seat is surrendered, so the row stops claiming a black screen"
+        );
+        assert!(
+            live.notices.iter().any(|n| matches!(
+                n,
+                LayoutNotice::Adopted(note)
+                    if note.string_id() == "server.bridge_layout.adopt_console_could_not_open"
+            )),
+            "and the operator is told why: {:?}",
+            live.notices
         );
     }
 

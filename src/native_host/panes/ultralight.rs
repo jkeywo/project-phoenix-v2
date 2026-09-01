@@ -1787,13 +1787,23 @@ fn open_pending_views(
                 (s.geometry.position_x, s.geometry.position_y),
             )
         });
+        // A camera this pane's build MINTED, as opposed to one it joined. Only
+        // the minted one is this build's to clean up if the view then fails —
+        // see the `Err` arm below.
+        let mut minted_camera: Option<Entity> = None;
         let placement = match seat {
             Some((window, origin, size, scale, window_origin)) => PaneSeat {
                 // One 2-D camera per Station window, reused as consoles come and
                 // go on it — the same arrangement `init_pane_host` makes, and
                 // the same list `retire_closed_panes` despawns from when a
                 // Station window's last console closes.
-                station_camera: Some(station_camera(host, commands, window)),
+                station_camera: Some({
+                    let (camera, minted) = station_camera(host, commands, window);
+                    if minted {
+                        minted_camera = Some(camera);
+                    }
+                    camera
+                }),
                 window,
                 origin,
                 size,
@@ -1837,11 +1847,35 @@ fn open_pending_views(
                     }
                 );
             }
-            Err(e) => crate::pwarn!(
-                log,
-                LogCat::Lobby,
-                "pane host: could not build the view for {new_id} ({name}): {e}"
-            ),
+            Err(e) => {
+                // The camera is created BEFORE the fallible build, because
+                // `make_pane_view` needs it to target the canvas it makes. So a
+                // failed build must take it back: `retire_closed_panes` only
+                // sweeps cameras when some pane CLOSES, and this pane never
+                // opened a window at all — the camera would sit there clearing a
+                // Station window to black for the life of the process, and the
+                // next attempt on that window would join it rather than notice.
+                if let Some(camera) = minted_camera {
+                    commands.entity(camera).try_despawn();
+                    host.station_cameras.retain(|(_, c)| *c != camera);
+                }
+                crate::pwarn!(
+                    log,
+                    LogCat::Lobby,
+                    "pane host: could not build the view for {new_id} ({name}): {e}"
+                );
+                // And the pane is FAULTED rather than left open with nothing
+                // behind it (issue #1331). A pane the bus lists as open but that
+                // has no view is the worst of both: the station reads as claimed,
+                // the screen is black, and nothing retries. `ViewCrashed` is
+                // exactly what this is — a view that will not answer — so it
+                // rides #1125's own path: close (one honest `PlayerDisconnected`,
+                // the station on `Backfill`), then a bounded rebuild on the same
+                // token. When that budget is spent the pane stays closed, and
+                // `bridge_display::reconcile_seated_consoles` gives the seat back
+                // so the operator's row stops claiming a screen that is black.
+                bus.0.fault(new_id, PaneFault::ViewCrashed);
+            }
         }
     }
     // A recreated pane is a new surface on the same identity: rebuild the router
@@ -1885,9 +1919,14 @@ struct PaneSeat {
 /// same arrangement `init_pane_host` makes at boot, and the same
 /// `station_cameras` list `retire_closed_panes` despawns from when a Station
 /// window's last console closes.
-fn station_camera(host: &mut PaneHost, commands: &mut Commands, window: Entity) -> Entity {
+///
+/// Returns whether this call **minted** the camera, because the caller builds a
+/// view that can fail afterwards and only a camera it minted is its to take
+/// back — despawning one it merely joined would blank every console already on
+/// that window.
+fn station_camera(host: &mut PaneHost, commands: &mut Commands, window: Entity) -> (Entity, bool) {
     if let Some((_, camera)) = host.station_cameras.iter().find(|(w, _)| *w == window) {
-        return *camera;
+        return (*camera, false);
     }
     let camera = commands
         .spawn((
@@ -1902,7 +1941,7 @@ fn station_camera(host: &mut PaneHost, commands: &mut Commands, window: Entity) 
         ))
         .id();
     host.station_cameras.push((window, camera));
-    camera
+    (camera, true)
 }
 
 /// Create one pane's Ultralight view, its texture and its on-screen canvas at

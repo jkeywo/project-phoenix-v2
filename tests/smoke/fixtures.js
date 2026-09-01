@@ -96,14 +96,22 @@ const workerSrc = (name) =>
 export const RENDEZVOUS_REGISTRY_JS = workerSrc('registry.js');
 export const RENDEZVOUS_RELAY_JS = workerSrc('relay.js');
 
-// Stub the QR CDN script so it doesn't block execution. In CI environments the
-// jsdelivr CDN can be slow or blocked, and a synchronous <script src="...">
-// tag blocks all inline scripts below it. The transport needs no such stub any
-// more — #1112 retired the PeerJS CDN tag, and the replacement is a
-// same-origin module island.
+// Stub the QR encoder. It is no longer a CDN dependency — issue #1329 vendored
+// it to gui/vendor/qrcode.js, same-origin, precisely so that a room with no
+// internet still gets a join code — so this is no longer about a slow jsdelivr;
+// it is that rasterising a real QR into a canvas is work no smoke assertion
+// reads. The route below still matches, because it matches on the file name.
+//
+// It RECORDS instead of ignoring: `window.__qrDraws` is the list of URLs the
+// page asked to be drawn, in order, so a spec can assert the join QR draw was
+// actually reached (issue #1329 AC5 — the draw used to sit in a PeerJS callback
+// that #1112 deleted) rather than only that the page did not crash.
 const STUB_QRCODE = `'use strict';
 // Minimal stub so server.html QR rendering code doesn't crash during tests.
-window.QRCode = { toCanvas: function () { return Promise.resolve(); } };
+window.__qrDraws = [];
+window.QRCode = {
+  toCanvas: function (canvas, text) { window.__qrDraws.push(text); return Promise.resolve(); },
+};
 `;
 
 // Minimal default world used by every smoke test that doesn't route its own

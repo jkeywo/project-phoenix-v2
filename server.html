@@ -33,11 +33,19 @@
      rule that did moved into this file with them. -->
 <link rel="stylesheet" href="gui/host-lobby.css" />
 
-  <!-- CDN dep loaded before our script so it's in scope synchronously. The
-       PeerJS tag that used to sit alongside it is gone (issue #1112): the crew
-       transport is gui/rendezvous-transport.js, a module island, and there is
-       no third-party broker left to load. -->
-  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+  <!-- The QR encoder, loaded before our script so the global `QRCode` is in
+       scope synchronously. VENDORED and same-origin since issue #1329: it used
+       to come from jsdelivr, which made the one thing a crew cannot start
+       without — the join code — depend on the room having internet. It is
+       served by whichever process is serving this page, which for a native
+       host is the host itself. See gui/vendor/README.md for provenance; the
+       native lobby surface loads the same file from the same place.
+
+       The PeerJS tag that used to sit alongside it is gone (issue #1112): the
+       crew transport is gui/rendezvous-transport.js, a module island, and there
+       is no third-party broker left to load. There is now no CDN <script> on
+       this page at all. -->
+  <script src="gui/vendor/qrcode.js"></script>
 
   <!-- Background-tab sim heartbeat ─────────────────────────────────────────
        Bevy's WASM runner (winit) uses requestAnimationFrame when visible and

@@ -313,6 +313,18 @@ impl CommandLog {
         &self.entries
     }
 
+    /// Replace the applied history from a gated authoritative transfer.
+    ///
+    /// Ordinary gameplay still has exactly one recording site
+    /// ([`PendingCommands::drain_due`]).  A mid-session GM join is different:
+    /// the new peer did not execute the earlier ticks, so the portable record
+    /// must install the already-applied history beside the snapshot it proves.
+    /// Keeping that exceptional write here prevents transfer code from growing
+    /// a second command-log representation or reaching into private storage.
+    pub fn replace_from_transfer(&mut self, entries: Vec<LoggedCommand>) {
+        self.entries = entries;
+    }
+
     pub fn len(&self) -> usize {
         self.entries.len()
     }

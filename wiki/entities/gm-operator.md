@@ -2,7 +2,7 @@
 title: GM Operator
 type: entity
 tags: [gm, operator, identity, reconnect, roster, readiness, force-start, action, pause, host-mesh]
-sources: [src/gm_roster.rs, src/gm_action.rs, src/gm_projection.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/messages.rs, src/core/codec.rs, src/lobby/server.rs, src/lockstep/frame.rs, src/lockstep/mod.rs, src/server/bridge.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/gm-local-projection.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html]
+sources: [src/gm_roster.rs, src/gm_action.rs, src/gm_join.rs, src/gm_projection.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/messages.rs, src/core/codec.rs, src/command_admission/log.rs, src/lobby/server.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server/bridge.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/gm-local-projection.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html]
 updated: 2026-09-01
 ---
 
@@ -31,6 +31,41 @@ a connected operator. Once frozen, that technical slot is part of Rust's
 deterministic wait-set. A departed GM is then refused `recovery-only` even with
 the correct capability until #1294 can restore the authoritative snapshot,
 watermark, and any one-shot start boundary it missed.
+
+## First-time mid-session admission
+
+An unknown GM joining a running fleet first receives only a private candidate
+connection and reserved identity. Every existing host-class page displays the
+request, and any admitted host or GM may accept or reject it; the star centre
+delivers that decision but has no product-level veto. Rejection before
+acceptance changes neither the public roster nor authoritative pause state.
+
+Acceptance asks Rust's technical owner to assign exactly one synchronized pause
+boundary. Its provisional topology is a private `GmJoinBootstrap`, which gives
+world setup the topology it needs without installing `FleetRoster` or
+`FleetLockstep`. The candidate receives the canonical #1117 run privately: its
+world snapshot, complete admitted-command history, and snapshotted
+`GmActionJournal`. It reports the restored digest through the typed
+`GmJoinFrame` lane. Only a matching digest commits the transaction, installs
+the public GM roster and lockstep wait-set, and makes the connection a live
+fleet peer. An authenticated owner-carried peer loss received after snapshot
+capture remains in private, non-authoritative `GmJoinPendingHostLoss`; it cannot
+alter digest proof or admit a wait-set. Commit drains it once into
+`PendingHostLoss` and marks that peer departed in the newly installed wait-set
+before Resume. Successful restore engages the candidate's technical join hold
+even when its private world began behind the pause boundary. An accepted
+disconnect or authenticated transfer/restore failure is terminally refused to
+every peer; if the disconnect callback races an existing Commit, Rust preserves
+and re-emits the same committed proof instead of losing the transaction.
+A stalled not-ready restore exhausts an authenticated, owner-sequenced
+`RestoreBoundary` protocol clock; duplicate, stale, and render-only updates are
+inert, while a candidate lost after commit follows the ordinary host-loss path.
+
+Once acceptance has scheduled it, `GmJoinPauseHold` keeps the session paused
+after either terminal Rust outcome. It is a protocol hold, not a fabricated GM
+action, and is released only when a newly applied, attributed
+`SetSessionPaused { active: false }` follows that terminal result. Consequently
+admission can never resume as a side effect of roster or transport completion.
 
 ## Authoritative projection
 

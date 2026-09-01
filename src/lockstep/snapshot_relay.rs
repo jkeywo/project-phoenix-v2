@@ -102,6 +102,10 @@ pub enum MeshRestoreOutcome {
         armed_from: HostSlot,
         from: Option<HostSlot>,
     },
+    /// Reassembly refused a corrupt, conflicting, or oversized chunk. The
+    /// in-flight buffer is discarded so a join cannot remain paused behind a
+    /// transfer which can no longer complete.
+    RefusedChunk(String),
     /// The receiving world is not yet far enough along to restore into — its
     /// layers have not reconciled, or its authored entities do not exist yet. The
     /// caller should retry on a later frame; the reassembled record is retained.
@@ -183,7 +187,13 @@ impl MeshSnapshotReceiver {
                 self.staged_from = Some(chunk.from);
             }
             Ok(Accepted::More { .. }) => self.last_fault = None,
-            Err(fault) => self.last_fault = Some(fault.clone()),
+            Err(fault) => {
+                self.last_fault = Some(fault.clone());
+                self.last = Some(MeshRestoreOutcome::RefusedChunk(fault.to_string()));
+                self.rx = SnapshotReceiver::default();
+                self.staged = None;
+                self.staged_from = None;
+            }
         }
         outcome
     }
@@ -267,7 +277,8 @@ impl MeshRestoreArm {
 /// Called by [`crate::lockstep::apply_mesh_inbox`] for every
 /// [`MeshFrame::Snapshot`], whether or not this host is a lockstep participant.
 /// A completed transfer stages its text for [`drain_mesh_restore`]; a chunk-level
-/// fault is recorded and the buffer is left as it was.
+/// fault records a terminal outcome and clears the partial buffer so a join
+/// driver can refuse visibly instead of waiting forever on a poisoned transfer.
 pub fn receive_chunk(
     receiver: &mut MeshSnapshotReceiver,
     chunk: &SnapshotChunk,
@@ -325,6 +336,23 @@ pub fn capture_run(world: &World, scenario: impl Into<String>) -> StoredRun {
         scenario,
         snapshot::versions(&crate::content_ledger::frozen_or_live()),
     )
+}
+
+/// Capture the canonical record plus the applied command history required by a
+/// first-time mid-session participant (issue #1293).
+///
+/// [`capture_run`] intentionally preserves save-slot semantics (a snapshot with
+/// an empty continuation log).  Join transfer needs the other existing half of
+/// `vellum_save::Run`: the commands which led to this boundary.  The state walk
+/// remains [`snapshot::capture`]; this only fills the envelope field the
+/// canonical record already owns.
+pub fn capture_join_run(world: &World, scenario: impl Into<String>) -> StoredRun {
+    let mut run = capture_run(world, scenario);
+    run.commands = world
+        .get_resource::<crate::command_admission::CommandLog>()
+        .map(|log| log.entries().to_vec())
+        .unwrap_or_default();
+    run
 }
 
 /// Frame a captured record into the mesh chunks that carry it (issue #1117).
@@ -456,6 +484,13 @@ pub fn gate_and_restore_against(
     let report = snapshot::restore(world, &snap.state);
     let restored = crate::sim_digest::world_digest(world);
     if restored == snap.digest && report.is_complete() {
+        // The transfer's whole-payload checksum already covered this history,
+        // and `import_artifact` parsed it through the canonical Run gate.  Install
+        // it only after the snapshot itself proved its digest so a refused or
+        // partial restore cannot overwrite the receiver's local record.
+        if let Some(mut log) = world.get_resource_mut::<crate::command_admission::CommandLog>() {
+            log.replace_from_transfer(run.commands.clone());
+        }
         return MeshRestoreOutcome::Committed {
             tick: snap.tick,
             digest: snap.digest,

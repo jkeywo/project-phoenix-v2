@@ -236,7 +236,7 @@ impl PendingHostLoss {
 pub fn apply_host_loss_backfill(
     sim_tick: Option<Res<crate::sim_tick::SimTick>>,
     mut pending: ResMut<PendingHostLoss>,
-    mut roster: ResMut<super::FleetRoster>,
+    roster: Option<ResMut<super::FleetRoster>>,
     mut ships: Query<(
         &crate::ship_plugin::ShipConfigComponent,
         &mut crate::ship_plugin::ShipSystemControlSources,
@@ -248,6 +248,14 @@ pub fn apply_host_loss_backfill(
     if pending.pending_len() == 0 {
         return;
     }
+    // A first-time GM candidate deliberately bootstraps without an
+    // authoritative roster.  Host-loss records cannot be projected into that
+    // private world until the digest-proven join commit installs the roster;
+    // retaining the records also keeps the transition deterministic once that
+    // commit arrives.
+    let Some(mut roster) = roster else {
+        return;
+    };
     let now = sim_tick.map_or(0, |t| t.0);
     for record in pending.drain_due(now) {
         // Empty the lost slot's frozen crewing so `resolve_human_seeking_hosts`
@@ -300,6 +308,7 @@ pub fn apply_host_loss_backfill(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::{app::Update, prelude::App};
 
     /// The agreed tick is the first tick past the lost host's watermark, and it
     /// is the same on every host because it is a function of that watermark
@@ -354,6 +363,38 @@ mod tests {
         assert!(pending.is_applied(HostSlot(3)));
         assert!(pending.drain_due(300).is_empty());
         assert_eq!(pending.records().len(), 1, "applying once records once");
+    }
+
+    #[test]
+    fn a_private_candidate_retains_loss_until_commit_installs_roster_then_drains_once() {
+        let mut app = App::new();
+        app.init_resource::<PendingHostLoss>()
+            .add_systems(Update, apply_host_loss_backfill);
+        app.world_mut()
+            .resource_mut::<PendingHostLoss>()
+            .observe(HostSlot(3), 0);
+
+        app.update();
+        let pending = app.world().resource::<PendingHostLoss>();
+        assert_eq!(pending.pending_len(), 1);
+        assert!(!pending.is_applied(HostSlot(3)));
+
+        // Digest-proven GmJoinCommit is the point at which the candidate gains
+        // the authoritative roster and can project an ordinary host loss.
+        app.world_mut()
+            .insert_resource(super::super::FleetRoster::default());
+        app.update();
+        let pending = app.world().resource::<PendingHostLoss>();
+        assert_eq!(pending.pending_len(), 0);
+        assert!(pending.is_applied(HostSlot(3)));
+        assert_eq!(pending.records().len(), 1);
+
+        app.update();
+        assert_eq!(
+            app.world().resource::<PendingHostLoss>().records().len(),
+            1,
+            "the retained transition is projected exactly once"
+        );
     }
 
     /// A due drain is ordered by `(tick, slot)`, so two survivors that lose the

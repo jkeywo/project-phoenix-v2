@@ -85,8 +85,9 @@ pub use slot_recovery::{
     SlotRecoveryResult, SlotRecoveryState,
 };
 pub use snapshot_relay::{
-    capture_run, drain_mesh_restore, frames_for, gate_and_restore, gate_and_restore_against,
-    send_snapshot, MeshRestoreArm, MeshRestoreOutcome, MeshSnapshotReceiver,
+    capture_join_run, capture_run, drain_mesh_restore, frames_for, gate_and_restore,
+    gate_and_restore_against, send_snapshot, MeshRestoreArm, MeshRestoreOutcome,
+    MeshSnapshotReceiver,
 };
 pub use transfer::{Accepted, SnapshotChunk, SnapshotReceiver, TransferError};
 
@@ -974,6 +975,7 @@ pub fn register_lockstep(app: &mut App) {
     // frame-driven restore that commits a fully-arrived record. Kept in its own
     // sibling so #1119's parallel work on this module does not collide with it.
     snapshot_relay::register_snapshot_relay(app);
+    crate::gm_join::register_join_driver(app);
     // Divergence recovery (issue #1118): the recovery resources and the diagnostic
     // log. The `drive_recovery` system itself is wired into the mesh chain above.
     recovery::register_recovery(app);
@@ -1244,6 +1246,7 @@ pub struct StartGrantAdmission<'w> {
     managed: Option<Res<'w, crate::lobby::server::FleetManagedLobby>>,
     gm_journal: ResMut<'w, crate::gm_action::GmActionJournal>,
     gm_paused: Res<'w, crate::gm_action::SimulationPaused>,
+    gm_join_hold: Option<Res<'w, crate::gm_join::GmJoinPauseHold>>,
     gm_results: ResMut<'w, crate::gm_action::LocalGmActionRefusals>,
 }
 
@@ -1266,7 +1269,7 @@ pub fn apply_mesh_inbox(
     mut pending_loss: ResMut<host_loss::PendingHostLoss>,
     mut pending_claims: ResMut<slot_recovery::PendingSlotClaims>,
     mut agreement: ResMut<MeshAgreement>,
-    mut snapshot_rx: ResMut<MeshSnapshotReceiver>,
+    mut join_lane: crate::gm_join::GmJoinMeshLane,
     mut outbox: ResMut<MeshOutbox>,
     roster: Option<Res<FleetRoster>>,
     sim_tick: Option<Res<crate::sim_tick::SimTick>>,
@@ -1287,8 +1290,26 @@ pub fn apply_mesh_inbox(
     // whose frames are legitimate even when the barrier no longer waits for them.
     // Absent roster ⇒ no fleet: nothing to authenticate against, so trust the
     // frame exactly as the pre-#1120 path did (a bare fixture).
-    let lead = roster.as_deref().map_or(HostSlot::SOLO, FleetRoster::lead);
-    let is_member = |slot: HostSlot| roster.as_deref().is_none_or(|r| r.is_member(slot));
+    // A first-time GM candidate intentionally has no authoritative FleetRoster
+    // before digest proof. Its private bootstrap topology may authenticate the
+    // owner's relay connection, but it is never used below as admission or as a
+    // simulation wait-set.
+    let authentication_roster = roster.as_deref().cloned().or_else(|| {
+        join_lane
+            .bootstrap
+            .as_deref()
+            .map(crate::gm_join::GmJoinBootstrap::topology)
+            .cloned()
+    });
+    let lead = authentication_roster
+        .as_ref()
+        .map_or(HostSlot::SOLO, FleetRoster::lead);
+    let is_member = |slot: HostSlot| {
+        authentication_roster
+            .as_ref()
+            .is_none_or(|r| r.is_member(slot))
+    };
+    let private_candidate = session.is_none() && roster.is_none() && join_lane.bootstrap.is_some();
     // Snapshot chunks (issue #1117) are handled whether or not this host is a
     // lockstep participant: RECEIVING the record is how a host becomes one (a
     // join, a #1120 slot recovery), so a chunk must not be dropped by the
@@ -1303,7 +1324,15 @@ pub fn apply_mesh_inbox(
         // `MeshOrigin`'s docs. A `LocalObservation` and an `Unauthenticated` push
         // are trusted here; the former is judged by the self-observation guard in
         // the HostLoss arm below.
-        if origin.refuses(frame.from(), lead, is_member) {
+        let proven_candidate_report = match &frame {
+            MeshFrame::GmJoin(crate::gm_join::GmJoinFrame::Restored { from, .. })
+            | MeshFrame::GmJoin(crate::gm_join::GmJoinFrame::RestoreBoundary { from, .. })
+            | MeshFrame::GmJoin(crate::gm_join::GmJoinFrame::Refused { from, .. }) => {
+                join_lane.runtime.active_candidate() == Some(*from)
+            }
+            _ => false,
+        };
+        if origin.refuses(frame.from(), lead, is_member) && !proven_candidate_report {
             crate::pwarn!(
                 log,
                 LogCat::Admit,
@@ -1316,7 +1345,36 @@ pub fn apply_mesh_inbox(
         }
         match frame {
             MeshFrame::Snapshot(chunk) => {
-                snapshot_relay::receive_chunk(&mut snapshot_rx, &chunk, &log);
+                snapshot_relay::receive_chunk(&mut join_lane.snapshot_rx, &chunk, &log);
+            }
+            MeshFrame::GmJoin(frame) => join_lane.inbox.push(frame),
+            MeshFrame::HostLoss(loss) if private_candidate => {
+                let topology = authentication_roster
+                    .as_ref()
+                    .expect("a private candidate has bootstrap topology");
+                if loss.tick == 0 && matches!(origin, MeshOrigin::Peer(_)) {
+                    crate::pwarn!(
+                        log,
+                        LogCat::Admit,
+                        "host-mesh: dropping a forged self-observed loss for {} on a private GM candidate",
+                        loss.lost.slot_id(),
+                    );
+                    continue;
+                }
+                if loss.lost == topology.local() || !topology.is_member(loss.lost) {
+                    crate::pwarn!(
+                        log,
+                        LogCat::Admit,
+                        "host-mesh: dropping a pre-admission loss for unknown/private slot {}",
+                        loss.lost.slot_id(),
+                    );
+                    continue;
+                }
+                // Retain the already-agreed carried tick in candidate-private,
+                // non-authoritative state. Commit is the sole transition into
+                // PendingHostLoss and the new wait-set, so this post-capture
+                // topology change cannot contaminate snapshot digest proof.
+                join_lane.pending_host_loss.observe(loss.lost, loss.tick);
             }
             other => sim_frames.push((other, origin)),
         }
@@ -1702,6 +1760,10 @@ pub fn apply_mesh_inbox(
                             now,
                             session.ready_through(now),
                             start_admission.gm_paused.0,
+                            start_admission
+                                .gm_join_hold
+                                .as_deref()
+                                .is_some_and(crate::gm_join::GmJoinPauseHold::active),
                         );
                         let decision = match sequenced {
                             Ok(grant) => crate::gm_action::GmActionFrame::Granted(grant),
@@ -1778,6 +1840,10 @@ pub fn apply_mesh_inbox(
             // this loop — but the match stays exhaustive rather than resting on
             // that being remembered.
             MeshFrame::Snapshot(_) => {}
+            // The deterministic admission driver consumes this in the bounded
+            // join lane; keep the main command/digest switch exhaustive while
+            // that lane is registered beside the snapshot relay.
+            MeshFrame::GmJoin(_) => {}
         }
     }
 }

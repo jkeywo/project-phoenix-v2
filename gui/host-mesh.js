@@ -118,9 +118,10 @@
  * adds the connected technical participant set to the frozen roster. A
  * revision-6 host would omit GM peers from Rust's lockstep wait-set and could
  * apply the decision before every deterministic peer reached its tick. `8`
- * adds the paused-safe typed GM-action frame.
+ * adds the paused-safe typed GM-action frame. `9` adds the visible first-time
+ * GM request/decision controls and the Rust-owned paused transfer frame.
  */
-export const HOST_MESH_PROTOCOL = 8;
+export const HOST_MESH_PROTOCOL = 10;
 
 /** Frame types this revision speaks. */
 export const HOST_FRAME_HELLO = 'hello';
@@ -165,6 +166,16 @@ export const HOST_FRAME_HOST_LOSS = 'host-loss';
 export const HOST_FRAME_SLOT_CLAIM = 'slot-claim';
 /** Revision 8 (#1292): one authenticated, attributed typed GM action. */
 export const HOST_FRAME_GM_ACTION = 'gm-action';
+/** Revision 9 (#1293): visible first-time GM request on every existing host. */
+export const HOST_FRAME_GM_JOIN_REQUEST = 'gm-join-request';
+/** Revision 9 (#1293): one existing peer's visible Accept/Reject answer. */
+export const HOST_FRAME_GM_JOIN_DECISION = 'gm-join-decision';
+/** Revision 9 (#1293): bounded transport progress, never roster authority. */
+export const HOST_FRAME_GM_JOIN_STATUS = 'gm-join-status';
+/** Revision 9 (#1293): candidate-only provisional identity/topology. */
+export const HOST_FRAME_GM_JOIN_PENDING = 'gm-join-pending';
+/** Revision 9 (#1293): Rust-owned pause/restore/digest/commit protocol. */
+export const HOST_FRAME_GM_JOIN = 'gm-join';
 
 /** Every type a receiver will accept. Read by the coverage tests. */
 export const HOST_FRAME_TYPES = [
@@ -184,6 +195,11 @@ export const HOST_FRAME_TYPES = [
   HOST_FRAME_HOST_LOSS,
   HOST_FRAME_SLOT_CLAIM,
   HOST_FRAME_GM_ACTION,
+  HOST_FRAME_GM_JOIN_REQUEST,
+  HOST_FRAME_GM_JOIN_DECISION,
+  HOST_FRAME_GM_JOIN_STATUS,
+  HOST_FRAME_GM_JOIN_PENDING,
+  HOST_FRAME_GM_JOIN,
 ];
 
 /**
@@ -204,6 +220,7 @@ export const HOST_SIMULATION_FRAME_TYPES = [
   HOST_FRAME_HOST_LOSS,
   HOST_FRAME_SLOT_CLAIM,
   HOST_FRAME_GM_ACTION,
+  HOST_FRAME_GM_JOIN,
 ];
 
 /** True when this frame belongs to the running simulation rather than the lobby. */
@@ -307,6 +324,8 @@ export const REASON_RECOVERY_ONLY = 'recovery-only';
  * "Cannot displace a connected host" is exactly this reason for a live slot.
  */
 export const REASON_SLOT_TAKEN = 'slot-taken';
+export const REASON_JOIN_IN_PROGRESS = 'join-in-progress';
+export const REASON_GM_JOIN_REFUSED = 'gm-join-refused';
 
 /** How a slot id is spelled. */
 const slotId = (seq) => `slot-${seq}`;
@@ -468,7 +487,11 @@ export function openFleet({
     admission: ADMISSION_OPEN,
     frozen: false,
     nextStartSeq: 1,
+    nextGmJoinSeq: 1,
     startGrant: null,
+    // Private transport reservation only. `rosterOf` deliberately ignores it;
+    // a digest-proven Commit is the sole path into `gms`/`participants`.
+    pendingGmJoin: null,
     slots: [],
     gms: [],
   };
@@ -609,7 +632,9 @@ export function admitHost(fleet, {
         reconnected: true,
       };
     }
-    if (fleet.frozen) return { ok: false, reason: REASON_RECOVERY_ONLY };
+    if (fleet.frozen) {
+      return requestFirstTimeGmJoin(fleet, { peer, name });
+    }
     if (fleet.admission !== ADMISSION_OPEN) {
       return { ok: false, reason: REASON_ADMISSION_CLOSED };
     }
@@ -675,6 +700,120 @@ export function admitHost(fleet, {
     meshSlot: slot.id,
     fleet: { ...fleet, nextSeq: fleet.nextSeq + 1, slots: [...fleet.slots, slot] },
   };
+}
+
+/**
+ * Reserve one first-time GM identity without changing the public/live roster.
+ *
+ * The reservation is deliberately part of the private owner model: it binds
+ * the candidate socket to the technical slot Rust will authenticate, but
+ * `rosterOf(fleet)` is byte-identical before and after this call. A second
+ * candidate gets a visible bounded refusal rather than an unbounded queue.
+ */
+export function requestFirstTimeGmJoin(fleet, { peer, name = '' }) {
+  if (!fleet.frozen) return { ok: false, reason: REASON_RECOVERY_ONLY };
+  if (fleet.pendingGmJoin) return { ok: false, reason: REASON_JOIN_IN_PROGRESS };
+  if ((fleet.gms || []).length >= MAX_GM_OPERATORS) {
+    return { ok: false, reason: REASON_FLEET_FULL };
+  }
+  const credential = reconnectClaim(fleet.credentialFactory());
+  if (!credential) throw new Error('GM reconnect credential factory returned an unusable value');
+  if ((fleet.gms || []).some((gm) => gm.credential === credential)) {
+    throw new Error('GM reconnect credential factory returned a duplicate value');
+  }
+  const candidate = {
+    id: gmId(fleet.nextGmSeq),
+    meshSlot: slotId(fleet.nextSeq),
+    peer,
+    connected: true,
+    ready: false,
+    startValidation: false,
+    name: boundedText(name, fleet.maxNameLength),
+    credential,
+  };
+  const request = {
+    id: fleet.nextGmJoinSeq,
+    candidate,
+    status: 'awaiting-decision',
+    approvedBy: null,
+  };
+  return {
+    ok: true,
+    pending: true,
+    request,
+    meshSlot: candidate.meshSlot,
+    operatorId: candidate.id,
+    reconnectCredential: credential,
+    fleet: {
+      ...fleet,
+      nextSeq: fleet.nextSeq + 1,
+      nextGmSeq: fleet.nextGmSeq + 1,
+      nextGmJoinSeq: fleet.nextGmJoinSeq + 1,
+      pendingGmJoin: request,
+    },
+  };
+}
+
+/** Record the first visible answer without admitting the candidate. */
+export function decideFirstTimeGmJoin(fleet, id, accepted, approvedBy) {
+  const pending = fleet.pendingGmJoin;
+  if (!pending || pending.id !== id) return { ok: false, reason: 'unknown' };
+  if (pending.status !== 'awaiting-decision') {
+    return { ok: false, reason: REASON_JOIN_IN_PROGRESS };
+  }
+  if (!accepted) {
+    return {
+      ok: true,
+      accepted: false,
+      request: { ...pending, status: 'refused', approvedBy },
+      fleet: { ...fleet, pendingGmJoin: null },
+    };
+  }
+  const request = { ...pending, status: 'accepted', approvedBy };
+  return {
+    ok: true,
+    accepted: true,
+    request,
+    fleet: { ...fleet, pendingGmJoin: request },
+  };
+}
+
+/**
+ * Add the candidate only after Rust reports a matching restored digest.
+ * Exact retries are inert; an approval or transfer-progress update cannot call
+ * this helper because it does not carry the terminal `committed` status.
+ */
+export function commitFirstTimeGmJoin(fleet, id) {
+  const pending = fleet.pendingGmJoin;
+  if (!pending || pending.id !== id || pending.status !== 'accepted') {
+    const existing = (fleet.gms || []).find((gm) => gm.joinId === id);
+    return existing ? { ok: true, fleet, gm: existing, duplicate: true }
+      : { ok: false, reason: 'unknown' };
+  }
+  const gm = { ...pending.candidate, joinId: id };
+  return {
+    ok: true,
+    gm,
+    fleet: { ...fleet, pendingGmJoin: null, gms: [...(fleet.gms || []), gm] },
+  };
+}
+
+/** Terminal transfer/ingress failure after a visible acceptance. */
+export function refuseFirstTimeGmJoin(fleet, id) {
+  const pending = fleet.pendingGmJoin;
+  if (!pending || pending.id !== id) return { ok: false, reason: 'unknown' };
+  return {
+    ok: true,
+    request: { ...pending, status: 'refused' },
+    fleet: { ...fleet, pendingGmJoin: null },
+  };
+}
+
+/** Candidate-private topology used only to bootstrap the incoming snapshot. */
+export function provisionalGmJoinRoster(fleet) {
+  const pending = fleet.pendingGmJoin;
+  if (!pending) return null;
+  return rosterOf({ ...fleet, gms: [...(fleet.gms || []), pending.candidate] });
 }
 
 /**
@@ -1164,6 +1303,38 @@ export const slotFrame = (patch) => hostFrame(HOST_FRAME_SLOT, patch);
 
 export const rosterFrame = (fleet) => hostFrame(HOST_FRAME_ROSTER, { roster: rosterOf(fleet) });
 
+const publicJoinRequest = (request) => ({
+  id: request.id,
+  candidate: {
+    operator_id: request.candidate.id,
+    host: hostSlotOrdinal(request.candidate.meshSlot),
+    name: request.candidate.name || '',
+  },
+});
+
+export const gmJoinRequestFrame = (request) =>
+  hostFrame(HOST_FRAME_GM_JOIN_REQUEST, { request: publicJoinRequest(request) });
+
+export const gmJoinDecisionFrame = (id, accepted) =>
+  hostFrame(HOST_FRAME_GM_JOIN_DECISION, { id, accepted: !!accepted });
+
+export const gmJoinStatusFrame = (request, status, reason = null) =>
+  hostFrame(HOST_FRAME_GM_JOIN_STATUS, {
+    request: publicJoinRequest(request),
+    status,
+    reason,
+  });
+
+/** Candidate-only bootstrap. Private capability never reaches roster/status. */
+export const gmJoinPendingFrame = (request, roster) =>
+  hostFrame(HOST_FRAME_GM_JOIN_PENDING, {
+    request: publicJoinRequest(request),
+    slot: request.candidate.meshSlot,
+    operator_id: request.candidate.id,
+    reconnect_credential: request.candidate.credential,
+    roster,
+  });
+
 export const admissionFrame = (state) => hostFrame(HOST_FRAME_ADMISSION, { state });
 
 /** One authenticated host's partial local start state; role is inferred by owner. */
@@ -1264,6 +1435,11 @@ if (typeof window !== 'undefined') {
     HOST_FRAME_START_POLICY,
     HOST_FRAME_START_FORCE,
     HOST_FRAME_FORCE_RESULT,
+    HOST_FRAME_GM_JOIN,
+    HOST_FRAME_GM_JOIN_REQUEST,
+    HOST_FRAME_GM_JOIN_DECISION,
+    HOST_FRAME_GM_JOIN_STATUS,
+    HOST_FRAME_GM_JOIN_PENDING,
     isSimulationFrame,
     simulationFrame,
     hostSlotOrdinal,
@@ -1276,6 +1452,8 @@ if (typeof window !== 'undefined') {
     REASON_FLEET_FULL,
     REASON_RECOVERY_ONLY,
     REASON_SLOT_TAKEN,
+    REASON_JOIN_IN_PROGRESS,
+    REASON_GM_JOIN_REFUSED,
     claimSlot,
     hostFrame,
     encodeHostFrame,
@@ -1288,6 +1466,11 @@ if (typeof window !== 'undefined') {
     gmById,
     slotById,
     admitHost,
+    requestFirstTimeGmJoin,
+    decideFirstTimeGmJoin,
+    commitFirstTimeGmJoin,
+    refuseFirstTimeGmJoin,
+    provisionalGmJoinRoster,
     setAdmission,
     freezeFleet,
     updateSlot,

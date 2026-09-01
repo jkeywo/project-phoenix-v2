@@ -512,6 +512,7 @@ fn restore_result(world: &World) -> RestoreResolution {
         }
         MeshRestoreOutcome::NotReady => RestoreResolution::Pending,
         MeshRestoreOutcome::RefusedGate(why) => RestoreResolution::Failed(why),
+        MeshRestoreOutcome::RefusedChunk(why) => RestoreResolution::Failed(why),
         MeshRestoreOutcome::RefusedIntegrity { recorded, restored } => {
             RestoreResolution::Failed(format!(
                 "the restored world folds to {restored:#018x}, not the {recorded:#018x} the \

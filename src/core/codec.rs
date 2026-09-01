@@ -545,6 +545,64 @@ pub fn encode_mesh_frame(frame: &crate::lockstep::MeshFrame) -> Result<String, s
                 }),
             ),
         },
+        MeshFrame::GmJoin(frame) => match frame {
+            crate::gm_join::GmJoinFrame::Pause(approval) => (
+                approval.apply_tick,
+                serde_json::json!({
+                    "from": approval.owner.0,
+                    "tick": approval.apply_tick,
+                    "kind": "pause",
+                    "join_id": approval.id.0,
+                    "approved_by": approval.approved_by.0,
+                    "candidate": approval.candidate.host.0,
+                    "operator_id": approval.candidate.operator_id,
+                    "apply_tick": approval.apply_tick,
+                    "transfer_id": format!("{:016x}", approval.transfer_id),
+                }),
+            ),
+            crate::gm_join::GmJoinFrame::Restored { from, id, digest } => (
+                0,
+                serde_json::json!({
+                    "from": from.0,
+                    "tick": 0,
+                    "kind": "restored",
+                    "join_id": id.0,
+                    "digest": format!("{:016x}", digest),
+                }),
+            ),
+            crate::gm_join::GmJoinFrame::RestoreBoundary { from, id, boundary } => (
+                0,
+                serde_json::json!({
+                    "from": from.0,
+                    "tick": 0,
+                    "kind": "restore-boundary",
+                    "join_id": id.0,
+                    "boundary": boundary,
+                }),
+            ),
+            crate::gm_join::GmJoinFrame::Committed(commit) => (
+                commit.tick,
+                serde_json::json!({
+                    "from": commit.owner.0,
+                    "tick": commit.tick,
+                    "kind": "committed",
+                    "join_id": commit.id.0,
+                    "candidate": commit.candidate.host.0,
+                    "operator_id": commit.candidate.operator_id,
+                    "digest": format!("{:016x}", commit.digest),
+                }),
+            ),
+            crate::gm_join::GmJoinFrame::Refused { from, id, reason } => (
+                0,
+                serde_json::json!({
+                    "from": from.0,
+                    "tick": 0,
+                    "kind": "refused",
+                    "join_id": id.0,
+                    "reason": reason,
+                }),
+            ),
+        },
     };
     Ok(serde_json::json!({
         MESH_ENVELOPE_PROTOCOL: crate::lockstep::HOST_MESH_PROTOCOL,
@@ -693,6 +751,76 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
             };
             Some(MeshFrame::GmAction(frame))
         }
+        crate::lockstep::frame::TYPE_GM_JOIN => {
+            use crate::gm_join::{
+                GmJoinApproval, GmJoinCandidate, GmJoinCommit, GmJoinFrame, GmJoinId,
+            };
+            let id = GmJoinId(body.get("join_id")?.as_u64()?);
+            let frame = match body.get("kind")?.as_str()? {
+                "pause" => {
+                    let approval = GmJoinApproval {
+                        id,
+                        owner: from,
+                        approved_by: HostSlot(
+                            u32::try_from(body.get("approved_by")?.as_u64()?).ok()?,
+                        ),
+                        candidate: GmJoinCandidate {
+                            host: HostSlot(u32::try_from(body.get("candidate")?.as_u64()?).ok()?),
+                            operator_id: body.get("operator_id")?.as_str()?.to_string(),
+                        },
+                        apply_tick: body.get("apply_tick")?.as_u64()?,
+                        transfer_id: u64::from_str_radix(body.get("transfer_id")?.as_str()?, 16)
+                            .ok()?,
+                    };
+                    if approval.apply_tick != tick {
+                        return None;
+                    }
+                    GmJoinFrame::Pause(approval)
+                }
+                "restored" => {
+                    if tick != 0 {
+                        return None;
+                    }
+                    GmJoinFrame::Restored {
+                        from,
+                        id,
+                        digest: u64::from_str_radix(body.get("digest")?.as_str()?, 16).ok()?,
+                    }
+                }
+                "restore-boundary" => {
+                    if tick != 0 {
+                        return None;
+                    }
+                    GmJoinFrame::RestoreBoundary {
+                        from,
+                        id,
+                        boundary: u16::try_from(body.get("boundary")?.as_u64()?).ok()?,
+                    }
+                }
+                "committed" => GmJoinFrame::Committed(GmJoinCommit {
+                    id,
+                    owner: from,
+                    candidate: GmJoinCandidate {
+                        host: HostSlot(u32::try_from(body.get("candidate")?.as_u64()?).ok()?),
+                        operator_id: body.get("operator_id")?.as_str()?.to_string(),
+                    },
+                    tick,
+                    digest: u64::from_str_radix(body.get("digest")?.as_str()?, 16).ok()?,
+                }),
+                "refused" => {
+                    if tick != 0 {
+                        return None;
+                    }
+                    GmJoinFrame::Refused {
+                        from,
+                        id,
+                        reason: serde_json::from_value(body.get("reason")?.clone()).ok()?,
+                    }
+                }
+                _ => return None,
+            };
+            Some(MeshFrame::GmJoin(frame))
+        }
         _ => None,
     }
 }
@@ -829,6 +957,13 @@ pub fn encode_gm_session_projection(
     serde_json::to_string(projection)
 }
 
+/// Encode the read-only first-time GM admission progress mirrored to the page.
+pub fn encode_gm_join_progress(
+    progress: &crate::gm_join::GmJoinProgress,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(progress)
+}
+
 /// Decode and validate one host-mesh lobby start grant (issue #1290).
 ///
 /// JSON stays confined to this codec seam. The grant itself is exact and
@@ -949,7 +1084,7 @@ mod mesh_frame_tests {
     fn a_tick_frame_round_trips_through_the_shared_envelope() {
         let frame = tick_frame();
         let text = super::encode_mesh_frame(&frame).expect("encodes");
-        assert!(text.contains("\"m\":8"), "the revision travels: {text}");
+        assert!(text.contains("\"m\":10"), "the revision travels: {text}");
         assert!(text.contains("\"t\":\"tick\""), "{text}");
         assert!(
             text.contains("\"tick\":412"),
@@ -1062,7 +1197,7 @@ mod mesh_frame_tests {
             tick: 418,
         });
         let text = super::encode_mesh_frame(&frame).expect("encodes");
-        assert!(text.contains("\"m\":8"), "the revision travels: {text}");
+        assert!(text.contains("\"m\":10"), "the revision travels: {text}");
         assert!(text.contains("\"t\":\"host-loss\""), "{text}");
         assert!(
             text.contains("\"lost\":3"),
@@ -1113,7 +1248,7 @@ mod mesh_frame_tests {
             },
         ));
         let text = super::encode_mesh_frame(&frame).expect("encodes");
-        assert!(text.contains("\"m\":8"), "the revision travels: {text}");
+        assert!(text.contains("\"m\":10"), "the revision travels: {text}");
         assert!(text.contains("\"t\":\"gm-action\""), "{text}");
         assert!(text.contains("\"operator_id\":\"gm-1\""), "{text}");
         assert!(text.contains("\"tick\":419"), "{text}");
@@ -1143,6 +1278,59 @@ mod mesh_frame_tests {
         ));
         for frame in [proposal, refusal] {
             let text = super::encode_mesh_frame(&frame).unwrap();
+            assert_eq!(super::decode_mesh_frame(&text), Some(frame));
+        }
+    }
+
+    #[test]
+    fn first_time_gm_join_frames_round_trip_on_the_shared_envelope() {
+        use crate::gm_join::{
+            GmJoinApproval, GmJoinCandidate, GmJoinCommit, GmJoinFrame, GmJoinId, GmJoinRefusal,
+        };
+
+        let candidate = GmJoinCandidate {
+            host: HostSlot(3),
+            operator_id: "gm-2".into(),
+        };
+        let frames = [
+            MeshFrame::GmJoin(GmJoinFrame::Pause(GmJoinApproval {
+                id: GmJoinId(7),
+                owner: HostSlot(1),
+                approved_by: HostSlot(2),
+                candidate: candidate.clone(),
+                apply_tick: 419,
+                transfer_id: 0x1293_0000_0000_0007,
+            })),
+            MeshFrame::GmJoin(GmJoinFrame::Restored {
+                from: HostSlot(3),
+                id: GmJoinId(7),
+                digest: 0xfeed_beef,
+            }),
+            MeshFrame::GmJoin(GmJoinFrame::RestoreBoundary {
+                from: HostSlot(3),
+                id: GmJoinId(7),
+                boundary: 4,
+            }),
+            MeshFrame::GmJoin(GmJoinFrame::Committed(GmJoinCommit {
+                id: GmJoinId(7),
+                owner: HostSlot(1),
+                candidate: candidate.clone(),
+                tick: 419,
+                digest: 0xfeed_beef,
+            })),
+            MeshFrame::GmJoin(GmJoinFrame::Refused {
+                from: HostSlot(1),
+                id: GmJoinId(7),
+                reason: GmJoinRefusal::DigestMismatch {
+                    expected: 1,
+                    restored: 2,
+                },
+            }),
+        ];
+        for frame in frames {
+            let text = super::encode_mesh_frame(&frame).expect("encodes");
+            assert!(text.contains("\"m\":10"), "the revision travels: {text}");
+            assert!(text.contains("\"t\":\"gm-join\""), "{text}");
             assert_eq!(super::decode_mesh_frame(&text), Some(frame));
         }
     }

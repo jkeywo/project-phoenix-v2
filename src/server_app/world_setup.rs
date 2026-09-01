@@ -419,6 +419,7 @@ pub(crate) fn spawn_game_start_entities(
     mut has_spawned: Local<bool>,
     id_mint: Option<Res<crate::world_id::WorldIdMint>>,
     roster: Option<Res<crate::lockstep::FleetRoster>>,
+    gm_join_bootstrap: Option<Res<crate::gm_join::GmJoinBootstrap>>,
     fleet_session: Option<Res<crate::lockstep::FleetLockstep>>,
     resume_game_start_uuids: Option<Res<ResumeGameStartEntityUuids>>,
 ) {
@@ -438,7 +439,14 @@ pub(crate) fn spawn_game_start_entities(
     // the world's GameStart `ship` rows in slot order. An app with no roster
     // resource at all (a bare fixture) behaves as a fleet of one.
     let solo_roster = crate::lockstep::FleetRoster::default();
-    let roster = roster.as_deref().unwrap_or(&solo_roster);
+    let roster = roster
+        .as_deref()
+        .or_else(|| {
+            gm_join_bootstrap
+                .as_deref()
+                .map(|bootstrap| bootstrap.topology())
+        })
+        .unwrap_or(&solo_roster);
     let mut player_ships_spawned = 0usize;
     let mut game_start_entity_uuids = Vec::new();
     let named_positions = crate::world::config::build_named_entity_positions(mc);

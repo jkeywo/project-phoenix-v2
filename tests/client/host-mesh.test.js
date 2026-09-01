@@ -41,6 +41,8 @@ import {
   isHostFrame,
   openFleet,
   admitHost,
+  decideFirstTimeGmJoin,
+  commitFirstTimeGmJoin,
   setAdmission,
   freezeFleet,
   updateSlot,
@@ -64,6 +66,10 @@ import {
   startPolicyFrame,
   startForceFrame,
   forceResultFrame,
+  gmJoinRequestFrame,
+  gmJoinDecisionFrame,
+  gmJoinStatusFrame,
+  gmJoinPendingFrame,
   fleetPanelViewModel,
 } from '../../gui/host-mesh.js';
 import {
@@ -94,6 +100,12 @@ function withMembers(fleet, n) {
 
 describe('the envelope', () => {
   it('round-trips every frame this revision speaks', () => {
+    const joinRequest = {
+      id: 7,
+      candidate: {
+        id: 'gm-2', meshSlot: 'slot-3', name: 'Guest GM', credential: 'private-capability',
+      },
+    };
     const frames = [
       helloFrame({ ship: { template_path: 'a.toml' }, name: 'Two' }),
       welcomeFrame('slot-2', rosterOf(fleetOf())),
@@ -107,6 +119,10 @@ describe('the envelope', () => {
       forceResultFrame({
         status: 'refused', operator_id: 'gm-1', reason: 'validation-failed', grant_id: null,
       }),
+      gmJoinRequestFrame(joinRequest),
+      gmJoinDecisionFrame(7, true),
+      gmJoinStatusFrame(joinRequest, 'accepted'),
+      gmJoinPendingFrame(joinRequest, rosterOf(fleetOf())),
     ];
     for (const frame of frames) {
       expect(HOST_FRAME_TYPES).toContain(frame.t);
@@ -216,7 +232,7 @@ describe('the envelope', () => {
     // silently fails to agree a tick; refusing an unrecognised `m` is what
     // makes that fail loudly, and this pair of pins is what catches a
     // one-sided bump.
-    expect(HOST_MESH_PROTOCOL).toBe(8);
+    expect(HOST_MESH_PROTOCOL).toBe(10);
     const rust = readFileSync(
       path.join(path.dirname(fileURLToPath(import.meta.url)), '../../src/lockstep/frame.rs'),
       'utf8',
@@ -424,6 +440,41 @@ describe('privileged GM host role (issue #1289)', () => {
     expect(rebound).toEqual({ ok: false, reason: REASON_RECOVERY_ONLY });
     expect(frozen.gms).toHaveLength(1);
     expect(frozen.gms[0]).toMatchObject({ connected: false, peer: null });
+  });
+
+  it('keeps a first-time mid-session GM private until matching-digest commit', () => {
+    const frozen = freezeFleet(fleetOf({
+      credentialFactory: credentials('join-secret-a', 'join-secret-b'),
+    }));
+    const publicBefore = rosterOf(frozen);
+
+    const rejectedRequest = admitHost(frozen, {
+      peer: 'candidate-a', role: HOST_ROLE_GM, name: 'A',
+    });
+    expect(rejectedRequest).toMatchObject({ ok: true, pending: true, operatorId: 'gm-1' });
+    expect(rosterOf(rejectedRequest.fleet)).toEqual(publicBefore);
+    const rejected = decideFirstTimeGmJoin(
+      rejectedRequest.fleet, rejectedRequest.request.id, false, 'slot-1',
+    );
+    expect(rejected).toMatchObject({ ok: true, accepted: false });
+    expect(rosterOf(rejected.fleet)).toEqual(publicBefore);
+
+    const requested = admitHost(rejected.fleet, {
+      peer: 'candidate-b', role: HOST_ROLE_GM, name: 'B',
+    });
+    const accepted = decideFirstTimeGmJoin(
+      requested.fleet, requested.request.id, true, 'slot-1',
+    );
+    expect(accepted).toMatchObject({ ok: true, accepted: true });
+    expect(rosterOf(accepted.fleet)).toEqual(publicBefore);
+    expect(accepted.fleet.pendingGmJoin.status).toBe('accepted');
+
+    const committed = commitFirstTimeGmJoin(accepted.fleet, requested.request.id);
+    expect(committed.ok).toBe(true);
+    expect(rosterOf(committed.fleet).gms).toEqual([
+      { id: 'gm-2', name: 'B', connected: true, ready: false },
+    ]);
+    expect(rosterOf(committed.fleet).participants).toContain('slot-3');
   });
 
   it('puts role and reconnect capability only in the privileged host envelope', () => {

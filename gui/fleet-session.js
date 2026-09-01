@@ -79,14 +79,22 @@ import {
   HOST_FRAME_HELLO,
   HOST_FRAME_REFUSED,
   HOST_FRAME_ROSTER,
+  HOST_FRAME_SNAPSHOT,
   HOST_FRAME_SLOT,
   HOST_FRAME_START_FORCE,
   HOST_FRAME_START_POLICY,
   HOST_FRAME_START_STATE,
   HOST_FRAME_FORCE_RESULT,
+  HOST_FRAME_GM_JOIN,
+  HOST_FRAME_GM_JOIN_DECISION,
+  HOST_FRAME_GM_JOIN_PENDING,
+  HOST_FRAME_GM_JOIN_REQUEST,
+  HOST_FRAME_GM_JOIN_STATUS,
+  HOST_FRAME_HOST_LOSS,
   HOST_FRAME_WELCOME,
   HOST_ROLE_GM,
   HOST_ROLE_SHIP,
+  REASON_GM_JOIN_REFUSED,
   admissionFrame,
   adjudicateForceStart,
   admitHost,
@@ -98,12 +106,20 @@ import {
   freezeFleet,
   forceResultFrame,
   gmForPeer,
+  gmJoinDecisionFrame,
+  gmJoinPendingFrame,
+  gmJoinRequestFrame,
+  gmJoinStatusFrame,
   grantFleetStart,
   helloFrame,
   hostFrame,
   hostSlotOrdinal,
   isSimulationFrame,
   openFleet,
+  commitFirstTimeGmJoin,
+  decideFirstTimeGmJoin,
+  refuseFirstTimeGmJoin,
+  provisionalGmJoinRoster,
   refusedFrame,
   rosterFrame,
   rosterOf,
@@ -156,6 +172,15 @@ const simulationRosterRefusal = (value) => {
   if (typeof value === 'string' && value.length > 0) return value;
   return null;
 };
+
+const rawRequestOf = (request) => ({
+  id: request.id,
+  candidate: {
+    operator_id: request.candidate.id,
+    host: hostSlotOrdinal(request.candidate.meshSlot),
+    name: request.candidate.name || '',
+  },
+});
 
 /**
  * Whether a simulation frame's declared origin agrees with the slot the delivering
@@ -222,6 +247,8 @@ function defaultAuthenticateFrame(raw, authSlot) {
  * @param {(raw:string, authSlot:number)=>boolean} [opts.authenticateFrame]
  *   whether a frame's declared origin matches the connection it arrived on; the
  *   default reads `window.wasm_mesh_frame_from`. Injectable for tests.
+ * @param {(id:number,reason:string)=>boolean} [opts.onRefuseGmJoin] owner-side
+ *   terminal sequencing when an accepted candidate transport disappears.
  * @param {(reason:string, detail?:string)=>void} [opts.onError]
  * @param {(msg:string)=>void} [opts.onLog]
  */
@@ -244,6 +271,10 @@ export function createFleetOwner(opts) {
     onStartPolicy = () => {},
     onStartGrant = () => {},
     onForceResult = () => {},
+    onGmJoinRequest = () => {},
+    onGmJoinStatus = () => {},
+    onBeginGmJoin = () => false,
+    onRefuseGmJoin = () => false,
     onSimulationFrame = () => {},
     onHostLost = () => {},
     onSlotClaimed = () => {},
@@ -264,6 +295,8 @@ export function createFleetOwner(opts) {
   });
   /** rendezvous peer id → the admitted connection adapter. */
   const links = new Map();
+  /** Candidate sockets reserved privately until Rust proves their digest. */
+  const pendingLinks = new Map();
   /**
    * rendezvous peer id → the fleet slot ordinal that connection was ADMITTED as
    * (issue #1120). This is the transport-authenticated identity of a member: a
@@ -391,6 +424,62 @@ export function createFleetOwner(opts) {
     onForceResult(result);
   };
 
+  const publishGmJoinRequest = (request) => {
+    const raw = encodeHostFrame(gmJoinRequestFrame(request));
+    for (const conn of links.values()) conn.send(raw);
+    onGmJoinRequest(rawRequestOf(request));
+  };
+
+  const publishGmJoinStatus = (request, status, reason = null) => {
+    const raw = encodeHostFrame(gmJoinStatusFrame(request, status, reason));
+    for (const conn of links.values()) conn.send(raw);
+    const candidate = pendingLinks.get(request.candidate.peer);
+    if (candidate) candidate.send(raw);
+    onGmJoinStatus({ ...rawRequestOf(request), status, reason });
+  };
+
+  const refusePendingJoin = (request, reason) => {
+    const result = refuseFirstTimeGmJoin(fleet, request.id);
+    if (result.ok) fleet = result.fleet;
+    publishGmJoinStatus(result.ok ? result.request : request, 'refused', reason);
+    const conn = pendingLinks.get(request.candidate.peer);
+    if (conn) {
+      conn.send(encodeHostFrame(refusedFrame(reason, { of: HOST_FRAME_GM_JOIN_REQUEST })));
+      setTimeout(() => conn.close(), 250);
+    }
+  };
+
+  const decidePendingJoin = (id, accepted, approvedBy) => {
+    const verdict = decideFirstTimeGmJoin(fleet, id, accepted, approvedBy);
+    if (!verdict.ok) return false;
+    fleet = verdict.fleet;
+    if (!verdict.accepted) {
+      publishGmJoinStatus(verdict.request, 'refused', 'rejected');
+      const conn = pendingLinks.get(verdict.request.candidate.peer);
+      if (conn) {
+        conn.send(encodeHostFrame(refusedFrame(
+          REASON_GM_JOIN_REFUSED,
+          { of: HOST_FRAME_GM_JOIN_REQUEST },
+        )));
+        setTimeout(() => conn.close(), 250);
+      }
+      return true;
+    }
+    const request = verdict.request;
+    const queued = onBeginGmJoin({
+      id: request.id,
+      approvedBy: hostSlotOrdinal(approvedBy),
+      candidateHost: hostSlotOrdinal(request.candidate.meshSlot),
+      operatorId: request.candidate.id,
+    });
+    if (queued === false || typeof queued === 'string') {
+      refusePendingJoin(request, typeof queued === 'string' ? queued : REASON_GM_JOIN_REFUSED);
+      return false;
+    }
+    publishGmJoinStatus(request, 'accepted');
+    return true;
+  };
+
   const forceFor = (operatorId) => {
     const verdict = adjudicateForceStart(fleet, operatorId);
     if (!verdict.ok) return false;
@@ -462,6 +551,16 @@ export function createFleetOwner(opts) {
       // use again would sit rendering an empty fleet panel with no idea why —
       // the same reasoning behind the crew path's refuse-then-close.
       setTimeout(() => conn.close(), 250);
+      return;
+    }
+    if (verdict.pending) {
+      fleet = verdict.fleet;
+      pendingLinks.set(conn.peer, conn);
+      connSlots.set(conn.peer, hostSlotOrdinal(verdict.meshSlot));
+      const provisional = provisionalGmJoinRoster(fleet);
+      conn.send(encodeHostFrame(gmJoinPendingFrame(verdict.request, provisional)));
+      publishGmJoinRequest(verdict.request);
+      onLog(`[fleet] ${verdict.operatorId} is awaiting visible mid-session acceptance`);
       return;
     }
     fleet = verdict.fleet;
@@ -592,6 +691,14 @@ export function createFleetOwner(opts) {
         const frame = decodeHostFrame(raw);
         if (!frame) return;
         if (isSimulationFrame(frame)) {
+          const pendingCandidate = pendingLinks.has(conn.peer);
+          // Before digest proof the reserved socket has exactly one simulation
+          // utterance: Rust's typed `Restored` join proof. It cannot publish
+          // ticks, actions or snapshots as though it were already in the wait-set.
+          if (pendingCandidate && frame.t !== HOST_FRAME_GM_JOIN) {
+            onLog(`[fleet] dropping pre-admission ${frame.t} from ${conn.peer}`);
+            return;
+          }
           // The slot this connection was authenticated as at join (issue #1120).
           const authSlot = connSlots.get(conn.peer);
           // An UNBOUND connection — one that cleared the transport compatibility
@@ -639,11 +746,36 @@ export function createFleetOwner(opts) {
         else if (frame.t === HOST_FRAME_SLOT) onSlot(conn, frame.d);
         else if (frame.t === HOST_FRAME_START_STATE) onStartState(conn, frame.d);
         else if (frame.t === HOST_FRAME_START_FORCE) onStartForce(conn);
+        else if (frame.t === HOST_FRAME_GM_JOIN_DECISION && links.has(conn.peer)) {
+          const approvedBy = connSlots.get(conn.peer);
+          if (approvedBy != null) {
+            decidePendingJoin(frame.d.id, !!frame.d.accepted, `slot-${approvedBy}`);
+          }
+        }
         // Everything else is owner-to-member and is noise arriving upstream.
       });
       conn.on('close', () => {
         const technicalSlot = connSlots.get(conn.peer);
         connSlots.delete(conn.peer);
+        if (pendingLinks.delete(conn.peer)) {
+          const pending = fleet.pendingGmJoin;
+          if (pending && pending.candidate.peer === conn.peer) {
+            if (pending.status === 'accepted'
+                && onRefuseGmJoin(pending.id, 'candidate-disconnected') !== false) {
+              // Rust now owns the terminal answer. Keep the private reservation
+              // until its fleet-wide Refused frame is projected; clearing it
+              // here was the old split-brain/deadlock bug.
+              publishGmJoinStatus(pending, 'refusing', 'candidate-disconnected');
+            } else {
+              const result = refuseFirstTimeGmJoin(fleet, pending.id);
+              if (result.ok) {
+                fleet = result.fleet;
+                publishGmJoinStatus(result.request, 'refused', 'candidate-disconnected');
+              }
+            }
+          }
+          return;
+        }
         if (!links.delete(conn.peer)) return;
         // Before the mission starts, a host closing is just a lobby slot going
         // dark. Once frozen it is a HOST LOSS (issue #1119): the simulation must
@@ -687,7 +819,56 @@ export function createFleetOwner(opts) {
     get role() { return ownerGm ? HOST_ROLE_GM : HOST_ROLE_SHIP; },
     get operatorId() { return ownerGm ? ownerGm.id : null; },
     get reconnectCredential() { return ownerGm ? ownerGm.credential : null; },
+    get canDecideGmJoin() { return true; },
     roster: () => rosterOf(fleet),
+    pendingGmJoin: () => fleet.pendingGmJoin ? rawRequestOf(fleet.pendingGmJoin) : null,
+
+    /** Any existing local host/GM is a peer and may visibly answer. */
+    decideGmJoin(id, accepted) {
+      return decidePendingJoin(id, !!accepted, fleet.owner);
+    },
+
+    /**
+     * Apply Rust's terminal digest verdict to the transport/public roster.
+     * This is deliberately impossible to reach from the earlier Accept path.
+     */
+    completeGmJoin(id, status, reason = null) {
+      const pending = fleet.pendingGmJoin;
+      if (!pending || pending.id !== id) {
+        return status === 'committed'
+          && (fleet.gms || []).some((gm) => gm.joinId === id);
+      }
+      if (status !== 'committed') {
+        refusePendingJoin(pending, reason || REASON_GM_JOIN_REFUSED);
+        return true;
+      }
+      const result = commitFirstTimeGmJoin(fleet, id);
+      if (!result.ok) return false;
+      fleet = result.fleet;
+      const conn = pendingLinks.get(pending.candidate.peer);
+      if (!conn) {
+        // Commit already installed the candidate in every deterministic wait-set.
+        // A transport loss racing the browser projection is therefore an ordinary
+        // typed host loss, never permission to erase only the JS row.
+        onHostLost(hostSlotOrdinal(result.gm.meshSlot));
+        fleet = dropHost(fleet, pending.candidate.peer);
+        publishGmJoinStatus(pending, 'committed');
+        publishRoster();
+        publishPolicy();
+        return true;
+      }
+      pendingLinks.delete(pending.candidate.peer);
+      links.set(pending.candidate.peer, conn);
+      conn.send(encodeHostFrame(welcomeFrame(result.gm.meshSlot, rosterOf(fleet), {
+        role: HOST_ROLE_GM,
+        operatorId: result.gm.id,
+        reconnectCredential: result.gm.credential,
+      })));
+      publishGmJoinStatus(pending, 'committed');
+      publishRoster();
+      publishPolicy();
+      return true;
+    },
 
     /**
      * The operator's lever. Both halves matter: the SERVICE stops resolving
@@ -759,6 +940,12 @@ export function createFleetOwner(opts) {
      */
     broadcast(raw) {
       for (const conn of links.values()) conn.send(raw);
+      const frame = decodeHostFrame(raw);
+      if (frame && (frame.t === HOST_FRAME_GM_JOIN
+          || frame.t === HOST_FRAME_SNAPSHOT
+          || frame.t === HOST_FRAME_HOST_LOSS)) {
+        for (const conn of pendingLinks.values()) conn.send(raw);
+      }
     },
 
     /** The owner's own ship/readiness, which follow the same freeze. */
@@ -811,6 +998,8 @@ export function createFleetOwner(opts) {
       simulationRosterPromise = null;
       for (const conn of links.values()) conn.close();
       links.clear();
+      for (const conn of pendingLinks.values()) conn.close();
+      pendingLinks.clear();
       host.close();
     },
   };
@@ -868,10 +1057,14 @@ export function createFleetMember(opts) {
     reconnectCredential = null,
     onRoster = () => {},
     onSimulationRoster = () => {},
+    onGmJoinBootstrap = () => false,
     onWelcome = () => {},
     onIdentity = () => {},
     onStartPolicy = () => {},
     onForceResult = () => {},
+    onGmJoinRequest = () => {},
+    onGmJoinStatus = () => {},
+    onGmJoinPending = () => {},
     onSimulationFrame = () => {},
     onError = () => {},
     onRefusedSlot = () => {},
@@ -885,6 +1078,7 @@ export function createFleetMember(opts) {
   let acceptedRole = role === HOST_ROLE_GM ? HOST_ROLE_GM : HOST_ROLE_SHIP;
   let operatorId = null;
   let privateReconnectCredential = reconnectCredential;
+  let gmJoinCandidate = false;
   let announced = { ship, name };
   let localCrewReadiness = { connected: 0, ready: 0 };
   let localGmReady = false;
@@ -952,6 +1146,29 @@ export function createFleetMember(opts) {
       simulationRosterPromise = Promise.resolve(result).then(
         settleSimulationRoster,
         () => refuseSimulationRoster('callback-rejected'),
+      );
+      return simulationRosterPromise;
+    }
+    return settleSimulationRoster(result);
+  };
+
+  const deliverGmJoinBootstrap = (id, candidate) => {
+    if (simulationRosterState === 'accepted') return true;
+    if (simulationRosterState === 'delivering') return simulationRosterPromise;
+    if (simulationRosterState !== 'pending' || !mine) return false;
+    const simulationRoster = simulationRosterOf(candidate, mine);
+    if (!simulationRoster) return refuseSimulationRoster('invalid-gm-bootstrap');
+    simulationRosterState = 'delivering';
+    let result;
+    try {
+      result = onGmJoinBootstrap(id, simulationRoster);
+    } catch (_error) {
+      return refuseSimulationRoster('gm-bootstrap-callback-threw');
+    }
+    if (isThenable(result)) {
+      simulationRosterPromise = Promise.resolve(result).then(
+        settleSimulationRoster,
+        () => refuseSimulationRoster('gm-bootstrap-callback-rejected'),
       );
       return simulationRosterPromise;
     }
@@ -1038,6 +1255,7 @@ export function createFleetMember(opts) {
         return;
       }
       if (decoded.t === HOST_FRAME_WELCOME) {
+        gmJoinCandidate = false;
         mine = decoded.d.slot || null;
         roster = decoded.d.roster || null;
         acceptedRole = decoded.d.role === HOST_ROLE_GM ? HOST_ROLE_GM : HOST_ROLE_SHIP;
@@ -1060,6 +1278,40 @@ export function createFleetMember(opts) {
         // still settling. Admission binds this connection first; now flush
         // the cached role-appropriate state in one authenticated frame.
         sendLocalStartState();
+        return;
+      }
+      if (decoded.t === HOST_FRAME_GM_JOIN_PENDING) {
+        const request = decoded.d.request;
+        const candidateRoster = decoded.d.roster;
+        if (!request || !candidateRoster || acceptedRole !== HOST_ROLE_GM) return;
+        mine = decoded.d.slot || null;
+        gmJoinCandidate = true;
+        roster = candidateRoster;
+        operatorId = decoded.d.operator_id || null;
+        privateReconnectCredential = decoded.d.reconnect_credential || null;
+        const identity = {
+          role: HOST_ROLE_GM,
+          operatorId,
+          reconnectCredential: privateReconnectCredential,
+        };
+        onIdentity(identity);
+        onGmJoinPending({ request, identity });
+        onGmJoinStatus({ ...request, status: 'awaiting-decision', reason: null });
+        deliverGmJoinBootstrap(request.id, candidateRoster);
+        return;
+      }
+      if (decoded.t === HOST_FRAME_GM_JOIN_REQUEST) {
+        if (decoded.d.request) onGmJoinRequest(decoded.d.request);
+        return;
+      }
+      if (decoded.t === HOST_FRAME_GM_JOIN_STATUS) {
+        if (decoded.d.request) {
+          onGmJoinStatus({
+            ...decoded.d.request,
+            status: decoded.d.status || 'pending',
+            reason: decoded.d.reason || null,
+          });
+        }
         return;
       }
       if (decoded.t === HOST_FRAME_ROSTER) {
@@ -1122,8 +1374,21 @@ export function createFleetMember(opts) {
     get role() { return acceptedRole; },
     get operatorId() { return operatorId; },
     get reconnectCredential() { return privateReconnectCredential; },
+    get canDecideGmJoin() { return !gmJoinCandidate && !!mine; },
     get code() { return joiner.failed ? null : { suffix: joiner.suffix, full: joiner.full }; },
     roster: () => roster,
+
+    /** Existing admitted peers may answer the visible request; candidates may not. */
+    decideGmJoin(id, accepted) {
+      if (closed || gmJoinCandidate || !mine || !roster) return false;
+      const publicAdmitted = Array.isArray(roster.participants)
+        && roster.participants.includes(mine)
+        && !(acceptedRole === HOST_ROLE_GM
+          && !Array.isArray(roster.gms));
+      if (!publicAdmitted) return false;
+      joiner.sendFrame(encodeHostFrame(gmJoinDecisionFrame(id, !!accepted)));
+      return true;
+    },
 
     /**
      * Say something to the fleet, verbatim (issue #1116).

@@ -145,6 +145,20 @@ impl LockstepSession {
         self.ready_through.is_empty()
     }
 
+    /// Add a digest-proven mid-session participant at a paused boundary.
+    ///
+    /// The candidate restored this exact `activation_tick`; seeding its
+    /// watermark through `tick + delay` is the same bootstrap guarantee
+    /// [`Self::new_at`] gives every original peer.  Exact retries are inert.
+    pub fn admit_peer(&mut self, peer: HostSlot, activation_tick: u64) {
+        if peer == self.local || self.departed.contains(&peer) {
+            return;
+        }
+        self.ready_through
+            .entry(peer)
+            .or_insert_with(|| activation_tick.saturating_add(self.delay));
+    }
+
     /// Record a peer's watermark.
     ///
     /// Monotonic by construction: a frame that arrives out of order, or a

@@ -178,6 +178,26 @@ struct PendingFleetJoin {
 }
 
 #[cfg(target_arch = "wasm32")]
+struct PendingGmJoin {
+    id: crate::gm_join::GmJoinId,
+    approved_by: crate::command_admission::HostSlot,
+    candidate: crate::gm_join::GmJoinCandidate,
+    scenario: String,
+}
+
+#[cfg(target_arch = "wasm32")]
+struct PendingGmJoinBootstrap {
+    id: crate::gm_join::GmJoinId,
+    provisional: crate::lockstep::FleetRoster,
+}
+
+#[cfg(target_arch = "wasm32")]
+struct PendingGmJoinRefusal {
+    id: crate::gm_join::GmJoinId,
+    reason: crate::gm_join::GmJoinRefusal,
+}
+
+#[cfg(target_arch = "wasm32")]
 enum PendingFleetAdoption {
     Join(PendingFleetJoin),
     Leave { generation: u64 },
@@ -642,6 +662,14 @@ thread_local! {
     static PENDING_GM_ACTIONS: RefCell<VecDeque<crate::gm_action::GmActionRequest>> =
         const { RefCell::new(VecDeque::new()) };
 
+    /// Visible owner-page Accept decisions waiting for the deterministic join
+    /// sequencer. Kept separate from GM actions: a ship host may accept too.
+    static PENDING_GM_JOINS: RefCell<VecDeque<PendingGmJoin>> =
+        const { RefCell::new(VecDeque::new()) };
+    /// Read-only progress mirror polled by every server-page surface.
+    static GM_JOIN_STATUS: RefCell<crate::gm_join::GmJoinProgress> =
+        const { RefCell::new(crate::gm_join::GmJoinProgress::Idle) };
+
     /// Explicit production GM-page boot request. This is set by the page before
     /// `wasm_init` and takes precedence over the WebDriver probe.
     static GM_HOST_BOOT_REQUESTED: RefCell<bool> = const { RefCell::new(false) };
@@ -922,6 +950,22 @@ thread_local! {
     /// from outside a system (issue #900). Written by `publish_god_mode`. Same
     /// pattern as `SIM_TICK_COUNT`/`HAS_NAVIGATION_WAYPOINT`.
     static GOD_MODE_MIRROR: RefCell<bool> = const { RefCell::new(false) };
+}
+
+// Keep the #1293 edge queues separate from the long-lived bridge macro above.
+// Besides making their distinct private/terminal roles visible, this prevents
+// the wasm target's `thread_local!` expansion from exceeding Rust's default
+// macro recursion depth as new bridge seams are added.
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    /// Candidate-private topology bootstrap. This deliberately does not enter
+    /// `PENDING_FLEET_ADOPTIONS`: it may prepare entities for restore, but only
+    /// the typed Commit may install the authoritative roster/wait-set.
+    static PENDING_GM_JOIN_BOOTSTRAPS: RefCell<VecDeque<PendingGmJoinBootstrap>> =
+        const { RefCell::new(VecDeque::new()) };
+    /// Owner-sequenced terminal transport losses after visible acceptance.
+    static PENDING_GM_JOIN_REFUSALS: RefCell<VecDeque<PendingGmJoinRefusal>> =
+        const { RefCell::new(VecDeque::new()) };
 }
 
 /// Resolve and cache the private browser Store namespace.
@@ -1465,7 +1509,8 @@ pub fn wasm_init() {
         // local GM ingress then joins that order before the reducer and before
         // any fixed step. This is what makes an apply-at-now standalone Pause
         // incapable of leaking one forbidden simulation tick.
-        drain_gm_action_input
+        (drain_gm_join_input, drain_gm_action_input)
+            .chain()
             .after(crate::lockstep::apply_mesh_inbox)
             .before(crate::gm_action::apply_due_actions)
             .in_set(crate::lockstep::MeshSet),
@@ -1492,6 +1537,7 @@ pub fn wasm_init() {
             publish_god_mode,
             publish_instagib,
             publish_pause_mirror,
+            publish_gm_join_status,
             // The snapshot seam (issues #862 and #865). FixedLast already
             // captured every due run at its exact logical tick; PostUpdate
             // performs only peer-local storage/export and fresh-app restore,
@@ -1784,6 +1830,106 @@ pub fn wasm_submit_gm_action(request_json: &str) -> bool {
     })
 }
 
+/// Queue one visible first-time GM acceptance for owner sequencing (#1293).
+/// Rejection is transport-only and never calls this export, which is why a
+/// rejected request cannot touch the live pause or roster resources.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_begin_gm_join(
+    join_id: u64,
+    approved_by: u32,
+    candidate_host: u32,
+    operator_id: &str,
+    scenario: &str,
+) -> bool {
+    const LIMIT: usize = 4;
+    if join_id == 0
+        || approved_by == 0
+        || candidate_host == 0
+        || operator_id.is_empty()
+        || operator_id.chars().count() > crate::gm_roster::MAX_GM_OPERATOR_ID_CHARS
+        || scenario.is_empty()
+        || scenario.len() > 4096
+    {
+        return false;
+    }
+    PENDING_GM_JOINS.with(|pending| {
+        let mut pending = pending.borrow_mut();
+        if pending.len() >= LIMIT {
+            return false;
+        }
+        pending.push_back(PendingGmJoin {
+            id: crate::gm_join::GmJoinId(join_id),
+            approved_by: crate::command_admission::HostSlot(approved_by),
+            candidate: crate::gm_join::GmJoinCandidate {
+                host: crate::command_admission::HostSlot(candidate_host),
+                operator_id: operator_id.to_string(),
+            },
+            scenario: scenario.to_string(),
+        });
+        true
+    })
+}
+
+/// Prepare a first-time candidate's world topology without admitting it to the
+/// authoritative roster or lockstep wait-set. Commit is the only code path
+/// which installs those resources.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_prepare_gm_join_candidate(join_id: u64, roster_json: &str) -> bool {
+    const LIMIT: usize = 2;
+    if join_id == 0 {
+        return false;
+    }
+    let Some((provisional, _)) = crate::core::codec::decode_fleet_roster(roster_json) else {
+        return false;
+    };
+    if crate::gm_join::GmJoinBootstrap::from_provisional(provisional.clone()).is_err() {
+        return false;
+    }
+    PENDING_GM_JOIN_BOOTSTRAPS.with(|pending| {
+        let mut pending = pending.borrow_mut();
+        if pending.len() >= LIMIT {
+            return false;
+        }
+        pending.push_back(PendingGmJoinBootstrap {
+            id: crate::gm_join::GmJoinId(join_id),
+            provisional,
+        });
+        true
+    })
+}
+
+/// Queue the owner's terminal answer when an accepted candidate disconnects.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_refuse_gm_join(join_id: u64, reason: &str) -> bool {
+    const LIMIT: usize = 4;
+    if join_id == 0 || reason != "candidate-disconnected" {
+        return false;
+    }
+    PENDING_GM_JOIN_REFUSALS.with(|pending| {
+        let mut pending = pending.borrow_mut();
+        if pending.len() >= LIMIT {
+            return false;
+        }
+        pending.push_back(PendingGmJoinRefusal {
+            id: crate::gm_join::GmJoinId(join_id),
+            reason: crate::gm_join::GmJoinRefusal::CandidateDisconnected,
+        });
+        true
+    })
+}
+
+/// Read-only absolute join progress for transport/public roster commit.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_gm_join_status() -> String {
+    GM_JOIN_STATUS.with(|status| {
+        crate::core::codec::encode_gm_join_progress(&status.borrow()).unwrap_or_default()
+    })
+}
+
 /// Enable or disable browser-mesh ownership of collective lobby start.
 /// Enabling fails closed until [`wasm_set_fleet_start_validation`] supplies the
 /// current local content/peer validation result.
@@ -1904,6 +2050,26 @@ fn clear_fleet_bridge_latches() {
 
 #[cfg(target_arch = "wasm32")]
 fn drain_mesh_inbound(world: &mut World) {
+    let bootstraps = PENDING_GM_JOIN_BOOTSTRAPS.with(|pending| {
+        let mut pending = pending.borrow_mut();
+        pending.drain(..).collect::<Vec<_>>()
+    });
+    for pending in bootstraps {
+        if let Err(reason) =
+            crate::gm_join::prepare_candidate_bootstrap(world, pending.provisional.clone())
+        {
+            world
+                .resource_mut::<crate::gm_join::GmJoinRuntime>()
+                .refuse(pending.id, reason.clone());
+            world.resource_mut::<crate::lockstep::MeshOutbox>().push(
+                crate::lockstep::MeshFrame::GmJoin(crate::gm_join::GmJoinFrame::Refused {
+                    from: pending.provisional.local(),
+                    id: pending.id,
+                    reason,
+                }),
+            );
+        }
+    }
     let adoptions = PENDING_FLEET_ADOPTIONS.with(|slot| std::mem::take(&mut *slot.borrow_mut()));
     for adoption in adoptions {
         let (generation, accepted, refusal) = match adoption {
@@ -2099,6 +2265,41 @@ fn drain_gm_action_input(world: &mut World) {
                 ));
         }
     }
+}
+
+/// Turn the owner page's visible Accept into one deterministic pause agreement.
+#[cfg(target_arch = "wasm32")]
+fn drain_gm_join_input(world: &mut World) {
+    let refusals = PENDING_GM_JOIN_REFUSALS.with(|pending| {
+        let mut pending = pending.borrow_mut();
+        pending.drain(..).collect::<Vec<_>>()
+    });
+    for refusal in refusals {
+        let _ = crate::gm_join::refuse_join(world, refusal.id, refusal.reason);
+    }
+    let requests = PENDING_GM_JOINS.with(|pending| {
+        let mut pending = pending.borrow_mut();
+        pending.drain(..).collect::<Vec<_>>()
+    });
+    for request in requests {
+        let id = request.id;
+        if let Err(reason) = crate::gm_join::begin_join(
+            world,
+            id,
+            request.approved_by,
+            request.candidate,
+            request.scenario,
+        ) {
+            world
+                .resource_mut::<crate::gm_join::GmJoinRuntime>()
+                .refuse(id, reason);
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn publish_gm_join_status(runtime: Res<crate::gm_join::GmJoinRuntime>) {
+    GM_JOIN_STATUS.with(|status| *status.borrow_mut() = runtime.progress().clone());
 }
 
 /// Drain the browser mesh's edge-only lobby state into typed Bevy resources.

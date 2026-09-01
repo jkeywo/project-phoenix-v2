@@ -93,6 +93,7 @@ pub mod effect_queue;
 pub mod entities;
 /// Minimal peer-local authoritative projection for the rendererless GM page.
 pub mod gm_action;
+pub mod gm_join;
 pub mod gm_projection;
 /// Crew-public Game Master identities (issue #1289), kept separate from crew
 /// sessions and the player-ship fleet roster by construction.

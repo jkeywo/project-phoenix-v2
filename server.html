@@ -1738,6 +1738,19 @@
 
   <div id="server-shell">
     <div id="viewscreen-shell">
+      <!-- Visible on every host-class page during a first-time mid-session GM
+           admission. The candidate is not in the public roster until the
+           digest-proven Commit; this surface is the explicit human gate. -->
+      <section id="gm-join-controls" hidden role="region" aria-labelledby="gm-join-heading"
+        style="position:absolute;right:18px;top:18px;z-index:110;max-width:min(28rem,calc(100vw - 36px));padding:14px;background:rgba(4,12,22,.94);border:1px solid #6ea4c8;color:#d8edff;font-family:'Chakra Petch',monospace;box-shadow:0 8px 30px rgba(0,0,0,.55)">
+        <h2 id="gm-join-heading" data-i18n="server.gm.join.heading"></h2>
+        <p id="gm-join-state" role="status" aria-live="polite" aria-atomic="true"></p>
+        <p id="gm-join-pause-state" role="status" aria-live="polite" aria-atomic="true"></p>
+        <div id="gm-join-actions">
+          <button id="gm-join-accept" type="button" data-i18n="server.gm.join.accept"></button>
+          <button id="gm-join-reject" type="button" data-i18n="server.gm.join.reject"></button>
+        </div>
+      </section>
       <!-- Loading spinner shown until WASM is ready -->
       <div id="wasm-spinner">
         <div class="spinner-ring"></div>
@@ -3058,6 +3071,10 @@
      * deliberately does.
      */
     let fleetNotice = null;
+    /** Visible first-time GM request and its absolute transfer progress (#1293). */
+    let fleetGmJoinRequest = null;
+    let fleetGmJoinProgress = null;
+    let fleetGmJoinCompletedId = null;
     /** ICE servers, latched by initHostTransport so a fleet can reuse them. */
     let fleetIceServers = [];
     /** Privileged host-mesh role chosen before open/join. Phones never set it. */
@@ -3139,6 +3156,142 @@
       const gms = fleetRoster && Array.isArray(fleetRoster.gms) ? fleetRoster.gms : [];
       const row = gms.find(gm => gm && gm.id === operatorId);
       return (row && (row.name || row.id)) || operatorId || '';
+    }
+
+    function gmJoinCandidateName() {
+      const candidate = fleetGmJoinRequest && fleetGmJoinRequest.candidate;
+      return (candidate && (candidate.name || candidate.operator_id)) || '';
+    }
+
+    function paintGmJoinControls() {
+      const panel = document.getElementById('gm-join-controls');
+      const state = document.getElementById('gm-join-state');
+      const pause = document.getElementById('gm-join-pause-state');
+      const accept = document.getElementById('gm-join-accept');
+      const reject = document.getElementById('gm-join-reject');
+      if (!panel || !state || !pause || !accept || !reject) return;
+      const progress = fleetGmJoinProgress;
+      const status = progress && progress.status
+        ? progress.status
+        : (fleetGmJoinRequest ? 'awaiting-decision' : 'idle');
+      panel.hidden = status === 'idle';
+      if (panel.hidden) return;
+      const name = gmJoinCandidateName();
+      const statusIds = {
+        'awaiting-decision': 'server.gm.join.awaiting_decision',
+        accepted: 'server.gm.join.accepted',
+        'awaiting-pause': 'server.gm.join.awaiting_pause',
+        transferring: 'server.gm.join.transferring',
+        committed: 'server.gm.join.committed',
+        refused: 'server.gm.join.refused',
+      };
+      const reason = progress && progress.reason != null
+        ? (typeof progress.reason === 'string'
+          ? progress.reason
+          : JSON.stringify(progress.reason))
+        : '';
+      state.textContent = t(statusIds[status] || 'server.gm.join.accepted', { name, reason });
+      let paused = false;
+      try {
+        paused = typeof window.wasm_is_paused === 'function' && window.wasm_is_paused();
+      } catch (_) {}
+      pause.textContent = t(paused
+        ? 'server.gm.join.pause_active'
+        : 'server.gm.join.pause_inactive');
+      const canAnswer = status === 'awaiting-decision'
+        && !!fleetHandle && !!fleetHandle.canDecideGmJoin
+        && typeof fleetHandle.decideGmJoin === 'function';
+      accept.hidden = !canAnswer;
+      reject.hidden = !canAnswer;
+      accept.disabled = !canAnswer;
+      reject.disabled = !canAnswer;
+    }
+
+    function receiveFleetGmJoinRequest(request) {
+      if (!request || !Number.isSafeInteger(request.id)) return;
+      fleetGmJoinRequest = request;
+      fleetGmJoinProgress = { ...request, status: 'awaiting-decision', reason: null };
+      paintGmJoinControls();
+    }
+
+    function receiveFleetGmJoinStatus(progress) {
+      if (!progress || !Number.isSafeInteger(progress.id)) return;
+      if (progress.candidate) fleetGmJoinRequest = {
+        id: progress.id, candidate: progress.candidate,
+      };
+      fleetGmJoinProgress = progress;
+      paintGmJoinControls();
+    }
+
+    function beginFleetGmJoin(request) {
+      if (!request || typeof window.wasm_begin_gm_join !== 'function') return false;
+      const scenario = typeof selectedScenario === 'string' ? selectedScenario : '';
+      try {
+        return window.wasm_begin_gm_join(
+          request.id,
+          request.approvedBy,
+          request.candidateHost,
+          request.operatorId,
+          scenario,
+        ) !== false;
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function prepareFleetGmJoinCandidate(id, roster) {
+      if (!Number.isSafeInteger(id)
+          || !roster
+          || typeof window.wasm_prepare_gm_join_candidate !== 'function') return false;
+      let encoded;
+      try { encoded = JSON.stringify(roster); } catch (_) { return false; }
+      try { return window.wasm_prepare_gm_join_candidate(id, encoded) !== false; }
+      catch (_) { return false; }
+    }
+
+    function refuseFleetGmJoin(id, reason) {
+      if (!Number.isSafeInteger(id) || typeof window.wasm_refuse_gm_join !== 'function') {
+        return false;
+      }
+      try { return window.wasm_refuse_gm_join(id, reason) !== false; }
+      catch (_) { return false; }
+    }
+
+    function pollFleetGmJoin() {
+      if (!fleetHandle || typeof window.wasm_gm_join_status !== 'function') {
+        paintGmJoinControls();
+        return;
+      }
+      let progress;
+      try { progress = JSON.parse(window.wasm_gm_join_status()); } catch (_) { return; }
+      if (!progress || progress.status === 'idle') {
+        paintGmJoinControls();
+        return;
+      }
+      const approval = progress.approval || null;
+      const commit = progress.commit || null;
+      const id = (approval && approval.id) || (commit && commit.id) || progress.id;
+      const candidate = (approval && approval.candidate) || (commit && commit.candidate);
+      if (Number.isSafeInteger(id) && candidate && !fleetGmJoinRequest) {
+        fleetGmJoinRequest = {
+          id,
+          candidate: {
+            operator_id: candidate.operator_id,
+            host: candidate.host,
+            name: candidate.operator_id,
+          },
+        };
+      }
+      fleetGmJoinProgress = { ...progress, id };
+      if ((progress.status === 'committed' || progress.status === 'refused')
+          && Number.isSafeInteger(id) && fleetHandle.isOwner
+          && fleetGmJoinCompletedId !== id
+          && typeof fleetHandle.completeGmJoin === 'function') {
+        if (fleetHandle.completeGmJoin(id, progress.status, progress.reason || null)) {
+          fleetGmJoinCompletedId = id;
+        }
+      }
+      paintGmJoinControls();
     }
 
     /** Read-only public operator projection for the pure GM controls module. */
@@ -4186,6 +4339,10 @@
         onStartPolicy: receiveFleetStartPolicy,
         onStartGrant: applyFleetStartGrant,
         onForceResult: receiveFleetForceResult,
+        onGmJoinRequest: receiveFleetGmJoinRequest,
+        onGmJoinStatus: receiveFleetGmJoinStatus,
+        onBeginGmJoin: beginFleetGmJoin,
+        onRefuseGmJoin: refuseFleetGmJoin,
         onSimulationFrame: receiveMeshFrame,
         // A member host dropped mid-mission (issue #1119). Tell the simulation
         // the slot; it agrees the disconnect tick from that host's own watermark
@@ -4269,8 +4426,12 @@
           paintFleetPanel();
         },
         onSimulationRoster: adoptFleetSimulationRoster,
+        onGmJoinBootstrap: prepareFleetGmJoinCandidate,
         onStartPolicy: receiveFleetStartPolicy,
         onForceResult: receiveFleetForceResult,
+        onGmJoinRequest: receiveFleetGmJoinRequest,
+        onGmJoinStatus: receiveFleetGmJoinStatus,
+        onGmJoinPending: ({ request }) => receiveFleetGmJoinRequest(request),
         onSimulationFrame: receiveMeshFrame,
         // The fleet declined a change this host asked for about its own slot.
         // It is still IN the fleet — reporting it is the whole answer, and
@@ -4336,6 +4497,18 @@
       };
     };
 
+    document.getElementById('gm-join-accept')?.addEventListener('click', () => {
+      if (!fleetHandle || !fleetGmJoinRequest
+          || typeof fleetHandle.decideGmJoin !== 'function') return;
+      fleetHandle.decideGmJoin(fleetGmJoinRequest.id, true);
+    });
+
+    document.getElementById('gm-join-reject')?.addEventListener('click', () => {
+      if (!fleetHandle || !fleetGmJoinRequest
+          || typeof fleetHandle.decideGmJoin !== 'function') return;
+      fleetHandle.decideGmJoin(fleetGmJoinRequest.id, false);
+    });
+
     document.getElementById('gm-ready-btn')?.addEventListener('click', () => {
       const gm = localGm();
       if (!gm || !fleetHandle || typeof fleetHandle.setGmReady !== 'function') return;
@@ -4399,8 +4572,14 @@
     function pumpMeshFrames() {
       flushFleetLobbyInputs();
       flushFleetStartGrants();
-      if (pollFleetSimulationRoster()) return;
-      if (!fleetHandle || !window.wasm_take_mesh_frames) return;
+      if (pollFleetSimulationRoster()) {
+        pollFleetGmJoin();
+        return;
+      }
+      if (!fleetHandle || !window.wasm_take_mesh_frames) {
+        pollFleetGmJoin();
+        return;
+      }
       let frames;
       try {
         frames = JSON.parse(window.wasm_take_mesh_frames());
@@ -4411,6 +4590,10 @@
         return;
       }
       for (const frame of frames) fleetHandle.broadcast(JSON.stringify(frame));
+      // A terminal join status can publish the public roster. Poll only after
+      // the Rust-owned Commit frame above left this host, so peers always see
+      // the deterministic proof before the browser projection that follows it.
+      pollFleetGmJoin();
     }
 
     /**
@@ -5836,6 +6019,12 @@ function finishInit() {
   // First typed GM action tracer (#1292). The page supplies the admitted
   // operator and semantic-action correlation; Rust owns admission and result.
   window.wasm_submit_gm_action = wasmBindings.wasm_submit_gm_action;
+  // Visible first-time GM admission (#1293): Accept queues the one pause;
+  // progress releases transport/public roster admission only after digest proof.
+  window.wasm_begin_gm_join = wasmBindings.wasm_begin_gm_join;
+  window.wasm_prepare_gm_join_candidate = wasmBindings.wasm_prepare_gm_join_candidate;
+  window.wasm_refuse_gm_join = wasmBindings.wasm_refuse_gm_join;
+  window.wasm_gm_join_status = wasmBindings.wasm_gm_join_status;
   // Collective lobby start coordination (#1290). The mesh decides one policy;
   // Rust admits the resulting typed, attributed grant on a fixed tick.
   window.wasm_set_fleet_managed_lobby = wasmBindings.wasm_set_fleet_managed_lobby;

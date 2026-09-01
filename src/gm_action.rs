@@ -714,6 +714,7 @@ pub fn apply_due_actions(
     mut paused: ResMut<SimulationPaused>,
     mut virtual_time: Option<ResMut<Time<Virtual>>>,
     mut fixed_time: Option<ResMut<Time<Fixed>>>,
+    mut join_hold: Option<ResMut<crate::gm_join::GmJoinPauseHold>>,
 ) {
     // Outside a fleet, an empty typed lane must not overwrite the ordinary
     // local host pause surface. Replay and restored saves deliberately carry a
@@ -724,7 +725,10 @@ pub fn apply_due_actions(
     }
     let now = tick.as_deref().map_or(0, |tick| tick.0);
     let next = journal.apply_through(now);
-    paused.0 = next.paused;
+    let join_paused = join_hold
+        .as_deref_mut()
+        .is_some_and(|hold| hold.retain_until_explicit_resume(&journal));
+    paused.0 = next.paused || join_paused;
     if let Some(virtual_time) = virtual_time.as_deref_mut() {
         if paused.0 {
             virtual_time.pause();
@@ -803,6 +807,7 @@ pub fn sequence_owner_proposal(
     now: u64,
     ready_through: u64,
     current_paused: bool,
+    technical_join_hold: bool,
 ) -> Result<GmActionGrant, GmActionRefusalReason> {
     proposal.validate()?;
     if let Some(existing) = journal.grant_for(&proposal.operator_id, &proposal.correlation) {
@@ -817,8 +822,12 @@ pub fn sequence_owner_proposal(
         journal.adopt_initial_pause(current_paused);
     }
     let projected_paused = journal.projected_pause();
-    let apply_tick = if projected_paused || (journal.is_empty() && current_paused) {
-        journal.last_apply_tick().unwrap_or(now)
+    let apply_tick = if projected_paused || (current_paused && technical_join_hold) {
+        // A technical join hold can make the live session paused even when the
+        // durable GM prefix last projected Running. Resume must land at this
+        // stopped logical boundary; scheduling it at `ready + 1` would require
+        // the very tick the hold forbids and deadlock forever.
+        journal.last_apply_tick().unwrap_or(now).max(now)
     } else {
         ready_through.saturating_add(1).max(now).max(
             journal
@@ -907,6 +916,9 @@ pub fn submit_local(
     let paused = world
         .get_resource::<SimulationPaused>()
         .is_some_and(|paused| paused.0);
+    let technical_join_hold = world
+        .get_resource::<crate::gm_join::GmJoinPauseHold>()
+        .is_some_and(crate::gm_join::GmJoinPauseHold::active);
     let owner = world.resource::<crate::lockstep::FleetRoster>().owner();
     let proposal = GmActionProposal {
         from: local,
@@ -933,7 +945,15 @@ pub fn submit_local(
         };
     let sequenced = {
         let mut journal = world.resource_mut::<GmActionJournal>();
-        sequence_owner_proposal(&mut journal, &proposal, owner, now, ready_through, paused)
+        sequence_owner_proposal(
+            &mut journal,
+            &proposal,
+            owner,
+            now,
+            ready_through,
+            paused,
+            technical_join_hold,
+        )
     };
     let grant = match sequenced {
         Ok(grant) => grant,
@@ -1012,7 +1032,7 @@ mod tests {
             correlation: GmActionId::new("resume").unwrap(),
             action: GmAction::SetSessionPaused { active: false },
         };
-        let resume = sequence_owner_proposal(&mut canonical, &resume, owner, 20, 20, true)
+        let resume = sequence_owner_proposal(&mut canonical, &resume, owner, 20, 20, true, false)
             .expect("owner sequences resume");
         assert_eq!(resume.apply_tick, 20);
 
@@ -1024,8 +1044,9 @@ mod tests {
             correlation: GmActionId::new("late-pause").unwrap(),
             action: GmAction::SetSessionPaused { active: true },
         };
-        let late_pause = sequence_owner_proposal(&mut canonical, &late_pause, owner, 20, 20, true)
-            .expect("owner sequences late proposal");
+        let late_pause =
+            sequence_owner_proposal(&mut canonical, &late_pause, owner, 20, 20, true, false)
+                .expect("owner sequences late proposal");
         assert_eq!(late_pause.apply_tick, 21);
 
         let mut early_delivery = GmActionJournal::default();
@@ -1041,6 +1062,31 @@ mod tests {
         assert_eq!(early_delivery, batched_delivery);
         assert!(!early_delivery.log_through(20).paused());
         assert!(early_delivery.log_through(21).paused());
+    }
+
+    #[test]
+    fn technical_join_hold_sequences_resume_at_the_stopped_tick() {
+        let owner = HostSlot(1);
+        let mut canonical = GmActionJournal::default();
+        canonical
+            .insert(grant(2, 1, 10, "old-pause", true))
+            .unwrap();
+        canonical
+            .insert(grant(2, 2, 10, "old-resume", false))
+            .unwrap();
+        let resume = GmActionProposal {
+            from: HostSlot(3),
+            operator_id: "gm-3".into(),
+            correlation: GmActionId::new("join-hold-resume").unwrap(),
+            action: GmAction::SetSessionPaused { active: false },
+        };
+
+        let grant = sequence_owner_proposal(&mut canonical, &resume, owner, 42, 99, true, true)
+            .expect("the technical hold accepts an explicit Resume");
+        assert_eq!(
+            grant.apply_tick, 42,
+            "the action cannot wait for a future tick the join hold forbids"
+        );
     }
 
     #[test]

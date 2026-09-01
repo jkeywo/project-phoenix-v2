@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { hostLobbyViewModel, hostLobbyMonitorRow, hostLobbyStationRows } from '../../gui/host-lobby-view.js';
+// The real assets/strings/strings.csv is loaded by the vitest setup file, so the
+// tests below can check the sentence an operator actually reads and not only the
+// id and the params it is built from.
+import { t } from '../../gui/strings.js';
 
 function payload(overrides = {}) {
   return {
@@ -620,6 +624,28 @@ describe('hostLobbyStationRows — a full screen says what is holding it', () =>
       id: 'server.station_row.full_authored',
       params: { stations: 'Ada, weapons', authored: 'Ada' },
     });
+  });
+
+  it('renders that reason as copy that agrees with itself for one name and for several', () => {
+    // The params alone cannot catch this, and the first version of the copy did
+    // not: `{authored} was opened by …` renders "Ada, Grace was opened…", which
+    // is a sentence disagreeing with itself in the exact case the marker exists
+    // for — a `--profile` that authored two participant panes on one screen. The
+    // copy is number-neutral instead, so both readings are correct English and
+    // neither needs a plural rule the string table has no way to express.
+    const render = (reason) => t(reason.id, reason.params);
+
+    const one = hostLobbyStationRows(fullBenq(['Ada', 'weapons'], ['Ada'])).helm;
+    expect(render(one.buttons[0].reason))
+      .toBe('[full — Ada, weapons; opened by the host\'s own settings and not closable from here: Ada]');
+
+    const several = hostLobbyStationRows(fullBenq(['Ada', 'Grace'], ['Ada', 'Grace'])).helm;
+    expect(render(several.buttons[0].reason))
+      .toBe('[full — Ada, Grace; opened by the host\'s own settings and not closable from here: Ada, Grace]');
+
+    // And the sentence really was resolved from the table, rather than the
+    // ⟨id⟩ fallback `t()` answers for a row that is not in strings.csv.
+    expect(render(several.buttons[0].reason)).not.toContain('⟨');
   });
 
   it('keeps the ordinary marker when every console on it can be closed from here', () => {

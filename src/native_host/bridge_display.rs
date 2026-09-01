@@ -3280,7 +3280,7 @@ mod tests {
 
     #[test]
     fn two_consoles_on_one_screen_divide_it_side_by_side() {
-        // The law caps a screen at two, and `station_rects` is what turns that
+        // The law caps a screen at two, and `surface_rects` is what turns that
         // into geometry. The 2-up polish is issue #1332's; the tiling is free
         // here and refusing to draw it would be a rule this module invented.
         let (mut app, bus) = console_host();
@@ -4149,6 +4149,34 @@ mod tests {
             ),
             handles,
             "and neither console was rebuilt to reach the arrangement it booted in"
+        );
+    }
+
+    #[test]
+    fn an_off_roster_authored_station_opens_no_window_and_tells_the_row_nothing() {
+        // The BOOT SIDE EFFECT this fix round removed, pinned so it cannot come
+        // back. The old path laid a Station out from the FILE, so a `--profile`
+        // naming a station this hull does not have — a cruiser's profile
+        // launched on a destroyer — spawned a borderless-fullscreen window for a
+        // console the law had already refused: a black screen with nothing
+        // behind it, and (once the follower re-tiled the same monitor from the
+        // law and found it empty) a spawned-then-closed window nobody had asked
+        // for. Boot reads `surface_rects` now, so a refused seat is simply not
+        // on the screen and no window is opened for it.
+        let (app, _bus) = authored_benq_host(None, vec![PaneSlot::for_station("flight-deck")]);
+
+        let layout = &app.world().resource::<BridgeLayoutResource>().layout;
+        assert!(
+            layout.occupants_on(&MonitorIdentity::new(BENQ)).is_empty(),
+            "the law refused the seat — the destroyer has no flight-deck"
+        );
+        assert!(
+            surfaces(&app).is_empty(),
+            "so nothing is drawn on that screen, and no Station window is opened for it"
+        );
+        assert!(
+            notice_ids(&app).is_empty(),
+            "and the refusal is a BOOT note: logged, never pushed onto the lobby's row"
         );
     }
 

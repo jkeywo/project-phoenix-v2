@@ -353,8 +353,10 @@ struct Reservation {
 ///
 /// Seating is stored grouped by monitor, in monitor order, and **within a
 /// monitor in the order the consoles were assigned**. That order is not
-/// incidental: it is the left-to-right order the panes are drawn in
-/// ([`station_rects`](Self::station_rects)), it is what
+/// incidental: it is the stations' left-to-right order on the glass — their
+/// order *relative to each other*, with an authored surface possibly taking a
+/// slot between them ([`surface_rects`](Self::surface_rects) is the whole
+/// screen, in the order it is drawn) — it is what
 /// [`write_displays_into`](Self::write_displays_into) records in the file, and it
 /// is part of `PartialEq`. So two layouts are equal when they seat the same
 /// stations on the same monitors *in the same order* — which is what makes the
@@ -422,6 +424,42 @@ pub struct BridgeLayout {
     /// [`LayoutAction`] can move or free it — only the `--profile` that authored
     /// it, and only by being re-adopted. Faking a `StationId` for one instead
     /// would have put a station no ship has on the roster-driven rows.
+    ///
+    /// # Why the pane bus does not free it (issue #1332's fix round)
+    ///
+    /// Once a reservation costs a console slot, a `--pane` participant who never
+    /// connects permanently halves that screen and there is no lobby control
+    /// that frees it. The alternative considered was feeding the pane bus's
+    /// **liveness** back into the law and freeing a reservation whose pane the
+    /// bus no longer has. It was rejected, and the first reason written down for
+    /// it was wrong, so here is the right one.
+    ///
+    /// *Not* because of a race between `PaneBus::close` and `PaneBus::recreate`:
+    /// those are consecutive statements in one system body
+    /// (`bridge_display::follow_layout_stations`'s rebuild pass), so no frame
+    /// ever observes the gap between them, and the lobby's own assign has
+    /// already run in `PreUpdate`. That window is not observable.
+    ///
+    /// The real windows are multi-frame, and there is one for **whichever**
+    /// liveness signal is picked:
+    ///
+    /// - Keyed on `Live`: a rebuilt console is *open but not live* from the
+    ///   moment `recreate` returns until its page has finished loading and
+    ///   `pump_pane` calls `mark_live` — a whole page load, on every move,
+    ///   re-tile and resize a console goes through.
+    /// - Keyed on `Closed`: issue #1125's crash path leaves a faulted pane
+    ///   closed from the fault until the recovery pass rebuilds it, and once its
+    ///   per-identity budget is spent, closed for the rest of the run.
+    ///
+    /// Either would hand a slot away under an operator who pressed nothing — the
+    /// exact class of surprise this fix round exists to remove — and the console
+    /// that came back would be overlapping the station seated into its half. The
+    /// law is also pure and Bevy-free by construction, so it has no bus to ask,
+    /// and the pane genuinely *is* on the glass from boot whether or not a human
+    /// has reached it, so the count is honest as it stands. The honest-ROW
+    /// branch was taken instead: the lobby is told which occupants it cannot
+    /// free (`server.station_row.full_authored`), rather than the law quietly
+    /// changing the arrangement.
     ///
     /// # It does not survive a round trip through a profile (issue #1334)
     ///
@@ -853,8 +891,19 @@ impl BridgeLayout {
     ///
     /// The deterministic split, resolved against real geometry: one console is
     /// the whole monitor, two divide it along that screen's own
-    /// [`split_on`](Self::split_on) with no gap and no overlap. Empty for the
-    /// viewscreen and for a monitor this bridge lacks.
+    /// [`split_on`](Self::split_on) with no gap and no overlap. Empty for a
+    /// monitor this bridge lacks, and for any screen holding nothing.
+    ///
+    /// Usually — but *not always* — that includes the viewscreen. Rule 2 keeps
+    /// its `seats` empty as an invariant, and nothing may move it onto an
+    /// occupied screen. One path reaches the exception all the same:
+    /// [`reconcile`](Self::reconcile)'s fallback when the viewscreen's own
+    /// display is unplugged and **no** surviving screen is free, which lands the
+    /// shared view on one holding an authored surface and says so
+    /// ([`ViewscreenCoversOccupants`](LayoutAdoption::ViewscreenCoversOccupants)).
+    /// A caller that assumed "the viewscreen tiles nothing" would draw a console
+    /// the layout has no way to move out from under the shared view; this
+    /// answers where it actually is.
     ///
     /// # One tiling, for both kinds of console and from boot onward
     ///
@@ -895,8 +944,15 @@ impl BridgeLayout {
     /// order — [`surface_rects`](Self::surface_rects) with the authored surfaces
     /// filtered out, *not* a tiling of its own.
     ///
-    /// A caller that has to place every pane on a screen wants `surface_rects`;
-    /// this is for one that only asks where the stations are.
+    /// **Test-only convenience, with no production caller.** Every caller that
+    /// places panes has to place *all* of them — a monitor has one Station
+    /// window and the whole occupancy is composited onto it — so the adapter
+    /// reads `surface_rects` and there is nothing left for this to answer. It is
+    /// kept because the tests that assert a station's rectangle read better for
+    /// it, and because it is the filter that proves the two cannot drift: it
+    /// derives from `surface_rects` rather than tiling again, which is the shape
+    /// issue #1332's overlap came from. Do not reach for it in the adapter — a
+    /// second placement path over the seats alone is the defect, not a shortcut.
     pub fn station_rects(
         &self,
         monitor: &MonitorIdentity,

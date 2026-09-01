@@ -1473,6 +1473,22 @@ short of restarting the host with different arguments — the button says so
 greyed screen that only listed the names would be true and useless: the operator
 reads "close one of these" and finds nothing to close.
 
+*The other branch, and why it was not taken.* The alternative was to feed the
+pane bus's **liveness** back into the law and free a reservation whose pane the
+bus no longer has. `BridgeLayout` is pure and Bevy-free by construction, so it
+has no bus to ask — but the deciding reason is that every liveness signal has a
+multi-frame window in which it lies, and the arrangement would change under an
+operator who pressed nothing. Keyed on `Live`, a **rebuilt** console is open but
+not live from the moment `recreate` returns until its page has reloaded and
+`pump_pane` calls `mark_live` — a whole page load, on every move, re-tile and
+resize. Keyed on `Closed`, #1125's crash path leaves a faulted pane closed from
+the fault until the recovery pass rebuilds it, and once its per-identity budget
+is spent, closed for the rest of the run. Either frees a slot for a station that
+then *overlaps* the console coming back — the very defect #1332 exists to close.
+(The `close`-then-`recreate` race this rationale first cited is **not** one of
+them: both calls are consecutive statements in one system body, so no frame
+observes the gap, and the lobby's own assign already ran in `PreUpdate`.)
+
 ### A crashed console reopens on its own monitor (issue #1333)
 
 Where a rebuilt view goes is now one stated rule in one pure module,

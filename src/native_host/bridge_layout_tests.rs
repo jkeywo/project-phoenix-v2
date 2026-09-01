@@ -1585,6 +1585,84 @@ fn an_authored_console_follows_its_screen_through_a_reconcile() {
         .is_ok());
 }
 
+/// A fourth display, for the reconcile tests that need a monitor this bridge has
+/// never seen — one plugged into a port nothing in the layout mentions.
+const EXTRA: &str = "ASUS PB@2560x1440";
+
+/// `monitor`'s occupants and their rectangles, as names — `surface_rects` in a
+/// shape two layouts can be compared in.
+fn rects_on(
+    layout: &BridgeLayout,
+    monitor: &str,
+    screen: &MonitorGeometry,
+) -> Vec<(String, PaneRect)> {
+    layout
+        .surface_rects(&m(monitor), screen)
+        .into_iter()
+        .map(|(occupant, rect)| (occupant.name().to_string(), rect))
+        .collect()
+}
+
+#[test]
+fn an_unrelated_monitor_arriving_or_leaving_re_carves_nothing() {
+    // THE FRAGILE INVARIANT of issue #1332's fix round, pinned here because
+    // nothing else pins it. `reconcile` carries a SURVIVING screen's authored
+    // split and its reservations — with their authored indices — across, and a
+    // regression to `vec![LAYOUT_SPLIT; ..]` and `vec![Vec::new(); ..]` (which
+    // is exactly what `adopt_profile` legitimately does, a few lines away)
+    // would resurrect #1332's defect invisibly: an operator's `stacked` screen
+    // re-carved side by side and its two consoles closed and recreated, because
+    // somebody plugged a display into a different port. A cable coming out of
+    // some OTHER screen is no reason to re-carve this one.
+    let (adopted, _) = bridge().adopt_profile(&authored(
+        Some(PaneSplit::Stacked),
+        vec![
+            PaneSlot::for_station("helm"),
+            PaneSlot::for_participant("Ada"),
+        ],
+    ));
+    let screen = geometry(1920, 1080);
+    let before = rects_on(&adopted, LEFT, &screen);
+    assert_eq!(
+        before.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
+        vec!["helm", "Ada"],
+        "the fixture really is the authored arrangement the reconciles below must preserve"
+    );
+    assert_eq!(adopted.split_on(&m(LEFT)), PaneSplit::Stacked);
+
+    // A display this bridge has never seen is plugged in somewhere else.
+    let mut arrived = all_three();
+    arrived.push(discovered(EXTRA, false));
+    let (after_arrival, notes) = adopted.reconcile(&arrived, roster());
+    assert_eq!(notes, Vec::new(), "nothing degraded, so nothing is said");
+    assert_eq!(
+        after_arrival.split_on(&m(LEFT)),
+        PaneSplit::Stacked,
+        "the authored axis survives a cable in another port"
+    );
+    assert_eq!(
+        rects_on(&after_arrival, LEFT, &screen),
+        before,
+        "and so do the authored slots: the same consoles, in the same order, at the same rectangles"
+    );
+    assert_eq!(
+        after_arrival.split_on(&m(EXTRA)),
+        LAYOUT_SPLIT,
+        "while the screen this bridge has just GAINED arrives on the constant — nothing authored it"
+    );
+
+    // And the mirror: an unrelated screen unplugged.
+    let (after_loss, notes) =
+        adopted.reconcile(&[discovered(TV, true), discovered(LEFT, false)], roster());
+    assert_eq!(
+        notes,
+        Vec::new(),
+        "the screen that left was holding nothing"
+    );
+    assert_eq!(after_loss.split_on(&m(LEFT)), PaneSplit::Stacked);
+    assert_eq!(rects_on(&after_loss, LEFT, &screen), before);
+}
+
 #[test]
 fn reconciling_against_the_same_bridge_changes_nothing_and_says_nothing() {
     let layout = assign(

@@ -343,7 +343,14 @@ cargo build --release --features host --bin phoenix-host
 #     that frees one, so the greyed row says which occupant is unreclaimable
 #     (server.station_row.full_authored, fed by the payload's `reserved` list)
 #     rather than leaving the operator hunting for an off button that cannot
-#     exist.
+#     exist. DO NOT free a reservation on pane-bus liveness instead: the law is
+#     pure and Bevy-free, and every liveness signal has a MULTI-FRAME window
+#     where it lies — a rebuilt console is open-but-not-LIVE from recreate until
+#     its page reloads and pump_pane calls mark_live, and #1125's crash path
+#     leaves a faulted pane CLOSED until recovery rebuilds it (forever, once its
+#     budget is spent). Either frees a slot under an operator who pressed
+#     nothing and overlaps the console coming back. (The close+recreate "race"
+#     this once cited is not observable — both calls are one system body.)
 #   --manifest also narrows what this process FLIES, not only what it publishes:
 #     with a curating manifest in force the default hull is drawn from that
 #     manifest's allowlist (issue #917). An explicit --ship still wins.

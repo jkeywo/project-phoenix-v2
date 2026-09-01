@@ -36,7 +36,7 @@ test('the public Fleet role control selects the explicit GM boot profile', async
   expect(errors).toEqual([]);
 });
 
-test('explicit rendererless GM page advances and renders stable local truth', async ({ context }) => {
+test('rendererless GM maps and inspects stable local ship truth', async ({ context }) => {
   const page = await context.newPage();
   const errors = captureServerPageErrors(page);
   await page.goto('/?gm=1&scenario=assets/worlds/default.toml');
@@ -69,38 +69,69 @@ test('explicit rendererless GM page advances and renders stable local truth', as
 
   await page.evaluate(() => document.getElementById('gm-ready-btn').click());
   await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
+  await page.waitForFunction(() => {
+    const map = document.getElementById('gm-entity-map');
+    return !map?.hidden && Array.isArray(map.state?.blips) && map.state.blips.length > 0;
+  });
+
+  const mapped = await page.evaluate(() => {
+    const map = document.getElementById('gm-entity-map');
+    return map.state.blips.map((blip) => ({
+      uuid: blip.uuid,
+      kind: blip.kind,
+      destroyed: blip.destroyed,
+    }));
+  });
+  expect(mapped.length).toBeGreaterThan(0);
+  for (const blip of mapped) {
+    expect(blip.uuid).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(['player_ship', 'npc_ship']).toContain(blip.kind);
+    expect(typeof blip.destroyed).toBe('boolean');
+  }
+
+  // The real custom element is the browser interaction seam: keyboard picks
+  // the first stable UUID, while wheel zoom remains a local map operation.
+  const map = page.locator('#gm-entity-map');
+  await map.focus();
+  await map.press('ArrowRight');
   await page.waitForSelector('#gm-entity-card:not([hidden])');
+  const canvas = map.locator('canvas');
+  await canvas.hover();
+  await page.mouse.wheel(0, -120);
 
   const first = await page.evaluate(() => {
     const card = document.getElementById('gm-entity-card');
     return {
       id: card.dataset.entityId,
+      selected: document.getElementById('gm-entity-map').dataset.selectedEntityId,
+      kind: card.dataset.kind,
       destroyed: card.dataset.destroyed,
       hull: document.getElementById('gm-entity-hull').value,
       status: document.getElementById('gm-entity-status').textContent,
+      position: document.getElementById('gm-entity-position').textContent,
+      legend: document.getElementById('gm-map-legend').textContent,
       tick: window.wasm_sim_tick(),
     };
   });
   expect(first.id).toMatch(/^[0-9a-f-]{36}$/i);
+  expect(first.selected).toBe(first.id);
+  expect(['player_ship', 'npc_ship']).toContain(first.kind);
   expect(Number(first.hull)).toBeGreaterThanOrEqual(0);
   expect(Number(first.hull)).toBeLessThanOrEqual(100);
   expect(first.status.length).toBeGreaterThan(0);
+  expect(first.position.length).toBeGreaterThan(0);
+  expect(first.legend).toContain('×');
 
   await page.waitForFunction((tick) => window.wasm_sim_tick() > tick + 10, first.tick);
   const second = await page.evaluate(() => {
     const card = document.getElementById('gm-entity-card');
     return {
       id: card.dataset.entityId,
-      destroyed: card.dataset.destroyed,
-      hull: document.getElementById('gm-entity-hull').value,
-      status: document.getElementById('gm-entity-status').textContent,
+      selected: document.getElementById('gm-entity-map').dataset.selectedEntityId,
+      mapHasId: document.getElementById('gm-entity-map').state.blips
+        .some((blip) => blip.uuid === card.dataset.entityId),
     };
   });
-  expect(second).toEqual({
-    id: first.id,
-    destroyed: first.destroyed,
-    hull: first.hull,
-    status: first.status,
-  });
+  expect(second).toEqual({ id: first.id, selected: first.id, mapHasId: true });
   expect(errors).toEqual([]);
 });

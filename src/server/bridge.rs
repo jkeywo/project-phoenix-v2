@@ -1035,8 +1035,8 @@ pub mod host_channels {
     /// Forcefield SFX volume — bare number in 0.0–1.0, emitted only when the
     /// level moves by at least the audible epsilon.
     pub const AUDIO_LEVEL: &str = "audio_level";
-    /// Rendererless GM peer's absolute one-entity projection. This callback is
-    /// page-local and never enters the peer transport.
+    /// Rendererless GM peer's absolute omniscient ship-map projection. This
+    /// callback is page-local and never enters the peer transport.
     pub const GM_ENTITY: &str = "gm_entity";
     /// Authoritative pause state plus attributed typed-action results.
     pub const GM_SESSION: &str = "gm_session";

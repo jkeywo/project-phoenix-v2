@@ -1,23 +1,42 @@
 ---
 title: Radar Projection
 type: concept
-tags: [radar, helm, navigation, viewscreen, pure-iterator, shared]
-sources: [gui/console-state.js, gui/components/ph-scope-chrome.js, gui/battleship/navigation.html, gui/sim-state.js, gui/components/ph-radar.js, gui/components/ph-tactical-radar.js, gui/components/ph-navigation-map.js, client.html, src/gui/radar.rs, src/radar.rs, src/radar_config.rs, src/entities/tags.rs, src/console/weapons/blackboard.rs, CONTEXT.md]
-updated: 2026-08-27
+tags: [radar, helm, navigation, viewscreen, gm, map, inspector, pure-iterator, shared]
+sources: [gui/console-state.js, gui/components/ph-scope-chrome.js, gui/battleship/navigation.html, gui/sim-state.js, gui/gm-local-projection.js, gui/entity-inspector.js, gui/components/ph-radar.js, gui/components/ph-tactical-radar.js, gui/components/ph-navigation-map.js, client.html, server.html, src/gm_projection.rs, src/gui/radar.rs, src/radar.rs, src/radar_config.rs, src/entities/tags.rs, src/console/weapons/blackboard.rs, CONTEXT.md]
+updated: 2026-09-01
 ---
 
 # Radar Projection
 
-Radar projection has three explicit surfaces rather than one cross-target
+Radar/map projection has four explicit surfaces rather than one cross-target
 implementation:
 
 - phone consoles use the pure-JS `buildBlips()` family in
   `gui/console-state.js` over authoritative entity and blackboard snapshots;
 - the Bevy viewscreen uses `project_radar_entity` in `src/gui/radar.rs`;
+- the rendererless GM page projects its own deterministic `Ship` rows through
+  the local Host Channel and adapts them to `ph-navigation-map` inspect mode;
 - `src/radar.rs` now owns only the pure ship-local phaser range/forward-arc
   readiness check used by the weapons server.
 
 The client remains pure JavaScript and does not call the Rust projection.
+
+## GM inspect mode
+
+`src/gm_projection.rs` builds one absolute, UUID-sorted player/NPC ship list
+from the GM peer's local deterministic ECS. It sends stable UUID/name,
+authoritative position, displayable faction, broad hull/destroyed status and
+the ship's current Tactical target only. The `gm_entity` Host Channel remains
+page-local; this is not an omniscient peer stream.
+
+`gui/gm-local-projection.js` narrows that public DTO and feeds the existing
+world-fixed `ph-navigation-map`. Its `interaction: "inspect"` mode keeps
+pan/zoom and touch/keyboard UUID selection local, hides waypoint actions and
+the Navigation own-ship marker, and retains a selected UUID across absolute
+refreshes. Player/NPC glyph shapes, a destroyed cross and a selection ring are
+non-colour cues. `gui/entity-inspector.js` renders the corresponding minimal
+identity/status/target shell and can follow a current-target UUID back to the
+same map selection.
 
 ## Shared radar artwork
 

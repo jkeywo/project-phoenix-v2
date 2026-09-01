@@ -160,10 +160,10 @@
     #canvas { display: block; width: 100%; height: 100%; background: #000; }
     #gm-console {
       display: none; position: absolute; inset: 0; z-index: 80;
-      box-sizing: border-box; padding: clamp(4rem, 8vw, 8rem);
+      box-sizing: border-box; padding: max(4rem, var(--settings-cog-keepout)) clamp(1rem, 4vw, 4rem) 2rem;
       color: var(--ink-primary); background: #05080d;
       font-family: 'Chakra Petch', monospace;
-      flex-direction: column; gap: 1.5rem;
+      flex-direction: column; gap: 1.25rem; overflow-y: auto;
     }
     html.phoenix-gm-page #gm-console { display: flex; }
     html.phoenix-gm-page #canvas,
@@ -186,10 +186,34 @@
     .gm-session-log-entry[data-outcome="pending"] { color: var(--ink-muted); }
     .gm-session-log-entry[data-outcome="refused"],
     .gm-session-log-entry[data-outcome="timed-out"] { color: var(--fire-bright); }
-    #gm-entity-card { max-width: 44rem; padding: 1.5rem; border: 1px solid var(--edge-control); }
+    #gm-workspace {
+      display: grid; grid-template-columns: minmax(20rem, 2fr) minmax(18rem, 1fr);
+      gap: 1rem; min-height: 28rem;
+    }
+    #gm-map-panel, #gm-inspector {
+      min-width: 0; padding: 1rem; border: 1px solid var(--edge-control);
+      background: var(--surface-panel-down); display: flex; flex-direction: column; gap: .75rem;
+    }
+    #gm-entity-map {
+      display: block; width: 100%; height: clamp(22rem, 54vh, 46rem);
+      min-height: 22rem; border: 1px solid var(--edge-control); background: var(--surface-abyss);
+    }
+    #gm-entity-map[data-has-selection] { border-color: var(--gold); }
+    #gm-map-legend { color: var(--ink-muted); margin: 0; }
+    #gm-entity-card { padding: .5rem 0 0; }
     #gm-entity-card dl { display: grid; grid-template-columns: max-content 1fr; gap: .75rem 1.5rem; }
     #gm-entity-card dt { color: var(--ink-muted); }
+    #gm-entity-card dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
     #gm-entity-hull { width: 100%; }
+    #gm-entity-target {
+      color: var(--ink-primary); background: var(--surface-panel-up);
+      border: 1px solid var(--edge-control); font: inherit; text-align: left; cursor: pointer;
+    }
+    #gm-entity-target:disabled { border-color: transparent; background: transparent; cursor: default; }
+    @media (max-width: 880px) {
+      #gm-workspace { grid-template-columns: 1fr; }
+      #gm-entity-map { height: 24rem; }
+    }
     #overlay { position: absolute; bottom: 1rem; right: 1rem; z-index: 190; display: none; }
     /* Before a world is selected the join surface is a real flex child of the
        scenario panel, between the world picker and saved-session catalogue.
@@ -1748,16 +1772,31 @@
           <ol id="gm-session-log" role="log" aria-labelledby="gm-session-log-heading"
             aria-live="polite" aria-relevant="additions text"></ol>
         </section>
-        <p id="gm-entity-pending" role="status" data-i18n="server.gm.entity.pending"></p>
-        <article id="gm-entity-card" hidden aria-live="polite">
-          <h2 id="gm-entity-name"></h2>
-          <dl>
-            <dt data-i18n="server.gm.entity.identity"></dt><dd id="gm-entity-identity"></dd>
-            <dt id="gm-entity-status-label" data-i18n="server.gm.entity.status"></dt><dd id="gm-entity-status"></dd>
-          </dl>
-          <meter id="gm-entity-hull" min="0" max="100" value="0"
-            aria-labelledby="gm-entity-status-label gm-entity-status"></meter>
-        </article>
+        <div id="gm-workspace">
+          <section id="gm-map-panel" role="region" aria-labelledby="gm-map-heading">
+            <h2 id="gm-map-heading" data-i18n="server.gm.map.heading"></h2>
+            <p id="gm-entity-pending" role="status" data-i18n="server.gm.entity.pending"></p>
+            <ph-navigation-map id="gm-entity-map" hidden></ph-navigation-map>
+            <p id="gm-map-legend" data-i18n="server.gm.map.legend"></p>
+          </section>
+          <section id="gm-inspector" role="region" aria-labelledby="gm-inspector-heading">
+            <h2 id="gm-inspector-heading" data-i18n="server.gm.inspector.heading"></h2>
+            <p id="gm-inspector-empty" data-i18n="server.gm.inspector.empty"></p>
+            <article id="gm-entity-card" hidden aria-live="polite">
+              <h3 id="gm-entity-name"></h3>
+              <dl>
+                <dt data-i18n="server.gm.entity.identity"></dt><dd id="gm-entity-identity"></dd>
+                <dt data-i18n="server.gm.entity.kind"></dt><dd id="gm-entity-kind"></dd>
+                <dt data-i18n="server.gm.entity.position"></dt><dd id="gm-entity-position"></dd>
+                <dt data-i18n="server.gm.entity.faction"></dt><dd id="gm-entity-faction"></dd>
+                <dt id="gm-entity-status-label" data-i18n="server.gm.entity.status"></dt><dd id="gm-entity-status"></dd>
+                <dt data-i18n="server.gm.entity.target"></dt><dd><button id="gm-entity-target" type="button" disabled></button></dd>
+              </dl>
+              <meter id="gm-entity-hull" min="0" max="100" value="0"
+                aria-labelledby="gm-entity-status-label gm-entity-status"></meter>
+            </article>
+          </section>
+        </div>
       </main>
 
       <!-- Game-over overlay: shown when GamePhase::GameOver via __updateHud. -->
@@ -2143,6 +2182,7 @@
        set_host_channel_callback further down for the other half of that. -->
   <script type="module">
     import { createHostChannel } from './gui/host-channel.js';
+    import './gui/components/ph-navigation-map.js';
     import { createGmLocalProjection } from './gui/gm-local-projection.js';
     import { createGmSessionControls } from './gui/gm-session-controls.js';
     import {

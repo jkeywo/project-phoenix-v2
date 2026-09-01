@@ -96,6 +96,11 @@ entities:
       authority: non-authoritative
       coordinates: [gm-milestone-peer-tracer, gm-milestone-integrated-workshop]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/gm_projection.rs, src/console_bridge.rs, src/core/codec.rs, src/server/bridge.rs, gui/gm-local-projection.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, assets/strings/strings.csv, server.html]
+      symbols: [GmEntityProjectionPayload, GmEntityProjection, GmEntityKind, GmEntityStatus, GmEntityReference, publish_local_projection, parseGmEntityProjection, buildGmMapState, createGmLocalProjection, createEntityInspector, PhNavigationMap]
+      tests: [cargo test gm_projection::tests, cargo test encode_gm_entity_projection_pins_the_local_host_channel_shape, npx vitest run tests/client/gm-local-projection.test.js tests/client/ph-navigation-map.test.js, tests/smoke/gm-page.spec.js]
 
   - decision: gm-t2-action-result-contract
     core:

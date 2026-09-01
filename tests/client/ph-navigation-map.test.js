@@ -1158,4 +1158,80 @@ describe('PhNavigationMap', () => {
       expect(call.x).toBeCloseTo(-20000, 0);
     });
   });
+
+  describe('read-only omniscient inspect mode', () => {
+    const INSPECT_STATE = {
+      interaction: 'inspect',
+      show_ship_marker: false,
+      range: 100,
+      blips: [
+        { uuid: 'player-a', kind: 'player_ship', name: 'Axiom', world_x: 0, world_z: 0, stance: 'friendly', destroyed: false },
+        { uuid: 'npc-b', kind: 'npc_ship', name: 'Raider', world_x: 50, world_z: 0, stance: 'unknown', destroyed: true },
+      ],
+      regions: [],
+    };
+
+    it('selects by touch and keyboard and keeps the UUID across absolute refreshes', () => {
+      // A host page owns a semantic registry, but read-only inspect gestures
+      // must stay local instead of being swallowed as Navigation commands.
+      window.activateSemanticAction = vi.fn(() => ({ claimed: false, handled: false }));
+      const h = setup();
+      const selected = [];
+      h.el.addEventListener('navselect', (event) => selected.push(event.detail && event.detail.uuid));
+      h.el.state = INSPECT_STATE;
+      h.tickRaf();
+
+      touch(h.canvas, 'touchstart', [{ clientX: 150, clientY: 150 }]);
+      touch(h.canvas, 'touchend', [], [{ clientX: 150, clientY: 150 }]);
+      expect(selected).toEqual(['player-a']);
+      expect(h.el.navigationSelectedUuid()).toBe('player-a');
+      expect(h.el.dataset.selectedEntityId).toBe('player-a');
+      expect(h.el.shadowRoot.querySelector('.wp-btn.show')).toBeNull();
+
+      h.el.state = {
+        ...INSPECT_STATE,
+        blips: INSPECT_STATE.blips.map((blip) => blip.uuid === 'player-a'
+          ? { ...blip, world_x: 10, hull_percent: 40 } : blip),
+      };
+      h.tickRaf();
+      expect(h.el.navigationSelectedUuid()).toBe('player-a');
+      expect(selected).toEqual(['player-a']);
+
+      h.el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+      expect(h.el.navigationSelectedUuid()).toBe('npc-b');
+      expect(selected).toEqual(['player-a', 'npc-b']);
+      expect(window.activateSemanticAction).not.toHaveBeenCalled();
+    });
+
+    it('keeps wheel/pinch zoom and pointer pan local and renders non-colour status marks', () => {
+      window.activateSemanticAction = vi.fn(() => ({ claimed: false, handled: false }));
+      const h = setup();
+      const zoom = vi.spyOn(h.el, 'navigationZoom');
+      const pan = vi.spyOn(h.el, 'navigationPan');
+      h.el.state = INSPECT_STATE;
+      h.tickRaf();
+
+      h.canvas.dispatchEvent(new WheelEvent('wheel', {
+        deltaY: -120, clientX: 150, clientY: 150, bubbles: true, cancelable: true,
+      }));
+      drag(h.canvas, 100, 100, 120, 100);
+      touch(h.canvas, 'touchstart', [
+        { clientX: 100, clientY: 100 }, { clientX: 200, clientY: 100 },
+      ]);
+      touch(h.canvas, 'touchmove', [
+        { clientX: 80, clientY: 100 }, { clientX: 220, clientY: 100 },
+      ]);
+
+      expect(zoom).toHaveBeenCalledTimes(2);
+      expect(pan).toHaveBeenCalled();
+      expect(window.activateSemanticAction).not.toHaveBeenCalled();
+
+      // Player/NPC are distinct diamond/ship paths, and destroyed adds an X;
+      // those marks remain when colour cannot be perceived.
+      h.tickRaf();
+      expect(h.fakeCtx._calls.moveTo.length).toBeGreaterThan(0);
+      expect(h.fakeCtx._calls.lineTo.length).toBeGreaterThan(h.fakeCtx._calls.moveTo.length);
+      expect(h.el.getAttribute('aria-label')).toBe(t('component.entity_map.label'));
+    });
+  });
 });

@@ -2,7 +2,7 @@
 title: GM Operator
 type: entity
 tags: [gm, operator, identity, reconnect, roster, readiness, force-start, action, pause, host-mesh]
-sources: [src/gm_roster.rs, src/gm_action.rs, src/gm_projection.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/messages.rs, src/core/codec.rs, src/lobby/server.rs, src/lockstep/frame.rs, src/lockstep/mod.rs, src/server/bridge.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/gm-local-projection.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html]
+sources: [src/gm_roster.rs, src/gm_action.rs, src/gm_projection.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/messages.rs, src/core/codec.rs, src/lobby/server.rs, src/lockstep/frame.rs, src/lockstep/mod.rs, src/server/bridge.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/gm-local-projection.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html]
 updated: 2026-09-01
 ---
 
@@ -58,10 +58,22 @@ The explicit `?gm=1` page selects the production
 `BootProfile::BrowserGameMaster` before `wasm_init`, independently of
 WebDriver. It keeps the browser window, world ingest, fixed-tick simulation,
 and fleet participant while installing no renderer and no `SelectedShipResource`
-or local ship. Its first tracer reads the lexicographically lowest stable
-`EntityUuid` with authoritative hull status and renders that absolute value on
-the page's local `gm_entity` Host Channel. Despawn or world reset sends an
-explicit null projection so stale identity cannot remain. The projection is
+or local ship. The local `gm_entity` Host Channel carries an absolute,
+UUID-sorted projection of every `Ship`: `FleetSlotOf` identifies player ships
+(including the solo slot) and its absence identifies NPCs. Each row contains
+only stable identity, `ShipPhysics` position, the faction's String Table display
+id when one is authored, broad hull/destroyed status, and the current
+`TacticalRadarSelection`. It carries no Bevy entity id, component inventory,
+System detail, or M2 action capability.
+
+`gui/gm-local-projection.js` validates and narrows that DTO, then adapts it to
+the shared `ph-navigation-map` in local inspect mode. Selection is keyed only
+by the stable UUID, so an absolute refresh updates the linked inspector without
+dropping selection; removal clears both map selection and stale inspector
+detail. Player and NPC marker shapes, a selected ring, a destroyed cross, text
+legend and textual inspector status make kind and condition independent of
+colour. `gui/entity-inspector.js` is the reusable M6 identity/status/target
+shell; selecting its target follows the same stable map link. The projection is
 not a `ServerMessage`, `MeshFrame`, or `SimOutbox`; peer state transfer remains
 the snapshot-recovery path.
 

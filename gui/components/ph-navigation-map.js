@@ -177,6 +177,18 @@ export class PhNavigationMap extends PhElement {
 
   set state(val) {
     this.#state = val;
+    const inspect = val && val.interaction === 'inspect';
+    if (inspect) {
+      this.setAttribute('aria-label', t('component.entity_map.label'));
+      this.setAttribute('aria-description', t('component.entity_map.keyboard_help'));
+    }
+    // Keep the stable UUID selected, but replace the retained blip object with
+    // this absolute projection's current values. The GM inspector can then
+    // survive movement/health refreshes without retaining stale detail.
+    if (this.#selectedBlip && val && Array.isArray(val.blips)) {
+      const refreshed = val.blips.find((blip) => blip.uuid === this.#selectedBlip.uuid);
+      if (refreshed) this.#selectedBlip = refreshed;
+    }
     if (val && val.auto && this.#picking) {
       this.#picking = false;
       this.canvas.classList.remove('picking');
@@ -235,7 +247,10 @@ export class PhNavigationMap extends PhElement {
     if ((this.#selectedBlip && this.#selectedBlip.uuid) === (next && next.uuid)) return false;
     if (!this.#selectedBlip && !next) return false;
     this.#selectedBlip = next;
-    this.#showOverlay(next);
+    this.toggleAttribute('data-has-selection', !!next);
+    if (next) this.dataset.selectedEntityId = next.uuid;
+    else delete this.dataset.selectedEntityId;
+    this.#showOverlay(this.#isInspectMode() ? null : next);
     this.#updateBar();
     this.#dispatch('navselect', next);
     this.needsRender = true;
@@ -281,19 +296,26 @@ export class PhNavigationMap extends PhElement {
     if (dx !== 0) {
       const actionId = dx < 0 ? NAVIGATION_PAN_LEFT_ACTION_ID : NAVIGATION_PAN_RIGHT_ACTION_ID;
       const detail = { x: dx };
-      activateNavigationAction(this, actionId, detail, () => this.navigationPan(detail));
+      if (this.#isInspectMode()) this.navigationPan(detail);
+      else activateNavigationAction(this, actionId, detail, () => this.navigationPan(detail));
     }
     if (dy !== 0) {
       const actionId = dy < 0 ? NAVIGATION_PAN_UP_ACTION_ID : NAVIGATION_PAN_DOWN_ACTION_ID;
       const detail = { y: dy };
-      activateNavigationAction(this, actionId, detail, () => this.navigationPan(detail));
+      if (this.#isInspectMode()) this.navigationPan(detail);
+      else activateNavigationAction(this, actionId, detail, () => this.navigationPan(detail));
     }
   }
 
   #activateZoom(factor, x, y) {
     const actionId = factor < 1 ? NAVIGATION_ZOOM_OUT_ACTION_ID : NAVIGATION_ZOOM_IN_ACTION_ID;
     const detail = { factor, x, y };
-    activateNavigationAction(this, actionId, detail, () => this.navigationZoom(detail));
+    if (this.#isInspectMode()) this.navigationZoom(detail);
+    else activateNavigationAction(this, actionId, detail, () => this.navigationZoom(detail));
+  }
+
+  #isInspectMode() {
+    return !!(this.#state && this.#state.interaction === 'inspect');
   }
 
   initResize() {
@@ -390,6 +412,8 @@ export class PhNavigationMap extends PhElement {
     // fallen outside the refresh). Emit only on a change.
     if (this.#selectedBlip && !blips.some((b) => b.uuid === this.#selectedBlip.uuid)) {
       this.#selectedBlip = null;
+      this.removeAttribute('data-has-selection');
+      delete this.dataset.selectedEntityId;
       this.#showOverlay(null);
       this.#dispatch('navselect', null);
     }
@@ -422,8 +446,10 @@ export class PhNavigationMap extends PhElement {
       this.#drawWaypoint(octx, waypoint, cx, cy, scale, wpPx);
     }
 
-    const [shipSx, shipSy] = this.#worldToScreen(shipPos.x, shipPos.z, 0, 0, 0, scale, cx, cy);
-    this.#drawShipMarker(octx, shipSx, shipSy, R, headingRad);
+    if (state.show_ship_marker !== false) {
+      const [shipSx, shipSy] = this.#worldToScreen(shipPos.x, shipPos.z, 0, 0, 0, scale, cx, cy);
+      this.#drawShipMarker(octx, shipSx, shipSy, R, headingRad);
+    }
 
     this.#projectedBlips = [];
     const blipR = Math.max(3, R * 0.015);
@@ -435,6 +461,10 @@ export class PhNavigationMap extends PhElement {
       // target-lock decoration on the tactical radar — a different feature.
       if (b.objective_target) this.#drawObjectiveRing(octx, sx, sy, blipR + 6);
       this.#drawBlipShape(octx, b.kind, sx, sy, blipR, color);
+      if (b.destroyed) this.#drawDestroyedMark(octx, sx, sy, blipR + 4);
+      if (this.#selectedBlip && this.#selectedBlip.uuid === b.uuid) {
+        this.#drawSelectionRing(octx, sx, sy, blipR + 8);
+      }
       if (showNames && b.name) {
         octx.font = namePx + 'px "JetBrains Mono", monospace';
         octx.fillStyle = phColor(this, color);
@@ -693,6 +723,30 @@ export class PhNavigationMap extends PhElement {
     octx.restore();
   }
 
+  #drawSelectionRing(octx, sx, sy, ringR) {
+    octx.save();
+    octx.strokeStyle = phColor(this, 'var(--gold)');
+    octx.lineWidth = 2;
+    octx.setLineDash?.([4, 3]);
+    octx.beginPath();
+    octx.arc(sx, sy, ringR, 0, Math.PI * 2);
+    octx.stroke();
+    octx.restore();
+  }
+
+  #drawDestroyedMark(octx, sx, sy, radius) {
+    octx.save();
+    octx.strokeStyle = phColor(this, 'var(--ink)');
+    octx.lineWidth = 2;
+    octx.beginPath();
+    octx.moveTo(sx - radius, sy - radius);
+    octx.lineTo(sx + radius, sy + radius);
+    octx.moveTo(sx + radius, sy - radius);
+    octx.lineTo(sx - radius, sy + radius);
+    octx.stroke();
+    octx.restore();
+  }
+
   #blipColor(stance) {
     if (stance === 'hostile') return 'var(--fire-hot)';
     if (stance === 'friendly') return 'var(--loaded)';
@@ -720,7 +774,16 @@ export class PhNavigationMap extends PhElement {
     } else if (kind === 'station') {
       const half = r * 1.1;
       octx.fillRect(sx - half, sy - half, half * 2, half * 2);
-    } else if (kind === 'ship') {
+    } else if (kind === 'player_ship') {
+      const s = r * 1.25;
+      octx.beginPath();
+      octx.moveTo(sx, sy - s);
+      octx.lineTo(sx + s, sy);
+      octx.lineTo(sx, sy + s);
+      octx.lineTo(sx - s, sy);
+      octx.closePath();
+      octx.fill();
+    } else if (kind === 'ship' || kind === 'npc_ship') {
       const s = r * 1.3;
       octx.beginPath();
       octx.moveTo(sx, sy - s);
@@ -802,9 +865,12 @@ export class PhNavigationMap extends PhElement {
     // the former navigation console. Tapping empty space clears selection.
     const hit = this.#getBlipAt(bufX, bufY);
     const detail = { uuid: hit ? hit.blip.uuid : null };
-    activateNavigationAction(this, NAVIGATION_CONTACT_ACTION_ID, detail, () => {
-      this.navigationSelect(detail);
-    });
+    if (this.#isInspectMode()) this.navigationSelect(detail);
+    else {
+      activateNavigationAction(this, NAVIGATION_CONTACT_ACTION_ID, detail, () => {
+        this.navigationSelect(detail);
+      });
+    }
   }
 
   #beginPick() {
@@ -891,7 +957,9 @@ export class PhNavigationMap extends PhElement {
       // when the focused target is a descendant control; the button runs its
       // own action, unimpeded, and the host stays out of it.
       if (event.composedPath()[0] !== this) return;
-      if (this.#picking) {
+      if (this.#isInspectMode()) {
+        if (this.#selectedBlip) event.preventDefault();
+      } else if (this.#picking) {
         event.preventDefault();
         this.#picking = false;
         this.canvas.classList.remove('picking');
@@ -923,12 +991,21 @@ export class PhNavigationMap extends PhElement {
     if (next < 0) return;
     event.preventDefault();
     const detail = { uuid: contacts[next].uuid };
-    activateNavigationAction(this, NAVIGATION_CONTACT_ACTION_ID, detail, () => {
-      this.navigationSelect(detail);
-    });
+    if (this.#isInspectMode()) this.navigationSelect(detail);
+    else {
+      activateNavigationAction(this, NAVIGATION_CONTACT_ACTION_ID, detail, () => {
+        this.navigationSelect(detail);
+      });
+    }
   };
 
   #updateBar() {
+    if (this.#isInspectMode()) {
+      this.btnSetWaypoint.classList.remove('show', 'active');
+      this.btnSetSelected.classList.remove('show');
+      this.btnClearWaypoint.classList.remove('show');
+      return;
+    }
     const state = this.#state || {};
     const wp = state.waypoint;
     const hasWp = !!(wp && Number.isFinite(wp.x) && Number.isFinite(wp.z));

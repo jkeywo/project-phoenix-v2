@@ -993,18 +993,28 @@ fn encode_chatter_wire_shape_matches_js_handler() {
 #[test]
 fn encode_gm_entity_projection_pins_the_local_host_channel_shape() {
     let payload = crate::gm_projection::GmEntityProjectionPayload {
-        entity: Some(crate::gm_projection::GmEntityProjection {
+        entities: vec![crate::gm_projection::GmEntityProjection {
             entity_id: "00000000-0000-0000-0000-000000000001".into(),
             name: "Axiom".into(),
+            kind: crate::gm_projection::GmEntityKind::PlayerShip,
+            position: [12.0, 0.0, -8.0],
+            faction: Some(crate::gm_projection::GmEntityReference {
+                entity_id: "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa".into(),
+                name: "faction.alliance.display_name".into(),
+            }),
             status: crate::gm_projection::GmEntityStatus {
                 hull_percent: 73,
                 destroyed: false,
             },
-        }),
+            current_target: Some(crate::gm_projection::GmEntityReference {
+                entity_id: "00000000-0000-0000-0000-000000000002".into(),
+                name: "Raider".into(),
+            }),
+        }],
     };
     assert_eq!(
         encode_gm_entity_projection(&payload).unwrap(),
-        r#"{"entity":{"entity_id":"00000000-0000-0000-0000-000000000001","name":"Axiom","status":{"hull_percent":73,"destroyed":false}}}"#
+        r#"{"entities":[{"entity_id":"00000000-0000-0000-0000-000000000001","name":"Axiom","kind":"player_ship","position":[12.0,0.0,-8.0],"faction":{"entity_id":"aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa","name":"faction.alliance.display_name"},"status":{"hull_percent":73,"destroyed":false},"current_target":{"entity_id":"00000000-0000-0000-0000-000000000002","name":"Raider"}}]}"#
     );
 }
 

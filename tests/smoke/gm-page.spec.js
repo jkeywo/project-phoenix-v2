@@ -16,6 +16,31 @@ const GM_ROCK_PATH = 'assets/entities/smoke_gm_ordinary_asteroid.toml';
 const GM_REGION_PATH = 'assets/entities/smoke_gm_inert_region.toml';
 const GM_LAYER_PATH = 'assets/worlds/smoke_gm_region_layer.toml';
 
+// A real region-damage producer drives the activity stream. The NPC survives
+// long enough to select from the first row, then leaves the map while its
+// retained feed identity remains readable. Nothing in this fixture injects a
+// Host Channel payload.
+const GM_ACTIVITY_WORLD = `
+[global]
+seed = 1297
+title = "GM activity smoke fixture"
+description = "Bounded deterministic region damage for issue 1297."
+sim_tick_hz = 30
+gm_activity_history_depth = 4
+
+[[entity]]
+template_path = "assets/entities/region_radiation_zone.toml"
+name = "entity.region_radiation_zone.name"
+transform = { position = [0.0, 0.0, 0.0] }
+overrides = { shape = { radius = 500.0 }, effects = { damage_zone = { damage_per_second = 50.0, shield_pierce = 1.0 } } }
+
+[[entity]]
+template_path = "assets/entities/alliance_courier.toml"
+name = "entity.alliance_courier.display_name"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+`;
+
 const GM_MAP_WORLD = `
 [global]
 seed = 1296
@@ -499,5 +524,92 @@ test('authored field and layer fixture supports aggregate and Region inspection 
   expect(identityLifecycle[restored].tick).toBeGreaterThan(identityLifecycle[removed].tick);
 
   await observer.close();
+  expect(errors).toEqual([]);
+});
+
+test('real damage and destruction stay ordered bounded and selectable after removal', async ({ context }) => {
+  test.setTimeout(90_000);
+  await context.route('**/assets/worlds/default.toml', (route) =>
+    route.fulfill({ contentType: 'text/plain', body: GM_ACTIVITY_WORLD }),
+  );
+
+  const page = await context.newPage();
+  const errors = captureServerPageErrors(page);
+  await page.goto('/?gm=1&scenario=assets/worlds/default.toml');
+  await waitForWasmReady(page);
+  await page.evaluate(() => window.__hostFleetOpen());
+  await page.waitForFunction(() => {
+    const state = window.__hostGmStartState?.();
+    return state?.admitted === true
+      && state.presentationReady === true
+      && state.localValidation === true;
+  });
+  await page.evaluate(() => document.getElementById('gm-ready-btn').click());
+  await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
+
+  await page.waitForFunction(() => {
+    const feed = window.__hostGmActivityState?.();
+    return feed?.entries?.some((entry) => entry.category === 'damage')
+      && document.querySelector('.gm-activity-entry[data-category="damage"]'
+        + ' .gm-activity-identity[data-involvement="victim"]:not(:disabled)');
+  });
+  const liveVictim = await page.evaluate(() => {
+    const feed = window.__hostGmActivityState();
+    const entry = feed.entries.find((candidate) => candidate.category === 'damage');
+    const button = [...document.querySelectorAll('.gm-activity-entry[data-category="damage"]'
+      + ' .gm-activity-identity[data-involvement="victim"]')]
+      .find((candidate) => candidate.dataset.entityId === entry.victim.entity_id);
+    button.click();
+    return { id: entry.victim.entity_id, name: button.textContent };
+  });
+  expect(liveVictim.id).toMatch(/^[0-9a-f-]{36}$/i);
+  expect(liveVictim.name.length).toBeGreaterThan(0);
+  await page.waitForFunction((uuid) => (
+    document.getElementById('gm-entity-map').navigationSelectedUuid() === uuid
+      && document.getElementById('gm-entity-card').dataset.entityId === uuid
+  ), liveVictim.id);
+
+  await page.waitForFunction((uuid) => {
+    const feed = window.__hostGmActivityState?.();
+    const map = document.getElementById('gm-entity-map');
+    return feed?.capacity === 4
+      && feed.entries.length === 4
+      && feed.entries.at(-1)?.category === 'destruction'
+      && feed.entries.at(-1)?.victim.entity_id === uuid
+      && !map.state.blips.some((blip) => blip.uuid === uuid);
+  }, liveVictim.id, { timeout: 30_000 });
+
+  const retained = await page.evaluate((uuid) => {
+    const feed = window.__hostGmActivityState();
+    const buttons = [...document.querySelectorAll(
+      `.gm-activity-identity[data-involvement="victim"][data-entity-id="${uuid}"]`,
+    )];
+    return {
+      capacity: feed.capacity,
+      entries: feed.entries,
+      buttons: buttons.map((button) => ({
+        text: button.textContent,
+        disabled: button.disabled,
+      })),
+      selected: document.getElementById('gm-entity-map').navigationSelectedUuid(),
+      cardHidden: document.getElementById('gm-entity-card').hidden,
+    };
+  }, liveVictim.id);
+  expect(retained.capacity).toBe(4);
+  expect(retained.entries).toHaveLength(4);
+  expect(retained.entries.every((entry) => entry.victim.entity_id === liveVictim.id)).toBe(true);
+  expect(retained.entries.at(-1).category).toBe('destruction');
+  const finalTick = retained.entries.at(-1).tick;
+  const finalBatch = retained.entries.filter((entry) => entry.tick === finalTick);
+  expect(finalBatch.map((entry) => entry.category)).toEqual(['damage', 'destruction']);
+  const damageSignatures = retained.entries
+    .filter((entry) => entry.category === 'damage')
+    .map((entry) => JSON.stringify(entry.damage));
+  expect(new Set(damageSignatures).size).toBeLessThan(damageSignatures.length);
+  expect(retained.buttons.length).toBeGreaterThan(0);
+  expect(retained.buttons.every((button) => button.text === liveVictim.name)).toBe(true);
+  expect(retained.buttons.every((button) => button.disabled)).toBe(true);
+  expect(retained.selected).toBeNull();
+  expect(retained.cardHidden).toBe(true);
   expect(errors).toEqual([]);
 });

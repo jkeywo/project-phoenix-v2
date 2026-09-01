@@ -171,6 +171,21 @@ fn parse_world_reads_the_trigger_fire_history_depth() {
     );
 }
 
+/// `[global] gm_activity_history_depth` (issue #1297): the authored bound for
+/// the page-local GM damage/destruction history.
+#[test]
+fn parse_world_reads_the_gm_activity_history_depth() {
+    let defaulted = parse_world("[global]\n").expect("minimal world should parse");
+    assert_eq!(
+        defaulted.global.gm_activity_history_depth, 128,
+        "an omitted gm_activity_history_depth falls back to 128 rows"
+    );
+
+    let authored = parse_world("[global]\ngm_activity_history_depth = 7\n")
+        .expect("authored GM activity depth should parse");
+    assert_eq!(authored.global.gm_activity_history_depth, 7);
+}
+
 /// `attacked_memory_secs` feeds straight into `now - last <
 /// attacked_memory_secs` in `objectives::attacked_recently` with no
 /// runtime clamp. TOML admits `nan`/`inf` as float literals, and IEEE 754

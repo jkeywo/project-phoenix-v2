@@ -76,6 +76,14 @@ pub fn encode_gm_entity_projection(
     serde_json::to_string(payload)
 }
 
+/// Encode the rendererless GM peer's absolute bounded activity Host Channel
+/// projection (issue #1297).
+pub fn encode_gm_activity_feed(
+    payload: &crate::gm_activity::GmActivityFeedPayload,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(payload)
+}
+
 /// Encode a station-activity debug payload to JSON (issue #1145, PRD #1144).
 ///
 /// The single seam where `crate::debug::payload::StationActivityPayload` becomes

@@ -1,8 +1,8 @@
 ---
 title: GM Operator
 type: entity
-tags: [gm, operator, identity, reconnect, roster, readiness, force-start, action, pause, host-mesh, map, regions, asteroids]
-sources: [src/gm_roster.rs, src/gm_action.rs, src/gm_join.rs, src/gm_projection.rs, src/entities/tags.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/messages.rs, src/core/codec.rs, src/command_admission/log.rs, src/lobby/server.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server/bridge.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/host-channel.js, gui/gm-local-projection.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html]
+tags: [gm, operator, identity, reconnect, roster, readiness, force-start, action, pause, host-mesh, map, activity, damage, destruction, regions, asteroids]
+sources: [src/gm_roster.rs, src/gm_action.rs, src/gm_join.rs, src/gm_projection.rs, src/gm_activity.rs, src/entities/config.rs, src/entities/tags.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/balance.rs, src/core/messages.rs, src/core/codec.rs, src/command_admission/log.rs, src/lobby/server.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server/bridge.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/host-channel.js, gui/gm-local-projection.js, gui/gm-activity-feed.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html]
 updated: 2026-09-01
 ---
 
@@ -125,6 +125,30 @@ make kind and condition independent of colour. The inspector hides its hull
 meter for kinds without hull applicability. The projection is not a
 `ServerMessage`, `MeshFrame`, or `SimOutbox`; peer state transfer remains the
 snapshot-recovery path.
+
+The sibling local `gm_activity` Host Channel is an absolute oldest-first view
+of a bounded presentation ring. `GmActivityPlugin` reads only the existing
+unconditional `BalanceEvent::DamageApplied` and `EntityDestroyed` facts after
+their fixed-tick producers and before `SimTick` advances. Within one tick it
+sorts damage before destruction, then victim UUID, optional source UUID, and
+damage detail; equal rows remain separate occurrences. The authored
+`global.gm_activity_history_depth` sets the capacity and defaults to 128.
+Capacity changes, new rows, and Lobby reset publish a replacement; an unchanged
+tick does not.
+
+A presentation-only UUID-to-name directory is sampled before combat, then
+pruned to identities that are live or referenced by the bounded history. Thus
+final damage and destruction rows retain a despawned victim's display identity
+without accumulating every UUID minted by asteroid streaming. Unknown and
+ordinary `AsteroidUuid` identities fall back to their UUID and remain
+unselectable. The browser validates the raw DTO, filters by category or exact
+involved identity, and resolves only known String Table ids at the render site;
+literal mod-authored names remain literal. Identity buttons call the same
+stable-UUID map selection seam; each `gm_entity` replacement reconciles their
+availability, so a removed or
+racing target becomes a readable disabled button and cannot clear another
+selection. This feed is likewise absent from `ServerMessage`, mesh frames,
+snapshots, digests, and peer transport.
 
 ## Typed session actions
 

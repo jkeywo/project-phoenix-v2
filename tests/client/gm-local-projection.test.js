@@ -130,6 +130,14 @@ describe('GM omniscient local projection', () => {
     })).toBeUndefined();
   });
 
+  it('exposes exact live-identity containment for cross-channel selection links', () => {
+    harness.projection.update(payload([entity()]));
+    expect(harness.projection.contains(PLAYER_ID)).toBe(true);
+    expect(harness.projection.contains(NPC_ID)).toBe(false);
+    harness.projection.update(payload([]));
+    expect(harness.projection.contains(PLAYER_ID)).toBe(false);
+  });
+
   it('projects player/NPC map markers with non-colour kind and destroyed state', () => {
     const npc = entity({
       entity_id: NPC_ID,

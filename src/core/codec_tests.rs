@@ -1051,6 +1051,49 @@ fn encode_gm_entity_projection_pins_the_local_host_channel_shape() {
     );
 }
 
+#[test]
+fn encode_gm_activity_feed_pins_the_local_host_channel_shape() {
+    let payload = crate::gm_activity::GmActivityFeedPayload {
+        capacity: 128,
+        entries: vec![
+            crate::gm_activity::GmActivityEntry {
+                tick: 42,
+                category: crate::gm_activity::GmActivityCategory::Damage,
+                victim: crate::gm_projection::GmEntityReference {
+                    entity_id: "00000000-0000-4000-8000-000000000001".into(),
+                    name: "entity.alliance_cruiser.display_name".into(),
+                },
+                source: None,
+                damage: Some(crate::gm_activity::GmActivityDamage {
+                    victim_kind: crate::core::balance::VictimKind::Ship,
+                    weapon: "region".into(),
+                    amount: 4.0,
+                    shield_absorbed: 1.0,
+                    hull_damage: 3.0,
+                    system_hit: None,
+                }),
+            },
+            crate::gm_activity::GmActivityEntry {
+                tick: 42,
+                category: crate::gm_activity::GmActivityCategory::Destruction,
+                victim: crate::gm_projection::GmEntityReference {
+                    entity_id: "00000000-0000-4000-8000-000000000001".into(),
+                    name: "entity.alliance_cruiser.display_name".into(),
+                },
+                source: Some(crate::gm_projection::GmEntityReference {
+                    entity_id: "00000000-0000-4000-8000-000000000002".into(),
+                    name: "Raider".into(),
+                }),
+                damage: None,
+            },
+        ],
+    };
+    assert_eq!(
+        encode_gm_activity_feed(&payload).unwrap(),
+        r#"{"capacity":128,"entries":[{"tick":42,"category":"damage","victim":{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"},"source":null,"damage":{"victim_kind":"ship","weapon":"region","amount":4.0,"shield_absorbed":1.0,"hull_damage":3.0,"system_hit":null}},{"tick":42,"category":"destruction","victim":{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"},"source":{"entity_id":"00000000-0000-4000-8000-000000000002","name":"Raider"},"damage":null}]}"#
+    );
+}
+
 /// `encode_chatter` must JSON-escape quotes/backslashes in the labels and in
 /// any text carried inside the payload — the pre-#818 hand-rolled `format!`
 /// encoder did this by hand; serde now owns it. Round-trips through

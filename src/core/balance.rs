@@ -40,7 +40,8 @@ pub const FIRED_KIND_BLASTER: &str = "blaster";
 /// not combat: folding it into the per-ship ledgers would credit a shooter
 /// with `damage_dealt` for shooting a rock. The discriminator lets emission
 /// stay unconditional while aggregation stays ship-only.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum VictimKind {
     /// A ship, station, or any other entity with an `EntityUuid`.
     Ship,

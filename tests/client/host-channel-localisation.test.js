@@ -32,6 +32,7 @@ function mountDispatcher({ strings = { t, has, localiseTree } } = {}) {
     audio_level: record('audio_level'),
     shake: record('shake'),
     gm_entity: record('gm_entity'),
+    gm_activity: record('gm_activity'),
     gm_session: record('gm_session'),
   };
   const dispatch = createHostChannel({ handlers, strings });
@@ -177,6 +178,34 @@ describe('host channel localisation boundary', () => {
     expect(payloadFor(raw.seen, 'gm_entity')).toEqual(dto);
     expect(localiseSpy).not.toHaveBeenCalled();
     expect(t(dto.entities[0].name)).not.toBe(dto.entities[0].name);
+  });
+
+  it('delivers gm_activity raw without mutating identities, weapons, or systems', () => {
+    const localiseSpy = vi.fn(localiseTree);
+    const raw = mountDispatcher({ strings: { t, has, localiseTree: localiseSpy } });
+    const dto = {
+      capacity: 4,
+      entries: [{
+        tick: 9,
+        category: 'damage',
+        victim: {
+          entity_id: 'entity.alliance_destroyer.name',
+          name: 'entity.alliance_destroyer.display_name',
+        },
+        source: null,
+        damage: {
+          victim_kind: 'ship',
+          weapon: 'entity.alliance_destroyer.name',
+          amount: 2,
+          shield_absorbed: 0,
+          hull_damage: 2,
+          system_hit: 'entity.alliance_destroyer.display_name',
+        },
+      }],
+    };
+    raw.dispatch('gm_activity', JSON.stringify(dto));
+    expect(payloadFor(raw.seen, 'gm_activity')).toEqual(dto);
+    expect(localiseSpy).not.toHaveBeenCalled();
   });
 
   it('carries the numeric taps through unchanged', () => {

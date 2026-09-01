@@ -2,7 +2,7 @@
 title: Message Flow
 type: concept
 tags: [messages, bridge, wasm, bevy, events, routing, delivery-class, snapshot, coordination, gm]
-sources: [src/core/debug_surface.rs, src/debug/catalogue.rs, src/server/bridge.rs, src/core/codec.rs, src/core/messages.rs, src/core/broadcast/, src/lobby/server.rs, src/lobby/handler.rs, src/command_admission/, src/gm_action.rs, src/gm_join.rs, src/lockstep/frame.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/server_app/registration.rs, src/ship/shields.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/console/helm/server.rs, src/console/weapons/server.rs, src/console/repair/server.rs, src/console_bridge.rs, server.html, client.html, gui/client-router.js, gui/host-mesh.js, gui/fleet-session.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/debug-surfaces.generated.js, gui/debug-surface-adapters.js, gui/server-settings.js, gui/settings-panel.js, gui/sim-state.js, gui/console-state.js, gui/coordination-popup.js, scripts/generate-debug-surfaces.mjs, scripts/build-client.mjs, AGENTS.md]
+sources: [src/core/debug_surface.rs, src/debug/catalogue.rs, src/server/bridge.rs, src/core/codec.rs, src/core/messages.rs, src/core/broadcast/, src/lobby/server.rs, src/lobby/handler.rs, src/command_admission/, src/gm_action.rs, src/gm_join.rs, src/gm_activity.rs, src/lockstep/frame.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/server_app/registration.rs, src/ship/shields.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/console/helm/server.rs, src/console/weapons/server.rs, src/console/repair/server.rs, src/console_bridge.rs, server.html, client.html, gui/client-router.js, gui/host-channel.js, gui/gm-activity-feed.js, gui/host-mesh.js, gui/fleet-session.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/debug-surfaces.generated.js, gui/debug-surface-adapters.js, gui/server-settings.js, gui/settings-panel.js, gui/sim-state.js, gui/console-state.js, gui/coordination-popup.js, scripts/generate-debug-surfaces.mjs, scripts/build-client.mjs, AGENTS.md]
 updated: 2026-09-01
 ---
 
@@ -91,6 +91,15 @@ matching on the `ServerMessage` variant. `LobbyOutbox` remains intrinsically
 Reliable. `flush_outbound` is the Rust-to-JavaScript boundary. `routeOutbound`
 prefers the client's unordered snapshot channel for snapshot traffic and falls
 back to reliable when that channel is absent.
+
+The browser host also owns page-local Host Channels which never enter that
+peer route. For a rendererless GM, `gm_entity` carries the absolute stable-ID
+map and `gm_activity` carries an absolute bounded damage/destruction history.
+The latter is projected from `BalanceEvent` after fixed-tick producers and is
+flushed by `src/server/bridge.rs` directly to `server.html`; it is not a new
+simulation event bus, `ServerMessage`, mesh frame, snapshot, or digest input.
+Both strict DTOs remain raw at the dispatcher and localise only their explicit
+display-name fields while rendering.
 
 ## Reconnect and disconnect
 

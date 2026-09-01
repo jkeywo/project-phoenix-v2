@@ -33,12 +33,13 @@ use {
     crate::asteroids::lifecycle::AsteroidLifecyclePlugin,
     crate::boot::{BootPlan, BootProfile, WorldIngest},
     crate::console_bridge::{
-        AiChatterEvent, AudioConfigChanged, AudioCueEvent, GmEntityProjectionChanged,
-        GmSessionChanged, HudStateChanged, LobbyStateChanged,
+        AiChatterEvent, AudioConfigChanged, AudioCueEvent, GmActivityFeedChanged,
+        GmEntityProjectionChanged, GmSessionChanged, HudStateChanged, LobbyStateChanged,
     },
     crate::core::codec::{self, JsonCodec, MessageCodec},
     crate::core::messages::{self, DeliveryClass},
     crate::entities::config_cache::ConfigCachePlugin,
+    crate::gm_activity::GmActivityPlugin,
     crate::gm_projection::{BrowserGameMaster, GmProjectionPlugin},
     crate::lobby::stations_config::ShipStations,
     crate::lobby::{
@@ -1082,12 +1083,15 @@ pub mod host_channels {
     /// Rendererless GM peer's absolute omniscient ship-map projection. This
     /// callback is page-local and never enters the peer transport.
     pub const GM_ENTITY: &str = "gm_entity";
+    /// Rendererless GM peer's absolute bounded damage/destruction feed. This
+    /// callback is page-local and never enters the peer transport.
+    pub const GM_ACTIVITY: &str = "gm_activity";
     /// Authoritative pause state plus attributed typed-action results.
     pub const GM_SESSION: &str = "gm_session";
 
     /// Every registered host channel name. The JS dispatcher table in
     /// `server.html` must have a handler per entry.
-    pub const ALL: [&str; 9] = [
+    pub const ALL: [&str; 10] = [
         HUD,
         LOBBY,
         CHATTER,
@@ -1096,6 +1100,7 @@ pub mod host_channels {
         SHAKE,
         AUDIO_LEVEL,
         GM_ENTITY,
+        GM_ACTIVITY,
         GM_SESSION,
     ];
 }
@@ -1381,7 +1386,7 @@ pub fn wasm_init() {
     if is_browser_gm {
         app.insert_resource(BrowserGameMaster);
     }
-    app.add_plugins(GmProjectionPlugin);
+    app.add_plugins((GmProjectionPlugin, GmActivityPlugin));
 
     app.insert_resource(log_config)
         .add_plugins(crate::logging::LoggingPlugin);
@@ -4900,11 +4905,12 @@ fn flush_host_channels(
     mut audio_config: MessageReader<AudioConfigChanged>,
     mut audio_cue: MessageReader<AudioCueEvent>,
     mut gm_entity: MessageReader<GmEntityProjectionChanged>,
+    mut gm_activity: MessageReader<GmActivityFeedChanged>,
     mut gm_session: MessageReader<GmSessionChanged>,
 ) {
     // Declarative channel table: name → drained JSON payloads. Adding a
     // message channel = one row here (see `host_channels`).
-    let message_batches: [(&str, Vec<String>); 7] = [
+    let message_batches: [(&str, Vec<String>); 8] = [
         (
             host_channels::HUD,
             hud.read().map(|m| m.json.clone()).collect(),
@@ -4933,6 +4939,13 @@ fn flush_host_channels(
             gm_entity
                 .read()
                 .filter_map(|event| codec::encode_gm_entity_projection(&event.payload).ok())
+                .collect(),
+        ),
+        (
+            host_channels::GM_ACTIVITY,
+            gm_activity
+                .read()
+                .filter_map(|event| codec::encode_gm_activity_feed(&event.payload).ok())
                 .collect(),
         ),
         (
@@ -5686,6 +5699,7 @@ spawn_on = "game_start"
                 host_channels::SHAKE,
                 host_channels::AUDIO_LEVEL,
                 host_channels::GM_ENTITY,
+                host_channels::GM_ACTIVITY,
                 host_channels::GM_SESSION,
             ]
         );

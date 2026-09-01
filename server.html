@@ -190,10 +190,32 @@
       display: grid; grid-template-columns: minmax(20rem, 2fr) minmax(18rem, 1fr);
       gap: 1rem; min-height: 28rem;
     }
-    #gm-map-panel, #gm-inspector {
+    #gm-map-panel, #gm-inspector, #gm-activity {
       min-width: 0; padding: 1rem; border: 1px solid var(--edge-control);
       background: var(--surface-panel-down); display: flex; flex-direction: column; gap: .75rem;
     }
+    #gm-activity { grid-column: 1 / -1; }
+    #gm-activity-filters { display: flex; flex-wrap: wrap; gap: .75rem 1rem; }
+    .gm-activity-filter { display: grid; gap: .3rem; color: var(--ink-muted); }
+    .gm-activity-filter select {
+      min-width: 12rem; padding: .45rem .6rem; color: var(--ink-primary);
+      background: var(--surface-panel-up); border: 1px solid var(--edge-control); font: inherit;
+    }
+    #gm-activity-status, #gm-activity-empty { margin: 0; color: var(--ink-muted); }
+    #gm-activity-list {
+      margin: 0; padding: 0; list-style: none; max-height: 20rem; overflow-y: auto;
+      display: grid; gap: .45rem;
+    }
+    .gm-activity-entry { padding: .65rem .75rem; border-left: 3px solid var(--edge-control); background: var(--surface-panel-up); }
+    .gm-activity-entry[data-category="destruction"] { border-left-color: var(--fire-bright); }
+    .gm-activity-metadata, .gm-activity-involved { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+    .gm-activity-tick, .gm-activity-category, .gm-activity-detail, .gm-activity-system { color: var(--ink-muted); }
+    .gm-activity-category { text-transform: uppercase; letter-spacing: .08em; }
+    .gm-activity-identity {
+      padding: .2rem .35rem; color: var(--ink-primary); background: transparent;
+      border: 1px solid var(--edge-control); font: inherit; cursor: pointer;
+    }
+    .gm-activity-identity:disabled { border-color: transparent; color: var(--ink-muted); cursor: default; }
     #gm-entity-map {
       display: block; width: 100%; height: clamp(22rem, 54vh, 46rem);
       min-height: 22rem; border: 1px solid var(--edge-control); background: var(--surface-abyss);
@@ -1809,6 +1831,27 @@
                 aria-labelledby="gm-entity-status-label gm-entity-status"></meter>
             </article>
           </section>
+          <section id="gm-activity" role="region" aria-labelledby="gm-activity-heading">
+            <h2 id="gm-activity-heading" data-i18n="server.gm.activity.heading"></h2>
+            <div id="gm-activity-filters">
+              <label class="gm-activity-filter" for="gm-activity-category-filter">
+                <span data-i18n="server.gm.activity.filter.category"></span>
+                <select id="gm-activity-category-filter">
+                  <option value="all" data-i18n="server.gm.activity.filter.category_all"></option>
+                  <option value="damage" data-i18n="server.gm.activity.category.damage"></option>
+                  <option value="destruction" data-i18n="server.gm.activity.category.destruction"></option>
+                </select>
+              </label>
+              <label class="gm-activity-filter" for="gm-activity-identity-filter">
+                <span data-i18n="server.gm.activity.filter.identity"></span>
+                <select id="gm-activity-identity-filter"></select>
+              </label>
+            </div>
+            <p id="gm-activity-status" role="status" aria-live="polite" aria-atomic="true"></p>
+            <p id="gm-activity-empty" data-i18n="server.gm.activity.empty"></p>
+            <ol id="gm-activity-list" role="log" aria-labelledby="gm-activity-heading"
+              aria-live="polite" aria-relevant="additions text"></ol>
+          </section>
         </div>
       </main>
 
@@ -2196,6 +2239,7 @@
   <script type="module">
     import { createHostChannel } from './gui/host-channel.js';
     import './gui/components/ph-navigation-map.js';
+    import { createGmActivityFeed } from './gui/gm-activity-feed.js';
     import { createGmLocalProjection } from './gui/gm-local-projection.js';
     import { createGmSessionControls } from './gui/gm-session-controls.js';
     import {
@@ -2205,6 +2249,12 @@
     import { createHostActionRegistry } from './gui/host-actions.js';
     import { t, has, localiseTree } from './gui/strings.js';
     const gmProjection = createGmLocalProjection({ doc: document, t });
+    const gmActivity = createGmActivityFeed({
+      doc: document,
+      t,
+      containsEntity: (id) => gmProjection.contains(id),
+      selectEntity: (id) => gmProjection.select(id),
+    });
     const hostActionFeedback = new ActionFeedbackLifecycle({
       onTransition: (value) => emitActionFeedbackTransition(window, value),
     });
@@ -2231,6 +2281,7 @@
     window.__hostGmSessionRefresh = gmSessionControls.refreshAdmission;
     window.__hostGmSessionReset = gmSessionControls.reset;
     window.__hostGmSessionState = gmSessionControls.state;
+    window.__hostGmActivityState = gmActivity.state;
     window.__hostSemanticActions = hostSemanticActions;
     window.__hostActionFeedback = hostActionFeedback;
     const hostChannelDispatch = createHostChannel({
@@ -2242,7 +2293,10 @@
         audio_cue:    function(p) { window.__audioCue(p); },
         audio_level:  function(p) { window.__audioLevel(p); },
         shake:        function(p) { window.__applyShake(p[0], p[1]); },
-        gm_entity:    function(p) { gmProjection.update(p); },
+        gm_entity:    function(p) {
+          if (gmProjection.update(p)) gmActivity.reconcileAvailability();
+        },
+        gm_activity:  function(p) { gmActivity.update(p); },
         gm_session:   function(p) { gmSessionControls.update(p); },
       },
       strings: { t, has, localiseTree },

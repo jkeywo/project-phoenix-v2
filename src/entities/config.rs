@@ -4349,6 +4349,17 @@ pub struct GlobalConfig {
     /// TOML authors the key, it IS the shipped tuning.
     #[serde(default = "default_trigger_fire_history_depth")]
     pub trigger_fire_history_depth: u32,
+    /// How many damage/destruction rows the browser GM activity feed retains
+    /// (issue #1297, PRD #930).
+    ///
+    /// The feed is a peer-local presentation projection over unconditional
+    /// balance events. This authored bound keeps a long-running facilitated
+    /// session from growing page or simulation memory without limit. The serde
+    /// default is the one sanctioned hardcoded copy (AGENTS.md #11); worlds
+    /// may tune the depth without changing the event stream or authoritative
+    /// reducer state.
+    #[serde(default = "default_gm_activity_history_depth")]
+    pub gm_activity_history_depth: u32,
     /// The lockstep input delay a FLEET playing this mission agrees on, in
     /// logical ticks (issue #1116).
     ///
@@ -4420,6 +4431,13 @@ fn default_trigger_fire_history_depth() -> u32 {
     16
 }
 
+/// Serde default for [`GlobalConfig::gm_activity_history_depth`]: 128 rows
+/// (issue #1297). The only sanctioned hardcoded copy of the shipped GM feed
+/// bound (AGENTS.md #11) -- a TOML-parse fallback.
+fn default_gm_activity_history_depth() -> u32 {
+    128
+}
+
 /// Serde default for [`GlobalConfig::command_delay_ticks`]: six logical ticks
 /// (issue #1116). The only sanctioned hardcoded copy of the shipped fleet delay
 /// (AGENTS.md #11) — a TOML-parse fallback.
@@ -4461,6 +4479,7 @@ impl Default for GlobalConfig {
             attacked_memory_secs: default_attacked_memory_secs(),
             station_activity_bucket_secs: default_station_activity_bucket_secs(),
             trigger_fire_history_depth: default_trigger_fire_history_depth(),
+            gm_activity_history_depth: default_gm_activity_history_depth(),
             command_delay_ticks: default_command_delay_ticks(),
         }
     }

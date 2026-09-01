@@ -269,6 +269,7 @@ export function createGmLocalProjection({ doc = document, t = (id) => id } = {})
     update,
     clear,
     select,
+    contains: (id) => entities.some((entity) => entity.entity_id === id),
     state: () => ({ entities: [...entities], selectedId }),
   };
 }

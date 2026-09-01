@@ -87,6 +87,13 @@ pub struct GmEntityProjectionChanged {
     pub payload: crate::gm_projection::GmEntityProjectionPayload,
 }
 
+/// Absolute bounded damage/destruction activity for the rendererless GM page.
+/// Drained only by the local Host Channel; it never enters the peer wire.
+#[derive(Message, Clone, Debug)]
+pub struct GmActivityFeedChanged {
+    pub payload: crate::gm_activity::GmActivityFeedPayload,
+}
+
 /// Absolute GM session state and bounded attributed result feed. Local Host
 /// Channel only; the grants themselves cross the typed host mesh.
 #[derive(Message, Clone, Debug)]

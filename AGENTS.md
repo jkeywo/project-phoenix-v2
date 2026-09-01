@@ -229,6 +229,25 @@ cargo build --release --features host --bin phoenix-host
 #     --profile and no lobby press the window stays exactly where the OS opened
 #     it (the #1121 behaviour), and only a press or an unplug moves it. An
 #     explicit --profile still wins at boot, seeding the layout the row edits.
+#     AND A SCREEN ROW ON EVERY STATION CARD (issue #1331): one button per
+#     eligible monitor plus an off state, so pressing one opens THAT STATION'S
+#     CONSOLE ON THAT MONITOR AT RUNTIME — a Station window and a seated pane
+#     created on demand, not at init — and off closes it and frees the screen.
+#     The console is an ordinary participant: it joins and claims through the
+#     normal flow, may be released and re-claimed by anyone, and admission
+#     cannot tell it from a phone. The station id in the layout decides only
+#     WHICH console document opens on WHICH glass, never who may sit there.
+#     A windowed host with a --client-dir therefore carries a PANE BUS whether
+#     or not it was given a --pane, and (with --rendezvous) pairs it with the
+#     relay through PairedTransport rather than replacing it — before #1331 the
+#     relay's insert_resource silently overwrote the pane transport, so a
+#     --pane on a crewed host was talking to nothing. The rows are reachable
+#     mid-mission through the F9-revealed surface, so a replugged monitor's
+#     console reopens without ending the mission; with one monitor they say
+#     consoles need a second screen. Unplugging a screen closes the consoles on
+#     it — through bridge_layout::reconcile plus
+#     bridge_display::follow_layout_stations, NOT through the #1125 watcher's
+#     pane_labels, which stay the AUTHORED profile's participant panes.
 #   --manifest also narrows what this process FLIES, not only what it publishes:
 #     with a curating manifest in force the default hull is drawn from that
 #     manifest's allowlist (issue #917). An explicit --ship still wins.

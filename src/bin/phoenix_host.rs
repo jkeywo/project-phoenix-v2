@@ -363,60 +363,86 @@ fn main() {
         }
     }
 
+    // The pane bus. `--pane` opens one console per flag at boot, and since
+    // issue #1331 the lobby's per-station screen rows open one on demand — so a
+    // host with a client bundle gets a bus either way, armed with the same
+    // document body a `--pane` loads. Without it a screen button would seat a
+    // console the host has nothing to open.
+    //
+    // A build with no `ultralight` feature and a host with no bundle both get
+    // `None`: the first can composite no view at all, and the second has no
+    // client page to load into one. Neither has a lobby surface to press,
+    // either, so neither can reach a screen row.
+    let wants_consoles = ultralight_ready && matches!(args.client, ClientSource::Bundled { .. });
     let mut pane_bus: Option<native_host::panes::PaneBus> = None;
-    if !sim.panes.is_empty() {
-        if !cfg!(feature = "ultralight") {
-            eprintln!(
-                "phoenix-host: --pane needs a build with --features ultralight (this one has \
-                 none), because a local Station pane is an embedded browser view. Rebuild \
-                 with `cargo build --release --features ultralight --bin phoenix-host`."
-            );
-            std::process::exit(2);
-        }
+    if !sim.panes.is_empty() && !cfg!(feature = "ultralight") {
+        eprintln!(
+            "phoenix-host: --pane needs a build with --features ultralight (this one has \
+             none), because a local Station pane is an embedded browser view. Rebuild \
+             with `cargo build --release --features ultralight --bin phoenix-host`."
+        );
+        std::process::exit(2);
+    }
+    if !sim.panes.is_empty() || wants_consoles {
+        // `LocalPanes::open(&[])` is a bus with no pane on it and every other
+        // preparation done — which is exactly what a host whose consoles are all
+        // still to be opened needs.
         let panes = native_host::panes::LocalPanes::open(&sim.panes, server.local_addr());
         let index = match &args.client {
             ClientSource::Bundled { dir } => {
                 std::path::Path::new(dir).join("client").join("index.html")
             }
-            ClientSource::Hosted => unreachable!("--pane requires --client-dir; parse_args gates"),
+            ClientSource::Hosted => unreachable!("both arms above require a --client-dir bundle"),
         };
-        let html = match std::fs::read_to_string(&index) {
-            Ok(html) => html,
+        match std::fs::read_to_string(&index) {
+            Ok(html) => match panes.publish(&html, &server.hosted_documents()) {
+                Ok(()) => {
+                    for pane in &panes.opened {
+                        // Deliberately NOT the pane's URL. It carries this
+                        // participant's whole session token in its fragment, and
+                        // an operator log is a file, a scrollback and a
+                        // screenshot; the first eight characters are enough to
+                        // correlate a pane with what it says.
+                        eprintln!(
+                            "phoenix-host: {} is {} on token {}… at http://{}/",
+                            pane.id,
+                            pane.identity.name(),
+                            &pane.identity.token()[..8],
+                            panes.host_addr,
+                        );
+                    }
+                    // A pane IS an embedded browser view, so an unstaged SDK is
+                    // fatal for it — the reason was printed by the staging
+                    // above. A host that only wanted the screen rows carries on
+                    // and simply cannot open one, like the lobby surface below.
+                    if !sim.panes.is_empty() && !ultralight_ready {
+                        std::process::exit(1);
+                    }
+                    pane_bus = Some(panes.bus.clone());
+                    cfg.panes = Some(panes);
+                }
+                Err(e) => {
+                    eprintln!(
+                        "phoenix-host: {} cannot become a pane document: {e}",
+                        index.display()
+                    );
+                    // Fatal for a `--pane`, which was asked for by name;
+                    // reported for a host that merely wanted the screen rows.
+                    if !sim.panes.is_empty() {
+                        std::process::exit(1);
+                    }
+                }
+            },
             Err(e) => {
                 eprintln!(
-                    "phoenix-host: cannot read {} for a pane: {e}",
+                    "phoenix-host: cannot read {} for a console: {e}",
                     index.display()
                 );
-                std::process::exit(1);
+                if !sim.panes.is_empty() {
+                    std::process::exit(1);
+                }
             }
-        };
-        if let Err(e) = panes.publish(&html, &server.hosted_documents()) {
-            eprintln!(
-                "phoenix-host: {} cannot become a pane document: {e}",
-                index.display()
-            );
-            std::process::exit(1);
         }
-        for pane in &panes.opened {
-            // Deliberately NOT the pane's URL. It carries this participant's
-            // whole session token in its fragment, and an operator log is a
-            // file, a scrollback and a screenshot; the first eight characters
-            // are enough to correlate a pane with what it says.
-            eprintln!(
-                "phoenix-host: {} is {} on token {}… at http://{}/",
-                pane.id,
-                pane.identity.name(),
-                &pane.identity.token()[..8],
-                panes.host_addr,
-            );
-        }
-        // A pane IS an embedded browser view, so an unstaged SDK is fatal for
-        // it — the reason was printed by the staging above.
-        if !ultralight_ready {
-            std::process::exit(1);
-        }
-        pane_bus = Some(panes.bus.clone());
-        cfg.panes = Some(panes);
     }
 
     // The host's own lobby surface (issue #1325). Opened after the bind, like a
@@ -506,9 +532,26 @@ fn main() {
                     },
                 );
                 app.insert_resource(transport.notices());
-                app.insert_resource(
-                    project_phoenix::native_host::transport::NativeTransportLink::new(transport),
-                );
+                // PAIRED with the pane bus when there is one, never inserted on
+                // top of it. `NativeTransportLink` is one resource, so a plain
+                // insert here replaced the bus `build_native_host_app` had
+                // already installed — which left every local console on a host
+                // that crew could also join talking to nothing. `PairedTransport`
+                // is what that type exists for: poll the panes then the relay,
+                // dispatch to both, and let each decide whether the `Target`
+                // names anyone it knows.
+                let link = match &pane_bus {
+                    Some(bus) => project_phoenix::native_host::transport::NativeTransportLink::new(
+                        project_phoenix::native_host::transport::PairedTransport::new(
+                            bus.transport(),
+                            transport,
+                        ),
+                    ),
+                    None => {
+                        project_phoenix::native_host::transport::NativeTransportLink::new(transport)
+                    }
+                };
+                app.insert_resource(link);
                 app.add_systems(bevy::prelude::Update, report_relay_notices);
                 eprintln!("phoenix-host: registering with {base} as {origin}");
             }

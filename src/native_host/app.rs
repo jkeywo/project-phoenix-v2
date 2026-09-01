@@ -154,7 +154,11 @@ pub struct NativeHostConfig {
     /// digest comparison, where an unpinned executor makes the claim a race
     /// rather than a measurement (see `tests/native_headless_digest.rs`).
     pub deterministic: bool,
-    /// Local Station panes, already opened and published (issue #1122).
+    /// The pane bus, and the Station panes `--pane` opened on it (issue #1122).
+    ///
+    /// `opened` may be empty (issue #1331): a host with a client bundle carries
+    /// a bus whether or not it was given a `--pane`, because the lobby's screen
+    /// rows open consoles on it while the host runs.
     ///
     /// Opened by the caller rather than here, because a pane's document is
     /// published at the delivery listener's own address and a `:0` bind does not
@@ -611,6 +615,14 @@ pub fn build_native_host_app(
     // A pane host with panes is therefore also a host that HAS a transport,
     // which is why the `--solo` warning below asks whether one is installed
     // rather than assuming nobody can ever connect.
+    //
+    // `panes.opened` may be EMPTY (issue #1331): a host with a client bundle
+    // carries a bus whether or not it was given a `--pane`, because the lobby's
+    // per-station screen rows open consoles on it while the host runs. The bus,
+    // the transport and the (empty) display config are installed all the same —
+    // a console opened three minutes into a lobby is the same kind of
+    // participant as one a flag opened at boot, and it must not need a second
+    // seam to reach the simulation.
     if let Some(panes) = &cfg.panes {
         app.insert_resource(crate::native_host::transport::NativeTransportLink::new(
             panes.bus.transport(),

@@ -759,6 +759,17 @@ fn spawn_station_window(commands: &mut Commands, monitor: Entity, identity: &str
 /// **which console document opens on which glass** — never who may sit there:
 /// the page claims its station through the ordinary lobby flow, and may be
 /// released and re-claimed by anyone.
+///
+/// # Moving one is rebuilding it, on the same identity
+///
+/// An Ultralight view is created at one size on one window, so a console that
+/// moved screens — or whose rectangle changed because a second console joined
+/// its screen or left it — cannot be re-placed and has to be built again. That
+/// goes through `PaneBus::close` + `recreate`, which is issue #1125's crash path
+/// used deliberately rather than a second mechanism: the **same session token**
+/// survives, so the rebuilt page's `Identify` is a reconnect the lobby answers
+/// by restoring the held station. Whoever claimed that console keeps it across
+/// the move, with the same moment on `Backfill` a view crash costs.
 fn follow_layout_stations(
     monitors: Query<(Entity, &Monitor, Has<PrimaryMonitor>)>,
     layout: Option<Res<BridgeLayoutResource>>,
@@ -814,13 +825,18 @@ fn follow_layout_stations(
         return;
     };
 
-    // Every console the surfaces are carrying, and every console the layout now
-    // says should be open. The bus is the authority on whether a pane exists;
-    // these two are the authority on whether one *should*.
-    let carried: Vec<crate::core::messages::StationId> = surfaces
+    // Every console the surfaces are carrying, and **where** — the monitor and
+    // the rectangle its view was built for. Both halves matter: a console that
+    // changed either has a view sized and placed for a seat it no longer has,
+    // and rebuilding it is what makes a move a move.
+    let carried: Vec<(crate::core::messages::StationId, String, PaneRect)> = surfaces
         .0
         .iter()
-        .flat_map(|s| s.panes.iter().filter_map(|p| p.station.clone()))
+        .flat_map(|s| {
+            s.panes
+                .iter()
+                .filter_map(|p| p.station.clone().map(|st| (st, s.identity.clone(), p.rect)))
+        })
         .collect();
 
     // Resolved against the identities the LAYOUT knows rather than freshly
@@ -836,13 +852,20 @@ fn follow_layout_stations(
     );
 
     // ── the layout's seating, monitor by monitor ────────────────────────────
+    //
+    // Three things can be true of a console at this point, and each needs a
+    // different act: it is NEW (open one), it MOVED or was re-laid-out (its view
+    // is the wrong size or on the wrong window, so rebuild it), or it is exactly
+    // where it was (leave it alone — most passes, for most consoles).
     let mut opened: Vec<(crate::core::messages::StationId, MonitorIdentity)> = Vec::new();
+    let mut reseated: Vec<(crate::core::messages::StationId, MonitorIdentity)> = Vec::new();
     for (entity, discovered, geometry) in &present {
         let identity = &discovered.identity;
         // The deterministic split, resolved against this monitor's real
         // geometry: one console is the whole screen, two divide it side by side.
         // Recomputed for the WHOLE monitor rather than per console, because
-        // seating a second console re-lays out the first.
+        // seating a second console re-lays out the first — and the first's view
+        // then has to be rebuilt at its new half, which is what `reseated` is.
         let seats = layout.layout.station_rects(identity, geometry);
         let existing = surfaces
             .0
@@ -860,9 +883,15 @@ fn follow_layout_stations(
             })
             .collect();
         for pane in &panes {
-            if let Some(station) = &pane.station {
-                if !carried.contains(station) {
-                    opened.push((station.clone(), identity.clone()));
+            let Some(station) = &pane.station else {
+                continue;
+            };
+            match carried.iter().find(|(s, _, _)| s == station) {
+                None => opened.push((station.clone(), identity.clone())),
+                Some((_, was_on, was_at)) => {
+                    if was_on != identity.as_str() || was_at != &pane.rect {
+                        reseated.push((station.clone(), identity.clone()));
+                    }
                 }
             }
         }
@@ -920,7 +949,7 @@ fn follow_layout_stations(
         .iter()
         .flat_map(|m| layout.layout.stations_on(m))
         .collect();
-    for station in carried.iter().filter(|s| !seated.contains(s)) {
+    for (station, _, _) in carried.iter().filter(|(s, _, _)| !seated.contains(&s)) {
         // The dropped-phone path, deliberately: a plain `close`, which owes the
         // lobby one `PlayerDisconnected` and flips the station to `Backfill`.
         // NOT a fault — a fault asks the pane host to rebuild the view, and this
@@ -940,6 +969,46 @@ fn follow_layout_stations(
                 log,
                 LogCat::Lobby,
                 "bridge display: station {:?}'s console was unseated with no pane open for it",
+                station.0
+            ),
+        }
+    }
+
+    // ── rebuild what moved, on the same identity ────────────────────────────
+    //
+    // A view is created at one size, on one window. So a console the operator
+    // moved to another screen — and one whose rectangle changed because a second
+    // console joined its screen or left it — has a view that no longer fits its
+    // seat, and there is no re-place: it has to be built again.
+    //
+    // Through `close` + `recreate`, which is issue #1125's crash path used
+    // deliberately rather than a second mechanism. It keeps the SAME session
+    // token, so the page's `Identify` is a reconnect the lobby answers by
+    // restoring the held station and pushing the current projection — whoever
+    // claimed that console keeps it across the move. `open_pending_views` builds
+    // the new view against the surfaces this pass just rewrote, so it lands on
+    // the screen the operator chose. The gap in between is the same one a view
+    // crash has: a moment on `Backfill` while the page loads.
+    for (station, monitor) in &reseated {
+        let Some(pane) = bus.0.open_pane_for_name(&station.0) else {
+            // No pane to rebuild — treat it as new, below.
+            opened.push((station.clone(), monitor.clone()));
+            continue;
+        };
+        bus.0.close(pane);
+        match bus.0.recreate(pane) {
+            Some((rebuilt, _url)) => crate::pinfo!(
+                log,
+                LogCat::Lobby,
+                "bridge display: station {:?}'s console moved to monitor {monitor}; its view is \
+                 rebuilt as {rebuilt} on the same identity, so whoever claimed it keeps it",
+                station.0
+            ),
+            None => crate::pwarn!(
+                log,
+                LogCat::Lobby,
+                "bridge display: station {:?}'s console moved to monitor {monitor} but could not \
+                 be rebuilt; it stays closed on AI control",
                 station.0
             ),
         }
@@ -2394,25 +2463,42 @@ mod tests {
     }
 
     #[test]
-    fn moving_a_console_to_another_screen_is_one_console_that_moved() {
+    fn moving_a_console_to_another_screen_keeps_whoever_claimed_it() {
         // Assigning a seated station elsewhere IS the move (the law has no move
-        // action), and the follower must read it as one: the same pane, on the
-        // other screen's window, rather than a close and a re-open that would
-        // drop the human at it.
+        // action). A view is built at one size on one window, so the move is a
+        // REBUILD — but on the same identity, through the #1125 recreate path,
+        // so the page's `Identify` is a reconnect the lobby answers by restoring
+        // the held station rather than a stranger arriving.
         let (mut app, bus) = console_host();
         seat(&mut app, "helm", BENQ);
         app.update();
         let pane = bus.open_pane_for_name("helm").unwrap();
+        let token = bus.token_of(pane).unwrap();
+        bus.mark_live(pane);
+        bus.take_pending_views();
 
         seat(&mut app, "helm", ACME);
         app.update();
 
         assert_eq!(surfaces(&app), vec![ACME.to_string()]);
-        assert_eq!(bus.open_count(), 1);
+        assert_eq!(bus.open_count(), 1, "one console, not two");
+        let moved = bus
+            .open_pane_for_name("helm")
+            .expect("the console is still open");
+        assert_ne!(moved, pane, "a rebuilt view is a new handle");
         assert_eq!(
-            bus.open_pane_for_name("helm"),
-            Some(pane),
-            "the same console: its session token, and whoever claimed with it, survive the move"
+            bus.token_of(moved).as_deref(),
+            Some(token.as_str()),
+            "on the SAME session token, so whoever claimed it keeps it across the move"
+        );
+        assert_eq!(
+            bus.take_pending_views()
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect::<Vec<_>>(),
+            vec![moved],
+            "and the pane host is asked to build its view — against the surfaces this pass \
+             rewrote, so it lands on the screen the operator chose"
         );
     }
 
@@ -2440,14 +2526,54 @@ mod tests {
     }
 
     #[test]
+    fn seating_a_second_console_beside_one_rebuilds_the_first_at_its_new_half() {
+        // The operator's two presses, a moment apart — the ordinary way a screen
+        // comes to hold two. The console that was already there had a view built
+        // for the whole screen, so it is rebuilt at its half rather than left
+        // overlapping the newcomer.
+        let (mut app, bus) = console_host();
+        seat(&mut app, "helm", BENQ);
+        app.update();
+        let helm_token = bus
+            .token_of(bus.open_pane_for_name("helm").unwrap())
+            .unwrap();
+        bus.take_pending_views();
+
+        seat(&mut app, "weapons", BENQ);
+        app.update();
+
+        let surface = app.world().resource::<BridgeStationSurfaces>();
+        assert_eq!(surface.slot_for("helm").unwrap().1.rect.width, 960);
+        assert_eq!(surface.slot_for("weapons").unwrap().1.rect.x, 960);
+        assert_eq!(bus.open_count(), 2);
+        assert_eq!(
+            bus.token_of(bus.open_pane_for_name("helm").unwrap())
+                .as_deref(),
+            Some(helm_token.as_str()),
+            "the first console keeps its identity: its view moved, nobody was dropped"
+        );
+        assert_eq!(
+            bus.take_pending_views().len(),
+            2,
+            "one view to build for the newcomer and one to rebuild for the console beside it"
+        );
+    }
+
+    #[test]
     fn closing_one_of_two_consoles_gives_the_other_the_whole_screen() {
         // The re-layout the move above only hinted at: a monitor's rectangles
         // are recomputed for the WHOLE monitor, so the survivor grows rather
-        // than staying in its half beside a black one.
+        // than staying in its half beside a black one — and its VIEW is rebuilt
+        // at the new size, on the same identity, because a view is created at
+        // one size and cannot be resized into place.
         let (mut app, bus) = console_host();
         seat(&mut app, "helm", BENQ);
         seat(&mut app, "weapons", BENQ);
         app.update();
+        let helm_pane = bus.open_pane_for_name("helm").unwrap();
+        let helm_token = bus.token_of(helm_pane).unwrap();
+        bus.mark_live(helm_pane);
+        bus.take_pending_views();
 
         unseat(&mut app, "weapons");
         app.update();
@@ -2456,6 +2582,13 @@ mod tests {
         let surface = app.world().resource::<BridgeStationSurfaces>();
         let (_, helm) = surface.slot_for("helm").unwrap();
         assert_eq!((helm.rect.x, helm.rect.width), (0, 1920));
+        let grown = bus.open_pane_for_name("helm").unwrap();
+        assert_eq!(
+            bus.token_of(grown).as_deref(),
+            Some(helm_token.as_str()),
+            "the survivor's view is rebuilt at its new size, and whoever was at it stays"
+        );
+        assert_eq!(bus.take_pending_views().len(), 1);
     }
 
     #[test]

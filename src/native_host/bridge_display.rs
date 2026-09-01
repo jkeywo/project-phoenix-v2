@@ -4295,6 +4295,13 @@ mod tests {
             "on the same identity, so whoever was at it reconnects to it"
         );
         assert_eq!(
+            bus.name_of(recreated).as_deref(),
+            Some("helm"),
+            "and under the same name — which is the key `open_pending_views` \
+             actually feeds to `home_for_pane`, so the placement asserted below \
+             is this pane's and not a coincidence of the string"
+        );
+        assert_eq!(
             bus.take_pending_views()
                 .into_iter()
                 .map(|(id, _)| id)
@@ -4442,6 +4449,145 @@ mod tests {
             "and the operator is told: {:?}",
             live.notices
         );
+    }
+
+    #[test]
+    fn a_rebuild_this_pass_could_not_place_is_faulted_rather_than_quietly_dropped() {
+        // The one-frame interleaving that would make "not built" mean "forgotten
+        // for ever", built against the real reconciler:
+        //
+        //   frame N   this pass reaches its grace, closes and recreates the
+        //             console — and RESETS its strike counter as it does;
+        //   frame N   the pane host drains that pending view later in the SAME
+        //             frame, with the slot still missing, and `home_for_pane`
+        //             answers `Nowhere(SeatedButUnplaced)`;
+        //   frame N+1 the slot comes back, so the health check below (pane open
+        //             AND slot present) reads healthy — for ever, over a black
+        //             screen, with no retry and no surrender.
+        //
+        // Which is why the answer carries a RETRY decision, pinned per reason in
+        // `panes::placement` because the drain itself is behind
+        // `--features ultralight`. This test drives the two halves that ARE
+        // compilable — the reconciler, and the fault the decision asks for —
+        // across that interleaving, and ends in a retry rather than in the stuck
+        // state. The other terminus, a retry budget spent and the seat given
+        // back, is the two tests either side of this one.
+        use crate::native_host::panes::recovery::{service_faults, PaneFault};
+        use crate::native_host::panes::{NoHome, PaneHome};
+
+        let (mut app, bus) = console_host();
+        seat(&mut app, "helm", BENQ);
+        app.update();
+        let opened = bus
+            .open_pane_for_name("helm")
+            .expect("the seat opened a console");
+        let token = bus.token_of(opened).expect("an open console has a token");
+        bus.mark_live(opened);
+        bus.take_pending_views();
+
+        // The slot goes away — a monitor between hot-plug frames, a Station
+        // window not yet rebuilt — and is kept so it can come back mid-scenario.
+        let slots: Vec<Vec<StationPane>> = app
+            .world()
+            .resource::<BridgeStationSurfaces>()
+            .0
+            .iter()
+            .map(|s| s.panes.clone())
+            .collect();
+        app.world_mut()
+            .resource_mut::<BridgeStationSurfaces>()
+            .0
+            .iter_mut()
+            .for_each(|s| s.panes.clear());
+
+        // Frame N, first half: the grace runs out and the console is rebuilt.
+        let mut rebuilt = None;
+        for _ in 0..=CONSOLE_MISSING_GRACE_FRAMES {
+            app.update();
+            if let Some((id, _url)) = bus.take_pending_views().pop() {
+                rebuilt = Some(id);
+                break;
+            }
+        }
+        let rebuilt = rebuilt.expect("the reconciler rebuilds the console it cannot see");
+        assert_eq!(
+            bus.name_of(rebuilt).as_deref(),
+            Some("helm"),
+            "on the same name the pane host looks its home up by"
+        );
+
+        // Frame N, second half: the pane host drains that entry, and this is the
+        // decision it makes — no home, and a retry rather than a skip.
+        let unbuilt = home(&app, "helm", &tempting_tile("helm"));
+        assert_eq!(
+            unbuilt,
+            PaneHome::Nowhere(NoHome::SeatedButUnplaced),
+            "never the viewscreen, however tempting the tile"
+        );
+        let PaneHome::Nowhere(reason) = unbuilt else {
+            unreachable!("just asserted")
+        };
+        assert!(
+            reason.should_retry(),
+            "and a seated console is faulted, not dropped: the pending entry is \
+             already drained, so a skip is the end of the story"
+        );
+
+        // Frame N+1: the slot returns, and with it the trap. Nothing is queued
+        // to build a view, yet both halves of the health check now pass — so a
+        // pane host that had skipped would leave the station card claiming a
+        // screen with nothing on it and this pass would never look again.
+        for (surface, panes) in app
+            .world_mut()
+            .resource_mut::<BridgeStationSurfaces>()
+            .0
+            .iter_mut()
+            .zip(slots)
+        {
+            surface.panes = panes;
+        }
+        assert!(
+            bus.take_pending_views().is_empty(),
+            "nothing is queued to build the view that was dropped"
+        );
+        assert!(
+            bus.open_pane_for_name("helm").is_some()
+                && app
+                    .world()
+                    .resource::<BridgeStationSurfaces>()
+                    .slot_for("helm")
+                    .is_some(),
+            "and the reconciler's health check would read HEALTHY: open pane, live \
+             slot, black screen"
+        );
+
+        // What the retry decision actually does, on #1125's own path: the pane is
+        // closed and reopened on the same token, and a view is queued again — for
+        // the screen it belongs on.
+        bus.fault(rebuilt, PaneFault::ViewCrashed);
+        let (retried, _url) = service_faults(&bus)
+            .pop()
+            .expect("one fault serviced")
+            .recreated
+            .expect("within the per-identity budget the console is rebuilt");
+        assert_eq!(
+            bus.token_of(retried).as_deref(),
+            Some(token.as_str()),
+            "still the same participant, across the reconciler's rebuild and this one"
+        );
+        assert_eq!(
+            bus.take_pending_views()
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect::<Vec<_>>(),
+            vec![retried],
+            "so a view IS queued again: the console retries rather than sitting \
+             healthy and black"
+        );
+        let PaneHome::Station { window, .. } = home(&app, "helm", &tempting_tile("helm")) else {
+            panic!("and the retry goes to its own Station window");
+        };
+        assert_eq!(window, station_window(&app, BENQ));
     }
 
     #[test]

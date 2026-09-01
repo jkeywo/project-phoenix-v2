@@ -1750,7 +1750,8 @@ fn drive_panes(
 /// **Where the view goes is [`home_for_pane`]'s decision, not this function's**
 /// (issue #1333). That rule — the live Station slot first, then a refusal for a
 /// console the law seats but the adapter cannot place, then the stored primary
-/// tile — is pure and CI-tested in [`super::placement`], because "a crashed
+/// tile, and whether a refusal is *retried* — is pure and CI-tested in
+/// [`super::placement`], because "a crashed
 /// console reopens on its own monitor, never over the viewscreen" is a claim,
 /// and a claim only provable on a Windows machine with a GPU is a claim nobody
 /// checks. What is left here is the Ultralight half: mint the Station camera,
@@ -1822,13 +1823,43 @@ fn open_pending_views(
                 window_origin: (0, 0),
             },
             PaneHome::Nowhere(reason) => {
+                // Not built, and — for a reason a rebuild could fix — FAULTED
+                // rather than dropped. `take_pending_views` has already drained
+                // this entry, so a bare `continue` is final: the bus still lists
+                // the pane as open and nothing is left to build a view for it.
+                // For a SEATED console that is the same "worst of both" the
+                // `Err` arm below describes, and it is reachable in a single
+                // frame — `reconcile_seated_consoles` reaches its grace, closes
+                // and recreates the console (resetting its own strike counter),
+                // this drain drops the entry while the slot is still missing,
+                // and the next frame the slot returns, so its health check
+                // (pane open AND slot present) reads healthy for ever over a
+                // black screen. The fault rides #1125's bounded path instead,
+                // ending in a rebuild that lands or in the seat being given back
+                // with a notice on the row.
+                //
+                // WHICH reasons retry is `NoHome::should_retry`'s to say, not
+                // this function's: everything here is behind
+                // `--features ultralight`, which no CI job compiles, and a
+                // fault-or-skip choice made here is a choice nothing checks —
+                // the whole reason `super::placement` exists (issue #1333).
+                let retry = reason.should_retry();
+                let outcome = if retry {
+                    "faulting it, so the rebuild is retried on the same identity and its seat \
+                     is repaired or honestly given back"
+                } else {
+                    "leaving it as it is: a retry would have nowhere to aim, so the pane stays \
+                     open with no view and nothing else picks it up"
+                };
                 crate::pwarn!(
                     log,
                     LogCat::Lobby,
-                    "pane host: {new_id} ({name}) is not built: {} — its station stays on AI \
-                     control",
+                    "pane host: {new_id} ({name}) is not built: {} — {outcome}",
                     reason.reason()
                 );
+                if retry {
+                    bus.0.fault(new_id, PaneFault::ViewCrashed);
+                }
                 continue;
             }
         };

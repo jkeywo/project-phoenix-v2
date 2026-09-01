@@ -25,14 +25,57 @@
 //!    answer is [`NoHome::SeatedButUnplaced`] and *nothing is built*. Tiling it
 //!    on the primary window would put a console the operator assigned to a wall
 //!    screen straight over the shared view, which is the one failure this
-//!    module's issue exists to make impossible. `bridge_display`'s
-//!    `reconcile_seated_consoles` is what then repairs or honestly surrenders
-//!    that seat, boundedly and with a notice on the row.
+//!    module's issue exists to make impossible. It is *faulted* rather than
+//!    quietly dropped — see [`NoHome::should_retry`] — so `bridge_display`'s
+//!    `reconcile_seated_consoles` repairs or honestly surrenders that seat,
+//!    boundedly and with a notice on the row.
 //! 3. **Otherwise the stored primary tile**, which is the legacy
 //!    `--pane`-without-`--profile` host: panes tile left-to-right across the
 //!    viewscreen window, and a crashed one is rebuilt on its own tile exactly as
 //!    issue #1125 shipped it.
 //! 4. **Otherwise nowhere**, with a reason, rather than a guess.
+//!
+//! # "Not built" must not mean "forgotten"
+//!
+//! The queue entry the adapter is answering has already been *drained* by the
+//! time this module is asked, so a `Nowhere` the adapter merely skips is a pane
+//! the bus still lists as open with no view behind it and nothing left to
+//! rebuild it. For a seated console that is the worst of both — and it is
+//! reachable in one frame: `reconcile_seated_consoles` hits its grace, closes
+//! and recreates the console (resetting its own strike counter), the pane host
+//! drains that entry later in the same frame while the slot is still missing,
+//! and the next frame the slot returns — so its health check, which asks only
+//! whether the pane is open *and* a slot exists, reads healthy forever over a
+//! black screen. That is precisely the state rule 2 above promises cannot
+//! happen.
+//!
+//! So which reasons are retried is part of the rule and lives here, in
+//! [`NoHome::should_retry`], rather than in the adapter: the adapter is behind
+//! `--features ultralight` and no CI job compiles it, which is the whole reason
+//! this module exists. A retried reason is faulted
+//! ([`PaneFault::ViewCrashed`](super::recovery::PaneFault::ViewCrashed)) and
+//! rides issue #1125's bounded path — close, rebuild on the same token, and,
+//! when the per-identity budget is spent, the seat given back with a notice on
+//! the row.
+//!
+//! # An authored participant's console that loses its slot is accepted residue
+//!
+//! A `--profile` `[[display.pane]]` with a label and no station key is a
+//! *person's* console on a Station window. It is placed by rule 1 and, since
+//! this module, records no tile at all. If its Station surface is dropped (the
+//! monitor unplugged, the window rebuilt) and its view then faults, the rebuild
+//! reaches rule 4 — no slot, no seat in the law (the law seats *stations*), no
+//! tile — so it is [`NoHome::Unplaced`], and it is not retried: there is nowhere
+//! for a rebuild to aim. Nothing else picks it up either, because
+//! `reconcile_seated_consoles` iterates the roster's seated stations only. The
+//! pane stays open on the bus with no view, and no notice is raised.
+//!
+//! That is a trade this module took on purpose, not an oversight. The behaviour
+//! it replaced was *worse*: the same pane was rebuilt on the primary window,
+//! over the shared view, at a rectangle measured on a different monitor. Doing
+//! better than "leave it" needs a lifecycle for participant panes that the
+//! layout does not own — the same lifecycle a resizable/re-homable participant
+//! pane needs — so a fix belongs with that work, not with a placement rule.
 //!
 //! # Only a TILED pane gets a stored tile
 //!
@@ -74,11 +117,18 @@ pub enum NoHome {
     /// Station surface carries a slot for it right now.
     ///
     /// The honest answer, and never a primary tile: a console with a screen of
-    /// its own does not fall back onto the shared view. The seat is
-    /// `bridge_display::reconcile_seated_consoles`' to repair or give back.
+    /// its own does not fall back onto the shared view. The pane is faulted so
+    /// the rebuild is retried ([`should_retry`](Self::should_retry)), and the
+    /// seat is `bridge_display::reconcile_seated_consoles`' to repair or give
+    /// back.
     SeatedButUnplaced,
     /// Neither a Station slot nor a stored primary tile — nothing knows where
     /// this pane goes, so nothing guesses.
+    ///
+    /// A legacy `--pane` with no tile, and the authored participant's console
+    /// whose Station slot went away: see the [module
+    /// note](self#an-authored-participants-console-that-loses-its-slot-is-accepted-residue)
+    /// for why that second one is left as it is rather than retried.
     Unplaced,
 }
 
@@ -96,6 +146,37 @@ impl NoHome {
                  own is never rebuilt over the viewscreen; its seat is reconciled or given back"
             }
             NoHome::Unplaced => "it has no Station slot and no stored tile",
+        }
+    }
+
+    /// Whether a pane left unbuilt for this reason is **faulted**, so that
+    /// something retries it, rather than skipped.
+    ///
+    /// The pane host has already drained this pane's pending-view entry, so
+    /// skipping is final: see the [module
+    /// note](self#not-built-must-not-mean-forgotten) for the one-frame
+    /// interleaving that turns a skipped [`SeatedButUnplaced`](Self::SeatedButUnplaced)
+    /// into a station card claiming a screen that is black, with no retry and no
+    /// surrender. `true` therefore means the adapter raises
+    /// [`PaneFault::ViewCrashed`](super::recovery::PaneFault::ViewCrashed) — the
+    /// same treatment, for the same written-out reason, a view that fails to
+    /// *build* gets — and the pane rides issue #1125's bounded rebuild path to a
+    /// view that lands or to the seat being given back with a notice.
+    ///
+    /// [`Unplaced`](Self::Unplaced) is `false` because there is nowhere for a
+    /// retry to aim: a legacy `--pane` with no tile and no slot would be closed,
+    /// rebuilt into the same answer, and closed again until the per-identity
+    /// budget was spent — a flap whose only outcome is the disconnect the
+    /// operator did not ask for.
+    ///
+    /// This decision is stated here rather than in the adapter deliberately:
+    /// [`super::ultralight`] is behind `--features ultralight` and no CI job in
+    /// this repository compiles it, so a fault-or-skip choice made there is a
+    /// choice nothing checks (issue #1333).
+    pub fn should_retry(&self) -> bool {
+        match self {
+            NoHome::SeatedButUnplaced => true,
+            NoHome::Unplaced => false,
         }
     }
 }
@@ -311,6 +392,57 @@ mod tests {
         assert!(
             !matches!(home, PaneHome::PrimaryTile { .. }),
             "never the viewscreen"
+        );
+        assert!(
+            NoHome::SeatedButUnplaced.should_retry(),
+            "and not built is not forgotten: this one is faulted so it is retried"
+        );
+    }
+
+    #[test]
+    fn only_a_console_a_rebuild_could_land_on_is_retried() {
+        // The fault-or-skip decision, pinned per reason in the half CI actually
+        // compiles — the one part of this rule the adapter could still get wrong
+        // on its own. `open_pending_views` has already DRAINED the pending-view
+        // entry by the time it asks, so a `Nowhere` it merely skips is a pane the
+        // bus still lists as open with no view and nothing left to rebuild it.
+        assert!(
+            NoHome::SeatedButUnplaced.should_retry(),
+            "a seated console is faulted, so #1125's bounded path retries it on the \
+             same identity and `reconcile_seated_consoles` ends the story — a \
+             rebuild that lands, or the seat given back with a notice"
+        );
+        assert!(
+            !NoHome::Unplaced.should_retry(),
+            "and a pane with no slot, no seat and no tile is left alone: a retry has \
+             nowhere to aim, so it would flap to the budget and close a console \
+             nobody asked to close"
+        );
+    }
+
+    #[test]
+    fn an_authored_participants_console_that_lost_its_slot_is_left_as_it_is() {
+        // The residue this module accepts, stated as a test so it is a decision
+        // rather than a gap: `Ada`'s Station surface is gone (unplugged, or a
+        // window not yet rebuilt), the law seats no station called `Ada` because
+        // she is a person, and #1333 records no tile for a pane on a Station
+        // window. So the rebuild reaches rule 4 and stops there — and nothing
+        // else picks it up, since `reconcile_seated_consoles` iterates the
+        // roster's seated stations only.
+        let home = home_for_pane(
+            "Ada",
+            Some(&BridgeStationSurfaces::default()),
+            Some(&layout_seating_helm()),
+            &[],
+        );
+        assert_eq!(home, PaneHome::Nowhere(NoHome::Unplaced));
+        let PaneHome::Nowhere(reason) = home else {
+            unreachable!("just asserted")
+        };
+        assert!(
+            !reason.should_retry(),
+            "left open with no view, deliberately: the behaviour this replaced \
+             rebuilt her console over the viewscreen instead"
         );
     }
 

@@ -278,6 +278,15 @@ cargo build --release --features host --bin phoenix-host
 #     rectangle, which on the primary window is an arbitrary strip over the
 #     viewscreen. An unplug still queues no view at all — it is a close, not a
 #     fault — so it is the operator's row press that brings the console back.
+#     "Not built" is FAULTED, not dropped, when the reason is one a rebuild
+#     could fix (NoHome::should_retry, pure and CI-pinned per reason): the
+#     pending-view entry is already drained, so skipping a seated console leaves
+#     it open with no view and nothing left to retry it, and the reconciler's
+#     health check reads healthy the moment its slot returns. The residue #1333
+#     accepts is the AUTHORED PARTICIPANT's console (a --profile pane with no
+#     station key): once its slot is gone it has no seat in the law and no tile,
+#     so it is Unplaced, is not retried, and the seat reconciler never looks at
+#     it — a fix belongs with participant-pane lifecycle work, not here.
 #     A PANE NAME colliding with a station id on the loaded hull is REFUSED
 #     (app::install_world_selection): pane names and station ids are one
 #     namespace on the pane bus since #1331, so a screen row's off button would

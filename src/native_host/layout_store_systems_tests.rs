@@ -181,6 +181,25 @@ fn live(app: &App) -> &BridgeLayout {
     &app.world().resource::<BridgeLayoutResource>().layout
 }
 
+/// Pull a display's cable, as `bevy_winit` does — despawn its `Monitor` entity
+/// — and run out the display watcher's own debounce so the law believes it.
+fn unplug(app: &mut App, name: &str) {
+    let mut found = None;
+    let mut query = app.world_mut().query::<(bevy::prelude::Entity, &Monitor)>();
+    for (entity, monitor) in query.iter(app.world()) {
+        if monitor.name.as_deref() == Some(name) {
+            found = Some(entity);
+        }
+    }
+    app.world_mut()
+        .entity_mut(found.expect("the monitor this test named is there"))
+        .despawn();
+    // Comfortably past `bridge_display`'s `DISPLAY_LOSS_DEBOUNCE_FRAMES`.
+    for _ in 0..16 {
+        app.update();
+    }
+}
+
 /// The saved layout on disk, adopted onto a fresh three-screen bridge — the
 /// next session's boot, without the next session.
 fn saved(scratch: &Scratch, class: &str) -> BridgeLayout {
@@ -379,6 +398,88 @@ fn every_accepted_change_is_filed_including_closing_a_console_again() {
         saved(&scratch, DESTROYER).monitor_of(&station("helm")),
         None,
         "the close was filed too"
+    );
+}
+
+#[test]
+fn a_cable_coming_out_mid_session_leaves_the_saved_layout_alone() {
+    // The saved layout is the operator's INTENT. A screen blipping through a
+    // dock degrades the live arrangement — that is the law, and it is right —
+    // but writing that degradation would permanently forget where two consoles
+    // were, on a bridge nobody touched. So the unplug re-baselines and writes
+    // nothing, and the FULL arrangement is still in the file.
+    let scratch = Scratch::new("unplug");
+    let mut app = booted(&scratch, DESTROYER);
+    press(
+        &mut app,
+        LayoutAction::AssignStation {
+            station: station("helm"),
+            monitor: m(BENQ),
+        },
+    );
+    press(
+        &mut app,
+        LayoutAction::AssignStation {
+            station: station("weapons"),
+            monitor: m(ACME),
+        },
+    );
+
+    unplug(&mut app, "ACME 1080");
+    assert_eq!(
+        live(&app).monitor_of(&station("weapons")),
+        None,
+        "the LIVE bridge degrades, because the screen really is gone"
+    );
+    let on_disk = saved(&scratch, DESTROYER);
+    assert_eq!(
+        on_disk.monitor_of(&station("weapons")),
+        Some(&m(ACME)),
+        "and the FILE still knows where that console lives when the screen is back"
+    );
+    assert_eq!(on_disk.monitor_of(&station("helm")), Some(&m(BENQ)));
+}
+
+#[test]
+fn and_re_assigning_after_the_unplug_writes_the_updated_layout() {
+    // The other half of #1334's changed-monitor criterion, and what keeps the
+    // rule above from being "the file is frozen after any unplug": the press
+    // that puts the console somewhere real files the new arrangement, because
+    // by then the bridge and the baseline agree again.
+    let scratch = Scratch::new("unplug-then-press");
+    let mut app = booted(&scratch, DESTROYER);
+    press(
+        &mut app,
+        LayoutAction::AssignStation {
+            station: station("weapons"),
+            monitor: m(ACME),
+        },
+    );
+    unplug(&mut app, "ACME 1080");
+
+    press(
+        &mut app,
+        LayoutAction::AssignStation {
+            station: station("weapons"),
+            monitor: m(BENQ),
+        },
+    );
+
+    let key = ShipClassKey::from_template_path(DESTROYER).unwrap();
+    let profile = scratch.store().load(&key).unwrap().unwrap();
+    let two_screens = BridgeLayout::new(
+        [m(DELL), m(BENQ)],
+        ["helm", "weapons", "comms"].map(station),
+        &m(DELL),
+    )
+    .unwrap();
+    assert_eq!(
+        two_screens
+            .adopt_profile(&profile)
+            .0
+            .monitor_of(&station("weapons")),
+        Some(&m(BENQ)),
+        "the re-assignment reached the file"
     );
 }
 

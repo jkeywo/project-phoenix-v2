@@ -110,8 +110,8 @@ pub struct BridgeLayoutStore {
     pub remembered: Option<Remembered>,
 }
 
-/// One ship class's remembered bridge: the key it is filed under and the
-/// arrangement the file holds.
+/// One ship class's remembered bridge: the key it is filed under, the
+/// arrangement the file holds, and the bridge that arrangement was agreed on.
 #[derive(Clone, Debug)]
 pub struct Remembered {
     pub class: ShipClassKey,
@@ -120,6 +120,17 @@ pub struct Remembered {
     /// that a class nobody has rearranged yet creates **no file**. "Created on
     /// first write" is the acceptance criterion, and this is where it is true.
     pub saved: BridgeLayout,
+    /// The monitors the layout had when [`saved`](Self::saved) was agreed.
+    ///
+    /// This is how the writer tells **an operator changing their bridge** from
+    /// **their bridge changing under them** — see
+    /// [`remember_bridge_layout`]'s note on the cable. Identities rather than
+    /// [`DiscoveredMonitor`](super::bridge_profile::DiscoveredMonitor)s,
+    /// because a monitor's geometry is not part of its identity and
+    /// `bridge_display::reconcile_layout` deliberately rebuilds nothing when a
+    /// display merely moves or renegotiates its mode: a television waking up
+    /// must not count as the bridge changing.
+    pub bridge: Vec<super::bridge_profile::MonitorIdentity>,
 }
 
 /// Installs the two systems. Both are inert without a [`BridgeLayoutStore`].
@@ -276,11 +287,15 @@ fn adopt_remembered_layout(
     if layout.layout != next {
         layout.layout = next.clone();
     }
-    store.remembered = Some(Remembered { class, saved: next });
+    store.remembered = Some(Remembered {
+        class,
+        bridge: next.monitors().to_vec(),
+        saved: next,
+    });
 }
 
-/// File the live arrangement whenever it differs from what this class's saved
-/// layout holds.
+/// File the live arrangement whenever the **operator** has moved it away from
+/// what this class's saved layout holds.
 ///
 /// # Write on every accepted change
 ///
@@ -301,6 +316,34 @@ fn adopt_remembered_layout(
 /// identical layout, or a press the no-op doctrine accepted without changing
 /// anything, marks the resource and must not rewrite the file.
 ///
+/// # A cable coming out is not the operator changing their mind
+///
+/// [ai] The saved layout is the operator's **intent**, and the law's resource
+/// has a second writer that is not them: `bridge_display`'s reconcile, which
+/// degrades a station whose monitor has gone to unassigned. Writing *that* would
+/// mean a screen blipping through a dock permanently forgets where two consoles
+/// were, on a bridge nobody touched — and it is the same silent loss issue
+/// #1123's never-re-home doctrine exists to refuse, arriving through the file
+/// instead of through a window.
+///
+/// So the trigger is "the arrangement changed while **the bridge did not**",
+/// which is what [`Remembered::bridge`] is for. A frame that changed the monitor
+/// set **re-baselines and writes nothing**: the file keeps the fuller
+/// arrangement, and the next press — the operator putting that console
+/// somewhere real, which is exactly how #1334's changed-monitor criterion says
+/// it comes back — writes the updated layout, because by then the bridge and the
+/// baseline agree again. It is also what makes the *cross-session* case right:
+/// launching on a laptop with two of four screens adopts a degraded layout and
+/// writes nothing, so the full arrangement is still there next time the bridge
+/// is whole.
+///
+/// Two honest edges. A press landing in the same frame as an unplug is
+/// re-baselined with it, so that one press reaches the file only on the next
+/// one — a rare race, with the bridge on screen correct throughout.  And
+/// `reconcile_seated_consoles` surrendering a seat it could not build a console
+/// for (`ConsoleCouldNotOpen`) changes no monitor, so it *is* filed; that is a
+/// real state the operator is told about, and re-pressing writes it back.
+///
 /// A failed write leaves `saved` alone, so the next accepted change tries again
 /// rather than the host giving up on the file for the rest of the run.
 fn remember_bridge_layout(
@@ -317,6 +360,20 @@ fn remember_bridge_layout(
         return;
     }
     let class = remembered.class.clone();
+    if remembered.bridge != layout.layout.monitors() {
+        crate::pinfo!(
+            log,
+            LogCat::Lobby,
+            "bridge layouts: the bridge changed under this host, so {class}'s saved layout is \
+             left as it is rather than overwritten with the degraded arrangement; the next \
+             change made from the lobby files the new one"
+        );
+        if let Some(remembered) = store.remembered.as_mut() {
+            remembered.saved = layout.layout.clone();
+            remembered.bridge = layout.layout.monitors().to_vec();
+        }
+        return;
+    }
     match store.store.save(&class, &layout.layout) {
         Ok(path) => {
             crate::pinfo!(

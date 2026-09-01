@@ -3,7 +3,7 @@
 // table is loaded, so the constructor's template t() calls never see an
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
-import { t } from '../strings.js';
+import { t, wireText } from '../strings.js';
 import { phColor } from './ph-console-styles.js';
 import { rovingKeyTarget } from '../roving-tabindex.js';
 import { PhElement, phDefine } from './ph-element.js';
@@ -29,7 +29,9 @@ export class PhNavigationMap extends PhElement {
   // onTemplate runs before this subclass's field-init phase (see ph-element.js).
   #state = null;
   #offscreen = null;
+  #icons = {};
   #projectedBlips = [];
+  #projectedRegions = [];
   #selectedBlip = null;
   #toastTimer = null;
   #picking = false;
@@ -182,11 +184,12 @@ export class PhNavigationMap extends PhElement {
       this.setAttribute('aria-label', t('component.entity_map.label'));
       this.setAttribute('aria-description', t('component.entity_map.keyboard_help'));
     }
-    // Keep the stable UUID selected, but replace the retained blip object with
-    // this absolute projection's current values. The GM inspector can then
-    // survive movement/health refreshes without retaining stale detail.
-    if (this.#selectedBlip && val && Array.isArray(val.blips)) {
-      const refreshed = val.blips.find((blip) => blip.uuid === this.#selectedBlip.uuid);
+    // Keep the stable UUID selected, but replace the retained point/Region
+    // object with this absolute projection's current values. The GM inspector
+    // can then survive movement/status refreshes without retaining stale detail.
+    if (this.#selectedBlip && val) {
+      const refreshed = this.#selectionCandidates(val)
+        .find((entry) => entry.uuid === this.#selectedBlip.uuid);
       if (refreshed) this.#selectedBlip = refreshed;
     }
     if (val && val.auto && this.#picking) {
@@ -227,8 +230,7 @@ export class PhNavigationMap extends PhElement {
 
   /** Apply one local contact-selection semantic operation. */
   navigationSelect(detail = {}) {
-    const contacts = ((this.#state && this.#state.blips) || [])
-      .filter((entry) => entry && typeof entry.uuid === 'string' && entry.uuid);
+    const contacts = this.#selectionCandidates();
     let next = null;
     if (Object.prototype.hasOwnProperty.call(detail, 'uuid')) {
       next = detail.uuid == null ? null
@@ -316,6 +318,17 @@ export class PhNavigationMap extends PhElement {
 
   #isInspectMode() {
     return !!(this.#state && this.#state.interaction === 'inspect');
+  }
+
+  #selectionCandidates(state = this.#state) {
+    const blips = ((state && state.blips) || [])
+      .filter((entry) => entry && typeof entry.uuid === 'string' && entry.uuid);
+    if (!(state && state.interaction === 'inspect')) return blips;
+    const regions = ((state && state.regions) || [])
+      .filter((entry) => entry && entry.selectable === true
+        && typeof entry.uuid === 'string' && entry.uuid);
+    return [...blips, ...regions]
+      .sort((left, right) => left.uuid.localeCompare(right.uuid));
   }
 
   initResize() {
@@ -410,7 +423,8 @@ export class PhNavigationMap extends PhElement {
 
     // Drop a selection whose blip left the chart (it may have despawned or
     // fallen outside the refresh). Emit only on a change.
-    if (this.#selectedBlip && !blips.some((b) => b.uuid === this.#selectedBlip.uuid)) {
+    if (this.#selectedBlip
+        && !this.#selectionCandidates(state).some((entry) => entry.uuid === this.#selectedBlip.uuid)) {
       this.#selectedBlip = null;
       this.removeAttribute('data-has-selection');
       delete this.dataset.selectedEntityId;
@@ -440,6 +454,7 @@ export class PhNavigationMap extends PhElement {
     // Areas sit under every point marker, matching the viewscreen radar's
     // draw order (regions before blips) so a hull never hides inside its fill.
     const showNames = this.#zoom >= 0.4;
+    this.#projectedRegions = [];
     this.#drawRegions(octx, regions, cx, cy, scale, namePx, showNames);
 
     if (waypoint && Number.isFinite(waypoint.x) && Number.isFinite(waypoint.z)) {
@@ -456,21 +471,32 @@ export class PhNavigationMap extends PhElement {
     for (const b of blips) {
       const [sx, sy] = this.#worldToScreen(b.world_x, b.world_z, 0, 0, 0, scale, cx, cy);
       if (sx < -50 || sx > W + 50 || sy < -50 || sy > H + 50) continue;
-      const color = this.#blipColor(b.stance);
+      const markerR = Number.isFinite(b.radar_size)
+        ? Math.max(3, b.radar_size * scale * this.#zoom) : blipR;
+      const color = this.#colourCss(b.color, this.#blipColor(b.stance));
       // Mission contacts wear a plain gold ring. The ticked ring is the
       // target-lock decoration on the tactical radar — a different feature.
-      if (b.objective_target) this.#drawObjectiveRing(octx, sx, sy, blipR + 6);
-      this.#drawBlipShape(octx, b.kind, sx, sy, blipR, color);
-      if (b.destroyed) this.#drawDestroyedMark(octx, sx, sy, blipR + 4);
+      if (b.objective_target) this.#drawObjectiveRing(octx, sx, sy, markerR + 6);
+      const icon = b.icon ? this.#getIconImage(b.icon) : null;
+      if (this.#imageIsLoaded(icon)) {
+        const size = markerR * 2;
+        octx.drawImage(icon, sx - markerR, sy - markerR, size, size);
+      } else {
+        // Missing, pending, and failed artwork all retain the semantic kind
+        // shape. The map therefore stays deterministic and non-colour-legible
+        // while an authored icon loads or when its asset is unavailable.
+        this.#drawBlipShape(octx, b.kind, sx, sy, markerR, color);
+      }
+      if (b.destroyed) this.#drawDestroyedMark(octx, sx, sy, markerR + 4);
       if (this.#selectedBlip && this.#selectedBlip.uuid === b.uuid) {
-        this.#drawSelectionRing(octx, sx, sy, blipR + 8);
+        this.#drawSelectionRing(octx, sx, sy, markerR + 8);
       }
       if (showNames && b.name) {
         octx.font = namePx + 'px "JetBrains Mono", monospace';
         octx.fillStyle = phColor(this, color);
-        octx.fillText(b.name, sx + blipR + 4, sy + 4);
+        octx.fillText(wireText(b.name), sx + markerR + 4, sy + 4);
       }
-      this.#projectedBlips.push({ uuid: b.uuid, sx, sy, hitR: Math.max(14, blipR + 6), blip: b });
+      this.#projectedBlips.push({ uuid: b.uuid, sx, sy, hitR: Math.max(14, markerR + 6), blip: b });
     }
 
     if (this.#keyboardCursorVisible) this.#drawKeyboardCursor(octx, W, H, px);
@@ -631,13 +657,40 @@ export class PhNavigationMap extends PhElement {
     ];
   }
 
+  #colourCss(color, fallback) {
+    if (!Array.isArray(color) || color.length < 3) return fallback;
+    const [r, g, b] = this.#regionRgb(color);
+    return 'rgb(' + r + ',' + g + ',' + b + ')';
+  }
+
+  #iconStemFromName(name) {
+    if (!name) return '';
+    return name.charAt(0).toUpperCase() + name.slice(1);
+  }
+
+  #getIconImage(name) {
+    if (!name) return null;
+    if (this.#icons[name]) return this.#icons[name];
+    if (typeof Image === 'undefined') return null;
+    const image = new Image();
+    image.onload = () => { this.needsRender = true; };
+    image.onerror = () => { this.needsRender = true; };
+    const stem = name === 'player' ? 'PlayerShip' : this.#iconStemFromName(name);
+    this.#icons[name] = image;
+    image.src = '../../assets/radar_icons/Icon-' + stem + '.png';
+    return image;
+  }
+
+  #imageIsLoaded(image) {
+    return !!(image && image.complete && image.naturalWidth > 0);
+  }
+
   /**
    * Draw region hulls and outlines under the blips.
    *
-   * Shapes mirror the viewscreen radar's renderer: a sphere is a filled
-   * circle, a torus is one thick stroked ring (no fill), a box is an
-   * axis-aligned filled rect — box `yaw` is deliberately ignored, matching
-   * the Rust renderer. An `objective_target` region strokes in the waypoint
+   * Shapes mirror authored Region geometry: a sphere is a filled circle, a
+   * torus is one thick stroked ring (no fill), and a box is a yaw-rotated
+   * filled rect. An `objective_target` region strokes in the waypoint
    * gold instead of its own colour: for a sphere or box that gold outline
    * sits around the region's own fill, but a torus never has a fill to
    * begin with, so its single stroked ring renders entirely gold. That is
@@ -665,6 +718,11 @@ export class PhNavigationMap extends PhElement {
       const fill = 'rgba(' + r + ',' + g + ',' + b + ',0.3)';
       const stroke = region.objective_target ? 'var(--gold)' : 'rgb(' + r + ',' + g + ',' + b + ')';
       let labelOffset;
+      let projected;
+
+      octx.setLineDash?.([]);
+      if (this.#isInspectMode() && region.kind === 'hazard') octx.setLineDash?.([9, 5]);
+      else if (this.#isInspectMode() && region.kind === 'asteroid_field') octx.setLineDash?.([2, 5]);
 
       if (region.shape === 'sphere') {
         const rPx = Math.max(4, (region.radius || 0) * pxPerWorld);
@@ -676,6 +734,7 @@ export class PhNavigationMap extends PhElement {
         octx.lineWidth = 1.5;
         octx.stroke();
         labelOffset = rPx;
+        projected = { uuid: region.uuid, region, shape: 'sphere', sx, sy, radius: rPx };
       } else if (region.shape === 'torus') {
         const outerR = region.outer_radius != null ? region.outer_radius : (region.radius || 0);
         const outerPx = Math.max(4, outerR * pxPerWorld);
@@ -687,27 +746,83 @@ export class PhNavigationMap extends PhElement {
         octx.strokeStyle = phColor(this, stroke);
         octx.stroke();
         labelOffset = outerPx;
+        projected = {
+          uuid: region.uuid,
+          region,
+          shape: 'torus',
+          sx,
+          sy,
+          innerRadius: innerPx,
+          outerRadius: outerPx,
+        };
       } else if (region.shape === 'box') {
         const he = region.half_extents || [0, 0];
         const halfW = Math.max(4, (he[0] || 0) * pxPerWorld);
         const halfH = Math.max(4, (he[1] || 0) * pxPerWorld);
+        const yaw = Number.isFinite(region.yaw) ? region.yaw : 0;
+        octx.save();
+        octx.translate(sx, sy);
+        // World +Z projects towards canvas -Y, so positive authored yaw is a
+        // negative canvas rotation. This is the drawing inverse of the hit
+        // transform below and matches RegionShape::contains in Rust.
+        octx.rotate(-yaw);
         octx.fillStyle = phColor(this, fill);
-        octx.fillRect(sx - halfW, sy - halfH, halfW * 2, halfH * 2);
+        octx.fillRect(-halfW, -halfH, halfW * 2, halfH * 2);
         octx.strokeStyle = phColor(this, stroke);
         octx.lineWidth = 1.5;
-        octx.strokeRect(sx - halfW, sy - halfH, halfW * 2, halfH * 2);
-        labelOffset = halfW;
+        octx.strokeRect(-halfW, -halfH, halfW * 2, halfH * 2);
+        octx.restore();
+        labelOffset = halfW * Math.abs(Math.cos(yaw)) + halfH * Math.abs(Math.sin(yaw));
+        projected = { uuid: region.uuid, region, shape: 'box', sx, sy, halfW, halfH, yaw };
       } else {
         // Unknown shape — skip, matching the viewscreen radar's own `_ => None`.
         continue;
+      }
+
+      if (projected && region.selectable === true && typeof region.uuid === 'string') {
+        this.#projectedRegions.push(projected);
+      }
+      if (projected && this.#selectedBlip && this.#selectedBlip.uuid === region.uuid) {
+        this.#drawRegionSelection(octx, projected);
       }
 
       // Same label treatment as blip names, including the zoom-out floor.
       if (showNames && region.name) {
         octx.font = namePx + 'px "JetBrains Mono", monospace';
         octx.fillStyle = phColor(this, stroke);
-        octx.fillText(region.name, sx + labelOffset + 4, sy + 4);
+        octx.fillText(wireText(region.name), sx + labelOffset + 4, sy + 4);
       }
+    }
+    octx.restore();
+  }
+
+  #drawRegionSelection(octx, projected) {
+    octx.save();
+    octx.strokeStyle = phColor(this, 'var(--gold)');
+    octx.lineWidth = 2;
+    octx.setLineDash?.([4, 3]);
+    if (projected.shape === 'sphere') {
+      octx.beginPath();
+      octx.arc(projected.sx, projected.sy, projected.radius + 4, 0, Math.PI * 2);
+      octx.stroke();
+    } else if (projected.shape === 'torus') {
+      octx.beginPath();
+      octx.arc(projected.sx, projected.sy, projected.outerRadius + 4, 0, Math.PI * 2);
+      octx.stroke();
+      if (projected.innerRadius > 4) {
+        octx.beginPath();
+        octx.arc(projected.sx, projected.sy, projected.innerRadius - 4, 0, Math.PI * 2);
+        octx.stroke();
+      }
+    } else if (projected.shape === 'box') {
+      octx.translate(projected.sx, projected.sy);
+      octx.rotate(-projected.yaw);
+      octx.strokeRect(
+        -projected.halfW - 4,
+        -projected.halfH - 4,
+        projected.halfW * 2 + 8,
+        projected.halfH * 2 + 8,
+      );
     }
     octx.restore();
   }
@@ -771,7 +886,7 @@ export class PhNavigationMap extends PhElement {
         else octx.lineTo(px, py);
       }
       octx.closePath(); octx.fill();
-    } else if (kind === 'station') {
+    } else if (kind === 'station' || kind === 'structure') {
       const half = r * 1.1;
       octx.fillRect(sx - half, sy - half, half * 2, half * 2);
     } else if (kind === 'player_ship') {
@@ -791,7 +906,7 @@ export class PhNavigationMap extends PhElement {
       octx.lineTo(sx, sy + s * 0.05);
       octx.lineTo(sx - s * 0.6, sy + s * 0.5);
       octx.closePath(); octx.fill();
-    } else if (kind === 'asteroid') {
+    } else if (kind === 'asteroid' || kind === 'authored_asteroid') {
       octx.beginPath();
       octx.arc(sx, sy, r * 0.5, 0, Math.PI * 2);
       octx.fill();
@@ -811,7 +926,9 @@ export class PhNavigationMap extends PhElement {
       this.overlay.classList.remove('show');
       return;
     }
-    nameEl.textContent = blip.name || blip.uuid || t('console.common.unknown');
+    nameEl.textContent = blip.name
+      ? wireText(blip.name)
+      : blip.uuid || t('console.common.unknown');
     kindEl.textContent = (blip.kind || 'unknown').toUpperCase();
     stanceEl.textContent = blip.stance ? t('console.stance.' + blip.stance) : t('console.common.unknown');
     stanceEl.className = 'st-' + (blip.stance || 'unknown');
@@ -819,6 +936,11 @@ export class PhNavigationMap extends PhElement {
   }
 
   #getBlipAt(canvasX, canvasY) {
+    if (this.#isInspectMode()) {
+      return this.#projectedBlips
+        .filter((candidate) => Math.hypot(canvasX - candidate.sx, canvasY - candidate.sy) <= candidate.hitR)
+        .sort((left, right) => left.uuid.localeCompare(right.uuid))[0] || null;
+    }
     let best = null;
     let bestDist = Infinity;
     for (const b of this.#projectedBlips) {
@@ -829,6 +951,28 @@ export class PhNavigationMap extends PhElement {
       }
     }
     return best;
+  }
+
+  #getRegionAt(canvasX, canvasY) {
+    return this.#projectedRegions
+      .filter((candidate) => {
+        const dx = canvasX - candidate.sx;
+        const dy = canvasY - candidate.sy;
+        if (candidate.shape === 'sphere') return Math.hypot(dx, dy) <= candidate.radius;
+        if (candidate.shape === 'torus') {
+          const distance = Math.hypot(dx, dy);
+          return distance >= candidate.innerRadius && distance <= candidate.outerRadius;
+        }
+        if (candidate.shape === 'box') {
+          const cosYaw = Math.cos(candidate.yaw);
+          const sinYaw = Math.sin(candidate.yaw);
+          const localX = dx * cosYaw - dy * sinYaw;
+          const localY = dx * sinYaw + dy * cosYaw;
+          return Math.abs(localX) <= candidate.halfW && Math.abs(localY) <= candidate.halfH;
+        }
+        return false;
+      })
+      .sort((left, right) => left.uuid.localeCompare(right.uuid))[0] || null;
   }
 
   #handleTap(bufX, bufY) {
@@ -864,7 +1008,8 @@ export class PhNavigationMap extends PhElement {
     // set the waypoint — that is an explicit command (bar buttons), matching
     // the former navigation console. Tapping empty space clears selection.
     const hit = this.#getBlipAt(bufX, bufY);
-    const detail = { uuid: hit ? hit.blip.uuid : null };
+    const regionHit = !hit && this.#isInspectMode() ? this.#getRegionAt(bufX, bufY) : null;
+    const detail = { uuid: hit ? hit.blip.uuid : regionHit ? regionHit.region.uuid : null };
     if (this.#isInspectMode()) this.navigationSelect(detail);
     else {
       activateNavigationAction(this, NAVIGATION_CONTACT_ACTION_ID, detail, () => {
@@ -974,7 +1119,7 @@ export class PhNavigationMap extends PhElement {
       }
       return;
     }
-    const contacts = ((this.#state && this.#state.blips) || []).filter((b) => b && b.uuid);
+    const contacts = this.#selectionCandidates();
     if (contacts.length === 0) return;
     const uuids = contacts.map((b) => b.uuid);
     const current = this.#selectedBlip ? uuids.indexOf(this.#selectedBlip.uuid) : -1;

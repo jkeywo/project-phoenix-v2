@@ -1,3 +1,5 @@
+import { wireText } from './strings.js';
+
 /**
  * Minimal reusable entity inspector shell (issue #1295).
  *
@@ -7,7 +9,12 @@
  * replacing the selection contract.
  */
 
-export function createEntityInspector({ doc = document, t = (id) => id, onSelect = () => false } = {}) {
+export function createEntityInspector({
+  doc = document,
+  t = (id) => id,
+  displayText = wireText,
+  onSelect = () => false,
+} = {}) {
   const empty = doc.getElementById('gm-inspector-empty');
   const card = doc.getElementById('gm-entity-card');
   const name = doc.getElementById('gm-entity-name');
@@ -44,6 +51,7 @@ export function createEntityInspector({ doc = document, t = (id) => id, onSelect
     }
     if (hull) {
       hull.value = 0;
+      hull.hidden = true;
       hull.removeAttribute('aria-valuetext');
     }
     return true;
@@ -57,7 +65,7 @@ export function createEntityInspector({ doc = document, t = (id) => id, onSelect
     card.dataset.entityId = entity.entity_id;
     card.dataset.kind = entity.kind;
     card.dataset.destroyed = String(entity.status.destroyed);
-    name.textContent = entity.name;
+    name.textContent = displayText(entity.name);
     identity.textContent = entity.entity_id;
     kind.textContent = t(`server.gm.entity.kind.${entity.kind}`);
     position.textContent = t('server.gm.entity.position_value', {
@@ -66,15 +74,30 @@ export function createEntityInspector({ doc = document, t = (id) => id, onSelect
       z: entity.position[2].toFixed(1),
     });
     faction.textContent = entity.faction
-      ? entity.faction.name
+      ? displayText(entity.faction.name)
       : t('server.gm.entity.faction_none');
-    status.textContent = entity.status.destroyed
-      ? t('server.gm.entity.destroyed')
-      : t('server.gm.entity.hull', { percent: entity.status.hull_percent });
-    hull.value = entity.status.hull_percent;
-    hull.setAttribute('aria-valuetext', status.textContent);
+    const hullPercent = entity.status.hull_percent;
+    const conditionPercent = entity.status.condition_percent;
+    if (entity.status.destroyed) {
+      status.textContent = t('server.gm.entity.destroyed');
+    } else if (hullPercent !== null && conditionPercent !== null) {
+      status.textContent = t('server.gm.entity.hull_and_condition', {
+        hull: hullPercent,
+        condition: conditionPercent,
+      });
+    } else if (hullPercent !== null) {
+      status.textContent = t('server.gm.entity.hull', { percent: hullPercent });
+    } else if (conditionPercent !== null) {
+      status.textContent = t('server.gm.entity.condition', { percent: conditionPercent });
+    } else {
+      status.textContent = t('server.gm.entity.active');
+    }
+    hull.hidden = hullPercent === null;
+    hull.value = hullPercent === null ? 0 : hullPercent;
+    if (hullPercent === null) hull.removeAttribute('aria-valuetext');
+    else hull.setAttribute('aria-valuetext', status.textContent);
     if (entity.current_target) {
-      target.textContent = entity.current_target.name;
+      target.textContent = displayText(entity.current_target.name);
       target.dataset.targetId = entity.current_target.entity_id;
       target.disabled = false;
     } else {

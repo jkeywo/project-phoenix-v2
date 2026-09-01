@@ -128,7 +128,7 @@ describe('host channel localisation boundary', () => {
 
   it('routes every channel through the boundary, not just the lobby', () => {
     for (const channel of [
-      'hud', 'chatter', 'audio_config', 'audio_cue', 'gm_entity', 'gm_session',
+      'hud', 'chatter', 'audio_config', 'audio_cue', 'gm_session',
     ]) {
       const fresh = mountDispatcher();
       fresh.dispatch(channel, JSON.stringify({
@@ -137,6 +137,46 @@ describe('host channel localisation boundary', () => {
       expect(payloadFor(fresh.seen, channel).text)
         .toBe(t('entity.alliance_destroyer.name'));
     }
+  });
+
+  it('delivers the strict gm_entity DTO raw before projection parsing', () => {
+    const localiseSpy = vi.fn(localiseTree);
+    const raw = mountDispatcher({ strings: { t, has, localiseTree: localiseSpy } });
+    const dto = {
+      entities: [{
+        entity_id: '00000000-0000-4000-8000-000000000001',
+        name: 'entity.alliance_destroyer.display_name',
+        kind: 'structure',
+        position: [12, 0, -8],
+        faction: {
+          entity_id: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
+          name: 'faction.federation.display_name',
+        },
+        status: { hull_percent: null, condition_percent: null, destroyed: false },
+        current_target: {
+          entity_id: '00000000-0000-4000-8000-000000000002',
+          name: 'entity.alliance_destroyer.display_name',
+        },
+        geometry: null,
+        // An opaque authored visual token is allowed to look like a String
+        // Table key. It must not be rewritten before the strict DTO adapter.
+        radar: {
+          icon: 'entity.alliance_destroyer.name',
+          colour: [0.9, 0.7, 0.2],
+          size: 5,
+          region_colour: null,
+        },
+      }],
+    };
+
+    expect(has(dto.entities[0].name)).toBe(true);
+    expect(has(dto.entities[0].faction.name)).toBe(true);
+    expect(has(dto.entities[0].radar.icon)).toBe(true);
+    raw.dispatch('gm_entity', JSON.stringify(dto));
+
+    expect(payloadFor(raw.seen, 'gm_entity')).toEqual(dto);
+    expect(localiseSpy).not.toHaveBeenCalled();
+    expect(t(dto.entities[0].name)).not.toBe(dto.entities[0].name);
   });
 
   it('carries the numeric taps through unchanged', () => {

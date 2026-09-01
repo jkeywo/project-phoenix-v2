@@ -993,28 +993,61 @@ fn encode_chatter_wire_shape_matches_js_handler() {
 #[test]
 fn encode_gm_entity_projection_pins_the_local_host_channel_shape() {
     let payload = crate::gm_projection::GmEntityProjectionPayload {
-        entities: vec![crate::gm_projection::GmEntityProjection {
-            entity_id: "00000000-0000-0000-0000-000000000001".into(),
-            name: "Axiom".into(),
-            kind: crate::gm_projection::GmEntityKind::PlayerShip,
-            position: [12.0, 0.0, -8.0],
-            faction: Some(crate::gm_projection::GmEntityReference {
-                entity_id: "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa".into(),
-                name: "faction.alliance.display_name".into(),
-            }),
-            status: crate::gm_projection::GmEntityStatus {
-                hull_percent: 73,
-                destroyed: false,
+        entities: vec![
+            crate::gm_projection::GmEntityProjection {
+                entity_id: "00000000-0000-0000-0000-000000000001".into(),
+                name: "Axiom".into(),
+                kind: crate::gm_projection::GmEntityKind::PlayerShip,
+                position: [12.0, 0.0, -8.0],
+                faction: Some(crate::gm_projection::GmEntityReference {
+                    entity_id: "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa".into(),
+                    name: "faction.alliance.display_name".into(),
+                }),
+                status: crate::gm_projection::GmEntityStatus {
+                    hull_percent: Some(73),
+                    condition_percent: None,
+                    destroyed: false,
+                },
+                current_target: Some(crate::gm_projection::GmEntityReference {
+                    entity_id: "00000000-0000-0000-0000-000000000002".into(),
+                    name: "Raider".into(),
+                }),
+                geometry: None,
+                radar: crate::gm_projection::GmRadarAppearance {
+                    icon: Some("playerShip".into()),
+                    colour: Some([0.2, 0.8, 1.0]),
+                    size: Some(4.0),
+                    region_colour: None,
+                },
             },
-            current_target: Some(crate::gm_projection::GmEntityReference {
-                entity_id: "00000000-0000-0000-0000-000000000002".into(),
-                name: "Raider".into(),
-            }),
-        }],
+            crate::gm_projection::GmEntityProjection {
+                entity_id: "00000000-0000-0000-0000-000000000003".into(),
+                name: "entity.asteroid_belt.display_name".into(),
+                kind: crate::gm_projection::GmEntityKind::AsteroidField,
+                position: [100.0, 0.0, 200.0],
+                faction: None,
+                status: crate::gm_projection::GmEntityStatus {
+                    hull_percent: None,
+                    condition_percent: None,
+                    destroyed: false,
+                },
+                current_target: None,
+                geometry: Some(crate::regions::shape::RegionShape::Torus {
+                    inner_radius: 25.0,
+                    outer_radius: 125.0,
+                }),
+                radar: crate::gm_projection::GmRadarAppearance {
+                    icon: None,
+                    colour: None,
+                    size: None,
+                    region_colour: Some([0.4, 0.35, 0.3]),
+                },
+            },
+        ],
     };
     assert_eq!(
         encode_gm_entity_projection(&payload).unwrap(),
-        r#"{"entities":[{"entity_id":"00000000-0000-0000-0000-000000000001","name":"Axiom","kind":"player_ship","position":[12.0,0.0,-8.0],"faction":{"entity_id":"aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa","name":"faction.alliance.display_name"},"status":{"hull_percent":73,"destroyed":false},"current_target":{"entity_id":"00000000-0000-0000-0000-000000000002","name":"Raider"}}]}"#
+        r#"{"entities":[{"entity_id":"00000000-0000-0000-0000-000000000001","name":"Axiom","kind":"player_ship","position":[12.0,0.0,-8.0],"faction":{"entity_id":"aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa","name":"faction.alliance.display_name"},"status":{"hull_percent":73,"condition_percent":null,"destroyed":false},"current_target":{"entity_id":"00000000-0000-0000-0000-000000000002","name":"Raider"},"geometry":null,"radar":{"icon":"playerShip","colour":[0.2,0.8,1.0],"size":4.0,"region_colour":null}},{"entity_id":"00000000-0000-0000-0000-000000000003","name":"entity.asteroid_belt.display_name","kind":"asteroid_field","position":[100.0,0.0,200.0],"faction":null,"status":{"hull_percent":null,"condition_percent":null,"destroyed":false},"current_target":null,"geometry":{"type":"torus","inner_radius":25.0,"outer_radius":125.0},"radar":{"icon":null,"colour":null,"size":null,"region_colour":[0.4,0.35,0.3]}}]}"#
     );
 }
 

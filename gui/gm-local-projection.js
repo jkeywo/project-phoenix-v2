@@ -1,8 +1,73 @@
 import { createEntityInspector } from './entity-inspector.js';
 
-/** Peer-local omniscient ship-map presenter for the browser GM (#1295). */
+/** Peer-local omniscient world-map presenter for the browser GM (#1295/#1296). */
 
-const ENTITY_KINDS = new Set(['player_ship', 'npc_ship']);
+const ENTITY_KINDS = new Set([
+  'player_ship',
+  'npc_ship',
+  'structure',
+  'hazard',
+  'region',
+  'asteroid_field',
+  'authored_asteroid',
+]);
+const REGION_KINDS = new Set(['hazard', 'region', 'asteroid_field']);
+
+function normalisePercent(value) {
+  if (value === null) return null;
+  if (!Number.isInteger(value) || value < 0 || value > 100) return undefined;
+  return value;
+}
+
+function normaliseColour(value) {
+  if (value === null) return null;
+  if (!Array.isArray(value) || value.length !== 3
+      || !value.every((channel) => Number.isFinite(channel) && channel >= 0 && channel <= 1)) {
+    return undefined;
+  }
+  return [...value];
+}
+
+function normaliseRadar(value) {
+  if (!value || typeof value !== 'object') return undefined;
+  const icon = value.icon === null ? null
+    : typeof value.icon === 'string' && value.icon.length > 0 ? value.icon : undefined;
+  const colour = normaliseColour(value.colour);
+  const regionColour = normaliseColour(value.region_colour);
+  const size = value.size === null ? null
+    : Number.isFinite(value.size) && value.size >= 0 ? value.size : undefined;
+  if (icon === undefined || colour === undefined || size === undefined || regionColour === undefined) {
+    return undefined;
+  }
+  return { icon, colour, size, region_colour: regionColour };
+}
+
+function normaliseGeometry(value) {
+  if (value === null) return null;
+  if (!value || typeof value !== 'object' || typeof value.type !== 'string') return undefined;
+  if (value.type === 'sphere') {
+    if (!Number.isFinite(value.radius) || value.radius < 0) return undefined;
+    return { type: 'sphere', radius: value.radius };
+  }
+  if (value.type === 'torus') {
+    if (!Number.isFinite(value.inner_radius) || value.inner_radius < 0
+        || !Number.isFinite(value.outer_radius) || value.outer_radius < value.inner_radius) {
+      return undefined;
+    }
+    return {
+      type: 'torus',
+      inner_radius: value.inner_radius,
+      outer_radius: value.outer_radius,
+    };
+  }
+  if (value.type === 'box') {
+    if (!Array.isArray(value.half_extents) || value.half_extents.length !== 3
+        || !value.half_extents.every((extent) => Number.isFinite(extent) && extent >= 0)
+        || !Number.isFinite(value.yaw)) return undefined;
+    return { type: 'box', half_extents: [...value.half_extents], yaw: value.yaw };
+  }
+  return undefined;
+}
 
 function normaliseReference(value) {
   if (!value || typeof value !== 'object'
@@ -13,6 +78,10 @@ function normaliseReference(value) {
 
 function normaliseEntity(value) {
   const status = value && value.status;
+  const hullPercent = status && normalisePercent(status.hull_percent);
+  const conditionPercent = status && normalisePercent(status.condition_percent);
+  const geometry = normaliseGeometry(value && value.geometry);
+  const radar = normaliseRadar(value && value.radar);
   if (!value || typeof value !== 'object'
       || typeof value.entity_id !== 'string' || value.entity_id.length === 0
       || typeof value.name !== 'string'
@@ -20,8 +89,11 @@ function normaliseEntity(value) {
       || !Array.isArray(value.position) || value.position.length !== 3
       || !value.position.every(Number.isFinite)
       || !status || typeof status !== 'object'
-      || !Number.isInteger(status.hull_percent)
-      || status.hull_percent < 0 || status.hull_percent > 100
+      || hullPercent === undefined
+      || conditionPercent === undefined
+      || geometry === undefined
+      || radar === undefined
+      || REGION_KINDS.has(value.kind) !== (geometry !== null)
       || typeof status.destroyed !== 'boolean') return undefined;
   const faction = value.faction === null ? null : normaliseReference(value.faction);
   const currentTarget = value.current_target === null
@@ -36,10 +108,13 @@ function normaliseEntity(value) {
     position: [...value.position],
     faction,
     status: {
-      hull_percent: status.hull_percent,
+      hull_percent: hullPercent,
+      condition_percent: conditionPercent,
       destroyed: status.destroyed,
     },
     current_target: currentTarget,
+    geometry,
+    radar,
   };
 }
 
@@ -62,26 +137,64 @@ export function parseGmEntityProjection(payload) {
 }
 
 export function buildGmMapState(entities) {
-  const extent = entities.reduce((largest, entity) => Math.max(
-    largest,
-    Math.abs(entity.position[0]),
-    Math.abs(entity.position[2]),
-  ), 1);
+  const extent = entities.reduce((largest, entity) => {
+    let extentX = entity.radar.size || 0;
+    let extentZ = entity.radar.size || 0;
+    if (entity.geometry && entity.geometry.type === 'sphere') {
+      extentX = entity.geometry.radius;
+      extentZ = entity.geometry.radius;
+    } else if (entity.geometry && entity.geometry.type === 'torus') {
+      extentX = entity.geometry.outer_radius;
+      extentZ = entity.geometry.outer_radius;
+    } else if (entity.geometry && entity.geometry.type === 'box') {
+      const [halfX, , halfZ] = entity.geometry.half_extents;
+      const sinYaw = Math.abs(Math.sin(entity.geometry.yaw));
+      const cosYaw = Math.abs(Math.cos(entity.geometry.yaw));
+      extentX = halfX * cosYaw + halfZ * sinYaw;
+      extentZ = halfX * sinYaw + halfZ * cosYaw;
+    }
+    return Math.max(
+      largest,
+      Math.abs(entity.position[0]) + extentX,
+      Math.abs(entity.position[2]) + extentZ,
+    );
+  }, 1);
+  const regions = entities.filter((entity) => entity.geometry !== null).map((entity) => ({
+    uuid: entity.entity_id,
+    kind: entity.kind,
+    name: entity.name,
+    x: entity.position[0],
+    z: entity.position[2],
+    selectable: true,
+    color: entity.radar.region_colour,
+    shape: entity.geometry.type,
+    radius: entity.geometry.type === 'sphere' ? entity.geometry.radius : null,
+    inner_radius: entity.geometry.type === 'torus' ? entity.geometry.inner_radius : null,
+    outer_radius: entity.geometry.type === 'torus' ? entity.geometry.outer_radius : null,
+    half_extents: entity.geometry.type === 'box'
+      ? [entity.geometry.half_extents[0], entity.geometry.half_extents[2]] : null,
+    yaw: entity.geometry.type === 'box' ? entity.geometry.yaw : null,
+  }));
+  const blips = entities.filter((entity) => entity.geometry === null).map((entity) => ({
+    uuid: entity.entity_id,
+    kind: entity.kind,
+    name: entity.name,
+    world_x: entity.position[0],
+    world_z: entity.position[2],
+    stance: entity.kind === 'player_ship' ? 'friendly' : 'unknown',
+    destroyed: entity.status.destroyed,
+    hull_percent: entity.status.hull_percent,
+    condition_percent: entity.status.condition_percent,
+    icon: entity.radar.icon,
+    color: entity.radar.colour,
+    radar_size: entity.radar.size,
+  }));
   return {
     interaction: 'inspect',
     show_ship_marker: false,
     range: extent * 1.2,
-    regions: [],
-    blips: entities.map((entity) => ({
-      uuid: entity.entity_id,
-      kind: entity.kind,
-      name: entity.name,
-      world_x: entity.position[0],
-      world_z: entity.position[2],
-      stance: entity.kind === 'player_ship' ? 'friendly' : 'unknown',
-      destroyed: entity.status.destroyed,
-      hull_percent: entity.status.hull_percent,
-    })),
+    regions,
+    blips,
   };
 }
 

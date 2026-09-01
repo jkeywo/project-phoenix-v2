@@ -85,7 +85,10 @@ let origGetContext;
 let origRAF;
 let origCARAF;
 let origRO;
+let origImage;
 let roCallback;
+let imageSources;
+let imageInstances;
 
 beforeEach(() => {
   fakeCtx = makeFakeCtx();
@@ -106,6 +109,29 @@ beforeEach(() => {
     return { observe: vi.fn(), disconnect: vi.fn() };
   };
 
+  origImage = window.Image;
+  imageSources = [];
+  imageInstances = [];
+  window.Image = class {
+    constructor() {
+      this.complete = true;
+      this.naturalWidth = 64;
+      this.naturalHeight = 64;
+      imageInstances.push(this);
+    }
+
+    set src(value) {
+      this._src = value;
+      imageSources.push(value);
+      if (value.includes('Missing')) {
+        this.naturalWidth = 0;
+        this.naturalHeight = 0;
+      }
+    }
+
+    get src() { return this._src; }
+  };
+
   Object.defineProperty(window, 'devicePixelRatio', { value: 2, configurable: true });
 });
 
@@ -114,6 +140,7 @@ afterEach(() => {
   window.requestAnimationFrame = origRAF;
   window.cancelAnimationFrame = origCARAF;
   window.ResizeObserver = origRO;
+  window.Image = origImage;
   document.body.innerHTML = '';
   delete window.sendAction;
   delete window.activateSemanticAction;
@@ -224,6 +251,72 @@ describe('PhNavigationMap', () => {
     // Blip at (1000, 0): rx=1000, rz=0 → sx=300+1000*0.06=360, sy=300+0=300
     // Blip at (-1000, 0): rx=-1000, rz=0 → sx=300-1000*0.06=240, sy=300
     expect(h.fakeCtx._calls.arc.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('draws distinct authored icons and falls back by kind after an icon failure', () => {
+    const h = setup();
+    h.el.state = {
+      interaction: 'inspect',
+      show_ship_marker: false,
+      regions: [],
+      range: 5000,
+      blips: [
+        {
+          uuid: 'structure-a', kind: 'structure', icon: 'station',
+          world_x: -1000, world_z: 0, destroyed: true,
+        },
+        {
+          uuid: 'structure-b', kind: 'structure', icon: 'destroyer',
+          world_x: 0, world_z: 0,
+        },
+        {
+          uuid: 'structure-c', kind: 'structure', icon: 'missing',
+          world_x: 1000, world_z: 0,
+        },
+      ],
+    };
+    expect(h.el.navigationSelect({ uuid: 'structure-a' })).toBe(true);
+    h.tickRaf();
+
+    expect(imageSources).toEqual([
+      '../../assets/radar_icons/Icon-Station.png',
+      '../../assets/radar_icons/Icon-Destroyer.png',
+      '../../assets/radar_icons/Icon-Missing.png',
+    ]);
+    const drawnSources = h.fakeCtx.drawImage.mock.calls
+      .map(([image]) => image && image.src)
+      .filter(Boolean);
+    expect(drawnSources).toEqual(expect.arrayContaining([
+      '../../assets/radar_icons/Icon-Station.png',
+      '../../assets/radar_icons/Icon-Destroyer.png',
+    ]));
+    expect(drawnSources).not.toContain('../../assets/radar_icons/Icon-Missing.png');
+
+    // Only the failed third structure takes the deterministic structure-square
+    // fallback. The two loaded same-kind contacts remain visually distinct.
+    const fallback = findOp(
+      h.fakeCtx,
+      'fillRect',
+      (op) => op.fillStyle === 'var(--ink-dim)' && op.args[0] > 350,
+    );
+    expect(fallback).toBeDefined();
+    expect(fallback.args.map((value) => Math.round(value))).toEqual([355, 295, 10, 10]);
+
+    // Icon artwork does not replace semantic overlays.
+    expect(findOp(h.fakeCtx, 'stroke', (op) => op.strokeStyle === 'var(--ink)')).toBeDefined();
+    expect(findOp(h.fakeCtx, 'stroke', (op) => op.strokeStyle === GOLD)).toBeDefined();
+
+    const failedImage = imageInstances.find((image) => image.src.endsWith('Icon-Missing.png'));
+    const fallbackCount = h.fakeCtx._ops.filter(
+      (op) => op.op === 'fillRect' && op.fillStyle === 'var(--ink-dim)',
+    ).length;
+    expect(failedImage.onerror).toEqual(expect.any(Function));
+    failedImage.onerror();
+    h.tickRaf();
+    expect(h.fakeCtx._ops.filter(
+      (op) => op.op === 'fillRect' && op.fillStyle === 'var(--ink-dim)',
+    ).length).toBeGreaterThan(fallbackCount);
+    expect(imageSources).toHaveLength(3);
   });
 
   it('draws the ship marker at its true world position, not the screen centre', () => {
@@ -475,6 +568,33 @@ describe('PhNavigationMap', () => {
     expect(nameEl.textContent).toBe('Starbase 7');
   });
 
+  it('resolves authored display IDs in point, Region, and overlay labels', () => {
+    const h = setup();
+    h.el.state = {
+      show_ship_marker: false,
+      range: 5000,
+      blips: [{
+        uuid: 'ship', kind: 'structure', name: 'entity.alliance_destroyer.display_name',
+        world_x: -1000, world_z: 0,
+      }],
+      regions: [{
+        uuid: 'region', kind: 'region', name: 'entity.region_nebula.name',
+        x: 1000, z: 0, shape: 'sphere', radius: 500,
+      }],
+    };
+    h.tickRaf();
+
+    const labels = h.fakeCtx._calls.fillText.map((call) => call.text);
+    expect(labels).toContain(t('entity.alliance_destroyer.display_name'));
+    expect(labels).toContain(t('entity.region_nebula.name'));
+    expect(labels).not.toContain('entity.alliance_destroyer.display_name');
+    expect(labels).not.toContain('entity.region_nebula.name');
+
+    expect(h.el.navigationSelect({ uuid: 'ship' })).toBe(true);
+    expect(h.el.shadowRoot.getElementById('ov-name').textContent)
+      .toBe(t('entity.alliance_destroyer.display_name'));
+  });
+
   it('tap far from blips hides overlay', () => {
     const sendAction = vi.fn();
     const h = setup({ sendAction });
@@ -719,26 +839,30 @@ describe('PhNavigationMap', () => {
       expect(findOp(h.fakeCtx, 'fill', (o) => o.fillStyle === 'rgba(128,77,51,0.3)')).toBeUndefined();
     });
 
-    it('draws a box region as an axis-aligned filled rect, ignoring yaw', () => {
+    it('rotates a non-square box fill, outline, and selected outline by authored yaw', () => {
       const h = setup();
       h.el.state = {
         ...BASE,
+        interaction: 'inspect',
         regions: [{
           uuid: 'b1', x: 0, z: 0, shape: 'box',
           half_extents: [1000, 500], yaw: 0.7,
-          color: [0, 1, 0], name: null, objective_target: false,
+          color: [0, 1, 0], name: null, objective_target: false, selectable: true,
         }],
       };
+      expect(h.el.navigationSelect({ uuid: 'b1' })).toBe(true);
       h.tickRaf();
 
-      // half extents 1000/500 world → 60/30 px, so a 120x60 rect at (240, 270).
-      // Axis-aligned despite the authored yaw, matching the viewscreen radar.
+      // half extents 1000/500 world → 60/30px in box-local canvas space.
       const rect = findOp(h.fakeCtx, 'fillRect', (o) => o.fillStyle === 'rgba(0,255,0,0.3)');
       expect(rect).toBeDefined();
-      expect(rect.args.map((n) => Math.round(n))).toEqual([240, 270, 120, 60]);
+      expect(rect.args.map((n) => Math.round(n))).toEqual([-60, -30, 120, 60]);
       const outline = findOp(h.fakeCtx, 'strokeRect', (o) => o.strokeStyle === 'rgb(0,255,0)');
       expect(outline).toBeDefined();
-      expect(outline.args.map((n) => Math.round(n))).toEqual([240, 270, 120, 60]);
+      expect(outline.args.map((n) => Math.round(n))).toEqual([-60, -30, 120, 60]);
+      const selection = findOp(h.fakeCtx, 'strokeRect', (o) => o.strokeStyle === GOLD);
+      expect(selection.args.map((n) => Math.round(n))).toEqual([-64, -34, 128, 68]);
+      expect(h.fakeCtx.rotate.mock.calls.filter(([angle]) => angle === -0.7)).toHaveLength(2);
     });
 
     it('outlines an objective region in gold while keeping its own fill', () => {
@@ -1168,7 +1292,10 @@ describe('PhNavigationMap', () => {
         { uuid: 'player-a', kind: 'player_ship', name: 'Axiom', world_x: 0, world_z: 0, stance: 'friendly', destroyed: false },
         { uuid: 'npc-b', kind: 'npc_ship', name: 'Raider', world_x: 50, world_z: 0, stance: 'unknown', destroyed: true },
       ],
-      regions: [],
+      regions: [{
+        uuid: 'region-c', kind: 'region', name: 'Safe harbour', x: 0, z: 50,
+        shape: 'sphere', radius: 15, color: [0.1, 0.7, 0.5], selectable: true,
+      }],
     };
 
     it('selects by touch and keyboard and keeps the UUID across absolute refreshes', () => {
@@ -1197,10 +1324,139 @@ describe('PhNavigationMap', () => {
       expect(h.el.navigationSelectedUuid()).toBe('player-a');
       expect(selected).toEqual(['player-a']);
 
-      h.el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+      h.el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
       expect(h.el.navigationSelectedUuid()).toBe('npc-b');
       expect(selected).toEqual(['player-a', 'npc-b']);
       expect(window.activateSemanticAction).not.toHaveBeenCalled();
+    });
+
+    it('selects selectable Regions by touch and includes them in stable UUID keyboard order', () => {
+      const h = setup();
+      const selected = [];
+      h.el.addEventListener('navselect', (event) => selected.push(event.detail && event.detail.uuid));
+      h.el.state = INSPECT_STATE;
+      h.tickRaf();
+
+      // Region world (0, 50) -> buffer (300, 150) -> CSS (150, 75).
+      touch(h.canvas, 'touchstart', [{ clientX: 150, clientY: 75 }]);
+      touch(h.canvas, 'touchend', [], [{ clientX: 150, clientY: 75 }]);
+      expect(h.el.navigationSelectedUuid()).toBe('region-c');
+      expect(selected).toEqual(['region-c']);
+
+      // Inspect candidates are UUID-sorted across points and Regions:
+      // npc-b, player-a, region-c.
+      h.el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+      expect(h.el.navigationSelectedUuid()).toBe('npc-b');
+      h.el.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+      expect(h.el.navigationSelectedUuid()).toBe('region-c');
+    });
+
+    it('hit-tests a rotated non-square box in its authored local frame', () => {
+      const h = setup();
+      h.el.state = {
+        ...INSPECT_STATE,
+        blips: [],
+        regions: [{
+          uuid: 'box', kind: 'region', x: 0, z: 0,
+          shape: 'box', half_extents: [40, 10], yaw: Math.PI / 4, selectable: true,
+        }],
+      };
+      h.tickRaf();
+
+      // Buffer delta (+60,-60): outside an axis-aligned 120x30px half-box,
+      // but on the long axis after authored +π/4 becomes canvas -π/4. Using
+      // the wrong yaw sign would reject this point as well.
+      touch(h.canvas, 'touchstart', [{ clientX: 180, clientY: 120 }]);
+      touch(h.canvas, 'touchend', [], [{ clientX: 180, clientY: 120 }]);
+      expect(h.el.navigationSelectedUuid()).toBe('box');
+
+      // Buffer delta (+80,0) is the inverse discriminator: axis-aligned would
+      // accept it, while the rotated thin axis correctly rejects it.
+      touch(h.canvas, 'touchstart', [{ clientX: 190, clientY: 150 }]);
+      touch(h.canvas, 'touchend', [], [{ clientX: 190, clientY: 150 }]);
+      expect(h.el.navigationSelectedUuid()).toBeNull();
+    });
+
+    it('gives overlapping points priority over Regions and resolves point overlap by UUID', () => {
+      const h = setup();
+      h.el.state = {
+        ...INSPECT_STATE,
+        blips: [
+          { uuid: 'z-point', kind: 'npc_ship', world_x: 0, world_z: 0 },
+          { uuid: 'a-point', kind: 'player_ship', world_x: 0, world_z: 0 },
+        ],
+        regions: [
+          { uuid: 'a-region', kind: 'hazard', x: 0, z: 0, shape: 'sphere', radius: 30, selectable: true },
+          { uuid: 'z-region', kind: 'region', x: 0, z: 0, shape: 'sphere', radius: 30, selectable: true },
+        ],
+      };
+      h.tickRaf();
+
+      touch(h.canvas, 'touchstart', [{ clientX: 150, clientY: 150 }]);
+      touch(h.canvas, 'touchend', [], [{ clientX: 150, clientY: 150 }]);
+      expect(h.el.navigationSelectedUuid()).toBe('a-point');
+    });
+
+    it('outlines the selected Region and distinguishes Region kinds without colour', () => {
+      const h = setup();
+      h.el.state = {
+        ...INSPECT_STATE,
+        blips: [],
+        regions: [
+          {
+            uuid: 'field-a', kind: 'asteroid_field', x: -30, z: 0,
+            shape: 'torus', inner_radius: 5, outer_radius: 20, selectable: true,
+          },
+          {
+            uuid: 'hazard-b', kind: 'hazard', x: 30, z: 0,
+            shape: 'sphere', radius: 20, selectable: true,
+          },
+          {
+            uuid: 'region-c', kind: 'region', x: 0, z: 30,
+            shape: 'box', half_extents: [10, 15], selectable: true,
+          },
+        ],
+      };
+      expect(h.el.navigationSelect({ uuid: 'region-c' })).toBe(true);
+      h.tickRaf();
+
+      expect(h.fakeCtx.setLineDash).toHaveBeenCalledWith([2, 5]);
+      expect(h.fakeCtx.setLineDash).toHaveBeenCalledWith([9, 5]);
+      expect(h.fakeCtx.setLineDash).toHaveBeenCalledWith([4, 3]);
+      expect(findOp(h.fakeCtx, 'strokeRect', (op) => op.strokeStyle === GOLD)).toBeDefined();
+    });
+
+    it('clears a removed Region and does not resurrect selection when the UUID reappears', () => {
+      const h = setup();
+      const selected = [];
+      h.el.addEventListener('navselect', (event) => selected.push(event.detail && event.detail.uuid));
+      h.el.state = INSPECT_STATE;
+      expect(h.el.navigationSelect({ uuid: 'region-c' })).toBe(true);
+      h.tickRaf();
+
+      h.el.state = { ...INSPECT_STATE, regions: [] };
+      h.tickRaf();
+      expect(h.el.navigationSelectedUuid()).toBeNull();
+      expect(selected).toEqual(['region-c', null]);
+
+      h.el.state = INSPECT_STATE;
+      h.tickRaf();
+      expect(h.el.navigationSelectedUuid()).toBeNull();
+      expect(h.el.navigationSelect({ uuid: 'region-c' })).toBe(true);
+    });
+
+    it('does not make Regions selectable on the ordinary Navigation chart', () => {
+      const h = setup();
+      h.el.state = {
+        ...INSPECT_STATE,
+        interaction: 'navigate',
+        blips: [],
+      };
+      h.tickRaf();
+      touch(h.canvas, 'touchstart', [{ clientX: 150, clientY: 75 }]);
+      touch(h.canvas, 'touchend', [], [{ clientX: 150, clientY: 75 }]);
+      expect(h.el.navigationSelectedUuid()).toBeNull();
+      expect(h.el.navigationSelect({ uuid: 'region-c' })).toBe(false);
     });
 
     it('keeps wheel/pinch zoom and pointer pan local and renders non-colour status marks', () => {

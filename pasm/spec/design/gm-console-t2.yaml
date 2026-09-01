@@ -92,6 +92,8 @@ entities:
       summary: "M1 shows every player ship, NPC, structure, authored hazard and authored Region with stable identity, position, faction, broad health/status, and current target. Asteroid fields render as aggregate Regions, never as individual asteroids unless authored as named selectable entities. Selection opens a minimal reusable inspector shell. One bounded tick-stamped activity stream projects existing structured balance/scenario sources: damage, destruction, Objectives, trigger fires, Red Alert, connections, and GM actions, with category/ship filters and selection links. Detailed doctrine, damage, Comms, knowledge, and attention scoring wait for the milestones that own them."
       rationale:
         - "The map, selection, inspector, panels, capability adapters, and action adapters are T2 components designed for M6 reuse, not a disposable GM page."
+        - "The local projection classifies ships before structure substrate, treats StaticPointDefence as a structure, and projects authored RegionShape geometry plus narrowed radar appearance. Streamed Asteroid/AsteroidUuid lifecycle entities have no EntityUuid and therefore never become contacts; only asteroids named in the authored world identity table are selectable points, while each asteroid-field section is one aggregate torus Region."
+        - "Inspect mode partitions geometry rows from point blips, gives an overlapping point priority and then resolves by stable UUID, and lets touch and keyboard traverse only explicitly selectable Regions. Absolute removal clears selection and same-UUID layer reappearance does not resurrect it; ordinary Navigation remains point-selecting."
         - "The feed consumes existing structured events rather than creating a parallel GM-only event bus; M4 later derives attention assistance from this evidence."
     architecture:
       kind: gm-presentation
@@ -101,7 +103,7 @@ entities:
     implementation:
       status: declared
       paths: [src/gm_projection.rs, src/console_bridge.rs, src/core/codec.rs, src/server/bridge.rs, gui/gm-local-projection.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, assets/strings/strings.csv, server.html]
-      symbols: [GmEntityProjectionPayload, GmEntityProjection, GmEntityKind, GmEntityStatus, GmEntityReference, publish_local_projection, parseGmEntityProjection, buildGmMapState, createGmLocalProjection, createEntityInspector, PhNavigationMap]
+      symbols: [GmEntityProjectionPayload, GmEntityProjection, GmEntityKind, GmEntityStatus, GmRadarAppearance, GmEntityReference, RegionShape, publish_local_projection, parseGmEntityProjection, buildGmMapState, createGmLocalProjection, createEntityInspector, PhNavigationMap]
       tests: [cargo test gm_projection::tests, cargo test encode_gm_entity_projection_pins_the_local_host_channel_shape, npx vitest run tests/client/gm-local-projection.test.js tests/client/ph-navigation-map.test.js, tests/smoke/gm-page.spec.js]
 
   - decision: gm-t2-action-result-contract

@@ -1,8 +1,8 @@
 ---
 title: GM Operator
 type: entity
-tags: [gm, operator, identity, reconnect, roster, readiness, force-start, action, pause, host-mesh]
-sources: [src/gm_roster.rs, src/gm_action.rs, src/gm_join.rs, src/gm_projection.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/messages.rs, src/core/codec.rs, src/command_admission/log.rs, src/lobby/server.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server/bridge.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/gm-local-projection.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html]
+tags: [gm, operator, identity, reconnect, roster, readiness, force-start, action, pause, host-mesh, map, regions, asteroids]
+sources: [src/gm_roster.rs, src/gm_action.rs, src/gm_join.rs, src/gm_projection.rs, src/entities/tags.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/messages.rs, src/core/codec.rs, src/command_admission/log.rs, src/lobby/server.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server/bridge.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/host-channel.js, gui/gm-local-projection.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html]
 updated: 2026-09-01
 ---
 
@@ -94,23 +94,37 @@ The explicit `?gm=1` page selects the production
 WebDriver. It keeps the browser window, world ingest, fixed-tick simulation,
 and fleet participant while installing no renderer and no `SelectedShipResource`
 or local ship. The local `gm_entity` Host Channel carries an absolute,
-UUID-sorted projection of every `Ship`: `FleetSlotOf` identifies player ships
-(including the solo slot) and its absence identifies NPCs. Each row contains
-only stable identity, `ShipPhysics` position, the faction's String Table display
-id when one is authored, broad hull/destroyed status, and the current
-`TacticalRadarSelection`. It carries no Bevy entity id, component inventory,
-System detail, or M2 action capability.
+UUID-sorted projection of facilitation-relevant local truth. Ships remain
+player or NPC contacts, while `StaticPointDefence` is a structure. The typed
+canonical `structure` tag also projects fixed authored structures that carry
+neither Station nor infrastructure components. Structures, hazards, inert
+Regions, asteroid fields, and selectable authored
+asteroids use semantic kinds rather than exposing ECS components. Region,
+hazard, and field footprints reuse the authored `RegionShape`; an asteroid
+field is one aggregate Region, while lifecycle-streamed `Asteroid` rocks never
+become individual contacts. A named/selectable asteroid authored in world
+content is the only asteroid point contact. Each row contains stable
+`EntityUuid`, position, String Table display ids, broad hull/infrastructure
+condition, current Tactical target where applicable, and narrowed authored
+radar appearance. It carries no Bevy entity id, component inventory, layer
+identity, effect tuning, System detail, or M2 action capability. The Host
+Channel dispatcher exempts this strict DTO from recursive localisation, keeping
+those identities and display ids raw until the map or inspector presents them.
 
-`gui/gm-local-projection.js` validates and narrows that DTO, then adapts it to
-the shared `ph-navigation-map` in local inspect mode. Selection is keyed only
-by the stable UUID, so an absolute refresh updates the linked inspector without
-dropping selection; removal clears both map selection and stale inspector
-detail. Player and NPC marker shapes, a selected ring, a destroyed cross, text
-legend and textual inspector status make kind and condition independent of
-colour. `gui/entity-inspector.js` is the reusable M6 identity/status/target
-shell; selecting its target follows the same stable map link. The projection is
-not a `ServerMessage`, `MeshFrame`, or `SimOutbox`; peer state transfer remains
-the snapshot-recovery path.
+`gui/gm-local-projection.js` validates and narrows that DTO, partitions point
+contacts from geometry Regions, then adapts both to the shared
+`ph-navigation-map` in local inspect mode. Selection is keyed only by stable
+UUID. An absolute refresh updates the linked inspector without dropping
+selection; removal clears both map selection and stale inspector detail, and a
+later same-UUID reappearance does not resurrect selection. At overlap a point
+wins over a Region, then stable UUID breaks ties. Touch and keyboard traverse
+selectable Regions as well as contacts only in inspect mode; Navigation's
+interaction contract is unchanged. Semantic marker/outline patterns, a
+selected outline, a destroyed cross, text legend, and textual inspector status
+make kind and condition independent of colour. The inspector hides its hull
+meter for kinds without hull applicability. The projection is not a
+`ServerMessage`, `MeshFrame`, or `SimOutbox`; peer state transfer remains the
+snapshot-recovery path.
 
 ## Typed session actions
 

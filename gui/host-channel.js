@@ -22,18 +22,26 @@
  *
  * ## Localisation boundary (issue #949)
  *
- * Every host-channel payload is built from authored DATA, so — exactly like a
- * peer message — it can carry string ids: a world's `[global] title` on the
- * lobby channel, a `game_over` trigger's `message` on the hud channel. A
+ * Presentation-oriented host-channel payloads are built from authored DATA,
+ * so — exactly like a peer message — they can carry string ids: a world's
+ * `[global] title` on the lobby channel, a `game_over` trigger's `message` on
+ * the hud channel. A
  * phone crosses localiseTree() once, in gui/rendezvous-transport.js, at the
  * point a peer message is decoded. This dispatcher is the host's equivalent
- * boundary — the single place every channel payload enters the page — so the
- * ids are resolved HERE rather than at each render site. Fixing it per render
+ * boundary — the single place those payloads enter the page — so their ids are
+ * resolved HERE rather than at each render site. Fixing it per render
  * site is what left `world.combat_test.global.title` on #lobby-title after
  * the scenario buttons were fixed (issue #949): two call sites found, and no
  * reason to think a third would not appear.
  *
- * Same rule as localiseTree: substitute only what the table actually holds.
+ * `gm_entity` is the deliberate exception. It is a strict domain DTO whose
+ * String Table display ids must remain raw through parsing and state; only the
+ * map and inspector resolve its known display fields at presentation. Recursive
+ * localisation here could otherwise mutate opaque strings before strict DTO
+ * validation, including a value that happens to equal a String Table key.
+ *
+ * For every other channel, use the same rule as localiseTree: substitute only
+ * what the table actually holds.
  * Machine tokens (`phase`, station-rating names, the audio cue `kind`),
  * player-typed names and prose a mod pack authored literally all pass through
  * untouched — every id in strings.csv is dotted, so none of them can collide.
@@ -87,7 +95,9 @@ export function createHostChannel({ handlers, strings }) {
   return function hostChannelDispatch(name, payload) {
     const handler = handlers[name];
     if (handler) {
-      handler(localiseHostPayload(payload, strings));
+      // `gm_entity` is parsed by a strict adapter and localised only at its
+      // explicit presentation sites. Preserve the exact Rust JSON here.
+      handler(name === 'gm_entity' ? payload : localiseHostPayload(payload, strings));
     } else {
       console.warn('[Phoenix] unhandled host channel:', name);
     }

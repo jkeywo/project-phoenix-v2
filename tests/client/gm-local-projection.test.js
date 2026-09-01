@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { t } from '../../gui/strings.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,6 +17,8 @@ const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
 const PLAYER_ID = '00000000-0000-4000-8000-000000000001';
 const NPC_ID = '00000000-0000-4000-8000-000000000002';
+const REGION_ID = '00000000-0000-4000-8000-000000000003';
+const FIELD_ID = '00000000-0000-4000-8000-000000000004';
 
 function entity(overrides = {}) {
   return {
@@ -27,10 +30,31 @@ function entity(overrides = {}) {
       entity_id: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
       name: 'Alliance',
     },
-    status: { hull_percent: 73, destroyed: false },
+    status: { hull_percent: 73, condition_percent: null, destroyed: false },
     current_target: null,
+    geometry: null,
+    radar: {
+      icon: 'playerShip',
+      colour: [0.2, 0.8, 1],
+      size: 4,
+      region_colour: null,
+    },
     ...overrides,
   };
+}
+
+function region(overrides = {}) {
+  return entity({
+    entity_id: REGION_ID,
+    name: 'world.region.safe_harbour.display_name',
+    kind: 'region',
+    position: [100, 0, -20],
+    faction: null,
+    status: { hull_percent: null, condition_percent: null, destroyed: false },
+    geometry: { type: 'sphere', radius: 30 },
+    radar: { icon: null, colour: null, size: null, region_colour: [0.1, 0.7, 0.5] },
+    ...overrides,
+  });
 }
 
 function payload(entities) {
@@ -62,10 +86,11 @@ function mount() {
   });
   map.navigationSelectedUuid = () => selected;
   map.navigationSelect = vi.fn(({ uuid }) => {
-    const blip = mapState.blips.find((entry) => entry.uuid === uuid) || null;
-    if (uuid != null && !blip) return false;
-    selected = blip && blip.uuid || null;
-    map.dispatchEvent(new CustomEvent('navselect', { detail: blip }));
+    const candidate = [...mapState.blips, ...mapState.regions]
+      .find((entry) => entry.uuid === uuid) || null;
+    if (uuid != null && !candidate) return false;
+    selected = candidate && candidate.uuid || null;
+    map.dispatchEvent(new CustomEvent('navselect', { detail: candidate }));
     return true;
   });
   const projection = createGmLocalProjection({
@@ -82,14 +107,27 @@ describe('GM omniscient local projection', () => {
 
   it('strictly normalises the public map DTO and drops unknown detail', () => {
     const parsed = parseGmEntityProjection({
-      entities: [entity({ raw_components: ['Transform', 'Ship'] })],
+      entities: [entity({
+        raw_components: ['Transform', 'Ship'],
+        effect_tuning: { dps: 9000 },
+        layer_path: 'assets/worlds/secret.toml',
+      })],
       ecs_world: { entities: 99 },
     });
     expect(parsed).toEqual([entity()]);
     expect(parsed[0]).not.toHaveProperty('raw_components');
+    expect(parsed[0]).not.toHaveProperty('effect_tuning');
+    expect(parsed[0]).not.toHaveProperty('layer_path');
     expect(parseGmEntityProjection({ entities: [entity(), entity()] })).toBeUndefined();
     expect(parseGmEntityProjection({ entities: [entity({ position: [0, NaN, 2] })] }))
       .toBeUndefined();
+    expect(parseGmEntityProjection({ entities: [region({ geometry: null })] })).toBeUndefined();
+    expect(parseGmEntityProjection({
+      entities: [region({ geometry: { type: 'torus', inner_radius: 50, outer_radius: 10 } })],
+    })).toBeUndefined();
+    expect(parseGmEntityProjection({
+      entities: [entity({ radar: { ...entity().radar, colour: [2, 0, 0] } })],
+    })).toBeUndefined();
   });
 
   it('projects player/NPC map markers with non-colour kind and destroyed state', () => {
@@ -98,7 +136,7 @@ describe('GM omniscient local projection', () => {
       name: 'Raider',
       kind: 'npc_ship',
       position: [100, 0, 40],
-      status: { hull_percent: 0, destroyed: true },
+      status: { hull_percent: 0, condition_percent: null, destroyed: true },
     });
     const state = buildGmMapState([entity(), npc]);
     expect(state).toMatchObject({ interaction: 'inspect', show_ship_marker: false });
@@ -109,6 +147,55 @@ describe('GM omniscient local projection', () => {
     expect(state.range).toBeGreaterThan(100);
   });
 
+  it('partitions geometry into selectable Regions without duplicate blips and frames full extents', () => {
+    const hazard = region({
+      entity_id: '00000000-0000-4000-8000-000000000005',
+      kind: 'hazard',
+      position: [200, 0, 100],
+      geometry: { type: 'box', half_extents: [20, 5, 40], yaw: Math.PI / 2 },
+      radar: { icon: null, colour: null, size: null, region_colour: [1, 0.3, 0.1] },
+    });
+    const field = region({
+      entity_id: FIELD_ID,
+      kind: 'asteroid_field',
+      position: [-400, 0, 0],
+      geometry: { type: 'torus', inner_radius: 25, outer_radius: 100 },
+      radar: { icon: null, colour: null, size: null, region_colour: [0.5, 0.5, 0.5] },
+    });
+    const structure = entity({
+      entity_id: '00000000-0000-4000-8000-000000000006',
+      kind: 'structure',
+      status: { hull_percent: 80, condition_percent: 64, destroyed: false },
+      radar: { icon: 'station', colour: [0.3, 0.6, 0.9], size: 12, region_colour: null },
+    });
+    const state = buildGmMapState([entity(), structure, hazard, field]);
+    expect(state.blips.map((entry) => entry.uuid)).toEqual([PLAYER_ID, structure.entity_id]);
+    expect(state.regions.map((entry) => entry.uuid)).toEqual([hazard.entity_id, FIELD_ID]);
+    expect(state.regions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        uuid: hazard.entity_id,
+        kind: 'hazard',
+        selectable: true,
+        shape: 'box',
+        half_extents: [20, 40],
+      }),
+      expect.objectContaining({
+        uuid: FIELD_ID,
+        kind: 'asteroid_field',
+        shape: 'torus',
+        inner_radius: 25,
+        outer_radius: 100,
+      }),
+    ]));
+    expect(state.blips[1]).toMatchObject({
+      kind: 'structure',
+      icon: 'station',
+      color: [0.3, 0.6, 0.9],
+      radar_size: 12,
+    });
+    expect(state.range).toBe(600);
+  });
+
   it('keeps selection by stable identity while absolute position and status refresh', () => {
     expect(harness.projection.update(payload([entity()]))).toBe(true);
     expect(harness.projection.select(PLAYER_ID)).toBe(true);
@@ -117,13 +204,23 @@ describe('GM omniscient local projection', () => {
 
     harness.projection.update(payload([entity({
       position: [25, 3, -12],
-      status: { hull_percent: 41, destroyed: false },
+      status: { hull_percent: 41, condition_percent: null, destroyed: false },
     })]));
     expect(harness.projection.state().selectedId).toBe(PLAYER_ID);
     expect(harness.getMapState().blips[0]).toMatchObject({ world_x: 25, world_z: -12 });
     expect(document.getElementById('gm-entity-hull').value).toBe(41);
     expect(document.getElementById('gm-entity-position').textContent)
       .toContain('25.0/3.0/-12.0');
+  });
+
+  it('selects a Region in the shared inspector and hides an inapplicable hull meter', () => {
+    harness.projection.update(payload([region()]));
+    expect(harness.projection.select(REGION_ID)).toBe(true);
+    expect(harness.projection.state().selectedId).toBe(REGION_ID);
+    expect(document.getElementById('gm-entity-card').dataset.kind).toBe('region');
+    expect(document.getElementById('gm-entity-hull').hidden).toBe(true);
+    expect(document.getElementById('gm-entity-status').textContent)
+      .toContain('server.gm.entity.active');
   });
 
   it('clears selection and stale inspector detail when the selected ship is removed', () => {
@@ -136,7 +233,7 @@ describe('GM omniscient local projection', () => {
     expect(document.getElementById('gm-entity-map').hidden).toBe(true);
   });
 
-  it('synchronously clears a real map element when its sole selected ship disappears', () => {
+  it('synchronously reconciles removal and reappearance of a selected Region on a real map element', () => {
     const originalGetContext = HTMLCanvasElement.prototype.getContext;
     const originalRequestAnimationFrame = window.requestAnimationFrame;
     const originalCancelAnimationFrame = window.cancelAnimationFrame;
@@ -170,11 +267,11 @@ describe('GM omniscient local projection', () => {
       canvas.height = 0;
       const projection = createGmLocalProjection({ doc: document });
 
-      projection.update(payload([entity()]));
-      expect(projection.select(PLAYER_ID)).toBe(true);
-      expect(projection.state().selectedId).toBe(PLAYER_ID);
-      expect(map.navigationSelectedUuid()).toBe(PLAYER_ID);
-      expect(map.dataset.selectedEntityId).toBe(PLAYER_ID);
+      projection.update(payload([region()]));
+      expect(projection.select(REGION_ID)).toBe(true);
+      expect(projection.state().selectedId).toBe(REGION_ID);
+      expect(map.navigationSelectedUuid()).toBe(REGION_ID);
+      expect(map.dataset.selectedEntityId).toBe(REGION_ID);
       expect(map.hasAttribute('data-has-selection')).toBe(true);
 
       projection.update(payload([]));
@@ -184,11 +281,13 @@ describe('GM omniscient local projection', () => {
       expect(map.dataset.selectedEntityId).toBeUndefined();
       expect(map.hasAttribute('data-has-selection')).toBe(false);
 
-      projection.update(payload([entity()]));
-      expect(projection.select(PLAYER_ID)).toBe(true);
-      expect(projection.state().selectedId).toBe(PLAYER_ID);
-      expect(map.navigationSelectedUuid()).toBe(PLAYER_ID);
-      expect(map.dataset.selectedEntityId).toBe(PLAYER_ID);
+      projection.update(payload([region({ position: [140, 0, -20] })]));
+      expect(projection.state().selectedId).toBeNull();
+      expect(map.navigationSelectedUuid()).toBeNull();
+      expect(projection.select(REGION_ID)).toBe(true);
+      expect(projection.state().selectedId).toBe(REGION_ID);
+      expect(map.navigationSelectedUuid()).toBe(REGION_ID);
+      expect(map.dataset.selectedEntityId).toBe(REGION_ID);
     } finally {
       document.body.innerHTML = '';
       HTMLCanvasElement.prototype.getContext = originalGetContext;
@@ -210,6 +309,35 @@ describe('GM omniscient local projection', () => {
     target.click();
     expect(harness.projection.state().selectedId).toBe(NPC_ID);
     expect(document.getElementById('gm-entity-name').textContent).toBe('Raider');
+  });
+
+  it('localises inspector entity, faction, and current-target display IDs only at render', () => {
+    const targetName = 'entity.ship_harrow_destroyer.display_name';
+    const player = entity({
+      name: 'entity.alliance_destroyer.display_name',
+      faction: {
+        entity_id: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
+        name: 'faction.federation.display_name',
+      },
+      current_target: { entity_id: NPC_ID, name: targetName },
+    });
+    const npc = entity({ entity_id: NPC_ID, name: targetName, kind: 'npc_ship' });
+    harness.projection.update(payload([player, npc]));
+    harness.projection.select(PLAYER_ID);
+
+    expect(document.getElementById('gm-entity-name').textContent)
+      .toBe(t('entity.alliance_destroyer.display_name'));
+    expect(document.getElementById('gm-entity-faction').textContent)
+      .toBe(t('faction.federation.display_name'));
+    const target = document.getElementById('gm-entity-target');
+    expect(target.textContent).toBe(t(targetName));
+    expect(target.dataset.targetId).toBe(NPC_ID);
+    expect(document.getElementById('gm-entity-identity').textContent).toBe(PLAYER_ID);
+
+    target.click();
+    expect(harness.projection.state().selectedId).toBe(NPC_ID);
+    expect(document.getElementById('gm-entity-name').textContent).toBe(t(targetName));
+    expect(document.getElementById('gm-entity-identity').textContent).toBe(NPC_ID);
   });
 
   it('rejects malformed payloads without changing the current map or inspector', () => {

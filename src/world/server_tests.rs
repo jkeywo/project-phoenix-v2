@@ -5523,6 +5523,89 @@ fn unload_world_despawns_entities_added_by_load_world() {
     );
 }
 
+/// A named layer entity is one authored identity across layer incarnations.
+/// Unload removes its current ECS entity, but reload must reuse the retained
+/// name registry UUID rather than minting a second contact identity (#1296).
+#[test]
+fn layer_reload_reuses_named_entity_uuid_without_a_duplicate() {
+    const PATH: &str = "tests/fixtures/layer_entities.toml";
+    const NAME: &str = "test.layer_fixture.raider";
+
+    let mut app = layer_test_app();
+    app.world_mut()
+        .resource_mut::<PendingWorldLayerChanges>()
+        .0
+        .push(WorldLayerChange::Load {
+            path: PATH.into(),
+            loader_path: None,
+        });
+    app.update();
+
+    let first_entity = app.world().resource::<WorldLayerMap>().0[PATH].spawned_entities[0];
+    let first_uuid = app
+        .world()
+        .get::<EntityUuid>(first_entity)
+        .expect("named layer entity carries an EntityUuid")
+        .0
+        .clone();
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .name_to_uuid
+            .get(NAME),
+        Some(&first_uuid),
+        "the live authored-name registry and spawned entity must agree"
+    );
+
+    app.world_mut()
+        .resource_mut::<PendingWorldLayerChanges>()
+        .0
+        .push(WorldLayerChange::Unload(PATH.into()));
+    app.update();
+
+    assert!(
+        app.world().get_entity(first_entity).is_err(),
+        "unload removes the current ECS incarnation"
+    );
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .name_to_uuid
+            .get(NAME),
+        Some(&first_uuid),
+        "unload retains authored identity for a later incarnation"
+    );
+
+    app.world_mut()
+        .resource_mut::<PendingWorldLayerChanges>()
+        .0
+        .push(WorldLayerChange::Load {
+            path: PATH.into(),
+            loader_path: None,
+        });
+    app.update();
+
+    let second_entity = app.world().resource::<WorldLayerMap>().0[PATH].spawned_entities[0];
+    assert_eq!(
+        app.world()
+            .get::<EntityUuid>(second_entity)
+            .expect("reloaded named layer entity carries an EntityUuid")
+            .0,
+        first_uuid,
+        "reload must restore the authored UUID"
+    );
+    let matching_entities = app
+        .world_mut()
+        .query::<&EntityUuid>()
+        .iter(app.world())
+        .filter(|uuid| uuid.0 == first_uuid)
+        .count();
+    assert_eq!(
+        matching_entities, 1,
+        "reload leaves exactly one live entity with the authored UUID"
+    );
+}
+
 /// Issue #751: unloading a layer removes exactly the objectives its
 /// triggers added (tracked in `WorldRuntime.owned_objective_ids`), leaving
 /// base-world objectives untouched.

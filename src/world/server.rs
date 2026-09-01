@@ -4347,11 +4347,28 @@ fn apply_loaded_layer(
     root_tick_hz: f32,
 ) {
     let crate::world::layers::LoadedLayer {
-        name_to_uuid_inserts,
-        scenario_config,
+        mut name_to_uuid_inserts,
+        mut scenario_config,
         emit_world_loaded,
         scripts,
     } = layer;
+
+    // A named layer entity is authored identity, not one incarnation of the
+    // layer. Unload deliberately leaves the live name registry intact, so a
+    // later load can restore the same UUID instead of exposing a removal and
+    // reappearance as two unrelated contacts (issue #1296). Keep the parsed
+    // config and the registrations in lockstep: the former is what spawning
+    // reads, while the latter is what the live runtime records below. Anonymous
+    // layer entities have no entry here and retain their mint-on-load policy.
+    for (name, uuid) in &mut name_to_uuid_inserts {
+        let Some(existing_uuid) = runtime.name_to_uuid.get(name).cloned() else {
+            continue;
+        };
+        *uuid = existing_uuid.clone();
+        scenario_config
+            .name_to_uuid
+            .insert(name.clone(), existing_uuid);
+    }
 
     // Merge the layer's compiled `[script]` set into the live script runtime
     // (issue #1045). Script-free layers take the `None` branch without changing

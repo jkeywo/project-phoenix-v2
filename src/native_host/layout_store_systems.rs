@@ -339,7 +339,7 @@ fn adopt_remembered_layout(
 ///
 /// Two honest edges. A press landing in the same frame as an unplug is
 /// re-baselined with it, so that one press reaches the file only on the next
-/// one — a rare race, with the bridge on screen correct throughout.  And
+/// one — a rare race, with the bridge on screen correct throughout. And
 /// `reconcile_seated_consoles` surrendering a seat it could not build a console
 /// for (`ConsoleCouldNotOpen`) changes no monitor, so it *is* filed; that is a
 /// real state the operator is told about, and re-pressing writes it back.

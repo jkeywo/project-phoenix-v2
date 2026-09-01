@@ -28,6 +28,8 @@ use project_phoenix::entities::template_preload::TemplatePreload;
 use project_phoenix::lobby::handler::Target;
 use project_phoenix::lobby::scenario_arbiter;
 use project_phoenix::lobby::server::InboundMessage;
+use project_phoenix::native_host::host_lobby::{pump_host_lobby, LocalHostLobby};
+use project_phoenix::native_host::panes::RecordingSurface;
 use project_phoenix::native_host::transport::{LoopbackHandle, NativeTransportLink};
 use project_phoenix::native_host::world_load::{
     LobbyScenarioCatalog, LobbySelection, RuntimeWorldLoad,
@@ -1300,4 +1302,332 @@ fn a_pinned_hull_completes_the_selection_on_the_scenario_lock_alone() {
         locked.0.is_some(),
         "and the arbitrated scenario alongside it"
     );
+}
+
+// ── Picking from the viewscreen itself (issue #1328) ────────────────────────
+//
+// Everything above drives the arbiter the way a PHONE reaches it. These drive it
+// the way the operator standing in front of the viewscreen does: through the
+// host-lobby bridge, over a `RecordingSurface` standing in for the Ultralight
+// view, so the whole round trip — push the catalogue, click, load the world —
+// runs headless in ordinary `cargo test` rather than only on a Windows machine
+// with a GPU.
+
+/// A world-less host with a lobby surface, and the surface's own side of it.
+fn lobby_host_with_surface(cfg: NativeHostConfig) -> (App, LocalHostLobby, RecordingSurface) {
+    let preload = preload();
+    let lobby = LocalHostLobby::open("127.0.0.1:8080");
+    let mut cfg = cfg;
+    cfg.host_lobby = Some(lobby.clone());
+    let app = build_native_host_app(&cfg, &preload).expect("a host with a lobby surface assembles");
+    (app, lobby, RecordingSurface::ready())
+}
+
+/// One frame of the surface loop the Ultralight display host runs in `Update`:
+/// hand the page everything pending, take back everything it queued.
+fn pump_surface(lobby: &LocalHostLobby, surface: &mut RecordingSurface) -> Vec<String> {
+    let before = surface.pushed.len();
+    pump_host_lobby(&lobby.bridge, surface);
+    surface.pushed[before..].to_vec()
+}
+
+/// The newest scenario-panel payload the surface was handed, decoded.
+fn scenario_pushes(pushed: &[String]) -> Vec<serde_json::Value> {
+    pushed
+        .iter()
+        .filter_map(|script| {
+            let rest = script.strip_prefix("window.__phoenixHostLobbyScenario('")?;
+            let body = rest.strip_suffix("')")?;
+            // `bridge::push_call` escapes single quotes and backslashes for the
+            // JavaScript string literal it builds; undo exactly that.
+            serde_json::from_str(&body.replace("\\'", "'").replace("\\\\", "\\")).ok()
+        })
+        .collect()
+}
+
+#[test]
+fn a_lobby_host_puts_its_catalogue_on_the_viewscreen_without_being_asked() {
+    // Acceptance criterion 1. The surface sends no `Identify`, so it gets no
+    // greeting the way a phone does — the picker has to arrive because the host
+    // has one to offer, or a `--lobby` host opens on a blank screen (which is
+    // exactly what #1325 + #1326 composed to before this issue).
+    let (mut app, lobby, mut surface) = lobby_host_with_surface(lobby_config());
+    pump(&mut app, 4);
+    let pushed = pump_surface(&lobby, &mut surface);
+
+    let payloads = scenario_pushes(&pushed);
+    let panel = payloads
+        .last()
+        .expect("the picker's state reaches the surface");
+    assert_eq!(panel["locked"], serde_json::Value::Bool(false));
+    assert_eq!(panel["locked_scenario"], serde_json::Value::Null);
+    let ids: Vec<&str> = panel["scenarios"]
+        .as_array()
+        .expect("the payload carries the catalogue")
+        .iter()
+        .filter_map(|s| s["id"].as_str())
+        .collect();
+    assert!(
+        ids.contains(&SCENARIO),
+        "the shipped catalogue reaches the viewscreen: {ids:?}"
+    );
+
+    // And it says nothing more until something moves — every push is a
+    // synchronous evaluate_script on the thread `FixedUpdate` runs `SimSet` on.
+    let quiet = pump_surface(&lobby, &mut surface);
+    assert!(
+        scenario_pushes(&quiet).is_empty(),
+        "an untouched picker costs the simulation nothing"
+    );
+}
+
+#[test]
+fn picking_from_the_viewscreen_loads_the_world_and_closes_the_picker() {
+    // Acceptance criterion 1's second half, end to end through the seam this
+    // issue built: two clicks on the surface become two records, the records
+    // become the same two `ClientMessage`s a phone sends, the arbiter accepts
+    // them, and the world lands.
+    let (mut app, lobby, mut surface) = lobby_host_with_surface(lobby_config());
+    pump(&mut app, 4);
+    pump_surface(&lobby, &mut surface);
+
+    let (scenario_id, hull) = pick();
+    surface.queue_record(format!(
+        r#"{{"kind":"select_scenario","scenario_id":"{scenario_id}"}}"#
+    ));
+    pump_surface(&lobby, &mut surface);
+    pump(&mut app, 4);
+
+    // The scenario is locked and the surface has been told so — which is what
+    // moves its picker on to the hull stage.
+    let after_scenario = scenario_pushes(&pump_surface(&lobby, &mut surface));
+    let panel = after_scenario
+        .last()
+        .expect("locking the scenario re-publishes the picker");
+    assert_eq!(panel["locked_scenario"], serde_json::json!(scenario_id));
+    assert_eq!(panel["locked"], serde_json::Value::Bool(false));
+
+    surface.queue_record(format!(
+        r#"{{"kind":"select_ship","template_path":"{hull}"}}"#
+    ));
+    pump_surface(&lobby, &mut surface);
+    pump(&mut app, 60);
+
+    assert!(
+        app.world().get_resource::<WorldConfig>().is_some(),
+        "a pick made on the viewscreen loads the world, exactly as a phone's does"
+    );
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::Lobby,
+        "loading a world does not start the mission — readying or launching does"
+    );
+
+    // …and the picker closes. `locked` is `scenarioCatalogView`'s third
+    // argument, and it is what takes the full-screen panel off the viewscreen
+    // so the crew lobby underneath is visible.
+    let closed = scenario_pushes(&pump_surface(&lobby, &mut surface));
+    let panel = closed
+        .last()
+        .expect("the world landing re-publishes the picker one last time");
+    assert_eq!(panel["locked"], serde_json::Value::Bool(true));
+    assert_eq!(panel["locked_ship"], serde_json::json!(hull));
+}
+
+#[test]
+fn a_pick_the_catalogue_does_not_offer_leaves_the_picker_exactly_where_it_was() {
+    // The refusal, rendered the way the host page renders one: not at all.
+    // `arbiterSelectScenario` returns before its render on any non-accepted
+    // outcome, so the panel keeps showing the stage that is actually true — and
+    // so does this one, because a refused pick moves no state and therefore
+    // publishes nothing. What is NOT silent is the operator log, which
+    // `drain_scenario_selection` writes at warn level on both hosts.
+    let (mut app, lobby, mut surface) = lobby_host_with_surface(lobby_config());
+    pump(&mut app, 4);
+    pump_surface(&lobby, &mut surface);
+
+    surface.queue_record(r#"{"kind":"select_scenario","scenario_id":"no_such_world"}"#);
+    pump_surface(&lobby, &mut surface);
+    pump(&mut app, 8);
+
+    assert!(
+        scenario_pushes(&pump_surface(&lobby, &mut surface)).is_empty(),
+        "a refused pick repaints nothing, exactly as it repaints nothing on the web"
+    );
+    assert!(
+        app.world().get_resource::<WorldConfig>().is_none(),
+        "and it certainly does not load a world"
+    );
+    assert_eq!(
+        app.world()
+            .resource::<LobbySelection>()
+            .0
+            .scenario_id
+            .as_deref(),
+        None,
+        "the arbiter's lock is untouched, so the panel's next render is the scenario stage"
+    );
+
+    // The picker is still usable: a good pick after a refused one still lands.
+    let (scenario_id, hull) = pick();
+    surface.queue_record(format!(
+        r#"{{"kind":"select_scenario","scenario_id":"{scenario_id}"}}"#
+    ));
+    surface.queue_record(format!(
+        r#"{{"kind":"select_ship","template_path":"{hull}"}}"#
+    ));
+    pump_surface(&lobby, &mut surface);
+    pump(&mut app, 60);
+    assert!(app.world().get_resource::<WorldConfig>().is_some());
+}
+
+#[test]
+fn a_record_this_bridge_does_not_speak_is_dropped_rather_than_admitted() {
+    // The surface holds no session token, so a `ClientMessage` envelope on this
+    // queue would be a participant nobody admitted. It is refused at the decode,
+    // before anything reads it as a command.
+    let (mut app, lobby, mut surface) = lobby_host_with_surface(lobby_config());
+    pump(&mut app, 4);
+    pump_surface(&lobby, &mut surface);
+
+    surface.queue_record(r#"{"type":"SetReady","data":{"ready":true}}"#);
+    surface.queue_record(r#"{"kind":"launch_everything"}"#);
+    pump_surface(&lobby, &mut surface);
+    pump(&mut app, 8);
+
+    assert!(app.world().get_resource::<WorldConfig>().is_none());
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::Lobby
+    );
+}
+
+#[test]
+fn the_viewscreens_launch_control_starts_a_crewless_mission() {
+    // Acceptance criterion 3, and the reason `apply_force_start` stopped being
+    // wasm-only: a lobby whose crew are all on phones has to be launchable from
+    // the viewscreen in front of the operator. No `--solo` here — this is the
+    // ordinary crewed mode, launched by hand.
+    let (mut app, lobby, mut surface) = lobby_host_with_surface(lobby_config());
+    pump(&mut app, 4);
+    pump_surface(&lobby, &mut surface);
+
+    // Pressing it before there is a world is refused rather than remembered:
+    // starting a mission over no world would spawn the game-start entities into
+    // an empty `World`.
+    surface.queue_record(r#"{"kind":"force_start"}"#);
+    pump_surface(&lobby, &mut surface);
+    pump(&mut app, 8);
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::Lobby,
+        "there is nothing to fly yet"
+    );
+
+    let (scenario_id, hull) = pick();
+    surface.queue_record(format!(
+        r#"{{"kind":"select_scenario","scenario_id":"{scenario_id}"}}"#
+    ));
+    surface.queue_record(format!(
+        r#"{{"kind":"select_ship","template_path":"{hull}"}}"#
+    ));
+    pump_surface(&lobby, &mut surface);
+    pump(&mut app, 60);
+    assert!(app.world().get_resource::<WorldConfig>().is_some());
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::Lobby,
+        "and a world alone still does not start a mission"
+    );
+
+    surface.queue_record(r#"{"kind":"force_start"}"#);
+    pump_surface(&lobby, &mut surface);
+    pump(&mut app, 30);
+    assert_ne!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::Lobby,
+        "the AI-launch control on the viewscreen starts the mission"
+    );
+}
+
+#[test]
+fn a_world_host_never_shows_the_picker_and_a_pinned_hull_never_offers_a_choice() {
+    // The flag matrix, as the ACs state it. `--world` decides the scenario, so
+    // the scenario stage is skipped: a `--world` host holds no
+    // `LobbyScenarioCatalog` and therefore never publishes a picker at all,
+    // which is what leaves the panel at the `display: none` the document was
+    // assembled with.
+    let (_, world_hull) = pick();
+    let mut cfg = NativeHostConfig::new("assets/worlds/combat_test.toml");
+    cfg.seed = Some(SEED);
+    cfg.surface = NativeRenderSurface::Contract;
+    let (mut app, lobby, mut surface) = lobby_host_with_surface(cfg);
+    pump(&mut app, 8);
+    let pushed = pump_surface(&lobby, &mut surface);
+    assert!(
+        scenario_pushes(&pushed).is_empty(),
+        "--world skips the scenario stage: there is nothing to pick"
+    );
+    assert!(
+        app.world().get_resource::<WorldConfig>().is_some(),
+        "and the world it named is already ingested"
+    );
+    // The lobby itself still reaches the surface, so the viewscreen is not blank.
+    assert!(
+        pushed
+            .iter()
+            .any(|s| s.starts_with("window.__phoenixHostLobbyApply(")),
+        "the crew lobby is still fed: {pushed:?}"
+    );
+
+    // `--world --ship` skips both — same absence, plus the hull the flag named.
+    let mut cfg = NativeHostConfig::new("assets/worlds/combat_test.toml");
+    cfg.seed = Some(SEED);
+    cfg.surface = NativeRenderSurface::Contract;
+    cfg.ship_path = Some(world_hull.clone());
+    let (mut app, lobby, mut surface) = lobby_host_with_surface(cfg);
+    pump(&mut app, 8);
+    assert!(scenario_pushes(&pump_surface(&lobby, &mut surface)).is_empty());
+    assert_eq!(
+        app.world()
+            .resource::<project_phoenix::lobby::SelectedShipResource>()
+            .0,
+        project_phoenix::entities::include_resolve::canonical_template_path(&world_hull),
+    );
+}
+
+#[test]
+fn a_pinned_hull_reaches_the_viewscreen_as_a_decision_already_made() {
+    // `--lobby --ship X`: the scenario stage still runs, and the hull stage does
+    // not, because the flag has already answered it. The surface has to be told
+    // the SAME thing every phone is told — `locked_ship` is the pinned hull —
+    // or the viewscreen would offer a choice this host has already overruled.
+    let (scenario_id, hull) = pick();
+    let mut cfg = lobby_config();
+    cfg.ship_path = Some(hull.clone());
+    let (mut app, lobby, mut surface) = lobby_host_with_surface(cfg);
+    pump(&mut app, 4);
+
+    let opening = scenario_pushes(&pump_surface(&lobby, &mut surface));
+    let panel = opening
+        .last()
+        .expect("the picker's state reaches the surface");
+    assert_eq!(
+        panel["locked_ship"],
+        serde_json::json!(hull),
+        "a pinned hull is reported as the locked one, so the picker shows a settled choice"
+    );
+    assert_eq!(
+        panel["locked"],
+        serde_json::Value::Bool(false),
+        "the scenario stage still has to be picked"
+    );
+
+    // And the scenario alone completes it, exactly as it does for a phone.
+    surface.queue_record(format!(
+        r#"{{"kind":"select_scenario","scenario_id":"{scenario_id}"}}"#
+    ));
+    pump_surface(&lobby, &mut surface);
+    pump(&mut app, 60);
+    assert!(app.world().get_resource::<WorldConfig>().is_some());
 }

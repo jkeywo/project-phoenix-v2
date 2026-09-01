@@ -10,12 +10,16 @@
 // every RENDER decision it makes is one the WEB host already makes with the
 // same modules:
 //
-//   gui/host-channel.js       resolve string ids in the payload (issue #949)
-//   gui/host-lobby-view.js    payload + previous phase -> view model (#1229)
-//   gui/host-lobby-render.js  view model -> the DOM inside #lobby-panel (#1325)
-//   gui/host-qr.js            the join panel: the draw, and its one visibility
-//                             law (#1329)
-//   gui/join-url.js           where a code sends a phone (#1329)
+//   gui/host-channel.js         resolve string ids in the payload (issue #949)
+//   gui/host-lobby-view.js      payload + previous phase -> view model (#1229)
+//   gui/host-lobby-render.js    view model -> the DOM inside #lobby-panel (#1325)
+//   gui/host-qr.js              the join panel: the draw, and its one visibility
+//                               law (#1329)
+//   gui/join-url.js             where a code sends a phone (#1329)
+//   gui/host-scenarios.js       catalogue + lock state -> which picker stage
+//                               (#1230)
+//   gui/host-scenario-render.js that stage -> the DOM inside #scenario-panel
+//                               (#1328)
 //
 // If this file ever grows a render decision of its own, that decision has
 // escaped the shared path and belongs back in one of those modules instead.
@@ -31,11 +35,14 @@ import { hostLobbyViewModel } from './gui/host-lobby-view.js';
 import { renderHostLobby, MONITOR_BUTTON_ATTR } from './gui/host-lobby-render.js';
 import { applyQrPhase, drawJoinQr, showJoiningOff, toggleQr } from './gui/host-qr.js';
 import { joinUrlForCode } from './gui/join-url.js';
+import { scenarioCatalogView } from './gui/host-scenarios.js';
+import { renderHostScenarios } from './gui/host-scenario-render.js';
 
 // The static `data-i18n` markup — "CREW", "CONNECTED", the awaiting-selection
-// badge, the join panel's caption, this surface's QR toggle — is substituted
-// once here, exactly as server.html's own module island does it. Everything
-// data-driven is resolved per render by `t` below.
+// badge, the join panel's caption, this surface's QR toggle, the picker's
+// "SELECT A WORLD" heading and the AI-launch button — is substituted once here,
+// exactly as server.html's own module island does it. Everything data-driven is
+// resolved per render by `t` below.
 applyToDom(document);
 
 // `hostLobbyViewModel`'s second argument is the phase seen on the previous
@@ -116,6 +123,96 @@ window.__phoenixHostLobby.renderJoin = function (json, qrToggles) {
   drawJoinQr(document, { url, code: invite.code }, window.QRCode, { link: false });
 };
 
+// ── Page -> host (issues #1328/#1330) ───────────────────────────────────────
+//
+// Unlike the renders above, this surface SENDS: a scenario, a hull, the AI
+// launch (issue #1328) and a monitor for the viewscreen (issue #1330). All four
+// go over the ONE page->host queue the boot script installed, as
+// native_host::host_lobby::HostLobbyRecord — four tags in one vocabulary, and
+// deliberately not ClientMessages, because this surface holds no session token
+// and is not a participant. The host drains that queue in one system and
+// dispatches on the tag; a second queue or a second record type would be a
+// queue two readers fight over. The host arbitrates a pick
+// (src/lobby/scenario_arbiter.rs) and judges a monitor press against the layout
+// law, and either answer comes back as the next push.
+//
+// Everything below sends through here rather than touching
+// `phoenixHostLobbyOut` directly, so a queue that is not there yet is one
+// console error and not a listener that throws out of an event handler.
+function send(record) {
+  try {
+    window.phoenixHostLobbyOut.send(JSON.stringify(record));
+  } catch (e) {
+    console.error('[host-lobby] could not send', e);
+  }
+}
+
+// What the host last told us is locked. Read by `shipStillNeeded` below, and by
+// the auto-resolve latch beside it — both of which need the AUTHORITATIVE
+// answer rather than "what we asked for", because the arbiter is
+// first-valid-wins and a phone can win.
+let lockedShip = null;
+// The hull the single-hull auto-resolve has already asked for. The browser host
+// needs no such latch: its arbiter is in the same page, so the pick lands
+// before the next render. Here the answer is a round trip, and every push
+// arriving in the meantime would re-send the same request.
+let autoAsked = null;
+
+window.__phoenixHostLobby.renderScenario = function (json) {
+  let payload;
+  try {
+    payload = JSON.parse(json);
+  } catch (e) {
+    console.warn('[host-lobby] bad scenario panel json', e);
+    return;
+  }
+  lockedShip = payload.locked_ship || null;
+  if (!lockedShip) autoAsked = null;
+  // The SAME call server.html makes, over the same view model: the payload's
+  // three fields are `scenarioCatalogView`'s three arguments, which is the whole
+  // reason it carries those three and nothing else.
+  const vm = scenarioCatalogView(
+    payload.scenarios,
+    { scenario_id: payload.locked_scenario, template_path: payload.locked_ship },
+    payload.locked,
+  );
+  renderHostScenarios(
+    document,
+    vm,
+    t,
+    {
+      // A world's `[[available_ships]] label` and a scenario's `label` are
+      // authored as string ids (issue #949). `localiseTree` is the same rule
+      // server.html's `tData` applies: substitute only what the table holds, so
+      // a mod pack's literal prose passes through.
+      tData: (value) => (value ? localiseTree(value) : ''),
+      selectScenario: (scenarioId) => send({ kind: 'select_scenario', scenario_id: scenarioId }),
+      selectShip: (templatePath) => send({ kind: 'select_ship', template_path: templatePath }),
+      autoSelectShip: (templatePath) => {
+        if (autoAsked === templatePath) return;
+        autoAsked = templatePath;
+        send({ kind: 'select_ship', template_path: templatePath });
+      },
+      shipStillNeeded: () => lockedShip === null,
+    },
+    // This document has no driveWorldLoad() and no return-to-lobby handler, so
+    // the payload is the whole of what it knows about whether the picker
+    // belongs on screen. server.html passes nothing here and keeps the page
+    // lifecycle it always had.
+    { ownPanelVisibility: true },
+  );
+};
+
+// The lobby's AI-launch control (issue #1328). Visible exactly when the shared
+// view model says so — `renderHostLobby` sets its display from
+// `vm.aiLaunchVisible`, on this surface as on the host page — and pressed, it
+// asks the host for the same force start the host page's button asks for. The
+// rule that answers is one rule (server::bridge::apply_force_start), not two.
+const aiLaunch = document.getElementById('ai-launch-btn');
+if (aiLaunch) {
+  aiLaunch.addEventListener('click', () => send({ kind: 'force_start' }));
+}
+
 // This surface's own QR control. A click, handled here and not sent anywhere:
 // the panel's visibility is this document's DOM, and a round trip through the
 // host would add a frame of latency to a decision nobody else needs to know.
@@ -140,10 +237,14 @@ if (qrToggle) {
 // times a lobby and lost the frame a render happened between the mousedown and
 // the click.
 //
-// It is the only thing this document sends, and what it sends is a request to
-// rearrange this machine's own screens: it carries no token, names no
-// participant, and the host judges it against the bridge layout law rather than
-// against command admission.
+// What it sends is a request to rearrange this machine's own screens: it
+// carries no token, names no participant, and the host judges it against the
+// bridge layout law rather than against command admission. It rides the same
+// `send` and the same queue as the picks above — one vocabulary, one drain.
+//
+// The tag is KEBAB where the picks are snake_case. That is not a slip: this
+// spelling shipped in #1330 and the Rust side keeps an explicit `serde(rename)`
+// for it rather than make a bundle older than the host stop working.
 document.addEventListener('click', (ev) => {
   const target = ev.target && ev.target.closest
     ? ev.target.closest(`[${MONITOR_BUTTON_ATTR}]`)
@@ -151,11 +252,10 @@ document.addEventListener('click', (ev) => {
   if (!target) return;
   const monitor = target.getAttribute(MONITOR_BUTTON_ATTR);
   if (!monitor) return;
-  window.phoenixHostLobbyOut.send(
-    JSON.stringify({ kind: 'set-viewscreen', monitor }),
-  );
+  send({ kind: 'set-viewscreen', monitor });
 });
 
 // Anything the host pushed while this island was still loading renders now.
 window.__phoenixHostLobby.paint();
 window.__phoenixHostLobby.paintJoin();
+window.__phoenixHostLobby.paintScenario();

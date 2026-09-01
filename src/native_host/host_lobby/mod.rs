@@ -6,6 +6,10 @@
 //! badge, the countdown. It is an embedded web view composited onto the
 //! viewscreen, fed by the bridge below.
 //!
+//! Launch it `--lobby` instead and the same surface opens on the scenario
+//! picker first (issue #1328) — the host page's own two-stage world-then-hull
+//! flow — and moves on to the crew lobby once the world it chose has landed.
+//!
 //! # The shape, in one pass
 //!
 //! ```text
@@ -29,35 +33,50 @@
 //! modules in that order, and so does this surface's document. There is one
 //! lobby renderer, not two.
 //!
-//! # …and one path back, for the monitor row (issue #1330)
+//! # …and ONE path back, for everything the surface says
 //!
 //! ```text
-//! a monitor <button> is pressed                        gui/host-lobby-render.js built it
-//!   │  phoenixHostLobbyOut.send(json)                  [host_lobby_link.js, delegated]
+//! #scenario-panel click        [gui/host-scenario-render.js, shared with server.html]
+//! a monitor <button> is pressed                        [gui/host-lobby-render.js built it]
+//!   │  HostLobbyRecord         [scenario] a closed vocabulary, NOT a ClientMessage
+//!   ▼  phoenixHostLobbyOut.send(json)                  [host_lobby_link.js, delegated]
+//! HostLobbyBridge::take_records                        [bridge] DRAINED once a frame
 //!   ▼
-//! HostLobbyBridge::take_records                        [bridge] drained once a frame
-//!   ▼
-//! apply_lobby_layout_actions → BridgeLayout::apply     [this file, over the layout law]
-//!   ▼  accepted: BridgeLayoutResource moves     refused: a LayoutNotice for the row
-//!   ▼
-//! follow_layout_viewscreen                             [bridge_display] the window follows
+//! drain_surface_records                                [this file, PreUpdate]
+//!   ├─ a pick      → InboundMessage { LOCAL_CONSOLE_TOKEN } → lobby::scenario_arbiter
+//!   ├─ an AI launch→ PendingForceStart  → server::bridge::apply_force_start
+//!   └─ a monitor   → BridgeLayout::apply, over the layout law
+//!        ▼  accepted: BridgeLayoutResource moves   refused: a LayoutNotice for the row
+//!        ▼
+//!      publish_bridge_layout [Update, same frame] → follow_layout_viewscreen
 //! ```
 //!
-//! The surface therefore has controls now, and exactly one thing to say with
-//! them: which display shows the shared view. It is still not a participant —
-//! nothing it sends is a `ClientMessage` and nothing crosses command admission;
-//! a press asks the host to rearrange **its own screens**, and the layout law is
-//! what judges it.
+//! **One vocabulary, one drain, one reader**, and that is a correctness
+//! constraint rather than tidiness: `take_records` empties what it returns, so a
+//! second consumer would swallow the first's records and warn about a language
+//! it does not speak while the first saw an empty queue forever — with a clean
+//! log at both ends. Issues #1328 and #1330 each grew this surface a control,
+//! and both ride the same queue and the same enum.
+//!
+//! The surface therefore has controls now: which scenario and hull the mission
+//! flies, whether to launch it AI-crewed, and which display shows the shared
+//! view. It is still **not a participant** — nothing it sends is a
+//! `ClientMessage` and nothing crosses command admission. A pick borrows
+//! `LOCAL_CONSOLE_TOKEN`, which is not an identity but a statement that the host
+//! operator is acting on the host's own window (the same statement `server.html`
+//! makes through `__localConsoleSend`); a monitor press asks the host to
+//! rearrange **its own screens**, and the layout law is what judges it.
 //!
 //! # What is here, and why each piece is where it is
 //!
 //! | piece | what it decides |
 //! |---|---|
-//! | [`document`] | what the surface loads: the host page's own `#lobby-panel` and `#qr-panel`, assembled in memory and served at the host page's own depth |
+//! | [`document`] | what the surface loads: the host page's own `#lobby-panel`, `#qr-panel` and `#scenario-panel`, assembled in memory and served at the host page's own depth |
 //! | [`bridge`] | what crosses, in both directions, and what a failed push costs |
 //! | [`join`] | what the join panel says, and where its QR points |
-//! | [`layout`] | the monitor row's two wire shapes — the roster out, the press back |
+//! | [`layout`] | the monitor row: the roster out, and the layout action a press asks for |
 //! | [`reveal`] | when the surface is on screen, and when it has yielded |
+//! | [`scenario`] | what the picker is shown, and [`HostLobbyRecord`] — everything the surface may say back, the monitor press included |
 //! | this file | the Bevy wiring, and [`LocalHostLobby`], which the binary assembles after its listener has bound |
 //!
 //! Every one of them compiles and is tested with the `ultralight` feature
@@ -67,6 +86,14 @@
 //! checks. Only the compositing and the input translation are behind the SDK,
 //! in [`panes::ultralight`](super::panes::ultralight), which is where the one
 //! Ultralight runtime a process may have already lives.
+//!
+//! # It talks back, since issue #1328
+//!
+//! The surface was read-only through #1325 and #1329: it rendered what the host
+//! was already broadcasting and sent nothing. It now carries the scenario and
+//! hull pick and the AI launch, so `phoenix-host --client-dir dist --lobby`
+//! boots to a picker an operator can actually use — and, since #1330, the
+//! monitor row beside it. The path both take is the one drawn above.
 //!
 //! # The surface is permanent
 //!
@@ -101,16 +128,20 @@ pub mod document;
 pub mod join;
 pub mod layout;
 pub mod reveal;
+pub mod scenario;
 
 use bevy::prelude::*;
 
-use crate::console_bridge::LobbyStateChanged;
-use crate::core::messages::GamePhase;
+use crate::console_bridge::{LobbyStateChanged, LOCAL_CONSOLE_TOKEN};
+use crate::core::messages::{ClientMessage, GamePhase};
 use crate::delivery::serve::HostedDocuments;
 use crate::logging::{LogCat, LogFilterConfig};
 use crate::native_host::bridge_display::BridgeLayoutResource;
 use crate::native_host::panes::document::{connectable_host_addr, mint_document_nonce};
 use crate::native_host::panes::PaneId;
+use crate::native_host::world_load::{
+    published_catalog, LobbyBootSettings, LobbyScenarioCatalog, LobbySelection,
+};
 
 pub use bridge::{pump_host_lobby, HostLobbyBridge, HostLobbyPumpReport};
 pub use document::{build_host_lobby_document, host_lobby_drain_script, HostLobbyDocumentError};
@@ -118,8 +149,9 @@ pub use join::{
     join_addr_reach, phone_rendezvous, JoinAddrReach, JoinInvite, PhoneRendezvous,
     CLIENT_DEFAULT_RENDEZVOUS,
 };
-pub use layout::{monitor_row_payload, LayoutNotice, LobbyLayoutRecord};
+pub use layout::{monitor_row_payload, set_viewscreen_action, LayoutNotice};
 pub use reveal::{RevealState, SurfacePresence};
+pub use scenario::{HostLobbyRecord, ScenarioPanelPayload};
 
 /// The host key that reveals and hides the lobby surface during play.
 ///
@@ -315,28 +347,40 @@ pub struct HostLobbyPlugin;
 
 impl Plugin for HostLobbyPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<HostLobbyRevealResource>().add_systems(
-            Update,
-            (
-                feed_lobby_state,
-                observe_phase,
-                // `ButtonInput<KeyCode>` exists only where `InputPlugin` does,
-                // and `NativeRenderSurface::Contract` stands one up nowhere.
-                // Bevy validates a system's parameters when it RUNS, so a bare
-                // `Res<ButtonInput<_>>` there is a panic rather than an inert
-                // system — the same trap `PaneDisplayPlugin` gates against.
-                toggle_reveal_key.run_if(resource_exists::<ButtonInput<KeyCode>>),
-                drain_client_qr_toggle,
-                publish_reveal,
-                // The monitor row's two halves, in the order one frame needs
-                // them: what the surface asked for is applied to the live
-                // layout, and the layout that results — moved, or unmoved with
-                // a refusal to show for it — is what gets published back.
-                apply_lobby_layout_actions,
-                publish_bridge_layout,
+        app.init_resource::<HostLobbyRevealResource>()
+            .add_systems(
+                Update,
+                (
+                    feed_lobby_state,
+                    feed_scenario_panel,
+                    observe_phase,
+                    // `ButtonInput<KeyCode>` exists only where `InputPlugin`
+                    // does, and `NativeRenderSurface::Contract` stands one up
+                    // nowhere. Bevy validates a system's parameters when it
+                    // RUNS, so a bare `Res<ButtonInput<_>>` there is a panic
+                    // rather than an inert system — the same trap
+                    // `PaneDisplayPlugin` gates against.
+                    toggle_reveal_key.run_if(resource_exists::<ButtonInput<KeyCode>>),
+                    drain_client_qr_toggle,
+                    publish_reveal,
+                    // The monitor row's other half (issue #1330). The layout a
+                    // press moved was moved in `PreUpdate` below, so this reads
+                    // the result in the SAME frame — moved, or unmoved with a
+                    // refusal to show for it — and publishes it back. That
+                    // one-frame edge is what makes a refusal something the
+                    // operator sees rather than something the log knows.
+                    publish_bridge_layout,
+                )
+                    .chain(),
             )
-                .chain(),
-        );
+            // The surface's own presses (issues #1328/#1330), in `PreUpdate` —
+            // where every other participant's input enters the app
+            // (`transport::drain_native_inbound`, and `drain_inbound` on wasm),
+            // and therefore before the fixed loop that arbitrates them runs.
+            //
+            // ONE system, because the queue it reads is a drain: see
+            // [`drain_surface_records`].
+            .add_systems(PreUpdate, drain_surface_records);
     }
 }
 
@@ -359,6 +403,219 @@ fn feed_lobby_state(
         return;
     };
     bridge.0.push_lobby_state(json);
+}
+
+/// Carry the scenario picker's state to the surface (issue #1328).
+///
+/// The viewscreen's picker renders from `gui/host-scenarios.js` +
+/// `gui/host-scenario-render.js` — the browser host's own two modules — so what
+/// has to cross is exactly `scenarioCatalogView`'s three arguments. They are
+/// built by [`published_catalog`], which is the same call that builds the
+/// `ScenarioCatalog` message every phone in the room folds: one derivation, two
+/// audiences, and no way for the viewscreen and the phones to be shown different
+/// catalogues.
+///
+/// # When it pushes, and why not every frame
+///
+/// Three moments, and nothing between them:
+///
+///  * the first frame, so a `--lobby` host puts its picker on screen without
+///    waiting for anybody to touch it (the surface sends no `Identify` and so
+///    gets no greeting the way a phone does);
+///  * whenever [`LobbySelection`] moved — a lock, or the reset
+///    `world_load::unwind_failed_load` performs after a refused world;
+///  * the frame a [`WorldConfig`](crate::world::config::WorldConfig) lands,
+///    which is what closes the picker for good.
+///
+/// A **refused** pick moves nothing, so it pushes nothing, and the picker stays
+/// exactly where it was — which is precisely what the host page does with one
+/// (`arbiterSelectScenario` returns before its render on any non-accepted
+/// outcome). The refusal itself is not silent: `drain_scenario_selection` logs
+/// it at warn level, on both hosts, through the same `log_outcome`.
+///
+/// A `--world` host has no [`LobbyScenarioCatalog`] and therefore never pushes
+/// at all, which is what leaves its `#scenario-panel` at the `display: none`
+/// [`document`] assembled it with — the flag that decides the world skips the
+/// stage it decides.
+fn feed_scenario_panel(
+    bridge: Option<Res<HostLobbyBridgeResource>>,
+    catalog: Option<Res<LobbyScenarioCatalog>>,
+    selection: Option<Res<LobbySelection>>,
+    settings: Option<Res<LobbyBootSettings>>,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
+    mut published: Local<bool>,
+) {
+    let (Some(bridge), Some(catalog), Some(selection)) = (bridge, catalog, selection) else {
+        return;
+    };
+    let moved = !*published
+        || selection.is_changed()
+        || world_config.as_ref().is_some_and(|w| w.is_added());
+    if !moved {
+        return;
+    }
+    *published = true;
+    let pinned = settings.as_ref().and_then(|s| s.ship_path.as_deref());
+    let payload =
+        published_catalog(&catalog.0, &selection.0, pinned).surface(world_config.is_some());
+    bridge.0.push_scenario(payload.to_json());
+}
+
+/// Carry what the operator pressed on the viewscreen back into the host.
+///
+/// The other half of [`feed_scenario_panel`] and of [`publish_bridge_layout`],
+/// and the reason this surface stopped being read-only. Records arrive as
+/// [`HostLobbyRecord`] — a closed vocabulary, not `ClientMessage`s, because the
+/// surface holds no session token — and leave as three different things:
+///
+///  * a pick becomes an `InboundMessage` under
+///    [`LOCAL_CONSOLE_TOKEN`](crate::console_bridge::LOCAL_CONSOLE_TOKEN), which
+///    is exactly what `server.html` submits its OWN picker's picks under
+///    (`__localConsoleSend`, issue #822). From
+///    [`crate::lobby::scenario_arbiter`]'s point of view the host page's picker
+///    and this one are the same sender — the host operator, acting on the host's
+///    own window — and the arbiter's first-valid-wins rule treats them as one
+///    participant among the phones, with no priority. The token is reserved
+///    (`lobby::handler::is_reserved_token`) so no network peer can impersonate
+///    it, and the two selection variants are explicit no-ops in the lobby
+///    handler, so nothing but the arbiter acts on them.
+///  * an AI launch sets
+///    [`PendingForceStart`](crate::server::bridge::PendingForceStart), which
+///    `server::bridge::apply_force_start` reads on the next fixed step. Not a
+///    message, because it is not a participant's command: it is the same
+///    host-side latch the browser button sets, and the rule that answers it is
+///    the same rule.
+///  * a monitor press (issue #1330) goes straight through
+///    [`BridgeLayout::apply`](crate::native_host::bridge_layout::BridgeLayout::apply)
+///    onto the **live** [`BridgeLayoutResource`], so the lobby has no rule of its
+///    own: a monitor unplugged between the click and this frame is a
+///    `LayoutRefusal::UnknownMonitor` here exactly as a hand-authored profile
+///    naming it would be at boot. A refusal is **shown**, not only logged —
+///    "the lobby never silently ignores me" is the user story, and a press that
+///    changed nothing with a clean log is indistinguishable from a broken
+///    button — so it goes back as a [`LayoutNotice`] and `publish_bridge_layout`
+///    carries it in this same frame.
+///
+/// # One system, because the queue is a drain
+///
+/// `HostLobbyBridge::take_records` empties what it returns, so every kind of
+/// record the surface can send is dispatched HERE rather than by a system of its
+/// own per kind. Two readers would not fail loudly: the first to run would
+/// swallow the other's records and warn about a vocabulary it does not speak,
+/// and the second would find an empty queue every frame for the rest of the run.
+///
+/// # `PreUpdate`, and what that buys the row
+///
+/// The picks have to be in before the fixed loop that arbitrates them. The
+/// layout half gets something else out of it for free: the applied layout is
+/// visible to `publish_bridge_layout` in `Update` of the **same** frame, so a
+/// press and the row that answers it are one repaint rather than two.
+///
+/// `PendingForceStart` and `BridgeLayoutResource` are `Option` because a
+/// headless-shaped composition, and a host whose winit has not enumerated its
+/// displays yet, may not carry them. The picks are written unconditionally,
+/// because a host with a lobby surface always has the message bus. Records are
+/// drained either way, so a surface talking to a host that cannot answer it does
+/// not sit on a queue for the whole mission.
+fn drain_surface_records(
+    bridge: Option<Res<HostLobbyBridgeResource>>,
+    mut inbound: MessageWriter<crate::lobby::InboundMessage>,
+    force_start: Option<ResMut<crate::server::bridge::PendingForceStart>>,
+    layout: Option<ResMut<BridgeLayoutResource>>,
+    log: Option<Res<LogFilterConfig>>,
+) {
+    let Some(bridge) = bridge else {
+        return;
+    };
+    let records = bridge.0.take_records();
+    if records.is_empty() {
+        return;
+    }
+    let mut force_start = force_start;
+    let mut layout = layout;
+    // Replaces rather than accumulates: the row shows what happened to the last
+    // thing the operator did, so an accepted press clears the refusal the one
+    // before it earned. `None` until a layout press is actually seen, so a frame
+    // carrying only picks does not touch the layout resource and mark it changed.
+    let mut layout_notices: Option<Vec<LayoutNotice>> = None;
+    for raw in records {
+        let Some(record) = HostLobbyRecord::decode(&raw) else {
+            // The only sender is a document this process assembled and serves,
+            // so this is a bug in that document rather than input to validate —
+            // and a bug on a surface nobody can attach a console to is a bug
+            // that has to reach the operator log. Deliberately NOT a refusal to
+            // show on the row either: a record this build cannot parse is a
+            // page/host mismatch, which is an operator's problem and not
+            // something to render as an answer to a press.
+            crate::pwarn!(
+                log,
+                LogCat::Lobby,
+                "host lobby: the surface sent something this bridge does not speak: {raw}"
+            );
+            continue;
+        };
+        match record {
+            HostLobbyRecord::SelectScenario { scenario_id } => {
+                crate::pinfo!(
+                    log,
+                    LogCat::Lobby,
+                    "host lobby: scenario picked: {scenario_id}"
+                );
+                inbound.write(crate::lobby::InboundMessage {
+                    token: LOCAL_CONSOLE_TOKEN.to_string(),
+                    msg: ClientMessage::SelectScenario { scenario_id },
+                });
+            }
+            HostLobbyRecord::SelectShip { template_path } => {
+                crate::pinfo!(
+                    log,
+                    LogCat::Lobby,
+                    "host lobby: hull picked: {template_path}"
+                );
+                inbound.write(crate::lobby::InboundMessage {
+                    token: LOCAL_CONSOLE_TOKEN.to_string(),
+                    msg: ClientMessage::SelectPlayerShip { template_path },
+                });
+            }
+            HostLobbyRecord::ForceStart => {
+                crate::pinfo!(log, LogCat::Lobby, "host lobby: AI launch requested");
+                if let Some(pending) = force_start.as_mut() {
+                    pending.0 = true;
+                }
+            }
+            HostLobbyRecord::SetViewscreen { monitor } => {
+                let Some(layout) = layout.as_mut() else {
+                    crate::pwarn!(
+                        log,
+                        LogCat::Lobby,
+                        "host lobby: a layout action ({monitor}) arrived before this host had a \
+                         bridge layout to apply it to; it is dropped"
+                    );
+                    continue;
+                };
+                let notices = layout_notices.get_or_insert_with(Vec::new);
+                match layout.layout.apply(&layout::set_viewscreen_action(monitor)) {
+                    Ok(next) => {
+                        crate::pinfo!(
+                            log,
+                            LogCat::Lobby,
+                            "host lobby: viewscreen now on monitor {}",
+                            next.viewscreen()
+                        );
+                        layout.layout = next;
+                        notices.clear();
+                    }
+                    Err(refusal) => {
+                        crate::pwarn!(log, LogCat::Lobby, "host lobby: {refusal}");
+                        notices.push(LayoutNotice::Refused(refusal));
+                    }
+                }
+            }
+        }
+    }
+    if let (Some(layout), Some(notices)) = (layout.as_mut(), layout_notices) {
+        layout.notices = notices;
+    }
 }
 
 /// Carry a phone's join-QR toggle to the surface (issue #1329).
@@ -463,86 +720,6 @@ fn publish_reveal(
     }
 }
 
-/// Apply what the monitor row asked for to the **live** bridge layout
-/// (issue #1330).
-///
-/// The surface's records are drained by [`pump_host_lobby`] into the bridge;
-/// this is the reader on the other end. Every press goes through
-/// [`BridgeLayout::apply`](crate::native_host::bridge_layout::BridgeLayout::apply),
-/// so the lobby has no rule of its own: a monitor unplugged between the click
-/// and this frame is a `LayoutRefusal::UnknownMonitor` here exactly as a
-/// hand-authored profile naming it would be at boot.
-///
-/// A refusal is **shown**, not only logged. "The lobby never silently ignores
-/// me" is the user story, and a press that changed nothing with a clean log is
-/// indistinguishable from a broken button — so the refusal goes back to the
-/// surface as a notice, and `publish_bridge_layout` below carries it.
-///
-/// The records are drained even when there is no layout to apply them to, so a
-/// surface talking to a host that never seeded one does not sit on a queue
-/// forever; there is nothing to do with them but say so.
-fn apply_lobby_layout_actions(
-    bridge: Option<Res<HostLobbyBridgeResource>>,
-    layout: Option<ResMut<BridgeLayoutResource>>,
-    log: Option<Res<LogFilterConfig>>,
-) {
-    let Some(bridge) = bridge else {
-        return;
-    };
-    let records = bridge.0.take_records();
-    if records.is_empty() {
-        return;
-    }
-    let Some(mut layout) = layout else {
-        crate::pwarn!(
-            log,
-            LogCat::Lobby,
-            "host lobby: {} layout action(s) arrived before this host had a bridge layout to \
-             apply them to; they are dropped",
-            records.len()
-        );
-        return;
-    };
-
-    // Replaces rather than accumulates: the row shows what happened to the last
-    // thing the operator did, so an accepted press clears the refusal the one
-    // before it earned.
-    let mut notices = Vec::new();
-    for record in records {
-        let action = match crate::core::codec::decode_lobby_layout_record(&record) {
-            Ok(parsed) => parsed.into_action(),
-            Err(e) => {
-                // Not a refusal to show: a record this build cannot parse is a
-                // page/host mismatch, which is an operator's problem and not
-                // something to render as an answer to a press.
-                crate::pwarn!(
-                    log,
-                    LogCat::Lobby,
-                    "host lobby: unreadable layout record from the surface: {e}"
-                );
-                continue;
-            }
-        };
-        match layout.layout.apply(&action) {
-            Ok(next) => {
-                crate::pinfo!(
-                    log,
-                    LogCat::Lobby,
-                    "host lobby: viewscreen now on monitor {}",
-                    next.viewscreen()
-                );
-                layout.layout = next;
-                notices.clear();
-            }
-            Err(refusal) => {
-                crate::pwarn!(log, LogCat::Lobby, "host lobby: {refusal}");
-                notices.push(LayoutNotice::Refused(refusal));
-            }
-        }
-    }
-    layout.notices = notices;
-}
-
 /// Publish the live bridge layout to the surface as its monitor row.
 ///
 /// Only when the layout resource actually changed — a press, a reconcile, or
@@ -551,6 +728,11 @@ fn apply_lobby_layout_actions(
 /// they answer different questions ("has anything touched it" and "does it
 /// still say the same thing"), and a `ResMut` deref that wrote the same value
 /// would pass the first.
+///
+/// In `Update`, after [`drain_surface_records`] has applied this frame's presses
+/// in `PreUpdate`. That ordering is the whole reason a refusal is something the
+/// operator sees: the press, the layout it moved (or the notice it earned), and
+/// the row that reports it are one frame and one repaint.
 fn publish_bridge_layout(
     bridge: Option<Res<HostLobbyBridgeResource>>,
     layout: Option<Res<BridgeLayoutResource>>,
@@ -591,6 +773,118 @@ mod tests {
             .insert_resource(HostLobbyBridgeResource(bridge.clone()))
             .add_plugins(HostLobbyPlugin);
         (app, bridge)
+    }
+
+    /// Read every `InboundMessage` this frame wrote, without consuming the
+    /// reader the systems under test share.
+    fn inbound(app: &mut App) -> Vec<crate::lobby::InboundMessage> {
+        let messages = app
+            .world()
+            .resource::<Messages<crate::lobby::InboundMessage>>();
+        messages.iter_current_update_messages().cloned().collect()
+    }
+
+    #[test]
+    fn a_pick_made_on_the_surface_arrives_as_the_host_pages_own_picker_would() {
+        // Issue #1328. The surface is not a participant, so what it sends is a
+        // `HostLobbyRecord` rather than a `ClientMessage` — but what reaches the
+        // arbiter has to be indistinguishable from the host PAGE's own picker,
+        // which submits under `LOCAL_CONSOLE_TOKEN` through
+        // `__localConsoleSend`. Anything else would be a second sender the
+        // first-valid-wins rule had never heard of.
+        let (mut app, bridge) = app_with_lobby();
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        surface.queue_record(r#"{"kind":"select_scenario","scenario_id":"combat_test"}"#);
+        surface.queue_record(r#"{"kind":"select_ship","template_path":"assets/a.toml"}"#);
+        pump_host_lobby(&bridge, &mut surface);
+
+        app.update();
+        let sent = inbound(&mut app);
+        assert_eq!(sent.len(), 2);
+        for message in &sent {
+            assert_eq!(message.token, crate::console_bridge::LOCAL_CONSOLE_TOKEN);
+        }
+        assert!(matches!(
+            &sent[0].msg,
+            crate::core::messages::ClientMessage::SelectScenario { scenario_id }
+                if scenario_id == "combat_test"
+        ));
+        assert!(matches!(
+            &sent[1].msg,
+            crate::core::messages::ClientMessage::SelectPlayerShip { template_path }
+                if template_path == "assets/a.toml"
+        ));
+    }
+
+    #[test]
+    fn a_record_this_bridge_does_not_speak_reaches_no_message_bus() {
+        // A `ClientMessage` envelope is the shape most likely to arrive here by
+        // mistake, and is the one that must NOT be forwarded: the surface holds
+        // no session token, so admitting one would be admitting a participant
+        // nobody identified.
+        let (mut app, bridge) = app_with_lobby();
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        surface.queue_record(r#"{"type":"SetReady","data":{"ready":true}}"#);
+        surface.queue_record("not json at all");
+        pump_host_lobby(&bridge, &mut surface);
+
+        app.update();
+        assert!(inbound(&mut app).is_empty());
+    }
+
+    #[test]
+    fn the_launch_control_sets_the_latch_the_browser_button_sets() {
+        // One force-start rule, not two: the record only raises
+        // `PendingForceStart`, and `server::bridge::apply_force_start` — the
+        // browser host's own, de-wasm-gated — decides everything else.
+        let (mut app, bridge) = app_with_lobby();
+        app.init_resource::<crate::server::bridge::PendingForceStart>();
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        surface.queue_record(r#"{"kind":"force_start"}"#);
+        pump_host_lobby(&bridge, &mut surface);
+
+        app.update();
+        assert!(
+            app.world()
+                .resource::<crate::server::bridge::PendingForceStart>()
+                .0
+        );
+        assert!(
+            inbound(&mut app).is_empty(),
+            "a launch is a host-side latch, not a participant's command"
+        );
+    }
+
+    #[test]
+    fn a_composition_with_no_force_start_latch_ignores_the_press_rather_than_panicking() {
+        // `app_with_lobby` is deliberately bare: the resource is `Option` in the
+        // drain because a headless-shaped composition need not carry it, and a
+        // missing resource on a system that RUNS is a Bevy panic rather than an
+        // inert system.
+        let (mut app, bridge) = app_with_lobby();
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        surface.queue_record(r#"{"kind":"force_start"}"#);
+        pump_host_lobby(&bridge, &mut surface);
+        app.update();
+    }
+
+    #[test]
+    fn a_host_with_no_catalogue_never_publishes_a_picker() {
+        // A `--world` host holds no `LobbyScenarioCatalog`, which is what leaves
+        // its `#scenario-panel` at the `display: none` the document assembled it
+        // with — the flag that decides the world skipping the stage it decides.
+        let (mut app, bridge) = app_with_lobby();
+        app.update();
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        pump_host_lobby(&bridge, &mut surface);
+        assert!(
+            !surface
+                .pushed
+                .iter()
+                .any(|s| s.contains("__phoenixHostLobbyScenario(")),
+            "no catalogue, no picker: {:?}",
+            surface.pushed
+        );
     }
 
     #[test]

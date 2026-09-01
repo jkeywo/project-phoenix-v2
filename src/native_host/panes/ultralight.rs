@@ -253,12 +253,15 @@ pub struct UltralightPaneSurface {
     /// Held per surface because the two documents this type drives install
     /// **different** queues: a pane's is `phoenixPaneOut` (a participant's
     /// `ClientMessage`s, admitted as such) and the host lobby's is
-    /// `phoenixHostLobbyOut` (this machine's own screen arrangement, judged by
-    /// the layout law and never admitted at all). Two namespaces make a record
-    /// that arrived on the wrong one unrepresentable rather than merely wrong —
-    /// see `host_lobby::document::HOST_LOBBY_OUT_NAMESPACE` — and a surface that
+    /// `phoenixHostLobbyOut` (the host operator's own picks and this machine's
+    /// own screen arrangement, judged by the arbiter and the layout law and
+    /// never admitted at all). Two namespaces make a record that arrived on the
+    /// wrong one unrepresentable rather than merely wrong — see
+    /// `host_lobby::document::HOST_LOBBY_OUT_NAMESPACE` — and a surface that
     /// drained the wrong one would simply find no function and report nothing,
-    /// forever, with a clean log.
+    /// forever, with a clean log. That cost nothing until issue #1328 gave the
+    /// lobby surface something to say and #1330 gave it more; this field is what
+    /// makes the mistake unrepresentable.
     drain_script: String,
 }
 
@@ -277,7 +280,7 @@ impl UltralightPaneSurface {
         }
     }
 
-    /// Wrap a freshly created **host-lobby** view (issue #1325/#1330).
+    /// Wrap a freshly created **host-lobby** view (issues #1325/#1328/#1330).
     ///
     /// Everything below the queue is identical to a pane's — the same runtime,
     /// the same texture, the same push primitive — so this is a constructor
@@ -834,10 +837,11 @@ fn init_pane_host(world: &mut World) {
                 return;
             }
         };
-        // The lobby surface drains its OWN queue. It shares everything else
-        // with a pane, and sharing this too would leave its monitor buttons
-        // evaluating `window.__phoenixPaneOutDrain` — a function its document
-        // never installs, so every press would be swallowed with a clean log.
+        // The lobby surface drains its OWN queue — the one place the two
+        // surfaces differ below the URL. Sharing this too would leave its picks
+        // and its monitor buttons evaluating `window.__phoenixPaneOutDrain`, a
+        // function its document never installs, so every press would be
+        // swallowed with a clean log.
         let mut surface = if seat.lobby {
             UltralightPaneSurface::for_host_lobby(view)
         } else {

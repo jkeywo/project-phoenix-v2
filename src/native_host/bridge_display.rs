@@ -166,7 +166,7 @@ pub struct BridgeStationSurfaces(pub Vec<BridgeStationSurface>);
 ///
 /// Seeded by [`apply_bridge_profile`] the frame winit first reports its
 /// monitors, edited by the lobby's monitor row
-/// (`host_lobby::apply_lobby_layout_actions`), rebuilt by
+/// (`host_lobby::drain_surface_records`), rebuilt by
 /// [`watch_runtime_displays`] when a cable moves, and read by
 /// [`follow_layout_viewscreen`] to decide whether a window has to move.
 ///
@@ -1606,8 +1606,8 @@ mod tests {
     #[test]
     fn choosing_another_monitor_moves_the_viewscreen_window_live() {
         // The lobby's monitor row, at the model boundary: the press itself is
-        // `host_lobby::apply_lobby_layout_actions`, and what it does is exactly
-        // this — one lawful transition on the live layout. No restart.
+        // `host_lobby::drain_surface_records`, and what it does is exactly this
+        // — one lawful transition on the live layout. No restart.
         let (mut app, window) = booted(None);
         choose(&mut app, BENQ);
         app.update();

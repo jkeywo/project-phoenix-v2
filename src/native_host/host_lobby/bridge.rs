@@ -29,15 +29,18 @@
 //! and a pane that missed one sits in the lobby forever.
 //!
 //! Nothing here is one-shot. A `LobbyStatePayload` is a snapshot of the whole
-//! lobby, pushed every frame the lobby changes, the monitor row is a snapshot
-//! of the whole bridge layout (issue #1330), and the reveal flag is a
-//! current state rather than an edge — so an older value has nothing to say
-//! that the newest one does not, and holding a backlog of them would only cost
+//! lobby, pushed every frame the lobby changes; the scenario-panel state is a
+//! snapshot of the whole picker (issue #1328); the monitor row is a snapshot of
+//! the whole bridge layout (issue #1330); and the reveal flag is a current
+//! state rather than an edge — so an older value has nothing to say that the
+//! newest one does not, and holding a backlog of them would only cost
 //! main-thread time inside a browser engine (see [`super::super::panes::surface`]'s
-//! note on why that time is the *simulation's*). Four latest-wins slots — the
-//! reveal, the join invitation, the monitor row and the lobby state — at most
-//! one push each a frame. (The QR toggle beside them is the one edge on this
-//! bridge, and says why where it is declared.)
+//! note on why that time is the *simulation's*). Five latest-wins slots — the
+//! reveal, the join invitation, the picker, the monitor row and the lobby state
+//! — at most one push each a frame.
+//!
+//! The one exception is the QR toggle, which is an *edge* and is counted rather
+//! than collapsed — see [`HostLobbyBridge::push_qr_toggle`].
 //!
 //! A push that fails is still not lost: it goes back in its slot unless
 //! something newer has already taken it, which is the same "the page's modules
@@ -49,16 +52,18 @@ use std::sync::{Arc, Mutex};
 
 use super::document::{
     host_lobby_apply_script, host_lobby_join_script, host_lobby_layout_script,
-    host_lobby_qr_toggle_script, host_lobby_reveal_script,
+    host_lobby_qr_toggle_script, host_lobby_reveal_script, host_lobby_scenario_script,
 };
 use crate::native_host::panes::{PaneSurface, PaneSurfaceError};
 
 /// How many records the page may queue before the oldest are dropped.
 ///
-/// Nothing rides the page→host direction in this slice, so this bounds a
-/// surface that has started talking to a host that has stopped listening —
-/// which is a bug rather than load, and the honest response to it is to keep
-/// the newest evidence and not to grow.
+/// The page→host direction carries an operator's presses — a scenario, a hull,
+/// an AI launch (issue #1328), a monitor for the viewscreen (issue #1330) —
+/// which arrive at human speed and are drained every frame. So this bounds a
+/// surface talking to a host that has stopped listening, which is a bug rather
+/// than load, and the honest response to it is to keep the newest evidence and
+/// not to grow.
 const RECORD_CAP: usize = 256;
 
 #[derive(Default)]
@@ -77,6 +82,19 @@ struct Inner {
     /// is a statement of where the crew should go NOW, and a reclaimed or
     /// rotated code makes the previous one wrong rather than merely older.
     join: Option<String>,
+    /// The newest scenario-panel state not yet handed to the page (issue
+    /// #1328).
+    ///
+    /// Latest-wins like the lobby state, and for the same reason: it is a
+    /// snapshot of the whole picker — the catalogue, what the arbiter has
+    /// locked, and whether a world has landed and closed the picker for good —
+    /// so an older one has nothing to say the newest does not.
+    ///
+    /// Unlike [`Self::payload`] it carries **no dedupe**, because its feed does
+    /// not push every frame: `host_lobby::publish_scenario_panel` pushes only
+    /// when the selection moved or a world arrived, exactly as `join` is pushed
+    /// only when a code is issued.
+    scenario: Option<String>,
     /// QR toggles asked for but not yet applied (issue #1329).
     ///
     /// A COUNT, not a flag, because this is the one thing on this bridge that is
@@ -155,6 +173,13 @@ impl HostLobbyBridge {
         self.lock().join = Some(json.into());
     }
 
+    /// Hand the surface the scenario picker's state
+    /// ([`super::scenario::ScenarioPanelPayload`], already encoded) — issue
+    /// #1328.
+    pub fn push_scenario(&self, json: impl Into<String>) {
+        self.lock().scenario = Some(json.into());
+    }
+
     /// Somebody asked for the join QR to be flipped (issue #1329).
     ///
     /// A phone's `ClientMessage::ToggleQrCode`, arriving over the relay at a
@@ -190,14 +215,30 @@ impl HostLobbyBridge {
         inner.payload.is_some()
             || inner.reveal.is_some()
             || inner.join.is_some()
+            || inner.scenario.is_some()
             || inner.layout.is_some()
             || inner.qr_toggles > 0
     }
 
     /// Take everything the surface has asked for since the last call, in order.
     ///
-    /// Empty in this slice — the lobby is read-only — and drained anyway, so a
-    /// surface that started sending would not silently fill memory.
+    /// This carries the operator's scenario and hull picks and their AI-launch
+    /// press (issue #1328) and their monitor presses (issue #1330) — see
+    /// [`super::HostLobbyRecord`], the one vocabulary all four are in, which
+    /// `host_lobby::drain_surface_records` decodes them into. Drained
+    /// unconditionally, so a surface talking to a host that has stopped
+    /// listening cannot fill memory.
+    ///
+    /// # One reader, and it has to stay one
+    ///
+    /// This is a `drain`: what it returns, nobody else will see. So the surface
+    /// gets exactly ONE consumer — `drain_surface_records`, in `PreUpdate` —
+    /// and every kind of record is a variant it dispatches rather than a second
+    /// system reading the same queue. A second `take_records` caller would not
+    /// fail loudly: whichever ran first would swallow the other's records and
+    /// warn about a vocabulary it does not speak, and the other would see an
+    /// empty queue forever. That is the whole reason the picks and the monitor
+    /// row share an enum instead of having one each.
     pub fn take_records(&self) -> Vec<String> {
         self.lock().records.drain(..).collect()
     }
@@ -216,6 +257,7 @@ impl HostLobbyBridge {
         Pending {
             reveal: inner.reveal.take(),
             join: inner.join.take(),
+            scenario: inner.scenario.take(),
             layout: inner.layout.take(),
             payload: inner.payload.take(),
             qr_toggles: std::mem::take(&mut inner.qr_toggles),
@@ -245,6 +287,13 @@ impl HostLobbyBridge {
         }
     }
 
+    fn restore_scenario(&self, json: String) {
+        let mut inner = self.lock();
+        if inner.scenario.is_none() {
+            inner.scenario = Some(json);
+        }
+    }
+
     fn restore_layout(&self, json: String) {
         let mut inner = self.lock();
         if inner.layout.is_none() {
@@ -266,6 +315,7 @@ impl HostLobbyBridge {
 struct Pending {
     reveal: Option<bool>,
     join: Option<String>,
+    scenario: Option<String>,
     layout: Option<String>,
     payload: Option<String>,
     qr_toggles: usize,
@@ -274,8 +324,8 @@ struct Pending {
 /// What one frame of [`pump_host_lobby`] did.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct HostLobbyPumpReport {
-    /// Scripts handed to the surface — the reveal, the join invitation, the
-    /// monitor row and the state, plus one for every QR toggle.
+    /// Scripts handed to the surface — the reveal, the invitation, the picker,
+    /// the monitor row and the lobby state, plus one for every QR toggle.
     pub pushed: usize,
     /// Values put back because a push failed.
     pub deferred: usize,
@@ -299,12 +349,17 @@ pub struct HostLobbyPumpReport {
 ///    phase's answer and then correcting it;
 /// 2. **the join invitation**, before the state that decides whether the panel
 ///    carrying it is on screen;
-/// 3. **the monitor row** (issue #1330), for the same reason the two above it
+/// 3. **the scenario picker** (issue #1328), before the lobby it covers: the
+///    picker is a full-screen panel over the crew lobby, so a frame that both
+///    closes it and fills the lobby behind it decides the covering first. No
+///    element is written by both renderers, so nothing here can clobber
+///    anything — the order is fixed and stated so it stays that way;
+/// 4. **the monitor row** (issue #1330), for the same reason the three above it
 ///    go first: the state push is what repaints the whole lobby, so the row has
 ///    to be in place when it lands rather than corrected after it;
-/// 4. **the lobby state**, which carries the phase, and with it the join
+/// 5. **the lobby state**, which carries the phase, and with it the join
 ///    panel's show/hide law;
-/// 5. **QR toggles last**, because an operator's press is their answer to the
+/// 6. **QR toggles last**, because an operator's press is their answer to the
 ///    phase, not the other way round. Applied before the state, a toggle in the
 ///    same frame as a `Lobby` push would be silently overwritten by it.
 ///
@@ -313,8 +368,8 @@ pub struct HostLobbyPumpReport {
 /// snapshots unless it is an edge, in which case it joins the toggles.
 ///
 /// (`host_lobby_boot.js` renders nothing until it has something to render, so a
-/// lone reveal, a lone monitor row or a lone toggle on the first frame is
-/// free.)
+/// lone reveal, a lone picker, a lone monitor row or a lone toggle on the first
+/// frame is free.)
 pub fn pump_host_lobby(
     bridge: &HostLobbyBridge,
     surface: &mut dyn PaneSurface,
@@ -354,6 +409,23 @@ pub fn pump_host_lobby(
                     report.push_failure = Some(e);
                     report.deferred += 1;
                     bridge.restore_join(json);
+                    failed = true;
+                }
+            }
+        }
+    }
+
+    if let Some(json) = pending.scenario {
+        if failed {
+            report.deferred += 1;
+            bridge.restore_scenario(json);
+        } else {
+            match surface.push(&host_lobby_scenario_script(&json)) {
+                Ok(()) => report.pushed += 1,
+                Err(e) => {
+                    report.push_failure = Some(e);
+                    report.deferred += 1;
+                    bridge.restore_scenario(json);
                     failed = true;
                 }
             }
@@ -607,6 +679,59 @@ mod tests {
     }
 
     #[test]
+    fn the_picker_crosses_before_the_lobby_it_covers() {
+        // Issue #1328. `#scenario-panel` is a full-screen panel over the crew
+        // lobby, so a frame that both closes the picker and fills the lobby
+        // behind it decides the covering first.
+        let bridge = HostLobbyBridge::new();
+        bridge.push_scenario(r#"{"scenarios":[],"locked":true}"#);
+        bridge.push_lobby_state(LOBBY);
+        let mut surface = RecordingSurface::ready();
+
+        let report = pump_host_lobby(&bridge, &mut surface);
+        assert_eq!(report.pushed, 2);
+        assert!(surface.pushed[0].contains("__phoenixHostLobbyScenario("));
+        assert!(surface.pushed[1].contains("__phoenixHostLobbyApply("));
+    }
+
+    #[test]
+    fn a_newer_picker_state_replaces_the_one_that_had_not_crossed_yet() {
+        // A snapshot of the whole picker, like the lobby state beside it: once
+        // the arbiter has locked a scenario, the state that said it was open is
+        // WRONG rather than merely older.
+        let bridge = HostLobbyBridge::new();
+        bridge.push_scenario(r#"{"locked_scenario":null}"#);
+        bridge.push_scenario(r#"{"locked_scenario":"combat_test"}"#);
+        let mut surface = RecordingSurface::ready();
+
+        pump_host_lobby(&bridge, &mut surface);
+        assert_eq!(surface.pushed.len(), 1);
+        assert!(surface.pushed[0].contains("combat_test"));
+    }
+
+    #[test]
+    fn a_picker_state_that_could_not_cross_is_kept_and_defers_the_lobby_behind_it() {
+        // The window between "the document loaded" and "its module island ran".
+        // Dropping here would leave the viewscreen showing a picker that cannot
+        // be clicked until the next time somebody happened to change the
+        // selection — which on a fresh `--lobby` host is never.
+        let bridge = HostLobbyBridge::new();
+        bridge.push_scenario(r#"{"locked_scenario":null}"#);
+        bridge.push_lobby_state(LOBBY);
+        let mut surface = RecordingSurface::ready();
+        surface.failing_pushes = 1;
+
+        let first = pump_host_lobby(&bridge, &mut surface);
+        assert_eq!(first.pushed, 0);
+        assert_eq!(first.deferred, 2);
+        assert!(bridge.has_pending());
+
+        let second = pump_host_lobby(&bridge, &mut surface);
+        assert_eq!(second.pushed, 2, "nothing was lost across the two frames");
+        assert!(surface.pushed[0].contains("__phoenixHostLobbyScenario("));
+    }
+
+    #[test]
     fn a_phones_qr_toggle_is_applied_after_the_phase_it_is_answering() {
         // The operator's press is their answer to the phase, not the other way
         // round. Pushed before the state, a toggle in the same frame as a
@@ -661,19 +786,23 @@ mod tests {
 
     #[test]
     fn what_the_surface_asks_for_is_collected_rather_than_dropped() {
-        // Nothing sends in this slice. The drain exists so that the day
-        // something does — a QR toggle, a layout row — the records are already
-        // arriving somewhere a reader can be attached to, and a surface that
-        // started talking to a deaf host cannot grow without bound.
+        // Since issue #1328 the records are the operator's own scenario and
+        // hull picks and their AI-launch press. This asserts only the pipe —
+        // that what the page queued reaches a reader exactly once, in order —
+        // because what the records MEAN is `HostLobbyRecord`'s, and what they
+        // do is `drain_surface_records`'s.
         let bridge = HostLobbyBridge::new();
         let mut surface = RecordingSurface::ready();
-        surface.queue_record(r#"{"kind":"hello"}"#);
+        surface.queue_record(r#"{"kind":"force_start"}"#);
 
         let report = pump_host_lobby(&bridge, &mut surface);
-        assert_eq!(report.records, vec![r#"{"kind":"hello"}"#.to_string()]);
+        assert_eq!(
+            report.records,
+            vec![r#"{"kind":"force_start"}"#.to_string()]
+        );
         assert_eq!(
             bridge.take_records(),
-            vec![r#"{"kind":"hello"}"#.to_string()]
+            vec![r#"{"kind":"force_start"}"#.to_string()]
         );
         assert!(bridge.take_records().is_empty());
     }
@@ -757,22 +886,29 @@ mod tests {
         // Every snapshot before the state that repaints around it, and the one
         // edge after it — the rule the doc comment on `pump_host_lobby` states,
         // asserted whole rather than pairwise, because the pairwise tests above
-        // each leave the slot they do not mention free to drift.
+        // each leave the slots they do not mention free to drift.
+        //
+        // All SIX, since the picker (issue #1328) joined the row (issue #1330)
+        // on this bridge: two slices adding a snapshot each is exactly the
+        // situation the stated rule exists for, and a five-slot assertion would
+        // have left the sixth to be placed by whichever one landed second.
         let bridge = HostLobbyBridge::new();
         bridge.push_lobby_state(LOBBY);
         bridge.push_qr_toggle();
         bridge.push_layout(ROW);
+        bridge.push_scenario(r#"{"scenarios":[],"locked":false}"#);
         bridge.push_join(r#"{"kind":"code","code":"ABCDE"}"#);
         bridge.push_reveal(true);
         let mut surface = RecordingSurface::ready();
 
         let report = pump_host_lobby(&bridge, &mut surface);
-        assert_eq!(report.pushed, 5);
+        assert_eq!(report.pushed, 6);
         assert!(surface.pushed[0].contains("__phoenixHostLobbyReveal('true')"));
         assert!(surface.pushed[1].contains("__phoenixHostLobbyJoin("));
-        assert!(surface.pushed[2].contains("__phoenixHostLobbyLayout("));
-        assert!(surface.pushed[3].contains("__phoenixHostLobbyApply("));
-        assert_eq!(surface.pushed[4], "window.__phoenixHostLobbyQrToggle()");
+        assert!(surface.pushed[2].contains("__phoenixHostLobbyScenario("));
+        assert!(surface.pushed[3].contains("__phoenixHostLobbyLayout("));
+        assert!(surface.pushed[4].contains("__phoenixHostLobbyApply("));
+        assert_eq!(surface.pushed[5], "window.__phoenixHostLobbyQrToggle()");
     }
 
     #[test]

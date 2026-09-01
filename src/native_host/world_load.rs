@@ -341,12 +341,29 @@ fn drain_scenario_selection(
     });
 }
 
-/// The catalogue message a phone folds through `gui/lobby-state.js`, identical
-/// in shape to the one `server.html` synthesises before its own world load.
+/// What this host is publishing about its own selection, in the one place both
+/// audiences read it from.
+///
+/// There are two audiences and they must never be told different things: every
+/// phone in the room, through
+/// [`ServerMessage::ScenarioCatalog`](crate::core::messages::ServerMessage::ScenarioCatalog),
+/// and the viewscreen's own picker, through
+/// [`ScenarioPanelPayload`](crate::native_host::host_lobby::ScenarioPanelPayload)
+/// (issue #1328). Both are rendered from these three fields, built once — so
+/// "the viewscreen shows a different catalogue from the phones" is not a
+/// question this host can be asked.
+pub(crate) struct PublishedCatalog {
+    scenarios: Vec<crate::core::messages::ScenarioCatalogWire>,
+    locked_scenario: Option<String>,
+    locked_ship: Option<String>,
+}
+
+/// Render what this host is publishing.
 ///
 /// `pinned_ship` is `--ship`. It is reported as the locked hull because it *is*
 /// the hull this host will fly whatever a phone picks, and a picker offering a
-/// choice the host has already overruled is a lie the phone acts on.
+/// choice the host has already overruled is a lie whoever is looking at it acts
+/// on.
 ///
 /// Which makes the precedence load-bearing rather than cosmetic: `pinned_ship`
 /// FIRST, exactly as [`drain_scenario_selection`] resolves the hull it actually
@@ -354,18 +371,55 @@ fn drain_scenario_selection(
 /// round, `--lobby --ship B` with a phone picking A would fly B while telling
 /// every phone the locked hull is A — the precise lie this field exists to
 /// prevent, on the one combination where the two answers differ.
-fn catalog_message(
+pub(crate) fn published_catalog(
     catalog: &ScenarioCatalog,
     selection: &ScenarioSelection,
     pinned_ship: Option<&str>,
-) -> ServerMessage {
-    ServerMessage::ScenarioCatalog {
+) -> PublishedCatalog {
+    PublishedCatalog {
         scenarios: scenario_arbiter::catalog_wire(catalog),
         locked_scenario: selection.scenario().map(str::to_string),
         locked_ship: pinned_ship
             .map(str::to_string)
             .or_else(|| selection.ship().map(str::to_string)),
     }
+}
+
+impl PublishedCatalog {
+    /// The catalogue message a phone folds through `gui/lobby-state.js`,
+    /// identical in shape to the one `server.html` synthesises before its own
+    /// world load.
+    fn wire(self) -> ServerMessage {
+        ServerMessage::ScenarioCatalog {
+            scenarios: self.scenarios,
+            locked_scenario: self.locked_scenario,
+            locked_ship: self.locked_ship,
+        }
+    }
+
+    /// The same three answers as the viewscreen picker's snapshot (issue
+    /// #1328), plus the one thing a phone has no use for: whether a world has
+    /// landed and closed the picker for good.
+    pub(crate) fn surface(
+        self,
+        locked: bool,
+    ) -> crate::native_host::host_lobby::ScenarioPanelPayload {
+        crate::native_host::host_lobby::ScenarioPanelPayload {
+            scenarios: self.scenarios,
+            locked_scenario: self.locked_scenario,
+            locked_ship: self.locked_ship,
+            locked,
+        }
+    }
+}
+
+/// [`published_catalog`], as the wire message.
+fn catalog_message(
+    catalog: &ScenarioCatalog,
+    selection: &ScenarioSelection,
+    pinned_ship: Option<&str>,
+) -> ServerMessage {
+    published_catalog(catalog, selection, pinned_ship).wire()
 }
 
 fn log_outcome(

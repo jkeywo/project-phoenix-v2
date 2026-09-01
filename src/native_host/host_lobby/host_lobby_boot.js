@@ -14,14 +14,17 @@
 // WHAT IT DOES NOT DO, and why that is worth saying:
 //
 //   - It does not seed an identity. There is none. This surface holds no
-//     session token: it renders the lobby the host is already broadcasting, and
-//     the one control it owns outright (the QR toggle, issue #1329) acts on
-//     this document's own DOM rather than sending anything. What it DOES send
-//     back (issue #1330's monitor button presses) is a request to rearrange
-//     this machine's own screens, not anything a participant may say. The
-//     page->host queue the shim installs beside these entry points is what
-//     carries it — installed in #1325 before anything rode it, so the bridge
-//     would have one shape rather than grow a second one later.
+//     session token, and what it sends over the page->host queue is not a
+//     participant's ClientMessage but the host OPERATOR's own presses — a
+//     scenario, a hull, an AI launch (issue #1328), a monitor for the
+//     viewscreen (issue #1330) — every one of them decoded by the single
+//     vocabulary native_host::host_lobby::HostLobbyRecord. A press asks the
+//     host to arbitrate its own lobby or rearrange its own screens; nothing
+//     here is anything a participant may say. The queue the shim installs
+//     beside these entry points is what carries them — installed in #1325
+//     before anything rode it, so the bridge would have one shape rather than
+//     grow a second one later. The one control that sends nothing at all is
+//     the QR toggle (issue #1329), which acts on this document's own DOM.
 //   - It does not replace requestAnimationFrame. pane_boot.js has to, because
 //     the client page's render loop is `scheduleRender()` -> rAF and an
 //     offscreen Ultralight view only services rAF as part of a rendering
@@ -51,6 +54,11 @@
     join: null,
     qrPending: 0,
     renderJoin: null,
+    // The scenario picker's half (issue #1328). A snapshot too: it carries the
+    // whole catalogue, whatever the arbiter has locked, and whether a world has
+    // landed and closed the picker for good.
+    scenario: null,
+    renderScenario: null,
   };
   window.__phoenixHostLobby = lobby;
 
@@ -110,6 +118,26 @@
   window.__phoenixHostLobbyJoin = function (json) {
     lobby.join = json;
     lobby.paintJoin();
+  };
+
+  lobby.paintScenario = function () {
+    if (!lobby.renderScenario || lobby.scenario === null) return;
+    try {
+      lobby.renderScenario(lobby.scenario);
+    } catch (e) {
+      // Same reason lobby.paint() swallows: a throw out of here propagates out
+      // of the host's evaluate_script, is read as a failed push, and is retried
+      // with the same payload forever.
+      console.error('[host-lobby] scenario render failed', e);
+    }
+  };
+
+  // Host -> page: one encoded ScenarioPanelPayload
+  // (native_host::host_lobby::scenario) — the catalogue this host publishes,
+  // what its arbiter has locked, and whether a world has closed the picker.
+  window.__phoenixHostLobbyScenario = function (json) {
+    lobby.scenario = json;
+    lobby.paintScenario();
   };
 
   // Host -> page: somebody pressed the QR toggle on a phone. No argument: the

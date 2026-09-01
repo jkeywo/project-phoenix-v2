@@ -9,16 +9,28 @@
 //! BridgeLayout + DiscoveredMonitor[]  ──monitor_row_payload──▶  BridgeLayoutPayload
 //!        ▲                                                            │ codec::encode_bridge_layout
 //!        │                                                            ▼
-//!  LayoutAction ◀──into_action── LobbyLayoutRecord ◀───  window.__phoenixHostLobbyLayout(json)
-//!                                        ▲                       gui/host-lobby-view.js
-//!                                        │ codec::decode_lobby_layout_record
-//!                                 phoenixHostLobbyOut.send
+//!  LayoutAction ◀─set_viewscreen_action─┐            window.__phoenixHostLobbyLayout(json)
+//!                                       │                        gui/host-lobby-view.js
+//!               HostLobbyRecord::SetViewscreen ◀───  phoenixHostLobbyOut.send
+//!                    [super::scenario]     │ codec::decode_host_lobby_record
 //! ```
 //!
 //! Both ends are here because they are one contract: the `identity` string a
 //! button carries out is the same `identity` string the press carries back, and
 //! splitting the two halves across two modules is how a renamed field becomes a
 //! button that silently does nothing.
+//!
+//! # …but the record itself is not, and that is deliberate
+//!
+//! The press arrives as a variant of [`HostLobbyRecord`](super::HostLobbyRecord),
+//! the surface's ONE vocabulary, beside the operator's scenario and hull picks
+//! and their AI-launch press (issue #1328). It is not a record type of its own,
+//! because `HostLobbyBridge::take_records` is a **drain**: a second record type
+//! would want a second reader, the first reader to run would swallow the other's
+//! records and warn about a vocabulary it does not speak, and the second would
+//! see an empty queue forever — with a clean log on both sides. One vocabulary,
+//! one drain. What stays here is the half that is genuinely this module's: the
+//! [`LayoutAction`] a `set-viewscreen` press asks for.
 //!
 //! # Why the payload is `serde` and not a `format!`
 //!
@@ -201,36 +213,22 @@ pub fn monitor_row_payload(
     }
 }
 
-/// One thing the lobby surface asked the host to do to the layout.
+/// The layout action a
+/// [`HostLobbyRecord::SetViewscreen`](super::HostLobbyRecord::SetViewscreen)
+/// press asks for.
 ///
-/// A tagged enum with exactly one variant today, and a tagged enum on purpose:
-/// the per-station screen rows are the next slice on this same surface, and a
-/// record shaped `{"monitor": "…"}` with no `kind` would have to grow one
-/// later — which is a wire break on a bridge whose two ends ship together but
-/// whose page is assembled from a bundle that may not.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind")]
-pub enum LobbyLayoutRecord {
-    /// Show the shared viewscreen on this monitor.
-    #[serde(rename = "set-viewscreen")]
-    SetViewscreen { monitor: String },
-}
-
-impl LobbyLayoutRecord {
-    /// The layout action this record asks for.
-    ///
-    /// Total and infallible: the record's own vocabulary is the action
-    /// vocabulary. Whether the bridge can *take* it is
-    /// [`BridgeLayout::apply`]'s answer, not this function's — a press naming a
-    /// monitor that was unplugged in between is a
-    /// [`LayoutRefusal::UnknownMonitor`], which is a sentence the operator
-    /// reads, rather than a parse failure nobody sees.
-    pub fn into_action(self) -> LayoutAction {
-        match self {
-            LobbyLayoutRecord::SetViewscreen { monitor } => LayoutAction::SetViewscreen {
-                monitor: MonitorIdentity::new(monitor),
-            },
-        }
+/// Total and infallible: the record's own vocabulary is the action vocabulary.
+/// Whether the bridge can *take* it is [`BridgeLayout::apply`]'s answer, not
+/// this function's — a press naming a monitor that was unplugged in between is
+/// a [`LayoutRefusal::UnknownMonitor`], which is a sentence the operator reads,
+/// rather than a parse failure nobody sees.
+///
+/// Here rather than beside the record for the reason the module note gives: the
+/// identity a button carries out and the identity a press carries back are one
+/// contract, and this is the line that closes it.
+pub fn set_viewscreen_action(monitor: impl Into<String>) -> LayoutAction {
+    LayoutAction::SetViewscreen {
+        monitor: MonitorIdentity::new(monitor.into()),
     }
 }
 
@@ -276,11 +274,22 @@ mod tests {
         // moved.
         let payload = monitor_row_payload(&layout(), &two_monitors(), &[]);
         let pressed = &payload.monitors[1];
-        let record = LobbyLayoutRecord::SetViewscreen {
-            monitor: pressed.identity.clone(),
-        };
+
+        // What the page sends back carries that identity verbatim, in the
+        // surface's one vocabulary…
         assert_eq!(
-            record.into_action(),
+            crate::core::codec::decode_host_lobby_record(&format!(
+                r#"{{"kind":"set-viewscreen","monitor":"{}"}}"#,
+                pressed.identity
+            ))
+            .unwrap(),
+            super::super::HostLobbyRecord::SetViewscreen {
+                monitor: pressed.identity.clone(),
+            }
+        );
+        // …and it resolves to the display the operator was looking at.
+        assert_eq!(
+            set_viewscreen_action(pressed.identity.as_str()),
             LayoutAction::SetViewscreen {
                 monitor: MonitorIdentity::new("BenQ EX@1920x1080"),
             }
@@ -430,15 +439,19 @@ mod tests {
     #[test]
     fn a_record_the_page_sends_is_tagged_by_the_verb_it_asks_for() {
         // The wire shape, pinned: `gui/`'s side builds this object by hand, so
-        // a rename here is a button that silently does nothing.
+        // a rename here is a button that silently does nothing. The tag stays
+        // KEBAB (`set-viewscreen`) even though its siblings in
+        // `HostLobbyRecord` are snake_case, because the page-side JS that
+        // writes it shipped before the two vocabularies were folded into one
+        // and there is no reason to make it a wire break.
         let json = r#"{"kind":"set-viewscreen","monitor":"BenQ EX@1920x1080"}"#;
         assert_eq!(
-            crate::core::codec::decode_lobby_layout_record(json).unwrap(),
-            LobbyLayoutRecord::SetViewscreen {
+            crate::core::codec::decode_host_lobby_record(json).unwrap(),
+            super::super::HostLobbyRecord::SetViewscreen {
                 monitor: "BenQ EX@1920x1080".to_string(),
             }
         );
-        assert!(crate::core::codec::decode_lobby_layout_record(r#"{"monitor":"x"}"#).is_err());
+        assert!(crate::core::codec::decode_host_lobby_record(r#"{"monitor":"x"}"#).is_err());
     }
 
     #[test]

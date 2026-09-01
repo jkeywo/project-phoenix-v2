@@ -203,13 +203,18 @@ pub fn encode_lobby_state(
     serde_json::to_string(s)
 }
 
-// ── The native lobby's monitor row (issue #1330) ────────────────────────────
+// ── The native host's lobby surface (issues #1328/#1330) ────────────────────
 //
-// The native host's own lobby surface takes one more push beside the lobby
-// state above — the bridge's monitor roster — and answers with one record kind,
-// a monitor button press. Both cross as JSON, so both are encoded HERE and
-// nowhere else (AGENTS.md Key Constraint 1); the types stay pure and Bevy-free
-// in `native_host::host_lobby::layout`.
+// That surface takes one more push beside the lobby state above — the bridge's
+// monitor roster — and answers with the operator's own presses: a scenario, a
+// hull, an AI launch, a monitor for the viewscreen. Both directions cross as
+// JSON, so both are encoded HERE and nowhere else (AGENTS.md Key Constraint 1);
+// the types stay pure and Bevy-free in `native_host::host_lobby::{layout,
+// scenario}`.
+//
+// One decode for all four verbs, because the record queue they share is a drain
+// with exactly one reader — see `HostLobbyRecord`'s note on why a second record
+// type would be a queue two systems fight over.
 //
 // Gated on the same cfg `crate::native_host` itself carries: a browser host has
 // no monitors to offer, and on wasm the module these name does not exist.
@@ -222,11 +227,12 @@ pub fn encode_bridge_layout(
     serde_json::to_string(p)
 }
 
-/// Decode one record the native lobby surface queued — a monitor button press.
+/// Decode one record the native lobby surface queued — a pick, an AI launch or
+/// a monitor button press.
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
-pub fn decode_lobby_layout_record(
+pub fn decode_host_lobby_record(
     s: &str,
-) -> Result<crate::native_host::host_lobby::layout::LobbyLayoutRecord, serde_json::Error> {
+) -> Result<crate::native_host::host_lobby::HostLobbyRecord, serde_json::Error> {
     serde_json::from_str(s)
 }
 

@@ -36,11 +36,11 @@
 //! [`build_pane_document`]: crate::native_host::panes::document::build_pane_document
 //!
 //! What the assembled document adds around that fragment is only what a
-//! fragment cannot carry: a `<head>` naming the three stylesheets the web host
-//! links (`gui/tokens.css`, `gui/host-lobby.css`, `gui/host-qr.css` — the last
-//! two exist *because* of this surface), a ground colour, the vendored QR
-//! encoder, the bridge scripts, and the module island that wires the shared
-//! view model to the shared renderer.
+//! fragment cannot carry: a `<head>` naming the four stylesheets the web host
+//! links (`gui/tokens.css`, `gui/host-lobby.css`, `gui/host-qr.css`,
+//! `gui/host-scenarios.css` — the last three exist *because* of this surface), a
+//! ground colour, the vendored QR encoder, the bridge scripts, and the module
+//! island that wires the shared view models to the shared renderers.
 //!
 //! It carries no `<title>`, deliberately: an embedded view has no tab bar, so a
 //! title would be player-visible English nothing ever shows — and every string a
@@ -58,21 +58,33 @@
 //!
 //! | edit | why |
 //! |---|---|
-//! | the AI-launch `<button>` removed | **scenario selection** stays on the CLI, and a control that silently does nothing is worse than no control |
 //! | the page's `#qr-panel` carried too, in an `#overlay` of this document's own (issue #1329) | the crew have to be shown how to JOIN the lobby they are looking at. The panel is the page's own markup for the same reason the lobby is; the overlay around it is not, because the page's also carries the fleet panel and the diagnostics readout, and neither has anything to say on a viewscreen |
 //! | `#host-lobby-qr-toggle` added (issue #1329) | a host page toggles the QR from its settings cog; this window has no cog, so the one decision that surface genuinely needs gets the one control it needs |
+//! | the page's `#scenario-panel` carried too (issue #1328) | an operator has to be able to pick the scenario and the hull from the viewscreen. Same rule as the lobby and the join panel: the page's own markup, so `gui/host-scenario-render.js` writes into the ids it expects |
+//! | that panel's `#mod-pack-upload` and `#snapshot-import` removed (issue #1328) | host TOOLING — file inputs with page-lifetime handlers this document does not carry, and which a demo build removes outright. A control that silently does nothing is worse than no control |
+//! | that panel starts `display: none` (issue #1328) | the page opens ON the picker, because a browser host always chooses at the prompt; a native host may have been given `--world`, and a picker covering the lobby of a host that has nothing to pick would be a viewscreen that never moves. It is shown by the first scenario push, which only a world-less host makes |
 //!
-//! That first edit is not "the surface is read-only": since issue #1329 it
-//! carries its own QR toggle, and since issue #1330 the bridge's **monitor
-//! row**, whose buttons are built by the shared renderer from a row the host
-//! pushes and whose presses ride the queue below. It is one control removed
-//! because nothing on this document is wired to launch a mission, not a policy
-//! about controls in general.
+//! The AI-launch `<button>` is **kept**, and was not always: #1325 stripped it,
+//! because a read-only surface with a control that silently does nothing is
+//! worse than one with no control. Since #1328 it does something — the
+//! force-start path is no longer wasm-only (`server::bridge::apply_force_start`)
+//! — so the reason to remove it has gone with it. It is the one way a crew who
+//! are all on phones can be launched from the viewscreen they are standing in
+//! front of.
+//!
+//! That is the rule the surface has kept throughout, rather than a policy about
+//! controls in general: **a control exists here exactly when something behind it
+//! answers it.** #1329's QR toggle is added because the host owns the flip;
+//! #1330's monitor row is not in this markup at all, because the shared renderer
+//! builds those buttons from a row the host pushes, so they exist only when
+//! there is a layout to move; and the picker's file inputs are removed because
+//! nothing here handles them. A test pins the resulting set — see
+//! `the_ai_launch_button_is_kept_because_the_surface_can_now_answer_it`.
 //!
 //! Everything else the document does to the markup it does by *omission*: it
 //! leaves `--settings-cog-keepout` undefined, which selects the `0px` fallback
-//! `gui/host-lobby.css` names, because there is no settings cog on the
-//! viewscreen window to reserve a corner for.
+//! `gui/host-lobby.css` and `gui/host-scenarios.css` both name, because there is
+//! no settings cog on the viewscreen window to reserve a corner for.
 //!
 //! # No identity, and therefore nothing to leak
 //!
@@ -93,8 +105,6 @@
 
 use vellum_ultralight::bridge::queue_shim;
 
-use crate::native_host::panes::document::strip_elements_matching;
-
 /// The first script in a lobby document. See `host_lobby_boot.js`.
 pub const HOST_LOBBY_BOOT_JS: &str = include_str!("host_lobby_boot.js");
 
@@ -105,10 +115,11 @@ pub const HOST_LOBBY_LINK_JS: &str = include_str!("host_lobby_link.js");
 ///
 /// Installed by issue #1325 with nothing riding it, so the bridge would have
 /// ONE shape from the start rather than growing a second channel beside it the
-/// first time something needed to send. Issue #1330 is that first thing: a
-/// monitor button press crosses here as a
-/// [`LobbyLayoutRecord`](super::layout::LobbyLayoutRecord). The QR overlay and
-/// the settings rows that land on this same permanent surface use it too.
+/// first time something needed to send. It carries the operator's scenario and
+/// hull picks and their AI-launch press (issue #1328) and their monitor presses
+/// (issue #1330), all as [`super::HostLobbyRecord`]s — one namespace, one
+/// vocabulary, one drain. The settings rows that land on this same permanent
+/// surface go here too.
 ///
 /// Deliberately distinct from `phoenixPaneOut`: a pane's records are a
 /// participant's `ClientMessage`s and are admitted as such, and these will never
@@ -155,6 +166,19 @@ pub fn host_lobby_layout_script(json: &str) -> String {
 /// [`JoinInvite`]: super::join::JoinInvite
 pub fn host_lobby_join_script(json: &str) -> String {
     vellum_ultralight::bridge::push_call("window.__phoenixHostLobbyJoin", json)
+}
+
+/// The script that hands the surface the scenario picker's state (issue #1328).
+///
+/// One encoded [`ScenarioPanelPayload`]: the catalogue this host publishes, what
+/// the arbiter has locked, and whether a world has landed and closed the picker.
+/// Those are precisely `scenarioCatalogView`'s three arguments, so the
+/// viewscreen's picker and the host page's are one decision rendered twice
+/// rather than two decisions that agree today.
+///
+/// [`ScenarioPanelPayload`]: super::scenario::ScenarioPanelPayload
+pub fn host_lobby_scenario_script(json: &str) -> String {
+    vellum_ultralight::bridge::push_call("window.__phoenixHostLobbyScenario", json)
 }
 
 /// The script that flips the join QR (issue #1329).
@@ -208,6 +232,16 @@ pub enum HostLobbyDocumentError {
     NoJoinPanel,
     /// `#qr-panel` opens and never closes.
     UnbalancedJoinPanel,
+    /// The page has no `#scenario-panel` element, so there is nothing to pick a
+    /// world from (issue #1328).
+    ///
+    /// Refused for the same reason as its two siblings: a `--lobby` host whose
+    /// viewscreen cannot show the picker is a host that can never start a
+    /// mission, and being told so at the prompt beats discovering it in a room
+    /// full of people.
+    NoScenarioPanel,
+    /// `#scenario-panel` opens and never closes.
+    UnbalancedScenarioPanel,
 }
 
 impl std::fmt::Display for HostLobbyDocumentError {
@@ -234,6 +268,17 @@ impl std::fmt::Display for HostLobbyDocumentError {
                 f,
                 "the host page's #qr-panel never closes — its <div> elements do not balance \
                  before the end of the document"
+            ),
+            HostLobbyDocumentError::NoScenarioPanel => write!(
+                f,
+                "the host page has no #scenario-panel element, so the viewscreen would have no \
+                 way to pick a scenario; check that --client-dir points at a bundle built from \
+                 this checkout's server.html"
+            ),
+            HostLobbyDocumentError::UnbalancedScenarioPanel => write!(
+                f,
+                "the host page's #scenario-panel never closes — its <div> elements do not \
+                 balance before the end of the document"
             ),
         }
     }
@@ -276,6 +321,20 @@ const LOBBY_PANEL_MARKER: &str = "<div id=\"lobby-panel\"";
 /// so the document supplies it below rather than taking the page's.
 const JOIN_PANEL_MARKER: &str = "<div id=\"qr-panel\"";
 
+/// The element the scenario picker hangs off, in the host page (issue #1328).
+const SCENARIO_PANEL_MARKER: &str = "<div id=\"scenario-panel\"";
+
+/// The two host-tooling blocks inside `#scenario-panel` that this surface must
+/// not carry (issue #1328).
+///
+/// Both are file pickers with page-lifetime handlers `server.html` installs and
+/// this document does not, and both are removed outright from a demo build
+/// (`applyPreScenarioRestrictions`). Removed rather than hidden, for the reason
+/// that function gives: a `display: none` control is still in the DOM to be
+/// reached.
+const SCENARIO_TOOLING_MARKERS: [&str; 2] =
+    ["<div id=\"mod-pack-upload\"", "<div id=\"snapshot-import\""];
+
 /// Assemble the lobby document from the host page's own `index.html`.
 ///
 /// Pure: bytes in, bytes out. Everything that makes this document different
@@ -288,9 +347,6 @@ pub fn build_host_lobby_document(host_index_html: &str) -> Result<String, HostLo
         HostLobbyDocumentError::NoLobbyPanel,
         HostLobbyDocumentError::UnbalancedLobbyPanel,
     )?;
-    // The one control in that markup, and it must not appear on a read-only
-    // surface: nothing on this document is wired to launch anything.
-    let panel = strip_elements_matching(panel, "button", None);
 
     let join_panel = extract_element(
         host_index_html,
@@ -298,6 +354,25 @@ pub fn build_host_lobby_document(host_index_html: &str) -> Result<String, HostLo
         HostLobbyDocumentError::NoJoinPanel,
         HostLobbyDocumentError::UnbalancedJoinPanel,
     )?;
+
+    // The picker (issue #1328), minus the two host-tooling blocks, and hidden
+    // until a world-less host says there is something to pick. See the module
+    // table for both edits.
+    let mut scenario_panel = extract_element(
+        host_index_html,
+        SCENARIO_PANEL_MARKER,
+        HostLobbyDocumentError::NoScenarioPanel,
+        HostLobbyDocumentError::UnbalancedScenarioPanel,
+    )?
+    .to_string();
+    for marker in SCENARIO_TOOLING_MARKERS {
+        scenario_panel = remove_element(&scenario_panel, marker);
+    }
+    let scenario_panel = scenario_panel.replacen(
+        SCENARIO_PANEL_MARKER,
+        &format!("{SCENARIO_PANEL_MARKER} style=\"display:none\""),
+        1,
+    );
 
     let head = format!(
         "\n<script>\n{}\n{}</script>\n",
@@ -312,6 +387,7 @@ pub fn build_host_lobby_document(host_index_html: &str) -> Result<String, HostLo
          <link rel=\"stylesheet\" href=\"gui/tokens.css\" />\n\
          <link rel=\"stylesheet\" href=\"gui/host-lobby.css\" />\n\
          <link rel=\"stylesheet\" href=\"gui/host-qr.css\" />\n\
+         <link rel=\"stylesheet\" href=\"gui/host-scenarios.css\" />\n\
          <style>\n{GROUND_CSS}</style>{head}\
          <script src=\"{QR_ENCODER_SRC}\"></script>\n\
          </head>\n\
@@ -319,10 +395,34 @@ pub fn build_host_lobby_document(host_index_html: &str) -> Result<String, HostLo
          {panel}\n\
          <div id=\"overlay\">\n{join_panel}\n</div>\n\
          {QR_TOGGLE_MARKUP}\n\
+         {scenario_panel}\n\
          <script type=\"module\">\n{HOST_LOBBY_LINK_JS}\n</script>\n\
          </body>\n\
          </html>\n"
     ))
+}
+
+/// `html` with the `<div>` element opening at `marker` removed entirely.
+///
+/// Depth-counted through [`extract_element`] rather than through
+/// `panes::document::strip_elements_matching`, which finds the FIRST closing tag
+/// after the opening one — correct for the flat `<audio>`/`<button>` elements it
+/// was written for, and wrong for both of these blocks, whose several nested
+/// `<div>`s would leave a truncated fragment behind.
+///
+/// A marker that is not present leaves `html` untouched: this removes host
+/// tooling that a demo bundle has already removed for its own reasons, so
+/// "already gone" is a normal outcome rather than an error.
+fn remove_element(html: &str, marker: &str) -> String {
+    match extract_element(
+        html,
+        marker,
+        HostLobbyDocumentError::NoScenarioPanel,
+        HostLobbyDocumentError::UnbalancedScenarioPanel,
+    ) {
+        Ok(subtree) => html.replacen(subtree, "", 1),
+        Err(_) => html.to_string(),
+    }
 }
 
 /// The QR encoder, from this host's own delivery server (issue #1329).
@@ -452,11 +552,26 @@ mod tests {
     const HOST_PAGE: &str = "<!doctype html>\n<html>\n<head>\n\
          <link rel=\"stylesheet\" href=\"gui/tokens.css\" />\n\
          </head>\n<body>\n\
-         <div id=\"scenario-panel\"><div id=\"world-list\">pick</div></div>\n\
+         <div id=\"scenario-panel\">\n\
+         <div id=\"world-list\">\n\
+         <div id=\"world-list-label\" data-i18n=\"server.select_world\">Select a world</div>\n\
+         <div id=\"scenario-loading\">Loading…</div>\n\
+         <div id=\"mod-pack-upload\">\n\
+         <input id=\"mod-pack-file\" type=\"file\">\n\
+         <button id=\"mod-pack-btn\" class=\"world-btn\">Upload mod pack</button>\n\
+         <div id=\"mod-pack-status\"></div>\n\
+         </div>\n\
+         <div id=\"snapshot-import\">\n\
+         <input id=\"snapshot-import-file\" type=\"file\">\n\
+         <button id=\"snapshot-import-btn\" class=\"world-btn\">Import saved game</button>\n\
+         </div>\n\
+         </div>\n\
+         </div>\n\
          <div id=\"lobby-panel\" class=\"lobby-panel\" style=\"display:none;\">\n\
          <div class=\"lobby-bg\"></div>\n\
          <!-- AI-only launch -->\n\
-         <button id=\"ai-launch-btn\">Launch AI Ship</button>\n\
+         <button id=\"ai-launch-btn\" style=\"display:none;\" \
+         data-i18n=\"server.launch_ai_ship\">Launch AI Ship</button>\n\
          <div class=\"lobby-panel-wrap\">\n\
          <div id=\"station-grid\" class=\"lobby-grid\"></div>\n\
          <aside class=\"lobby-rail\"><div id=\"lobby-status-hint\"></div></aside>\n\
@@ -484,10 +599,6 @@ mod tests {
         assert!(html.contains("id=\"lobby-status-hint\""));
         assert!(html.contains("class=\"lobby-panel-wrap\""));
         assert!(
-            !html.contains("id=\"scenario-panel\""),
-            "the scenario picker is the host page's, not the lobby's"
-        );
-        assert!(
             !html.contains("id=\"canvas\""),
             "the depth count must stop at the panel's own closing tag"
         );
@@ -498,19 +609,90 @@ mod tests {
     }
 
     #[test]
-    fn the_ai_launch_button_is_removed_because_nothing_here_launches_a_mission() {
-        // Scenario selection stays on the CLI. A button that silently does
-        // nothing is worse than no button: it invites the one press that would
-        // launch a mission, and answers it with nothing at all. The monitor row
-        // (issue #1330) is not an exception to this — its buttons are BUILT by
-        // the shared renderer from a row the host pushes, so they exist exactly
-        // when something is wired behind them.
+    fn the_ai_launch_button_is_kept_because_the_surface_can_now_answer_it() {
+        // #1325 stripped it: a read-only surface with a control that silently
+        // does nothing is worse than one with no control. #1328 removed the
+        // reason — `server::bridge::apply_force_start` is no longer wasm-only —
+        // and this is the one way a crew who are all on phones can be launched
+        // from the viewscreen they are standing in front of.
+        //
+        // The monitor row (issue #1330) is not a second exception: its buttons
+        // are BUILT by the shared renderer from a row the host pushes, so they
+        // are not in this markup at all and exist exactly when something is
+        // wired behind them.
         let html = build_host_lobby_document(HOST_PAGE).unwrap();
-        assert!(!html.contains("<button"));
-        assert!(!html.contains("ai-launch-btn"));
-        // …and removing it took nothing else with it.
+        assert!(html.contains("id=\"ai-launch-btn\""));
+        // It carries the page's own string ids, so `applyToDom` names it in
+        // whatever language the room is in — the English in the markup is
+        // server.html's fallback, not this document's (AGENTS.md rule 11).
+        assert!(html.contains("data-i18n=\"server.launch_ai_ship\""));
+        // …and keeping it took nothing else with it.
         assert!(html.contains("class=\"lobby-bg\""));
         assert!(html.contains("id=\"station-grid\""));
+    }
+
+    #[test]
+    fn the_scenario_picker_is_the_host_pages_own_and_starts_hidden() {
+        // Issue #1328. Same rule as the lobby and the join panel: the page's
+        // own markup, so `gui/host-scenario-render.js` writes into the ids it
+        // expects. Hidden to start because a `--world` host has nothing to pick
+        // and never pushes, and a picker covering the lobby of such a host
+        // would be a viewscreen that never moves.
+        let html = build_host_lobby_document(HOST_PAGE).unwrap();
+        assert!(html.contains("<div id=\"scenario-panel\" style=\"display:none\">"));
+        assert!(html.contains("id=\"world-list\""));
+        assert!(html.contains("id=\"world-list-label\""));
+        assert!(html.contains("id=\"scenario-loading\""));
+        assert!(html.contains("href=\"gui/host-scenarios.css\""));
+    }
+
+    #[test]
+    fn the_pickers_host_tooling_is_removed_rather_than_hidden() {
+        // The mod-pack upload and the save importer are file inputs with
+        // page-lifetime handlers this document does not carry, and a demo build
+        // removes them outright for its own reasons. A `display: none` control
+        // is still in the DOM to be reached.
+        let html = build_host_lobby_document(HOST_PAGE).unwrap();
+        for id in [
+            "mod-pack-upload",
+            "mod-pack-file",
+            "mod-pack-btn",
+            "mod-pack-status",
+            "snapshot-import",
+            "snapshot-import-file",
+            "snapshot-import-btn",
+        ] {
+            assert!(
+                !html.contains(&format!("id=\"{id}\"")),
+                "#{id} is host tooling and must not reach the viewscreen"
+            );
+        }
+        // The removal is depth-counted: everything around the two blocks is
+        // still there, and the column did not lose its tail.
+        assert!(html.contains("id=\"world-list-label\""));
+        assert!(html.contains("id=\"scenario-loading\""));
+        assert!(html.contains("id=\"lobby-panel\""));
+    }
+
+    #[test]
+    fn a_page_with_no_scenario_panel_is_refused_by_its_own_name() {
+        // A `--lobby` host whose viewscreen cannot show the picker is a host
+        // that can never start a mission.
+        let page = "<body><div id=\"lobby-panel\">x</div><div id=\"qr-panel\">y</div></body>";
+        assert_eq!(
+            build_host_lobby_document(page),
+            Err(HostLobbyDocumentError::NoScenarioPanel)
+        );
+    }
+
+    #[test]
+    fn a_scenario_panel_that_never_closes_is_refused_by_its_own_name_too() {
+        let page = "<body><div id=\"lobby-panel\">x</div><div id=\"qr-panel\">y</div>\
+                    <div id=\"scenario-panel\"><div class=\"z\"></div></body>";
+        assert_eq!(
+            build_host_lobby_document(page),
+            Err(HostLobbyDocumentError::UnbalancedScenarioPanel)
+        );
     }
 
     #[test]
@@ -559,6 +741,7 @@ mod tests {
         assert!(html.contains("href=\"gui/tokens.css\""));
         assert!(html.contains("href=\"gui/host-lobby.css\""));
         assert!(html.contains("href=\"gui/host-qr.css\""));
+        assert!(html.contains("href=\"gui/host-scenarios.css\""));
         // Relative, not absolute: the path is what makes the served depth do the
         // resolving, exactly as it does for a pane document.
         assert!(!html.contains("href=\"/gui/"));
@@ -595,6 +778,14 @@ mod tests {
         let html = build_host_lobby_document(HOST_PAGE).unwrap();
         assert!(!html.contains("id=\"fleet-panel\""));
         assert!(!html.contains("id=\"fleet-slots\""));
+    }
+
+    #[test]
+    fn a_pushed_scenario_state_is_escaped_into_its_own_call() {
+        assert_eq!(
+            host_lobby_scenario_script(r#"{"scenarios":[],"locked":false}"#),
+            r#"window.__phoenixHostLobbyScenario('{"scenarios":[],"locked":false}')"#
+        );
     }
 
     #[test]
@@ -676,6 +867,7 @@ mod tests {
         // valid markup.
         let page = "<div id=\"lobby-panel\"><!-- a </div> in prose --><div>x</div></div>\
                     <div id=\"qr-panel\"></div>\
+                    <div id=\"scenario-panel\"><div id=\"world-list\"></div></div>\
                     <canvas id=\"trailing\"></canvas>";
         let html = build_host_lobby_document(page).unwrap();
         assert!(html.contains("<div>x</div>"));
@@ -779,13 +971,31 @@ mod tests {
             );
         }
 
+        // The picker's own ids, which gui/host-scenario-render.js writes into
+        // (issue #1328) — taken out of the same page, by the same rule.
+        for id in ["scenario-panel", "world-list", "world-list-label"] {
+            assert!(
+                html.contains(&format!("id=\"{id}\"")),
+                "the lobby document must carry #{id}, which the shared picker writes into"
+            );
+        }
+        // …minus the host tooling, which the real page really does carry.
+        assert!(page.contains("id=\"mod-pack-upload\""));
+        assert!(!html.contains("id=\"mod-pack-upload\""));
+        assert!(page.contains("id=\"snapshot-import\""));
+        assert!(!html.contains("id=\"snapshot-import\""));
+        // The only control the surface carries out of the lobby markup is the
+        // AI launch, which is now wired (issue #1328).
+        assert!(html.contains("id=\"ai-launch-btn\""));
+        assert!(!html.contains("id=\"mod-pack-btn\""));
+        assert!(!html.contains("id=\"snapshot-import-btn\""));
+
         // …and stops at each panel. `#hud-overlay` is the next full-screen
         // surface in the page and a runaway count would swallow it; the fleet
         // panel is #overlay's other child and is not this surface's business.
         assert!(!html.contains("id=\"hud-overlay\""));
         assert!(!html.contains("id=\"canvas\""));
         assert!(!html.contains("id=\"fleet-panel\""));
-        assert!(!html.contains("<button"));
 
         // Nothing in either borrowed subtree reaches the internet. This is the
         // half `the_encoder_is_the_local_copy_because_a_bridge_has_no_internet`
@@ -806,6 +1016,11 @@ mod tests {
                 JOIN_PANEL_MARKER,
                 HostLobbyDocumentError::NoJoinPanel,
                 HostLobbyDocumentError::UnbalancedJoinPanel,
+            ),
+            (
+                SCENARIO_PANEL_MARKER,
+                HostLobbyDocumentError::NoScenarioPanel,
+                HostLobbyDocumentError::UnbalancedScenarioPanel,
             ),
         ] {
             let subtree = extract_element(&page, marker, missing, unbalanced).unwrap();
@@ -856,6 +1071,14 @@ mod tests {
         assert!(
             page.contains("src=\"gui/vendor/qrcode.js\""),
             "both surfaces load the vendored encoder from the host's own server (issue #1329)"
+        );
+        assert!(
+            page.contains("href=\"gui/host-scenarios.css\""),
+            "server.html must link the shared picker stylesheet this document also links"
+        );
+        assert!(
+            !page.contains("#scenario-panel {"),
+            "the picker's rules belong in gui/host-scenarios.css, not back in server.html"
         );
     }
 }

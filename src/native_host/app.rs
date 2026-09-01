@@ -838,6 +838,22 @@ pub fn build_native_host_app(
     if cfg.bridge_profile.is_none() {
         match crate::native_host::layout_store::LayoutStore::user() {
             Some(store) => {
+                // Opening the operator's real store is the one moment to clear
+                // debris out of it. A `*.tmp` sibling can only be there because
+                // a previous host was HARD-killed between the create and the
+                // rename — an ordinary failed save removes its own — and this is
+                // a directory people browse, copy between machines and delete
+                // single entries from. Debug rather than info: a tidy-up nobody
+                // asked for is not news, and it says nothing on the run after.
+                for stale in store.sweep_temporaries() {
+                    crate::pdebug!(
+                        cfg.log,
+                        crate::logging::LogCat::Lobby,
+                        "bridge layouts: swept the stale temporary {} left behind by a host that \
+                         did not finish a write",
+                        stale.display()
+                    );
+                }
                 app.insert_resource(
                     crate::native_host::layout_store_systems::BridgeLayoutStore {
                         store,

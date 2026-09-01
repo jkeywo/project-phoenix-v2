@@ -626,6 +626,205 @@ fn a_saved_layout_that_fails_validation_is_ignored_and_the_host_still_runs() {
     );
 }
 
+// ── a --profile copied into the store (#1334 fix round) ────────────────────
+
+#[test]
+fn a_profile_copied_into_the_store_is_ignored_and_seats_no_phantom_console() {
+    // The store's directory is one an operator browses, and what it holds is a
+    // bridge profile they may hand back to `--profile` — so copying a
+    // `--profile` INTO it is an invitation this feature extends, and the file
+    // that arrives is perfectly valid. It must still be refused, because
+    // adopting it would populate `reserved` on a run NOBODY AUTHORED:
+    //
+    //  * the BenQ would be reported full at two seats nobody can see, its
+    //    Station window opened with a permanently dead half;
+    //  * every screen-row press onto it would be refused, naming consoles the
+    //    operator cannot find; and
+    //  * the first press anywhere would then hit `save`'s
+    //    `WouldDropReservations` — for ever, because the file that caused it is
+    //    never rewritten. One ship class, silently un-saveable, with the only
+    //    line in the log being the wrong sentence.
+    let scratch = Scratch::new("copied-profile");
+    std::fs::create_dir_all(scratch.store().root()).unwrap();
+    let copied = BridgeProfile {
+        version: PROFILE_VERSION,
+        displays: vec![
+            DisplayEntry {
+                id: ACME.to_string(),
+                role: ROLE_VIEWSCREEN.to_string(),
+                split: None,
+                panes: Vec::new(),
+            },
+            DisplayEntry {
+                id: BENQ.to_string(),
+                role: ROLE_STATION.to_string(),
+                split: None,
+                panes: vec![
+                    PaneSlot::for_participant("Ada"),
+                    PaneSlot::for_participant("Grace"),
+                ],
+            },
+        ],
+        touch: Vec::new(),
+        media: Vec::new(),
+    };
+    assert!(
+        copied.clone().validate().is_ok(),
+        "the fixture is a profile the flag itself would take — that is the trap"
+    );
+    let text = copied.to_toml().unwrap();
+    std::fs::write(scratch.file("alliance_destroyer"), &text).unwrap();
+
+    let mut app = booted(&scratch, DESTROYER);
+
+    assert_eq!(
+        live(&app).viewscreen(),
+        &m(DELL),
+        "the host runs on the bridge it BOOTED with — the copied file's viewscreen is not adopted"
+    );
+    assert_eq!(live(&app).roster().len(), 3, "with the hull's roster");
+    assert!(
+        live(&app).reserved_on(&m(BENQ)).is_empty(),
+        "and no phantom occupant: nothing but an authored --profile may populate `reserved`"
+    );
+    assert!(
+        live(&app).occupants_on(&m(BENQ)).is_empty(),
+        "the screen really is free, not merely free of SEATS"
+    );
+    let row = live(&app)
+        .eligibility_of(&station("weapons"))
+        .expect("weapons is on the roster");
+    assert_eq!(
+        row.choice_for(&m(BENQ)),
+        Some(crate::native_host::bridge_layout::MonitorChoice::Eligible),
+        "so the operator's own screen row offers it, rather than greying it for two \
+         consoles that are nowhere on screen"
+    );
+    assert_eq!(
+        std::fs::read_to_string(scratch.file("alliance_destroyer")).unwrap(),
+        text,
+        "and the file is left exactly where it is — an operator who put it there wants to \
+         see what they put"
+    );
+
+    // And the class is NOT un-saveable. The refused file is a file like any
+    // other unusable one: this session runs on the bridge it has, and the first
+    // arrangement made from the lobby files a real layout over it.
+    press(
+        &mut app,
+        LayoutAction::AssignStation {
+            station: station("weapons"),
+            monitor: m(BENQ),
+        },
+    );
+    assert_eq!(
+        saved(&scratch, DESTROYER).monitor_of(&station("weapons")),
+        Some(&m(BENQ)),
+        "the press saved normally, and what is on disk now IS a lobby layout"
+    );
+}
+
+// ── a disk that will not take it (#1334 fix round) ─────────────────────────
+
+#[test]
+fn a_store_that_cannot_be_written_retries_once_per_change_not_once_per_frame() {
+    // A `LayoutStoreError::Write` is almost never transient — a read-only
+    // `%APPDATA%`, a full disk, a scanner holding the file. `saved` is
+    // deliberately left alone on a failure so the next press retries, which
+    // taken alone means `saved != layout` stays true and the warning repeats at
+    // the FRAME RATE for the rest of the run, burying `LogCat::Lobby` under one
+    // sentence. The retry is keyed on the accepted change instead.
+    let scratch = Scratch::new("unwritable");
+    std::fs::create_dir_all(&scratch.0).unwrap();
+    let root = scratch.0.join("bridge-layouts");
+    // A FILE where the store's directory belongs. `create_dir_all` refuses that
+    // on every platform, which is this failure without needing a read-only
+    // volume in CI.
+    std::fs::write(&root, "not a directory").unwrap();
+
+    let mut app = host(&scratch, None);
+    app.insert_resource(BridgeLayoutStore {
+        store: LayoutStore::at(&root),
+        remembered: None,
+    });
+    fly(&mut app, DESTROYER);
+    app.update();
+
+    press(
+        &mut app,
+        LayoutAction::AssignStation {
+            station: station("helm"),
+            monitor: m(BENQ),
+        },
+    );
+
+    let refused = live(&app).clone();
+    let remembered = app
+        .world()
+        .resource::<BridgeLayoutStore>()
+        .remembered
+        .clone()
+        .expect("the class was taken up even though its store is unusable");
+    assert_eq!(
+        remembered.unsaved.as_ref(),
+        Some(&refused),
+        "the disk refused THIS arrangement, and that is what is recorded"
+    );
+    assert_ne!(
+        remembered.saved, refused,
+        "`saved` still records what is on disk, which is nothing — a bridge the file never \
+         received must not look filed"
+    );
+
+    // The operator fixes the directory. THIRTY IDLE FRAMES STILL WRITE NOTHING:
+    // the retry waits for a change, not for a frame. Without the gate the very
+    // next frame would find `saved != layout` and file it — and every frame
+    // before this one would have warned.
+    std::fs::remove_file(&root).unwrap();
+    std::fs::create_dir_all(&root).unwrap();
+    for _ in 0..30 {
+        app.update();
+    }
+    assert!(
+        !root.join("alliance_destroyer.toml").exists(),
+        "an idle bridge does not retry, however writable the directory has become"
+    );
+
+    // The next accepted change does, and recovers — the file appears, carrying
+    // both the press that failed and the one that succeeded.
+    press(
+        &mut app,
+        LayoutAction::AssignStation {
+            station: station("weapons"),
+            monitor: m(ACME),
+        },
+    );
+    let key = ShipClassKey::from_template_path(DESTROYER).unwrap();
+    let profile = LayoutStore::at(&root)
+        .load(&key)
+        .expect("it reads")
+        .expect("and there is one now");
+    let bridge = BridgeLayout::new(
+        [m(DELL), m(BENQ), m(ACME)],
+        ["helm", "weapons", "comms"].map(station),
+        &m(DELL),
+    )
+    .unwrap();
+    let on_disk = bridge.adopt_profile(&profile).0;
+    assert_eq!(on_disk.monitor_of(&station("helm")), Some(&m(BENQ)));
+    assert_eq!(on_disk.monitor_of(&station("weapons")), Some(&m(ACME)));
+    assert!(
+        app.world()
+            .resource::<BridgeLayoutStore>()
+            .remembered
+            .as_ref()
+            .expect("still remembering")
+            .unsaved
+            .is_none(),
+        "and the refusal is cleared, so a later failure is warned about again"
+    );
+}
+
 // ── --profile precedence, and the data-loss guard (criterion six) ───────────
 
 /// An authored profile: the Dell is the viewscreen, the BenQ carries two

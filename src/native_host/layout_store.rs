@@ -12,7 +12,7 @@
 //! %APPDATA%\ProjectPhoenix\bridge-layouts\alliance_destroyer.toml
 //! ```
 //!
-//! # Three properties, and each one is a rule rather than an implementation
+//! # Four properties, and each one is a rule rather than an implementation
 //!
 //! 1. **The location is injectable.** A [`LayoutStore`] is a directory and
 //!    nothing else. [`LayoutStore::user`] is the one that resolves the
@@ -31,15 +31,66 @@
 //!    truncated by a full disk meets exactly the refusals a `--profile` meets.
 //!    The caller's answer to that is a warning and today's bridge, never a
 //!    failed boot (issue #1334's acceptance criterion).
+//! 4. **The store enforces its own, narrower schema — at load, not only at
+//!    save.** A saved layout records the viewscreen and the seated station
+//!    consoles and *nothing else*. Being a valid `--profile` is not enough to
+//!    get in here, because a `--profile` is a strictly larger language and the
+//!    part of it this store cannot write is the part that does harm.
 //!
 //! # What may be saved: lobby-built layouts, and only those
 //!
-//! [`save`](LayoutStore::save) **refuses** a layout that carries reservations —
-//! the authored `--pane` surfaces a `--profile` opened, which
-//! [`BridgeLayout::reserved_on`] records and
-//! [`BridgeLayout::to_validated_profile`] does not re-emit.
+//! The store's schema is the **seats**: a `[[display]]` list in which every
+//! `[[display.pane]]` names a `station`, and no `[[touch]]` or `[[media]]`
+//! tables. Both doors enforce it, and they are the same rule facing opposite
+//! ways:
 //!
-//! That refusal is this module's half of a data-loss guard whose other half is
+//!  * [`save`](LayoutStore::save) refuses
+//!    [`LayoutStoreError::WouldDropReservations`] for a layout carrying
+//!    reservations — the authored `--pane` surfaces a `--profile` opened, which
+//!    [`BridgeLayout::reserved_on`] records and
+//!    [`BridgeLayout::to_validated_profile`] does not re-emit.
+//!  * [`load`](LayoutStore::load) refuses
+//!    [`LayoutStoreError::NotALobbyLayout`] for a *file* carrying a station-less
+//!    pane slot, a `[[touch]]` mapping or a `[[media]]` assignment.
+//!
+//! **Why the load side is not redundant.** A saved file *is* a bridge profile —
+//! that is a feature, and the directory is one an operator browses — which is a
+//! standing invitation to drop a `--profile` into it and see what happens.
+//! Without the load-side refusal, what happens is a chain: the pre-apply adopts
+//! the file, so `reserved` is populated on a run **nobody authored** (falsifying
+//! the invariant this module states three times); the bridge acquires a phantom
+//! occupant — a monitor reported full at a seat the operator cannot see, a
+//! Station window with a permanently dead half, refusals naming a console that
+//! is nowhere on screen; and the operator's first lobby press is then refused by
+//! `save`'s `WouldDropReservations`, for ever, because the file that caused it is
+//! never rewritten. One class, silently un-saveable, with the only warning in
+//! the log being the wrong sentence. Refusing the file at the door makes that
+//! whole sequence unreachable and hands the operator the two moves that fix it.
+//!
+//! # `[[touch]]` and `[[media]]`: refused, not preserved ([ai] decision)
+//!
+//! [`save`](LayoutStore::save) writes [`BridgeLayout::to_profile`] — an *empty*
+//! profile with the displays written into it — so any `[[touch]]` or `[[media]]`
+//! table an operator added to a store file is dropped by the next press.
+//! [`BridgeLayout::write_displays_into`] exists precisely so a layout can be
+//! written back *over* an existing profile, and preserving them that way was the
+//! alternative. It is not taken, for two reasons rather than one:
+//!
+//!  * **It would not actually be lossless.** `write_displays_into` replaces the
+//!    whole `[[display]]` list, so the file's `[[display.pane]]` participant
+//!    slots would still be dropped — the silent loss would survive, one table
+//!    over, and arrive through the door the reservation guard cannot see.
+//!  * It puts a read, a parse and a policy for an unparseable file onto the
+//!    **write** path, which runs on every accepted press.
+//!
+//! Refusing them at load costs the operator nothing they had — today those
+//! tables are silently wiped — and turns a silent loss into a sentence naming
+//! the remedy. What survives is the claim that is true in the direction that
+//! matters: a file this store **wrote** is a profile an operator may hand
+//! straight back to `--profile`. A `--profile` is not, in general, a file this
+//! store will **read**.
+//!
+//! Those refusals are this module's half of a data-loss guard whose other half is
 //! the *policy* in [`super::layout_store_systems`]: a `--profile` run never
 //! writes at all. Either alone would do it today; both are here because the
 //! failure they prevent is silent and permanent. Writing a `--profile`-seeded
@@ -48,7 +99,8 @@
 //! viewscreen on top of a crew member's live console — the exact failure
 //! `reserved` exists to prevent, re-introduced by the save. A layout the lobby
 //! built is reservation-free by construction (nothing but
-//! [`BridgeLayout::adopt_profile`] ever populates `reserved`, and nothing but an
+//! [`BridgeLayout::adopt_profile`] ever populates `reserved`, and — *because*
+//! [`load`](LayoutStore::load) refuses a station-less pane slot — nothing but an
 //! authored `--profile` reaches it), so this refusal costs a correct caller
 //! nothing and is unreachable from the shipped path — which is precisely the
 //! property worth pinning with a test.
@@ -71,6 +123,11 @@ pub const LAYOUTS_DIR: &str = "bridge-layouts";
 /// shape [`super::bridge_profile`] documents, and may hand it straight to
 /// `--profile`.
 pub const LAYOUT_EXTENSION: &str = "toml";
+
+/// The extension [`write_atomically`]'s in-flight temporary carries, and the one
+/// [`LayoutStore::sweep_temporaries`] clears. Named once so the writer and the
+/// sweeper cannot drift apart and leave debris nothing collects.
+pub const TEMP_EXTENSION: &str = "tmp";
 
 // ── the class key ───────────────────────────────────────────────────────────
 
@@ -112,6 +169,17 @@ pub const LAYOUT_EXTENSION: &str = "toml";
 /// is why this is a newtype and why [`LayoutStore`] takes one instead of a
 /// `&str`: there is no way to hand the store a class name it has not been
 /// through.
+///
+/// [ai] One Windows caveat, recorded rather than fixed: a hull template named
+/// for a DOS device — `con.toml`, `nul.toml`, `aux.toml`, `prn.toml`,
+/// `com1.toml` … — reduces to that reserved word, and Windows resolves
+/// `…\bridge-layouts\con.toml` to the console device rather than to a file. That
+/// class's saves therefore fail with an ordinary [`LayoutStoreError::Write`]
+/// warning and it simply never remembers its bridge, which is the same
+/// degradation an unwritable directory gets. No shipped hull is named that, the
+/// failure is loud and costs nothing else, and renaming the template fixes it —
+/// so the key deliberately does **not** grow a reserved-name escape that would
+/// make the file name stop matching the hull the operator is looking at.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ShipClassKey(String);
 
@@ -223,6 +291,12 @@ impl LayoutStore {
     /// conversion is infallible by construction, so there is no validity error
     /// to report from this side. [`load`](Self::load) re-validates anyway,
     /// because by then the file has been on a disk an operator can edit.
+    ///
+    /// `to_profile` starts from an **empty** profile, so this overwrites rather
+    /// than merges: whatever the file held before is gone. That is safe only
+    /// because [`load`](Self::load) refuses everything a merge would have had to
+    /// preserve, which is the pair explained in the
+    /// [module note](self#touch-and-media-refused-not-preserved-ai-decision).
     pub fn save(
         &self,
         class: &ShipClassKey,
@@ -257,6 +331,21 @@ impl LayoutStore {
     /// one: an unreadable file, TOML that does not parse, and a profile that no
     /// longer validates each come back typed, for a caller whose whole answer
     /// to them is a warning and the bridge it already has.
+    ///
+    /// # Two doors, outermost first
+    ///
+    /// The file is put through [`BridgeProfile::validate`] — every refusal a
+    /// hand-authored `--profile` meets — and *then* through this store's own,
+    /// narrower schema, which refuses [`LayoutStoreError::NotALobbyLayout`] for
+    /// a station-less `[[display.pane]]`, a `[[touch]]` mapping or a `[[media]]`
+    /// assignment. That order is deliberate: "this is not a bridge profile" is
+    /// the more fundamental complaint and should be the one an operator is told
+    /// first, and it keeps every existing refusal reading exactly as it did.
+    ///
+    /// The second door is what makes the invariant `save` relies on true rather
+    /// than hoped for — see the
+    /// [module note](self#what-may-be-saved-lobby-built-layouts-and-only-those)
+    /// for the phantom-occupant chain it cuts.
     pub fn load(&self, class: &ShipClassKey) -> Result<Option<ValidatedProfile>, LayoutStoreError> {
         let path = self.path_for(class);
         let text = match std::fs::read_to_string(&path) {
@@ -280,8 +369,85 @@ impl LayoutStore {
                 path: path.display().to_string(),
                 source,
             })?;
+        let found = beyond_the_stores_schema(&profile);
+        if !found.is_empty() {
+            return Err(LayoutStoreError::NotALobbyLayout {
+                path: path.display().to_string(),
+                found,
+            });
+        }
         Ok(Some(validated))
     }
+
+    /// Remove the `*.tmp` siblings a hard-killed host left in this directory,
+    /// answering what was removed.
+    ///
+    /// [`write_atomically`] removes its own temporary on either failure, so an
+    /// *ordinary* failed save leaves nothing behind. This is for the case
+    /// nothing runs to clean up after: a power cut, a taskbar close or a
+    /// `SIGKILL` landing between the create and the rename. The directory is one
+    /// an operator browses, and `alliance_destroyer.toml.5732.tmp` beside their
+    /// layouts is debris they have to reason about.
+    ///
+    /// A directory that is not there, and a file that will not delete, are both
+    /// silently nothing: this is tidying, and nothing depends on it having
+    /// worked.
+    ///
+    /// [ai] Swept by extension rather than by age, and the race that buys is
+    /// recorded rather than closed: a second host of the same user launching in
+    /// the microseconds another is between its create and its rename would
+    /// delete that temporary. The victim reports an ordinary
+    /// [`LayoutStoreError::Write`] with its **previous file untouched** and
+    /// files the arrangement again on the next accepted change — which is the
+    /// failure mode a sharing violation already has. An age threshold would need
+    /// a clock and a number, to close a window that is already a documented
+    /// no-op.
+    pub fn sweep_temporaries(&self) -> Vec<PathBuf> {
+        let Ok(entries) = std::fs::read_dir(&self.root) else {
+            return Vec::new();
+        };
+        let mut swept = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some(TEMP_EXTENSION)
+                && std::fs::remove_file(&path).is_ok()
+            {
+                swept.push(path);
+            }
+        }
+        swept.sort();
+        swept
+    }
+}
+
+/// Everything in `profile` that a **saved layout** does not record, named the
+/// way it appears in the file so the operator can go and find it.
+///
+/// Empty for a file the lobby could have written, which is what
+/// [`LayoutStore::load`] requires. See the
+/// [module note](self#what-may-be-saved-lobby-built-layouts-and-only-those).
+fn beyond_the_stores_schema(profile: &BridgeProfile) -> Vec<String> {
+    let mut found = Vec::new();
+    for display in &profile.displays {
+        for pane in &display.panes {
+            // The `--pane <NAME>` participant shape (issue #1122): a pane that
+            // belongs to no station. `BridgeLayout::to_validated_profile` never
+            // emits one, so a file holding one was not written here.
+            if pane.station.is_none() {
+                found.push(format!(
+                    "a [[display.pane]] on {:?} with no `station =` ({:?})",
+                    display.id, pane.label
+                ));
+            }
+        }
+    }
+    for touch in &profile.touch {
+        found.push(format!("a [[touch]] mapping ({:?})", touch.device));
+    }
+    for media in &profile.media {
+        found.push(format!("a [[media]] assignment ({:?})", media.surface));
+    }
+    found
 }
 
 /// Every authored surface `layout` is carrying, across all its monitors.
@@ -322,8 +488,11 @@ fn reservations(layout: &BridgeLayout) -> Vec<String> {
 ///    class at the same moment cannot write each other's temporary. Last writer
 ///    wins on the target, which is the right answer for a per-user setting.
 ///
-/// The temporary is removed on a failed rename, so a store that has been failing
-/// to save does not silently fill with debris.
+/// The temporary is removed on either failure, so a store that has been failing
+/// to save does not fill with debris. A **hard** kill between the create and the
+/// rename does leave one, because nothing runs at all — that is what
+/// [`LayoutStore::sweep_temporaries`] is for, and why the claim above is about
+/// an ordinary failure rather than about every one.
 fn write_atomically(path: &Path, contents: &str) -> std::io::Result<()> {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     std::fs::create_dir_all(dir)?;
@@ -331,7 +500,7 @@ fn write_atomically(path: &Path, contents: &str) -> std::io::Result<()> {
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "layout".to_string());
-    let temp = dir.join(format!("{stem}.{}.tmp", std::process::id()));
+    let temp = dir.join(format!("{stem}.{}.{TEMP_EXTENSION}", std::process::id()));
 
     let write = || -> std::io::Result<()> {
         let mut file = std::fs::File::create(&temp)?;
@@ -363,6 +532,14 @@ pub enum LayoutStoreError {
     /// would drop them. See the
     /// [module note](self#what-may-be-saved-lobby-built-layouts-and-only-those).
     WouldDropReservations { class: String, labels: Vec<String> },
+    /// The file parses and validates as a bridge profile, but it is not one the
+    /// lobby wrote: it carries content the store's own narrower schema does not
+    /// hold — a station-less `[[display.pane]]`, a `[[touch]]` mapping or a
+    /// `[[media]]` assignment. The mirror of
+    /// [`WouldDropReservations`](Self::WouldDropReservations) at the other door;
+    /// see the
+    /// [module note](self#what-may-be-saved-lobby-built-layouts-and-only-those).
+    NotALobbyLayout { path: String, found: Vec<String> },
     /// The file could not be written (a full disk, a read-only directory, a
     /// destination another process is holding open).
     Write { path: String, detail: String },
@@ -388,6 +565,15 @@ impl std::fmt::Display for LayoutStoreError {
                     .map(|l| format!("{l:?}"))
                     .collect::<Vec<_>>()
                     .join(", ")
+            ),
+            LayoutStoreError::NotALobbyLayout { path, found } => write!(
+                f,
+                "saved bridge layout {path} is not one the lobby wrote — it carries {}. \
+                 Delete the [[display.pane]] entries that have no `station =`, or point \
+                 --profile at this file instead: a saved layout records the viewscreen and \
+                 the seated station consoles and nothing else, so [[touch]] and [[media]] \
+                 tables belong in a --profile too",
+                found.join(", ")
             ),
             LayoutStoreError::Write { path, detail } => {
                 write!(

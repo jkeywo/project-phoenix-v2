@@ -76,6 +76,15 @@
 //! **A saved layout is therefore only ever a lobby-built one, and lobby-built
 //! layouts are reservation-free by construction**: nothing but `adopt_profile`
 //! populates `reserved`, and nothing but an authored `--profile` reaches it.
+//!
+//! That last clause is the one the *store* has to hold up, not this module: the
+//! saved file is a bridge profile in a directory an operator browses, so a
+//! `--profile` copied into it would come through
+//! [`adopt_remembered_layout`]'s call to `adopt_profile` on a run nobody
+//! authored. [`super::layout_store::LayoutStore::load`] refuses such a file
+//! ([`NotALobbyLayout`](super::layout_store::LayoutStoreError::NotALobbyLayout)),
+//! which lands in the warned-and-ignored path below like any other unusable
+//! file — so the invariant is enforced rather than assumed.
 
 use bevy::prelude::*;
 
@@ -131,6 +140,21 @@ pub struct Remembered {
     /// display merely moves or renegotiates its mode: a television waking up
     /// must not count as the bridge changing.
     pub bridge: Vec<super::bridge_profile::MonitorIdentity>,
+    /// The arrangement whose save the **disk** refused, if the last attempt
+    /// failed. `None` whenever the file and [`saved`](Self::saved) agree.
+    ///
+    /// This is what makes "retry on the next accepted change" mean *once per
+    /// change* rather than *once per frame*. A `LayoutStoreError::Write` is
+    /// almost never transient — a read-only `%APPDATA%`, a full disk, a scanner
+    /// holding the file, a class keyed to a reserved device name — and with
+    /// `saved` deliberately left alone so the next press retries,
+    /// [`remember_bridge_layout`] would otherwise find `saved != layout` on
+    /// every frame for the rest of the run and warn at the frame rate, burying
+    /// [`LogCat::Lobby`] under one sentence. Recording the refused arrangement
+    /// says "this exact bridge has already been offered to the disk and
+    /// declined", so the next *different* arrangement — including the operator
+    /// pressing again after fixing the directory — tries again and recovers.
+    pub unsaved: Option<BridgeLayout>,
 }
 
 /// Installs the two systems. Both are inert without a [`BridgeLayoutStore`].
@@ -140,7 +164,26 @@ impl Plugin for BridgeLayoutStorePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (adopt_remembered_layout, remember_bridge_layout)
+            (
+                adopt_remembered_layout,
+                // ONE ATTEMPT PER ACCEPTED CHANGE, NOT ONE PER FRAME. The
+                // writer's own rule is "the arrangement differs from what the
+                // file holds", and a failed write deliberately leaves that
+                // record alone so the next press retries — which without this
+                // condition means every frame for the rest of the run, at the
+                // frame rate, on a `%APPDATA%` that is read-only or a disk that
+                // is full. The value compare inside stays exactly where it is
+                // (see `remember_bridge_layout`'s note): change detection
+                // answers "did somebody hold a `ResMut`", so it is the cheap
+                // outer gate and the compare is the correct one.
+                //
+                // `Remembered::unsaved` is the other half, and it is the
+                // load-bearing one: this module is not the only writer of the
+                // law's resource, so a frame in which `bridge_display`'s
+                // reconcilers touch it would open this gate again with nothing
+                // for it to do.
+                remember_bridge_layout.run_if(resource_exists_and_changed::<BridgeLayoutResource>),
+            )
                 .chain()
                 // Both need the store, and one of them is the whole reason it
                 // exists — see the resource's note on presence being the switch.
@@ -164,6 +207,29 @@ impl Plugin for BridgeLayoutStorePlugin {
                 // inserts it directly), and `follow_layout_stations` opens the
                 // consoles on the next pass. That is the same one-frame settle a
                 // lobby press already takes.
+                //
+                // THE ONE ROW STILL UNORDERED, AND WHY THAT IS ACCEPTED.
+                // `host_lobby::publish_bridge_layout` also holds
+                // `ResMut<BridgeLayoutResource>` in `Update`, and it is in
+                // neither this set nor `BridgeDisplaySet` — so it is the same
+                // arbitrary-but-silent ambiguity class the `.after` above
+                // closes, and the executor may run it either side of the
+                // adoption. It is left that way on purpose:
+                //
+                //  * The cost is BOUNDED AND ONE-DIRECTIONAL. An adoption marks
+                //    the law's resource changed, and the publisher pushes any
+                //    layout that changed — so a publisher that ran first simply
+                //    republishes the adopted arrangement on the very next frame.
+                //    The lobby's monitor and screen rows are at worst one frame
+                //    late on the boot-or-pick frame, and never WRONG. The
+                //    consoles themselves are not involved: they follow
+                //    `follow_layout_stations`, which is inside the set.
+                //  * Ordering it would cost more than it buys. The publisher is
+                //    the tail of the lobby's own `Update` chain, which #1330
+                //    built around a press and the row that answers it landing in
+                //    ONE frame; dragging that chain after the whole display
+                //    adapter would move every notice's frame with it, to buy a
+                //    single frame on the one frame a class is taken up.
                 .after(super::bridge_display::BridgeDisplaySet),
         );
     }
@@ -291,6 +357,7 @@ fn adopt_remembered_layout(
         class,
         bridge: next.monitors().to_vec(),
         saved: next,
+        unsaved: None,
     });
 }
 
@@ -310,11 +377,31 @@ fn adopt_remembered_layout(
 /// display driver taking the process with it, would lose the whole session's
 /// work. The simplest trigger is also the only one with no lossy state.
 ///
-/// The `saved` value compare is what keeps that honest: this system is on the
-/// law's change detection, and change detection answers "did somebody hold a
+/// The `saved` value compare is what keeps that honest: this system is gated on
+/// the law's change detection (`resource_exists_and_changed::<BridgeLayoutResource>`,
+/// on the plugin above), and change detection answers "did somebody hold a
 /// `ResMut`", not "is the bridge different". A reconcile that rebuilt an
 /// identical layout, or a press the no-op doctrine accepted without changing
 /// anything, marks the resource and must not rewrite the file.
+///
+/// # A failing disk is warned about once per change, not once per frame
+///
+/// [ai] A failed write leaves `saved` alone on purpose, so the next accepted
+/// change tries again rather than the host giving up on the file for the rest of
+/// the run. Taken alone that is a log storm waiting for a read-only `%APPDATA%`:
+/// a `LayoutStoreError::Write` is a *persistent* condition — a locked-down
+/// profile directory, a full disk, a scanner holding the file open — so
+/// `saved != layout` would stay true and this would warn at the frame rate
+/// until the operator quit, burying [`LogCat::Lobby`] under one sentence
+/// repeated sixty times a second.
+///
+/// So the retry is keyed on the **change**, not on the frame, in two layers:
+/// the run condition above means an idle bridge does not reach this system at
+/// all, and [`Remembered::unsaved`] records the arrangement the disk refused so
+/// that a frame which *does* get here — this module is not the law's only
+/// writer — offers the disk something new or nothing. The second layer is the
+/// load-bearing one; the first is what makes the paragraph above true rather
+/// than aspirational.
 ///
 /// # A cable coming out is not the operator changing their mind
 ///
@@ -332,10 +419,14 @@ fn adopt_remembered_layout(
 /// arrangement, and the next press — the operator putting that console
 /// somewhere real, which is exactly how #1334's changed-monitor criterion says
 /// it comes back — writes the updated layout, because by then the bridge and the
-/// baseline agree again. It is also what makes the *cross-session* case right:
-/// launching on a laptop with two of four screens adopts a degraded layout and
-/// writes nothing, so the full arrangement is still there next time the bridge
-/// is whole.
+/// baseline agree again. It is also what makes the *cross-session* case right as
+/// far as it goes: launching on a laptop with two of four screens adopts a
+/// degraded layout and writes nothing, so merely **running** there does not cost
+/// the operator the arrangement they built on the full bridge. The moment they
+/// rearrange anything on the laptop, that press is filed and the file becomes
+/// the two-screen bridge — because a press is intent, and this system cannot
+/// tell "I am tidying up on the road" from "this is my layout now". The
+/// arrangement survives the trip, not the editing.
 ///
 /// Two honest edges. A press landing in the same frame as an unplug is
 /// re-baselined with it, so that one press reaches the file only on the next
@@ -344,8 +435,6 @@ fn adopt_remembered_layout(
 /// for (`ConsoleCouldNotOpen`) changes no monitor, so it *is* filed; that is a
 /// real state the operator is told about, and re-pressing writes it back.
 ///
-/// A failed write leaves `saved` alone, so the next accepted change tries again
-/// rather than the host giving up on the file for the rest of the run.
 fn remember_bridge_layout(
     mut store: ResMut<BridgeLayoutStore>,
     layout: Res<BridgeLayoutResource>,
@@ -357,6 +446,12 @@ fn remember_bridge_layout(
         return;
     };
     if remembered.saved == layout.layout {
+        return;
+    }
+    // Already offered to the disk, and declined. The next DIFFERENT arrangement
+    // tries again — including the operator's next press after they have made the
+    // directory writable, which is the recovery path.
+    if remembered.unsaved.as_ref() == Some(&layout.layout) {
         return;
     }
     let class = remembered.class.clone();
@@ -371,6 +466,7 @@ fn remember_bridge_layout(
         if let Some(remembered) = store.remembered.as_mut() {
             remembered.saved = layout.layout.clone();
             remembered.bridge = layout.layout.monitors().to_vec();
+            remembered.unsaved = None;
         }
         return;
     }
@@ -384,13 +480,24 @@ fn remember_bridge_layout(
             );
             if let Some(remembered) = store.remembered.as_mut() {
                 remembered.saved = layout.layout.clone();
+                remembered.unsaved = None;
             }
         }
-        Err(e) => crate::pwarn!(
-            log,
-            LogCat::Lobby,
-            "bridge layouts: {e}. The bridge on screen is unaffected; the next change tries again"
-        ),
+        Err(e) => {
+            crate::pwarn!(
+                log,
+                LogCat::Lobby,
+                "bridge layouts: {e}. The bridge on screen is unaffected; the next change made \
+                 from the lobby tries again"
+            );
+            // NOT `saved` — that still records what is on disk, and overwriting
+            // it would make a bridge the file never received look filed. This
+            // records what the disk refused, which is what stops the warning
+            // above repeating for an arrangement nothing has changed since.
+            if let Some(remembered) = store.remembered.as_mut() {
+                remembered.unsaved = Some(layout.layout.clone());
+            }
+        }
     }
 }
 

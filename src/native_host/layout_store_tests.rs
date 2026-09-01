@@ -12,7 +12,8 @@ use super::*;
 use crate::core::messages::StationId;
 use crate::native_host::bridge_layout::{BridgeLayout, LayoutAction, LAYOUT_SPLIT};
 use crate::native_host::bridge_profile::{
-    DisplayEntry, MonitorIdentity, PaneSlot, PROFILE_VERSION, ROLE_STATION, ROLE_VIEWSCREEN,
+    DisplayEntry, MonitorIdentity, PaneSlot, TouchMapping, PROFILE_VERSION, ROLE_STATION,
+    ROLE_VIEWSCREEN,
 };
 
 // ── fixtures ────────────────────────────────────────────────────────────────
@@ -465,6 +466,147 @@ fn a_layout_carrying_an_authored_console_is_refused_at_the_door() {
     );
 }
 
+// ── the store's OWN schema, at the load door ────────────────────────────────
+
+/// The file an operator makes by copying a `--profile` into the store
+/// directory: valid, and full of the participant slots a saved layout does not
+/// hold.
+fn a_copied_profile() -> BridgeProfile {
+    BridgeProfile {
+        version: PROFILE_VERSION,
+        displays: vec![
+            DisplayEntry {
+                id: TV.to_string(),
+                role: ROLE_VIEWSCREEN.to_string(),
+                split: None,
+                panes: Vec::new(),
+            },
+            DisplayEntry {
+                id: LEFT.to_string(),
+                role: ROLE_STATION.to_string(),
+                split: Some(LAYOUT_SPLIT),
+                panes: vec![
+                    PaneSlot::for_participant("Ada"),
+                    PaneSlot::for_participant("Grace"),
+                ],
+            },
+        ],
+        touch: Vec::new(),
+        media: Vec::new(),
+    }
+}
+
+#[test]
+fn a_profile_copied_into_the_store_is_refused_at_the_load_door() {
+    // THE MIRROR OF `save`'s REFUSAL, and the reason it is needed. The saved
+    // file IS a bridge profile and the directory is one an operator browses, so
+    // "copy your --profile in here" is an invitation this module extends. It
+    // must not be taken: `adopt_profile` would populate `reserved` on a run
+    // NOBODY AUTHORED, which is the invariant `save` leans on — and the bridge
+    // would then carry a phantom console (a screen reported full at a seat
+    // nobody can see) whose only exit is a `WouldDropReservations` refusal on
+    // every press, for ever, because the file that caused it is never rewritten.
+    let scratch = Scratch::new("copied-profile");
+    let store = scratch.store();
+    std::fs::create_dir_all(store.root()).unwrap();
+    let text = a_copied_profile().to_toml().unwrap();
+    std::fs::write(store.path_for(&destroyer()), &text).unwrap();
+
+    // It is a perfectly good `--profile` — that is the whole trap.
+    assert!(a_copied_profile().validate().is_ok());
+
+    let err = store
+        .load(&destroyer())
+        .expect_err("a --profile is not a saved layout");
+    let LayoutStoreError::NotALobbyLayout { found, .. } = &err else {
+        panic!("the refusal is the store's own, not a profile complaint: {err}");
+    };
+    assert_eq!(
+        found.len(),
+        2,
+        "both participant slots are named: {found:?}"
+    );
+    assert!(found[0].contains("Ada") && found[1].contains("Grace"));
+
+    let sentence = err.to_string();
+    assert!(
+        sentence.contains("alliance_destroyer.toml"),
+        "it names the file the operator would go and look at: {sentence}"
+    );
+    assert!(
+        sentence.contains(
+            "Delete the [[display.pane]] entries that have no `station =`, or point --profile \
+             at this file instead"
+        ),
+        "and the REMEDY, both halves of it — the warning is the only thing the operator \
+         gets: {sentence}"
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(store.path_for(&destroyer())).unwrap(),
+        text,
+        "and the file is left exactly where it is: a refusal is not a repair"
+    );
+}
+
+#[test]
+fn a_store_file_carrying_touch_or_media_is_refused_at_the_same_door() {
+    // The other half of the narrowing, and the honest answer to "`save` writes
+    // `to_profile()`, which is EMPTY plus displays". Preserving those tables
+    // through `write_displays_into` would still drop the file's participant
+    // slots one table over, and would put a read and a parse on the write path;
+    // refusing them turns a silent wipe on the next press into a sentence.
+    let scratch = Scratch::new("touch-media");
+    let store = scratch.store();
+    std::fs::create_dir_all(store.root()).unwrap();
+
+    let mut profile = assign(&bridge(), "helm", LEFT).to_profile();
+    profile.touch.push(TouchMapping {
+        device: "Elo 2201L".to_string(),
+        monitor: LEFT.to_string(),
+    });
+    std::fs::write(
+        store.path_for(&destroyer()),
+        profile.to_toml().unwrap().as_str(),
+    )
+    .unwrap();
+
+    let err = store.load(&destroyer()).expect_err("touch is not ours");
+    let LayoutStoreError::NotALobbyLayout { found, .. } = &err else {
+        panic!("{err}");
+    };
+    assert_eq!(found.len(), 1);
+    assert!(
+        found[0].contains("[[touch]]") && found[0].contains("Elo 2201L"),
+        "named as it appears in the file: {found:?}"
+    );
+    assert!(
+        err.to_string().contains("belong in a --profile too"),
+        "and the remedy covers them rather than only the panes: {err}"
+    );
+}
+
+#[test]
+fn a_file_this_store_wrote_is_one_it_will_read_back() {
+    // The narrowing must not be so tight that the store refuses its own output.
+    // Every shape the lobby can file — no consoles, one, two on one screen —
+    // goes out and comes back.
+    let scratch = Scratch::new("own-output");
+    let store = scratch.store();
+    let two_up = {
+        let l = assign(&bridge(), "helm", LEFT);
+        assign(&l, "weapons", LEFT)
+    };
+    for layout in [bridge(), assign(&bridge(), "helm", LEFT), two_up] {
+        store.save(&destroyer(), &layout).unwrap();
+        let profile = store
+            .load(&destroyer())
+            .expect("the store reads what the store wrote")
+            .expect("and there is one");
+        assert_eq!(bridge().adopt_profile(&profile).0, layout);
+    }
+}
+
 // ── the write itself ────────────────────────────────────────────────────────
 
 #[test]
@@ -500,10 +642,51 @@ fn saving_twice_replaces_the_file_and_leaves_no_temporary_behind() {
 }
 
 #[test]
+fn a_hard_kills_leftover_temporary_is_swept_and_the_layouts_beside_it_are_not() {
+    // `write_atomically` removes its own temporary on either failure, so debris
+    // means a host that never got to run any code at all: a power cut, a taskbar
+    // close, a `SIGKILL` between the create and the rename. Nothing else
+    // collects it, and this is a directory an operator browses.
+    let scratch = Scratch::new("sweep");
+    let store = scratch.store();
+    store
+        .save(&destroyer(), &assign(&bridge(), "helm", LEFT))
+        .unwrap();
+    let debris = store.root().join("alliance_destroyer.toml.4321.tmp");
+    std::fs::write(&debris, "half a fi").unwrap();
+    std::fs::write(store.root().join("alliance_cruiser.toml.7.tmp"), "").unwrap();
+
+    let swept = store.sweep_temporaries();
+    assert_eq!(swept.len(), 2, "both, not just the one with a live sibling");
+    assert!(!debris.exists());
+
+    let left: Vec<String> = std::fs::read_dir(store.root())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+        .collect();
+    assert_eq!(
+        left,
+        vec!["alliance_destroyer.toml".to_string()],
+        "and the saved layout beside it is untouched — this sweeps debris, not bridges"
+    );
+
+    // A second sweep has nothing to do, and a store with no directory at all is
+    // not an error: this is tidying, and nothing depends on it having worked.
+    assert!(store.sweep_temporaries().is_empty());
+    assert!(LayoutStore::at(scratch.0.join("never-created"))
+        .sweep_temporaries()
+        .is_empty());
+}
+
+#[test]
 fn the_saved_file_is_a_bridge_profile_an_operator_could_hand_back_to_the_flag() {
     // It is not an internal state dump: what is written is the same TOML
     // `--profile` reads, which is what makes "copy your layout to the other
     // machine" and "open it and see which monitor is the viewscreen" work.
+    //
+    // ONE WAY ONLY, and the tests above are the other direction: a file this
+    // store wrote is a profile the flag will take, but a profile is not in
+    // general a file this store will read.
     let scratch = Scratch::new("shape");
     let store = scratch.store();
     let path = store

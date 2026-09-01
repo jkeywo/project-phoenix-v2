@@ -12,8 +12,8 @@ use super::*;
 use crate::core::messages::StationId;
 use crate::native_host::bridge_layout::{BridgeLayout, LayoutAction, LAYOUT_SPLIT};
 use crate::native_host::bridge_profile::{
-    DisplayEntry, MonitorIdentity, PaneSlot, TouchMapping, PROFILE_VERSION, ROLE_STATION,
-    ROLE_VIEWSCREEN,
+    DisplayEntry, MonitorIdentity, PaneSlot, PaneSplit, TouchMapping, PROFILE_VERSION,
+    ROLE_STATION, ROLE_VIEWSCREEN,
 };
 
 // ── fixtures ────────────────────────────────────────────────────────────────
@@ -580,10 +580,136 @@ fn a_store_file_carrying_touch_or_media_is_refused_at_the_same_door() {
         found[0].contains("[[touch]]") && found[0].contains("Elo 2201L"),
         "named as it appears in the file: {found:?}"
     );
+    let sentence = err.to_string();
     assert!(
-        err.to_string().contains("belong in a --profile too"),
-        "and the remedy covers them rather than only the panes: {err}"
+        sentence.contains("Move every [[touch]] table into a --profile of your own"),
+        "and the remedy is the one THIS file needs: {sentence}"
     );
+    assert!(
+        !sentence.contains("[[display.pane]]"),
+        "not the pane clause — this file has no station-less pane to delete, and telling \
+         an operator to go and delete entries their file does not contain is how a remedy \
+         stops being read: {sentence}"
+    );
+}
+
+#[test]
+fn the_remedy_names_only_the_moves_this_file_actually_needs() {
+    // The warning is the ONLY thing the operator gets — the file is ignored for
+    // the run and their first press files a layout over it — so the sentence has
+    // to be about their file. One blended sentence naming every refusal class
+    // was the alternative, and it told a touch-only file's owner to delete pane
+    // entries that were not there while never mentioning the table that was.
+    //
+    // Each class is asserted through the RENDERED sentence rather than through
+    // the composer, because the sentence is the artefact.
+    let scratch = Scratch::new("remedy");
+    let store = scratch.store();
+    std::fs::create_dir_all(store.root()).unwrap();
+
+    let tail = ": a saved layout records the viewscreen and the seated station consoles and \
+                nothing else";
+    let refusal = |profile: BridgeProfile| -> String {
+        std::fs::write(store.path_for(&destroyer()), profile.to_toml().unwrap()).unwrap();
+        store
+            .load(&destroyer())
+            .expect_err("the store's own schema refuses it")
+            .to_string()
+    };
+
+    // 1. Station-less panes only — the copied `--profile`.
+    let panes = refusal(a_copied_profile());
+    assert!(
+        panes.contains(&format!(
+            "Delete the [[display.pane]] entries that have no `station =`, or point --profile \
+             at this file instead{tail}"
+        )),
+        "{panes}"
+    );
+
+    // 2. A `[[media]]` assignment only — no pane clause, and the table named is
+    //    the one that is there rather than both.
+    let mut with_media = assign(&bridge(), "helm", LEFT).to_profile();
+    with_media
+        .media
+        .push(crate::native_host::bridge_media::MediaSurfaceEntry {
+            surface: "viewscreen".to_string(),
+            camera: Some("camera:Logitech BRIO".to_string()),
+            microphones: Vec::new(),
+            outputs: Vec::new(),
+            allow_shared: Vec::new(),
+        });
+    let media = refusal(with_media);
+    assert!(
+        media.contains(&format!(
+            "Move every [[media]] table into a --profile of your own, or point --profile at \
+             this file instead{tail}"
+        )),
+        "{media}"
+    );
+
+    // 3. All three at once: one clause each, in file order, and the `--profile`
+    //    tail once.
+    let mut everything = a_copied_profile();
+    everything.touch.push(TouchMapping {
+        device: "Elo 2201L".to_string(),
+        monitor: LEFT.to_string(),
+    });
+    everything
+        .media
+        .push(crate::native_host::bridge_media::MediaSurfaceEntry {
+            surface: "viewscreen".to_string(),
+            camera: Some("camera:Logitech BRIO".to_string()),
+            microphones: Vec::new(),
+            outputs: Vec::new(),
+            allow_shared: Vec::new(),
+        });
+    let all = refusal(everything);
+    assert!(
+        all.contains(&format!(
+            "Delete the [[display.pane]] entries that have no `station =`, or move every \
+             [[touch]] and [[media]] table into a --profile of your own, or point --profile \
+             at this file instead{tail}"
+        )),
+        "{all}"
+    );
+    assert_eq!(
+        all.matches("point --profile at this file instead").count(),
+        1,
+        "the move that always works is the tail, said once: {all}"
+    );
+}
+
+/// A file that carves `LEFT` the way the **lobby** cannot: `stacked`. There is
+/// no split verb in `LayoutAction`, so the only way a live layout carries a
+/// non-default axis is a file that authored one — and it is still a file this
+/// store's own schema accepts, because every pane names a station.
+fn stacked_left(stations: &[&str]) -> ValidatedProfile {
+    BridgeProfile {
+        version: PROFILE_VERSION,
+        displays: vec![
+            DisplayEntry {
+                id: TV.to_string(),
+                role: ROLE_VIEWSCREEN.to_string(),
+                split: None,
+                panes: Vec::new(),
+            },
+            DisplayEntry {
+                id: LEFT.to_string(),
+                role: ROLE_STATION.to_string(),
+                split: Some(PaneSplit::Stacked),
+                panes: stations
+                    .iter()
+                    .copied()
+                    .map(PaneSlot::for_station)
+                    .collect(),
+            },
+        ],
+        touch: Vec::new(),
+        media: Vec::new(),
+    }
+    .validate()
+    .expect("a stacked screen of seated stations is a valid profile")
 }
 
 #[test]
@@ -591,19 +717,49 @@ fn a_file_this_store_wrote_is_one_it_will_read_back() {
     // The narrowing must not be so tight that the store refuses its own output.
     // Every shape the lobby can file — no consoles, one, two on one screen —
     // goes out and comes back.
+    //
+    // INCLUDING THE AXIS THE SCREEN IS CARVED ON, on one console as well as on
+    // two (issue #1334's fix round). A one-pane `[[display]]` used to be written
+    // without its `split`, which read as tidiness and was a silent drop: an
+    // operator's `stacked` screen survived only while it held two consoles, and
+    // the first save that caught it holding one wrote the axis out of the file
+    // for good — with no verb anywhere in the lobby to put it back.
     let scratch = Scratch::new("own-output");
     let store = scratch.store();
     let two_up = {
         let l = assign(&bridge(), "helm", LEFT);
         assign(&l, "weapons", LEFT)
     };
-    for layout in [bridge(), assign(&bridge(), "helm", LEFT), two_up] {
+    let one_stacked = bridge().adopt_profile(&stacked_left(&["helm"])).0;
+    let two_stacked = bridge()
+        .adopt_profile(&stacked_left(&["helm", "weapons"]))
+        .0;
+    assert_eq!(
+        one_stacked.split_on(&m(LEFT)),
+        PaneSplit::Stacked,
+        "the fixture really is carrying an axis the lobby cannot produce"
+    );
+
+    for layout in [
+        bridge(),
+        assign(&bridge(), "helm", LEFT),
+        two_up,
+        one_stacked,
+        two_stacked,
+    ] {
         store.save(&destroyer(), &layout).unwrap();
         let profile = store
             .load(&destroyer())
             .expect("the store reads what the store wrote")
             .expect("and there is one");
-        assert_eq!(bridge().adopt_profile(&profile).0, layout);
+        let (reloaded, notes) = bridge().adopt_profile(&profile);
+        assert_eq!(notes, Vec::new(), "nothing degraded: {notes:?}");
+        assert_eq!(reloaded, layout);
+        assert_eq!(
+            reloaded.split_on(&m(LEFT)),
+            layout.split_on(&m(LEFT)),
+            "and the screen comes back on the axis it was carved on"
+        );
     }
 }
 
@@ -655,24 +811,38 @@ fn a_hard_kills_leftover_temporary_is_swept_and_the_layouts_beside_it_are_not() 
     let debris = store.root().join("alliance_destroyer.toml.4321.tmp");
     std::fs::write(&debris, "half a fi").unwrap();
     std::fs::write(store.root().join("alliance_cruiser.toml.7.tmp"), "").unwrap();
+    // NOT debris: this directory is one an operator opens, and a `.tmp` that is
+    // not the writer's own `<name>.<pid>.tmp` shape is a file somebody put here.
+    // Sweeping by extension alone would delete it on the next launch, silently.
+    let theirs = store.root().join("notes.tmp");
+    std::fs::write(&theirs, "which screen is the BenQ again").unwrap();
 
     let swept = store.sweep_temporaries();
     assert_eq!(swept.len(), 2, "both, not just the one with a live sibling");
     assert!(!debris.exists());
+    assert!(
+        theirs.exists(),
+        "and the operator's own note is still there — this sweeps THIS writer's debris"
+    );
 
-    let left: Vec<String> = std::fs::read_dir(store.root())
+    let mut left: Vec<String> = std::fs::read_dir(store.root())
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
         .collect();
+    left.sort();
     assert_eq!(
         left,
-        vec!["alliance_destroyer.toml".to_string()],
+        vec![
+            "alliance_destroyer.toml".to_string(),
+            "notes.tmp".to_string()
+        ],
         "and the saved layout beside it is untouched — this sweeps debris, not bridges"
     );
-
-    // A second sweep has nothing to do, and a store with no directory at all is
-    // not an error: this is tidying, and nothing depends on it having worked.
+    // A second sweep has nothing to do — the note is not debris on this pass
+    // either — and a store with no directory at all is not an error: this is
+    // tidying, and nothing depends on it having worked.
     assert!(store.sweep_temporaries().is_empty());
+    assert!(theirs.exists());
     assert!(LayoutStore::at(scratch.0.join("never-created"))
         .sweep_temporaries()
         .is_empty());

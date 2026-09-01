@@ -735,20 +735,7 @@ fn a_store_that_cannot_be_written_retries_once_per_change_not_once_per_frame() {
     // the FRAME RATE for the rest of the run, burying `LogCat::Lobby` under one
     // sentence. The retry is keyed on the accepted change instead.
     let scratch = Scratch::new("unwritable");
-    std::fs::create_dir_all(&scratch.0).unwrap();
-    let root = scratch.0.join("bridge-layouts");
-    // A FILE where the store's directory belongs. `create_dir_all` refuses that
-    // on every platform, which is this failure without needing a read-only
-    // volume in CI.
-    std::fs::write(&root, "not a directory").unwrap();
-
-    let mut app = host(&scratch, None);
-    app.insert_resource(BridgeLayoutStore {
-        store: LayoutStore::at(&root),
-        remembered: None,
-    });
-    fly(&mut app, DESTROYER);
-    app.update();
+    let (mut app, root) = host_with_an_unwritable_store(&scratch);
 
     press(
         &mut app,
@@ -822,6 +809,174 @@ fn a_store_that_cannot_be_written_retries_once_per_change_not_once_per_frame() {
             .unsaved
             .is_none(),
         "and the refusal is cleared, so a later failure is warned about again"
+    );
+}
+
+/// A host whose store directory cannot be created: a **file** sits where the
+/// directory belongs, which `create_dir_all` refuses on every platform. That is
+/// a read-only `%APPDATA%` without needing one in CI.
+///
+/// Answers the app and the path of the blocking file, which a test removes to
+/// let the writes through.
+fn host_with_an_unwritable_store(scratch: &Scratch) -> (App, std::path::PathBuf) {
+    std::fs::create_dir_all(&scratch.0).unwrap();
+    let root = scratch.0.join("bridge-layouts");
+    std::fs::write(&root, "not a directory").unwrap();
+
+    let mut app = host(scratch, None);
+    app.insert_resource(BridgeLayoutStore {
+        store: LayoutStore::at(&root),
+        remembered: None,
+    });
+    fly(&mut app, DESTROYER);
+    app.update();
+    (app, root)
+}
+
+fn unsaved_record(app: &App) -> Option<BridgeLayout> {
+    app.world()
+        .resource::<BridgeLayoutStore>()
+        .remembered
+        .as_ref()
+        .expect("the class was taken up")
+        .unsaved
+        .clone()
+}
+
+#[test]
+fn undoing_a_refused_change_and_making_it_again_files_it() {
+    // THE OPERATOR'S OWN RECOVERY, and the one the warning promises them. A
+    // press is refused by the disk (`%APPDATA%` locked down, a scanner holding
+    // the file); they put the bridge back the way it was while they go and fix
+    // it; then they make the same change again.
+    //
+    // That third press produces the arrangement the disk refused — NOTHING ELSE
+    // CAN, because undo-then-redo is the only path back to it — so a refusal
+    // record that only ever cleared on a successful write would suppress it, and
+    // every press after it, for the rest of the run. The session would end with
+    // one bridge on screen and another on disk, after a log line that had said
+    // the next change would try again.
+    let scratch = Scratch::new("undo-redo");
+    let (mut app, root) = host_with_an_unwritable_store(&scratch);
+
+    press(
+        &mut app,
+        LayoutAction::AssignStation {
+            station: station("helm"),
+            monitor: m(BENQ),
+        },
+    );
+    let refused = live(&app).clone();
+    assert_eq!(
+        unsaved_record(&app).as_ref(),
+        Some(&refused),
+        "the disk refused this arrangement, and that is what is recorded"
+    );
+
+    // They fix the directory, then put the bridge back — which is not a change
+    // the file needs, because the file has never held anything else.
+    std::fs::remove_file(&root).unwrap();
+    std::fs::create_dir_all(&root).unwrap();
+    press(
+        &mut app,
+        LayoutAction::UnassignStation {
+            station: station("helm"),
+        },
+    );
+    assert!(
+        !root.join("alliance_destroyer.toml").exists(),
+        "the undo is not itself a change to file: what is on screen is what the disk holds"
+    );
+    assert_eq!(
+        unsaved_record(&app),
+        None,
+        "and with the screen and the disk agreeing there is nothing outstanding, so the \
+         refusal is cleared rather than left standing against an arrangement the operator \
+         may well make again"
+    );
+
+    // The redo: the same press, the same arrangement, ONE new attempt — and it
+    // lands, because the directory is writable now.
+    press(
+        &mut app,
+        LayoutAction::AssignStation {
+            station: station("helm"),
+            monitor: m(BENQ),
+        },
+    );
+    let key = ShipClassKey::from_template_path(DESTROYER).unwrap();
+    let profile = LayoutStore::at(&root)
+        .load(&key)
+        .expect("it reads")
+        .expect("and there is one now");
+    let bridge = BridgeLayout::new(
+        [m(DELL), m(BENQ), m(ACME)],
+        ["helm", "weapons", "comms"].map(station),
+        &m(DELL),
+    )
+    .unwrap();
+    assert_eq!(
+        bridge
+            .adopt_profile(&profile)
+            .0
+            .monitor_of(&station("helm")),
+        Some(&m(BENQ)),
+        "the retry the warning promised actually happened"
+    );
+    assert_eq!(
+        unsaved_record(&app),
+        None,
+        "and nothing is outstanding after a save that landed"
+    );
+}
+
+#[test]
+fn a_second_frame_carrying_the_same_refused_arrangement_offers_it_nothing() {
+    // THE SUPPRESSION BRANCH ITSELF, which the run condition alone does not
+    // reach: an idle bridge never gets here, but this module is not the law's
+    // only writer, so `bridge_display`'s reconcilers holding a `ResMut` open the
+    // gate on a frame that changed no arrangement at all. Without the refusal
+    // record such a frame would re-offer the bridge the disk has already
+    // declined and warn again — at the rate the other writers touch the
+    // resource, for the rest of the run.
+    //
+    // The observable is the FILE: the directory is repaired first, so a frame
+    // that reached the writer would leave a layout behind. Nothing appears.
+    let scratch = Scratch::new("same-arrangement");
+    let (mut app, root) = host_with_an_unwritable_store(&scratch);
+
+    press(
+        &mut app,
+        LayoutAction::AssignStation {
+            station: station("helm"),
+            monitor: m(BENQ),
+        },
+    );
+    let refused = live(&app).clone();
+    assert_eq!(unsaved_record(&app).as_ref(), Some(&refused));
+
+    std::fs::remove_file(&root).unwrap();
+    std::fs::create_dir_all(&root).unwrap();
+    for _ in 0..3 {
+        // Another writer's frame: the resource is marked changed, the layout is
+        // not touched. This is what `bridge_display::reconcile_layout` does on a
+        // frame that rebuilt an identical arrangement.
+        app.world_mut()
+            .resource_mut::<BridgeLayoutResource>()
+            .set_changed();
+        app.update();
+    }
+
+    assert!(
+        !root.join("alliance_destroyer.toml").exists(),
+        "the arrangement has already been offered to the disk and declined, so a frame \
+         carrying that same one again has nothing to say"
+    );
+    assert_eq!(
+        unsaved_record(&app).as_ref(),
+        Some(&refused),
+        "and the record still stands — it is cleared by the bridge changing, not by a frame \
+         passing"
     );
 }
 

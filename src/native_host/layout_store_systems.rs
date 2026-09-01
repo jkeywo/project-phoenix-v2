@@ -84,7 +84,10 @@
 //! authored. [`super::layout_store::LayoutStore::load`] refuses such a file
 //! ([`NotALobbyLayout`](super::layout_store::LayoutStoreError::NotALobbyLayout)),
 //! which lands in the warned-and-ignored path below like any other unusable
-//! file — so the invariant is enforced rather than assumed.
+//! file — so the invariant is enforced rather than assumed. Ignored, with the
+//! file left on disk, is as far as that goes: the first press from the lobby
+//! files a saved layout over it, so the warning is the operator's one chance to
+//! move what is in it somewhere it belongs.
 
 use bevy::prelude::*;
 
@@ -152,8 +155,16 @@ pub struct Remembered {
     /// every frame for the rest of the run and warn at the frame rate, burying
     /// [`LogCat::Lobby`] under one sentence. Recording the refused arrangement
     /// says "this exact bridge has already been offered to the disk and
-    /// declined", so the next *different* arrangement — including the operator
-    /// pressing again after fixing the directory — tries again and recovers.
+    /// declined", so a frame that reaches the writer with *that same* bridge
+    /// again has nothing to offer and says nothing.
+    ///
+    /// It is a record of one arrangement, not a verdict on the class, and it is
+    /// **cleared the moment the live bridge is back to what the disk holds** —
+    /// see [`remember_bridge_layout`]'s note on the undo. Without that, the
+    /// operator's most natural recovery (put it back, then try again) would meet
+    /// a suppression that no press of theirs could ever lift: nothing but the
+    /// refused arrangement itself comes back from an undo-then-redo, and the one
+    /// line in the log had promised a retry.
     pub unsaved: Option<BridgeLayout>,
 }
 
@@ -337,11 +348,18 @@ fn adopt_remembered_layout(
             // file stays where it is — an operator who hand-edited it wants to
             // see what they wrote, not to find it deleted — and this session
             // runs on the bridge it booted with.
+            //
+            // "Left where it is" is not "kept", and the warning says so: this
+            // run ignores the file, and the operator's first press from the
+            // lobby files a lobby layout over it. So a refused file costs one
+            // session's arrangement rather than the class — and the sentence
+            // below is the only chance they get to save what is in it.
             crate::pwarn!(
                 log,
                 LogCat::Lobby,
-                "bridge layouts: {e} — it is ignored for this run and the bridge keeps the \
-                 arrangement it booted with"
+                "bridge layouts: {e} — it is ignored for this run, the bridge keeps the \
+                 arrangement it booted with, and the first change made from the lobby files a \
+                 saved layout over it"
             );
             reconciled
         }
@@ -403,6 +421,18 @@ fn adopt_remembered_layout(
 /// load-bearing one; the first is what makes the paragraph above true rather
 /// than aspirational.
 ///
+/// [ai] And the record is **cleared as soon as the live bridge is what the disk
+/// holds again**, which is the difference between "once per change" and "never
+/// again". The operator's own recovery from a failed write is to put the bridge
+/// back and try once more, and the retry *is* the arrangement the disk refused —
+/// no other press produces it. A record that only ever cleared on a successful
+/// write would therefore swallow that press and every one like it for the rest
+/// of the run, ending the session with one bridge on screen and another on
+/// disk, after a warning that had promised a retry. Clearing at the
+/// nothing-to-do return costs the storm guard nothing, because reaching that
+/// return means the file and the screen agree and a warning is a whole accepted
+/// change away.
+///
 /// # A cable coming out is not the operator changing their mind
 ///
 /// [ai] The saved layout is the operator's **intent**, and the law's resource
@@ -446,11 +476,31 @@ fn remember_bridge_layout(
         return;
     };
     if remembered.saved == layout.layout {
+        // THE DISK ALREADY HOLDS WHAT IS ON SCREEN, so there is nothing
+        // outstanding — and that includes a refusal the operator has since
+        // undone. Clearing the record here is what makes the retry promised in
+        // the warning below reachable by the one move an operator actually
+        // makes: a failed press, then putting the bridge back, then trying
+        // again. That third press produces the SAME arrangement the disk
+        // refused — nothing else can produce it — so a record left standing
+        // would suppress it, and every press after it, for the rest of the run.
+        //
+        // It cannot re-open the log storm: reaching this line means the live
+        // layout IS `saved`, so the warning below is still a whole accepted
+        // change away, and a frame that merely re-marks the resource lands back
+        // here.
+        if remembered.unsaved.is_some() {
+            if let Some(remembered) = store.remembered.as_mut() {
+                remembered.unsaved = None;
+            }
+        }
         return;
     }
-    // Already offered to the disk, and declined. The next DIFFERENT arrangement
-    // tries again — including the operator's next press after they have made the
-    // directory writable, which is the recovery path.
+    // Already offered to the disk, and declined. A frame carrying that same
+    // arrangement again — this module is not the law's only writer — has
+    // nothing new to offer, so it is silent. Any arrangement that is not this
+    // one tries again, including the operator's next press after they have made
+    // the directory writable.
     if remembered.unsaved.as_ref() == Some(&layout.layout) {
         return;
     }

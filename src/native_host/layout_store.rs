@@ -65,7 +65,15 @@
 //! `save`'s `WouldDropReservations`, for ever, because the file that caused it is
 //! never rewritten. One class, silently un-saveable, with the only warning in
 //! the log being the wrong sentence. Refusing the file at the door makes that
-//! whole sequence unreachable and hands the operator the two moves that fix it.
+//! whole sequence unreachable and hands the operator the moves that fix it.
+//!
+//! **What "refused" costs, stated honestly.** The file is left where it is —
+//! an operator who hand-edited it wants to see what they wrote — but it is
+//! ignored for this run, and their first press from the lobby files a saved
+//! layout over it. So a refused file costs one session's arrangement rather
+//! than the class, and the warning is the one chance to act on it before the
+//! press. That is why the sentence carries the remedy rather than only the
+//! complaint.
 //!
 //! # `[[touch]]` and `[[media]]`: refused, not preserved ([ai] decision)
 //!
@@ -83,12 +91,15 @@
 //!  * It puts a read, a parse and a policy for an unparseable file onto the
 //!    **write** path, which runs on every accepted press.
 //!
-//! Refusing them at load costs the operator nothing they had — today those
-//! tables are silently wiped — and turns a silent loss into a sentence naming
-//! the remedy. What survives is the claim that is true in the direction that
-//! matters: a file this store **wrote** is a profile an operator may hand
-//! straight back to `--profile`. A `--profile` is not, in general, a file this
-//! store will **read**.
+//! Refusing them at load does not *save* those tables: the file is ignored for
+//! the run and the operator's first press files a saved layout over it, so they
+//! are gone by the end of the session either way. What changes is that the loss
+//! is announced before it happens, by a sentence naming where those tables
+//! belong, rather than discovered afterwards by an operator wondering why their
+//! touchscreen stopped working. What survives is the claim that is true in the
+//! direction that matters: a file this store **wrote** is a profile an operator
+//! may hand straight back to `--profile`. A `--profile` is not, in general, a
+//! file this store will **read**.
 //!
 //! Those refusals are this module's half of a data-loss guard whose other half is
 //! the *policy* in [`super::layout_store_systems`]: a `--profile` run never
@@ -124,7 +135,8 @@ pub const LAYOUTS_DIR: &str = "bridge-layouts";
 /// `--profile`.
 pub const LAYOUT_EXTENSION: &str = "toml";
 
-/// The extension [`write_atomically`]'s in-flight temporary carries, and the one
+/// The extension [`write_atomically`]'s in-flight temporary carries, at the end
+/// of the `<file name>.<process id>.tmp` shape
 /// [`LayoutStore::sweep_temporaries`] clears. Named once so the writer and the
 /// sweeper cannot drift apart and leave debris nothing collects.
 pub const TEMP_EXTENSION: &str = "tmp";
@@ -393,7 +405,14 @@ impl LayoutStore {
     /// silently nothing: this is tidying, and nothing depends on it having
     /// worked.
     ///
-    /// [ai] Swept by extension rather than by age, and the race that buys is
+    /// What is swept is the **writer's own name shape** —
+    /// `<file name>.<process id>.tmp`, [`names_a_temporary`] — and not every
+    /// `*.tmp` in the directory. This is a directory an operator opens, so their
+    /// own `notes.tmp` beside their layouts is a file this has no business
+    /// deleting; matching on the extension alone would take it on the next
+    /// launch, silently, with nothing but a debug line to say so.
+    ///
+    /// [ai] Swept by name rather than by age, and the race that buys is
     /// recorded rather than closed: a second host of the same user launching in
     /// the microseconds another is between its create and its rename would
     /// delete that temporary. The victim reports an ordinary
@@ -409,9 +428,11 @@ impl LayoutStore {
         let mut swept = Vec::new();
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some(TEMP_EXTENSION)
-                && std::fs::remove_file(&path).is_ok()
-            {
+            let is_debris = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(names_a_temporary);
+            if is_debris && std::fs::remove_file(&path).is_ok() {
                 swept.push(path);
             }
         }
@@ -427,27 +448,92 @@ impl LayoutStore {
 /// [`LayoutStore::load`] requires. See the
 /// [module note](self#what-may-be-saved-lobby-built-layouts-and-only-those).
 fn beyond_the_stores_schema(profile: &BridgeProfile) -> Vec<String> {
+    // DESTRUCTURED, so that a field added to `BridgeProfile` is a BUILD FAILURE
+    // here rather than a silent wipe. This function is the whole of the store's
+    // schema: anything it does not name is a table `save` overwrites out of the
+    // file on the next press (`to_profile` starts from an empty profile), so a
+    // door that hand-walked the fields would go on accepting the one thing
+    // nobody had thought about yet. `version` is the profile's own and is
+    // checked by `validate` a few lines up the call.
+    let BridgeProfile {
+        version: _,
+        displays,
+        touch,
+        media,
+    } = profile;
     let mut found = Vec::new();
-    for display in &profile.displays {
+    for display in displays {
         for pane in &display.panes {
             // The `--pane <NAME>` participant shape (issue #1122): a pane that
             // belongs to no station. `BridgeLayout::to_validated_profile` never
             // emits one, so a file holding one was not written here.
             if pane.station.is_none() {
                 found.push(format!(
-                    "a [[display.pane]] on {:?} with no `station =` ({:?})",
+                    "a {PANE_TABLE} on {:?} with no `station =` ({:?})",
                     display.id, pane.label
                 ));
             }
         }
     }
-    for touch in &profile.touch {
-        found.push(format!("a [[touch]] mapping ({:?})", touch.device));
+    for touch in touch {
+        found.push(format!("a {TOUCH_TABLE} mapping ({:?})", touch.device));
     }
-    for media in &profile.media {
-        found.push(format!("a [[media]] assignment ({:?})", media.surface));
+    for media in media {
+        found.push(format!("a {MEDIA_TABLE} assignment ({:?})", media.surface));
     }
     found
+}
+
+/// The three table names [`beyond_the_stores_schema`] can report, spelled the
+/// way they appear in the file.
+///
+/// Named once because they are used twice: to *say what was found*, and — by
+/// [`LayoutStoreError::NotALobbyLayout`]'s remedy — to work out **which
+/// imperative to give the operator**. A remedy assembled from a different
+/// spelling than the finding would eventually tell somebody to delete a table
+/// their file does not contain, which is the defect this pair exists to close.
+const PANE_TABLE: &str = "[[display.pane]]";
+/// See [`PANE_TABLE`].
+const TOUCH_TABLE: &str = "[[touch]]";
+/// See [`PANE_TABLE`].
+const MEDIA_TABLE: &str = "[[media]]";
+
+/// The moves that fix `found`, composed from what is actually **in** it.
+///
+/// One blended sentence naming every refusal class was the alternative, and it
+/// is wrong in the ordinary case rather than in an exotic one: an operator whose
+/// file carries a `[[touch]]` mapping and nothing else was told to "delete the
+/// `[[display.pane]]` entries that have no `station =`" — entries their file
+/// does not contain — and was never told what to do with the table that was
+/// actually refused. So each clause appears only when its own class was found,
+/// and the one move that always works (`--profile`) is the tail.
+fn remedy_for(found: &[String]) -> String {
+    let present = |table: &str| found.iter().any(|f| f.contains(table));
+    let mut clauses: Vec<String> = Vec::new();
+    if present(PANE_TABLE) {
+        clauses.push(format!(
+            "delete the {PANE_TABLE} entries that have no `station =`"
+        ));
+    }
+    let tables: Vec<&str> = [TOUCH_TABLE, MEDIA_TABLE]
+        .into_iter()
+        .filter(|t| present(t))
+        .collect();
+    if !tables.is_empty() {
+        clauses.push(format!(
+            "move every {} table into a --profile of your own",
+            tables.join(" and ")
+        ));
+    }
+    // Always available, and the only one that keeps the file as it stands.
+    clauses.push("point --profile at this file instead".to_string());
+
+    let mut remedy = clauses.join(", or ");
+    // It opens a sentence. Every clause above starts with an ASCII verb.
+    if let Some(first) = remedy.get_mut(0..1) {
+        first.make_ascii_uppercase();
+    }
+    remedy
 }
 
 /// Every authored surface `layout` is carrying, across all its monitors.
@@ -500,6 +586,8 @@ fn write_atomically(path: &Path, contents: &str) -> std::io::Result<()> {
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "layout".to_string());
+    // `<file name>.<process id>.tmp`. `names_a_temporary` is the reader of this
+    // shape and the two are a pair — see [`LayoutStore::sweep_temporaries`].
     let temp = dir.join(format!("{stem}.{}.{TEMP_EXTENSION}", std::process::id()));
 
     let write = || -> std::io::Result<()> {
@@ -516,6 +604,25 @@ fn write_atomically(path: &Path, contents: &str) -> std::io::Result<()> {
         return Err(e);
     }
     Ok(())
+}
+
+/// Whether `name` is a temporary [`write_atomically`] left behind:
+/// `<file name>.<process id>.`[`TEMP_EXTENSION`].
+///
+/// The pid component is required, and required to be digits, so that this
+/// matches the writer's own output and nothing else. An operator's `notes.tmp`
+/// or `old.toml.tmp` in the same directory is not debris this wrote and is not
+/// debris this deletes — see [`LayoutStore::sweep_temporaries`]. The pid is not
+/// checked against a *live* process: the whole point is that the host which
+/// wrote it is gone, and a pid is reused.
+fn names_a_temporary(name: &str) -> bool {
+    let Some(rest) = name.strip_suffix(&format!(".{TEMP_EXTENSION}")) else {
+        return false;
+    };
+    let Some((stem, pid)) = rest.rsplit_once('.') else {
+        return false;
+    };
+    !stem.is_empty() && !pid.is_empty() && pid.chars().all(|c| c.is_ascii_digit())
 }
 
 // ── failures ────────────────────────────────────────────────────────────────
@@ -568,12 +675,11 @@ impl std::fmt::Display for LayoutStoreError {
             ),
             LayoutStoreError::NotALobbyLayout { path, found } => write!(
                 f,
-                "saved bridge layout {path} is not one the lobby wrote — it carries {}. \
-                 Delete the [[display.pane]] entries that have no `station =`, or point \
-                 --profile at this file instead: a saved layout records the viewscreen and \
-                 the seated station consoles and nothing else, so [[touch]] and [[media]] \
-                 tables belong in a --profile too",
-                found.join(", ")
+                "saved bridge layout {path} is not one the lobby wrote — it carries {}. {}: a \
+                 saved layout records the viewscreen and the seated station consoles and \
+                 nothing else",
+                found.join(", "),
+                remedy_for(found)
             ),
             LayoutStoreError::Write { path, detail } => {
                 write!(

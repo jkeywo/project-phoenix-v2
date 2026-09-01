@@ -476,8 +476,8 @@ pub struct BridgeLayout {
     /// moves the viewscreen onto a crew member's live console, the exact failure
     /// this field exists to prevent, re-introduced by the save. It had two
     /// answers available (re-emit the participant slots, or refuse to persist a
-    /// `--profile`-seeded layout at all) and **took the second**, in two places
-    /// rather than one because the failure is silent and permanent:
+    /// `--profile`-seeded layout at all) and **took the second**, in three
+    /// places rather than one because the failure is silent and permanent:
     ///
     ///  * [`super::layout_store_systems`]'s two systems are gated on the run
     ///    *not* being authored, so a `--profile` host pre-applies nothing and
@@ -487,12 +487,22 @@ pub struct BridgeLayout {
     ///    carrying reservations outright, at the only door onto the disk, so a
     ///    caller added later inherits the guard instead of having to remember
     ///    it.
+    ///  * [`super::layout_store::LayoutStore::load`] **refuses a file** carrying
+    ///    a station-less `[[display.pane]]`
+    ///    ([`NotALobbyLayout`](super::layout_store::LayoutStoreError::NotALobbyLayout)),
+    ///    which is the one that closes the loop rather than doubling the others.
+    ///    A saved layout lives in a directory an operator browses and *is* a
+    ///    bridge profile, so a `--profile` copied into it would reach
+    ///    `adopt_profile` on a run **nobody authored** — populating this field
+    ///    with no `--profile` anywhere in sight, and making the sentence below
+    ///    false.
     ///
     /// Which leaves the invariant worth stating positively: **a saved layout is
     /// only ever a lobby-built one, and a lobby-built layout is reservation-free
     /// by construction** — nothing but [`adopt_profile`](Self::adopt_profile)
-    /// populates this field, and nothing but an authored `--profile` reaches it.
-    /// Re-emitting the slots remains the answer if that ever stops being true.
+    /// populates this field, and (*because* `load` refuses a station-less pane
+    /// slot) nothing but an authored `--profile` reaches it. Re-emitting the
+    /// slots remains the answer if that ever stops being true.
     reserved: Vec<Vec<Reservation>>,
 }
 
@@ -1014,11 +1024,19 @@ impl BridgeLayout {
                 // file that wrote `side_by_side` over it would re-arrange the
                 // bridge on the next boot.
                 //
-                // Only a two-console monitor is actually split; a single console
-                // is the whole screen and the field is ignored for it, so it is
-                // left out rather than written as noise an operator must read
-                // past.
-                split: (stations.len() > 1).then(|| self.splits[index]),
+                // WRITTEN WHATEVER THE OCCUPANCY, though it is ignored for a
+                // screen holding one console (issue #1334's fix round). Leaving
+                // it out there looked like tidiness and was a silent drop: the
+                // law carries the split for a one-console screen, `validate` and
+                // `adopt_profile` take it on any Station entry, and no
+                // `LayoutAction` can set one — so an operator's authored
+                // `stacked` survived exactly as long as the screen held two
+                // consoles and vanished from the file on the first save after
+                // one of them left, to come back `LAYOUT_SPLIT` next session
+                // with nothing said. One redundant line in a file an operator
+                // reads is a smaller cost than a setting they cannot see
+                // disappearing.
+                split: Some(self.splits[index]),
                 panes: stations
                     .iter()
                     .map(|s| PaneSlot::for_station(s.0.clone()))
@@ -1063,12 +1081,14 @@ impl BridgeLayout {
     /// systems' run condition *and* at
     /// [`LayoutStore::save`](super::layout_store::LayoutStore::save)'s door, so
     /// the only layouts this writes for the disk are lobby-built and therefore
-    /// reservation-free. A screen's
-    /// [`split_on`](Self::split_on) is lossy in the same one direction and for
-    /// the file's own reason: a `[[display]]` holding fewer than two panes has no
-    /// split to write (a one-pane Station's is ignored by definition), so a
-    /// screen the operator authored `stacked` and then emptied comes back
-    /// [`LAYOUT_SPLIT`].
+    /// reservation-free. A screen's [`split_on`](Self::split_on) is lossy in the
+    /// same one direction, and now in exactly one case: a screen holding **no**
+    /// consoles is not written at all — a `[[display]]` with an empty `pane`
+    /// list is not a shape the file has (`validate` refuses it on the density
+    /// rule) — so a screen the operator authored `stacked` and then *emptied*
+    /// comes back [`LAYOUT_SPLIT`]. A screen holding one console does carry its
+    /// split, which is the drop issue #1334's fix round closed; see
+    /// [`write_displays_into`](Self::write_displays_into).
     pub fn to_validated_profile(&self) -> ValidatedProfile {
         self.to_profile()
             .validate()

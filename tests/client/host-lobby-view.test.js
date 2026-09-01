@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hostLobbyViewModel } from '../../gui/host-lobby-view.js';
+import { hostLobbyViewModel, hostLobbyMonitorRow } from '../../gui/host-lobby-view.js';
 
 function payload(overrides = {}) {
   return {
@@ -256,5 +256,150 @@ describe('hostLobbyViewModel — AI-only launch button', () => {
     expect(hostLobbyViewModel(payload(), '').aiLaunchVisible).toBe(true);
     expect(hostLobbyViewModel(payload({ crew_count: 1 }), '').aiLaunchVisible).toBe(false);
     expect(hostLobbyViewModel(payload({ spectators: ['Zed'] }), '').aiLaunchVisible).toBe(false);
+  });
+});
+
+// ── the bridge monitor row (issue #1330) ────────────────────────────────────
+//
+// The row is the native host's, and the rule that keeps it out of the browser
+// host's way is a rule about DATA rather than about which page is asking: no
+// monitor roster, no row. So these tests reach it the way both surfaces do —
+// through `hostLobbyViewModel`'s third argument — and check the sub-function
+// directly where the claim is about the row alone.
+
+const monitor = (overrides = {}) => ({
+  identity: 'BRAVIA@3840x2160',
+  name: 'BRAVIA',
+  width: 3840,
+  height: 2160,
+  primary: true,
+  viewscreen: true,
+  stations: [],
+  ...overrides,
+});
+
+const secondMonitor = (overrides = {}) => monitor({
+  identity: 'BenQ EX@1920x1080',
+  name: 'BenQ EX',
+  width: 1920,
+  height: 1080,
+  primary: false,
+  viewscreen: false,
+  ...overrides,
+});
+
+describe('hostLobbyMonitorRow — when there is a row at all', () => {
+  it('answers null when nothing reported a monitor, which is every browser host', () => {
+    // server.html calls the view model with two arguments. That is the whole
+    // of "the row is absent on the web host": there is no page check anywhere.
+    expect(hostLobbyViewModel(payload(), '').monitorRow).toBeNull();
+    expect(hostLobbyMonitorRow(undefined)).toBeNull();
+    expect(hostLobbyMonitorRow(null)).toBeNull();
+  });
+
+  it('answers null for a roster that reported no monitors', () => {
+    // A row of no buttons is not a row. A native host between boot and winit
+    // enumerating its displays is briefly in exactly this state.
+    expect(hostLobbyMonitorRow({ monitors: [] })).toBeNull();
+    expect(hostLobbyMonitorRow({ monitors: [], notices: [{ id: 'x', params: {} }] })).toBeNull();
+  });
+
+  it('reaches the view model when a native host does report one', () => {
+    const vm = hostLobbyViewModel(payload(), '', { monitors: [monitor()] });
+    expect(vm.monitorRow.buttons.length).toBe(1);
+  });
+});
+
+describe('hostLobbyMonitorRow — how a monitor is named', () => {
+  it('names a display by what the OS called it and its native resolution', () => {
+    const row = hostLobbyMonitorRow({ monitors: [monitor()] });
+    expect(row.buttons[0].label).toEqual({
+      id: 'server.monitor_row.monitor',
+      params: { name: 'BRAVIA', w: 3840, h: 2160 },
+    });
+  });
+
+  it('uses a different string for a display the OS did not name', () => {
+    // Not the same sentence with an empty slot: "· 1920×1080" reads as a bug.
+    const row = hostLobbyMonitorRow({ monitors: [monitor({ name: null })] });
+    expect(row.buttons[0].label).toEqual({
+      id: 'server.monitor_row.monitor_unnamed',
+      params: { w: 3840, h: 2160 },
+    });
+  });
+
+  it('carries the identity a press names back, untranslated', () => {
+    const row = hostLobbyMonitorRow({ monitors: [monitor(), secondMonitor()] });
+    expect(row.buttons.map((b) => b.identity))
+      .toEqual(['BRAVIA@3840x2160', 'BenQ EX@1920x1080']);
+  });
+});
+
+describe('hostLobbyMonitorRow — marking', () => {
+  it('marks the viewscreen and the primary in words, not only by position', () => {
+    // WCAG 1.4.1: which monitor is showing the shared view is the one fact
+    // this row carries, so it must not be legible only as a border colour.
+    const row = hostLobbyMonitorRow({ monitors: [monitor(), secondMonitor()] });
+    expect(row.buttons[0].marks.map((m) => m.id)).toEqual([
+      'server.monitor_row.viewscreen',
+      'server.monitor_row.primary',
+    ]);
+    expect(row.buttons[1].marks).toEqual([]);
+    expect(row.buttons[0].viewscreen).toBe(true);
+    expect(row.buttons[1].viewscreen).toBe(false);
+  });
+
+  it('marks a viewscreen that is not the primary as exactly that and nothing more', () => {
+    // The operator moved it. `reconcile` keeps that choice across a re-plug of
+    // some other screen, so the row has to be able to say so.
+    const row = hostLobbyMonitorRow({
+      monitors: [
+        monitor({ viewscreen: false }),
+        secondMonitor({ viewscreen: true }),
+      ],
+    });
+    expect(row.buttons[0].marks.map((m) => m.id)).toEqual(['server.monitor_row.primary']);
+    expect(row.buttons[1].marks.map((m) => m.id)).toEqual(['server.monitor_row.viewscreen']);
+  });
+
+  it('shows a single monitor marked, which is the whole inert row', () => {
+    const row = hostLobbyMonitorRow({ monitors: [monitor()] });
+    expect(row.buttons.length).toBe(1);
+    expect(row.buttons[0].viewscreen).toBe(true);
+  });
+
+  it('carries the consoles a monitor is holding, which is why a press may be refused', () => {
+    const row = hostLobbyMonitorRow({
+      monitors: [monitor(), secondMonitor({ stations: ['helm', 'weapons'] })],
+    });
+    expect(row.buttons[1].stations).toEqual(['helm', 'weapons']);
+  });
+});
+
+describe('hostLobbyMonitorRow — feedback', () => {
+  it('passes each notice through as the id and parameters the host sent', () => {
+    // The host composes no sentences (AGENTS.md rule 11): a refusal crosses as
+    // a strings.csv id, and the renderer's `t` resolves it.
+    const row = hostLobbyMonitorRow({
+      monitors: [monitor()],
+      notices: [
+        { id: 'server.bridge_layout.unknown_monitor', params: { monitor: 'Gone@1920x1080' } },
+      ],
+    });
+    expect(row.notices).toEqual([
+      { id: 'server.bridge_layout.unknown_monitor', params: { monitor: 'Gone@1920x1080' } },
+    ]);
+  });
+
+  it('is empty rather than absent when nothing has happened', () => {
+    expect(hostLobbyMonitorRow({ monitors: [monitor()] }).notices).toEqual([]);
+  });
+
+  it('defaults a notice with no parameters to an empty set rather than undefined', () => {
+    const row = hostLobbyMonitorRow({
+      monitors: [monitor()],
+      notices: [{ id: 'server.bridge_layout.adopt_no_monitors' }],
+    });
+    expect(row.notices[0].params).toEqual({});
   });
 });

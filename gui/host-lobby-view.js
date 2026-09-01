@@ -10,6 +10,12 @@
  * writes — and all side effects (audio, wake-state variables) — stay in
  * server.html's inline glue, which consumes this view model.
  *
+ * It also decides the native host's **monitor row** (issue #1330), from a
+ * second, optional input: the bridge layout a native host pushes beside the
+ * lobby state. `hostLobbyMonitorRow` is exported separately because that is
+ * where the whole rule lives — no roster, no row — and the browser host, which
+ * has no monitors, reaches it by simply not passing one.
+ *
  * SIBLING of gui/lobby-view.js, not a reuse of it: the host consumes a
  * Rust-built roster whose station rows already carry resolved display text
  * (`name`/`short_code`/`rank`/`holder_name`/`preset_names` — every host
@@ -34,9 +40,13 @@
  * @param {string} prevPhase  The phase seen on the previous call (server.html's
  *                    `_lobbyPrevPhase`), used to detect the Loading→InProgress
  *                    and "entered InProgress" edges.
+ * @param {object|null} [layout]  The native bridge's monitor row, parsed from
+ *                    the `BridgeLayoutPayload` a native host pushes (issue
+ *                    #1330). Omitted — and therefore `null` — on the browser
+ *                    host, which has no monitors of its own to offer.
  * @returns {object} view model — see the return literal below.
  */
-export function hostLobbyViewModel(s, prevPhase) {
+export function hostLobbyViewModel(s, prevPhase, layout) {
   const phase = s.phase;
   const isLobby = phase === 'Lobby';
   const maxP = s.max_players || 0;
@@ -196,6 +206,65 @@ export function hostLobbyViewModel(s, prevPhase) {
     spectatorPills,
     hint,
     aiLaunchVisible,
+    monitorRow: hostLobbyMonitorRow(layout),
+  };
+}
+
+/**
+ * The bridge's monitor row (issue #1330) — one button per connected monitor,
+ * the current viewscreen marked, plus whatever the layout law had to say about
+ * the last press or the last cable that moved.
+ *
+ * **Answers `null` unless a bridge actually reported monitors.** That is the
+ * whole browser-host story: `server.html` calls the view model with no layout
+ * at all, so there is no row, and the renderer draws none — rather than the
+ * host page carrying a row it must remember to hide. A native host that has
+ * pushed a roster with an empty `monitors` list gets the same answer, because a
+ * row of no buttons is not a row.
+ *
+ * Everything it returns is data or a `{ id, params }` pair, on the same
+ * convention `readyBadge` and `hint` use: the words are `strings.csv`'s and the
+ * caller's `t()` resolves them. The one thing that is neither is `identity` —
+ * the monitor's stable key, which is not shown and is what a press carries back
+ * to the host.
+ *
+ * @param {object|null|undefined} layout parsed `BridgeLayoutPayload`.
+ * @returns {object|null} `{ buttons, notices }`, or `null` for no bridge.
+ */
+export function hostLobbyMonitorRow(layout) {
+  const monitors = (layout && layout.monitors) || [];
+  if (monitors.length === 0) return null;
+
+  const buttons = monitors.map((m) => {
+    const width = m.width || 0;
+    const height = m.height || 0;
+    // A display the OS named and one it did not are two different sentences,
+    // not one sentence with an empty slot: "· 1920×1080" reads as a bug.
+    const label = m.name
+      ? { id: 'server.monitor_row.monitor', params: { name: m.name, w: width, h: height } }
+      : { id: 'server.monitor_row.monitor_unnamed', params: { w: width, h: height } };
+    // Marks are a list rather than a composed label so a monitor that is both
+    // the primary AND the viewscreen does not need a fourth string id, and so a
+    // translator never has to reproduce this build's ordering inside one row.
+    const marks = [];
+    if (m.viewscreen) marks.push({ id: 'server.monitor_row.viewscreen', params: {} });
+    if (m.primary) marks.push({ id: 'server.monitor_row.primary', params: {} });
+    return {
+      identity: m.identity,
+      label,
+      marks,
+      viewscreen: !!m.viewscreen,
+      primary: !!m.primary,
+      // The consoles this monitor holds. A press onto one of these is refused
+      // by the layout law (no silent eviction), and the row says so up front
+      // rather than only after the press.
+      stations: m.stations || [],
+    };
+  });
+
+  return {
+    buttons,
+    notices: (layout.notices || []).map((n) => ({ id: n.id, params: n.params || {} })),
   };
 }
 

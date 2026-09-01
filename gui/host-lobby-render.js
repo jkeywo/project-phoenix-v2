@@ -15,7 +15,8 @@
  * Exactly the contents of `#lobby-panel` — the panel's own visibility, the
  * title/subtitle, the crew counter and its dots, the spectator tag, the ready
  * badge, the countdown, the station-card grid, the aggregate RESERVED chip,
- * the connected-pill list, the status hint and the AI-launch button.
+ * the connected-pill list, the status hint, the bridge monitor row (issue
+ * #1330) and the AI-launch button.
  *
  * It does NOT touch the viewscreen's other surfaces: the asset-loading
  * overlay, the join panel and the game-over overlay are viewscreen chrome that
@@ -44,6 +45,23 @@
  * `window.phStrings`, and the native lobby document imports `gui/strings.js`
  * directly. Neither is this module's business.
  */
+
+/**
+ * The attribute a monitor button carries its display's stable identity in
+ * (issue #1330).
+ *
+ * Exported because the press half lives elsewhere:
+ * `src/native_host/host_lobby/host_lobby_link.js` delegates a click listener
+ * off the row's container and reads this attribute to know which display was
+ * pressed. A literal spelled in both files is a button that silently does
+ * nothing the first time either is touched.
+ *
+ * A `data-` attribute rather than the button's text, deliberately: the text is
+ * localised and elided, and the identity is a machine key that must reach the
+ * host byte-for-byte or the layout law refuses it as a monitor this bridge does
+ * not have.
+ */
+export const MONITOR_BUTTON_ATTR = 'data-monitor';
 
 /**
  * Render one lobby view model into `doc`.
@@ -227,8 +245,66 @@ export function renderHostLobby(doc, vm, t, opts) {
     hintEl.style.color = vm.hint.color;
   }
 
+  // ── Bridge monitor row (issue #1330) ──────────────────────────────
+  // One button per connected monitor, the viewscreen's marked. Present in
+  // BOTH documents' markup and filled in neither unless a bridge reported a
+  // roster: `vm.monitorRow` is null on the host page, which has no monitors,
+  // so the row is hidden by the same branch that hides it on a native host
+  // whose winit has not enumerated its displays yet.
+  const row = doc.getElementById('monitor-row');
+  if (row) {
+    const model = vm.monitorRow;
+    row.style.display = model ? '' : 'none';
+
+    const buttons = doc.getElementById('monitor-row-buttons');
+    if (buttons) {
+      // Replaced wholesale, like the station grid: the press listener is
+      // delegated off this container precisely because these do not survive.
+      buttons.innerHTML = '';
+      for (const b of (model ? model.buttons : [])) {
+        const el = doc.createElement('button');
+        el.type = 'button';
+        el.className = 'monitor-button' + (b.viewscreen ? ' viewscreen' : '');
+        el.setAttribute(MONITOR_BUTTON_ATTR, b.identity);
+        // `aria-pressed` rather than a colour alone: which monitor is showing
+        // the viewscreen is the one fact this row carries, and it must not be
+        // legible only to somebody who can tell two blues apart (WCAG 1.4.1).
+        // The mark below says the same thing in words for the same reason.
+        el.setAttribute('aria-pressed', b.viewscreen ? 'true' : 'false');
+
+        const name = doc.createElement('span');
+        name.className = 'monitor-button-name';
+        name.textContent = t(b.label.id, b.label.params);
+        el.appendChild(name);
+
+        for (const mark of b.marks) {
+          const markEl = doc.createElement('span');
+          markEl.className = 'monitor-button-mark';
+          markEl.textContent = t(mark.id, mark.params);
+          el.appendChild(markEl);
+        }
+        buttons.appendChild(el);
+      }
+    }
+
+    // Whatever the layout law said about the last press or the last cable
+    // that moved — a refusal the operator must see, or a monitor that went
+    // away and took the viewscreen's chosen home with it.
+    const notices = doc.getElementById('monitor-row-notice');
+    if (notices) {
+      notices.innerHTML = '';
+      for (const n of (model ? model.notices : [])) {
+        const line = doc.createElement('div');
+        line.className = 'monitor-row-notice-line';
+        line.textContent = t(n.id, n.params);
+        notices.appendChild(line);
+      }
+    }
+  }
+
   // ── AI-only launch button ─────────────────────────────────────────
-  // Absent from the native lobby document, which is read-only in this slice.
+  // Absent from the native lobby document: scenario selection stays on the CLI
+  // there, so the document slice strips the one control it would inherit.
   const aiBtn = doc.getElementById('ai-launch-btn');
   if (aiBtn) {
     aiBtn.style.display = vm.aiLaunchVisible ? '' : 'none';
@@ -238,5 +314,5 @@ export function renderHostLobby(doc, vm, t, opts) {
 // Expose for the classic (non-module) script in server.html — the same
 // self-registering pattern window.hostLobbyViewModel uses.
 if (typeof window !== 'undefined') {
-  window.hostLobbyRender = { renderHostLobby };
+  window.hostLobbyRender = { renderHostLobby, MONITOR_BUTTON_ATTR };
 }

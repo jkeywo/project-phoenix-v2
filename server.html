@@ -1084,6 +1084,18 @@
             <div class="lobby-rail-label" data-i18n="server.connected">Connected</div>
             <div id="lobby-spectator-list" class="lobby-rail-section"></div>
           </div>
+          <!-- Bridge monitor row (issue #1330). One button per connected
+               monitor, the viewscreen's marked; pressing another moves the
+               viewscreen onto it. Filled ONLY when a bridge reports a monitor
+               roster, which a browser host never does — so this page carries
+               the markup (one lobby, one renderer, one stylesheet) and never
+               shows the row, and the native lobby document, which is sliced out
+               of this very subtree, does. -->
+          <div id="monitor-row" class="monitor-row" style="display:none;">
+            <div class="lobby-rail-label" data-i18n="server.monitor_row.label">Viewscreen monitor</div>
+            <div id="monitor-row-buttons" class="monitor-row-buttons"></div>
+            <div id="monitor-row-notice" class="monitor-row-notice"></div>
+          </div>
           <div class="lobby-rail-spacer"></div>
           <div id="lobby-status-hint" class="lobby-status-hint" data-i18n="server.waiting_players">Waiting for players to connect…</div>
           <div id="lobby-countdown" class="lobby-countdown" style="display:none;">5</div>

@@ -346,6 +346,100 @@
   }
 }
 
+/* ── Bridge monitor row (issue #1330) ─────────────────────────────────
+   One button per connected monitor, in the lobby rail. It is the first
+   CONTROL on this surface — the native host composites this same lobby onto
+   its viewscreen window and points a real mouse and keyboard at it — so the
+   rules here are accessibility rules rather than decoration:
+
+   * Which monitor is showing the viewscreen is never carried by colour
+     alone. The button text says so (server.monitor_row.viewscreen) and
+     `aria-pressed` says so again; the border and background are the third
+     telling, not the only one (WCAG 1.4.1).
+   * Focus is drawn for plain `:focus` as well as `:focus-visible`. The
+     embedded view is a WebKit build whose heuristics for "did this focus
+     come from a keyboard" are its own, and an operator who cannot see where
+     the next keystroke lands is worse served by a clean-looking row than by
+     an always-present ring. Both selectors carry the same declarations, so a
+     browser supporting each applies one rule rather than two.
+   * Nothing here animates or transitions, so `prefers-reduced-motion` has
+     nothing to switch off — a row of buttons on a television in a room full
+     of people has no business moving. Hover and press are colour changes on
+     a static box. */
+.monitor-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 0.75rem;
+}
+.monitor-row-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.monitor-button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  padding: 6px 10px;
+  border-radius: 4px;
+  border: 1px solid #2a2d3a;
+  background: #0e0e14;
+  color: #cce;
+  font-family: 'Chakra Petch', system-ui, monospace;
+  font-size: 0.75rem;
+  letter-spacing: .04em;
+  text-align: left;
+  cursor: pointer;
+}
+.monitor-button:hover { border-color: #4a5570; }
+.monitor-button.viewscreen {
+  border-color: #2a8a96;
+  background: #101a1d;
+}
+.monitor-button .monitor-button-mark {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: #667;
+}
+.monitor-button.viewscreen .monitor-button-mark { color: #5fd8e8; }
+.monitor-button:focus,
+.monitor-button:focus-visible {
+  outline: 2px solid #cfe8ff;
+  outline-offset: 2px;
+}
+.monitor-row-notice {
+  font-size: 0.7rem;
+  color: #c9a86a;
+  line-height: 1.4;
+}
+.monitor-row-notice-line + .monitor-row-notice-line { margin-top: 4px; }
+
+/* High contrast (issue #1128 / PRD #1023 module 3). The row is the one part of
+   the lobby somebody OPERATES, so its two states and its focus ring stop being
+   tinted greys and become full-strength edges — the same answer the
+   host-drawn focus reticle gives, in CSS. Both `more` and `custom`: a Windows
+   high-contrast theme reaches an embedded view as `custom`. */
+@media (prefers-contrast: more), (prefers-contrast: custom) {
+  .monitor-button {
+    border-color: #ffffff;
+    color: #ffffff;
+    background: #000000;
+  }
+  .monitor-button.viewscreen {
+    border-width: 2px;
+    border-color: #5fd8e8;
+  }
+  .monitor-button .monitor-button-mark { color: #ffffff; }
+  .monitor-button:focus,
+  .monitor-button:focus-visible {
+    outline: 3px solid #ffffff;
+  }
+  .monitor-row-notice { color: #ffffff; }
+}
+
 /* Reduced motion (PRD #1023 module 3), the lobby's own half. The viewscreen
    is a television in a room full of people, so a looping glow is exactly what
    a viewer who asked for stillness cannot walk away from. The badge is held at

@@ -25,7 +25,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { t } from '../../gui/strings.js';
 import { hostLobbyViewModel } from '../../gui/host-lobby-view.js';
-import { renderHostLobby } from '../../gui/host-lobby-render.js';
+import { renderHostLobby, MONITOR_BUTTON_ATTR } from '../../gui/host-lobby-render.js';
 
 const SERVER_HTML = fs.readFileSync(
   path.join(path.dirname(fileURLToPath(import.meta.url)), '../../server.html'),
@@ -301,6 +301,185 @@ describe('one renderer, two documents', () => {
     installLobbyPanel(document);
     document.getElementById('station-grid').remove();
     expect(() => render({ stations: [station()] })).not.toThrow();
+    expect(document.getElementById('lobby-title').textContent).toBe('Combat Test');
+  });
+});
+
+// ── the bridge monitor row (issue #1330) ────────────────────────────────────
+//
+// The row is markup BOTH documents carry — server.html's own `#monitor-row`,
+// which the native lobby document is sliced out of — and data only a native
+// host supplies. So these render through the same `installLobbyPanel` fixture
+// the rest of the file uses, which is what proves the row's ids exist in the
+// real page rather than in a stand-in written to match.
+
+const monitor = (overrides = {}) => ({
+  identity: 'BRAVIA@3840x2160',
+  name: 'BRAVIA',
+  width: 3840,
+  height: 2160,
+  primary: true,
+  viewscreen: true,
+  stations: [],
+  ...overrides,
+});
+
+const benq = (overrides = {}) => monitor({
+  identity: 'BenQ EX@1920x1080',
+  name: 'BenQ EX',
+  width: 1920,
+  height: 1080,
+  primary: false,
+  viewscreen: false,
+  ...overrides,
+});
+
+/** Render one payload with a monitor roster attached. */
+function renderWithLayout(layout, overrides = {}) {
+  const vm = hostLobbyViewModel(payload(overrides), '', layout);
+  renderHostLobby(document, vm, t);
+  return vm;
+}
+
+const rowButtons = () =>
+  Array.from(document.getElementById('monitor-row-buttons').children);
+
+describe('the bridge monitor row', () => {
+  it('is hidden and empty on a host that reported no monitors', () => {
+    // The browser host, every frame of its life: server.html carries the
+    // markup so there is one lobby, and never fills it.
+    installLobbyPanel(document);
+    render();
+    expect(document.getElementById('monitor-row').style.display).toBe('none');
+    expect(rowButtons().length).toBe(0);
+  });
+
+  it('draws one button per monitor, named and marked', () => {
+    installLobbyPanel(document);
+    renderWithLayout({ monitors: [monitor(), benq()] });
+    expect(document.getElementById('monitor-row').style.display).toBe('');
+    const buttons = rowButtons();
+    expect(buttons.length).toBe(2);
+    expect(buttons[0].textContent).toContain('BRAVIA');
+    expect(buttons[0].textContent).toContain('3840');
+    expect(buttons[0].textContent).toContain(t('server.monitor_row.viewscreen'));
+    expect(buttons[1].textContent).toContain('BenQ EX');
+    expect(buttons[1].textContent).not.toContain(t('server.monitor_row.viewscreen'));
+  });
+
+  it('resolves every string through the table rather than showing an id', () => {
+    // `t()` answers ⟨id⟩ for a row that is not in strings.csv, so this is the
+    // check that the ids the view model names actually exist.
+    installLobbyPanel(document);
+    renderWithLayout({
+      monitors: [monitor(), benq({ name: null })],
+      notices: [
+        { id: 'server.bridge_layout.unknown_monitor', params: { monitor: 'Gone@1920x1080' } },
+      ],
+    });
+    const text = document.getElementById('monitor-row').textContent;
+    expect(text).not.toContain('⟨');
+  });
+
+  it('carries each display identity in the attribute the press half reads', () => {
+    // The button text is localised and elided; the identity has to reach the
+    // host byte-for-byte or the layout law refuses it as an unknown monitor.
+    installLobbyPanel(document);
+    renderWithLayout({ monitors: [monitor(), benq()] });
+    expect(rowButtons().map((b) => b.getAttribute(MONITOR_BUTTON_ATTR)))
+      .toEqual(['BRAVIA@3840x2160', 'BenQ EX@1920x1080']);
+  });
+
+  it('says which monitor is the viewscreen in a way a screen reader gets too', () => {
+    installLobbyPanel(document);
+    renderWithLayout({ monitors: [monitor(), benq()] });
+    const buttons = rowButtons();
+    expect(buttons[0].getAttribute('aria-pressed')).toBe('true');
+    expect(buttons[1].getAttribute('aria-pressed')).toBe('false');
+    expect(buttons[0].className).toContain('viewscreen');
+    expect(buttons[1].className).not.toContain('viewscreen');
+  });
+
+  it('builds real buttons, so a keyboard operates the row without any help', () => {
+    installLobbyPanel(document);
+    renderWithLayout({ monitors: [monitor(), benq()] });
+    for (const b of rowButtons()) {
+      expect(b.tagName).toBe('BUTTON');
+      // `type="button"` and not the default submit: the lobby panel is inside
+      // a page that may grow a form, and a submit would reload it.
+      expect(b.type).toBe('button');
+    }
+  });
+
+  it('replaces the buttons on a re-render rather than accumulating them', () => {
+    // The press listener is delegated off the container precisely because
+    // these do not survive a render.
+    installLobbyPanel(document);
+    renderWithLayout({ monitors: [monitor(), benq()] });
+    renderWithLayout({ monitors: [monitor(), benq()] });
+    expect(rowButtons().length).toBe(2);
+  });
+
+  it('moves the mark when the viewscreen moves, without rebuilding the lobby', () => {
+    installLobbyPanel(document);
+    renderWithLayout({ monitors: [monitor(), benq()] });
+    renderWithLayout({
+      monitors: [monitor({ viewscreen: false }), benq({ viewscreen: true })],
+    });
+    const buttons = rowButtons();
+    expect(buttons[0].getAttribute('aria-pressed')).toBe('false');
+    expect(buttons[1].getAttribute('aria-pressed')).toBe('true');
+    expect(buttons[1].textContent).toContain(t('server.monitor_row.viewscreen'));
+  });
+
+  it('shows a refusal as visible feedback, resolved from its id and parameters', () => {
+    // "The lobby never silently ignores me": a press that changed nothing with
+    // a clean log is indistinguishable from a broken button.
+    installLobbyPanel(document);
+    renderWithLayout({
+      monitors: [monitor(), benq()],
+      notices: [{
+        id: 'server.bridge_layout.viewscreen_holds_stations',
+        params: { monitor: 'BenQ EX@1920x1080', stations: 'helm, weapons' },
+      }],
+    });
+    const notice = document.getElementById('monitor-row-notice');
+    expect(notice.children.length).toBe(1);
+    expect(notice.textContent).toContain('BenQ EX@1920x1080');
+    expect(notice.textContent).toContain('helm, weapons');
+  });
+
+  it('clears the last refusal when the next render carries none', () => {
+    installLobbyPanel(document);
+    renderWithLayout({
+      monitors: [monitor()],
+      notices: [{ id: 'server.bridge_layout.unknown_monitor', params: { monitor: 'Gone@1x1' } }],
+    });
+    renderWithLayout({ monitors: [monitor()] });
+    expect(document.getElementById('monitor-row-notice').children.length).toBe(0);
+  });
+
+  it('renders a roster change note as its own line beside any cause', () => {
+    installLobbyPanel(document);
+    renderWithLayout({
+      monitors: [monitor()],
+      notices: [
+        {
+          id: 'server.bridge_layout.adopt_viewscreen_gone',
+          params: { monitor: 'BenQ EX@1920x1080', replacement: 'BRAVIA@3840x2160' },
+        },
+        { id: 'server.bridge_layout.adopt_no_monitors', params: { count: '2' } },
+      ],
+    });
+    expect(document.getElementById('monitor-row-notice').children.length).toBe(2);
+  });
+
+  it('renders the rest of the lobby on a document with no monitor row at all', () => {
+    // The same guarded-write property the AI-launch button has: one renderer,
+    // two documents, and a missing element is a branch that does nothing.
+    installLobbyPanel(document);
+    document.getElementById('monitor-row').remove();
+    renderWithLayout({ monitors: [monitor()] }, { scenario_title: 'Combat Test' });
     expect(document.getElementById('lobby-title').textContent).toBe('Combat Test');
   });
 });

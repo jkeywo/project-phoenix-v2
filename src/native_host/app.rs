@@ -74,9 +74,10 @@ pub enum NativeHostError {
     /// The chosen hull could not be read, parsed, or carries no `[[station]]`
     /// blocks.
     Ship(String),
-    /// One or more `--pane <NAME>` labels are also **station ids** on the hull
-    /// this host is about to fly (issue #1331) — see
-    /// [`pane_labels_shadowing_stations`].
+    /// One or more participant pane names — from `--pane <NAME>` or from a
+    /// `--profile`'s station-less `[[display.pane]]` slots — are also **station
+    /// ids** on the hull this host is about to fly (issue #1331). See
+    /// [`pane_labels_shadowing_stations`] and [`AuthoredPaneLabels`].
     PaneShadowsStation(Vec<String>),
 }
 
@@ -88,19 +89,25 @@ impl std::fmt::Display for NativeHostError {
             NativeHostError::Boot(e) => write!(f, "{e}"),
             NativeHostError::NoShip(m) => write!(f, "no playable hull: {m}"),
             NativeHostError::Ship(m) => write!(f, "ship: {m}"),
+            // The noun is "the pane name" rather than "--pane" because the same
+            // collision arrives by two routes and the refusal covers both: a
+            // `--pane <NAME>` flag, and a `--profile` `[[display.pane]]` slot
+            // with a `label` and no `station`. Everything the sentence asserts,
+            // and the remedy it gives, is unchanged.
             NativeHostError::PaneShadowsStation(labels) => write!(
                 f,
-                "--pane {} names a station this hull has, and a pane name and a station id are \
-                 one namespace on the pane bus (issue #1331): the lobby's screen rows open a \
-                 station's console under its own id, so closing that station's console would \
-                 close this person's instead. Rename the pane — `--pane {}-crew` — or drop it \
-                 and open that station's console from the lobby's screen row",
+                "the pane name {} names a station this hull has, and a pane name and a station \
+                 id are one namespace on the pane bus (issue #1331): the lobby's screen rows \
+                 open a station's console under its own id, so closing that station's console \
+                 would close this person's instead. Rename the pane — `--pane {name}-crew`, or \
+                 `label = \"{name}-crew\"` in the `--profile` — or drop it and open that \
+                 station's console from the lobby's screen row",
                 labels
                     .iter()
                     .map(|l| format!("{l:?}"))
                     .collect::<Vec<_>>()
                     .join(", "),
-                labels.first().map(String::as_str).unwrap_or("name"),
+                name = labels.first().map(String::as_str).unwrap_or("name"),
             ),
         }
     }
@@ -362,27 +369,51 @@ pub(crate) struct HullChoice<'a> {
     pub seed: Option<u64>,
 }
 
-/// The `--pane <NAME>` labels this host was launched with (issue #1331).
+/// Every **participant pane name** this host was launched with (issue #1331).
 ///
-/// Inserted by [`build_native_host_app`] whenever a pane bus exists, so that
-/// [`install_world_selection`] can check them against the hull's station ids —
-/// on the `--world` path and on the runtime `--lobby` world load alike, which
-/// are the only two places a roster is ever chosen. Empty for a host given a
-/// `--client-dir` but no `--pane`, which is the ordinary console host.
+/// Inserted by [`build_native_host_app`], so that [`install_world_selection`] can
+/// check them against the hull's station ids — on the `--world` path and on the
+/// runtime `--lobby` world load alike, which are the only two places a roster is
+/// ever chosen. Empty for a host given a `--client-dir` but no `--pane` and no
+/// `--profile` participant slot, which is the ordinary console host.
+///
+/// # Two sources, one list
+///
+/// A pane name reaches the bus by two routes and the collision is identical
+/// down both, so they are gathered into one list rather than guarded in two
+/// places:
+///
+///  * `--pane <NAME>` (issue #1122), whose pane is opened at boot;
+///  * a `--profile`'s **participant** pane slots — a `[[display.pane]]` with a
+///    `label` and no `station` key
+///    ([`ValidatedProfile::participant_pane_labels`](crate::native_host::bridge_profile::ValidatedProfile::participant_pane_labels)).
+///    Those are the slots `assigned_surfaces` keeps in the runtime watcher's
+///    `pane_labels`, and the ones the adapter lays out as a rectangle on a
+///    Station window that a `--pane` of the same name is then seated into.
+///
+/// Only the FIRST of the two was checked when the guard landed, which left the
+/// whole collision reachable through a file: an authored `label = "helm"` on a
+/// hull with a `helm` station passes the `--pane` check (there is no `--pane`),
+/// keeps "helm" in the watcher's `pane_labels`, and then has the *station's*
+/// console — opened under the same name by the lobby's screen row — closed by an
+/// unplug of a monitor the law never unseated anything on, minting a fresh token
+/// in its place.
 #[derive(Resource, Clone, Debug, Default)]
 pub struct AuthoredPaneLabels(pub Vec<String>);
 
-/// The `--pane <NAME>` labels that are also station ids on `stations`
-/// (issue #1331).
+/// The participant pane names that are also station ids on `stations`
+/// (issue #1331) — see [`AuthoredPaneLabels`] for where `labels` comes from.
 ///
 /// **A pane name and a station id are one namespace.** `PaneBus` resolves a pane
 /// by participant name (`open_pane_for_name`), and since #1331 the lobby's
 /// screen rows open a station's console under the *station id* as its name —
 /// deliberately, because that is what lets the layout law and the pane bus talk
-/// about the same console by the same key. A hand-authored `--pane helm` on a
-/// hull that has a `helm` station therefore collides: unassigning `helm` from a
-/// screen row resolves the name to the human's pane and closes **their**
-/// console, and seating `helm` finds a pane already open and never builds one.
+/// about the same console by the same key. A hand-authored `--pane helm` — or a
+/// `--profile` pane slot whose `label` is `"helm"` — on a hull that has a `helm`
+/// station therefore collides: unassigning `helm` from a screen row resolves the
+/// name to the human's pane and closes **their** console, seating `helm` finds a
+/// pane already open and never builds one, and an unplug of the monitor the
+/// profile named closes whichever of the two the bus answers with.
 ///
 /// Comparison is exact and case-sensitive, matching `open_pane_for_name`'s own
 /// `==` — a guard that judged by a different rule than the lookup it protects
@@ -495,8 +526,9 @@ pub(crate) fn install_world_selection(
         .ship_config
         .ok_or_else(|| NativeHostError::Ship(format!("{ship_path:?} has no [[station]] blocks")))?;
 
-    // The one place a `--pane` label and a station id can be compared: the
-    // labels were fixed at the prompt, and this is where the roster is finally
+    // The one place a participant pane name and a station id can be compared:
+    // the names were fixed at the prompt (a `--pane` flag, or a `--profile` pane
+    // slot that names no station), and this is where the roster is finally
     // known — at boot for a `--world` host, and at the pick for a `--lobby` one,
     // which is why the guard lives here rather than in `phoenix_host`'s main.
     // Refused rather than warned: the two names resolve to one pane on the bus,
@@ -577,21 +609,28 @@ pub fn build_native_host_app(
     app.insert_resource(cfg.log.clone())
         .add_plugins(LoggingPlugin);
 
-    // The `--pane` labels, BEFORE the world selection below — that is where they
-    // are checked against the hull's station ids (issue #1331), and the runtime
-    // `--lobby` load reaches the same check through the same resource on a
-    // running `World`.
-    app.insert_resource(AuthoredPaneLabels(
-        cfg.panes
-            .as_ref()
-            .map(|p| {
-                p.opened
-                    .iter()
-                    .map(|pane| pane.identity.name().to_string())
-                    .collect()
-            })
-            .unwrap_or_default(),
-    ));
+    // The participant pane names, BEFORE the world selection below — that is
+    // where they are checked against the hull's station ids (issue #1331), and
+    // the runtime `--lobby` load reaches the same check through the same resource
+    // on a running `World`.
+    //
+    // BOTH sources, because both put a name on the pane bus and the collision is
+    // identical down either: the `--pane <NAME>` flags, and the `--profile`'s own
+    // station-less pane slots. See [`AuthoredPaneLabels`].
+    let mut authored_pane_labels: Vec<String> = cfg
+        .panes
+        .as_ref()
+        .map(|p| {
+            p.opened
+                .iter()
+                .map(|pane| pane.identity.name().to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    if let Some(profile) = &cfg.bridge_profile {
+        authored_pane_labels.extend(profile.participant_pane_labels());
+    }
+    app.insert_resource(AuthoredPaneLabels(authored_pane_labels));
 
     // The world half — everything below is skipped for a world-less host, which
     // does it at runtime instead. `install_world_selection` is the shared body:

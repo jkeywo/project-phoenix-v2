@@ -1660,3 +1660,167 @@ fn a_pinned_hull_reaches_the_viewscreen_as_a_decision_already_made() {
     pump(&mut app, 60);
     assert!(app.world().get_resource::<WorldConfig>().is_some());
 }
+
+// ── a pane name and a station id are one namespace (issue #1331) ─────────────
+//
+// `install_world_selection` is the one place a participant pane name and the
+// hull's station ids can be compared: the names are fixed at the prompt, and the
+// roster is known at boot on the `--world` path and at the pick on the `--lobby`
+// one. Both paths reach it, so both are driven here.
+//
+// The `--pane` half of the guard landed with the round-2 fix. What it missed is
+// that a pane name reaches the bus by a SECOND route: a `--profile`'s
+// `[[display.pane]]` with a `label` and no `station` key. That slot is a
+// participant pane in every way that matters here — it stays in the runtime
+// watcher's `pane_labels`, and the adapter lays it out as a rectangle on a
+// Station window — so an authored `label = "helm"` on a hull with a `helm`
+// station is the same collision, reached through a file instead of a flag.
+
+/// The first station id `hull` authors — read off the content rather than
+/// pinned, so a hull edit moves this test rather than breaking it.
+fn first_station_of(hull: &str) -> String {
+    project_phoenix::entities::include_resolve::load_entity_config(hull)
+        .expect("the hull's template parses")
+        .ship_config
+        .expect("a playable hull authors [[station]] blocks")
+        .stations
+        .first()
+        .expect("and at least one of them")
+        .id
+        .0
+        .clone()
+}
+
+/// A validated `--profile`: the viewscreen on one monitor, and a Station monitor
+/// carrying one PARTICIPANT pane named `label` (no `station` key).
+fn profile_naming_a_participant(
+    label: &str,
+) -> project_phoenix::native_host::bridge_profile::ValidatedProfile {
+    use project_phoenix::native_host::bridge_profile::{
+        BridgeProfile, DisplayEntry, PaneSlot, PROFILE_VERSION, ROLE_STATION, ROLE_VIEWSCREEN,
+    };
+    BridgeProfile {
+        version: PROFILE_VERSION,
+        displays: vec![
+            DisplayEntry {
+                id: "DELL U2720Q@3840x2160".to_string(),
+                role: ROLE_VIEWSCREEN.to_string(),
+                split: None,
+                panes: Vec::new(),
+            },
+            DisplayEntry {
+                id: "BenQ EX@1920x1080".to_string(),
+                role: ROLE_STATION.to_string(),
+                split: None,
+                panes: vec![PaneSlot::for_participant(label)],
+            },
+        ],
+        touch: Vec::new(),
+        media: Vec::new(),
+    }
+    .validate()
+    .expect("a viewscreen and a one-participant Station display are a lawful profile")
+}
+
+#[test]
+fn a_profile_pane_named_for_a_station_is_refused_on_the_world_path() {
+    // `--world --profile`: the roster is known before the `App` exists, so the
+    // refusal happens where every other bad launch argument does — at the
+    // prompt, before a window or a listener is up.
+    let preload = preload();
+    let (scenario_id, hull) = pick();
+    let world = scenario_arbiter::find_scenario(&catalog(), &scenario_id)
+        .expect("the picked scenario is in the catalogue")
+        .world
+        .clone();
+    let station = first_station_of(&hull);
+
+    let mut cfg = NativeHostConfig::new(world);
+    cfg.seed = Some(SEED);
+    cfg.surface = NativeRenderSurface::Contract;
+    cfg.ship_path = Some(hull.clone());
+    cfg.bridge_profile = Some(profile_naming_a_participant(&station));
+
+    let refusal = match build_native_host_app(&cfg, &preload) {
+        Ok(_) => panic!("a profile pane named for a station on this hull is refused"),
+        Err(e) => e.to_string(),
+    };
+    assert!(
+        refusal.contains(&format!("{station:?}")),
+        "the refusal names the colliding pane: {refusal}"
+    );
+    assert!(
+        refusal.contains("one namespace"),
+        "and says why the two cannot both exist: {refusal}"
+    );
+    assert!(
+        refusal.contains(&format!("{station}-crew")),
+        "and what to do instead: {refusal}"
+    );
+
+    // The same profile with a pane named for a PERSON is untouched — this must
+    // refuse a collision, not `--profile` participants.
+    cfg.bridge_profile = Some(profile_naming_a_participant("Ada"));
+    assert!(
+        build_native_host_app(&cfg, &preload).is_ok(),
+        "an ordinary authored participant pane still boots"
+    );
+}
+
+#[test]
+fn a_profile_pane_named_for_a_station_is_refused_on_the_lobby_path() {
+    // `--lobby --profile`: the roster is not known until a scenario and hull are
+    // picked, so the same guard has to fire frames into a running host — through
+    // the same `install_world_selection`, with `unwind_failed_load` putting the
+    // lobby back to genuinely world-less afterwards.
+    //
+    // The refusal reaches the operator LOG and nothing else here: the catalogue
+    // is re-published with nothing locked, which is what a phone sees. That
+    // asymmetry with the `--world` path above is documented on
+    // `world_load::unwind_failed_load` rather than papered over.
+    let preload = preload();
+    let (scenario_id, hull) = pick();
+    let station = first_station_of(&hull);
+
+    let mut cfg = lobby_config();
+    cfg.solo = true;
+    cfg.bridge_profile = Some(profile_naming_a_participant(&station));
+    let mut app = build_native_host_app(&cfg, &preload).expect("a world-less host assembles");
+    pump(&mut app, 4);
+
+    select(&mut app, "phone-1", &scenario_id, &hull);
+    pump(&mut app, 30);
+
+    assert!(
+        app.world().get_resource::<WorldConfig>().is_none(),
+        "the pick is refused, and the ingest it had already done is unwound"
+    );
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::Lobby,
+        "the host stays in the lobby rather than flying a bridge whose pane \
+         names and station ids collide"
+    );
+    assert_eq!(
+        app.world().resource::<LobbySelection>().0,
+        project_phoenix::lobby::scenario_arbiter::ScenarioSelection::default(),
+        "and the selection is released"
+    );
+    assert!(
+        !project_phoenix::content_ledger::is_frozen(),
+        "`PaneShadowsStation` is a failure point past `ingest_world`'s freeze, \
+         so the unwind has to unfreeze the ledger as it does for an uncached hull"
+    );
+
+    // The same host with the collision removed loads that very pick — the
+    // refusal is about the NAME, not about the profile or the scenario.
+    app.world_mut()
+        .resource_mut::<project_phoenix::native_host::app::AuthoredPaneLabels>()
+        .0 = vec!["Ada".to_string()];
+    select(&mut app, "phone-2", &scenario_id, &hull);
+    pump(&mut app, 120);
+    assert!(
+        app.world().get_resource::<WorldConfig>().is_some(),
+        "a lobby that refused one pick is still a lobby"
+    );
+}

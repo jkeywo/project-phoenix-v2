@@ -1127,8 +1127,17 @@ pub fn resolve(profile: &ValidatedProfile, discovered: &[DiscoveredMonitor]) -> 
 pub struct AssignedSurface {
     /// The stable identity of the monitor this role is assigned to.
     pub identity: MonitorIdentity,
-    /// A one-line role summary, for the operator report.
-    pub role: String,
+    /// What this monitor **is** — the role itself, not a rendering of it.
+    ///
+    /// Carried as the [`DisplayRole`] rather than as its
+    /// [`summary`](DisplayRole::summary) because a runtime report has to *branch*
+    /// on the kind of surface that was lost, and since issue #1331
+    /// [`pane_labels`](Self::pane_labels) can no longer answer that question: a
+    /// Station monitor carrying only station-bearing slots contributes no labels,
+    /// so "empty labels" stopped meaning "the viewscreen". See
+    /// [`RuntimeDisplayLoss`]'s `Display`, which is where reading it the other
+    /// way printed the viewscreen's sentence for a Station monitor.
+    pub role: DisplayRole,
     /// The **participant** labels whose panes live on this monitor — empty for
     /// the viewscreen, one or two for a Station.
     ///
@@ -1169,17 +1178,43 @@ impl ValidatedProfile {
             .iter()
             .map(|d| AssignedSurface {
                 identity: d.identity.clone(),
-                role: d.role.summary(),
-                pane_labels: match &d.role {
-                    DisplayRole::Viewscreen => Vec::new(),
-                    DisplayRole::Station { panes, .. } => panes
-                        .iter()
-                        .filter(|p| p.station.is_none())
-                        .map(|p| p.label.clone())
-                        .collect(),
-                },
+                role: d.role.clone(),
+                pane_labels: participant_labels(&d.role),
             })
             .collect()
+    }
+
+    /// Every **participant** pane label this profile authors, across all its
+    /// Station displays (issue #1331).
+    ///
+    /// The same list [`assigned_surfaces`](Self::assigned_surfaces) hands the
+    /// runtime watcher, flattened — and it is a list of *names on the pane bus*,
+    /// which is why [`app::install_world_selection`](crate::native_host::app)
+    /// checks it against the hull's station ids exactly as it checks a `--pane`
+    /// flag's. A pane name and a station id are one namespace: an authored
+    /// `label = "helm"` on a hull that has a `helm` station is the same collision
+    /// a `--pane helm` is, reached through a file instead of a flag.
+    pub fn participant_pane_labels(&self) -> Vec<String> {
+        self.displays
+            .iter()
+            .flat_map(|d| participant_labels(&d.role))
+            .collect()
+    }
+}
+
+/// The **participant** pane labels a role carries — a Station's slots that name
+/// no station, and nothing at all for the viewscreen.
+///
+/// One function, so the list the watcher diffs against and the list the boot
+/// guard refuses on cannot come to disagree about what a participant pane is.
+fn participant_labels(role: &DisplayRole) -> Vec<String> {
+    match role {
+        DisplayRole::Viewscreen => Vec::new(),
+        DisplayRole::Station { panes, .. } => panes
+            .iter()
+            .filter(|p| p.station.is_none())
+            .map(|p| p.label.clone())
+            .collect(),
     }
 }
 
@@ -1196,35 +1231,56 @@ impl ValidatedProfile {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RuntimeDisplayLoss {
     pub identity: MonitorIdentity,
-    pub role: String,
-    /// The participant labels whose panes must disconnect. Empty when the
-    /// viewscreen monitor is the one lost — the shared 3-D view simply has
-    /// nowhere to draw until the display returns, and no participant is affected.
+    /// What the lost monitor was — see [`AssignedSurface::role`]. The `Display`
+    /// below branches on THIS and never on `pane_labels`.
+    pub role: DisplayRole,
+    /// The participant labels whose panes must disconnect. Empty for the
+    /// viewscreen, which carries none — and also empty for a Station monitor
+    /// whose slots all name stations, whose consoles are the layout's to close.
     pub pane_labels: Vec<String>,
 }
 
 impl std::fmt::Display for RuntimeDisplayLoss {
+    /// # It branches on the ROLE, not on whether any pane was named
+    ///
+    /// It used to ask `pane_labels.is_empty()`, which was the same question until
+    /// issue #1331 stopped a station-bearing slot contributing a label. After
+    /// that, a Station monitor carrying only station consoles reported the
+    /// *viewscreen's* sentence — "the shared 3-D view it carried now has nowhere
+    /// to draw … no station is affected" — while the layout law, on the same
+    /// unplug, printed `StationMonitorGone` about the very stations it had just
+    /// unseated. The role is the thing that was lost; the labels are only who
+    /// disconnects because of it.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.pane_labels.is_empty() {
-            write!(
+        match &self.role {
+            DisplayRole::Viewscreen => write!(
                 f,
                 "the {} monitor {} was connected and has been lost mid-mission; the shared 3-D \
                  view it carried now has nowhere to draw until it returns, but no station is \
                  affected — the simulation and every other surface keep running, and its role is \
                  left unfilled rather than moved to another display",
-                self.role, self.identity
-            )
-        } else {
-            write!(
+                self.role.summary(),
+                self.identity
+            ),
+            DisplayRole::Station { .. } if !self.pane_labels.is_empty() => write!(
                 f,
                 "the {} monitor {} was connected and has been lost mid-mission; the panes it \
                  carried ({}) disconnect and their stations fall back to AI control, exactly as a \
                  dropped phone's would — its role is left unfilled rather than moved to another \
                  display",
-                self.role,
+                self.role.summary(),
                 self.identity,
                 self.pane_labels.join(", ")
-            )
+            ),
+            DisplayRole::Station { .. } => write!(
+                f,
+                "the {} monitor {} was connected and has been lost mid-mission; no participant \
+                 pane rode on it, so nothing disconnects here — a station's console seated on it \
+                 is closed by the bridge layout instead, which names that station itself — and \
+                 its role is left unfilled rather than moved to another display",
+                self.role.summary(),
+                self.identity
+            ),
         }
     }
 }
@@ -1238,7 +1294,8 @@ impl std::fmt::Display for RuntimeDisplayLoss {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RuntimeDisplayReturn {
     pub identity: MonitorIdentity,
-    pub role: String,
+    /// What the returned monitor is — see [`AssignedSurface::role`].
+    pub role: DisplayRole,
 }
 
 impl std::fmt::Display for RuntimeDisplayReturn {
@@ -1248,7 +1305,8 @@ impl std::fmt::Display for RuntimeDisplayReturn {
             "the {} monitor {} is connected again; it is not brought back into use automatically, \
              so re-apply the bridge profile to place its surface — no pane is moved onto it \
              without an explicit repair",
-            self.role, self.identity
+            self.role.summary(),
+            self.identity
         )
     }
 }

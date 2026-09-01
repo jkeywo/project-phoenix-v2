@@ -197,7 +197,8 @@ merges, and the `Welcome` arm emits `MOUNT_CONSOLES` unconditionally.
 ### A refused world leaves a pickable lobby
 
 A load that fails **after** the ingest (an unreadable or malformed world, an
-uncached `--ship`, a hull with no `[[station]]` blocks) puts the lobby back:
+uncached `--ship`, a hull with no `[[station]]` blocks, a participant pane name
+that shadows one of that hull's station ids) puts the lobby back:
 `WorldConfig` and `PreCompiledScripts` are removed — nothing has spawned at any
 failure point, and leaving them behind would give the operator a host holding a
 world it never built and deaf to every later pick — the arbiter's lock is
@@ -210,6 +211,16 @@ would go on answering for a world this host does not have — and that is what
 bound to. `reset` is the whole undo rather than a restore because `ingest_world`
 opens every attempt, including the next successful one, with exactly that reset.
 `--world` has none of these cases; it reports at the prompt and exits.
+
+The two paths are **not** equal in what the operator sees, and it is worth
+knowing which: `--world` prints the refusal in the terminal it was launched from
+and exits 1, while `--lobby` writes one `perror!` to the operator log and simply
+returns the lobby to pickable. The refusal itself crosses to **no** surface —
+phones see the catalogue come back with nothing locked, and the host's own lobby
+surface sees the same. `LayoutNotice` is not a route for it: that channel carries
+the bridge *layout's* refusals, and a world that would not load is not a
+statement about a monitor. Saying it on a surface needs a message this protocol
+does not have.
 
 ## The catalogue restriction cuts both ways
 
@@ -910,7 +921,13 @@ and reconnect `Identify`.
   `RuntimeDisplayLoss`, the runtime companion to `ProfileProblem::MonitorMissing`)
   and the watcher closes the panes that Station carried — resolved by participant
   name through `PaneBus::open_pane_for_name`. A lost **viewscreen** monitor is
-  named but fails no pane (nobody sits there). Nothing is re-homed.
+  named but fails no pane (nobody sits there). Nothing is re-homed. The report
+  branches on the `DisplayRole`, never on whether any pane was named: since
+  #1331 a station-bearing slot contributes no label, so a Station monitor
+  carrying only station consoles has an empty `pane_labels` too — and reading
+  that emptiness as "the viewscreen" printed *the shared 3-D view has nowhere to
+  draw, no station is affected* about a screen whose stations the layout law
+  was, on the same frame, reporting as `StationMonitorGone`.
 - **Recreation, on the same identity.** A crash's `PaneBus::recreate` opens a
   fresh pane carrying the **same session token** (a new `PaneId`, ids are never
   reissued), republishes its document at a fresh nonce, and enqueues its view for
@@ -1270,6 +1287,21 @@ in its place. The lists are kept apart at the **source** instead:
 really is participants only — and a station's console is the law's on every host,
 authored or not.
 
+Excluding the station-bearing slot closes only half of it. The *other* half is a
+profile pane that names **no** station and takes a station's name anyway:
+`label = "helm"` with no `station` key stays in `pane_labels` by design, so the
+same unplug of the authored monitor closes the `helm` console the lobby had
+opened somewhere else and the open sweep mints a fresh token — the identical
+harm, reached through a `label` rather than through a `station`. That is a *name*
+problem, and it is refused where every other pane-name collision is:
+`app::install_world_selection` checks the hull's station ids against **both**
+sources of participant pane names — the `--pane` flags and the profile's
+station-less slots (`ValidatedProfile::participant_pane_labels`) — on the
+`--world` path and on the `--lobby` one. With that refusal in force a duplicate
+pane label cannot come from authored input at all, and
+`BridgeStationSurfaces::slot_for` prefers the station-bearing slot so the
+unreachable case is *decided* rather than left to iteration order.
+
 *A surface is the law's to drop, not this frame's winit report.* Every reader of
 a lost display waits out `DISPLAY_LOSS_DEBOUNCE_FRAMES` before believing it,
 because winit's monitor list blips through a GPU reset, a display waking and a
@@ -1283,6 +1315,16 @@ rebuilt for a console the layout never stopped seating. And the close sweep asks
 the bus ∩ the law — every rostered station the layout does not seat whose console
 is still open — rather than the surfaces it has just rewritten, because a console
 outliving its seat is the one failure with no way back.
+
+Rebuilding that window means **re-anchoring** it. `bevy_winit` despawns a
+`Monitor` entity when a display stops being reported and spawns a *new* one when
+it returns, so a surface that survived the blip still names an entity that is
+gone — and winit re-applies fullscreen only when `Window::mode` changes, so the
+window would sit wherever the OS parked it while the geometry, the pane rects and
+the input router all used the returned monitor's coordinates. `BridgeStationSurface`
+records the `Monitor` entity it is anchored to, and the applier rewrites the mode
+when that differs, exactly as `follow_layout_viewscreen` does for the primary
+window.
 
 *The law and the adapter are reconciled, and a seat can be given back.*
 `follow_layout_stations` applies the layout; it cannot see whether the
@@ -1299,6 +1341,25 @@ claiming a screen that is black. On the pane host's side, a failed
 pane, so the failure enters that same path instead of leaving an open pane with
 nothing behind it.
 
+It declines a frame reporting **no** monitors at all, as the applier and the
+watcher already do: with none, `follow_layout_stations` leaves its pass owed, so
+a station seated on such a frame has neither surface nor console through nothing's
+fault, and ten of those frames used to surrender a seat the applier never got to
+attempt.
+
+*Notices are appended, and drained by the publisher.*
+`BridgeLayoutResource::notices` is written by three systems in **two unordered
+chains** — the lobby's `drain_surface_records` (in `PreUpdate`), and
+`reconcile_layout` and `reconcile_seated_consoles` here — and all three used to
+assign, so whichever ran last erased the others. The frame where that decides
+something is the frame worth reporting: a press landing as a seat is surrendered
+dropped `ConsoleCouldNotOpen`, the one notice the reconciler exists to deliver.
+Every writer extends now, so a frame's notices surface together, and
+`publish_bridge_layout` clears what it has pushed — through
+`bypass_change_detection`, so the drain cannot schedule a second push that blanks
+the row it has just filled. The list is therefore *what the lobby is owed*, not
+everything that ever happened.
+
 *A host with a bundle always carries a pane bus.* A screen row can open a console
 at any moment, so `phoenix-host` opens `LocalPanes` (with however many `--pane`
 names it was given, including none) whenever it has a `--client-dir` bundle and
@@ -1307,13 +1368,16 @@ through `PairedTransport` rather than replaced by it — before #1331 the relay'
 `insert_resource` silently overwrote the pane transport, so a `--pane` on a
 crewed host was talking to nothing.
 
-*A `--pane` may not shadow a station id.* Pane names and station ids became one
+*A pane name may not shadow a station id.* Pane names and station ids became one
 namespace when the screen rows started opening a console under its station's own
 id, so `--pane helm` on a hull with a `helm` station is two participants under
 one key — and the row's off button would close the person's console rather than
 the station's. `app::install_world_selection` refuses it where the roster is
 finally known: at the prompt for a `--world` host, and at the pick for a
-`--lobby` one.
+`--lobby` one. **Both** sources of a participant pane name are checked — the
+`--pane` flags and a `--profile`'s station-less `[[display.pane]]` slots — for
+the reason given under the two lists above: the profile route is the one that
+puts a station id back into `pane_labels`.
 
 *What is deliberately not here.* Two consoles on one screen tile side by side
 because the geometry is free, but the 2-up polish and its greying UX are issue

@@ -264,10 +264,20 @@ cargo build --release --features host --bin phoenix-host
 #     the same token (#1125's own budget) and, when that is spent, has its SEAT
 #     GIVEN BACK through the law with a LayoutNotice the row renders — an honest
 #     Backfill instead of a station card claiming a screen that is black.
-#     A --pane <NAME> colliding with a station id on the loaded hull is REFUSED
+#     A PANE NAME colliding with a station id on the loaded hull is REFUSED
 #     (app::install_world_selection): pane names and station ids are one
 #     namespace on the pane bus since #1331, so a screen row's off button would
-#     otherwise close that person's console instead of the station's.
+#     otherwise close that person's console instead of the station's. BOTH
+#     sources are checked — a --pane <NAME> flag AND a --profile
+#     [[display.pane]] carrying a label and no station key — because the second
+#     is what puts a station id back into assigned_surfaces's pane_labels: an
+#     unplug of the AUTHORED monitor would then close the station's console the
+#     lobby had opened on another screen and mint a fresh token, with the law
+#     never having unseated anything. A Station window whose display blips and
+#     returns is RE-ANCHORED to the new Monitor entity (winit re-applies
+#     fullscreen only on a mode change), and BridgeLayoutResource::notices is
+#     APPENDED to by every writer and drained by publish_bridge_layout, so a
+#     press racing a console surrender cannot erase either sentence.
 #   --manifest also narrows what this process FLIES, not only what it publishes:
 #     with a curating manifest in force the default hull is drawn from that
 #     manifest's allowlist (issue #917). An explicit --ship still wins.

@@ -496,10 +496,12 @@ fn apply_pending_world_load(world: &mut World) {
 /// Three things have to go, and the third is the one that is easy to miss:
 ///
 ///  * `WorldConfig` and `PreCompiledScripts`. `install_world_selection` can fail
-///    AFTER [`crate::boot::ingest_world`] has already inserted them (an uncached
-///    hull, a hull with no `[[station]]` blocks), and leaving them behind would
-///    take [`awaiting_world`] false — a host holding a world it never spawned,
-///    unable to accept another pick.
+///    AFTER [`crate::boot::ingest_world`] has already inserted them — an uncached
+///    hull, a hull with no `[[station]]` blocks, or a participant pane name that
+///    shadows one of that hull's station ids
+///    ([`NativeHostError::PaneShadowsStation`], issue #1331) — and leaving them
+///    behind would take [`awaiting_world`] false: a host holding a world it never
+///    spawned, unable to accept another pick.
 ///  * The **content ledger**. `ingest_world` froze it over the refused world's
 ///    file set, and `install_world_selection` froze it again after re-recording
 ///    the hull — both before either failure point. A frozen ledger is the input
@@ -513,8 +515,26 @@ fn apply_pending_world_load(world: &mut World) {
 ///    is the template preload's records, which the next load's own eager record
 ///    re-reads from disk regardless.
 ///
-/// Nothing has spawned at either failure point, so there are no entities to
-/// unwind alongside them.
+/// Nothing has spawned at any of those failure points, so there are no entities
+/// to unwind alongside them.
+///
+/// # What the operator sees, and how that differs from `--world`
+///
+/// Stated rather than glossed, because the two paths are genuinely not equal and
+/// nothing here can make them so cheaply. A `--world` host meets these same
+/// refusals at the prompt: `phoenix_host`'s `main` prints the
+/// [`NativeHostError`] and exits 1, so the operator reads the sentence in the
+/// terminal they launched from. A `--lobby` host meets them frames into a
+/// running process, where there is no prompt left to fail at — so
+/// [`apply_pending_world_load`] emits one `perror!` on the operator log, clears
+/// the selection, and re-publishes the catalogue so the lobby is pickable again.
+/// **The refusal itself does not cross to any surface.** The phones see the
+/// catalogue return with nothing locked; the host's own lobby surface shows the
+/// same, and its `LayoutNotice` channel is not a route for this — that carries
+/// the bridge LAYOUT's own refusals, and a world that would not load is not a
+/// statement about a monitor. Saying it on a surface needs a message this
+/// protocol does not have; until one exists, the operator log is where the
+/// sentence lives and the lobby is only observably back where it started.
 fn unwind_failed_load(world: &mut World) {
     world.remove_resource::<crate::world::config::WorldConfig>();
     world.remove_resource::<crate::world::server::PreCompiledScripts>();

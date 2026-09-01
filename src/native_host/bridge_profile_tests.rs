@@ -1057,6 +1057,59 @@ fn a_station_bearing_slot_contributes_no_pane_label_to_the_watcher() {
 }
 
 #[test]
+fn a_stations_only_monitor_reports_its_loss_as_a_station_monitors() {
+    // The case the test above dodged by mixing a participant in beside the
+    // station. A Station monitor whose slots ALL name stations contributes no
+    // pane labels at all after issue #1331 — and `RuntimeDisplayLoss`'s report
+    // used to branch on exactly that emptiness, so unplugging it printed the
+    // VIEWSCREEN's sentence: "the shared 3-D view it carried now has nowhere to
+    // draw … no station is affected", about a screen that was carrying a crew
+    // member's console and about which the layout law was, on the same frame,
+    // printing `StationMonitorGone`. The report branches on the ROLE now.
+    let profile = profile_with(vec![
+        viewscreen_entry(DELL),
+        DisplayEntry {
+            id: BENQ.to_string(),
+            role: ROLE_STATION.to_string(),
+            split: None,
+            panes: vec![PaneSlot::for_station("helm")],
+        },
+    ])
+    .validate()
+    .expect("a viewscreen and a one-station display validate");
+
+    let assigned = profile.assigned_surfaces();
+    let losses = runtime_display_losses(&assigned, &present(&[DELL, BENQ]), &present(&[DELL]));
+    assert_eq!(losses.len(), 1);
+    assert!(
+        losses[0].pane_labels.is_empty(),
+        "a station-bearing slot contributes no label, which is the whole of #1331's fix"
+    );
+
+    let text = losses[0].to_string();
+    assert!(
+        text.starts_with("the station,"),
+        "the sentence has to say what kind of monitor was lost: {text}"
+    );
+    assert!(
+        !text.contains("nowhere to draw") && !text.contains("no station is affected"),
+        "and must not claim to be the viewscreen's: {text}"
+    );
+    assert!(
+        text.contains("no participant pane rode on it"),
+        "it says why nothing disconnects HERE: {text}"
+    );
+    assert!(
+        text.contains("closed by the bridge layout"),
+        "and where the console it was carrying is closed instead: {text}"
+    );
+
+    // The viewscreen keeps its own sentence, which is the half that was right.
+    let lost_view = runtime_display_losses(&assigned, &present(&[DELL, BENQ]), &present(&[BENQ]));
+    assert!(lost_view[0].to_string().contains("nowhere to draw"));
+}
+
+#[test]
 fn losing_a_station_monitor_names_it_and_the_panes_that_must_disconnect() {
     // The runtime extension of the #1123 missing-display report: a monitor that
     // WAS present and driving a pane is unplugged mid-mission. It is named

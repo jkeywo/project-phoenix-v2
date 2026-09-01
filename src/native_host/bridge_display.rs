@@ -1474,7 +1474,7 @@ mod tests {
     /// The lobby's monitor row, as the surface would receive it this frame.
     fn row(app: &App) -> super::super::host_lobby::layout::BridgeLayoutPayload {
         let live = app.world().resource::<BridgeLayoutResource>();
-        super::super::host_lobby::monitor_row_payload(&live.layout, &live.monitors, &live.notices)
+        super::super::host_lobby::bridge_layout_payload(&live.layout, &live.monitors, &live.notices)
     }
 
     /// The window mode of the process's primary window.

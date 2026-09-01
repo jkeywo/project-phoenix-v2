@@ -25,7 +25,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { t } from '../../gui/strings.js';
 import { hostLobbyViewModel } from '../../gui/host-lobby-view.js';
-import { renderHostLobby, MONITOR_BUTTON_ATTR } from '../../gui/host-lobby-render.js';
+import {
+  renderHostLobby,
+  MONITOR_BUTTON_ATTR,
+  STATION_BUTTON_ATTR,
+  STATION_SCREEN_ATTR,
+} from '../../gui/host-lobby-render.js';
 
 const SERVER_HTML = fs.readFileSync(
   path.join(path.dirname(fileURLToPath(import.meta.url)), '../../server.html'),
@@ -498,5 +503,154 @@ describe('the bridge monitor row', () => {
     document.getElementById('monitor-row').remove();
     renderWithLayout({ monitors: [monitor()] }, { scenario_title: 'Combat Test' });
     expect(document.getElementById('lobby-title').textContent).toBe('Combat Test');
+  });
+});
+
+// ── the per-station screen rows (issue #1331) ────────────────────────────────
+//
+// The strip is drawn INSIDE a station card, so what these check is the half no
+// view-model test can: that a real `<button>` reaches the real markup carrying
+// the two attributes the press half reads, that a full screen is disabled
+// rather than merely styled, and that the chosen screen says so to a screen
+// reader as well as to an eye.
+
+const screenChoice = (identity, choice, excluded) => (
+  excluded ? { identity, choice, excluded } : { identity, choice }
+);
+
+/** A layout whose one station may open on the BenQ and nowhere else. */
+const stationBridge = (rows) => ({
+  monitors: [monitor(), benq()],
+  stations: rows || [{
+    station: 'helm',
+    monitors: [
+      screenChoice('BRAVIA@3840x2160', 'excluded', 'is-viewscreen'),
+      screenChoice('BenQ EX@1920x1080', 'eligible'),
+    ],
+  }],
+});
+
+const screenButtons = () =>
+  Array.from(document.querySelectorAll('#station-grid .station-screen-button'));
+
+describe('a station card’s screen row', () => {
+  it('draws no strip at all on a host that reported no monitors', () => {
+    // The browser host: one renderer, two surfaces, and the row is data-driven
+    // rather than page-driven.
+    installLobbyPanel(document);
+    render({ stations: [station({ id: 'helm' })] });
+    expect(document.querySelectorAll('.station-screens').length).toBe(0);
+  });
+
+  it('draws an off button and one button per offered screen', () => {
+    installLobbyPanel(document);
+    renderWithLayout(stationBridge(), { stations: [station({ id: 'helm' })] });
+    const buttons = screenButtons();
+    expect(buttons.length).toBe(2);
+    expect(buttons[0].textContent).toContain(t('server.station_row.off'));
+    expect(buttons[1].textContent).toContain('BenQ EX');
+    // The viewscreen's own display is never among them.
+    expect(buttons.some((b) => b.textContent.includes('BRAVIA'))).toBe(false);
+  });
+
+  it('carries the station id and the screen identity the press half reads', () => {
+    // Both must reach the host byte-for-byte: the layout law refuses an unknown
+    // monitor and an off-roster station alike, and the button text is localised.
+    installLobbyPanel(document);
+    renderWithLayout(stationBridge(), { stations: [station({ id: 'helm' })] });
+    const [off, benqButton] = screenButtons();
+    expect(off.getAttribute(STATION_BUTTON_ATTR)).toBe('helm');
+    expect(off.getAttribute(STATION_SCREEN_ATTR)).toBe('');
+    expect(benqButton.getAttribute(STATION_BUTTON_ATTR)).toBe('helm');
+    expect(benqButton.getAttribute(STATION_SCREEN_ATTR)).toBe('BenQ EX@1920x1080');
+  });
+
+  it('never carries the attribute the viewscreen row is delegated on', () => {
+    // A station button that answered to `data-monitor` would move the shared
+    // view instead of opening a console.
+    installLobbyPanel(document);
+    renderWithLayout(stationBridge(), { stations: [station({ id: 'helm' })] });
+    for (const b of screenButtons()) {
+      expect(b.hasAttribute(MONITOR_BUTTON_ATTR)).toBe(false);
+    }
+  });
+
+  it('says which screen is chosen to a screen reader, not only in colour', () => {
+    installLobbyPanel(document);
+    renderWithLayout(
+      stationBridge([{
+        station: 'helm',
+        assigned_to: 'BenQ EX@1920x1080',
+        monitors: [
+          screenChoice('BRAVIA@3840x2160', 'excluded', 'is-viewscreen'),
+          screenChoice('BenQ EX@1920x1080', 'selected'),
+        ],
+      }]),
+      { stations: [station({ id: 'helm' })] },
+    );
+    const [off, benqButton] = screenButtons();
+    expect(off.getAttribute('aria-pressed')).toBe('false');
+    expect(benqButton.getAttribute('aria-pressed')).toBe('true');
+    expect(benqButton.className).toContain('selected');
+  });
+
+  it('disables a full screen rather than offering a press that would be refused', () => {
+    installLobbyPanel(document);
+    renderWithLayout(
+      stationBridge([{
+        station: 'helm',
+        monitors: [
+          screenChoice('BRAVIA@3840x2160', 'excluded', 'is-viewscreen'),
+          screenChoice('BenQ EX@1920x1080', 'excluded', 'full'),
+        ],
+      }]),
+      { stations: [station({ id: 'helm' })] },
+    );
+    const [off, benqButton] = screenButtons();
+    expect(off.disabled).toBe(false);
+    expect(benqButton.disabled).toBe(true);
+    expect(benqButton.textContent).toContain(t('server.station_row.full'));
+  });
+
+  it('says why there is no screen on a one-monitor bridge', () => {
+    installLobbyPanel(document);
+    renderWithLayout(
+      {
+        monitors: [monitor()],
+        stations: [{
+          station: 'helm',
+          monitors: [screenChoice('BRAVIA@3840x2160', 'excluded', 'is-viewscreen')],
+        }],
+      },
+      { stations: [station({ id: 'helm' })] },
+    );
+    expect(screenButtons().length).toBe(0);
+    expect(document.querySelector('.station-screens-message').textContent)
+      .toBe(t('server.station_row.needs_second_monitor'));
+  });
+
+  it('resolves every string through the table rather than showing an id', () => {
+    installLobbyPanel(document);
+    renderWithLayout(
+      stationBridge([{
+        station: 'helm',
+        monitors: [
+          screenChoice('BRAVIA@3840x2160', 'excluded', 'is-viewscreen'),
+          screenChoice('BenQ EX@1920x1080', 'excluded', 'full'),
+        ],
+      }]),
+      { stations: [station({ id: 'helm' })] },
+    );
+    expect(document.querySelector('.station-screens').textContent).not.toContain('⟨');
+  });
+
+  it('replaces the strip on a re-render rather than accumulating one per push', () => {
+    // The grid is rebuilt wholesale, which is exactly why the press listener is
+    // delegated — but a strip appended to a surviving card would stack.
+    installLobbyPanel(document);
+    renderWithLayout(stationBridge(), { stations: [station({ id: 'helm' })] });
+    renderWithLayout(stationBridge(), { stations: [station({ id: 'helm' })] });
+    expect(document.querySelectorAll('.station-screens').length).toBe(1);
+    expect(screenButtons().length).toBe(2);
   });
 });

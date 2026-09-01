@@ -64,6 +64,25 @@
 export const MONITOR_BUTTON_ATTR = 'data-monitor';
 
 /**
+ * The attributes a station's screen button carries (issue #1331).
+ *
+ * Two of them, and deliberately NOT `data-monitor`: the viewscreen row's
+ * delegated listener matches on that attribute, and a station button carrying
+ * it would move the shared view instead of opening a console. So a screen
+ * button is identified by `data-station` (which station's console) and
+ * `data-screen` (which display, or empty for the off state), and the listener
+ * in `src/native_host/host_lobby/host_lobby_link.js` tests for the station
+ * attribute first.
+ *
+ * The off button carries `data-screen=""` rather than omitting the attribute:
+ * an absent attribute and an empty one are the same to `closest()` but not to
+ * `getAttribute`, and "off" has to be a value the listener can act on rather
+ * than a hole it has to guess the meaning of.
+ */
+export const STATION_BUTTON_ATTR = 'data-station';
+export const STATION_SCREEN_ATTR = 'data-screen';
+
+/**
  * Render one lobby view model into `doc`.
  *
  * @param {Document} doc the document holding the `#lobby-panel` markup.
@@ -186,6 +205,13 @@ export function renderHostLobby(doc, vm, t, opts) {
       chips.appendChild(chip);
     }
     card.appendChild(chips);
+
+    // ── This station's screen row (issue #1331) ──────────────────────────
+    // One button per display this console may open on, an off button that
+    // closes it, and — on a bridge with nowhere but the viewscreen — a line
+    // saying so instead. Absent entirely on the browser host, whose view model
+    // carries no bridge at all.
+    if (c.screens) renderStationScreens(doc, card, c.screens, t);
 
     // Footer: complexity pill(s)
     if (c.presetPills.length > 0) {
@@ -322,8 +348,86 @@ export function renderHostLobby(doc, vm, t, opts) {
   }
 }
 
+/**
+ * Draw one station card's screen row into `card` (issue #1331).
+ *
+ * Split out of the card loop above because it is a control strip rather than
+ * card content: every element it makes is operable, and the rules that go with
+ * that — a real `<button>` so a keyboard reaches it, `aria-pressed` so the
+ * chosen screen is legible without colour, `disabled` so a full screen is
+ * skipped rather than offered and refused — are all in one place instead of
+ * threaded through the card's presentation.
+ *
+ * @param {Document} doc
+ * @param {Element} card the `.station-card` this row belongs to.
+ * @param {object} row one entry of `hostLobbyStationRows()`.
+ * @param {(id: string, params?: object) => string} t
+ */
+function renderStationScreens(doc, card, row, t) {
+  const strip = doc.createElement('div');
+  strip.className = 'station-screens';
+
+  const label = doc.createElement('span');
+  label.className = 'station-screens-label';
+  label.textContent = t('server.station_row.label');
+  strip.appendChild(label);
+
+  // A bridge with one display offers this station nothing, so it says why
+  // rather than showing an empty strip the operator would read as broken.
+  if (row.message) {
+    const note = doc.createElement('span');
+    note.className = 'station-screens-message';
+    note.textContent = t(row.message.id, row.message.params);
+    strip.appendChild(note);
+    card.appendChild(strip);
+    return;
+  }
+
+  const button = (screen, selected, disabled, text, reason) => {
+    const el = doc.createElement('button');
+    el.type = 'button';
+    el.className = 'station-screen-button' + (selected ? ' selected' : '');
+    el.setAttribute(STATION_BUTTON_ATTR, row.station);
+    el.setAttribute(STATION_SCREEN_ATTR, screen);
+    // Which screen this console is on is the one fact the row carries, and it
+    // must not be legible only to somebody who can tell two blues apart
+    // (WCAG 1.4.1) — the same reason the monitor row marks its viewscreen with
+    // `aria-pressed` as well as a border.
+    el.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    if (disabled) el.disabled = true;
+    const name = doc.createElement('span');
+    name.className = 'station-screen-name';
+    name.textContent = text;
+    el.appendChild(name);
+    if (reason) {
+      const why = doc.createElement('span');
+      why.className = 'station-screen-reason';
+      why.textContent = t(reason.id, reason.params);
+      el.appendChild(why);
+    }
+    return el;
+  };
+
+  // Off first, so the row reads "closed, or one of these" left to right and the
+  // control that always works is the one under the operator's thumb.
+  strip.appendChild(
+    button('', row.off.selected, false, t('server.station_row.off'), null),
+  );
+  for (const b of row.buttons) {
+    strip.appendChild(
+      button(b.identity, b.selected, b.disabled, t(b.label.id, b.label.params), b.reason),
+    );
+  }
+  card.appendChild(strip);
+}
+
 // Expose for the classic (non-module) script in server.html — the same
 // self-registering pattern window.hostLobbyViewModel uses.
 if (typeof window !== 'undefined') {
-  window.hostLobbyRender = { renderHostLobby, MONITOR_BUTTON_ATTR };
+  window.hostLobbyRender = {
+    renderHostLobby,
+    MONITOR_BUTTON_ATTR,
+    STATION_BUTTON_ATTR,
+    STATION_SCREEN_ATTR,
+  };
 }

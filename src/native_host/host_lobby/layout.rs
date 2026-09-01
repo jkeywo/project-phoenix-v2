@@ -1,36 +1,53 @@
-//! What the lobby's **monitor row** is, in both directions (issue #1330) —
-//! **pure, Bevy-free**.
+//! What the lobby's **monitor row** and its **per-station screen rows** are, in
+//! both directions (issues #1330, #1331) — **pure, Bevy-free**.
 //!
 //! [`super::super::bridge_layout`] is the law: what a bridge arrangement may
 //! become. This is the *conversation about it* the viewscreen's own lobby
 //! surface has:
 //!
 //! ```text
-//! BridgeLayout + DiscoveredMonitor[]  ──monitor_row_payload──▶  BridgeLayoutPayload
+//! BridgeLayout + DiscoveredMonitor[] ──bridge_layout_payload──▶  BridgeLayoutPayload
 //!        ▲                                                            │ codec::encode_bridge_layout
 //!        │                                                            ▼
-//!  LayoutAction ◀─set_viewscreen_action─┐            window.__phoenixHostLobbyLayout(json)
-//!                                       │                        gui/host-lobby-view.js
-//!               HostLobbyRecord::SetViewscreen ◀───  phoenixHostLobbyOut.send
-//!                    [super::scenario]     │ codec::decode_host_lobby_record
+//!  LayoutAction ◀──*_action────────────┐              window.__phoenixHostLobbyLayout(json)
+//!                                      │                         gui/host-lobby-view.js
+//!    HostLobbyRecord::{SetViewscreen, AssignStation, UnassignStation}
+//!                    [super::scenario]  ▲ codec::decode_host_lobby_record
+//!                                       └──────────────  phoenixHostLobbyOut.send
 //! ```
+//!
+//! # Two rows, one payload
+//!
+//! The monitor row (issue #1330) chooses which display shows the shared
+//! viewscreen; a station's screen row (issue #1331) chooses which display that
+//! station's console opens on, or closes it. They travel together because they
+//! are two projections of the same [`BridgeLayout`] and the surface renders
+//! them in one pass — a press on either is judged by the same law, and a
+//! payload that carried only one of them would let the two disagree about which
+//! screen is holding what.
 //!
 //! Both ends are here because they are one contract: the `identity` string a
 //! button carries out is the same `identity` string the press carries back, and
 //! splitting the two halves across two modules is how a renamed field becomes a
 //! button that silently does nothing.
 //!
-//! # …but the record itself is not, and that is deliberate
+//! # …but the records themselves are not, and that is deliberate
 //!
-//! The press arrives as a variant of [`HostLobbyRecord`](super::HostLobbyRecord),
-//! the surface's ONE vocabulary, beside the operator's scenario and hull picks
-//! and their AI-launch press (issue #1328). It is not a record type of its own,
-//! because `HostLobbyBridge::take_records` is a **drain**: a second record type
-//! would want a second reader, the first reader to run would swallow the other's
+//! All three presses arrive as variants of
+//! [`HostLobbyRecord`](super::HostLobbyRecord), the surface's ONE vocabulary,
+//! beside the operator's scenario and hull picks and their AI-launch press
+//! (issue #1328). They are not a record type of their own, because
+//! `HostLobbyBridge::take_records` is a **drain**: a second record type would
+//! want a second reader, the first reader to run would swallow the other's
 //! records and warn about a vocabulary it does not speak, and the second would
 //! see an empty queue forever — with a clean log on both sides. One vocabulary,
 //! one drain. What stays here is the half that is genuinely this module's: the
-//! [`LayoutAction`] a `set-viewscreen` press asks for.
+//! [`LayoutAction`] each of `set-viewscreen`, `assign-station` and
+//! `unassign-station` asks for.
+//!
+//! There is no `move-station` verb, because the law has no move action: naming
+//! a different screen for a station that is already seated *is* the move. The
+//! row therefore presses one button either way and cannot pick the wrong verb.
 //!
 //! # Why the payload is `serde` and not a `format!`
 //!
@@ -57,7 +74,11 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::super::bridge_layout::{BridgeLayout, LayoutAction, LayoutAdoption, LayoutRefusal};
+use crate::core::messages::StationId;
+
+use super::super::bridge_layout::{
+    BridgeLayout, ExclusionReason, LayoutAction, LayoutAdoption, LayoutRefusal, MonitorChoice,
+};
 use super::super::bridge_profile::{DiscoveredMonitor, MonitorIdentity};
 
 /// One monitor, as one button in the lobby's monitor row.
@@ -106,7 +127,51 @@ pub struct LayoutNoticePayload {
     pub params: BTreeMap<String, String>,
 }
 
-/// The whole monitor row, as the surface receives it.
+/// One monitor's entry in one station's screen row (issue #1331).
+///
+/// The law's [`MonitorChoice`] on the wire, and **only** the law's: the page
+/// never works out for itself why a screen is not offered, because two
+/// implementations of one rule are how a greyed button and a refusal start
+/// disagreeing. `choice` is the state; `excluded` is the reason, present
+/// exactly when the state is `excluded`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StationScreenPayload {
+    /// The monitor's stable identity — the token a press carries back. The
+    /// display's *name* is not repeated here: it is on this same payload's
+    /// [`MonitorButtonPayload`], and the row joins the two by identity rather
+    /// than carrying one OS string twice per station.
+    pub identity: String,
+    /// `selected`, `eligible` or `excluded` — see [`MonitorChoice`].
+    pub choice: String,
+    /// Why it is greyed: `is-viewscreen` or `full`
+    /// ([`ExclusionReason::as_str`]). Absent unless `choice` is `excluded`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub excluded: Option<String>,
+}
+
+/// One station's screen row (issue #1331).
+///
+/// Every station on the ship's roster gets one, in roster order, whether or not
+/// its console is open — the row is how it is *opened*, so a station with no
+/// row would be a station the operator could never seat.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StationRowPayload {
+    /// The station id — the ship's own authoring key, which is what a press
+    /// carries back and what the layout law is keyed on.
+    pub station: String,
+    /// The monitor its console is open on, or absent when it is closed. The
+    /// row's "off" state is this being absent, not a monitor entry of its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assigned_to: Option<String>,
+    /// One entry per monitor this bridge has, in monitor order — including the
+    /// viewscreen's, marked `is-viewscreen`. The surface drops that one rather
+    /// than the host omitting it, so the row acts on the law's own answer
+    /// instead of re-deriving which screen is the shared view.
+    pub monitors: Vec<StationScreenPayload>,
+}
+
+/// The whole bridge layout, as the surface receives it: the monitor row and
+/// every station's screen row.
 ///
 /// A snapshot, like the lobby payload beside it: the newest one is the truth
 /// and an older one has nothing to add.
@@ -114,6 +179,12 @@ pub struct LayoutNoticePayload {
 pub struct BridgeLayoutPayload {
     /// One entry per monitor this bridge has, in discovery order.
     pub monitors: Vec<MonitorButtonPayload>,
+    /// One entry per claimable station on this ship, in roster order
+    /// (issue #1331). Empty for a host that has resolved no hull — a delivery
+    /// host, or one still in a world-less lobby — which is a lawful bridge with
+    /// nothing to seat rather than a missing field.
+    #[serde(default)]
+    pub stations: Vec<StationRowPayload>,
     /// What happened to the last action or bridge change — empty when nothing
     /// has.
     #[serde(default)]
@@ -185,13 +256,13 @@ fn notice(id: &str, params: Vec<(&'static str, String)>) -> LayoutNoticePayload 
 /// layout monitor missing from it is skipped rather than drawn at an invented
 /// size — the two only diverge while a reconcile is pending, and half a button
 /// is worse than no button.
-pub fn monitor_row_payload(
+pub fn bridge_layout_payload(
     layout: &BridgeLayout,
     discovered: &[DiscoveredMonitor],
     notices: &[LayoutNotice],
 ) -> BridgeLayoutPayload {
     let viewscreen = layout.viewscreen().clone();
-    let monitors = layout
+    let monitors: Vec<MonitorButtonPayload> = layout
         .monitors()
         .iter()
         .filter_map(|identity| {
@@ -207,11 +278,56 @@ pub fn monitor_row_payload(
             })
         })
         .collect();
+    // The screen rows are drawn against the SAME filtered monitor list: a
+    // display the layout knows but nothing reported has no button in the
+    // monitor row, and offering it a station is offering a press the row cannot
+    // even draw. Both halves therefore skip it together.
+    let drawn: Vec<&str> = monitors.iter().map(|m| m.identity.as_str()).collect();
+    let stations = layout
+        .eligibility()
+        .into_iter()
+        .map(|row| StationRowPayload {
+            station: row.station.0,
+            assigned_to: row.assigned_to.map(|m| m.as_str().to_string()),
+            monitors: row
+                .monitors
+                .into_iter()
+                .filter(|c| drawn.contains(&c.monitor.as_str()))
+                .map(|c| StationScreenPayload {
+                    identity: c.monitor.as_str().to_string(),
+                    choice: choice_token(c.choice).to_string(),
+                    excluded: c.choice.exclusion().map(|r| r.as_str().to_string()),
+                })
+                .collect(),
+        })
+        .collect();
     BridgeLayoutPayload {
         monitors,
+        stations,
         notices: notices.iter().flat_map(LayoutNotice::payloads).collect(),
     }
 }
+
+/// The wire token for one [`MonitorChoice`] state.
+///
+/// Spelled here rather than on the law, because it is this wire's vocabulary
+/// rather than the law's: [`ExclusionReason::as_str`] already crosses as its own
+/// field, and a `Display` for the whole choice would have to fold the reason
+/// into the state and make the page split a string apart again.
+fn choice_token(choice: MonitorChoice) -> &'static str {
+    match choice {
+        MonitorChoice::Selected => "selected",
+        MonitorChoice::Eligible => "eligible",
+        MonitorChoice::Excluded(_) => "excluded",
+    }
+}
+
+/// Assert at compile time that the two exclusion reasons the page styles are
+/// the two the law has — a third would otherwise reach `gui/` as a token
+/// nothing renders, and the button would grey with no reason beside it.
+const _: fn(ExclusionReason) = |reason| match reason {
+    ExclusionReason::IsViewscreen | ExclusionReason::Full => {}
+};
 
 /// The layout action a
 /// [`HostLobbyRecord::SetViewscreen`](super::HostLobbyRecord::SetViewscreen)
@@ -229,6 +345,34 @@ pub fn monitor_row_payload(
 pub fn set_viewscreen_action(monitor: impl Into<String>) -> LayoutAction {
     LayoutAction::SetViewscreen {
         monitor: MonitorIdentity::new(monitor.into()),
+    }
+}
+
+/// The layout action an
+/// [`HostLobbyRecord::AssignStation`](super::HostLobbyRecord::AssignStation)
+/// press asks for (issue #1331): open — or re-seat — this station's console on
+/// this screen.
+///
+/// Total and infallible for the same reason [`set_viewscreen_action`] is: a
+/// screen the row offered and the law has since filled is a
+/// [`LayoutRefusal::MonitorFull`] the operator reads, not a parse failure.
+pub fn assign_station_action(
+    station: impl Into<String>,
+    monitor: impl Into<String>,
+) -> LayoutAction {
+    LayoutAction::AssignStation {
+        station: StationId(station.into()),
+        monitor: MonitorIdentity::new(monitor.into()),
+    }
+}
+
+/// The layout action an
+/// [`HostLobbyRecord::UnassignStation`](super::HostLobbyRecord::UnassignStation)
+/// press asks for (issue #1331): close this station's console. The row's "off"
+/// button.
+pub fn unassign_station_action(station: impl Into<String>) -> LayoutAction {
+    LayoutAction::UnassignStation {
+        station: StationId(station.into()),
     }
 }
 
@@ -272,7 +416,7 @@ mod tests {
         // press says, so the host resolves the button to the display the
         // operator was looking at rather than to an index into a list that
         // moved.
-        let payload = monitor_row_payload(&layout(), &two_monitors(), &[]);
+        let payload = bridge_layout_payload(&layout(), &two_monitors(), &[]);
         let pressed = &payload.monitors[1];
 
         // What the page sends back carries that identity verbatim, in the
@@ -298,7 +442,7 @@ mod tests {
 
     #[test]
     fn the_row_names_each_monitor_by_what_the_os_reported_and_marks_the_viewscreen() {
-        let payload = monitor_row_payload(&layout(), &two_monitors(), &[]);
+        let payload = bridge_layout_payload(&layout(), &two_monitors(), &[]);
         assert_eq!(payload.monitors.len(), 2);
         let tv = &payload.monitors[0];
         assert_eq!(tv.name.as_deref(), Some("BRAVIA"));
@@ -318,7 +462,7 @@ mod tests {
                 monitor: MonitorIdentity::new("BenQ EX@1920x1080"),
             })
             .expect("a free monitor takes the viewscreen");
-        let payload = monitor_row_payload(&moved, &two_monitors(), &[]);
+        let payload = bridge_layout_payload(&moved, &two_monitors(), &[]);
         assert!(!payload.monitors[0].viewscreen);
         assert!(payload.monitors[1].viewscreen);
         assert!(
@@ -333,7 +477,7 @@ mod tests {
         // and pressing it is the no-op the law defines.
         let one = identify(&[raw("BRAVIA", 3840, 2160, 0, true)]);
         let layout = BridgeLayout::from_discovered(&one, roster()).unwrap();
-        let payload = monitor_row_payload(&layout, &one, &[]);
+        let payload = bridge_layout_payload(&layout, &one, &[]);
         assert_eq!(payload.monitors.len(), 1);
         assert!(payload.monitors[0].viewscreen);
     }
@@ -342,7 +486,7 @@ mod tests {
     fn a_monitor_the_layout_has_but_nothing_reported_is_left_out_of_the_row() {
         // The two only diverge while a reconcile is pending. Half a button —
         // named, sized 0x0 — is worse than no button.
-        let payload = monitor_row_payload(&layout(), &two_monitors()[..1], &[]);
+        let payload = bridge_layout_payload(&layout(), &two_monitors()[..1], &[]);
         assert_eq!(payload.monitors.len(), 1);
         assert_eq!(payload.monitors[0].identity, "BRAVIA@3840x2160");
     }
@@ -355,7 +499,7 @@ mod tests {
                 monitor: MonitorIdentity::new("BenQ EX@1920x1080"),
             })
             .expect("a free non-viewscreen monitor takes a console");
-        let payload = monitor_row_payload(&seated, &two_monitors(), &[]);
+        let payload = bridge_layout_payload(&seated, &two_monitors(), &[]);
         assert_eq!(payload.monitors[1].stations, vec!["helm".to_string()]);
     }
 
@@ -385,7 +529,7 @@ mod tests {
             },
         ];
         let (adopted, _) = layout().adopt_profile(&profile.validate().unwrap());
-        let payload = monitor_row_payload(&adopted, &two_monitors(), &[]);
+        let payload = bridge_layout_payload(&adopted, &two_monitors(), &[]);
         assert_eq!(payload.monitors[1].stations, vec!["Ada".to_string()]);
         assert!(payload.monitors[0].stations.is_empty());
     }
@@ -395,7 +539,7 @@ mod tests {
         let refusal = LayoutRefusal::UnknownMonitor {
             monitor: MonitorIdentity::new("Gone@1920x1080"),
         };
-        let payload = monitor_row_payload(
+        let payload = bridge_layout_payload(
             &layout(),
             &two_monitors(),
             &[LayoutNotice::Refused(refusal)],
@@ -422,7 +566,7 @@ mod tests {
             },
         };
         let payload =
-            monitor_row_payload(&layout(), &two_monitors(), &[LayoutNotice::Adopted(note)]);
+            bridge_layout_payload(&layout(), &two_monitors(), &[LayoutNotice::Adopted(note)]);
         assert_eq!(
             payload
                 .notices
@@ -460,7 +604,7 @@ mod tests {
         // what keeps a quiet lobby free of `evaluate_script` calls on the
         // simulation's own thread. That only works if encoding the same layout
         // twice yields the same bytes — hence the ordered parameter map.
-        let first = crate::core::codec::encode_bridge_layout(&monitor_row_payload(
+        let first = crate::core::codec::encode_bridge_layout(&bridge_layout_payload(
             &layout(),
             &two_monitors(),
             &[LayoutNotice::Refused(LayoutRefusal::MonitorFull {
@@ -469,7 +613,7 @@ mod tests {
             })],
         ))
         .unwrap();
-        let second = crate::core::codec::encode_bridge_layout(&monitor_row_payload(
+        let second = crate::core::codec::encode_bridge_layout(&bridge_layout_payload(
             &layout(),
             &two_monitors(),
             &[LayoutNotice::Refused(LayoutRefusal::MonitorFull {
@@ -480,5 +624,214 @@ mod tests {
         .unwrap();
         assert_eq!(first, second);
         assert!(first.contains("\"identity\":\"BRAVIA@3840x2160\""));
+    }
+
+    // ── the per-station screen rows (issue #1331) ───────────────────────────
+
+    /// A three-monitor bridge, so a row can hold a full screen beside a free
+    /// one and still exclude the viewscreen's.
+    fn three_monitors() -> Vec<DiscoveredMonitor> {
+        identify(&[
+            raw("BRAVIA", 3840, 2160, 0, true),
+            raw("BenQ EX", 1920, 1080, 3840, false),
+            raw("Acer VG", 1280, 1024, 5760, false),
+        ])
+    }
+
+    fn two_station_roster() -> Vec<StationId> {
+        vec![
+            StationId("helm".to_string()),
+            StationId("weapons".to_string()),
+        ]
+    }
+
+    fn row_for<'a>(payload: &'a BridgeLayoutPayload, station: &str) -> &'a StationRowPayload {
+        payload
+            .stations
+            .iter()
+            .find(|r| r.station == station)
+            .expect("every roster station has a row")
+    }
+
+    fn screen_for<'a>(row: &'a StationRowPayload, identity: &str) -> &'a StationScreenPayload {
+        row.monitors
+            .iter()
+            .find(|m| m.identity == identity)
+            .expect("every drawn monitor has an entry")
+    }
+
+    #[test]
+    fn every_station_on_the_roster_gets_a_row_whether_or_not_its_console_is_open() {
+        // The row is how a console is OPENED, so a station without one is a
+        // station the operator could never seat.
+        let payload = bridge_layout_payload(&layout(), &two_monitors(), &[]);
+        assert_eq!(
+            payload
+                .stations
+                .iter()
+                .map(|r| r.station.as_str())
+                .collect::<Vec<_>>(),
+            vec!["helm"]
+        );
+        assert!(payload.stations[0].assigned_to.is_none(), "nothing is open");
+    }
+
+    #[test]
+    fn a_rows_entries_carry_the_laws_own_answer_for_every_monitor() {
+        // Including the viewscreen's, marked with its reason: the surface drops
+        // that entry rather than the host omitting it, so the row acts on the
+        // law's answer instead of re-deriving which screen is the shared view.
+        let payload = bridge_layout_payload(&layout(), &two_monitors(), &[]);
+        let helm = row_for(&payload, "helm");
+        assert_eq!(
+            screen_for(helm, "BRAVIA@3840x2160").choice,
+            "excluded",
+            "the viewscreen's own display is never offered a console"
+        );
+        assert_eq!(
+            screen_for(helm, "BRAVIA@3840x2160").excluded.as_deref(),
+            Some("is-viewscreen")
+        );
+        assert_eq!(screen_for(helm, "BenQ EX@1920x1080").choice, "eligible");
+        assert!(screen_for(helm, "BenQ EX@1920x1080").excluded.is_none());
+    }
+
+    #[test]
+    fn a_seated_console_marks_its_own_screen_and_says_where_it_is() {
+        let seated = layout()
+            .apply(&LayoutAction::AssignStation {
+                station: StationId("helm".to_string()),
+                monitor: MonitorIdentity::new("BenQ EX@1920x1080"),
+            })
+            .expect("a free non-viewscreen monitor takes a console");
+        let payload = bridge_layout_payload(&seated, &two_monitors(), &[]);
+        let helm = row_for(&payload, "helm");
+        assert_eq!(helm.assigned_to.as_deref(), Some("BenQ EX@1920x1080"));
+        assert_eq!(screen_for(helm, "BenQ EX@1920x1080").choice, "selected");
+    }
+
+    #[test]
+    fn a_full_screen_is_excluded_with_its_reason_rather_than_left_out() {
+        // Two consoles is the per-screen maximum, so a THIRD station's row
+        // greys that screen — and says `full`, which is a different sentence
+        // from `is-viewscreen` and a different button state.
+        let mut roster = two_station_roster();
+        roster.push(StationId("comms".to_string()));
+        let base = BridgeLayout::from_discovered(&three_monitors(), roster)
+            .expect("three monitors are a bridge");
+        let seated = base
+            .apply(&LayoutAction::AssignStation {
+                station: StationId("helm".to_string()),
+                monitor: MonitorIdentity::new("BenQ EX@1920x1080"),
+            })
+            .and_then(|l| {
+                l.apply(&LayoutAction::AssignStation {
+                    station: StationId("weapons".to_string()),
+                    monitor: MonitorIdentity::new("BenQ EX@1920x1080"),
+                })
+            })
+            .expect("two consoles fit one screen");
+        let payload = bridge_layout_payload(&seated, &three_monitors(), &[]);
+        let comms = row_for(&payload, "comms");
+        let benq = screen_for(comms, "BenQ EX@1920x1080");
+        assert_eq!(benq.choice, "excluded");
+        assert_eq!(benq.excluded.as_deref(), Some("full"));
+        assert_eq!(
+            screen_for(comms, "Acer VG@1280x1024").choice,
+            "eligible",
+            "and the free screen is still offered"
+        );
+        // A station already ON the full screen still reads as selected there —
+        // capacity is judged after the no-op case, so re-pressing its own
+        // button is not a refusal.
+        assert_eq!(
+            screen_for(row_for(&payload, "helm"), "BenQ EX@1920x1080").choice,
+            "selected"
+        );
+    }
+
+    #[test]
+    fn a_single_monitor_bridge_offers_a_station_no_screen_at_all() {
+        // Issue #1331's single-monitor acceptance criterion, at the model
+        // boundary: the one display is the viewscreen, the law excludes it, and
+        // what is left is nothing — which is what the surface renders its
+        // "consoles need a second monitor" line from.
+        let one = identify(&[raw("BRAVIA", 3840, 2160, 0, true)]);
+        let layout = BridgeLayout::from_discovered(&one, roster()).unwrap();
+        let payload = bridge_layout_payload(&layout, &one, &[]);
+        let helm = row_for(&payload, "helm");
+        assert_eq!(helm.monitors.len(), 1);
+        assert_eq!(helm.monitors[0].excluded.as_deref(), Some("is-viewscreen"));
+        assert!(
+            !helm.monitors.iter().any(|m| m.choice == "eligible"),
+            "no screen may hold a console on a one-screen bridge"
+        );
+    }
+
+    #[test]
+    fn a_monitor_the_row_cannot_draw_is_not_offered_to_a_station_either() {
+        // The monitor row skips a display the layout knows but nothing
+        // reported (half a button is worse than no button). Offering a station
+        // that same display would offer a press the operator cannot see.
+        let payload = bridge_layout_payload(&layout(), &two_monitors()[..1], &[]);
+        assert_eq!(payload.monitors.len(), 1);
+        assert_eq!(row_for(&payload, "helm").monitors.len(), 1);
+    }
+
+    #[test]
+    fn a_host_with_no_hull_has_a_monitor_row_and_no_station_rows() {
+        // A delivery host, or one still in a world-less lobby: a lawful bridge
+        // with an empty roster. The viewscreen still moves; there is simply
+        // nothing to seat.
+        let bare = BridgeLayout::from_discovered(&two_monitors(), []).unwrap();
+        let payload = bridge_layout_payload(&bare, &two_monitors(), &[]);
+        assert_eq!(payload.monitors.len(), 2);
+        assert!(payload.stations.is_empty());
+    }
+
+    #[test]
+    fn the_two_station_verbs_round_trip_from_the_page_as_the_law_reads_them() {
+        // The wire shape, pinned: `gui/`'s side builds these objects by hand.
+        // They arrive in the surface's ONE vocabulary, beside the picks, and
+        // KEBAB like the `set-viewscreen` they were written to match.
+        use super::super::HostLobbyRecord;
+        assert_eq!(
+            crate::core::codec::decode_host_lobby_record(
+                r#"{"kind":"assign-station","station":"helm","monitor":"BenQ EX@1920x1080"}"#
+            )
+            .unwrap(),
+            HostLobbyRecord::AssignStation {
+                station: "helm".to_string(),
+                monitor: "BenQ EX@1920x1080".to_string(),
+            }
+        );
+        assert_eq!(
+            assign_station_action("helm", "BenQ EX@1920x1080"),
+            LayoutAction::AssignStation {
+                station: StationId("helm".to_string()),
+                monitor: MonitorIdentity::new("BenQ EX@1920x1080"),
+            }
+        );
+        assert_eq!(
+            crate::core::codec::decode_host_lobby_record(
+                r#"{"kind":"unassign-station","station":"helm"}"#
+            )
+            .unwrap(),
+            HostLobbyRecord::UnassignStation {
+                station: "helm".to_string(),
+            }
+        );
+        assert_eq!(
+            unassign_station_action("helm"),
+            LayoutAction::UnassignStation {
+                station: StationId("helm".to_string()),
+            }
+        );
+        // There is no `move-station` verb, because the law has no move action:
+        // assigning a seated station elsewhere IS the move.
+        assert!(crate::core::codec::decode_host_lobby_record(
+            r#"{"kind":"move-station","station":"helm","monitor":"x"}"#
+        )
+        .is_err());
     }
 }

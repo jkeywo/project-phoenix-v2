@@ -20,8 +20,9 @@
 //!   is locked out — carried as one snapshot. Nothing is computed here that the
 //!   shared view model computes there.
 //! * [`HostLobbyRecord`] is what the surface says back — **all** of it, not
-//!   only the picker's half: the monitor row's press (issue #1330) is a variant
-//!   here too, because the bridge's record queue is a drain with one reader. A
+//!   only the picker's half: the monitor row's press (issue #1330) and a
+//!   station's two screen-row presses (issue #1331) are variants here too,
+//!   because the bridge's record queue is a drain with one reader. A
 //!   closed vocabulary, because the surface is **not a participant**: it holds
 //!   no session token, and a `ClientMessage` arriving on this bridge would be a
 //!   category error (see [`super::document`]'s note on why the two page→host
@@ -93,18 +94,24 @@ impl ScenarioPanelPayload {
 /// issue #822) — because from the arbiter's point of view the host page's picker
 /// and this one are the same sender.
 ///
-/// # Why the monitor row is in here and not in a type of its own
+/// # Why the layout presses are in here and not in a type of their own
 ///
-/// [`SetViewscreen`](Self::SetViewscreen) is issue #1330's, and it lives beside
-/// #1328's picks because [`HostLobbyBridge::take_records`] is a **drain**. Two
-/// record types would want two readers; whichever ran first would swallow the
-/// other's records and warn about a vocabulary it does not speak, and the second
-/// would find an empty queue every frame for the rest of the run — both with a
-/// clean log. So the surface gets one vocabulary and
+/// [`SetViewscreen`](Self::SetViewscreen) is issue #1330's and the two station
+/// verbs are #1331's, and all three live beside #1328's picks because
+/// [`HostLobbyBridge::take_records`] is a **drain**. Two record types would want
+/// two readers; whichever ran first would swallow the other's records and warn
+/// about a vocabulary it does not speak, and the second would find an empty
+/// queue every frame for the rest of the run — both with a clean log. So the
+/// surface gets one vocabulary and
 /// [`drain_surface_records`](super::drain_surface_records) is its one reader,
 /// dispatching on the variant. What each verb *does* still belongs to the module
-/// that owns it: the layout half of this one is
-/// [`layout::set_viewscreen_action`](super::layout::set_viewscreen_action).
+/// that owns it: the layout half of these three is
+/// [`layout::set_viewscreen_action`](super::layout::set_viewscreen_action),
+/// [`layout::assign_station_action`](super::layout::assign_station_action) and
+/// [`layout::unassign_station_action`](super::layout::unassign_station_action).
+///
+/// The rule for the slices that follow: a new page->host control is a variant
+/// here, never a second record type and never a second `take_records` caller.
 ///
 /// [`HostLobbyBridge::take_records`]: super::HostLobbyBridge::take_records
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,6 +137,23 @@ pub enum HostLobbyRecord {
     /// host. The explicit rename is the whole cost of keeping it.
     #[serde(rename = "set-viewscreen")]
     SetViewscreen { monitor: String },
+    /// The operator pressed a screen button in a station's row: open — or
+    /// re-seat — that station's console on this display (issue #1331).
+    ///
+    /// Kebab-tagged, like the `set-viewscreen` it was written to match: the
+    /// three layout verbs are one row of controls on the page and share one
+    /// spelling convention there, whatever the picks beside them do.
+    ///
+    /// There is no `move-station` sibling, because the law has no move action:
+    /// naming a different screen for a station that is already seated *is* the
+    /// move, so the row presses one button either way and cannot pick the wrong
+    /// verb.
+    #[serde(rename = "assign-station")]
+    AssignStation { station: String, monitor: String },
+    /// The operator pressed a station row's "off" button: close that station's
+    /// console (issue #1331). Kebab-tagged, for the reason above.
+    #[serde(rename = "unassign-station")]
+    UnassignStation { station: String },
 }
 
 impl HostLobbyRecord {
@@ -189,7 +213,7 @@ mod tests {
     }
 
     #[test]
-    fn the_surfaces_four_records_round_trip() {
+    fn the_surfaces_six_records_round_trip() {
         for record in [
             HostLobbyRecord::SelectScenario {
                 scenario_id: "combat_test".into(),
@@ -200,6 +224,13 @@ mod tests {
             HostLobbyRecord::ForceStart,
             HostLobbyRecord::SetViewscreen {
                 monitor: "BenQ EX@1920x1080".into(),
+            },
+            HostLobbyRecord::AssignStation {
+                station: "helm".into(),
+                monitor: "BenQ EX@1920x1080".into(),
+            },
+            HostLobbyRecord::UnassignStation {
+                station: "helm".into(),
             },
         ] {
             let json = serde_json::to_string(&record).expect("a record encodes");
@@ -228,11 +259,13 @@ mod tests {
             HostLobbyRecord::decode(r#"{"kind":"force_start"}"#),
             Some(HostLobbyRecord::ForceStart)
         );
-        // KEBAB, alone among the four. `rename_all = "snake_case"` would have
-        // made this `set_viewscreen`, and the page has been sending the other
-        // spelling since issue #1330 — so the explicit `rename` is load-bearing
-        // and the snake_case spelling must NOT be accepted, or a bundle drifting
-        // to it would work here and nowhere else.
+        // KEBAB, all three of the layout verbs. `rename_all = "snake_case"`
+        // would have made these `set_viewscreen`, `assign_station` and
+        // `unassign_station`; the page has been sending `set-viewscreen` since
+        // issue #1330 and its two station siblings were written to match it — so
+        // the explicit `rename`s are load-bearing and the snake_case spellings
+        // must NOT be accepted, or a bundle drifting to them would work here and
+        // nowhere else.
         assert_eq!(
             HostLobbyRecord::decode(r#"{"kind":"set-viewscreen","monitor":"BenQ@1920x1080"}"#),
             Some(HostLobbyRecord::SetViewscreen {
@@ -241,6 +274,31 @@ mod tests {
         );
         assert_eq!(
             HostLobbyRecord::decode(r#"{"kind":"set_viewscreen","monitor":"BenQ@1920x1080"}"#),
+            None
+        );
+        assert_eq!(
+            HostLobbyRecord::decode(
+                r#"{"kind":"assign-station","station":"helm","monitor":"BenQ@1920x1080"}"#
+            ),
+            Some(HostLobbyRecord::AssignStation {
+                station: "helm".into(),
+                monitor: "BenQ@1920x1080".into()
+            })
+        );
+        assert_eq!(
+            HostLobbyRecord::decode(
+                r#"{"kind":"assign_station","station":"helm","monitor":"BenQ@1920x1080"}"#
+            ),
+            None
+        );
+        assert_eq!(
+            HostLobbyRecord::decode(r#"{"kind":"unassign-station","station":"helm"}"#),
+            Some(HostLobbyRecord::UnassignStation {
+                station: "helm".into()
+            })
+        );
+        assert_eq!(
+            HostLobbyRecord::decode(r#"{"kind":"unassign_station","station":"helm"}"#),
             None
         );
     }

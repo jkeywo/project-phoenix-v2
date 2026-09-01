@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hostLobbyViewModel, hostLobbyMonitorRow } from '../../gui/host-lobby-view.js';
+import { hostLobbyViewModel, hostLobbyMonitorRow, hostLobbyStationRows } from '../../gui/host-lobby-view.js';
 
 function payload(overrides = {}) {
   return {
@@ -419,5 +419,174 @@ describe('hostLobbyMonitorRow — feedback', () => {
       notices: [{ id: 'server.bridge_layout.adopt_no_monitors' }],
     });
     expect(row.notices[0].params).toEqual({});
+  });
+});
+
+// ── the per-station screen rows (issue #1331) ────────────────────────────────
+//
+// The row is a `map` over the layout law's own `eligibility` output, and the
+// point of these tests is that it stays one: the page must not re-derive WHY a
+// screen is not offered, because two implementations of one rule are how a
+// greyed button and the refusal a press earns start disagreeing. So every case
+// below is fed the law's answer verbatim — `selected` / `eligible` /
+// `excluded` plus `is-viewscreen` or `full` — and asserts only on what the row
+// DOES with it.
+
+const screen = (identity, choice, excluded) => (
+  excluded ? { identity, choice, excluded } : { identity, choice }
+);
+
+/** A `BridgeLayoutPayload` for a two-monitor bridge with one station. */
+const bridge = (overrides = {}) => ({
+  monitors: [monitor(), secondMonitor()],
+  stations: [{
+    station: 'helm',
+    monitors: [
+      screen('BRAVIA@3840x2160', 'excluded', 'is-viewscreen'),
+      screen('BenQ EX@1920x1080', 'eligible'),
+    ],
+  }],
+  ...overrides,
+});
+
+describe('hostLobbyStationRows — when there is a row at all', () => {
+  it('answers null on a host with no monitors, which is every browser host', () => {
+    expect(hostLobbyStationRows(null)).toBeNull();
+    expect(hostLobbyStationRows({ monitors: [], stations: [] })).toBeNull();
+  });
+
+  it('answers null when a bridge reported monitors but no roster', () => {
+    // A delivery host, or one still in a world-less lobby: the monitor row is
+    // real and there is simply nothing to seat.
+    expect(hostLobbyStationRows({ monitors: [monitor()], stations: [] })).toBeNull();
+  });
+
+  it('keys its rows by station id, which is what joins them to their cards', () => {
+    const rows = hostLobbyStationRows(bridge());
+    expect(Object.keys(rows)).toEqual(['helm']);
+    expect(rows.helm.station).toBe('helm');
+  });
+});
+
+describe('hostLobbyStationRows — which screens are offered', () => {
+  it('never offers the display showing the viewscreen', () => {
+    // The acceptance criterion's "lists exactly the non-viewscreen monitors".
+    // Dropped on the LAW's reason, not on a second reading of `viewscreen`.
+    const row = hostLobbyStationRows(bridge()).helm;
+    expect(row.buttons.map((b) => b.identity)).toEqual(['BenQ EX@1920x1080']);
+  });
+
+  it('keeps a full screen, greyed, with the reason beside it', () => {
+    // Different from a viewscreen: the operator can free a slot here, and a
+    // button that vanished would read as a monitor that had gone.
+    const row = hostLobbyStationRows(bridge({
+      stations: [{
+        station: 'helm',
+        monitors: [
+          screen('BRAVIA@3840x2160', 'excluded', 'is-viewscreen'),
+          screen('BenQ EX@1920x1080', 'excluded', 'full'),
+        ],
+      }],
+    })).helm;
+    expect(row.buttons.length).toBe(1);
+    expect(row.buttons[0].disabled).toBe(true);
+    expect(row.buttons[0].reason).toEqual({ id: 'server.station_row.full', params: {} });
+  });
+
+  it('names a screen exactly as the monitor row names it', () => {
+    // One display, one sentence, whichever row it appears in.
+    const row = hostLobbyStationRows(bridge()).helm;
+    expect(row.buttons[0].label).toEqual({
+      id: 'server.monitor_row.monitor',
+      params: { name: 'BenQ EX', w: 1920, h: 1080 },
+    });
+  });
+
+  it('falls back to the unnamed sentence for a display the OS did not name', () => {
+    const row = hostLobbyStationRows(bridge({
+      monitors: [monitor(), secondMonitor({ name: undefined })],
+    })).helm;
+    expect(row.buttons[0].label.id).toBe('server.monitor_row.monitor_unnamed');
+  });
+
+  it('skips a screen the monitor row is not drawing', () => {
+    // The host already omits a display the layout knows and nothing reported;
+    // offering a station a button with no name and no size would be half a
+    // button, which is worse than none.
+    const row = hostLobbyStationRows(bridge({ monitors: [monitor()] })).helm;
+    expect(row.buttons).toEqual([]);
+  });
+});
+
+describe('hostLobbyStationRows — which state the row is in', () => {
+  it('marks the screen a console is open on and says where it is', () => {
+    const row = hostLobbyStationRows(bridge({
+      stations: [{
+        station: 'helm',
+        assigned_to: 'BenQ EX@1920x1080',
+        monitors: [
+          screen('BRAVIA@3840x2160', 'excluded', 'is-viewscreen'),
+          screen('BenQ EX@1920x1080', 'selected'),
+        ],
+      }],
+    })).helm;
+    expect(row.assigned).toBe('BenQ EX@1920x1080');
+    expect(row.buttons[0].selected).toBe(true);
+    expect(row.off.selected).toBe(false);
+  });
+
+  it('selects the off state when no console is open', () => {
+    // Which state the row is in has to be legible without comparing the
+    // others, so "closed" is a pressed button rather than an absence.
+    const row = hostLobbyStationRows(bridge()).helm;
+    expect(row.assigned).toBeNull();
+    expect(row.off.selected).toBe(true);
+    expect(row.buttons.every((b) => !b.selected)).toBe(true);
+  });
+
+  it('offers a message instead of an empty strip on a one-screen bridge', () => {
+    // The single-monitor acceptance criterion: the only display is the
+    // viewscreen, so there is nowhere for a console — and nothing to turn off.
+    const row = hostLobbyStationRows({
+      monitors: [monitor()],
+      stations: [{
+        station: 'helm',
+        monitors: [screen('BRAVIA@3840x2160', 'excluded', 'is-viewscreen')],
+      }],
+    }).helm;
+    expect(row.buttons).toEqual([]);
+    expect(row.off).toBeNull();
+    expect(row.message).toEqual({
+      id: 'server.station_row.needs_second_monitor',
+      params: {},
+    });
+  });
+});
+
+describe('hostLobbyViewModel — a card carries its own screen row', () => {
+  it('hangs the row on the card whose station id matches', () => {
+    const vm = hostLobbyViewModel(
+      payload({ stations: [helmStation({ id: 'helm' })] }),
+      '',
+      bridge(),
+    );
+    expect(vm.cards[0].screens.station).toBe('helm');
+  });
+
+  it('gives a card the bridge has no row for none at all', () => {
+    // A ship whose lobby roster and whose layout roster disagree — an
+    // auxiliary station, or a hull swapped under a stale payload. Better no row
+    // than somebody else's.
+    const vm = hostLobbyViewModel(
+      payload({ stations: [helmStation({ id: 'science' })] }),
+      '',
+      bridge(),
+    );
+    expect(vm.cards[0].screens).toBeNull();
+  });
+
+  it('gives every card none on the browser host, which passes no layout', () => {
+    const vm = hostLobbyViewModel(payload({ stations: [helmStation({ id: 'helm' })] }), '');
+    expect(vm.cards[0].screens).toBeNull();
   });
 });

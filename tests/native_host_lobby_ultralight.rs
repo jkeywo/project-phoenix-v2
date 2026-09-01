@@ -76,12 +76,21 @@
 //! 7. **The monitor row draws, and a press comes back** (issue #1330). A real
 //!    `BridgeLayoutPayload` builds real `<button>` elements through the shared
 //!    renderer, and clicking one puts a `set-viewscreen` record on the page's
-//!    own queue, which the host drains over the real bridge. Together with (6)
-//!    that is the whole page→host direction, in the engine that actually runs
-//!    it — and it is where a namespace mistake would surface, because the lobby
-//!    drains `phoenixHostLobbyOut` and a pane drains `phoenixPaneOut`. Both
-//!    kinds ride ONE queue and one drain, so a test that saw only one of them
-//!    arrive would be the first sign of a second reader.
+//!    own queue, which the host drains over the real bridge.
+//! 8. **A station's screen row draws inside its card, and both of its presses
+//!    come back** (issue #1331). The strip is built by the same shared
+//!    renderer, the viewscreen's own display is never among its buttons, and a
+//!    screen press and the off button leave the page as `assign-station` and
+//!    `unassign-station`. What a press then OPENS — a Station window and a
+//!    seated pane — is winit's and the pane host's, and is the #1335 kit's
+//!    walkthrough.
+//!
+//! Together, (6), (7) and (8) are the whole page→host direction, in the engine
+//! that actually runs it — and they are where a namespace mistake would
+//! surface, because the lobby drains `phoenixHostLobbyOut` and a pane drains
+//! `phoenixPaneOut`. All six record kinds ride ONE queue and one drain, so a
+//! test that saw only some of them arrive would be the first sign of a second
+//! reader.
 //!
 //! The half this cannot reach is the compositing itself — the Bevy node, its
 //! `display`, and the router placement. Those need a window and a GPU adapter;
@@ -104,7 +113,8 @@ use project_phoenix::core::rendezvous::JoinCode;
 use project_phoenix::delivery::args::{ClientSource, HostArgs};
 use project_phoenix::delivery::serve::{HostServer, ShutdownSignal};
 use project_phoenix::native_host::host_lobby::layout::{
-    BridgeLayoutPayload, LayoutNoticePayload, MonitorButtonPayload,
+    BridgeLayoutPayload, LayoutNoticePayload, MonitorButtonPayload, StationRowPayload,
+    StationScreenPayload,
 };
 use project_phoenix::native_host::host_lobby::{
     pump_host_lobby, JoinInvite, LocalHostLobby, ScenarioPanelPayload,
@@ -179,13 +189,18 @@ impl Drop for Delivery {
 /// One lobby snapshot, in the shape `viewscreen_border::push_lobby_state`
 /// builds and `codec::encode_lobby_state` encodes.
 fn lobby_payload(phase: &str, holder: Option<&str>) -> String {
-    let station = |name: &str, code: &str, rank: &str, holder: Option<&str>| StationPayload {
-        name: name.to_string(),
-        short_code: code.to_string(),
-        rank: rank.to_string(),
-        holder_name: holder.map(str::to_string),
-        is_mine: false,
-        preset_names: vec![],
+    let station = |id: &str, name: &str, code: &str, rank: &str, holder: Option<&str>| {
+        StationPayload {
+            // The key the per-station screen row is joined to its card by
+            // (issue #1331).
+            id: id.to_string(),
+            name: name.to_string(),
+            short_code: code.to_string(),
+            rank: rank.to_string(),
+            holder_name: holder.map(str::to_string),
+            is_mine: false,
+            preset_names: vec![],
+        }
     };
     let payload = LobbyStatePayload {
         phase: phase.to_string(),
@@ -196,8 +211,8 @@ fn lobby_payload(phase: &str, holder: Option<&str>) -> String {
         all_stations_filled: false,
         all_ready: false,
         stations: vec![
-            station("Helm", "HLM", "Lieutenant", holder),
-            station("Tactical", "TAC", "Ensign", None),
+            station("helm", "Helm", "HLM", "Lieutenant", holder),
+            station("weapons", "Tactical", "TAC", "Ensign", None),
         ],
         spectators: vec![],
         loading_progress: None,
@@ -206,9 +221,16 @@ fn lobby_payload(phase: &str, holder: Option<&str>) -> String {
     codec::encode_lobby_state(&payload).expect("the lobby payload encodes")
 }
 
-/// A two-monitor bridge, in the shape `host_lobby::layout::monitor_row_payload`
-/// builds from a live [`BridgeLayout`] (issue #1330).
-fn monitor_row(viewscreen_is_second: bool, notices: Vec<LayoutNoticePayload>) -> String {
+/// A two-monitor bridge, in the shape `host_lobby::layout::bridge_layout_payload`
+/// builds from a live [`BridgeLayout`] (issues #1330, #1331).
+///
+/// `helm_on_benq` seats the first station's console on the second display, so
+/// the screen row can be driven through both of its states.
+fn monitor_row(
+    viewscreen_is_second: bool,
+    helm_on_benq: bool,
+    notices: Vec<LayoutNoticePayload>,
+) -> String {
     let monitor =
         |identity: &str, name: &str, w: u32, h: u32, primary, viewscreen| MonitorButtonPayload {
             identity: identity.to_string(),
@@ -237,6 +259,59 @@ fn monitor_row(viewscreen_is_second: bool, notices: Vec<LayoutNoticePayload>) ->
                 false,
                 viewscreen_is_second,
             ),
+        ],
+        // The screen rows the layout law's `eligibility` produces for this
+        // arrangement: the viewscreen's own display is excluded for every
+        // station, and the other is either free or holding helm's console.
+        stations: vec![
+            StationRowPayload {
+                station: "helm".to_string(),
+                assigned_to: helm_on_benq.then(|| "BenQ EX@1920x1080".to_string()),
+                monitors: vec![
+                    StationScreenPayload {
+                        identity: "BRAVIA@3840x2160".to_string(),
+                        choice: if viewscreen_is_second {
+                            "eligible".to_string()
+                        } else {
+                            "excluded".to_string()
+                        },
+                        excluded: (!viewscreen_is_second).then(|| "is-viewscreen".to_string()),
+                    },
+                    StationScreenPayload {
+                        identity: "BenQ EX@1920x1080".to_string(),
+                        choice: match (viewscreen_is_second, helm_on_benq) {
+                            (true, _) => "excluded".to_string(),
+                            (false, true) => "selected".to_string(),
+                            (false, false) => "eligible".to_string(),
+                        },
+                        excluded: viewscreen_is_second.then(|| "is-viewscreen".to_string()),
+                    },
+                ],
+            },
+            StationRowPayload {
+                station: "weapons".to_string(),
+                assigned_to: None,
+                monitors: vec![
+                    StationScreenPayload {
+                        identity: "BRAVIA@3840x2160".to_string(),
+                        choice: if viewscreen_is_second {
+                            "eligible".to_string()
+                        } else {
+                            "excluded".to_string()
+                        },
+                        excluded: (!viewscreen_is_second).then(|| "is-viewscreen".to_string()),
+                    },
+                    StationScreenPayload {
+                        identity: "BenQ EX@1920x1080".to_string(),
+                        choice: if viewscreen_is_second {
+                            "excluded".to_string()
+                        } else {
+                            "eligible".to_string()
+                        },
+                        excluded: viewscreen_is_second.then(|| "is-viewscreen".to_string()),
+                    },
+                ],
+            },
         ],
         notices,
     })
@@ -633,7 +708,7 @@ fn the_native_lobby_renders_the_web_hosts_own_lobby_over_the_bridge() {
     );
 
     // ── 7. The monitor row draws, and a press comes back (issue #1330) ───────
-    bridge.push_layout(monitor_row(false, Vec::new()));
+    bridge.push_layout(monitor_row(false, false, Vec::new()));
     for _ in 0..8 {
         frame(&mut surface);
     }
@@ -686,7 +761,7 @@ fn the_native_lobby_renders_the_web_hosts_own_lobby_over_the_bridge() {
     // The host's answer — accepted here, so the mark moves — repaints the row
     // without rebuilding the surface. (A refusal is the same push carrying a
     // notice; the sentence it renders is asserted below.)
-    bridge.push_layout(monitor_row(true, Vec::new()));
+    bridge.push_layout(monitor_row(true, false, Vec::new()));
     for _ in 0..8 {
         frame(&mut surface);
     }
@@ -703,6 +778,7 @@ fn the_native_lobby_renders_the_web_hosts_own_lobby_over_the_bridge() {
     // A refusal is visible feedback, resolved from its id on the page.
     bridge.push_layout(monitor_row(
         true,
+        false,
         vec![LayoutNoticePayload {
             id: "server.bridge_layout.unknown_monitor".to_string(),
             params: [("monitor".to_string(), "Unplugged@1920x1080".to_string())]
@@ -721,5 +797,85 @@ fn the_native_lobby_renders_the_web_hosts_own_lobby_over_the_bridge() {
     assert!(
         notice.contains("Unplugged@1920x1080") && !notice.contains('\u{27e8}'),
         "the refusal is a sentence the operator can read: {notice:?}"
+    );
+
+    // ── 8. A station's screen row, and both of its presses (issue #1331) ────
+    //
+    // The page→host direction for the OTHER row on this surface. What is
+    // settled here and nowhere else is that the strip is built inside a real
+    // station card by the shared renderer, that its buttons are reachable, and
+    // that each of the two verbs leaves the page as the record the layout law
+    // takes. What a press then OPENS — a Station window and a seated pane — is
+    // winit's and the pane host's, and belongs to the #1335 acceptance kit's
+    // walkthrough: press a screen button on the viewscreen and watch a console
+    // appear on the other monitor.
+    bridge.push_layout(monitor_row(false, false, Vec::new()));
+    for _ in 0..8 {
+        frame(&mut surface);
+    }
+    assert_eq!(
+        probe(
+            &mut surface,
+            "String(document.querySelectorAll('#station-grid .station-card')[0]\
+             .querySelectorAll('.station-screen-button').length)"
+        )
+        .as_deref(),
+        Some("2"),
+        "off, plus the one display that is not showing the viewscreen"
+    );
+    let strip = probe(
+        &mut surface,
+        "document.querySelector('#station-grid .station-screens').textContent",
+    )
+    .unwrap_or_default();
+    assert!(
+        strip.contains("BenQ EX") && !strip.contains("BRAVIA"),
+        "the viewscreen's own display is never offered a console: {strip:?}"
+    );
+    assert!(
+        !strip.contains('\u{27e8}'),
+        "every string resolved through the real strings.csv: {strip:?}"
+    );
+
+    let _ = probe(
+        &mut surface,
+        "document.querySelector('[data-station=\"helm\"][data-screen=\"BenQ EX@1920x1080\"]')\
+         .click(); 'clicked'",
+    );
+    frame(&mut surface);
+    assert_eq!(
+        bridge.take_records(),
+        vec![
+            r#"{"kind":"assign-station","station":"helm","monitor":"BenQ EX@1920x1080"}"#
+                .to_string()
+        ],
+        "a screen press reaches the host as the assign the layout law takes"
+    );
+
+    // The host's answer: the console is open, so the row marks that screen —
+    // and the off button, which is what closes it again.
+    bridge.push_layout(monitor_row(false, true, Vec::new()));
+    for _ in 0..8 {
+        frame(&mut surface);
+    }
+    assert_eq!(
+        probe(
+            &mut surface,
+            "document.querySelector('[data-station=\"helm\"][data-screen=\"BenQ EX@1920x1080\"]')\
+             .getAttribute('aria-pressed')"
+        )
+        .as_deref(),
+        Some("true"),
+        "the chosen screen says so to a screen reader, not only in colour"
+    );
+    let _ = probe(
+        &mut surface,
+        "document.querySelector('[data-station=\"helm\"][data-screen=\"\"]').click(); 'clicked'",
+    );
+    frame(&mut surface);
+    assert_eq!(
+        bridge.take_records(),
+        vec![r#"{"kind":"unassign-station","station":"helm"}"#.to_string()],
+        "and the off button closes it, through the law's own verb"
     );
 }

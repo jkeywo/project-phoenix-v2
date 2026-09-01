@@ -5248,6 +5248,19 @@ pub struct LobbyStatePayload {
 /// One station slot in the lobby grid payload.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct StationPayload {
+    /// The ship's own authoring key for this station (issue #1331).
+    ///
+    /// Not display text — `name` is that, and it is what a person reads. This
+    /// is never shown: it is the key the native host's per-station **screen
+    /// row** is matched to its card by, because the bridge layout law is keyed
+    /// on [`StationId`] and a card matched by its localised name would stop
+    /// matching the moment somebody translated it.
+    ///
+    /// `#[serde(default)]` so a lobby payload written before this field existed
+    /// still decodes; such a card simply gets no screen row, which is the
+    /// honest state for a host with no monitors to offer.
+    #[serde(default)]
+    pub id: String,
     pub name: String,
     pub short_code: String,
     pub rank: String,

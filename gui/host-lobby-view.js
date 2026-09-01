@@ -10,11 +10,12 @@
  * writes — and all side effects (audio, wake-state variables) — stay in
  * server.html's inline glue, which consumes this view model.
  *
- * It also decides the native host's **monitor row** (issue #1330), from a
- * second, optional input: the bridge layout a native host pushes beside the
- * lobby state. `hostLobbyMonitorRow` is exported separately because that is
- * where the whole rule lives — no roster, no row — and the browser host, which
- * has no monitors, reaches it by simply not passing one.
+ * It also decides the native host's **monitor row** (issue #1330) and the
+ * per-station **screen rows** (issue #1331), from a second, optional input: the
+ * bridge layout a native host pushes beside the lobby state.
+ * `hostLobbyMonitorRow` and `hostLobbyStationRows` are exported separately
+ * because that is where the whole rule lives — no roster, no row — and the
+ * browser host, which has no monitors, reaches both by simply not passing one.
  *
  * SIBLING of gui/lobby-view.js, not a reuse of it: the host consumes a
  * Rust-built roster whose station rows already carry resolved display text
@@ -130,6 +131,12 @@ export function hostLobbyViewModel(s, prevPhase, layout) {
   // The grid shows exactly the ship's defined station roster — no padding to
   // a fixed slot count — so every card is populated; there is no empty-slot
   // variant to compute.
+  // The per-station screen rows (issue #1331), keyed by the station id the
+  // lobby payload now carries beside the card's display name. Built once for
+  // the whole roster and looked up per card, because a station the BRIDGE knows
+  // and the lobby roster does not (or the other way round) must simply get no
+  // row rather than a row for somebody else's station.
+  const screenRows = hostLobbyStationRows(layout);
   const cards = stations.map(st => {
     const claimed = !!st.holder_name;
     const avatar = claimed
@@ -149,6 +156,8 @@ export function hostLobbyViewModel(s, prevPhase, layout) {
       avatar,
       consoles,
       presetPills,
+      // null on the browser host and on any card the bridge has no row for.
+      screens: (screenRows && st.id && screenRows[st.id]) || null,
     };
   });
 
@@ -236,13 +245,11 @@ export function hostLobbyMonitorRow(layout) {
   if (monitors.length === 0) return null;
 
   const buttons = monitors.map((m) => {
-    const width = m.width || 0;
-    const height = m.height || 0;
     // A display the OS named and one it did not are two different sentences,
-    // not one sentence with an empty slot: "· 1920×1080" reads as a bug.
-    const label = m.name
-      ? { id: 'server.monitor_row.monitor', params: { name: m.name, w: width, h: height } }
-      : { id: 'server.monitor_row.monitor_unnamed', params: { w: width, h: height } };
+    // not one sentence with an empty slot: "· 1920×1080" reads as a bug. Shared
+    // with the station screen rows (issue #1331) so one display reads the same
+    // on both.
+    const label = monitorLabel(m);
     // Marks are a list rather than a composed label so a monitor that is both
     // the primary AND the viewscreen does not need a fourth string id, and so a
     // translator never has to reproduce this build's ordering inside one row.
@@ -277,6 +284,103 @@ export function hostLobbyMonitorRow(layout) {
     buttons,
     notices: (layout.notices || []).map((n) => ({ id: n.id, params: n.params || {} })),
   };
+}
+
+/**
+ * One display's button label, from its entry in the monitor row.
+ *
+ * Shared by the monitor row and the station screen rows so a display reads the
+ * same on both: a name the OS gave and one it did not are two different
+ * sentences, not one sentence with an empty slot.
+ */
+function monitorLabel(m) {
+  const width = m.width || 0;
+  const height = m.height || 0;
+  return m.name
+    ? { id: 'server.monitor_row.monitor', params: { name: m.name, w: width, h: height } }
+    : { id: 'server.monitor_row.monitor_unnamed', params: { w: width, h: height } };
+}
+/**
+ * The per-station **screen rows** (issue #1331) — one row per station on the
+ * ship's roster, each offering the displays that station's console may open on
+ * plus an off state that closes it.
+ *
+ * Returned as an object keyed by station id, because the caller has cards in
+ * lobby-roster order and rows in bridge-roster order and the two are joined by
+ * that key, never by position.
+ *
+ * **The law decides; this only draws.** Every button's state comes straight
+ * from `BridgeLayout::eligibility` on the wire — `selected`, `eligible`, or
+ * `excluded` with `is-viewscreen` or `full` — and the one judgement made here
+ * is which of those becomes a button:
+ *
+ * - `is-viewscreen` is **dropped**. A console never opens on the display
+ *   showing the shared view, so a button for it could only ever come back as a
+ *   refusal. That is the acceptance criterion's "lists exactly the
+ *   non-viewscreen monitors", and it is acting on the law's own reason rather
+ *   than re-deriving which screen is the viewscreen.
+ * - `full` is **kept and greyed**, carrying its reason. It is a screen the
+ *   operator can free a slot on, which is a different fact from a screen no
+ *   console ever opens on — and a button that vanished would leave them
+ *   wondering where their second monitor went.
+ *
+ * A row with no button left at all is the single-monitor bridge: there is
+ * nowhere but the viewscreen, so the row carries a message instead of an empty
+ * strip of nothing.
+ *
+ * @param {object|null|undefined} layout parsed `BridgeLayoutPayload`.
+ * @returns {object|null} `{ [stationId]: row }`, or `null` for no bridge.
+ */
+export function hostLobbyStationRows(layout) {
+  const monitors = (layout && layout.monitors) || [];
+  const stations = (layout && layout.stations) || [];
+  if (monitors.length === 0 || stations.length === 0) return null;
+
+  const byIdentity = new Map(monitors.map((m) => [m.identity, m]));
+  const rows = {};
+  for (const st of stations) {
+    const buttons = [];
+    for (const screen of (st.monitors || [])) {
+      if (screen.excluded === 'is-viewscreen') continue;
+      const monitor = byIdentity.get(screen.identity);
+      // A screen the monitor row is not drawing has no name and no size to put
+      // on a button; the host already skips those, so this is belt to braces.
+      if (!monitor) continue;
+      const excluded = screen.choice === 'excluded';
+      buttons.push({
+        identity: screen.identity,
+        label: monitorLabel(monitor),
+        selected: screen.choice === 'selected',
+        disabled: excluded,
+        // The law's reason, as the words beside a greyed button. `full` is the
+        // only one that reaches here; `is-viewscreen` was dropped above.
+        reason: screen.excluded === 'full'
+          ? { id: 'server.station_row.full', params: {} }
+          : null,
+      });
+    }
+    rows[st.station] = buttons.length === 0
+      // Phones only: the one display is the viewscreen, and a console never
+      // covers it.
+      ? {
+          station: st.station,
+          assigned: null,
+          off: null,
+          buttons: [],
+          message: { id: 'server.station_row.needs_second_monitor', params: {} },
+        }
+      : {
+          station: st.station,
+          assigned: st.assigned_to || null,
+          // The off state is a button like any other, and `selected` when the
+          // console is closed — so which state the row is in is legible without
+          // comparing the others.
+          off: { selected: !st.assigned_to },
+          buttons,
+          message: null,
+        };
+  }
+  return rows;
 }
 
 // Expose for the classic (non-module) script in server.html.

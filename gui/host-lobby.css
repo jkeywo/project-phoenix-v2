@@ -107,6 +107,79 @@
 .station-card .complexity-pill.low {
   background: #1a3828; color: #5fd88a; border: 1px solid #2a6850;
 }
+
+/* This station's screen row (issue #1331) — which display its console opens
+   on, and an off state that closes it. Native host only; the browser host
+   reports no monitors and the renderer draws no strip at all.
+
+   The same three accessibility rules the monitor row states further down, for
+   the same reasons, so a change to one is a change to both:
+     * which screen is chosen is never carried by colour alone — `aria-pressed`
+       says it and the selected border is the second telling (WCAG 1.4.1);
+     * `:focus` is drawn as well as `:focus-visible`, because the embedded view
+       is a WebKit build whose keyboard heuristics are its own;
+     * nothing animates, so `prefers-reduced-motion` has nothing to switch off.
+   The disabled state is this row's own: a full screen stays visible and greyed
+   with its reason beside it, because "free a slot here" is a different fact
+   from "this screen is not offered", and a button that vanished would read as
+   a monitor that had gone. */
+.station-card .station-screens {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+.station-card .station-screens-label {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  /* #8a8aa0 for the same reason the monitor row's quiet half is: #667 on this
+     card's #0e0e14 is 3.4:1, under WCAG 1.4.3's floor for small text. */
+  color: #8a8aa0;
+  margin-right: 2px;
+}
+.station-card .station-screens-message {
+  font-size: 0.65rem;
+  color: #8a8aa0;
+}
+.station-card .station-screen-button {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  border: 1px solid #2a2d3a;
+  background: #131722;
+  color: #cce;
+  font-family: 'Chakra Petch', system-ui, monospace;
+  font-size: 0.65rem;
+  letter-spacing: .04em;
+  cursor: pointer;
+}
+.station-card .station-screen-button:hover:enabled { border-color: #4a5570; }
+.station-card .station-screen-button.selected {
+  border-color: #2a8a96;
+  background: #101a1d;
+  color: #5fd8e8;
+}
+.station-card .station-screen-button:disabled {
+  cursor: default;
+  color: #8a8aa0;
+  border-style: dashed;
+}
+.station-card .station-screen-reason {
+  font-size: 0.6rem;
+  color: #8a8aa0;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.station-card .station-screen-button:focus,
+.station-card .station-screen-button:focus-visible {
+  outline: 2px solid #cfe8ff;
+  outline-offset: 2px;
+}
+
 /* Crew dots */
 .crew-dot {
   width: 8px; height: 8px; border-radius: 50%;
@@ -447,6 +520,30 @@
     outline: 3px solid #ffffff;
   }
   .monitor-row-notice { color: #ffffff; }
+
+  /* The station screen rows (issue #1331) get the same treatment, because they
+     are the other thing on this surface somebody OPERATES — and a full screen's
+     greyed button becomes a dashed full-strength edge rather than a dim one, so
+     "offered" and "not offered" stay distinguishable without a colour
+     judgement. */
+  .station-card .station-screen-button {
+    border-color: #ffffff;
+    color: #ffffff;
+    background: #000000;
+  }
+  .station-card .station-screen-button.selected {
+    border-width: 2px;
+    border-color: #5fd8e8;
+    color: #ffffff;
+  }
+  .station-card .station-screen-button:disabled { border-style: dashed; }
+  .station-card .station-screens-label,
+  .station-card .station-screens-message,
+  .station-card .station-screen-reason { color: #ffffff; }
+  .station-card .station-screen-button:focus,
+  .station-card .station-screen-button:focus-visible {
+    outline: 3px solid #ffffff;
+  }
 }
 
 /* Reduced motion (PRD #1023 module 3), the lobby's own half. The viewscreen

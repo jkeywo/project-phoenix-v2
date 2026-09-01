@@ -32,7 +32,12 @@ import './gui/strings-boot.js';
 import { t, localiseTree, applyToDom } from './gui/strings.js';
 import { localiseHostPayload } from './gui/host-channel.js';
 import { hostLobbyViewModel } from './gui/host-lobby-view.js';
-import { renderHostLobby, MONITOR_BUTTON_ATTR } from './gui/host-lobby-render.js';
+import {
+  renderHostLobby,
+  MONITOR_BUTTON_ATTR,
+  STATION_BUTTON_ATTR,
+  STATION_SCREEN_ATTR,
+} from './gui/host-lobby-render.js';
 import { applyQrPhase, drawJoinQr, showJoiningOff, toggleQr } from './gui/host-qr.js';
 import { joinUrlForCode } from './gui/join-url.js';
 import { scenarioCatalogView } from './gui/host-scenarios.js';
@@ -123,17 +128,18 @@ window.__phoenixHostLobby.renderJoin = function (json, qrToggles) {
   drawJoinQr(document, { url, code: invite.code }, window.QRCode, { link: false });
 };
 
-// ── Page -> host (issues #1328/#1330) ───────────────────────────────────────
+// ── Page -> host (issues #1328/#1330/#1331) ─────────────────────────────────
 //
 // Unlike the renders above, this surface SENDS: a scenario, a hull, the AI
-// launch (issue #1328) and a monitor for the viewscreen (issue #1330). All four
-// go over the ONE page->host queue the boot script installed, as
-// native_host::host_lobby::HostLobbyRecord — four tags in one vocabulary, and
+// launch (issue #1328), a monitor for the viewscreen (issue #1330) and a screen
+// for a station's console — or none, closing it (issue #1331). All six go over
+// the ONE page->host queue the boot script installed, as
+// native_host::host_lobby::HostLobbyRecord — six tags in one vocabulary, and
 // deliberately not ClientMessages, because this surface holds no session token
 // and is not a participant. The host drains that queue in one system and
 // dispatches on the tag; a second queue or a second record type would be a
 // queue two readers fight over. The host arbitrates a pick
-// (src/lobby/scenario_arbiter.rs) and judges a monitor press against the layout
+// (src/lobby/scenario_arbiter.rs) and judges a layout press against the layout
 // law, and either answer comes back as the next push.
 //
 // Everything below sends through here rather than touching
@@ -231,24 +237,51 @@ if (qrToggle) {
   });
 }
 
-// Page -> host: a monitor button press (issue #1330). Delegated off the row's
-// container rather than bound per button, because `renderHostLobby` REPLACES
-// the buttons on every render — a per-button listener would be rebound sixty
-// times a lobby and lost the frame a render happened between the mousedown and
-// the click.
+// Page -> host: a layout button press — the viewscreen's monitor row
+// (issue #1330) and a station's screen row (issue #1331). Delegated off the
+// document rather than bound per button, because `renderHostLobby` REPLACES
+// every one of them on every render — a per-button listener would be rebound
+// sixty times a lobby and lost the frame a render happened between the mousedown
+// and the click.
 //
 // What it sends is a request to rearrange this machine's own screens: it
 // carries no token, names no participant, and the host judges it against the
-// bridge layout law rather than against command admission. It rides the same
-// `send` and the same queue as the picks above — one vocabulary, one drain.
+// bridge layout law rather than against command admission. Which station's
+// console a screen shows is a LAYOUT question — never a question of who may sit
+// at it, which stays the ordinary claim flow a phone goes through. All three
+// verbs ride the same `send` and the same queue as the picks above — one
+// vocabulary, one drain.
 //
-// The tag is KEBAB where the picks are snake_case. That is not a slip: this
-// spelling shipped in #1330 and the Rust side keeps an explicit `serde(rename)`
-// for it rather than make a bundle older than the host stop working.
+// The tags are KEBAB where the picks are snake_case. That is not a slip:
+// `set-viewscreen` shipped that way in #1330, its two station siblings were
+// written to match it, and the Rust side keeps an explicit `serde(rename)` for
+// each rather than make a bundle older than the host stop working.
+//
+// The station row is tested FIRST. Its buttons deliberately do not carry
+// `data-monitor` (see `host-lobby-render.js`), so the order is belt to braces
+// rather than the thing that keeps them apart — but an ordering that reads
+// "the more specific control wins" is the one that survives somebody adding a
+// third row.
 document.addEventListener('click', (ev) => {
-  const target = ev.target && ev.target.closest
-    ? ev.target.closest(`[${MONITOR_BUTTON_ATTR}]`)
-    : null;
+  const closest = (attr) => (ev.target && ev.target.closest
+    ? ev.target.closest(`[${attr}]`)
+    : null);
+
+  const station = closest(STATION_BUTTON_ATTR);
+  if (station) {
+    const id = station.getAttribute(STATION_BUTTON_ATTR);
+    if (!id) return;
+    // Empty is the off state — a real value the host acts on, not a hole.
+    const monitor = station.getAttribute(STATION_SCREEN_ATTR) || '';
+    send(
+      monitor
+        ? { kind: 'assign-station', station: id, monitor }
+        : { kind: 'unassign-station', station: id },
+    );
+    return;
+  }
+
+  const target = closest(MONITOR_BUTTON_ATTR);
   if (!target) return;
   const monitor = target.getAttribute(MONITOR_BUTTON_ATTR);
   if (!monitor) return;

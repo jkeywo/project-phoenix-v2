@@ -375,6 +375,10 @@ fn claimable_lobby_roster(stations: &ShipStations, players: &[Player]) -> Claima
                 .iter()
                 .find(|p| p.connected && p.station.as_ref() == Some(&def.id));
             StationPayload {
+                // The authoring key, carried so a native host can match this
+                // card to its per-station screen row (issue #1331): the bridge
+                // layout law is keyed on the same id.
+                id: def.id.0.clone(),
                 name: def.name.clone(),
                 short_code: def.short_code.clone(),
                 rank: def.rank.clone(),

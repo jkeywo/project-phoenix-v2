@@ -37,6 +37,13 @@
      over its lobby, so the panel's rules have to be reachable from a document
      that is not this page. -->
 <link rel="stylesheet" href="gui/host-qr.css" />
+<!-- The scenario picker's stylesheet (issue #1328), lifted out for the third
+     time for the third surface-sharing reason: the native lobby surface now
+     shows the scenario/hull picker on the viewscreen, so its rules have to be
+     reachable from a document that is not this page. The mod-pack and
+     save-import rules stayed inline below — they style host tooling the native
+     surface strips rather than renders. -->
+<link rel="stylesheet" href="gui/host-scenarios.css" />
 
   <!-- The QR encoder, loaded before our script so the global `QRCode` is in
        scope synchronously. VENDORED and same-origin since issue #1329: it used
@@ -261,39 +268,12 @@
       animation: spin 1s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
-    #scenario-panel {
-      position: fixed; inset: 0; z-index: 200;
-      background: #000 url('assets/logo.png') center center / min(45vw, 45vh) auto no-repeat;
-      display: flex; flex-direction: row; align-items: stretch;
-      font-family: monospace; color: #cce;
-    }
-    #world-list {
-      display: flex; flex-direction: column; gap: 0.5rem;
-      /* Top padding is the cog keep-out, not a design choice: #world-list-label
-         is the first child and would otherwise sit at y 24, under the cog —
-         "SELECT A WORLD" rendered as "⚙ CT A WORLD" on the first screen the
-         host sees. The label's y is set by this padding alone, so the clash is
-         width-independent. */
-      padding: var(--settings-cog-keepout) 1rem 1.5rem;
-      width: 14rem; min-width: 12rem; max-width: 18rem;
-      overflow-y: auto;
-      background: rgba(0,0,0,0.75);
-      border-right: 1px solid #334;
-      box-sizing: border-box;
-    }
-    #world-list-label {
-      font-size: 0.75rem; color: #889; letter-spacing: 0.06em;
-      margin-bottom: 0.5rem; text-transform: uppercase;
-    }
-    .world-btn {
-      background: #111; color: #aae; border: 1px solid #334;
-      padding: 0.55rem 0.9rem; font-family: monospace; font-size: 0.95rem;
-      border-radius: 4px; cursor: pointer; text-align: left;
-      letter-spacing: 0.04em; white-space: nowrap; overflow: hidden;
-      text-overflow: ellipsis; transition: background 0.15s, border-color 0.15s;
-    }
-    .world-btn:hover { background: #223; border-color: #558; }
-    .world-btn.active { background: #224; border-color: #66c; color: #ccf; }
+    /* The scenario picker's own rules (#scenario-panel, #world-list,
+       #world-list-label, .world-btn) live in gui/host-scenarios.css (issue
+       #1328), linked in <head> above: server.html and the native host-lobby
+       document render one picker, so they load one stylesheet. The mod-pack and
+       save-import rules below stayed, because they style host TOOLING the
+       native surface does not carry. */
     #mod-pack-upload {
       margin-top: auto; padding-top: 1rem; border-top: 1px solid #223;
       display: flex; flex-direction: column; gap: 0.4rem;
@@ -1331,6 +1311,17 @@
        click, a Rust host-channel push) that only ever happens after this
        module has finished loading. -->
   <script type="module" src="gui/host-scenarios.js"></script>
+  <!-- Host scenario-picker renderer (issue #1328): every DOM write inside
+       #world-list that used to be inline in renderScenarioLockState below.
+       Extracted for the reason gui/host-lobby-render.js was — the NATIVE host
+       now shows the same picker on its viewscreen window from an in-memory
+       document that loads this very module (see
+       src/native_host/host_lobby/document.rs) — one picker, one renderer, and
+       no second implementation of these element ids to drift. Self-registers
+       window.hostScenarioRender, the same load-order-tolerant pattern as the
+       view model above; every call site fires from an async event long after
+       both have run. -->
+  <script type="module" src="gui/host-scenario-render.js"></script>
   <!-- GamePhase predicates shared with client.html (issue #440), including
        codesRotatable() — the pure "may the operator regenerate a join code
        right now" gate (issue #1115 AC2: rotatable in Lobby/GameOver, refused
@@ -3269,34 +3260,13 @@
     }
 
     // ── Host-page selection UI (rendered from the catalog) ─────────────────
-    // Lifecycle class + selector for the elements renderScenarioLockState()
-    // OWNS and rebuilds on every call. Deliberately NOT `.world-btn`: that is a
-    // shared *styling* hook also worn by the static #mod-pack-btn, so cleaning
-    // up by it deleted the "Upload mod pack" button the instant the first
-    // scenario button rendered (issue #951). Styling hook and lifecycle hook
-    // are separate on purpose — anything added to #world-list that this
-    // function does not own must stay out of SCENARIO_ENTRY_SELECTOR.
-    // (#scenario-loading is matched by id by design: it is the placeholder this
-    // function replaces.)
-    const SCENARIO_ENTRY_CLASS = 'scenario-entry';
-    const SCENARIO_ENTRY_SELECTOR = '.scenario-entry, ph-ship-picker, #scenario-loading';
-
-    /** Remove every element this render owns, leaving static controls alone. */
-    function clearScenarioEntries(worldList) {
-      worldList.querySelectorAll(SCENARIO_ENTRY_SELECTOR).forEach(function (el) { el.remove(); });
-    }
-
-    /**
-     * Insert a rebuilt entry above the static footer controls so
-     * #mod-pack-upload keeps the bottom of the column its `margin-top: auto`
-     * asks for (plain appendChild would stack scenario buttons below the
-     * upload block's separator rule).
-     */
-    function appendScenarioEntry(worldList, el) {
-      const footer = worldList.querySelector('#mod-pack-upload');
-      if (footer) worldList.insertBefore(el, footer);
-      else worldList.appendChild(el);
-    }
+    // The lifecycle class, the selector, the two list helpers and every DOM
+    // write the picker makes moved to gui/host-scenario-render.js (issue
+    // #1328), for the reason the lobby's writes moved to
+    // gui/host-lobby-render.js: the NATIVE host now shows this same picker on
+    // its viewscreen window, from a document that loads that very module. What
+    // is left here is what is genuinely this page's — the demo-build tooling
+    // removal, and the arbiter the picks are routed into.
 
     /**
      * Remove the pre-scenario HOST TOOLING controls from a demo build — the
@@ -3332,78 +3302,38 @@
 
     function renderScenarioLockState() {
       const worldList = document.getElementById('world-list');
-      const label = document.getElementById('world-list-label');
       if (!worldList) return;
       if (!_catalogBuilt) return;
       applyPreScenarioRestrictions();
 
       // Pure stage decision (scenario stage / ship stage / single-ship
       // auto-resolve / locked) lives in gui/host-scenarios.js (issue #1230);
-      // everything below is DOM writes plus the arbiterSelectShip/
-      // window.__sendAction side effects the decision asked for.
+      // every DOM write it drives lives in gui/host-scenario-render.js (issue
+      // #1328), which the NATIVE host's lobby document loads too — one picker,
+      // one renderer. What stays here is what is this page's alone: the
+      // demo-build tooling removal above, and the arbiter these picks reach.
       const vm = window.hostScenarios.scenarioCatalogView(_scenarioCatalog, _preSelection, _worldLoadStarted);
-
-      if (vm.stage === 'ship-auto') {
-        // A scenario curated (or authored) down to exactly one playable hull
-        // resolves straight to it — no picker click needed (issue #917).
-        arbiterSelectShip(vm.templatePath);
-        return;
-      }
-
-      if (vm.stage === 'scenario-empty') {
-        if (label) label.textContent = t(vm.labelId);
-        clearScenarioEntries(worldList);
-        const empty = document.createElement('div');
-        empty.id = 'scenario-loading';
-        empty.textContent = t('server.no_scenarios');
-        appendScenarioEntry(worldList, empty);
-        return;
-      }
-
-      if (vm.stage === 'scenario-list') {
-        // Scenario stage — one button per catalog scenario.
-        if (label) label.textContent = t(vm.labelId);
-        clearScenarioEntries(worldList);
-        vm.entries.forEach(function (sc) {
-          const btn = document.createElement('button');
-          btn.className = 'world-btn ' + SCENARIO_ENTRY_CLASS;
-          btn.dataset.path = sc.world;
-          btn.dataset.scenarioId = sc.scenarioId;
-          btn.textContent = tData(sc.label) || sc.scenarioId;
-          btn.addEventListener('click', function () {
-            // Round 1 and every subsequent round after Game Over route through
-            // the same arbiter (issue #756): the second round re-enters
-            // select_scenario → arbiter → driveWorldLoad, reusing the loaded
-            // world without a page reload.
-            window.__sendAction(JSON.stringify({ action: 'select_scenario', scenario_id: sc.scenarioId }));
-          });
-          appendScenarioEntry(worldList, btn);
-        });
-        return;
-      }
-
-      if (vm.stage === 'ship-picker') {
-        // Ship stage — the locked scenario's offered ships via ph-ship-picker.
-        if (label) label.textContent = t(vm.labelId);
-        clearScenarioEntries(worldList);
-        import('./gui/components/ph-ship-picker.js').then(function () {
-          if (_preSelection.template_path != null) return; // won meanwhile
-          const picker = document.createElement('ph-ship-picker');
-          appendScenarioEntry(worldList, picker);
-          picker.state = { ships: vm.ships };
-          picker.addEventListener('ship-selected', function (e) {
-            window.__sendAction(JSON.stringify({ action: 'select_player_ship', template_path: e.detail.template_path }));
-          });
-        });
-        return;
-      }
-
-      // vm.stage === 'locked' — either _worldLoadStarted, or both scenario and
-      // ship are already locked and world load is about to start. Only this
-      // render's own entries go; #mod-pack-upload stays put for the next
-      // round's scenario stage (Return to Lobby re-shows the panel without
-      // rebuilding it).
-      clearScenarioEntries(worldList);
+      window.hostScenarioRender.renderHostScenarios(document, vm, t, {
+        tData: tData,
+        // Round 1 and every subsequent round after Game Over route through the
+        // same arbiter (issue #756): the second round re-enters
+        // select_scenario → arbiter → driveWorldLoad, reusing the loaded world
+        // without a page reload.
+        selectScenario: function (scenarioId) {
+          window.__sendAction(JSON.stringify({ action: 'select_scenario', scenario_id: scenarioId }));
+        },
+        selectShip: function (templatePath) {
+          window.__sendAction(JSON.stringify({ action: 'select_player_ship', template_path: templatePath }));
+        },
+        // The single-hull auto-resolve calls this page's arbiter DIRECTLY, as
+        // it always has — not through the action map a click goes through.
+        autoSelectShip: arbiterSelectShip,
+        shipStillNeeded: function () { return _preSelection.template_path == null; },
+      });
+      // No `ownPanelVisibility`: on this page #scenario-panel's show/hide is
+      // page lifecycle (driveWorldLoad hides it, the return to lobby shows it),
+      // never a payload-driven render. The native surface has no such lifecycle
+      // and asks the renderer to own it instead.
     }
 
     // Which scenario manifest to load: the base catalog (assets/scenarios.toml)

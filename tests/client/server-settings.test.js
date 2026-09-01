@@ -43,6 +43,18 @@ const LOBBY_CSS = fs.readFileSync(
   'utf-8',
 );
 
+/**
+ * The scenario picker's stylesheet, which server.html links rather than
+ * inlines since issue #1328 — the native host's lobby document shows the same
+ * picker and loads the same file. The two assertions below reach for
+ * `#scenario-panel` and `#world-list` rules, so they read them where the rules
+ * now live; what they assert about them is unchanged.
+ */
+const SCENARIOS_CSS = fs.readFileSync(
+  path.join(path.dirname(fileURLToPath(import.meta.url)), '../../gui/host-scenarios.css'),
+  'utf-8',
+);
+
 /** The shipped join-code table — the bounds the fleet controls read. */
 const JOIN_DATA = JSON.parse(fs.readFileSync(
   path.join(path.dirname(fileURLToPath(import.meta.url)), '../../assets/join/join-codes.json'),
@@ -844,9 +856,12 @@ describe('server.html host-page guards', () => {
     };
     const zIndexOf = zIndexIn(SRC, 'server.html');
     const zIndexOfLobby = zIndexIn(LOBBY_CSS, 'gui/host-lobby.css');
+    const zIndexOfScenarios = zIndexIn(SCENARIOS_CSS, 'gui/host-scenarios.css');
     const btnZ = zIndexOf(/#server-settings-btn\s*\{[^}]*z-index:\s*(\d+)/);
     const overlayZ = zIndexOf(/#server-settings-overlay\s*\{[^}]*z-index:\s*(\d+)/);
-    const scenarioPanelZ = zIndexOf(/#scenario-panel\s*\{[^}]*z-index:\s*(\d+)/);
+    // Lives in gui/host-scenarios.css since #1328; the cog it must sit under is
+    // still this page's.
+    const scenarioPanelZ = zIndexOfScenarios(/#scenario-panel\s*\{[^}]*z-index:\s*(\d+)/);
     const lobbyPanelZ = zIndexOfLobby(/\.lobby-panel\s*\{[^}]*z-index:\s*(\d+)/);
     const gameOverZ = zIndexOf(/id="game-over-overlay"[^>]*z-index:\s*(\d+)/);
 
@@ -891,10 +906,13 @@ describe('server.html host-page guards', () => {
     expect(keepout).toBeGreaterThanOrEqual(top + height);
 
     // #world-list: the scenario picker. Its label is the first child, so the
-    // reserve has to be the block's own TOP padding.
-    const worldList = SRC.match(/#world-list\s*\{([^}]*)\}/);
+    // reserve has to be the block's own TOP padding. The rule lives in
+    // gui/host-scenarios.css since #1328; the token it names is still this
+    // page's, and the optional fallback is that sheet saying the token may be
+    // absent — it is, on the native lobby surface, which has no cog.
+    const worldList = SCENARIOS_CSS.match(/#world-list\s*\{([^}]*)\}/);
     expect(worldList, '#world-list rule not found').not.toBeNull();
-    expect(worldList[1]).toMatch(/padding:\s*var\(--settings-cog-keepout\)/);
+    expect(worldList[1]).toMatch(/padding:\s*var\(--settings-cog-keepout(?:,[^)]*)?\)/);
 
     // .lobby-panel-wrap: #lobby-title is top-left here. The clamp already
     // clears the cog on wide viewports and stops clearing it under ~1100px,

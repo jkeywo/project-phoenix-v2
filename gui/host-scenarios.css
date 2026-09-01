@@ -1,0 +1,89 @@
+/*
+ * gui/host-scenarios.css - the scenario picker's stylesheet (issue #1328).
+ *
+ * Lifted verbatim out of server.html's inline <style> (issue #755's block) so
+ * that the ONE picker has ONE stylesheet: server.html links it, and so does the
+ * host-lobby document the native host assembles in memory
+ * (src/native_host/host_lobby/document.rs), which since #1328 carries the
+ * scenario panel as well as the crew lobby. This is the same move #1325 made
+ * for gui/host-lobby.css and #1329 for gui/host-qr.css, for the same reason: a
+ * second copy of these rules for the native surface is exactly the drift those
+ * extractions removed, and CSS is half of a render path.
+ *
+ * WHAT DID NOT COME WITH IT: the mod-pack upload and the save importer
+ * (#mod-pack-*, #snapshot-import*). Those are host TOOLING — file inputs with
+ * page-lifetime handlers, removed outright from a demo build - and the native
+ * lobby document strips them from the markup it borrows, so their rules stay
+ * inline in server.html where the only surface that renders them lives.
+ *
+ * `--settings-cog-keepout` is server.html's own: the settings cog is a host
+ * PAGE control and the keep-out it reserves is that page's geometry. It is
+ * referenced here WITH a fallback, which is this sheet saying the property may
+ * legitimately be absent - it is, on the native lobby surface, which has no cog
+ * to clear.
+ *
+ * The logo is `../assets/logo.png`, not `assets/logo.png`: a URL in a
+ * stylesheet resolves against the STYLESHEET, and this file sits one directory
+ * down from the bundle root both surfaces load it from.
+ */
+
+/* ── Scenario picker (issue #755) ─────────────────────────────────────── */
+#scenario-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: #000 url('../assets/logo.png') center center / min(45vw, 45vh) auto no-repeat;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  font-family: monospace;
+  color: #cce;
+}
+#world-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  /* Top padding is the cog keep-out, not a design choice: #world-list-label
+     is the first child and would otherwise sit at y 24, under the cog —
+     "SELECT A WORLD" rendered as "⚙ CT A WORLD" on the first screen the
+     host sees. The label's y is set by this padding alone, so the clash is
+     width-independent.
+
+     The optional fallback is this sheet saying the token may be absent: it is
+     on the native lobby surface, which has no settings cog to clear. Without
+     it the whole `padding` declaration would be invalid there and the column
+     would lose its 1rem sides as well as its top. */
+  padding: var(--settings-cog-keepout, 0px) 1rem 1.5rem;
+  width: 14rem;
+  min-width: 12rem;
+  max-width: 18rem;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.75);
+  border-right: 1px solid #334;
+  box-sizing: border-box;
+}
+#world-list-label {
+  font-size: 0.75rem;
+  color: #889;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+}
+.world-btn {
+  background: #111;
+  color: #aae;
+  border: 1px solid #334;
+  padding: 0.55rem 0.9rem;
+  font-family: monospace;
+  font-size: 0.95rem;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.15s, border-color 0.15s;
+}
+.world-btn:hover { background: #223; border-color: #558; }
+.world-btn.active { background: #224; border-color: #66c; color: #ccf; }

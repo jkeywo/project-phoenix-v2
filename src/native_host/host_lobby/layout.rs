@@ -111,8 +111,32 @@ pub struct MonitorButtonPayload {
     /// The two are one list here because the button is answering one question —
     /// what is on this screen — and the refusal a press would earn names them
     /// together too.
+    ///
+    /// In the order they are **drawn** on that screen
+    /// ([`BridgeLayout::occupants_on`](super::super::bridge_layout::BridgeLayout::occupants_on)),
+    /// so a person looking at the glass reads the button the way the glass reads.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stations: Vec<String>,
+    /// Which of `stations` the **lobby cannot free** — the consoles a
+    /// hand-authored `--profile` opened
+    /// ([`BridgeLayout::reserved_on`](super::super::bridge_layout::BridgeLayout::reserved_on)),
+    /// which have no station row, no off button and no way back short of
+    /// restarting the host with different arguments (issue #1332's fix round).
+    ///
+    /// A subset of `stations`, not a second list of a different kind of thing:
+    /// the button answers "what is on this screen" with one list, and this says
+    /// which of those entries an operator pressing around the lobby will never
+    /// find a control for. Without it a `--pane` participant's console reads as
+    /// an ordinary occupant of a full screen, and the operator hunts the station
+    /// rows for the unassign button that would free it. There is none, and since
+    /// issue #1332 that console costs the screen a real slot — so saying so is
+    /// the difference between a screen an operator can act on and one they
+    /// cannot.
+    ///
+    /// Empty on every host without a `--profile` that authors a participant
+    /// pane, which is every host but that one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reserved: Vec<String>,
 }
 
 /// One sentence the lobby has to say, as an id and its parameters.
@@ -275,6 +299,7 @@ pub fn bridge_layout_payload(
                 primary: found.primary,
                 viewscreen: identity == &viewscreen,
                 stations: layout.occupants_on(identity),
+                reserved: layout.reserved_on(identity),
             })
         })
         .collect();
@@ -805,8 +830,19 @@ mod tests {
         assert_eq!(weapons.excluded.as_deref(), Some("full"));
         assert_eq!(
             payload.monitors[1].stations,
-            vec!["helm".to_string(), "Ada".to_string()],
-            "and the button names both, so the greying has a visible reason"
+            vec!["Ada".to_string(), "helm".to_string()],
+            "and the button names both, so the greying has a visible reason — in the order they \
+             are DRAWN on that screen (issue #1332's fix round), so a person looking at the glass \
+             reads the button left to right and finds them where it says they are. Ada was \
+             authored into the first pane slot, so she is the left half and the station seated \
+             beside her is the right"
+        );
+        assert_eq!(
+            payload.monitors[1].reserved,
+            vec!["Ada".to_string()],
+            "and the one of them the lobby cannot free is named as such: there is no unassign \
+             button for an authored console, and a row that only said `full` would send the \
+             operator hunting for one"
         );
     }
 

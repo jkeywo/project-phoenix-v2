@@ -308,16 +308,42 @@ cargo build --release --features host --bin phoenix-host
 #     one count, and MonitorFull names the authored labels beside the station
 #     ids. A monitor has exactly ONE Station window, so the runtime console
 #     SHARES it: BridgeLayout::surface_rects tiles the WHOLE occupancy in one
-#     pane_rects call (reserved first, then seats in seat order) and
-#     follow_layout_stations writes that over the surface wholesale. Before
-#     this, two tilings each took the full rectangle and the pair OVERLAPPED.
+#     pane_rects call and follow_layout_stations writes that over the surface
+#     wholesale. Before this, two tilings each took the full rectangle and the
+#     pair OVERLAPPED.
+#     ONE TILING, AND IT IS THE AUTHORED ONE (#1332 fix round): surface_rects is
+#     the ONLY tiling — apply_bridge_profile READS it rather than laying a
+#     --profile's Station out from the file a second time. It must, because the
+#     follower is chained straight after the applier: boot drew the file's order
+#     and the next system overwrote it, so an authored [helm(station),
+#     Ada(participant)] booted helm-left and flipped to Ada-left (closing and
+#     recreating a console nobody touched, and pushing a notice around the
+#     deliberate boot-quiet rule), and an authored split = "stacked" was
+#     re-carved side by side. The law therefore CARRIES the authored intent:
+#     each reservation keeps the INDEX its [[display]] entry gave it and each
+#     monitor keeps its authored SPLIT (BridgeLayout::split_on), both adopted in
+#     adopt_profile and carried by reconcile. Do not reintroduce a blanket order
+#     (neither "reserved first" nor "seats first") and do not tile with the
+#     LAYOUT_SPLIT constant where a profile authored an axis — LAYOUT_SPLIT is
+#     the default for a screen nothing authored, which is every screen on a host
+#     with no --profile. occupants_on reports that same drawn order, so the
+#     greyed button reads the way the glass reads.
 #     A console whose rectangle changed where it stood — the NEIGHBOUR nobody
-#     asked to move — is rebuilt on its own token like any move and now SAYS so
-#     (LayoutAdoption::ConsoleRetiling on the row); a console whose MONITOR
-#     changed is the operator's own press and stays silent. The rebuilt page
-#     reclaims its seat through handle_identify's reconnect-yield ON THE SAME
-#     TOKEN, but only while nobody else claimed it during the page load — that
-#     gap is #1125's, disclosed rather than removed.
+#     asked to move — is rebuilt on its own token like any move and now SAYS so;
+#     a console whose MONITOR changed is the operator's own press and stays
+#     silent. The two surprises are told apart by OCCUPANCY (#1332 fix round):
+#     a neighbour arriving or leaving is ConsoleRetiling ("the split changed"),
+#     and a screen that changed SIZE holding exactly what it held is
+#     ConsoleResized. Never attribute a geometry change to a split change. The
+#     rebuilt page reclaims its seat through handle_identify's reconnect-yield ON
+#     THE SAME TOKEN, but only while nobody else claimed it during the page load
+#     — that gap is #1125's, disclosed rather than removed, and every sentence
+#     about the reconnect (Display, rustdoc, strings.csv description) says so.
+#     A --profile's participant console COSTS A SLOT and the lobby has no control
+#     that frees one, so the greyed row says which occupant is unreclaimable
+#     (server.station_row.full_authored, fed by the payload's `reserved` list)
+#     rather than leaving the operator hunting for an off button that cannot
+#     exist.
 #   --manifest also narrows what this process FLIES, not only what it publishes:
 #     with a curating manifest in force the default hull is drawn from that
 #     manifest's allowlist (issue #917). An explicit --ship still wins.

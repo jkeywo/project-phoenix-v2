@@ -240,6 +240,9 @@ fn monitor_row(
             primary,
             viewscreen,
             stations: Vec::new(),
+            // Nothing a `--profile` opened: this fixture's screens are the
+            // lobby's to fill and to free.
+            reserved: Vec::new(),
         };
     codec::encode_bridge_layout(&BridgeLayoutPayload {
         monitors: vec![

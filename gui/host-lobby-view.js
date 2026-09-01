@@ -333,6 +333,13 @@ function monitorLabel(m) {
  * `--profile` opened for a named crew member, which fills a slot, has no row of
  * its own, and would otherwise grey a screen for no visible reason.
  *
+ * And when one of them is that kind, the reason **says the slot is not the
+ * lobby's to free**. A `--pane` console holds its half of a screen for the
+ * lifetime of the host: it has no station row, no off button, and nothing in
+ * this surface can release it. A greyed screen that only listed the names would
+ * be true and useless — the operator reads it as "close one of these" and there
+ * is nothing to close.
+ *
  * A row with no button left at all is the single-monitor bridge: there is
  * nowhere but the viewscreen, so the row carries a message instead of an empty
  * strip of nothing.
@@ -360,16 +367,33 @@ export function hostLobbyStationRows(layout) {
       // only one that reaches here; `is-viewscreen` was dropped above. When the
       // monitor row knows what that screen is holding, the reason says so —
       // the same `occupants_on` list the monitor button shows and the same one
-      // the refusal names, so all three agree by construction.
+      // the refusal names, in the same ORDER, so all three agree by
+      // construction: the list is the law's drawn order (issue #1332's fix
+      // round), which is left to right on a side-by-side screen and top to
+      // bottom on a stacked one, so the words match the glass rather than
+      // merely naming the same set.
       const holding = monitor.stations || [];
+      // The ones with no off button anywhere: consoles a hand-authored
+      // `--profile` opened. They cost a slot like any other console and there is
+      // no lobby control that frees one, so a greyed screen held by one has to
+      // say that rather than sending the operator hunting the station rows for
+      // an unassign that does not exist.
+      const authored = monitor.reserved || [];
       let reason = null;
       if (screen.excluded === 'full') {
-        reason = holding.length
-          // Joined here rather than in the string table for `occupants`' reason:
-          // `t()` interpolates values, and a comma is punctuation rather than
-          // English a translator can be handed a list for.
-          ? { id: 'server.station_row.full_holding', params: { stations: holding.join(', ') } }
-          : { id: 'server.station_row.full', params: {} };
+        // Joined here rather than in the string table, for `occupants`' reason:
+        // `t()` interpolates values, and a comma is punctuation rather than
+        // English a translator can be handed a list for.
+        if (authored.length) {
+          reason = {
+            id: 'server.station_row.full_authored',
+            params: { stations: holding.join(', '), authored: authored.join(', ') },
+          };
+        } else if (holding.length) {
+          reason = { id: 'server.station_row.full_holding', params: { stations: holding.join(', ') } };
+        } else {
+          reason = { id: 'server.station_row.full', params: {} };
+        }
       }
       buttons.push({
         identity: screen.identity,

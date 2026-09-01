@@ -23,8 +23,10 @@
 //!    **authored** profile opened counts too, even though this layout cannot
 //!    move it — see [`BridgeLayout::reserved_on`].
 //! 3. **Two per screen.** A non-viewscreen monitor holds at most
-//!    [`MAX_STATIONS_PER_MONITOR`] **consoles**, split deterministically side by
-//!    side. That is [`MAX_PANES_PER_STATION`] — the same legibility bound the
+//!    [`MAX_STATIONS_PER_MONITOR`] **consoles**, split deterministically — along
+//!    the screen's own authored [`split_on`](BridgeLayout::split_on), or
+//!    [`LAYOUT_SPLIT`] where no profile authored one. That is
+//!    [`MAX_PANES_PER_STATION`] — the same legibility bound the
 //!    profile enforces at author time, restated as a runtime precondition rather
 //!    than duplicated as a second number. A console is a console whoever opened
 //!    it (issue #1332): the stations this layout seated *and* the authored
@@ -90,13 +92,21 @@ use super::bridge_profile::{
 /// there is only one place to change it.
 pub const MAX_STATIONS_PER_MONITOR: usize = MAX_PANES_PER_STATION;
 
-/// How a monitor holding two station consoles is divided.
+/// How a monitor the **lobby** filled divides itself between two consoles.
 ///
-/// Side by side, always — the PRD's "two consoles on one monitor split it side by
-/// side automatically". It is a constant rather than a per-monitor choice because
-/// the lobby offers no control for it: an operator picks *which* screen, never
-/// how it is carved, and a layout that could differ per monitor would be a
-/// setting nothing sets.
+/// Side by side — the PRD's "two consoles on one monitor split it side by side
+/// automatically". It is a constant rather than a lobby control because the
+/// lobby offers none: an operator picks *which* screen, never how it is carved,
+/// so a per-press choice would be a setting nothing sets.
+///
+/// It is the **default**, not the only answer. A monitor a `--profile` authored
+/// as a Station carries that entry's own `split`, and
+/// [`adopt_profile`](BridgeLayout::adopt_profile) records it
+/// ([`split_on`](BridgeLayout::split_on)) so the arrangement an operator wrote
+/// down is the arrangement that is drawn — issue #1332's carried defect was that
+/// the adapter re-tiled an authored `stacked` screen side by side on the first
+/// frame after boot. A screen no profile authored — every screen on a host with
+/// no `--profile`, and any other screen on a host with one — has this.
 pub const LAYOUT_SPLIT: PaneSplit = PaneSplit::SideBySide;
 
 // ── actions ─────────────────────────────────────────────────────────────────
@@ -309,6 +319,29 @@ fn join_occupants(
 
 // ── the layout ──────────────────────────────────────────────────────────────
 
+/// One console an **authored** profile opened on a monitor that this layout does
+/// not own — see [`BridgeLayout::reserved_on`].
+///
+/// It carries the pane's position in the `[[display]]` entry that authored it as
+/// well as its label, and that index is load-bearing (issue #1332): it is where
+/// the console is *drawn* on its screen. A profile authoring
+/// `[helm(station), Ada(participant)]` puts helm on the left and Ada on the
+/// right, and the layout has nowhere else to remember that — the station went
+/// into `seats` and the participant into `reserved`, so the pair's authored
+/// interleaving is lost the moment the two lists are read back in their own
+/// order. Blanket "reserved first" is what that loss looked like: boot drew the
+/// operator's order and the first follower pass flipped it, closing and
+/// recreating a console nobody had touched.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Reservation {
+    /// The participant label the pane was authored under — the key the pane bus
+    /// resolves it by, and the name a person reads.
+    label: String,
+    /// This pane's index within its authored `[[display]]` entry, which is its
+    /// slot in the screen's left-to-right (or top-to-bottom) tiling.
+    index: usize,
+}
+
 /// A bridge arrangement: which monitor is the viewscreen, and which stations sit
 /// on which of the others.
 ///
@@ -342,8 +375,22 @@ pub struct BridgeLayout {
     /// viewscreen's entry is always empty — that is rule 2, held as an invariant
     /// rather than re-derived.
     seats: Vec<Vec<StationId>>,
-    /// Parallel to `monitors`: the labels of surfaces an **authored** profile
-    /// opened on each, which this layout does not own (issue #1330).
+    /// Parallel to `monitors`: how each divides itself between two consoles.
+    ///
+    /// [`LAYOUT_SPLIT`] for a screen no profile authored, and the authored
+    /// entry's own `split` for one a `--profile` named as a Station
+    /// ([`adopt_profile`](Self::adopt_profile) records it). It is stored rather
+    /// than looked up because the profile is not kept: adoption is the only
+    /// moment the file is in hand, and [`surface_rects`](Self::surface_rects) is
+    /// read on every frame of the run.
+    ///
+    /// Normalised, never optional: a screen with no authored split holds
+    /// [`LAYOUT_SPLIT`] itself rather than a `None` meaning the same thing, so
+    /// two layouts that tile identically compare equal and the profile
+    /// round-trip stays an equality assertion.
+    splits: Vec<PaneSplit>,
+    /// Parallel to `monitors`: the surfaces an **authored** profile opened on
+    /// each, which this layout does not own (issue #1330).
     ///
     /// A hand-authored `--pane <NAME>` Station belongs to a named crew member
     /// rather than to a claimable station ([`PaneSlot::for_participant`]), so
@@ -394,7 +441,7 @@ pub struct BridgeLayout {
     /// the save. Issue #1334 must therefore do one of two things: re-emit the
     /// participant slots it read, or refuse to persist a `--profile`-seeded
     /// layout at all. It may not simply write the file.
-    reserved: Vec<Vec<String>>,
+    reserved: Vec<Vec<Reservation>>,
 }
 
 impl BridgeLayout {
@@ -419,11 +466,13 @@ impl BridgeLayout {
         };
         let seats = vec![Vec::new(); monitors.len()];
         let reserved = vec![Vec::new(); monitors.len()];
+        let splits = vec![LAYOUT_SPLIT; monitors.len()];
         Ok(Self {
             monitors,
             roster,
             viewscreen: index,
             seats,
+            splits,
             reserved,
         })
     }
@@ -472,8 +521,17 @@ impl BridgeLayout {
         self.seat_of(station).map(|i| &self.monitors[i])
     }
 
-    /// The stations seated on `monitor`, in the order their panes are laid out.
-    /// Empty for the viewscreen, and for a monitor this bridge does not have.
+    /// The stations seated on `monitor`, in **seat order** — the order the
+    /// operator opened them, which is the order they appear left to right among
+    /// that screen's panes. Empty for the viewscreen, and for a monitor this
+    /// bridge does not have.
+    ///
+    /// Seat order is the stations' order *relative to each other*, not their
+    /// slot numbers: an authored surface ([`reserved_on`](Self::reserved_on))
+    /// may sit between them or before them, at the index its profile gave it.
+    /// [`occupants_on`](Self::occupants_on) is the whole screen in the order it
+    /// is drawn, and [`surface_rects`](Self::surface_rects) is that order with
+    /// the rectangles.
     pub fn stations_on(&self, monitor: &MonitorIdentity) -> &[StationId] {
         match self.index_of(monitor) {
             Some(i) => &self.seats[i],
@@ -481,28 +539,51 @@ impl BridgeLayout {
         }
     }
 
-    /// The labels of authored surfaces on `monitor` this layout does not own —
-    /// see the [`reserved`](Self::reserved) note. Empty for a monitor this
-    /// bridge does not have.
-    pub fn reserved_on(&self, monitor: &MonitorIdentity) -> &[String] {
+    /// The labels of authored surfaces on `monitor` this layout does not own, in
+    /// the order their profile authored them — see the
+    /// [`reserved`](Self::reserved) note. Empty for a monitor this bridge does
+    /// not have.
+    pub fn reserved_on(&self, monitor: &MonitorIdentity) -> Vec<String> {
         match self.index_of(monitor) {
-            Some(i) => &self.reserved[i],
-            None => &[],
+            Some(i) => self.reserved[i].iter().map(|r| r.label.clone()).collect(),
+            None => Vec::new(),
         }
     }
 
-    /// Everything open on `monitor`, as the names a person reads: the stations
-    /// this layout seated, then the authored surfaces it merely knows about.
+    /// How `monitor` divides itself between two consoles — its authored `split`
+    /// when a `--profile` named it a Station, else [`LAYOUT_SPLIT`].
     ///
-    /// What the lobby's monitor row draws on a button, and the same list a
-    /// refusal names — one function, so the row cannot promise a press the law
-    /// then refuses for a reason the row never showed.
+    /// [`LAYOUT_SPLIT`] for a monitor this bridge does not have, which is the
+    /// same answer an empty screen gives and is never drawn against anything.
+    pub fn split_on(&self, monitor: &MonitorIdentity) -> PaneSplit {
+        match self.index_of(monitor) {
+            Some(i) => self.splits[i],
+            None => LAYOUT_SPLIT,
+        }
+    }
+
+    /// Everything open on `monitor`, as the names a person reads, **in the order
+    /// it is drawn on that screen**.
+    ///
+    /// The same order — and the same names — [`surface_rects`](Self::surface_rects)
+    /// hands out rectangles in, so the greyed button that lists what a screen is
+    /// holding reads left to right (or top to bottom) exactly as the screen does.
+    /// Before issue #1332's fix round the two disagreed: this listed seats then
+    /// authored surfaces while the tiling drew authored surfaces first, so a
+    /// mixed screen's button named them in the opposite order to the glass.
+    ///
+    /// What the lobby's monitor row draws on a button — one function, so the row
+    /// cannot promise a press the law then refuses for a reason the row never
+    /// showed.
     pub fn occupants_on(&self, monitor: &MonitorIdentity) -> Vec<String> {
-        self.stations_on(monitor)
-            .iter()
-            .map(|s| s.0.clone())
-            .chain(self.reserved_on(monitor).iter().cloned())
-            .collect()
+        match self.index_of(monitor) {
+            Some(i) => self
+                .occupants_at(i)
+                .iter()
+                .map(|o| o.name().to_string())
+                .collect(),
+            None => Vec::new(),
+        }
     }
 
     /// Apply `action`, answering the layout it produces — or the typed reason it
@@ -544,7 +625,7 @@ impl BridgeLayout {
             return Err(LayoutRefusal::ViewscreenMonitorHoldsStations {
                 monitor: monitor.clone(),
                 stations: self.seats[index].clone(),
-                panes: self.reserved[index].clone(),
+                panes: self.reserved_labels(index),
             });
         }
         let mut next = self.clone();
@@ -578,7 +659,7 @@ impl BridgeLayout {
             return Err(LayoutRefusal::MonitorFull {
                 monitor: monitor.clone(),
                 occupants: self.seats[index].clone(),
-                panes: self.reserved[index].clone(),
+                panes: self.reserved_labels(index),
             });
         }
         let mut next = self.clone();
@@ -627,6 +708,64 @@ impl BridgeLayout {
         self.seats.iter().position(|s| s.contains(station))
     }
 
+    /// The labels of one monitor's authored surfaces, in the order their profile
+    /// authored them.
+    fn reserved_labels(&self, index: usize) -> Vec<String> {
+        self.reserved[index]
+            .iter()
+            .map(|r| r.label.clone())
+            .collect()
+    }
+
+    /// Everything on one monitor, **in the order it is drawn on that screen**
+    /// (issue #1332's fix round) — the one place that order is decided.
+    ///
+    /// Each authored surface takes the slot its profile gave it
+    /// ([`Reservation::index`]) and the seats fill what is left, in seat order.
+    /// So a profile authoring `[helm(station), Ada(participant)]` draws helm on
+    /// the left and Ada on the right — the operator's own order — and one
+    /// authoring `[Ada, helm]` draws them the other way round. A station the
+    /// **lobby** later seats beside an authored console lands in the slot the
+    /// authored one did not take, which is the same "the console that stayed put
+    /// keeps its half" rule seat order already follows, extended to the one
+    /// occupant seat order cannot express.
+    ///
+    /// An authored index can be out of range — a two-pane profile whose *other*
+    /// pane named a station this ship does not have leaves one reservation at
+    /// index 1 on a screen with one slot — so it is clamped to the last slot and
+    /// then walked forward (wrapping) to the first free one. Total and
+    /// deterministic: there is exactly one slot per occupant, so a free one
+    /// always remains.
+    fn occupants_at(&self, index: usize) -> Vec<SurfaceOccupant> {
+        let total = self.occupant_count(index);
+        if total == 0 {
+            return Vec::new();
+        }
+        let mut slots: Vec<Option<SurfaceOccupant>> = vec![None; total];
+        for reservation in &self.reserved[index] {
+            let target = reservation.index.min(total - 1);
+            let slot = (target..total)
+                .chain(0..target)
+                .find(|i| slots[*i].is_none())
+                .expect("one slot per occupant, so a free one always remains");
+            slots[slot] = Some(SurfaceOccupant::Reserved(reservation.label.clone()));
+        }
+        let mut seats = self.seats[index].iter();
+        slots
+            .into_iter()
+            .map(|slot| {
+                slot.unwrap_or_else(|| {
+                    SurfaceOccupant::Station(
+                        seats
+                            .next()
+                            .expect("the free slots are exactly the seats' count")
+                            .clone(),
+                    )
+                })
+            })
+            .collect()
+    }
+
     /// How many consoles a monitor is carrying — its seats **and** the authored
     /// surfaces it holds (issue #1332).
     ///
@@ -664,7 +803,7 @@ impl BridgeLayout {
             monitor: self.monitors[index].clone(),
             is_viewscreen,
             stations: self.seats[index].clone(),
-            reserved: self.reserved[index].clone(),
+            reserved: self.reserved_labels(index),
             free_slots: (!is_viewscreen)
                 .then(|| MAX_STATIONS_PER_MONITOR.saturating_sub(self.occupant_count(index))),
         }
@@ -708,14 +847,16 @@ impl BridgeLayout {
         }
     }
 
-    /// Where **everything** on `monitor` is drawn on it: the authored surfaces
-    /// it carries first, then its seated consoles in seat order (issue #1332).
+    /// Where **everything** on `monitor` is drawn on it, in the order it is drawn
+    /// — [`occupants_on`](Self::occupants_on)'s order, with the rectangles
+    /// (issue #1332).
     ///
     /// The deterministic split, resolved against real geometry: one console is
-    /// the whole monitor, two divide it side by side with no gap and no overlap.
-    /// Empty for the viewscreen and for a monitor this bridge lacks.
+    /// the whole monitor, two divide it along that screen's own
+    /// [`split_on`](Self::split_on) with no gap and no overlap. Empty for the
+    /// viewscreen and for a monitor this bridge lacks.
     ///
-    /// # One tiling for both kinds of console, and why
+    /// # One tiling, for both kinds of console and from boot onward
     ///
     /// It is **one** [`pane_rects`] call over the whole occupancy, not a seat
     /// tiling laid beside a reserved one. Two calls is exactly the shape that
@@ -726,29 +867,28 @@ impl BridgeLayout {
     /// [`MAX_STATIONS_PER_MONITOR`] like any other pair, so the *existing* split
     /// geometry tiles them with nothing new invented.
     ///
-    /// **Reserved first** is the deliberate order: an authored pane was on that
-    /// screen from boot, so it keeps the left half and a station seated beside it
-    /// arrives on the right — the same "the console that stayed put is the
-    /// earlier of the two" rule seat order already follows, extended to the one
-    /// occupant seat order cannot express.
+    /// It is also the **only** tiling. `bridge_display::apply_bridge_profile`
+    /// used to lay a `--profile`'s Station out from the file directly — the
+    /// profile's own pane order, the profile's own split — and the first
+    /// follower pass then re-laid the same screen from here. Two answers, and
+    /// this one won: an authored `[helm, Ada]` booted helm-left and flipped to
+    /// Ada-left one frame later, closing and recreating a console nobody had
+    /// touched, and an authored `stacked` screen was re-tiled side by side. Boot
+    /// now reads its rectangles from here, so there is one answer and the
+    /// authored arrangement is what a boot frame draws — see
+    /// [`occupants_at`](Self::occupants_at) for the order and
+    /// [`splits`](Self::splits) for the axis.
     pub fn surface_rects(
         &self,
         monitor: &MonitorIdentity,
         geometry: &MonitorGeometry,
     ) -> Vec<(SurfaceOccupant, PaneRect)> {
-        let reserved = self.reserved_on(monitor);
-        let stations = self.stations_on(monitor);
-        reserved
-            .iter()
-            .cloned()
-            .map(SurfaceOccupant::Reserved)
-            .chain(stations.iter().cloned().map(SurfaceOccupant::Station))
-            .zip(pane_rects(
-                geometry,
-                LAYOUT_SPLIT,
-                reserved.len() + stations.len(),
-            ))
-            .collect()
+        let Some(index) = self.index_of(monitor) else {
+            return Vec::new();
+        };
+        let occupants = self.occupants_at(index);
+        let rects = pane_rects(geometry, self.splits[index], occupants.len());
+        occupants.into_iter().zip(rects).collect()
     }
 
     /// Where each of `monitor`'s **seated** consoles is drawn on it, in seat
@@ -798,11 +938,17 @@ impl BridgeLayout {
             displays.push(DisplayEntry {
                 id: self.monitors[index].as_str().to_string(),
                 role: ROLE_STATION.to_string(),
+                // The screen's OWN split (issue #1332's fix round), not the
+                // constant: a monitor a `--profile` authored `stacked` and the
+                // operator then filled from the lobby is still stacked, and a
+                // file that wrote `side_by_side` over it would re-arrange the
+                // bridge on the next boot.
+                //
                 // Only a two-console monitor is actually split; a single console
                 // is the whole screen and the field is ignored for it, so it is
                 // left out rather than written as noise an operator must read
                 // past.
-                split: (stations.len() > 1).then_some(LAYOUT_SPLIT),
+                split: (stations.len() > 1).then(|| self.splits[index]),
                 panes: stations
                     .iter()
                     .map(|s| PaneSlot::for_station(s.0.clone()))
@@ -843,7 +989,12 @@ impl BridgeLayout {
     /// [`adopt_profile`](Self::adopt_profile) of what this writes differs from
     /// the layout it was written from whenever that layout reserves anything.
     /// See [`reserved`](Self::reserved) — nothing today can reach the loss, and
-    /// issue #1334 is where it stops being free.
+    /// issue #1334 is where it stops being free. A screen's
+    /// [`split_on`](Self::split_on) is lossy in the same one direction and for
+    /// the file's own reason: a `[[display]]` holding fewer than two panes has no
+    /// split to write (a one-pane Station's is ignored by definition), so a
+    /// screen the operator authored `stacked` and then emptied comes back
+    /// [`LAYOUT_SPLIT`].
     pub fn to_validated_profile(&self) -> ValidatedProfile {
         self.to_profile()
             .validate()
@@ -873,6 +1024,13 @@ impl BridgeLayout {
     /// **reserved** on its monitor (see the [`reserved`](Self::reserved) note):
     /// there is no seat to take, but the screen is not free either, and a
     /// viewscreen that moved onto it would cover a crew member's live console.
+    /// It keeps the **index** its entry gave it, because that is where it is
+    /// drawn — see [`Reservation`].
+    ///
+    /// A Station entry's `split` is adopted too, onto the monitor it names
+    /// ([`splits`](Self::splits)): this is the one moment the file is in hand,
+    /// and the arrangement an operator wrote down is the arrangement the screen
+    /// is carved into from the boot frame onward.
     pub fn adopt_profile(&self, profile: &ValidatedProfile) -> (Self, Vec<LayoutAdoption>) {
         let mut notes = Vec::new();
         let mut next = Self {
@@ -881,8 +1039,9 @@ impl BridgeLayout {
             viewscreen: self.viewscreen,
             seats: vec![Vec::new(); self.monitors.len()],
             // Replaced along with the seating: adoption is "this arrangement",
-            // and a profile that no longer authors a participant pane no longer
-            // reserves the screen it was on.
+            // and a profile that no longer authors a screen no longer carves it
+            // or reserves it.
+            splits: vec![LAYOUT_SPLIT; self.monitors.len()],
             reserved: vec![Vec::new(); self.monitors.len()],
         };
 
@@ -905,16 +1064,29 @@ impl BridgeLayout {
 
         let mut seated: Vec<StationId> = Vec::new();
         for display in &profile.displays {
-            let DisplayRole::Station { panes, .. } = &display.role else {
+            let DisplayRole::Station { panes, split } = &display.role else {
                 continue;
             };
-            for pane in panes {
+            // How this screen is carved, from the entry that carves it. Recorded
+            // before the panes below, and whether or not any of them is adopted:
+            // the split is the operator's statement about the SCREEN, and a
+            // station they later seat on it from the lobby lands on the axis they
+            // authored.
+            if let Some(index) = next.index_of(&display.identity) {
+                next.splits[index] = *split;
+            }
+            for (position, pane) in panes.iter().enumerate() {
                 let Some(id) = pane.station.as_deref() else {
                     // Nothing to seat — but the authored profile opens a
                     // surface here all the same, so the screen is recorded as
                     // taken rather than left looking free to rule 2's mirror.
+                    // At the index the file gave it, because that is the half of
+                    // the screen it is drawn on.
                     if let Some(index) = next.index_of(&display.identity) {
-                        next.reserved[index].push(pane.label.clone());
+                        next.reserved[index].push(Reservation {
+                            label: pane.label.clone(),
+                            index: position,
+                        });
                     }
                     notes.push(LayoutAdoption::PaneNamesNoStation {
                         monitor: display.identity.clone(),
@@ -1054,16 +1226,25 @@ impl BridgeLayout {
         // An authored surface follows its screen: a monitor that is still here
         // is still carrying whatever the profile opened on it, and one that is
         // gone took its surface with it. Carried before the seats below so the
-        // occupancy a seat is judged against is the whole of it.
-        let reserved: Vec<Vec<String>> = identities
+        // occupancy a seat is judged against is the whole of it. A screen's
+        // authored split follows it the same way — a cable coming out of some
+        // OTHER display is no reason to re-carve this one — and a monitor this
+        // bridge has just gained arrives on `LAYOUT_SPLIT`, because nothing
+        // authored it.
+        let reserved: Vec<Vec<Reservation>> = identities
             .iter()
-            .map(|m| self.reserved_on(m).to_vec())
+            .map(|m| match self.index_of(m) {
+                Some(i) => self.reserved[i].clone(),
+                None => Vec::new(),
+            })
             .collect();
+        let splits: Vec<PaneSplit> = identities.iter().map(|m| self.split_on(m)).collect();
         let mut next = Self {
             seats: vec![Vec::new(); identities.len()],
             monitors: identities,
             roster,
             viewscreen: index,
+            splits,
             reserved,
         };
 
@@ -1326,8 +1507,8 @@ pub enum LayoutAdoption {
     ViewscreenCoversOccupants {
         monitor: MonitorIdentity,
         /// What that screen was holding, in the order
-        /// [`BridgeLayout::occupants_on`] gives it: the seated station ids
-        /// first, then the authored surfaces this layout does not own.
+        /// [`BridgeLayout::occupants_on`] gives it — the order it is drawn on
+        /// the screen, so the list reads the way the operator was looking at it.
         occupants: Vec<String>,
     },
     /// A station's console was open on a monitor that is no longer connected, so
@@ -1373,7 +1554,8 @@ pub enum LayoutAdoption {
     /// was at that console therefore spends a page load disconnected, their
     /// station on `Backfill`, and their seat is claimable by somebody else for
     /// exactly that long. The reconnect restores it (`handle_identify`'s
-    /// reconnect-yield) *if* nobody took it in the gap.
+    /// reconnect-yield) *if* nobody took it in the gap — and if somebody did,
+    /// the station stays on AI control for the person who was at it.
     ///
     /// For the console the operator **moved**, that is the cost of the move and
     /// it needs no announcement. For its *neighbour* — a person who pressed
@@ -1382,7 +1564,41 @@ pub enum LayoutAdoption {
     /// blink is announced rather than absorbed. The variant carries the console's
     /// name rather than a [`StationId`] because an authored `--pane` participant
     /// is re-tiled by the same rule and has no station id to carry.
+    ///
+    /// # Only when the OCCUPANCY changed
+    ///
+    /// This variant names one cause — a neighbour arrived or left — and it must
+    /// only be raised for that cause. A screen whose consoles did not change but
+    /// whose *geometry* did (a television renegotiating its mode, its identity
+    /// carried across by `identify_stable`) re-tiles every pane on it too, and
+    /// saying "the split changed" about that is a sentence the code cannot
+    /// support: nothing joined or left. That case is
+    /// [`ConsoleResized`](Self::ConsoleResized) — the same rebuild, the true
+    /// reason.
     ConsoleRetiling {
+        /// The station id, or the participant label of an authored surface —
+        /// [`SurfaceOccupant::name`].
+        console: String,
+        monitor: MonitorIdentity,
+    },
+    /// A console **nobody moved** is being rebuilt, because the monitor it is on
+    /// changed size while holding exactly the consoles it already held
+    /// (issue #1332's fix round).
+    ///
+    /// [`ConsoleRetiling`](Self::ConsoleRetiling)'s sibling, and everything in
+    /// that note about *why a rebuild is announced at all* applies here word for
+    /// word: the view was built at one size, the page reloads, and the person at
+    /// it spends that load on `Backfill`. What differs is only the true cause. A
+    /// display that renegotiates its mode in place — a television waking, an
+    /// EDID handshake settling — keeps its identity
+    /// (`bridge_profile::identify_stable`) and reports new pixels, so every pane
+    /// on it gets a new rectangle with the same neighbours it always had.
+    ///
+    /// It is a separate variant rather than a parameter because the two are
+    /// separate **sentences**: `t()` interpolates values into a sentence, and a
+    /// translator handed `{cause}` cannot see what grammar is about to land in
+    /// it.
+    ConsoleResized {
         /// The station id, or the participant label of an authored surface —
         /// [`SurfaceOccupant::name`].
         console: String,
@@ -1424,6 +1640,7 @@ impl LayoutAdoption {
                 "server.bridge_layout.adopt_console_could_not_open"
             }
             LayoutAdoption::ConsoleRetiling { .. } => "server.bridge_layout.adopt_console_retiling",
+            LayoutAdoption::ConsoleResized { .. } => "server.bridge_layout.adopt_console_resized",
             LayoutAdoption::NoMonitorsReported { .. } => "server.bridge_layout.adopt_no_monitors",
         }
     }
@@ -1452,7 +1669,8 @@ impl LayoutAdoption {
                 ("station", station.0.clone()),
                 ("monitor", monitor.as_str().to_string()),
             ],
-            LayoutAdoption::ConsoleRetiling { console, monitor } => vec![
+            LayoutAdoption::ConsoleRetiling { console, monitor }
+            | LayoutAdoption::ConsoleResized { console, monitor } => vec![
                 ("console", console.clone()),
                 ("monitor", monitor.as_str().to_string()),
             ],
@@ -1565,7 +1783,16 @@ impl std::fmt::Display for LayoutAdoption {
                 f,
                 "monitor {monitor}'s split changed, so {console:?}'s console — which nobody asked \
                  to move — is rebuilt at its new half; whoever is at it reconnects on the same \
-                 identity once the page loads, and their station is on AI control until it does",
+                 identity once the page loads, and their station is on AI control until it does \
+                 — and stays there if somebody else claimed it in the meantime",
+            ),
+            LayoutAdoption::ConsoleResized { console, monitor } => write!(
+                f,
+                "monitor {monitor} changed size, so {console:?}'s console — which nobody asked to \
+                 move, and which kept the same neighbours — is rebuilt to fit it; whoever is at \
+                 it reconnects on the same identity once the page loads, and their station is on \
+                 AI control until it does — and stays there if somebody else claimed it in the \
+                 meantime",
             ),
             LayoutAdoption::NoMonitorsReported { kept } => write!(
                 f,

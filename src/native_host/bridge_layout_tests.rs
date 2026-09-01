@@ -1070,6 +1070,262 @@ fn an_authored_console_alone_still_covers_its_whole_screen() {
         .is_empty());
 }
 
+// ── one tiling, and it is the AUTHORED one (issue #1332's fix round) ────────
+//
+// #1332 landed two tilings. `bridge_display::apply_bridge_profile` laid a
+// `--profile`'s Station out from the file — that entry's pane order, that
+// entry's split — and `surface_rects` laid the same screen out from the law,
+// reserved-first and always `LAYOUT_SPLIT`. Boot drew the operator's
+// arrangement and the very next system overwrote it, so an authored
+// `[helm, Ada]` flipped to Ada-left one frame in (closing and recreating a
+// console nobody had touched) and an authored `stacked` screen was re-tiled
+// side by side.
+//
+// Boot now READS `surface_rects`, so there is one tiling. These pin that the one
+// answer is the authored one, shape by shape.
+
+/// A `--profile` putting `panes` on `LEFT` under `split`, with the TV as the
+/// viewscreen — the authored shapes a hand-written profile can take.
+fn authored(split: Option<PaneSplit>, panes: Vec<PaneSlot>) -> ValidatedProfile {
+    let mut profile = BridgeProfile::empty();
+    profile.displays = vec![
+        DisplayEntry {
+            id: TV.to_string(),
+            role: ROLE_VIEWSCREEN.to_string(),
+            split: None,
+            panes: Vec::new(),
+        },
+        DisplayEntry {
+            id: LEFT.to_string(),
+            role: ROLE_STATION.to_string(),
+            split,
+            panes,
+        },
+    ];
+    profile.validate().expect("the fixture is a valid profile")
+}
+
+#[test]
+fn the_law_tiles_an_authored_screen_exactly_as_the_file_authored_it() {
+    // The property, over every shape a `--profile` can author: adopting a
+    // profile and asking the law where its consoles go answers what laying that
+    // entry out from the file itself answers — the same names, in the same
+    // order, at the same rectangles, on the same axis.
+    //
+    // That equality IS "boot rects == surface_rects" now that boot reads
+    // `surface_rects`: this is the file's own tiling on the left of the
+    // assertion, computed the way `apply_bridge_profile` used to compute it.
+    let shapes: Vec<(&str, Option<PaneSplit>, Vec<PaneSlot>)> = vec![
+        ("one station", None, vec![PaneSlot::for_station("helm")]),
+        (
+            "one participant",
+            None,
+            vec![PaneSlot::for_participant("Ada")],
+        ),
+        (
+            "two participants",
+            None,
+            vec![
+                PaneSlot::for_participant("Ada"),
+                PaneSlot::for_participant("Grace"),
+            ],
+        ),
+        (
+            "two stations",
+            None,
+            vec![
+                PaneSlot::for_station("helm"),
+                PaneSlot::for_station("weapons"),
+            ],
+        ),
+        (
+            "station then participant",
+            Some(PaneSplit::SideBySide),
+            vec![
+                PaneSlot::for_station("helm"),
+                PaneSlot::for_participant("Ada"),
+            ],
+        ),
+        (
+            "participant then station",
+            Some(PaneSplit::SideBySide),
+            vec![
+                PaneSlot::for_participant("Ada"),
+                PaneSlot::for_station("helm"),
+            ],
+        ),
+        (
+            "station then participant, stacked",
+            Some(PaneSplit::Stacked),
+            vec![
+                PaneSlot::for_station("helm"),
+                PaneSlot::for_participant("Ada"),
+            ],
+        ),
+        (
+            "participant then station, stacked",
+            Some(PaneSplit::Stacked),
+            vec![
+                PaneSlot::for_participant("Ada"),
+                PaneSlot::for_station("helm"),
+            ],
+        ),
+        (
+            "two stations, stacked",
+            Some(PaneSplit::Stacked),
+            vec![
+                PaneSlot::for_station("helm"),
+                PaneSlot::for_station("weapons"),
+            ],
+        ),
+    ];
+
+    let screen = geometry(1920, 1080);
+    for (name, split, panes) in shapes {
+        let profile = authored(split, panes.clone());
+        let (adopted, _) = bridge().adopt_profile(&profile);
+
+        // The file's own answer — one `pane_rects` call over the entry, exactly
+        // as the boot path used to make it.
+        let from_the_file: Vec<(String, PaneRect)> = panes
+            .iter()
+            .map(|slot| slot.label.clone())
+            .zip(pane_rects(&screen, split.unwrap_or_default(), panes.len()))
+            .collect();
+        let from_the_law: Vec<(String, PaneRect)> = adopted
+            .surface_rects(&m(LEFT), &screen)
+            .into_iter()
+            .map(|(occupant, rect)| (occupant.name().to_string(), rect))
+            .collect();
+
+        assert_eq!(
+            from_the_law, from_the_file,
+            "{name}: the law must tile an authored screen the way its file authored it"
+        );
+        assert_eq!(
+            adopted.split_on(&m(LEFT)),
+            split.unwrap_or_default(),
+            "{name}: and on the authored axis"
+        );
+    }
+}
+
+#[test]
+fn an_authored_station_keeps_the_half_the_file_gave_it() {
+    // The inversion, named on its own because it is the defect: `[helm, Ada]`
+    // authors the STATION on the left, and a law that put every reserved surface
+    // first drew Ada there instead — one frame after boot had drawn it right.
+    let (adopted, _) = bridge().adopt_profile(&authored(
+        None,
+        vec![
+            PaneSlot::for_station("helm"),
+            PaneSlot::for_participant("Ada"),
+        ],
+    ));
+    let rects = adopted.surface_rects(&m(LEFT), &geometry(1920, 1080));
+    assert_eq!(
+        rects
+            .iter()
+            .map(|(o, _)| o.name().to_string())
+            .collect::<Vec<_>>(),
+        vec!["helm".to_string(), "Ada".to_string()],
+        "the operator wrote helm first, so helm is the left half"
+    );
+    assert_eq!((rects[0].1.x, rects[0].1.width), (0, 960));
+    assert_eq!((rects[1].1.x, rects[1].1.width), (960, 960));
+
+    // And the whole screen reads in that order everywhere the lobby looks, so a
+    // greyed button lists the consoles the way the glass shows them.
+    assert_eq!(
+        adopted.occupants_on(&m(LEFT)),
+        vec!["helm".to_string(), "Ada".to_string()]
+    );
+}
+
+#[test]
+fn an_authored_stacked_screen_is_not_re_carved_side_by_side() {
+    // The other half of the same defect. `LAYOUT_SPLIT` is the default for a
+    // screen nothing authored, not an override of one that was.
+    let (adopted, _) = bridge().adopt_profile(&authored(
+        Some(PaneSplit::Stacked),
+        vec![
+            PaneSlot::for_participant("Ada"),
+            PaneSlot::for_participant("Grace"),
+        ],
+    ));
+    let rects = adopted.surface_rects(&m(LEFT), &geometry(1920, 1080));
+    assert_eq!((rects[0].1.y, rects[0].1.height), (0, 540));
+    assert_eq!((rects[1].1.y, rects[1].1.height), (540, 540));
+    assert_eq!(rects[0].1.width, 1920, "stacked panes are full width");
+    assert_eq!(
+        bridge().split_on(&m(LEFT)),
+        LAYOUT_SPLIT,
+        "while a screen no profile authored keeps the constant"
+    );
+}
+
+#[test]
+fn a_station_the_lobby_seats_lands_on_the_authored_axis_and_in_the_free_slot() {
+    // A screen the operator authored `stacked` is still stacked when the LOBBY
+    // fills its second slot: the split is a statement about the screen, not
+    // about the pane that happened to be on it first. And the newcomer takes the
+    // slot the authored console did not — here the top, because the file put Ada
+    // in the second pane.
+    let (adopted, _) = bridge().adopt_profile(&authored(
+        Some(PaneSplit::Stacked),
+        vec![
+            PaneSlot::for_station("comms"),
+            PaneSlot::for_participant("Ada"),
+        ],
+    ));
+    let shared = assign(
+        &adopted
+            .apply(&LayoutAction::UnassignStation {
+                station: s("comms"),
+            })
+            .expect("closing a console is lawful"),
+        "helm",
+        LEFT,
+    );
+
+    let rects = shared.surface_rects(&m(LEFT), &geometry(1920, 1080));
+    assert_eq!(
+        rects
+            .iter()
+            .map(|(o, _)| o.name().to_string())
+            .collect::<Vec<_>>(),
+        vec!["helm".to_string(), "Ada".to_string()],
+        "Ada was authored second, so she keeps the bottom and the newcomer takes the top"
+    );
+    assert_eq!((rects[0].1.y, rects[0].1.height), (0, 540));
+    assert_eq!((rects[1].1.y, rects[1].1.height), (540, 540));
+}
+
+#[test]
+fn an_authored_index_past_the_end_of_a_shrunken_screen_still_lands_somewhere() {
+    // The clamp, which is not hypothetical: a two-pane profile whose FIRST pane
+    // names a station this ship does not have leaves one reservation holding
+    // index 1 on a screen with one slot. There is nowhere for index 1, and an
+    // answer that dropped the pane — or panicked — would lose a live console.
+    let (adopted, notes) = bridge().adopt_profile(&authored(
+        None,
+        vec![
+            PaneSlot::for_station("flight-deck"),
+            PaneSlot::for_participant("Ada"),
+        ],
+    ));
+    assert!(
+        notes
+            .iter()
+            .any(|n| matches!(n, LayoutAdoption::SeatRefused { .. })),
+        "the cruiser's station is refused on this destroyer"
+    );
+    let rects = adopted.surface_rects(&m(LEFT), &geometry(1920, 1080));
+    assert_eq!(rects.len(), 1);
+    assert_eq!(rects[0].0.name(), "Ada");
+    assert_eq!((rects[0].1.x, rects[0].1.width), (0, 1920));
+}
+
 #[test]
 fn a_profile_the_layout_itself_wrote_reserves_nothing() {
     // The other direction, unchanged: every pane a layout writes names a

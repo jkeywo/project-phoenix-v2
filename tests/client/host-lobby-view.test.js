@@ -572,9 +572,12 @@ describe('hostLobbyStationRows — which state the row is in', () => {
 // hand-authored `--profile` opened, which no station row can ever show.
 
 describe('hostLobbyStationRows — a full screen says what is holding it', () => {
-  /** A payload whose BenQ is `full`, holding whatever `stations` names. */
-  const fullBenq = (stations) => bridge({
-    monitors: [monitor(), secondMonitor({ stations })],
+  /**
+   * A payload whose BenQ is `full`, holding whatever `stations` names — and, in
+   * `reserved`, whichever of those the lobby cannot free.
+   */
+  const fullBenq = (stations, reserved = []) => bridge({
+    monitors: [monitor(), secondMonitor({ stations, reserved })],
     stations: [{
       station: 'helm',
       monitors: [
@@ -600,8 +603,31 @@ describe('hostLobbyStationRows — a full screen says what is holding it', () =>
     // The case that would otherwise grey a screen for no visible reason: a
     // `--pane` participant is a console on the glass and fills a slot, but is
     // not on the roster, so no station card mentions them anywhere.
-    const row = hostLobbyStationRows(fullBenq(['Ada', 'Grace'])).helm;
+    const row = hostLobbyStationRows(fullBenq(['Ada', 'Grace'], ['Ada', 'Grace'])).helm;
     expect(row.buttons[0].reason.params.stations).toBe('Ada, Grace');
+  });
+
+  it('says the slot is not the lobby\'s to free when an authored console holds it', () => {
+    // Since issue #1332 a `--pane` console costs the screen a real slot, and
+    // there is no control anywhere in this surface that frees one: no station
+    // row, no off button, nothing short of restarting the host with different
+    // arguments. A greyed screen that only listed the names would be true and
+    // useless — the operator reads "close one of these" and finds nothing to
+    // close. So the reason says which of them is unreclaimable.
+    const row = hostLobbyStationRows(fullBenq(['Ada', 'weapons'], ['Ada'])).helm;
+    expect(row.buttons[0].disabled).toBe(true);
+    expect(row.buttons[0].reason).toEqual({
+      id: 'server.station_row.full_authored',
+      params: { stations: 'Ada, weapons', authored: 'Ada' },
+    });
+  });
+
+  it('keeps the ordinary marker when every console on it can be closed from here', () => {
+    // The discrimination, from the other side: two seated stations are two
+    // buttons the operator can press, so nothing is said about authored
+    // consoles and the sentence stays the short one.
+    const row = hostLobbyStationRows(fullBenq(['weapons', 'comms'], [])).helm;
+    expect(row.buttons[0].reason.id).toBe('server.station_row.full_holding');
   });
 
   it('falls back to the bare marker when the row was told nothing about it', () => {

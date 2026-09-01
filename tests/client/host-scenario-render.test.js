@@ -80,12 +80,30 @@ function hooks(extra) {
 const t = (id) => `«${id}»`;
 
 /**
- * Let the renderer's dynamic `import('./components/ph-ship-picker.js')` land.
+ * Spin the event loop until `ready()` answers, or a real-time deadline passes.
  *
- * A module graph resolves over several microtask turns the first time it is
- * pulled in (the component imports the string table, the roving-tabindex helper
- * and `PhElement`), so one `setTimeout(0)` is not reliably enough. A handful of
- * turns is, and costs nothing once the module is cached.
+ * The renderer's `import('./components/ph-ship-picker.js')` resolves a whole
+ * module graph the first time it is pulled in — the component imports the
+ * string table, the roving-tabindex helper and `PhElement` — and how many turns
+ * that takes is a function of how busy the machine is, not of the code. A fixed
+ * count therefore passes on an idle box and fails inside a loaded
+ * `vitest run` of every suite at once, which is a flake rather than a finding.
+ * Waiting on the CONDITION with a generous ceiling is both faster in the normal
+ * case and honest in the slow one.
+ */
+async function settleUntil(ready) {
+  const deadline = Date.now() + 5000;
+  while (!ready() && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 0));
+  }
+}
+
+/**
+ * Spin a fixed handful of turns, for asserting something did NOT happen.
+ *
+ * There is no condition to wait on in that case. It is only sound because the
+ * mounting test above runs first and leaves the module graph cached, so the
+ * import this is giving room to resolves immediately.
  */
 async function settle() {
   for (let i = 0; i < 10; i += 1) await new Promise((r) => setTimeout(r, 0));
@@ -173,7 +191,7 @@ describe('the hull stage', () => {
     expect(doc.getElementById('world-list-label').textContent).toBe('«server.select_ship»');
 
     // The component load is a dynamic import; let it settle.
-    await settle();
+    await settleUntil(() => doc.querySelector('ph-ship-picker'));
     const picker = doc.querySelector('ph-ship-picker');
     expect(picker).not.toBeNull();
     picker.dispatchEvent(

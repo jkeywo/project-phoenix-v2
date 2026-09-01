@@ -31,6 +31,7 @@ function mountDispatcher({ strings = { t, has, localiseTree } } = {}) {
     audio_cue: record('audio_cue'),
     audio_level: record('audio_level'),
     shake: record('shake'),
+    gm_entity: record('gm_entity'),
   };
   const dispatch = createHostChannel({ handlers, strings });
   return { dispatch, seen };
@@ -125,7 +126,7 @@ describe('host channel localisation boundary', () => {
   });
 
   it('routes every channel through the boundary, not just the lobby', () => {
-    for (const channel of ['hud', 'chatter', 'audio_config', 'audio_cue']) {
+    for (const channel of ['hud', 'chatter', 'audio_config', 'audio_cue', 'gm_entity']) {
       const fresh = mountDispatcher();
       fresh.dispatch(channel, JSON.stringify({
         text: 'entity.alliance_destroyer.name',

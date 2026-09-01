@@ -235,8 +235,13 @@ impl BaseTransform {
     }
 }
 
-/// ECS component carrying a model's resolved rig points so downstream systems
-/// can look up mount points and target points without re-reading the sidecar.
+/// Authoritative ECS component carrying the marker and target geometry from an
+/// entity's **primary authored rig**.
+///
+/// [`crate::entities::model_markers::sync_authoritative_model_markers`]
+/// attaches it independently of rendering. Active GLB/shape/billboard LODs are
+/// presentation and must never replace or remove it, so weapons and every
+/// deterministic peer resolve the same geometry at every visual distance.
 #[derive(Component, Debug, Clone, Default)]
 pub struct ModelMarkers {
     markers: HashMap<String, Marker>,

@@ -35,6 +35,7 @@
  * selected-but-still-preloading boundary directly testable.
  */
 export function fleetStartValidationState({
+  role = 'ship',
   fleetLinked = false,
   wasmReady = false,
   worldLoaded = false,
@@ -44,14 +45,17 @@ export function fleetStartValidationState({
   presentationReady = false,
 } = {}) {
   const selectedPath = selectedHull && selectedHull.template_path;
+  const hullReady = role === 'gm' || (
+    typeof selectedPath === 'string'
+    && selectedPath.length > 0
+    && validatedHullPath === selectedPath
+  );
   return !!(
     fleetLinked
     && wasmReady
     && worldLoaded
     && bootReady
-    && typeof selectedPath === 'string'
-    && selectedPath.length > 0
-    && validatedHullPath === selectedPath
+    && hullReady
     && presentationReady
   );
 }

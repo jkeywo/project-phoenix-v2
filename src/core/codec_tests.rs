@@ -990,6 +990,24 @@ fn encode_chatter_wire_shape_matches_js_handler() {
     );
 }
 
+#[test]
+fn encode_gm_entity_projection_pins_the_local_host_channel_shape() {
+    let payload = crate::gm_projection::GmEntityProjectionPayload {
+        entity: Some(crate::gm_projection::GmEntityProjection {
+            entity_id: "00000000-0000-0000-0000-000000000001".into(),
+            name: "Axiom".into(),
+            status: crate::gm_projection::GmEntityStatus {
+                hull_percent: 73,
+                destroyed: false,
+            },
+        }),
+    };
+    assert_eq!(
+        encode_gm_entity_projection(&payload).unwrap(),
+        r#"{"entity":{"entity_id":"00000000-0000-0000-0000-000000000001","name":"Axiom","status":{"hull_percent":73,"destroyed":false}}}"#
+    );
+}
+
 /// `encode_chatter` must JSON-escape quotes/backslashes in the labels and in
 /// any text carried inside the payload — the pre-#818 hand-rolled `format!`
 /// encoder did this by hand; serde now owns it. Round-trips through

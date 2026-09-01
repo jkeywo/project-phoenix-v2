@@ -3,7 +3,7 @@ title: LOD Generation
 type: concept
 tags: [tooling, assets, models, rendering, ci]
 sources: [scripts/generate-lods.mjs, scripts/capture-billboards.mjs, scripts/viewer-lods.mjs, scripts/dev-viewer.mjs, scripts/blender-voxel-remesh.py, scripts/lod-manifest.toml, scripts/lod-capture-manifest.toml, src/entities/config.rs, src/entities/model_rig.rs, src/perf/assets.rs, src/perf/mesh.rs, tests/client/generate-lods.test.js, tests/client/capture-billboards.test.js, tests/client/viewer-lods.test.js]
-updated: 2026-08-26
+updated: 2026-09-01
 ---
 
 # LOD Generation
@@ -13,8 +13,11 @@ the tree still match what the sidecars ask for (issue #919).
 
 Generated GLB tiers that declare `tier_rig = "identity"` have no sibling
 sidecar to fetch, but still inherit the primary model rig's offset and rotation
-at runtime. Their scale remains on the LOD parent, so it is applied exactly
-once. This keeps 180°-corrected hulls nose-forward across every LOD transition.
+at runtime. Their extra scale lives on a presentation-only LOD root below the
+authoritative entity, so it is applied exactly once without changing marker,
+weapon, collision, or digest geometry. This keeps 180°-corrected hulls
+nose-forward across every LOD transition while rendererless GM peers remain
+simulation-identical to rendered peers.
 
 ## The sidecar declares the whole ladder
 

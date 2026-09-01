@@ -7,11 +7,11 @@
  * through the #1224 latch in server.html's classic prelude. `createHostChannel`
  * builds the function that latch hands off to: a handler table routes each
  * named channel (hud, lobby, chatter, audio_config, audio_cue, audio_level,
- * shake) to the page's existing render/audio functions. Adding a channel is
+ * shake, gm_entity) to the page's existing render/audio functions. Adding a channel is
  * one Rust table row + one entry in the `handlers` object server.html passes
  * in.
  *
- * Payload shapes: JSON string for hud/lobby/chatter/audio_config/audio_cue;
+ * Payload shapes: JSON string for hud/lobby/chatter/audio_config/audio_cue/gm_entity;
  * a bare number for audio_level; a two-element [x, y] array for shake.
  *
  * JS must not assume any cross-channel ordering: even though a single flush

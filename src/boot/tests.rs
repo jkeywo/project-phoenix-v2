@@ -1,9 +1,9 @@
-//! Guard tests for the boot seam (issue #1217; fourth profile #1121).
+//! Guard tests for the boot seam (issue #1217; fifth profile #1291).
 //!
 //! The headline is the profile registration-parity test: the whole point of
-//! the module is that Headless, BrowserHost, BrowserAutomation and NativeHost
-//! cannot drift on what the renderer (real or surrogate) owes the simulation, so
-//! a test builds all four and asserts they land on the same
+//! the module is that Headless, BrowserHost, BrowserAutomation,
+//! BrowserGameMaster and NativeHost cannot drift on what the renderer (real or
+//! surrogate) owes the simulation, so a test builds all five and asserts they land on the same
 //! four-asset/three-message floor — and that only the two render-stack profiles
 //! took the real render-stack path.
 //!
@@ -88,10 +88,11 @@ fn plan_with_child(profile: BootProfile, child: &str) -> BootPlan {
     }
 }
 
-const PROFILES: [(BootProfile, &str); 4] = [
+const PROFILES: [(BootProfile, &str); 5] = [
     (BootProfile::Headless, "headless"),
     (BootProfile::BrowserHost, "browser-host"),
     (BootProfile::BrowserAutomation, "browser-automation"),
+    (BootProfile::BrowserGameMaster, "browser-game-master"),
     (BootProfile::NativeHost, "native-host"),
 ];
 
@@ -129,7 +130,7 @@ fn assert_render_contract(app: &App, label: &str) {
 }
 
 #[test]
-fn all_four_profiles_register_the_same_asset_and_message_floor() {
+fn all_five_profiles_register_the_same_asset_and_message_floor() {
     for (profile, label) in PROFILES {
         let app = build(plan_for(profile)).unwrap_or_else(|e| panic!("{label} build failed: {e}"));
         assert_render_contract(&app, label);
@@ -143,6 +144,7 @@ fn the_render_stack_is_taken_only_by_the_profiles_that_name_a_renderer() {
     let host = build(plan_for(BootProfile::BrowserHost)).expect("browser-host build");
     let automation =
         build(plan_for(BootProfile::BrowserAutomation)).expect("browser-automation build");
+    let gm = build(plan_for(BootProfile::BrowserGameMaster)).expect("browser-gm build");
     let native = build(plan_for(BootProfile::NativeHost)).expect("native-host build");
 
     // The two render-stack profiles drove it and NOT the surrogate. That the
@@ -160,8 +162,12 @@ fn the_render_stack_is_taken_only_by_the_profiles_that_name_a_renderer() {
         );
     }
 
-    // The two renderer-less profiles took the surrogate and NOT the stack.
-    for (app, label) in [(&headless, "headless"), (&automation, "browser-automation")] {
+    // The three renderer-less profiles took the surrogate and NOT the stack.
+    for (app, label) in [
+        (&headless, "headless"),
+        (&automation, "browser-automation"),
+        (&gm, "browser-game-master"),
+    ] {
         assert!(
             app.world().contains_resource::<RenderSurrogateApplied>(),
             "{label} must take the render-surrogate path"
@@ -246,12 +252,13 @@ fn the_native_template_gate_covers_a_hull_declared_only_by_a_static_child() {
         "the refusal must name the child's template: {err}"
     );
 
-    // And the other three profiles are unaffected, exactly as they are for a
+    // And the other four profiles are unaffected, exactly as they are for a
     // root-declared one.
     for profile in [
         BootProfile::Headless,
         BootProfile::BrowserHost,
         BootProfile::BrowserAutomation,
+        BootProfile::BrowserGameMaster,
     ] {
         assert!(
             build(plan_with_child(profile, &child)).is_ok(),
@@ -281,7 +288,11 @@ fn a_broken_world_aborts_headless_but_only_blocks_activation_for_the_browser() {
     // A browser host keeps booting: the broken scripts are carried through as a
     // resource so the downstream WorldPlugin gate can refuse to activate them,
     // rather than the build failing here.
-    for profile in [BootProfile::BrowserHost, BootProfile::BrowserAutomation] {
+    for profile in [
+        BootProfile::BrowserHost,
+        BootProfile::BrowserAutomation,
+        BootProfile::BrowserGameMaster,
+    ] {
         let app = build(plan_with(profile, BROKEN_SCRIPT_WORLD))
             .unwrap_or_else(|e| panic!("{profile:?} must boot a broken world: {e}"));
         assert!(

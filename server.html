@@ -19,6 +19,15 @@
        TRUNK_BUILD_RELEASE, which the dev host also sets. -->
   <meta name="phoenix-build-demo" content="false" />
   <title data-i18n="server.doc_title">Project Phoenix — View Screen</title>
+  <script>
+    // Explicit production rendererless GM route (#1291). This is evaluated
+    // before boot and is independent of the WebDriver automation probe.
+    window.__phoenixGmPage = new URLSearchParams(location.search).get('gm') === '1';
+    if (window.__phoenixGmPage) {
+      document.documentElement.classList.add('phoenix-gm-page');
+      document.documentElement.dataset.phoenixBootRequest = 'browser-game-master';
+    }
+  </script>
   <link rel="icon" type="image/x-icon" href="assets/favicon.ico" />
 <!-- The shared design vocabulary (PRD #1023 module 1): colours, edges, ink,
      accents, space, the type ramp and its legibility floor, and the control
@@ -149,6 +158,21 @@
       overflow: hidden;
     }
     #canvas { display: block; width: 100%; height: 100%; background: #000; }
+    #gm-console {
+      display: none; position: absolute; inset: 0; z-index: 80;
+      box-sizing: border-box; padding: clamp(4rem, 8vw, 8rem);
+      color: var(--ink-primary); background: #05080d;
+      font-family: 'Chakra Petch', monospace;
+      flex-direction: column; gap: 1.5rem;
+    }
+    html.phoenix-gm-page #gm-console { display: flex; }
+    html.phoenix-gm-page #canvas,
+    html.phoenix-gm-page #hud-overlay { display: none; }
+    #gm-console h1, #gm-console h2 { margin: 0; }
+    #gm-entity-card { max-width: 44rem; padding: 1.5rem; border: 1px solid var(--edge-control); }
+    #gm-entity-card dl { display: grid; grid-template-columns: max-content 1fr; gap: .75rem 1.5rem; }
+    #gm-entity-card dt { color: var(--ink-muted); }
+    #gm-entity-hull { width: 100%; }
     #overlay { position: absolute; bottom: 1rem; right: 1rem; z-index: 190; display: none; }
     /* Before a world is selected the join surface is a real flex child of the
        scenario panel, between the world picker and saved-session catalogue.
@@ -1688,6 +1712,23 @@
       <!-- Bevy renders into the canvas that DefaultPlugins creates at startup -->
       <canvas id="canvas"></canvas>
 
+      <main id="gm-console" aria-labelledby="gm-console-title">
+        <header>
+          <h1 id="gm-console-title" data-i18n="server.gm.console.title"></h1>
+          <p data-i18n="server.gm.console.local_truth"></p>
+        </header>
+        <p id="gm-entity-pending" role="status" data-i18n="server.gm.entity.pending"></p>
+        <article id="gm-entity-card" hidden aria-live="polite">
+          <h2 id="gm-entity-name"></h2>
+          <dl>
+            <dt data-i18n="server.gm.entity.identity"></dt><dd id="gm-entity-identity"></dd>
+            <dt id="gm-entity-status-label" data-i18n="server.gm.entity.status"></dt><dd id="gm-entity-status"></dd>
+          </dl>
+          <meter id="gm-entity-hull" min="0" max="100" value="0"
+            aria-labelledby="gm-entity-status-label gm-entity-status"></meter>
+        </article>
+      </main>
+
       <!-- Game-over overlay: shown when GamePhase::GameOver via __updateHud. -->
       <div id="game-over-overlay" style="display:none;position:absolute;inset:0;z-index:85;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.88);color:#cde;font-family:'Chakra Petch',monospace;text-align:center;padding:32px;">
         <div id="game-over-message" style="font-size:clamp(0.95rem,2.5vw,1.15rem);white-space:pre-wrap;line-height:1.7;max-width:64ch;letter-spacing:0.03em;"></div>
@@ -2071,7 +2112,9 @@
        set_host_channel_callback further down for the other half of that. -->
   <script type="module">
     import { createHostChannel } from './gui/host-channel.js';
+    import { createGmLocalProjection } from './gui/gm-local-projection.js';
     import { t, has, localiseTree } from './gui/strings.js';
+    const gmProjection = createGmLocalProjection({ doc: document, t });
     const hostChannelDispatch = createHostChannel({
       handlers: {
         hud:          function(p) { window.__updateHud(p); },
@@ -2081,6 +2124,7 @@
         audio_cue:    function(p) { window.__audioCue(p); },
         audio_level:  function(p) { window.__audioLevel(p); },
         shake:        function(p) { window.__applyShake(p[0], p[1]); },
+        gm_entity:    function(p) { gmProjection.update(p); },
       },
       strings: { t, has, localiseTree },
     });
@@ -2904,9 +2948,9 @@
     /** ICE servers, latched by initHostTransport so a fleet can reuse them. */
     let fleetIceServers = [];
     /** Privileged host-mesh role chosen before open/join. Phones never set it. */
-    let fleetRole = 'ship';
+    let fleetRole = window.__phoenixGmPage ? 'gm' : 'ship';
     /** Distinguishes the default from an operator deliberately choosing ship. */
-    let fleetRoleExplicit = false;
+    let fleetRoleExplicit = !!window.__phoenixGmPage;
     /** Latest owner-computed collective readiness policy, identical on peers. */
     let fleetStartPolicy = null;
     /** Latest local lobby tally; Rust has already excluded spectators. */
@@ -2988,6 +3032,7 @@
     function fleetStartValidation() {
       const evaluate = window.fleetStartValidationState;
       return typeof evaluate === 'function' && evaluate({
+        role: fleetRole,
         fleetLinked: !!fleetHandle,
         wasmReady,
         worldLoaded: _worldLoadedIntoBevy,
@@ -3085,6 +3130,13 @@
       const stateKey = `${role}|${fleetLobbyReadiness.connected}|${fleetLobbyReadiness.ready}`
         + `|${fleetPresentationReady}|${valid}`;
       if (stateKey !== fleetLastPublishedStartState) {
+        // Both fleet setters synchronously publish a new roster, whose
+        // `onRoster` callback re-enters this function. Latch the projection
+        // before crossing that callback boundary or the same state recursively
+        // republishes until the browser stack is exhausted. Roll back on a real
+        // setter failure so the next lobby payload can retry it.
+        const previousStateKey = fleetLastPublishedStartState;
+        fleetLastPublishedStartState = stateKey;
         try {
           // Crew first, validation last. Validation is the final latch in the
           // owner's policy; setting it first would briefly expose this ship's
@@ -3094,8 +3146,8 @@
             fleetHandle.setCrewReadiness(fleetLobbyReadiness);
           }
           fleetHandle.setStartValidation(valid);
-          fleetLastPublishedStartState = stateKey;
         } catch (e) {
+          fleetLastPublishedStartState = previousStateKey;
           console.warn('[fleet] could not publish lobby start state', e);
         }
       }
@@ -3422,6 +3474,20 @@
     window.__hostSetFleetRole = function(role) {
       const next = normaliseFleetRole(role);
       if (fleetHandle || (role !== 'ship' && role !== 'gm')) return false;
+
+      // The role is a boot profile, not a mutable label on an already-booted
+      // simulation. Keep the role picker discoverable, but make its public UI
+      // route select that profile explicitly before a fleet can be opened or
+      // joined. The query parameter is also the copyable/bookmarkable route.
+      const wantsGmPage = next === 'gm';
+      if (wantsGmPage !== !!window.__phoenixGmPage) {
+        const target = new URL(window.location.href);
+        if (wantsGmPage) target.searchParams.set('gm', '1');
+        else target.searchParams.delete('gm');
+        window.location.assign(target.href);
+        return false;
+      }
+
       fleetRole = next;
       fleetRoleExplicit = true;
       return true;
@@ -5500,16 +5566,23 @@ function handleConfigRequest(path) {
   
   // Complexity TOML files are loaded through wasm_load_complexity, not
   // wasm_load_config (they carry a [[preset]] array, not an [entity] schema).
+  // Primary model-rig sidecars discovered while those entity configs parse use
+  // the same callback but land in their persistent rig inbox. Their loader's
+  // boolean return joins the one-shot completion gate, so wasm_init cannot
+  // freeze the content digest before authoritative marker bytes arrive.
   const isComplexity = path.startsWith('assets/complexity/');
-  const loader = isComplexity ? wasm_load_complexity : wasm_load_config;
+  const isPrimaryRig = /^assets\/models\/.+\.toml$/.test(path);
+  const loader = isPrimaryRig
+    ? wasmBindings.wasm_push_sidecar_toml
+    : (isComplexity ? wasm_load_complexity : wasm_load_config);
 
   fetch(path)
     .then(response => response.ok ? response.text() : Promise.reject(new Error(`HTTP ${response.status}`)))
     .then(toml => {
       let complete = false;
       try {
-        // wasm_load_config / wasm_load_complexity returns true when the last
-        // pending config is loaded.
+        // Every preload loader returns true when the last entity, complexity,
+        // or authoritative primary-rig dependency is loaded.
         complete = loader(path, toml) === true;
       } catch (e) {
         console.error(`Failed to parse config at ${path}:`, e);
@@ -5548,6 +5621,8 @@ function finishInit() {
   window.wasm_receive_message = wasmBindings.wasm_receive_message;
   window.set_message_callback = wasmBindings.set_message_callback;
   window.wasm_validate_stations = wasmBindings.wasm_validate_stations;
+  window.wasm_prepare_game_master = wasmBindings.wasm_prepare_game_master;
+  window.wasm_boot_profile = wasmBindings.wasm_boot_profile;
   // Reduced motion (issue #1173): the viewscreen forwards the host's
   // `prefers-reduced-motion` preference to the renderer so hull-damage screen
   // shake and the shield-hit white flash honour it. The getter lets the
@@ -5792,6 +5867,15 @@ function finishInit() {
   window.wasm_get_available_ships = wasmBindings.wasm_get_available_ships;
   window.wasm_select_ship = wasmBindings.wasm_select_ship;
 
+  // The explicit GM profile owns no selected/local ship. It still follows the
+  // ordinary world preload and startServer path, including the runtime sidecar
+  // fetch callback installed there.
+  if (window.__phoenixGmPage) {
+    window.wasm_prepare_game_master();
+    startServer();
+    return;
+  }
+
   const ships = wasm_get_available_ships();
 
   // A saved session owns its boot hull. The catalogue carries that canonical
@@ -5968,8 +6052,9 @@ async function startServer() {
   // Register the runtime fetch callback. The same callback serves three flows:
   //  - World TOMLs (e.g. patrol.toml) loaded additively by load_world effects.
   //  - Sibling Rhai scripts declared by those additive world TOMLs.
-  //  - Per-model rig sidecars under assets/models/*.toml, requested by the
-  //    renderer when spawning a GLB-backed entity.
+  //  - Later/generated model-rig sidecars under assets/models/*.toml. Primary
+  //    authoritative rigs already arrived through config preload before
+  //    wasm_init; this runtime route is the defensive path for later content.
   // Sidecar paths (assets/models/<stem>.<variant>.toml) are routed to
   // wasm_push_sidecar_toml; everything else uses the durable world/script
   // content cache. An

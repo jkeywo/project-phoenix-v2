@@ -2,8 +2,8 @@
 title: GM Operator
 type: entity
 tags: [gm, operator, identity, reconnect, roster, readiness, force-start, host-mesh]
-sources: [src/gm_roster.rs, src/lobby/start_policy.rs, src/core/messages.rs, src/lobby/server.rs, src/server/bridge.rs, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html]
-updated: 2026-08-31
+sources: [src/gm_roster.rs, src/gm_projection.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/messages.rs, src/lobby/server.rs, src/server/bridge.rs, gui/gm-local-projection.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html]
+updated: 2026-09-01
 ---
 
 # GM Operator
@@ -54,13 +54,16 @@ the technical owner assigns the safe exact tick and puts the grant in its
 authenticated `TickFrame`; every member adopts that canonical value. The
 star-centre host does not gain a leader permission.
 
-This implementation establishes admission, reconnect identity, presence, and
-the collective lobby-start policy. It also establishes that a GM's private
-technical slot is a full lockstep participant despite there being no
-corresponding ship row. The dedicated renderer-free GM simulation surface is
-#1291: #1290 does not claim convergence for renderer-derived authoritative
-`ModelMarkers` and does not infer a headless runtime merely from the role
-selector.
+The explicit `?gm=1` page selects the production
+`BootProfile::BrowserGameMaster` before `wasm_init`, independently of
+WebDriver. It keeps the browser window, world ingest, fixed-tick simulation,
+and fleet participant while installing no renderer and no `SelectedShipResource`
+or local ship. Its first tracer reads the lexicographically lowest stable
+`EntityUuid` with authoritative hull status and renders that absolute value on
+the page's local `gm_entity` Host Channel. Despawn or world reset sends an
+explicit null projection so stale identity cannot remain. The projection is
+not a `ServerMessage`, `MeshFrame`, or `SimOutbox`; peer state transfer remains
+the snapshot-recovery path.
 
 ## Related
 

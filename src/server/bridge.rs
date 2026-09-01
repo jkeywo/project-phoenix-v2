@@ -33,11 +33,13 @@ use {
     crate::asteroids::lifecycle::AsteroidLifecyclePlugin,
     crate::boot::{BootPlan, BootProfile, WorldIngest},
     crate::console_bridge::{
-        AiChatterEvent, AudioConfigChanged, AudioCueEvent, HudStateChanged, LobbyStateChanged,
+        AiChatterEvent, AudioConfigChanged, AudioCueEvent, GmEntityProjectionChanged,
+        HudStateChanged, LobbyStateChanged,
     },
     crate::core::codec::{self, JsonCodec, MessageCodec},
     crate::core::messages::{self, DeliveryClass},
     crate::entities::config_cache::ConfigCachePlugin,
+    crate::gm_projection::{BrowserGameMaster, GmProjectionPlugin},
     crate::lobby::stations_config::ShipStations,
     crate::lobby::{
         FleetLobbyInput, FleetManagedLobby, InboundMessage, LobbyOutbox, LobbyPlugin,
@@ -524,20 +526,22 @@ fn rebind_fleet_lobby_projections(
 ) {
     pending.clear();
     if let Some(enabled) = managed {
-        debug_assert!(queue_fleet_lobby_input_bounded(
+        let queued = queue_fleet_lobby_input_bounded(
             pending,
             generation,
             FleetLobbyInput::Managed(enabled),
             MAX_FLEET_LOBBY_INPUTS,
-        ));
+        );
+        debug_assert!(queued);
     }
     if let Some(valid) = validation {
-        debug_assert!(queue_fleet_lobby_input_bounded(
+        let queued = queue_fleet_lobby_input_bounded(
             pending,
             generation,
             FleetLobbyInput::Validation(valid),
             MAX_FLEET_LOBBY_INPUTS,
-        ));
+        );
+        debug_assert!(queued);
     }
 }
 
@@ -632,6 +636,12 @@ thread_local! {
     /// escapes `core::codec`; latched here because the JS call has no `World`.
     static PENDING_GM_ROSTER: RefCell<Option<crate::gm_roster::GmRoster>> =
         const { RefCell::new(None) };
+
+    /// Explicit production GM-page boot request. This is set by the page before
+    /// `wasm_init` and takes precedence over the WebDriver probe.
+    static GM_HOST_BOOT_REQUESTED: RefCell<bool> = const { RefCell::new(false) };
+    /// Read-only browser smoke/diagnostic mirror of the profile actually used.
+    static ACTIVE_BOOT_PROFILE: RefCell<&'static str> = const { RefCell::new("not-started") };
 
     /// Ordered, edge-only coordinated-lobby input waiting for the next
     /// `PreUpdate` drain (issue #1290). One FIFO is essential: a same-frame
@@ -1020,10 +1030,13 @@ pub mod host_channels {
     /// Forcefield SFX volume — bare number in 0.0–1.0, emitted only when the
     /// level moves by at least the audible epsilon.
     pub const AUDIO_LEVEL: &str = "audio_level";
+    /// Rendererless GM peer's absolute one-entity projection. This callback is
+    /// page-local and never enters the peer transport.
+    pub const GM_ENTITY: &str = "gm_entity";
 
     /// Every registered host channel name. The JS dispatcher table in
     /// `server.html` must have a handler per entry.
-    pub const ALL: [&str; 7] = [
+    pub const ALL: [&str; 8] = [
         HUD,
         LOBBY,
         CHATTER,
@@ -1031,7 +1044,24 @@ pub mod host_channels {
         AUDIO_CUE,
         SHAKE,
         AUDIO_LEVEL,
+        GM_ENTITY,
     ];
+}
+
+/// Select the explicit production rendererless browser GM profile. The page
+/// calls this before [`wasm_init`]; it deliberately does not depend on
+/// `navigator.webdriver`.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_prepare_game_master() {
+    GM_HOST_BOOT_REQUESTED.with(|requested| *requested.borrow_mut() = true);
+}
+
+/// Read-only identity of the profile actually composed by [`wasm_init`].
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_boot_profile() -> String {
+    ACTIVE_BOOT_PROFILE.with(|active| active.borrow().to_string())
 }
 
 // ── Instagib helper (issue #900 context, de-globalised in #1181) ────────────
@@ -1223,6 +1253,7 @@ pub fn wasm_init() {
                 .and_then(|v| v.as_bool())
         })
         .unwrap_or(false);
+    let is_browser_gm = GM_HOST_BOOT_REQUESTED.with(|requested| *requested.borrow());
 
     // Boot clock starts here, before any plugin is added, and stops when the
     // app is handed to the frame loop (issue #868). `is_automation` is passed
@@ -1252,12 +1283,23 @@ pub fn wasm_init() {
     // `world_path`/`reader`/`script_resolver` a `HostPreloaded` plan carries are the
     // browser's genuine ones, kept for shape and future use but consulted by no boot
     // in this mode — see `WorldIngest::HostPreloaded`.
+    let profile = if is_browser_gm {
+        BootProfile::BrowserGameMaster
+    } else if is_automation {
+        BootProfile::BrowserAutomation
+    } else {
+        BootProfile::BrowserHost
+    };
+    ACTIVE_BOOT_PROFILE.with(|active| {
+        *active.borrow_mut() = match profile {
+            BootProfile::BrowserGameMaster => "browser-game-master",
+            BootProfile::BrowserAutomation => "browser-automation",
+            BootProfile::BrowserHost => "browser-host",
+            _ => unreachable!("wasm_init selects only browser profiles"),
+        };
+    });
     let plan = BootPlan {
-        profile: if is_automation {
-            BootProfile::BrowserAutomation
-        } else {
-            BootProfile::BrowserHost
-        },
+        profile,
         world_ingest: WorldIngest::HostPreloaded,
         log_filter,
         // The world path is read straight from the `SNAPSHOT_WORLD` edge stash
@@ -1284,6 +1326,11 @@ pub fn wasm_init() {
     let mut app =
         crate::boot::build(plan).expect("browser boot composes a HostPreloaded plan infallibly");
 
+    if is_browser_gm {
+        app.insert_resource(BrowserGameMaster);
+    }
+    app.add_plugins(GmProjectionPlugin);
+
     app.insert_resource(log_config)
         .add_plugins(crate::logging::LoggingPlugin);
     app.add_plugins(ConfigCachePlugin)
@@ -1306,14 +1353,14 @@ pub fn wasm_init() {
     add_simulation_plugins_with(
         &mut app,
         SimPluginOptions {
-            render: !is_automation,
+            render: !(is_automation || is_browser_gm),
             ..default()
         },
     );
     app.add_plugins(WorldPlugin);
     // Insert the selected ship resource (set by wasm_select_ship before
     // wasm_init was called). Falls back to the legacy default path.
-    {
+    if !is_browser_gm {
         let ship_path = SELECTED_SHIP_TEMPLATE_PATH
             .with(|slot| slot.borrow().clone())
             .unwrap_or_else(|| "assets/entities/alliance_cruiser.toml".to_string());
@@ -1379,10 +1426,15 @@ pub fn wasm_init() {
             // the world teardown/adoption first, then the new generation's
             // managed/validation edges; otherwise scheduler order could let
             // teardown erase the newly opened lobby state.
-            drain_fleet_lobby_input.after(drain_mesh_inbound),
             drain_disconnects,
             drain_snapshot_requests,
-            drain_host_controls.before(crate::debug::catalogue::refresh_readback),
+            drain_host_controls
+                .before(crate::debug::catalogue::refresh_readback)
+                // The marker/mesh barrier is the final Time<Virtual> decision
+                // before the fixed runner. A same-frame host unpause must land
+                // first so it cannot reopen a clock held for authoritative rig
+                // delivery (issue #1291).
+                .before(crate::lockstep::MeshSet),
             drain_force_start_input,
             drain_teleport_to_waypoint,
             drain_god_mode_toggle,
@@ -1390,12 +1442,14 @@ pub fn wasm_init() {
             publish_waypoint_existence,
         ),
     )
-    // The fleet's ingress, before the barrier and the merge it feeds (issue
-    // #1116). Its own `add_systems` call rather than a member of the tuple
-    // above, because it carries an ordering edge that tuple has no way to state.
+    // The fleet's ingress and generation-scoped lobby projections form one
+    // explicit sequence before the barrier: adopt the pending roster first,
+    // then apply only that generation's managed/validation/grant inputs.
     .add_systems(
         PreUpdate,
-        drain_mesh_inbound.before(crate::lockstep::MeshSet),
+        (drain_mesh_inbound, drain_fleet_lobby_input)
+            .chain()
+            .before(crate::lockstep::MeshSet),
     )
     // `apply_force_start` writes `NextState<GamePhase>`, so it lives in
     // `FixedUpdate` rather than alongside its own input drain above — see the
@@ -3590,16 +3644,18 @@ pub fn wasm_fail_world_fetch(path: String, message: String) {
     crate::entities::config_cache::wasm_fail_world_fetch(path, message);
 }
 
-/// Deliver a runtime-fetched model-rig sidecar TOML to the Rust side.
+/// Deliver a preloaded or runtime-fetched model-rig sidecar TOML to Rust.
 ///
-/// Called by JS after fetching a sidecar path that Rust requested via the
-/// `set_world_fetch_callback` callback (the same callback serves both world
-/// TOMLs and rig sidecars). Pass an empty string when the sidecar is absent
-/// (404) so the renderer proceeds with an identity base rig.
+/// Before boot, the entity-config preload calls this for every primary authored
+/// rig and uses the return value as its completion signal; this records the
+/// exact bytes before the content ledger freezes. The runtime world callback
+/// reuses it for later/generated paths and ignores the return. Pass an empty
+/// string when the sidecar is absent (404) so every target binds the same empty
+/// bytes and proceeds with an identity rig.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn wasm_push_sidecar_toml(path: String, toml_str: String) {
-    crate::entities::config_cache::wasm_push_sidecar_toml(path, toml_str);
+pub fn wasm_push_sidecar_toml(path: String, toml_str: String) -> bool {
+    crate::entities::config_cache::wasm_push_sidecar_toml(path, toml_str)
 }
 
 /// Return the list of available player ships for the currently loaded world.
@@ -4573,10 +4629,11 @@ fn flush_host_channels(
     mut chatter: MessageReader<AiChatterEvent>,
     mut audio_config: MessageReader<AudioConfigChanged>,
     mut audio_cue: MessageReader<AudioCueEvent>,
+    mut gm_entity: MessageReader<GmEntityProjectionChanged>,
 ) {
     // Declarative channel table: name → drained JSON payloads. Adding a
     // message channel = one row here (see `host_channels`).
-    let message_batches: [(&str, Vec<String>); 5] = [
+    let message_batches: [(&str, Vec<String>); 6] = [
         (
             host_channels::HUD,
             hud.read().map(|m| m.json.clone()).collect(),
@@ -4599,6 +4656,13 @@ fn flush_host_channels(
         (
             host_channels::AUDIO_CUE,
             audio_cue.read().map(|m| m.json.clone()).collect(),
+        ),
+        (
+            host_channels::GM_ENTITY,
+            gm_entity
+                .read()
+                .filter_map(|event| codec::encode_gm_entity_projection(&event.payload).ok())
+                .collect(),
         ),
     ];
 
@@ -5343,6 +5407,7 @@ spawn_on = "game_start"
                 host_channels::AUDIO_CUE,
                 host_channels::SHAKE,
                 host_channels::AUDIO_LEVEL,
+                host_channels::GM_ENTITY,
             ]
         );
     }

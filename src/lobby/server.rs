@@ -235,7 +235,8 @@ pub fn apply_fleet_lobby_inputs(
                     inputs.push_front(FleetLobbyInput::Grant(grant));
                     break;
                 }
-                debug_assert!(grants.try_push(grant));
+                let queued = grants.try_push(grant);
+                debug_assert!(queued);
             }
         }
     }
@@ -493,7 +494,14 @@ fn update_session_with_config(
     mut ship_manual: ResMut<ShipManualResource>,
     pending_ship_config: Option<Res<PendingShipConfig>>,
     selected_ship: Option<Res<SelectedShipResource>>,
+    browser_gm: Option<Res<crate::gm_projection::BrowserGameMaster>>,
 ) {
+    // An explicit rendererless GM peer owns no local ship and therefore no
+    // station/manual config. In particular, do not take the native filesystem
+    // fallback below: browser GM boot deliberately skips ship selection.
+    if browser_gm.is_some() {
+        return;
+    }
     let ship_config_resource = if let Some(pending) = pending_ship_config {
         ShipConfigComponent(pending.0.clone())
     } else {
@@ -1379,6 +1387,7 @@ pub fn handle_set_ready_system(
     #[cfg(feature = "server")] preload: Option<
         Res<crate::server::asset_preload::AssetPreloadResource>,
     >,
+    model_rigs: Option<Res<crate::entities::model_markers::ModelRigReadiness>>,
     mut ship_query: Query<
         (
             &ShipConfigComponent,
@@ -1408,7 +1417,8 @@ pub fn handle_set_ready_system(
         .unwrap_or(true);
     #[cfg(not(feature = "server"))]
     let preload_ready = true;
-    let preload_complete = crate::debug_overlay::is_playwright_automation() || preload_ready;
+    let preload_complete = (crate::debug_overlay::is_playwright_automation() || preload_ready)
+        && model_rigs.is_none_or(|rigs| rigs.is_ready());
     let events: Vec<_> = inbound.read().cloned().collect();
     for ev in events {
         let ClientMessage::SetReady { ready } = &ev.msg else {
@@ -1706,6 +1716,7 @@ fn handle_disconnect(
     #[cfg(feature = "server")] preload: Option<
         Res<crate::server::asset_preload::AssetPreloadResource>,
     >,
+    model_rigs: Option<Res<crate::entities::model_markers::ModelRigReadiness>>,
     mut countdown: Option<ResMut<CountdownTimer>>,
 ) {
     let empty_stations = ShipStations::default();
@@ -1721,7 +1732,8 @@ fn handle_disconnect(
         .unwrap_or(true);
     #[cfg(not(feature = "server"))]
     let preload_ready = true;
-    let preload_complete = crate::debug_overlay::is_playwright_automation() || preload_ready;
+    let preload_complete = (crate::debug_overlay::is_playwright_automation() || preload_ready)
+        && model_rigs.is_none_or(|rigs| rigs.is_ready());
 
     for ev in events.read() {
         // Apply Backfill rating to the disconnecting player's station so the

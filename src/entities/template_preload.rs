@@ -317,7 +317,7 @@ impl AiDeclarationReport {
 
 /// Model-marker contract check for one parsed template: resolve its rig
 /// sidecar off disk (identity rig when genuinely absent, mirroring
-/// `glb_visual::resolve_sidecar_rig` on native) and validate every authored
+/// `model_markers::resolve_sidecar_rig` on native) and validate every authored
 /// marker reference against it, plus the sidecar's own duplicate declarations.
 fn validate_template_markers(key: &str, toml: &str, cfg: &EntityConfig) -> Vec<MarkerFinding> {
     let mut findings = Vec::new();

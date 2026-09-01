@@ -69,6 +69,13 @@ pub fn encode_audio_cue(c: &crate::audio_config::AudioCue) -> Result<String, ser
     serde_json::to_string(c)
 }
 
+/// Encode the rendererless GM peer's one-entity local Host Channel projection.
+pub fn encode_gm_entity_projection(
+    payload: &crate::gm_projection::GmEntityProjectionPayload,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(payload)
+}
+
 /// Encode a station-activity debug payload to JSON (issue #1145, PRD #1144).
 ///
 /// The single seam where `crate::debug::payload::StationActivityPayload` becomes

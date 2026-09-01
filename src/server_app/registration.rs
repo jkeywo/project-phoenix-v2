@@ -311,6 +311,21 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         app
             // Timers / outboxes: wall-clock / transport bookkeeping, not sim state.
             .declare_state::<SimOutbox>(StateClass::Timer, "digest-exclusion-classes")
+            // Peer-local asynchronous content delivery and its virtual-clock
+            // hold. The exact sidecar bytes and resolved ModelMarkers are the
+            // authority; which frame this peer finished loading them on is not.
+            .declare_state::<crate::entities::model_markers::ModelRigReadiness>(
+                StateClass::Timer,
+                "model-rig-readiness-state",
+            )
+            // Peer-local boot identity derived from the explicit browser GM
+            // profile. Lobby systems name the optional resource on every
+            // assembled target, so its census declaration belongs at this
+            // shared assembly site even though only the browser GM inserts it.
+            .declare_state::<crate::gm_projection::BrowserGameMaster>(
+                StateClass::Derived,
+                "browser-gm-profile-marker-state",
+            )
             .declare_state::<crate::debug_overlay::DamageLog>(
                 StateClass::Timer,
                 "digest-exclusion-classes",
@@ -846,6 +861,34 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 // before either spawner runs, and the mint order matches the parent
                 // commit exactly.
                 .before(crate::world::server::spawn_world_entities),
+        )
+        // Model markers are authored simulation content, not a by-product of
+        // materialising a GLB (issue #1291). These renderer-independent systems
+        // prime the primary sidecars, apply the authored parent transform, and
+        // retry marker attachment for headless and browser-GM profiles too.
+        // None depends on `Assets<Scene>` or a render plugin.
+        .init_resource::<crate::entities::model_markers::ModelRigReadiness>()
+        .add_systems(
+            PreUpdate,
+            (
+                crate::entities::model_markers::apply_authored_mesh_transform,
+                crate::entities::model_markers::sync_authoritative_model_markers,
+            )
+                .chain()
+                .before(crate::lockstep::MeshSet),
+        )
+        // FixedUpdate commands are flushed before FixedLast. Synchronise any
+        // runtime spawn there so it has canonical markers before the next fixed
+        // consumer; if its WASM sidecar is pending, discard only whole unbegun
+        // catch-up steps and let the PreUpdate clock gate hold the next frame.
+        .add_systems(
+            FixedLast,
+            (
+                crate::entities::model_markers::sync_authoritative_model_markers,
+                crate::entities::model_markers::discard_blocked_model_rig_overstep,
+            )
+                .chain()
+                .after(crate::sim_tick::advance_sim_tick),
         )
         .add_systems(
             OnEnter(GamePhase::InProgress),

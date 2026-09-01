@@ -122,9 +122,26 @@ async function openFleetTab(page) {
   await page.waitForSelector('[data-control="fleet-code"]', { state: 'attached' });
 }
 
+async function selectGmProfile(page) {
+  await Promise.all([
+    page.waitForURL((url) => url.searchParams.get('gm') === '1'),
+    page.click('[data-control="fleet-role-gm"]'),
+  ]);
+  if (new URL(page.url()).searchParams.has('scenario')) {
+    await waitForWasmReady(page);
+  } else {
+    await page.waitForFunction(
+      () => typeof window.__hostFleetOpen === 'function'
+        && document.documentElement.dataset.phoenixBootRequest === 'browser-game-master',
+      { timeout: 60_000 },
+    );
+  }
+  await openFleetTab(page);
+}
+
 async function openFleet(page, role = 'ship') {
   await openFleetTab(page);
-  if (role === 'gm') await page.click('[data-control="fleet-role-gm"]');
+  if (role === 'gm') await selectGmProfile(page);
   await page.click('[data-control="fleet-open"]');
   await page.waitForFunction(
     () => /^[A-Z]{5}$/.test(document.getElementById('fleet-code')?.textContent ?? ''),
@@ -149,7 +166,7 @@ async function joinFleetAsGm(page, code) {
   // rather than intentionally reclaiming the first GM identity.
   await page.evaluate(() => localStorage.removeItem('phoenix.fleet.gm-identity.v1'));
   await openFleetTab(page);
-  await page.click('[data-control="fleet-role-gm"]');
+  await selectGmProfile(page);
   await page.fill('[data-control="fleet-code"]', code);
   await page.click('[data-control="fleet-join"]');
   await page.waitForFunction(

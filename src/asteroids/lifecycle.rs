@@ -677,12 +677,11 @@ pub type RockBundle = (
     Visibility,
     bevy_rapier3d::prelude::Collider,
     // Pin the physics shape to the authored radius regardless of the rock's
-    // `Transform.scale`. Field rocks carry LOD ladders too, so under `render`
-    // `update_mesh_lod` writes the model's `[base].scale` onto this transform at
-    // the far tiers — the same leak that inflated the starbase collider (see
-    // `entity_spawner::spawn_entity`). `Absolute(ONE)` keeps the rock's collision
-    // radius equal to `config.collider.radius` in the browser as it already is
-    // headless, so it moves no digest and stops a distant rock over-colliding.
+    // canonical `Transform.scale`, which carries its authored `[mesh].scale` in
+    // every profile. Camera-selected LOD compensation lives below it on a
+    // presentation-only child. `Absolute(ONE)` therefore keeps the collision
+    // radius equal to `config.collider.radius` in rendered and headless runs,
+    // independent of both authored model scale and visual distance.
     bevy_rapier3d::prelude::ColliderScale,
     bevy_rapier3d::prelude::RigidBody,
 );

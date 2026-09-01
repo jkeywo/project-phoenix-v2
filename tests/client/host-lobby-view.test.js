@@ -292,6 +292,27 @@ describe('fleetStartValidationState', () => {
       presentationReady: true,
     })).toBe(false);
   });
+
+  it('lets an explicit GM peer validate without inventing a local hull', () => {
+    expect(fleetStartValidationState({
+      role: 'gm',
+      fleetLinked: true,
+      wasmReady: true,
+      worldLoaded: true,
+      bootReady: true,
+      selectedHull: null,
+      validatedHullPath: null,
+      presentationReady: true,
+    })).toBe(true);
+    expect(fleetStartValidationState({
+      role: 'gm',
+      fleetLinked: true,
+      wasmReady: true,
+      worldLoaded: true,
+      bootReady: true,
+      presentationReady: false,
+    })).toBe(false);
+  });
 });
 
 describe('hostLobbyViewModel GM presence', () => {

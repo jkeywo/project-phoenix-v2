@@ -78,3 +78,10 @@ pub struct AudioConfigChanged {
 pub struct AudioCueEvent {
     pub json: String,
 }
+
+/// Absolute one-entity projection for the rendererless GM page. Drained only
+/// by the local Host Channel; it is intentionally not part of the peer wire.
+#[derive(Message, Clone, Debug)]
+pub struct GmEntityProjectionChanged {
+    pub payload: crate::gm_projection::GmEntityProjectionPayload,
+}

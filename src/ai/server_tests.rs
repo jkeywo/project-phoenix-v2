@@ -2068,7 +2068,7 @@ fn faction_registry_resource_accessible_as_res_not_option() {
 
 // ── LOD system tests ─────────────────────────────────────────────────────
 
-use crate::server_app::{LocalShip, Ship};
+use crate::server_app::Ship;
 use crate::ship::state::ShipPhysics;
 
 /// Mirrors the production schedule: `simulate_low_lod_ships` (Physics)
@@ -2099,17 +2099,29 @@ fn spawn_player(app: &mut App, x: f32, z: f32) -> Entity {
     app.world_mut()
         .spawn((
             Ship,
-            LocalShip,
+            crate::lockstep::FleetSlotOf(crate::command_admission::HostSlot::SOLO),
             Transform::from_xyz(x, 0.0, z),
             ShipPhysics::default(),
             // Same shared set the production player-ship spawn uses.
             ai_high_fidelity_components(),
-            // LOD keys on the ANCHOR's bubble radius, so these mechanic tests
-            // give the player a 100-unit bubble — the threshold they were
+            // LOD keys on the fleet ANCHOR's bubble radius, so these mechanic
+            // tests give the solo fleet ship a 100-unit bubble — the threshold they were
             // written against back when it was `spawn_npc`'s `sensor_range`
             // arg — so their promote/demote distances (50 in, 200 out,
             // 110/120 hysteresis) still mean what they say.
             LodBubble { radius: 100.0 },
+        ))
+        .id()
+}
+
+fn spawn_fleet_ship(app: &mut App, slot: u32, x: f32, z: f32) -> Entity {
+    app.world_mut()
+        .spawn((
+            Ship,
+            crate::lockstep::FleetSlotOf(crate::command_admission::HostSlot(slot)),
+            Transform::from_xyz(x, 0.0, z),
+            ShipPhysics::default(),
+            ai_high_fidelity_components(),
         ))
         .id()
 }
@@ -2185,17 +2197,100 @@ fn the_high_fidelity_component_set_carries_every_per_ship_ai_component() {
 }
 
 #[test]
-fn local_ship_permanently_has_ai_high_fidelity() {
+fn fleet_ship_permanently_has_ai_high_fidelity() {
     let mut app = build_lod_test_app();
     let player = spawn_player(&mut app, 0.0, 0.0);
     assert!(
         app.world().get::<AiHighFidelity>(player).is_some(),
-        "LocalShip must start with AiHighFidelity"
+        "the fleet ship must start with AiHighFidelity"
     );
     tick_with_dt(&mut app, 0.1);
     assert!(
         app.world().get::<AiHighFidelity>(player).is_some(),
-        "LocalShip must retain AiHighFidelity after update"
+        "the fleet ship must retain AiHighFidelity after update"
+    );
+}
+
+/// A stationless GM has no `LocalShip`, but it has the same frozen fleet as
+/// every ship host. Every fleet hull must therefore project the same implicit
+/// fidelity bubble on all three peers, and fleet hulls themselves must never be
+/// demoted as NPCs.
+#[test]
+fn stationless_peer_uses_every_fleet_ship_as_an_implicit_lod_anchor() {
+    let mut app = build_lod_test_app();
+    let first = spawn_fleet_ship(&mut app, 1, 0.0, 0.0);
+    let second = spawn_fleet_ship(&mut app, 2, 1_000.0, 0.0);
+    let npc = spawn_npc(
+        &mut app,
+        1_000.0 + DEFAULT_FLEET_LOD_BUBBLE_RADIUS - 1.0,
+        0.0,
+        10.0,
+    );
+
+    tick_with_dt(&mut app, 0.1);
+
+    assert!(
+        app.world().get::<AiHighFidelity>(npc).is_some(),
+        "the second fleet ship's implicit bubble must promote the nearby NPC even though this peer has no LocalShip"
+    );
+    for fleet_ship in [first, second] {
+        assert!(
+            app.world().get::<AiHighFidelity>(fleet_ship).is_some(),
+            "fleet ships are authoritative participants, not LOD candidates"
+        );
+    }
+}
+
+/// Authored bubbles are world facts, not children of a local player bubble. A
+/// GM-only world may contain a station and scripted NPCs with no fleet at all;
+/// the station must still promote the NPCs in its authored zone.
+#[test]
+fn authored_lod_bubble_works_without_a_local_or_fleet_ship() {
+    let mut app = build_lod_test_app();
+    let station = app
+        .world_mut()
+        .spawn((
+            Ship,
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            ShipPhysics::default(),
+            AiProfile::default(),
+            LodBubble { radius: 250.0 },
+        ))
+        .id();
+    let npc = spawn_npc(&mut app, 200.0, 0.0, 100.0);
+
+    tick_with_dt(&mut app, 0.1);
+
+    assert!(
+        app.world().get::<AiHighFidelity>(station).is_some(),
+        "the authored bubble carrier must hold itself high"
+    );
+    assert!(
+        app.world().get::<AiHighFidelity>(npc).is_some(),
+        "an authored world bubble must promote nearby NPCs without a LocalShip fallback"
+    );
+}
+
+/// `LocalShip` is a presentation marker and may differ between peers (or be
+/// absent on a GM). A stray marker without frozen-roster identity must not
+/// create an authoritative fidelity bubble of its own.
+#[test]
+fn local_ship_without_a_fleet_slot_is_not_an_authoritative_lod_anchor() {
+    let mut app = build_lod_test_app();
+    app.world_mut().spawn((
+        Ship,
+        crate::server_app::LocalShip,
+        Transform::from_xyz(0.0, 0.0, 0.0),
+        ShipPhysics::default(),
+        ai_high_fidelity_components(),
+    ));
+    let npc = spawn_npc(&mut app, 1.0, 0.0, 100.0);
+
+    tick_with_dt(&mut app, 0.1);
+
+    assert!(
+        app.world().get::<AiHighFidelity>(npc).is_none(),
+        "LocalShip alone must not promote an NPC; only FleetSlotOf and authored LodBubble anchors are authoritative"
     );
 }
 

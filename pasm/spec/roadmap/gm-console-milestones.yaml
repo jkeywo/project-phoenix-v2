@@ -42,6 +42,11 @@ entities:
       authority: authoritative
       coordinates: [roadmap-band-a2-native-network-foundation]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/boot/mod.rs, src/gm_projection.rs, src/server/bridge.rs, gui/gm-local-projection.js, server.html]
+      symbols: [BrowserGameMaster, GmProjectionPlugin, GmEntityProjectionChanged, wasm_prepare_game_master]
+      tests: [src/boot/tests.rs, tests/client/gm-local-projection.test.js, tests/smoke/gm-page.spec.js]
 
   - component: gm-milestone-directing
     core:

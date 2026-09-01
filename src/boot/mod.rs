@@ -81,7 +81,7 @@ use crate::world::script::load::ScriptResolver;
 
 // ── Profile ──────────────────────────────────────────────────────────────────
 
-/// Which of the four inventories to compose.
+/// Which of the five inventories to compose.
 ///
 /// The axes the profiles vary along are read off this enum by the private
 /// predicates below rather than matched inline, so a fifth profile (or a
@@ -96,6 +96,11 @@ pub enum BootProfile {
     /// The browser under WebDriver automation: a browser window but no renderer
     /// (wgpu has no GPU in headless CI), so the render surrogate stands in.
     BrowserAutomation,
+    /// The production browser Game Master peer: the ordinary browser shell and
+    /// authoritative simulation, deliberately without a render stack or local
+    /// player ship. Unlike [`BrowserAutomation`](Self::BrowserAutomation), this
+    /// profile is selected explicitly by the GM page and is shipped behavior.
+    BrowserGameMaster,
     /// The native windowed authoritative host (issue #1121): the same
     /// simulation/plugin graph the browser host runs, with the viewscreen drawn
     /// by native Bevy/wgpu through winit instead of onto a `<canvas>`.
@@ -140,7 +145,9 @@ impl BootProfile {
     fn is_browser(self) -> bool {
         matches!(
             self,
-            BootProfile::BrowserHost | BootProfile::BrowserAutomation
+            BootProfile::BrowserHost
+                | BootProfile::BrowserAutomation
+                | BootProfile::BrowserGameMaster
         )
     }
 

@@ -51,8 +51,9 @@ pub struct ColliderSection(pub crate::entities::config::ColliderConfig);
 pub struct AppearanceSection(pub crate::entities::config::AppearanceConfig);
 
 /// Present when the EntityConfig has a [mesh] section.
-/// Drives all 3-D viewscreen rendering â€” the renderer creates a Bevy mesh and
-/// material from this data.
+/// Its primary model/variant and authored parent transform are simulation
+/// content used by the renderer-independent marker loader; the remaining shape
+/// and material fields drive 3-D viewscreen presentation.
 #[derive(Component, Clone, Debug)]
 pub struct MeshSection(pub crate::entities::config::MeshConfig);
 
@@ -1591,7 +1592,7 @@ impl SpawnSection for DockSpawn {
         if let Some(dock) = &config.dock {
             if let Some(mesh) = &config.mesh {
                 if let Some(model) = mesh.model.as_deref() {
-                    if let Some(rig) = crate::entities::glb_visual::resolve_sidecar_rig(
+                    if let Some(rig) = crate::entities::model_markers::resolve_sidecar_rig(
                         model,
                         mesh.variant.as_deref(),
                     ) {

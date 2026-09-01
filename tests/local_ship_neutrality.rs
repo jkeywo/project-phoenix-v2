@@ -80,6 +80,9 @@ const SEED: u64 = 1_116_026;
 /// The two fleet slots the world's two `game_start` ship rows take.
 const SLOT_ONE: HostSlot = HostSlot(1);
 const SLOT_TWO: HostSlot = HostSlot(2);
+/// A stationless GM simulation participant. It owns no fleet ship and therefore
+/// must never receive `LocalShip`, but it still runs the exact same world.
+const SLOT_GM: HostSlot = HostSlot(3);
 
 fn args_for(world: &str) -> HeadlessArgs {
     HeadlessArgs {
@@ -108,6 +111,27 @@ fn roster(local: HostSlot) -> FleetRoster {
     )
 }
 
+/// The exact two-ship, three-participant topology after a GM joins two ship
+/// hosts. The GM contributes a lockstep watermark without inventing a third
+/// player ship.
+fn roster_with_gm(local: HostSlot) -> FleetRoster {
+    FleetRoster::with_participants(
+        vec![FleetShip::new(SLOT_ONE), FleetShip::new(SLOT_TWO)],
+        vec![SLOT_ONE, SLOT_TWO, SLOT_GM],
+        local,
+        SLOT_ONE,
+    )
+    .expect("two ship hosts plus one stationless GM is a valid fleet topology")
+}
+
+/// A browser GM can be the only participant. That topology deliberately owns
+/// no player ship; authored NPCs, structures, Regions and scenario state still
+/// boot and run in its authoritative simulation.
+fn gm_only_roster() -> FleetRoster {
+    FleetRoster::with_participants(Vec::new(), vec![SLOT_GM], SLOT_GM, SLOT_GM)
+        .expect("one stationless GM is a valid zero-ship topology")
+}
+
 /// Run the world with `local` as this host's ship, folding the digest after
 /// every tick.
 ///
@@ -120,11 +144,20 @@ fn run_host(local: HostSlot) -> Vec<(u64, u64)> {
 }
 
 fn run_host_on(world: &str, local: HostSlot) -> Vec<(u64, u64)> {
-    let args = args_for(world);
-    let mut app = build_headless_app(&args).expect("app should build");
+    run_roster_on(world, roster(local))
+}
+
+fn app_with_roster(world: &str, roster: FleetRoster) -> bevy::prelude::App {
+    let mut app = build_headless_app(&args_for(world)).expect("app should build");
     // Before the first update: `headless_auto_start` enters `InProgress` on the
     // first fixed step, and the ships are spawned by that transition.
-    app.insert_resource(roster(local));
+    app.insert_resource(roster);
+    app
+}
+
+/// Run one exact frozen topology and fold it after every tick.
+fn run_roster_on(world: &str, roster: FleetRoster) -> Vec<(u64, u64)> {
+    let mut app = app_with_roster(world, roster);
 
     let mut digests = Vec::with_capacity(TICKS as usize);
     for _ in 0..TICKS {
@@ -235,6 +268,127 @@ fn the_digest_does_not_care_which_ship_a_host_projects() {
         distinct.len() > TICKS as usize / 2,
         "only {} distinct digests over {TICKS} ticks — the probe world is not \
          simulating anything worth comparing",
+        distinct.len()
+    );
+}
+
+/// A GM joining two ship hosts is a third authoritative simulation peer, not a
+/// state-streaming spectator. Its only topology difference is that no fleet
+/// ship carries `LocalShip` on that machine. Every folded tick must still match
+/// a ship host running the same frozen roster.
+#[test]
+fn a_stationless_gm_joining_two_ship_hosts_matches_their_digest_every_tick() {
+    let mut first_ship_host = app_with_roster(WORLD, roster_with_gm(SLOT_ONE));
+    let mut second_ship_host = app_with_roster(WORLD, roster_with_gm(SLOT_TWO));
+    let mut gm_host = app_with_roster(WORLD, roster_with_gm(SLOT_GM));
+    let mut distinct = std::collections::BTreeSet::new();
+
+    for _ in 0..TICKS {
+        run(&mut first_ship_host, 1);
+        run(&mut second_ship_host, 1);
+        run(&mut gm_host, 1);
+
+        let tick = gm_host.world().resource::<SimTick>().0;
+        let gm_digest = world_digest(gm_host.world());
+        distinct.insert(gm_digest);
+        for (label, ship_host) in [
+            ("first ship host", &first_ship_host),
+            ("second ship host", &second_ship_host),
+        ] {
+            let ship_tick = ship_host.world().resource::<SimTick>().0;
+            assert_eq!(ship_tick, tick, "{label} and GM must compare the same tick");
+            let ship_digest = world_digest(ship_host.world());
+            if ship_digest != gm_digest {
+                let gm_stages = project_phoenix::sim_digest::digest_stages(gm_host.world());
+                let first_scope = project_phoenix::sim_digest::first_divergent_scope(
+                    ship_host.world(),
+                    &gm_stages,
+                )
+                .unwrap_or("unknown");
+                panic!(
+                    "the stationless GM diverged from the {label} at tick {tick}: \
+                     ship host {ship_digest:#018x}, GM host {gm_digest:#018x}; first \
+                     divergent scope: {first_scope}. A GM's missing `LocalShip` is \
+                     presentation locality only; find the host-local input that \
+                     leaked into folded state instead of adding a privileged state \
+                     stream"
+                );
+            }
+        }
+    }
+
+    assert!(
+        distinct.len() > TICKS as usize / 2,
+        "only {} distinct GM digests over {TICKS} ticks — the comparison is vacuous",
+        distinct.len()
+    );
+}
+
+/// GM-only is the M1 tracer topology: one full simulation participant, zero
+/// player ships. Two fresh boots with the same authored seed must traverse the
+/// same digest ledger, proving that removing the local player projection did
+/// not remove or randomise the authoritative world.
+#[test]
+fn a_gm_only_zero_ship_session_boots_repeatably() {
+    let (fleet_ships, local_ships, non_fleet_entities) = {
+        let mut app = build_headless_app(&args()).expect("GM-only app should build");
+        app.insert_resource(gm_only_roster());
+        run(&mut app, 60);
+        let fleet_ships = {
+            let mut query = app.world_mut().query::<&FleetSlotOf>();
+            query.iter(app.world()).count()
+        };
+        let local_ships = {
+            let mut query = app
+                .world_mut()
+                .query_filtered::<(), bevy::prelude::With<LocalShip>>();
+            query.iter(app.world()).count()
+        };
+        let non_fleet_entities = {
+            let mut query = app.world_mut().query_filtered::<
+                &project_phoenix::entities::spawner::EntityUuid,
+                bevy::prelude::Without<FleetSlotOf>,
+            >();
+            query.iter(app.world()).count()
+        };
+        (fleet_ships, local_ships, non_fleet_entities)
+    };
+    assert_eq!(
+        fleet_ships, 0,
+        "a GM-only roster must not invent a player ship"
+    );
+    assert_eq!(
+        local_ships, 0,
+        "a stationless GM must not receive `LocalShip`"
+    );
+    assert!(
+        non_fleet_entities > 0,
+        "the GM-only tracer must still boot authored NPC, structure, Region, or scenario entities"
+    );
+
+    let first = run_roster_on(WORLD, gm_only_roster());
+    let second = run_roster_on(WORLD, gm_only_roster());
+
+    assert_eq!(
+        first.len(),
+        TICKS as usize,
+        "the first GM-only boot completed"
+    );
+    assert_eq!(
+        second.len(),
+        TICKS as usize,
+        "the second GM-only boot completed"
+    );
+    assert_eq!(
+        first, second,
+        "two GM-only boots of the same authored world and seed must match on every tick"
+    );
+
+    let distinct: std::collections::BTreeSet<u64> =
+        first.iter().map(|(_, digest)| *digest).collect();
+    assert!(
+        distinct.len() > TICKS as usize / 2,
+        "only {} distinct GM-only digests over {TICKS} ticks — the world did not run",
         distinct.len()
     );
 }

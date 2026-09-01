@@ -311,22 +311,6 @@ fn fade_alpha_mode(original: AlphaMode) -> AlphaMode {
     }
 }
 
-/// Rescale a visual so it keeps the world size it had while its PARENT takes a
-/// different one — what an outgoing LOD tier needs, because the tier scale
-/// lives on the entity transform both tiers hang from and the incoming tier is
-/// about to claim it.
-///
-/// Component-wise, and a degenerate incoming axis leaves that axis alone rather
-/// than dividing into a non-finite scale.
-pub fn parent_scale_correction(outgoing_parent: Vec3, incoming_parent: Vec3) -> Vec3 {
-    let axis = |out: f32, inc: f32| if inc.abs() > 1e-6 { out / inc } else { 1.0 };
-    Vec3::new(
-        axis(outgoing_parent.x, incoming_parent.x),
-        axis(outgoing_parent.y, incoming_parent.y),
-        axis(outgoing_parent.z, incoming_parent.z),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -449,43 +433,6 @@ mod tests {
         );
         assert_eq!(fade_alpha_mode(AlphaMode::Blend), AlphaMode::Blend);
         assert_eq!(fade_alpha_mode(AlphaMode::Add), AlphaMode::Add);
-    }
-
-    /// The outgoing tier holds the world size it had while the entity takes the
-    /// incoming tier's scale. A hull ladder's near tier folds in nothing and its
-    /// far tiers the whole `[base].scale` (0.75 on the destroyer), so an
-    /// uncorrected outgoing near tier would visibly GROW as it faded.
-    #[test]
-    fn an_outgoing_tier_keeps_its_world_size_across_a_hull_ladder_switch() {
-        let near = Vec3::ONE;
-        let far = Vec3::splat(0.75);
-        let correction = parent_scale_correction(near, far);
-        assert!(
-            (correction * far - near).length() < 1e-6,
-            "the corrected child under the incoming parent scale must reach the \
-             outgoing world size, got {:?}",
-            correction * far
-        );
-    }
-
-    /// The pipeline convention pulls the other way — the parent stays at 1 and
-    /// the child carries the base scale — so the correction must be able to go
-    /// both directions, not just shrink.
-    #[test]
-    fn the_correction_works_in_both_directions() {
-        let a = Vec3::new(2.0, 4.0, 8.0);
-        let b = Vec3::new(1.0, 1.0, 1.0);
-        assert!((parent_scale_correction(a, b) * b - a).length() < 1e-6);
-        assert!((parent_scale_correction(b, a) * a - b).length() < 1e-6);
-    }
-
-    /// A degenerate incoming scale carries no usable ratio; leave the outgoing
-    /// visual as it is rather than produce a non-finite scale.
-    #[test]
-    fn a_degenerate_incoming_scale_corrects_by_nothing() {
-        let got = parent_scale_correction(Vec3::splat(3.0), Vec3::ZERO);
-        assert_eq!(got, Vec3::ONE);
-        assert!(got.is_finite());
     }
 
     // ── The driver, over a real world ────────────────────────────────────

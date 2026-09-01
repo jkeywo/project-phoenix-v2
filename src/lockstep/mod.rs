@@ -1578,6 +1578,7 @@ pub fn gate_lockstep_ticks(
     session: Option<Res<FleetLockstep>>,
     sim_tick: Option<Res<crate::sim_tick::SimTick>>,
     paused: Option<Res<crate::debug_overlay::SimulationPaused>>,
+    model_rigs: Option<Res<crate::entities::model_markers::ModelRigReadiness>>,
     virtual_time: Option<ResMut<Time<Virtual>>>,
     mut diagnostics: ResMut<MeshDiagnostics>,
     recovery_hold: Option<Res<recovery::RecoveryHold>>,
@@ -1585,9 +1586,7 @@ pub fn gate_lockstep_ticks(
     start_tracker: Option<Res<crate::lobby::server::StartGrantTracker>>,
     log: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
-    let Some(session) = session else {
-        return;
-    };
+    let model_rig_hold = model_rigs.is_some_and(|rigs| rigs.blocks_simulation());
     // `Option` for the same reason `SimTick` is taken as one in admission: a
     // bare-`App` fixture with no `TimePlugin` would otherwise fail Bevy's
     // parameter validation and skip this system entirely, which is a silent
@@ -1595,15 +1594,37 @@ pub fn gate_lockstep_ticks(
     let Some(mut virtual_time) = virtual_time else {
         return;
     };
-    if session.is_alone() {
-        return;
-    }
     // The operator's own pause owns the clock while it is on; the barrier must
     // not un-pause it out from under them.
     if paused.is_some_and(|p| p.0) {
         return;
     }
     let next_tick = sim_tick.map_or(0, |t| t.0);
+
+    // Canonical marker geometry is required even outside a multi-peer fleet.
+    // A solo/browser-GM app has no peer barrier, but it must still wait rather
+    // than make sidecar delivery timing authoritative. This branch owns only
+    // that hold; the operator-pause guard above remains stronger.
+    let Some(session) = session.filter(|session| !session.is_alone()) else {
+        if model_rig_hold {
+            if !virtual_time.is_paused() {
+                crate::pinfo!(
+                    log,
+                    LogCat::Assets,
+                    "authoritative model-rig hold at tick {next_tick}: waiting for primary sidecar"
+                );
+                virtual_time.pause();
+            }
+        } else if virtual_time.is_paused() {
+            crate::pinfo!(
+                log,
+                LogCat::Assets,
+                "authoritative model-rig hold released at tick {next_tick}"
+            );
+            virtual_time.unpause();
+        }
+        return;
+    };
 
     // A peer stall (this host is ahead of the fleet) and a recovery boundary hold
     // (issue #1118, this host must not run past the tick a divergence is being
@@ -1627,7 +1648,8 @@ pub fn gate_lockstep_ticks(
         || slot_recovery_hold
             .and_then(|hold| hold.withhold_beyond)
             .is_some_and(|boundary| next_tick > boundary)
-        || start_tracker.is_some_and(|tracker| tracker.is_failed_closed());
+        || start_tracker.is_some_and(|tracker| tracker.is_failed_closed())
+        || model_rig_hold;
 
     if stall.is_some() || held {
         if !virtual_time.is_paused() {
@@ -2107,6 +2129,37 @@ mod tests {
         let text = found.to_string();
         assert!(text.contains("240"), "{text}");
         assert!(text.contains("slot-2"), "{text}");
+    }
+
+    /// Canonical marker geometry is an authority prerequisite even when no
+    /// fleet session exists. A rendererless GM therefore uses the same virtual
+    /// clock hold as a rendered host, and releases it as soon as its live
+    /// primary rig resolves.
+    #[test]
+    fn model_rig_hold_pauses_and_resumes_a_solo_clock() {
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin)
+            .init_resource::<crate::entities::model_markers::ModelRigReadiness>()
+            .init_resource::<MeshDiagnostics>()
+            .add_systems(PreUpdate, gate_lockstep_ticks);
+
+        app.world_mut()
+            .resource_mut::<crate::entities::model_markers::ModelRigReadiness>()
+            .set_live_blocked_for_test(true);
+        app.update();
+        assert!(
+            app.world().resource::<Time<Virtual>>().is_paused(),
+            "a solo authoritative profile must not tick without live marker geometry"
+        );
+
+        app.world_mut()
+            .resource_mut::<crate::entities::model_markers::ModelRigReadiness>()
+            .set_live_blocked_for_test(false);
+        app.update();
+        assert!(
+            !app.world().resource::<Time<Virtual>>().is_paused(),
+            "the narrow marker hold releases immediately once geometry resolves"
+        );
     }
 
     /// The diagnostics count a run of withheld frames, not just the fact of

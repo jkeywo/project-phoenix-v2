@@ -294,6 +294,7 @@ pub(crate) fn push_lobby_state(
     phase: Res<State<GamePhase>>,
     world_resource: Option<Res<WorldResource>>,
     preload: Option<Res<AssetPreloadResource>>,
+    model_rigs: Option<Res<crate::entities::model_markers::ModelRigReadiness>>,
     countdown: Option<Res<CountdownTimer>>,
     gm_roster: Option<Res<crate::gm_roster::GmRoster>>,
     mut writer: MessageWriter<LobbyStateChanged>,
@@ -327,7 +328,10 @@ pub(crate) fn push_lobby_state(
 
     let readiness = sessions.0.readiness_tally();
     let all_ready = readiness.all_ready();
-    let presentation_ready = local_presentation_ready(preload.as_deref());
+    // The wire field predates authoritative rig preloading and retains its
+    // protocol name. It now means the complete local start-assets gate: GPU
+    // presentation when present, plus primary model rigs on every profile.
+    let presentation_ready = local_start_assets_ready(preload.as_deref(), model_rigs.as_deref());
 
     let loading_progress = if *phase.get() == GamePhase::Loading {
         preload.as_ref().filter(|p| p.started).map(|p| p.fraction())
@@ -375,6 +379,13 @@ fn local_presentation_ready(preload: Option<&AssetPreloadResource>) -> bool {
         Some(preload) => preload.complete,
         None => true,
     }
+}
+
+fn local_start_assets_ready(
+    preload: Option<&AssetPreloadResource>,
+    model_rigs: Option<&crate::entities::model_markers::ModelRigReadiness>,
+) -> bool {
+    local_presentation_ready(preload) && model_rigs.is_none_or(|rigs| rigs.is_ready())
 }
 
 /// Build the host viewscreen lobby roster from claimable bridge seats only.
@@ -818,6 +829,32 @@ mod tests {
 
         preload.complete = true;
         assert!(local_presentation_ready(Some(&preload)));
+    }
+
+    #[test]
+    fn local_start_assets_wait_for_authoritative_rigs_without_a_renderer() {
+        let rigs = crate::entities::model_markers::ModelRigReadiness::default();
+
+        assert!(local_start_assets_ready(None, None));
+        assert!(
+            !local_start_assets_ready(None, Some(&rigs)),
+            "rendererless does not mean canonical weapon geometry is ready"
+        );
+
+        let mut app = App::new();
+        app.init_resource::<crate::entities::model_markers::ModelRigReadiness>()
+            .add_systems(
+                Update,
+                crate::entities::model_markers::sync_authoritative_model_markers,
+            );
+        app.update();
+        assert!(local_start_assets_ready(
+            None,
+            Some(
+                app.world()
+                    .resource::<crate::entities::model_markers::ModelRigReadiness>()
+            )
+        ));
     }
 
     #[test]

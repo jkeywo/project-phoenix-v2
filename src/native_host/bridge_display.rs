@@ -847,7 +847,7 @@ fn follow_layout_stations(
         let existing = surfaces
             .0
             .iter()
-            .position(|s| &s.identity == identity.as_str());
+            .position(|s| s.identity == identity.as_str());
         if seats.is_empty() && existing.is_none() {
             continue;
         }

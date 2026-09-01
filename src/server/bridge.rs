@@ -21,7 +21,17 @@ use std::collections::HashMap;
 // `bevy::prelude::*` glob in the gated `use` block below, and under a demo build
 // the drain is compiled out entirely, so the import is scoped to match.
 #[cfg(all(not(target_arch = "wasm32"), not(phoenix_demo_build)))]
-use bevy::prelude::{Commands, MessageReader, Res, World};
+use bevy::prelude::{Commands, MessageReader, World};
+
+// The force-start path stopped being wasm-only in issue #1328: a native host's
+// lobby is its viewscreen, and a lobby with only phone crew has to be
+// launchable from it. `PendingForceStart` and `apply_force_start` below are
+// therefore compiled on every target, so these four prelude names are too.
+// Named explicitly rather than glob-imported because the rest of this module's
+// native portion is deliberately Bevy-free — see the module note. On WASM the
+// gated `bevy::prelude::*` below also provides them; an explicit import wins
+// over a glob, so the two do not collide.
+use bevy::prelude::{NextState, Res, ResMut, Resource, State};
 
 #[cfg(target_arch = "wasm32")]
 use {
@@ -35,8 +45,8 @@ use {
     crate::entities::config_cache::ConfigCachePlugin,
     crate::lobby::stations_config::ShipStations,
     crate::lobby::{
-        InboundMessage, LobbyOutbox, LobbyPlugin, OutboundMessage, PlayerDisconnected,
-        SelectedShipResource, Target,
+        InboundMessage, LobbyPlugin, OutboundMessage, PlayerDisconnected, SelectedShipResource,
+        Target,
     },
     crate::modifiers::coordination::ModifierCoordinationPlugin,
     crate::server_app::add_simulation_plugins,
@@ -3073,14 +3083,25 @@ fn drain_disconnects(mut writer: MessageWriter<PlayerDisconnected>) {
     }
 }
 
-/// Bevy-side latch for a pending `wasm_force_start()` request, bridging
-/// `drain_force_start_input` (the `PreUpdate` JS-input drain) to
-/// `apply_force_start` (the `FixedUpdate` state writer) — see the #907 review
-/// note on the latter for why the one function that used to do both is now
-/// two, in two different schedules.
-#[cfg(target_arch = "wasm32")]
+/// Bevy-side latch for a pending force-start request, bridging whatever asked
+/// for it to [`apply_force_start`] (the `FixedUpdate` state writer) — see the
+/// #907 review note on the latter for why the one function that used to do both
+/// is now two, in two different schedules.
+///
+/// **Two things ask, and only one of them is JavaScript.** On the browser host
+/// it is `wasm_force_start()`, drained out of a thread-local by
+/// [`drain_force_start_input`] in `PreUpdate`. On a native host (issue #1328) it
+/// is the lobby surface's own AI-launch control, which sets this resource
+/// directly from a Bevy system
+/// (`native_host::host_lobby::drain_surface_records`) — there is no thread-local
+/// and no JS to read one out of.
+///
+/// Which is why the latch, rather than each caller writing `NextState` itself:
+/// the *decision* (is this the Lobby? has the preload finished? is there a world
+/// at all?) is one policy, stated once in `apply_force_start`, and the request is
+/// just a bool that policy reads.
 #[derive(Resource, Default)]
-struct PendingForceStart(bool);
+pub struct PendingForceStart(pub bool);
 
 /// Drains the force-start thread-local each frame into [`PendingForceStart`].
 /// The actual phase transition is [`apply_force_start`]'s job — this system
@@ -3118,16 +3139,44 @@ fn drain_force_start_input(mut pending: ResMut<PendingForceStart>) {
 /// [`drain_force_start_input`] above — because reading a thread-local from
 /// inside the fixed schedule would run it zero or several times per frame
 /// instead of once.
-#[cfg(target_arch = "wasm32")]
-fn apply_force_start(
-    state: Res<State<messages::GamePhase>>,
-    mut next_state: ResMut<NextState<messages::GamePhase>>,
-    mut outbox: ResMut<LobbyOutbox>,
+///
+/// **Not wasm-only since issue #1328.** The rule this applies — Lobby only, wait
+/// for the preload, announce `GameStarted` — is host policy rather than browser
+/// glue, and a native host needs exactly it: its lobby is the viewscreen, and a
+/// crew who are all on phones must be launchable from the surface in front of
+/// them. `native_host::app` registers this system on the same
+/// `.before(SimSet::Input)` edge `wasm_init` gives it, so the mint inside
+/// `OnEnter(InProgress)` stamps the same tick on both hosts. Only
+/// [`drain_force_start_input`] stays behind the `wasm32` gate, because a
+/// thread-local set by JavaScript is the one part of this that genuinely is
+/// browser glue.
+///
+/// # The world guard
+///
+/// `world_config` is `None` on a `--lobby` host that has not been given a
+/// scenario yet (issue #1326), and starting a mission there would run
+/// `spawn_game_start_entities` over no world at all. It is the same guard
+/// `native_host::app::solo_auto_start` carries, for the same reason, and it
+/// changes nothing in the browser: a host page loads its world before
+/// `wasm_init` composes the `App`, so the resource is there before the first
+/// fixed step.
+///
+/// A request that arrives with no world is **dropped**, not held. Remembering it
+/// would start the mission the instant somebody else's scenario pick landed,
+/// which is not what the person who pressed the button asked for.
+pub(crate) fn apply_force_start(
+    state: Res<State<crate::core::messages::GamePhase>>,
+    mut next_state: ResMut<NextState<crate::core::messages::GamePhase>>,
+    mut outbox: ResMut<crate::lobby::LobbyOutbox>,
     preload: Option<Res<crate::server::asset_preload::AssetPreloadResource>>,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
     mut pending: ResMut<PendingForceStart>,
 ) {
     let pending_flag = std::mem::take(&mut pending.0);
-    if !pending_flag || state.get() != &messages::GamePhase::Lobby {
+    if !pending_flag
+        || state.get() != &crate::core::messages::GamePhase::Lobby
+        || world_config.is_none()
+    {
         return;
     }
     let preload_complete = if crate::debug_overlay::is_playwright_automation() {
@@ -3139,12 +3188,13 @@ fn apply_force_start(
             .unwrap_or(true)
     };
     if preload_complete {
-        next_state.set(messages::GamePhase::InProgress);
-        outbox
-            .0
-            .push((Target::All, messages::ServerMessage::GameStarted));
+        next_state.set(crate::core::messages::GamePhase::InProgress);
+        outbox.0.push((
+            crate::lobby::Target::All,
+            crate::core::messages::ServerMessage::GameStarted,
+        ));
     } else {
-        next_state.set(messages::GamePhase::Loading);
+        next_state.set(crate::core::messages::GamePhase::Loading);
     }
 }
 

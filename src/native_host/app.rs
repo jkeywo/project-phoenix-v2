@@ -571,6 +571,32 @@ pub fn build_native_host_app(
         });
     }
 
+    // The host-authoritative force start (issue #1328).
+    //
+    // `apply_force_start` is `server::bridge`'s own, de-wasm-gated rather than
+    // reimplemented: the rule it applies — Lobby only, wait for the asset
+    // preload, announce `GameStarted`, refuse with no world — is host policy,
+    // and a second native copy of it is a second policy that drifts. What stays
+    // browser-side is only `drain_force_start_input`, which reads a thread-local
+    // JavaScript set.
+    //
+    // The two ordering edges are `wasm_init`'s and `solo_auto_start`'s:
+    // `.before(SimSet::Input)` puts the `NextState<GamePhase>` write on the
+    // tick-scoped transition site (issue #907), and
+    // `.after(NativeWorldLoadSet)` means a press on the tick a runtime world
+    // lands sees that world rather than being refused by the guard.
+    //
+    // Installed unconditionally. Nothing sets the latch on a host with no lobby
+    // surface, so a `--pane`-only, `--solo` or headless-shaped host is a
+    // resource and an inert system heavier and behaves identically.
+    app.init_resource::<crate::server::bridge::PendingForceStart>()
+        .add_systems(
+            FixedUpdate,
+            crate::server::bridge::apply_force_start
+                .before(crate::sim_sets::SimSet::Input)
+                .after(crate::native_host::world_load::NativeWorldLoadSet),
+        );
+
     // The transport seam. Installed unconditionally and inert until something
     // inserts a `NativeTransportLink` — see the module docs for why it is here
     // before the transport is.
@@ -674,28 +700,30 @@ pub fn build_native_host_app(
                 // already ingested the set is empty and the edge is inert.
                 .after(crate::native_host::world_load::NativeWorldLoadSet),
         );
-    } else if cfg.panes.as_ref().is_none_or(|p| p.opened.is_empty()) {
+    } else if cfg.panes.as_ref().is_none_or(|p| p.opened.is_empty()) && cfg.host_lobby.is_none() {
         // The mode is correct and the flag is not refused — but with nothing
         // able to connect it opens a window onto a lobby nothing can start.
-        // Every route to `InProgress` needs a session: collective `SetReady`
-        // auto-start, or the host page's force-start
-        // (`drain_force_start_input`, wasm-only). Browser participants are
-        // still deferred to issue #1112, and there is no native force-start, so
-        // say so at the top of the log rather than leaving an operator watching
-        // a lobby that will never move.
+        // Every route to `InProgress` needs a session (collective `SetReady`
+        // auto-start) or a force-start, and browser participants are still
+        // deferred to issue #1112 — so say so at the top of the log rather than
+        // leaving an operator watching a lobby that will never move.
         //
-        // A host with local Station panes (issue #1122) does NOT take this arm:
-        // its panes are participants, they ready up like any other, and the
-        // mission starts when they do.
+        // Two arrangements do NOT take this arm. A host with local Station panes
+        // (issue #1122): its panes are participants, they ready up like any
+        // other, and the mission starts when they do. And a host with a lobby
+        // SURFACE (issue #1328): the AI-launch control on that surface is a
+        // native force-start, so the operator standing in front of the
+        // viewscreen can launch it on Backfill without `--solo`.
         crate::pwarn!(
             cfg.log,
             crate::logging::LogCat::Lobby,
-            "no --solo and no --pane: this host is waiting in the lobby for \
-             participants, but browser clients cannot join a native host yet \
-             (issue #1112 — PeerJS is browser JavaScript). Nothing can ready up \
-             and there is no native force-start, so the mission will not start. \
-             Re-run with --solo to fly it on Backfill, or --pane <NAME> to crew \
-             it locally."
+            "no --solo, no --pane and no lobby surface: this host is waiting in \
+             the lobby for participants, but browser clients cannot join a \
+             native host yet (issue #1112 — PeerJS is browser JavaScript). \
+             Nothing can ready up and there is no control to force-start from, \
+             so the mission will not start. Re-run with --solo to fly it on \
+             Backfill, --pane <NAME> to crew it locally, or --client-dir <DIR> \
+             so the viewscreen carries the lobby's own launch control."
         );
     }
 

@@ -21,11 +21,12 @@ night actually happens: boot, pick, invite, arrange, crew, fly, break something,
 come back. Work through it in order — later sections assume the bridge the
 earlier ones built.
 
-Two parts of the feature cannot be settled on this rig at all, and they are
+Three parts of the feature cannot be settled on this rig at all, and they are
 **parked explicitly in §9** rather than quietly skipped: touch operation of the
-lobby (no touch hardware, the #1124 pattern), and the OS accessibility
-preferences (the live OS read is a documented stub — see §8). Do not tick those
-criteria until §9's conditions are met.
+lobby (no touch hardware, the #1124 pattern), the OS accessibility preferences
+(the live OS read is a documented stub — see §8b), and an *observed* view crash
+(not constructible by hand — see §6c). Do not tick those criteria until §9's
+conditions are met, and do not read their unticked boxes as a failed run.
 
 ---
 
@@ -46,6 +47,7 @@ criteria until §9's conditions are met.
       TRUNK_BUILD_RELEASE=true trunk build --release
       ```
 
+      (In `cmd`: `set TRUNK_BUILD_RELEASE=true` then `trunk build --release`.)
       Without it `run-native.bat` stops with
       `[ERROR] dist\index.html not found` before taking the port.
 
@@ -63,8 +65,9 @@ criteria until §9's conditions are met.
 
       It prints each display's stable `id` (e.g. `\\.\DISPLAY2@1920x1080`), its
       geometry and its scale. Those ids are what the saved-layout file in §7 is
-      written in. (`--setup` refuses `lobby`; it is an enumerate-and-exit
-      diagnostic.)
+      written in. Do **not** add the `lobby` mode word here — `--setup` refuses
+      `--lobby` (and every other simulation flag) rather than silently discarding
+      it: it is a standalone enumerate-and-exit diagnostic.
 
 - [ ] **Start each section from a clean bridge unless it says otherwise.** §7
       depends on `%APPDATA%\ProjectPhoenix\bridge-layouts\` — open that folder in
@@ -101,9 +104,11 @@ subsequent ones are a fast no-op.
       the hull stage.
 - [ ] **A mouse picks the hull.** Click the **destroyer**. The world loads (a few
       seconds), the picker closes, and the **crew lobby** appears underneath:
-      scenario title, crew counter, and one station card per station on the
-      destroyer's roster — Captain, Helm, Tactical, Navigation, Comms,
-      Engineering, Command.
+      scenario title, crew counter, and one station card per **claimable** seat
+      on the destroyer's roster — **Captain, Helm, Tactical and Engineering**.
+      (Navigation, Comms and Command are `auxiliary` hosted tabs with no lobby
+      seat of their own, so they have no card and therefore no screen row. Use
+      the four above wherever this kit names a station.)
 - [ ] **The lobby says nobody can join.** With no `--rendezvous` the terminal
       carries `no --rendezvous, so nobody can join this host …` and the join panel
       on the viewscreen reads **"Crew joining is off — this host has no join
@@ -131,7 +136,9 @@ From the host still running in §1:
       something that can never work, and "the code has not arrived yet" and
       "there will never be a code" look identical on a wall.
 - [ ] The same holds for `run-native.bat lobby --solo` — one condition, two
-      spellings.
+      spellings. (`--solo` starts the mission on the tick the world lands, so the
+      caption is only up while you are still picking; that is the moment to read
+      it.)
 
 ### 2b. A real code, and a phone that reaches it
 
@@ -181,7 +188,10 @@ parameter's own host), and the host says so at the prompt — see §2c.
 ### 2c. When the address the QR names cannot work
 
 The host classifies the address it puts in the QR and says at the prompt when no
-phone in the room can open it. Reproduce **one** of these — a VPN is the easiest:
+phone in the room can open it. This is a **prompt-side** check made before
+anything is registered, so it runs whether or not §2b's service is deployed —
+only `--rendezvous` needs to be on the line. Reproduce **one** of these; a VPN is
+the easiest:
 
 - [ ] **Bring up a VPN (Tailscale or similar) and relaunch §2b's command.** The
       terminal carries a second line after the "pointing phones at" one:
@@ -210,15 +220,20 @@ phone in the room can open it. Reproduce **one** of these — a VPN is the easie
 
 ### 2d. The toggle, in the lobby and in play
 
+Everything here except the two phone bullets works on a plain
+`run-native.bat lobby` — the control hides and shows the join **panel**, whether
+that panel is holding a code or the joining-off sentence.
+
 - [ ] **In the lobby, the surface's own control toggles the QR.** The viewscreen
-      window has no settings cog, so the surface carries one control of its own.
-      Click it: the join panel hides. Click again: it comes back.
-- [ ] **A phone toggles it too.** From a joined phone's settings menu, press the
-      QR toggle. The panel on the viewscreen flips. (Two presses are two flips —
-      it is an edge, not a state.)
-- [ ] **The QR is above the picker.** Relaunch and confirm the code is readable
-      *while you are still choosing the scenario*: the crew join while the
-      operator picks.
+      window has no settings cog, so the surface carries one control of its own,
+      top right. Click it: the join panel hides. Click again: it comes back.
+- [ ] **A phone toggles it too** *(needs §2b)*. From a joined phone's settings
+      menu, press the QR toggle. The panel on the viewscreen flips. (Two presses
+      are two flips — it is an edge, not a state.)
+- [ ] **The QR is above the picker** *(needs §2b for a real code; the panel's
+      position is visible either way)*. Relaunch and confirm the join panel is
+      readable *while you are still choosing the scenario*: the crew join while
+      the operator picks.
 - [ ] **Mission start hides it.** Start the mission (§4 or the AI-launch control).
       The QR goes, and so does the rest of the lobby chrome — the viewscreen is
       clean.
@@ -227,10 +242,11 @@ phone in the room can open it. Reproduce **one** of these — a VPN is the easie
       covers the view — that is the native answer, not a bug). The QR toggle is
       there; press it and the code shows for a late arrival. Press **F9** again to
       hide the surface.
-- [ ] **A phone cannot uncover the surface.** With the surface hidden mid-mission,
-      press a phone's QR toggle. The viewscreen does **not** open — a phone in
-      somebody's pocket must not drop a sheet over a running mission. It sets what
-      the operator finds when they next press F9; confirm that too.
+- [ ] **A phone cannot uncover the surface** *(needs §2b)*. With the surface
+      hidden mid-mission, press a phone's QR toggle. The viewscreen does **not**
+      open — a phone in somebody's pocket must not drop a sheet over a running
+      mission. It sets what the operator finds when they next press F9; confirm
+      that too.
 
 ---
 
@@ -330,10 +346,14 @@ want it on.
 ### 4c. Close it
 
 - [ ] **Press Off on the Helm card.** The console's window closes and the monitor
-      is free.
-- [ ] **The screen comes back everywhere.** Look at another station's row — the
-      button for that monitor is no longer greyed. One law, one answer, on every
-      card at once.
+      is free again.
+- [ ] **The row says so.** Helm's screen row now has **Off** selected and no
+      screen button selected — which state the row is in is legible without
+      comparing the buttons to each other.
+- [ ] **The seat is given up honestly.** Helm's card returns to its placeholder
+      avatar; the station is on AI control, not held by a console that is no
+      longer on screen. (One console on a screen never greyed it for anybody —
+      a screen holds two. That is §5d's check.)
 
 ### 4d. Mid-mission, after a replug
 
@@ -393,9 +413,10 @@ With a crew member (or you) at each half:
       hands over exactly at the seam — no dead strip, no half answering a click on
       the other's side.
 - [ ] **The keyboard reaches each half.** Press **Ctrl+Tab** to move the focus
-      reticle onto one console and type into a field on it; Ctrl+Tab again for the
-      other. Characters land in the focused half only. Plain **Tab** stays the
-      page's own field-to-field traversal.
+      reticle onto one console and type into a text field on it (the name field
+      before you claim, or a comms reply after); Ctrl+Tab again for the other.
+      Characters land in the focused half only. Plain **Tab** stays the page's own
+      field-to-field traversal — it does not jump halves.
 - [ ] **Both are genuinely playable.** Claim a station on each half and actually
       operate it for a minute — not "the page rendered", but "somebody could sit
       here for an hour".
@@ -411,7 +432,7 @@ With a crew member (or you) at each half:
 
 ### 5d. A third is refused, by name
 
-- [ ] **Press monitor 2 on the Navigation card.** The button is **greyed and not
+- [ ] **Try monitor 2 on the Engineering card.** The button is **greyed and not
       pressable**, and it names what is holding the screen: **"full — helm,
       tactical"**.
 - [ ] **The names are in the order they are drawn.** Left half first on a
@@ -421,8 +442,8 @@ With a crew member (or you) at each half:
       here" is a different fact from "this screen is not offered", and a monitor
       that disappeared from the row would read as one that had been unplugged.
 - [ ] **The greyed screen un-greys everywhere at once.** Press **Off** on the
-      Tactical card. Navigation's button for that monitor is offerable again, and
-      so is every other station's.
+      Tactical card. Engineering's button for that monitor is offerable again,
+      and so is every other station's.
 
 ### 5e. The survivor regrows
 
@@ -472,13 +493,18 @@ run-native.bat lobby --profile bridge.toml --pane Ada
 
 ## 6. A cable comes out mid-mission
 
-Get into a running mission with **at least one console open on a non-viewscreen
-monitor** and somebody (or a phone) at it. Run the host with `--log info` so the
-operator log carries the lobby's own lines:
+Run the host with `--log info` so the operator log carries the lobby's own lines:
 
 ```
 run-native.bat lobby --log info
 ```
+
+Then get into a running mission with **at least one console open on a
+non-viewscreen monitor**: pick Combat Test + the destroyer, open Helm's console on
+a second screen (§4a), claim Helm at it and press **Ready** there. The countdown
+runs and the mission starts. (The lobby's AI-launch control is the other route,
+but it is only offered while *nobody* is connected — a claimed console hides it,
+which is correct: a crew that exists readies up.)
 
 ### 6a. Unplug
 
@@ -568,7 +594,9 @@ run-native.bat lobby --log info
 
 - [ ] **Relaunch and pick Combat Test + the cruiser.** The destroyer's layout is
       **not** applied — the cruiser starts unarranged (the log says nothing is
-      saved for it yet).
+      saved for it yet). It also has a **different roster**: six claimable cards
+      (Captain, Helm, Tactical, Science, Engineering, Comms) where the destroyer
+      had four, which is the whole reason a layout is keyed by class.
 - [ ] **Arrange the cruiser differently** — a different viewscreen monitor, or
       different stations on different screens. `alliance_cruiser.toml` appears
       beside the destroyer's.
@@ -769,7 +797,10 @@ Add a dated note to the issue #1335 thread (or the batch's acceptance log):
 - for §7, the contents of `%APPDATA%\ProjectPhoenix\bridge-layouts\` at the end.
 
 **Say explicitly which of §9's parks applied.** P1 and P2 are expected to be
-parked on this rig; that is the correct outcome, not an incomplete run.
+parked on this rig, and P3 unless a crash happened to you; that is the correct
+outcome, not an incomplete run. Say the same about §9's two prerequisites — a
+deployed rendezvous with the LAN origin allow-listed, and whether you ran
+one-screen at all.
 
 ---
 

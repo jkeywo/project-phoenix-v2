@@ -351,6 +351,19 @@ cargo build --release --features host --bin phoenix-host
 #     budget is spent). Either frees a slot under an operator who pressed
 #     nothing and overlaps the console coming back. (The close+recreate "race"
 #     this once cited is not observable — both calls are one system body.)
+#     THE WHOLE OF THE ABOVE HAS A HUMAN HALF: docs/acceptance/1335-native-lobby.md
+#     (issue #1335) walks one operator through it on real monitors, end to end
+#     through `run-native.bat lobby` — the picks, the QR, the viewscreen move,
+#     consoles opened/moved/closed, two per screen judged by eye and the re-tile
+#     blink timed, an unplug mid-mission, arrange-quit-relaunch per class, and
+#     the keyboard pass. Its §9 PARKS what this rig cannot settle rather than
+#     dropping it: touch (no hardware, with #1124's leg), prefers-contrast /
+#     reduced-motion (panes::os_prefs::query_os_accessibility_prefs is a stub and
+#     Ultralight has no OS-backed matchMedia, so neither the surface's CSS nor
+#     the reticle's response can be driven from Windows today), and an OBSERVED
+#     view crash (not constructible by hand). Do not read those unticked boxes as
+#     a failed run, and do not add a kit step for behaviour the batch does not
+#     have.
 #   --manifest also narrows what this process FLIES, not only what it publishes:
 #     with a curating manifest in force the default hull is drawn from that
 #     manifest's allowlist (issue #917). An explicit --ship still wins.
@@ -735,7 +748,10 @@ gui/fleet-session.js — its two ends wired onto the transport. Separate from th
                   crew protocol by design; see "Assembling a fleet" above
 docs/acceptance/ — Step-by-step kits for the human half of a HITL issue, one
                   file per issue. `1113-networks.md` is the field script for
-                  connecting across real networks.
+                  connecting across real networks; `1335-native-lobby.md` is the
+                  one for the native bridge lobby on real monitors (run through
+                  `run-native.bat lobby`), and each kit parks what its rig cannot
+                  settle explicitly rather than dropping it.
 tests/client/   — Vitest tests for gui/*.js
 tests/smoke/    — Playwright smoke tests
 wiki/           — LLM-maintained knowledge base. Read SCHEMA.md first; update as you work.

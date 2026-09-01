@@ -203,6 +203,15 @@ cargo build --release --features host --bin phoenix-host
 #     --rendezvous, or --solo, the panel says joining is off rather than framing
 #     a dead code. Shown in the lobby, hidden at mission start, and toggled in
 #     play from the surface's own control (after F9) or a phone's settings menu.
+#     THAT LOBBY CARRIES THE MONITOR ROW (issue #1330): one button per connected
+#     display, the current viewscreen marked, and pressing another moves the
+#     viewscreen onto it live, through the bridge_layout law. A windowed host
+#     therefore ALWAYS runs the display applier and the runtime monitor watcher
+#     now, even with no --profile: it synthesises a BridgeDisplayConfig from the
+#     displays it finds. That config DESCRIBES rather than instructs — with no
+#     --profile and no lobby press the window stays exactly where the OS opened
+#     it (the #1121 behaviour), and only a press or an unplug moves it. An
+#     explicit --profile still wins at boot, seeding the layout the row edits.
 #   --manifest also narrows what this process FLIES, not only what it publishes:
 #     with a curating manifest in force the default hull is drawn from that
 #     manifest's allowlist (issue #917). An explicit --ship still wins.

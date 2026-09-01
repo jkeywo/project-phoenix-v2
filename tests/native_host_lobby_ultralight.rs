@@ -66,10 +66,24 @@
 //!    *encodes* is settled without a browser, in
 //!    `native_host::host_lobby::join` and `tests/client/host-qr.test.js`, which
 //!    pin the same join-URL literal this file asserts on screen.
+//! 6. **The monitor row draws, and a press comes back** (issue #1330). A real
+//!    `BridgeLayoutPayload` builds real `<button>` elements through the shared
+//!    renderer, and clicking one puts a `set-viewscreen` record on the page's
+//!    own queue, which the host drains over the real bridge. That is the whole
+//!    page→host direction, in the engine that actually runs it — and it is
+//!    where a namespace mistake would surface, because the lobby drains
+//!    `phoenixHostLobbyOut` and a pane drains `phoenixPaneOut`.
 //!
 //! The half this cannot reach is the compositing itself — the Bevy node, its
 //! `display`, and the router placement. Those need a window and a GPU adapter;
 //! `native_host::host_lobby::reveal` is where their decision is made and tested.
+//!
+//! Nor can it reach the **window move** a press causes: that is winit's, on real
+//! monitors, and `tests/native_bridge_displays.rs` is the ignored test that
+//! opens real borderless-fullscreen surfaces. The whole-feature walkthrough —
+//! press a button on one screen and watch the viewscreen arrive on another — is
+//! the **#1335 acceptance kit**'s step, and belongs in `docs/acceptance/`
+//! beside the #1124/#1126/#1128 kits rather than in any `cargo test`.
 
 #![cfg(all(feature = "ultralight", not(target_arch = "wasm32")))]
 
@@ -80,6 +94,9 @@ use project_phoenix::core::messages::{LobbyStatePayload, StationPayload};
 use project_phoenix::core::rendezvous::JoinCode;
 use project_phoenix::delivery::args::{ClientSource, HostArgs};
 use project_phoenix::delivery::serve::{HostServer, ShutdownSignal};
+use project_phoenix::native_host::host_lobby::layout::{
+    BridgeLayoutPayload, LayoutNoticePayload, MonitorButtonPayload,
+};
 use project_phoenix::native_host::host_lobby::{pump_host_lobby, JoinInvite, LocalHostLobby};
 use project_phoenix::native_host::panes::surface::PaneSurface;
 use project_phoenix::native_host::panes::ultralight::{stage_sdk, UltralightPaneSurface};
@@ -178,6 +195,44 @@ fn lobby_payload(phase: &str, holder: Option<&str>) -> String {
     codec::encode_lobby_state(&payload).expect("the lobby payload encodes")
 }
 
+/// A two-monitor bridge, in the shape `host_lobby::layout::monitor_row_payload`
+/// builds from a live [`BridgeLayout`] (issue #1330).
+fn monitor_row(viewscreen_is_second: bool, notices: Vec<LayoutNoticePayload>) -> String {
+    let monitor = |identity: &str, name: &str, w: u32, h: u32, primary, viewscreen| {
+        MonitorButtonPayload {
+            identity: identity.to_string(),
+            name: Some(name.to_string()),
+            width: w,
+            height: h,
+            primary,
+            viewscreen,
+            stations: Vec::new(),
+        }
+    };
+    codec::encode_bridge_layout(&BridgeLayoutPayload {
+        monitors: vec![
+            monitor(
+                "BRAVIA@3840x2160",
+                "BRAVIA",
+                3840,
+                2160,
+                true,
+                !viewscreen_is_second,
+            ),
+            monitor(
+                "BenQ EX@1920x1080",
+                "BenQ EX",
+                1920,
+                1080,
+                false,
+                viewscreen_is_second,
+            ),
+        ],
+        notices,
+    })
+    .expect("the monitor row encodes")
+}
+
 #[test]
 #[ignore = "needs the Ultralight SDK, a trunk-built dist/, and a machine that can run both"]
 fn the_native_lobby_renders_the_web_hosts_own_lobby_over_the_bridge() {
@@ -210,7 +265,12 @@ fn the_native_lobby_renders_the_web_hosts_own_lobby_over_the_bridge() {
             session: Some(PaneSession::ephemeral("host-lobby".to_string())),
         })
         .expect("the view is created");
-    let mut surface = UltralightPaneSurface::new(view);
+    // `for_host_lobby`, not `new`: the lobby document installs the
+    // `phoenixHostLobbyOut` queue, and a surface built for a pane would drain
+    // `phoenixPaneOut` — a function this page never defines — so every button
+    // press would vanish with a clean log. That is the exact mistake section 5
+    // below would otherwise not catch.
+    let mut surface = UltralightPaneSurface::for_host_lobby(view);
     surface.load(&lobby.url()).expect("the document loads");
 
     let bridge = lobby.bridge.clone();
@@ -338,9 +398,10 @@ fn the_native_lobby_renders_the_web_hosts_own_lobby_over_the_bridge() {
         "…still showing the state it was last given — the surface was never rebuilt"
     );
 
-    // Nothing on this surface can launch anything: the AI-launch button is
-    // stripped, and the one control the document DOES carry (the QR toggle,
-    // issue #1329) is a div, not a `<button>` that a lobby renderer would find.
+    // Nothing on this surface can launch a mission: the document slice strips
+    // the AI-launch button, the one control the document itself carries (the QR
+    // toggle, issue #1329) is a div rather than a `<button>` a lobby renderer
+    // would find, and no monitor row has been pushed yet.
     assert_eq!(
         probe(
             &mut surface,
@@ -348,7 +409,7 @@ fn the_native_lobby_renders_the_web_hosts_own_lobby_over_the_bridge() {
         )
         .as_deref(),
         Some("0"),
-        "the lobby document carries no launch control"
+        "the lobby document carries no control it was not given data for"
     );
 
     // ── 5. The join QR, in a real browser engine (issue #1329) ──────────────
@@ -458,5 +519,96 @@ fn the_native_lobby_renders_the_web_hosts_own_lobby_over_the_bridge() {
         Some("true"),
         "`--solo` (or no --rendezvous) states that joining is off rather than \
          showing a dead QR"
+    );
+
+    // ── 6. The monitor row draws, and a press comes back (issue #1330) ───────
+    bridge.push_layout(monitor_row(false, Vec::new()));
+    for _ in 0..8 {
+        frame(&mut surface);
+    }
+    assert_eq!(
+        probe(
+            &mut surface,
+            "String(document.querySelectorAll('#monitor-row-buttons button').length)"
+        )
+        .as_deref(),
+        Some("2"),
+        "the shared renderer builds one button per monitor the host reported"
+    );
+    assert_eq!(
+        probe(
+            &mut surface,
+            "document.querySelector('#monitor-row-buttons button').getAttribute('aria-pressed')"
+        )
+        .as_deref(),
+        Some("true"),
+        "the display showing the viewscreen says so to a screen reader, not only in colour"
+    );
+    let label = probe(
+        &mut surface,
+        "document.querySelector('#monitor-row-buttons button').textContent",
+    )
+    .unwrap_or_default();
+    assert!(
+        label.contains("BRAVIA") && label.contains("3840"),
+        "a button names its display recognisably: {label:?}"
+    );
+    assert!(
+        !label.contains('\u{27e8}'),
+        "every string resolved through the real strings.csv: {label:?}"
+    );
+
+    // The press. A real click on a real button, through the delegated listener
+    // `host_lobby_link.js` installed, onto the page's own out-queue — which the
+    // host drains on the very next frame over the same bridge.
+    let _ = probe(
+        &mut surface,
+        "document.querySelector('[data-monitor=\"BenQ EX@1920x1080\"]').click(); 'clicked'",
+    );
+    frame(&mut surface);
+    assert_eq!(
+        bridge.take_records(),
+        vec![r#"{"kind":"set-viewscreen","monitor":"BenQ EX@1920x1080"}"#.to_string()],
+        "the press reaches the host as the record the layout law takes"
+    );
+
+    // The host's answer — accepted here, so the mark moves — repaints the row
+    // without rebuilding the surface. (A refusal is the same push carrying a
+    // notice; the sentence it renders is asserted below.)
+    bridge.push_layout(monitor_row(true, Vec::new()));
+    for _ in 0..8 {
+        frame(&mut surface);
+    }
+    assert_eq!(
+        probe(
+            &mut surface,
+            "document.querySelectorAll('#monitor-row-buttons button')[1].getAttribute('aria-pressed')"
+        )
+        .as_deref(),
+        Some("true"),
+        "the mark moved to the display that was pressed"
+    );
+
+    // A refusal is visible feedback, resolved from its id on the page.
+    bridge.push_layout(monitor_row(
+        true,
+        vec![LayoutNoticePayload {
+            id: "server.bridge_layout.unknown_monitor".to_string(),
+            params: [("monitor".to_string(), "Unplugged@1920x1080".to_string())]
+                .into_iter()
+                .collect(),
+        }],
+    ));
+    for _ in 0..8 {
+        frame(&mut surface);
+    }
+    let notice = probe(
+        &mut surface,
+        "document.getElementById('monitor-row-notice').textContent",
+    )
+    .unwrap_or_default();
+    assert!(
+        notice.contains("Unplugged@1920x1080") && !notice.contains('\u{27e8}'),
+        "the refusal is a sentence the operator can read: {notice:?}"
     );
 }

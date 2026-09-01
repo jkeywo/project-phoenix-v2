@@ -29,6 +29,26 @@
 //! modules in that order, and so does this surface's document. There is one
 //! lobby renderer, not two.
 //!
+//! # …and one path back, for the monitor row (issue #1330)
+//!
+//! ```text
+//! a monitor <button> is pressed                        gui/host-lobby-render.js built it
+//!   │  phoenixHostLobbyOut.send(json)                  [host_lobby_link.js, delegated]
+//!   ▼
+//! HostLobbyBridge::take_records                        [bridge] drained once a frame
+//!   ▼
+//! apply_lobby_layout_actions → BridgeLayout::apply     [this file, over the layout law]
+//!   ▼  accepted: BridgeLayoutResource moves     refused: a LayoutNotice for the row
+//!   ▼
+//! follow_layout_viewscreen                             [bridge_display] the window follows
+//! ```
+//!
+//! The surface therefore has controls now, and exactly one thing to say with
+//! them: which display shows the shared view. It is still not a participant —
+//! nothing it sends is a `ClientMessage` and nothing crosses command admission;
+//! a press asks the host to rearrange **its own screens**, and the layout law is
+//! what judges it.
+//!
 //! # What is here, and why each piece is where it is
 //!
 //! | piece | what it decides |
@@ -36,6 +56,7 @@
 //! | [`document`] | what the surface loads: the host page's own `#lobby-panel` and `#qr-panel`, assembled in memory and served at the host page's own depth |
 //! | [`bridge`] | what crosses, in both directions, and what a failed push costs |
 //! | [`join`] | what the join panel says, and where its QR points |
+//! | [`layout`] | the monitor row's two wire shapes — the roster out, the press back |
 //! | [`reveal`] | when the surface is on screen, and when it has yielded |
 //! | this file | the Bevy wiring, and [`LocalHostLobby`], which the binary assembles after its listener has bound |
 //!
@@ -51,9 +72,9 @@
 //!
 //! It is created once and never torn down. On mission start the *chrome*
 //! yields — see [`reveal`] — and one host key ([`HOST_LOBBY_REVEAL_KEY`])
-//! brings it back. The join QR arrived on this same surface in issue #1329, and
-//! the settings and layout rows follow, so nothing downstream should learn to
-//! rebuild it.
+//! brings it back. The join QR arrived on this same surface in issue #1329 and
+//! the monitor row in issue #1330; the settings rows follow, so nothing
+//! downstream should learn to rebuild it.
 //!
 //! One consequence is worth stating plainly, because it is the shape of the
 //! native answer rather than an omission: **in play, the QR is visible only

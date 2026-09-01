@@ -48,19 +48,24 @@ REM `dist` is trunk's output. The host version-pins it against the manifest it
 REM serves at startup, so a stale bundle refuses to start before the port is
 REM taken rather than misbehaving later.
 if not exist "dist\index.html" (
-    echo [ERROR] dist\index.html not found — build the bundle first:
+    echo [ERROR] dist\index.html not found - build the bundle first:
     echo           trunk build --release
     echo           node scripts/build-client.mjs
     exit /b 1
 )
 
-if /i "%~1"=="lobby" (
-    shift
-    echo === Native host: lobby ^(pick the scenario on the viewscreen^) ===
-    "%HOST%" --client-dir dist --lobby %1 %2 %3 %4 %5 %6 %7 %8 %9
-    exit /b %errorlevel%
-)
+REM `goto` rather than an if-block, and this is not style: cmd expands %1..%9
+REM for a whole parenthesised block BEFORE running any of it, so a `shift`
+REM inside one has no effect on the very line that needs it. Jumping out is what
+REM makes the shift take.
+if /i "%~1"=="lobby" goto :lobby
 
 echo === Native host: delivery only ===
 "%HOST%" --client-dir dist %*
+exit /b %errorlevel%
+
+:lobby
+shift
+echo === Native host: lobby (pick the scenario on the viewscreen) ===
+"%HOST%" --client-dir dist --lobby %1 %2 %3 %4 %5 %6 %7 %8 %9
 exit /b %errorlevel%

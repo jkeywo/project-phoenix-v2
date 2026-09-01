@@ -443,10 +443,14 @@ fn find_tag_end(html: &str, open: &str) -> Option<usize> {
 /// requires the matching `</tag>` — because the alternative is a general HTML
 /// parser for two elements this repository authors itself.
 ///
-/// `pub(crate)` for [`super::super::host_lobby::document`], which strips the
-/// AI-launch `<button>` out of the read-only native lobby (issue #1325) — the
-/// same "remove an element the embedded surface must not carry" this does for
-/// `<audio>`, so it uses the same narrow matcher rather than a second one.
+/// `pub(crate)` because [`super::super::host_lobby::document`] borrowed it for
+/// the AI-launch `<button>` in issue #1325 — which #1328 stopped stripping, the
+/// force-start path having ceased to be wasm-only. That module now removes only
+/// NESTED elements (the picker's two host-tooling blocks), which this matcher
+/// cannot do: it takes the FIRST closing tag after the opening one, so it would
+/// truncate a `<div>` containing `<div>`s. It has its own depth-counted
+/// `remove_element` instead, and this one stays exactly as narrow as the two
+/// flat elements it was written for.
 pub(crate) fn strip_elements_matching(html: &str, tag: &str, marker: Option<&str>) -> String {
     let open_tag = format!("<{tag}");
     let close_tag = format!("</{tag}>");

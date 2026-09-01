@@ -149,8 +149,19 @@ cargo build --release --features host --bin phoenix-host
 #   mint pin. WorldIdMint is parked at tick 0 across that pass and restored
 #   after, so a world's entity uuids do not depend on how long the operator
 #   spent choosing; tests/native_host_lobby.rs asserts a runtime-loaded world
-#   mints exactly the ids a boot-loaded one mints.
+#   mints exactly the ids a boot-loaded one mints AND mints each one to the same
+#   entity, plus a second test comparing the two SCHEDULES so a system added to
+#   WorldPlugin's Startup chain cannot silently not-run on the runtime path.
+#   A successful runtime load also re-Welcomes every connected participant: a
+#   phone that identified before the pick was welcomed with the world-less
+#   lobby's battleship FALLBACK roster and nothing else would ever tell it
+#   otherwise. A refused one puts the lobby back, content ledger included — the
+#   failed load had already frozen it over content this host does not have.
 #   --ship <PATH>   the player's hull [default: the world's first available_ships]
+#                   With --lobby it also SATISFIES the hull half of the pick: a
+#                   scenario lock alone then loads the world, because a
+#                   SelectPlayerShip this host would discard anyway is not worth
+#                   waiting for.
 #   --seed <N>      overrides the world's [global] seed
 #   --solo          start with nobody connected, every station on Backfill.
 #                   WITH NEITHER IT NOR --pane, NOTHING REACHES A RUNNING

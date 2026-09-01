@@ -17,6 +17,8 @@
 //! ordinary transport seam, or written straight onto `Messages<InboundMessage>`
 //! where the test is not about the transport.
 
+use std::collections::BTreeSet;
+
 use bevy::prelude::*;
 
 use project_phoenix::boot::NativeRenderSurface;
@@ -27,7 +29,9 @@ use project_phoenix::lobby::handler::Target;
 use project_phoenix::lobby::scenario_arbiter;
 use project_phoenix::lobby::server::InboundMessage;
 use project_phoenix::native_host::transport::{LoopbackHandle, NativeTransportLink};
-use project_phoenix::native_host::world_load::{LobbyScenarioCatalog, LobbySelection};
+use project_phoenix::native_host::world_load::{
+    LobbyScenarioCatalog, LobbySelection, RuntimeWorldLoad,
+};
 use project_phoenix::native_host::{
     build_native_host_app, preload_content_templates, NativeHostConfig,
 };
@@ -110,18 +114,70 @@ fn select(app: &mut App, token: &str, scenario_id: &str, template_path: &str) {
     }
 }
 
-/// Every `EntityUuid` in the world, sorted — the identity half of what
-/// `sim_digest::fold_entity_namespace` folds, and the thing a runtime load must
-/// not change.
-fn entity_uuids(app: &mut App) -> Vec<String> {
-    let mut ids: Vec<String> = app
+/// Every `EntityUuid` in the world paired with **which entity holds it**,
+/// sorted — the identity half of what `sim_digest::fold_entity_namespace`
+/// folds, and the thing a runtime load must not change.
+///
+/// The pairing is the whole point. A bare sorted list of uuids is a multiset and
+/// says nothing about *whose* id each one is, so the hazard the
+/// `setup_world < spawn_world_entities` pin exists to stop — the two spawn
+/// passes swapping places, which permutes ids between the anonymous stars and
+/// the named entities without changing the set — walks straight past it, while
+/// the authoritative digest (which folds each id against that entity's own
+/// physics and hull) diverges.
+///
+/// The identity is the instance's `EntityId`, else the template's display
+/// `EntityName`, else the marker below; the spawn position disambiguates the
+/// several entities that share one template. Neither moves in `GamePhase::Lobby`
+/// — the simulation sets are gated on `InProgress` — so it is a stable key on
+/// both hosts.
+fn entity_identities(app: &mut App) -> Vec<(String, String)> {
+    use project_phoenix::entities::spawner::{EntityId, EntityName, EntityUuid};
+    let mut rows: Vec<(String, String)> = app
         .world_mut()
-        .query::<&project_phoenix::entities::spawner::EntityUuid>()
+        .query::<(
+            &EntityUuid,
+            Option<&EntityId>,
+            Option<&EntityName>,
+            &Transform,
+        )>()
         .iter(app.world())
-        .map(|uuid| uuid.0.clone())
+        .map(|(uuid, id, name, transform)| {
+            let who = id
+                .map(|i| i.0.clone())
+                .or_else(|| name.map(|n| n.0.clone()))
+                .unwrap_or_else(|| "<unnamed>".to_string());
+            let at = transform.translation;
+            (
+                format!("{who}@{:.3},{:.3},{:.3}", at.x, at.y, at.z),
+                uuid.0.clone(),
+            )
+        })
         .collect();
-    ids.sort();
-    ids
+    rows.sort();
+    rows
+}
+
+/// The world's own `name -> uuid` map, sorted — the second half of the identity
+/// claim, and the one the scenario runtime actually resolves through.
+///
+/// `spawn_world_entities` writes it, so it is empty until that system has run
+/// and it re-keys the moment the mint hands out different sequence numbers.
+/// `world::dispatch`, `comms::scripted` and `civilian::server` all resolve an
+/// authored name to a live uuid through it, so two hosts of one mission
+/// disagreeing here is two hosts targeting different entities from the same
+/// script line.
+fn world_name_to_uuid(app: &App) -> Vec<(String, String)> {
+    let Some(config) = app.world().get_resource::<WorldConfig>() else {
+        return Vec::new();
+    };
+    let mut pairs: Vec<(String, String)> = config
+        .name_to_uuid
+        .iter()
+        .map(|(name, uuid)| (name.clone(), uuid.clone()))
+        .collect();
+    pairs.sort();
+    pairs
 }
 
 #[test]
@@ -155,7 +211,7 @@ fn a_host_with_no_world_boots_into_an_empty_lobby_holding_the_catalogue() {
     // And no world means no world entities — the empty lobby is genuinely empty
     // rather than half-populated.
     assert!(
-        entity_uuids(&mut app).is_empty(),
+        entity_identities(&mut app).is_empty(),
         "an empty lobby spawns no simulation entities"
     );
 }
@@ -206,7 +262,7 @@ fn a_selection_pair_loads_the_world_and_the_mission_starts() {
         .count();
     assert_eq!(local_ships, 1, "the player's hull is in the world");
     assert!(
-        !entity_uuids(&mut app).is_empty(),
+        !entity_identities(&mut app).is_empty(),
         "the world's own entities spawned"
     );
 }
@@ -338,17 +394,38 @@ fn a_runtime_load_mints_the_same_world_entity_ids_as_a_boot_load() {
     select(&mut runtime, "phone-1", &scenario_id, &hull);
     pump(&mut runtime, 4);
 
-    let booted_ids = entity_uuids(&mut booted);
+    let booted_ids = entity_identities(&mut booted);
     assert!(
         !booted_ids.is_empty(),
         "the boot host spawned the world's entities"
     );
     assert_eq!(
-        entity_uuids(&mut runtime),
+        entity_identities(&mut runtime),
         booted_ids,
         "a world loaded at runtime must mint exactly the ids the same world \
-         loaded at boot mints — the mint is parked at tick 0 across the spawn \
-         pass precisely so the uuids do not carry the operator's reaction time"
+         loaded at boot mints, AND mint each one to the same entity — the mint \
+         is parked at tick 0 across the spawn pass precisely so the uuids do \
+         not carry the operator's reaction time, and the ids are folded into \
+         the authoritative digest against the entity that holds them"
+    );
+
+    // The same claim through the map the scenario runtime resolves names with.
+    // It is written by `spawn_world_entities` alone, so it re-keys the instant
+    // the `setup_world < spawn_world_entities` pin flips and the anonymous
+    // spawn pass takes the sequence numbers the named one was minting from.
+    let booted_names = world_name_to_uuid(&booted);
+    assert!(
+        !booted_names.is_empty(),
+        "the picked world must author at least one named [[entity]] for this \
+         half of the test to mean anything"
+    );
+    assert_eq!(
+        world_name_to_uuid(&runtime),
+        booted_names,
+        "the world's name -> uuid map must be identical on both paths — it is \
+         what `world::dispatch`, `comms::scripted` and `civilian::server` \
+         resolve an authored name through, so a disagreement here is two hosts \
+         of one mission targeting different entities from the same script line"
     );
 }
 
@@ -533,11 +610,82 @@ fn a_participant_picks_the_scenario_and_readies_the_mission_through_the_ordinary
         "loading a world does not start the mission — readying does"
     );
 
-    // Now the ordinary ready path: claim a station, ready up, and the collective
-    // auto-start takes the host into the mission.
-    let station = app
-        .world()
-        .resource::<project_phoenix::lobby::stations_config::ShipStations>()
+    // The load is not silent. This phone identified BEFORE the pick, so the
+    // `Welcome` it holds was built against `load_ship_config_from_disk`'s
+    // battleship fallback roster and a Default `ShipClientConfig` — a hull this
+    // host is not flying. The load has just replaced both, and nothing else on
+    // this path would say so: `gui/lobby-state.js`'s fully-locked-catalogue
+    // branch resumes the lobby on whatever `Welcome` it already has, because
+    // that branch was written for issue #756's round-2 world REUSE, where the
+    // roster genuinely has not moved. A native runtime load is round ONE, and
+    // the browser's round one re-welcomes for free (its Bevy app, and therefore
+    // its `handle_identify`, does not exist until after `wasm_init`).
+    //
+    // So the drained outbound must carry a fresh `Welcome`, and its roster must
+    // be the CHOSEN hull's. Everything below claims a seat from THAT roster
+    // rather than from the host's own `ShipStations` resource — reading the
+    // resource is how a test walks straight past this bug, because the resource
+    // is right and only the client's copy is wrong.
+    let dispatched = handle.drain_outbound();
+    let (welcome_stations, welcome_config) = dispatched
+        .iter()
+        .rev()
+        .find_map(|(_, msg, _)| match msg {
+            ServerMessage::Welcome {
+                ship_stations,
+                ship_config,
+                ..
+            } => Some((ship_stations.clone(), ship_config.clone())),
+            _ => None,
+        })
+        .expect(
+            "a runtime world load must re-Welcome every connected participant — \
+             a phone welcomed before the pick is holding the fallback hull's roster",
+        );
+
+    let authored = project_phoenix::entities::include_resolve::load_entity_config(&hull)
+        .expect("the selected hull parses");
+    assert_eq!(
+        welcome_stations
+            .stations
+            .iter()
+            .map(|s| s.id.0.clone())
+            .collect::<Vec<_>>(),
+        authored
+            .ship_config
+            .as_ref()
+            .expect("the selected hull authors [[station]] blocks")
+            .stations
+            .iter()
+            .map(|s| s.id.0.clone())
+            .collect::<Vec<_>>(),
+        "the re-Welcome carries the chosen hull's station roster, not the \
+         world-less lobby's `load_ship_config_from_disk` battleship fallback"
+    );
+    // And the client config with it. The world-less lobby's fallback here is a
+    // different hull again — `update_session_with_config` reads the literal
+    // `alliance_cruiser` path when no `SelectedShipResource` has been installed
+    // — so this is an equality against the CHOSEN hull rather than a mere
+    // "not the Default", which the cruiser's own numbers would also satisfy.
+    let expected_range = authored
+        .helm_console
+        .as_ref()
+        .map(|hc| hc.effective_radar_range())
+        .unwrap_or_default();
+    assert!(
+        expected_range > 0.0,
+        "{hull} must author a helm radar range for this assertion to mean anything"
+    );
+    assert_eq!(
+        welcome_config.helm_radar_range, expected_range,
+        "the re-Welcome carries the chosen hull's authored client config"
+    );
+
+    // Now the ordinary ready path: claim a station from the roster the client
+    // was actually told about, ready up, and the collective auto-start takes the
+    // host into the mission. `handle_select_station` validates against the REAL
+    // roster, so a claim from a phantom roster would be silently ignored.
+    let station = welcome_stations
         .stations
         .first()
         .expect("the chosen hull authors stations")
@@ -584,6 +732,272 @@ fn a_participant_picks_the_scenario_and_readies_the_mission_through_the_ordinary
     );
 }
 
+/// A world-less host that has loaded its world — the state both schedules have
+/// been initialized in, which `Schedule::systems` requires.
+fn loaded_lobby_host() -> App {
+    let preload = preload();
+    let mut cfg = lobby_config();
+    cfg.solo = true;
+    let mut app = build_native_host_app(&cfg, &preload).expect("a world-less host assembles");
+    pump(&mut app, 4);
+    let (scenario_id, hull) = pick();
+    select(&mut app, "phone-1", &scenario_id, &hull);
+    pump(&mut app, 60);
+    assert!(
+        app.world().get_resource::<WorldConfig>().is_some(),
+        "the runtime load ran"
+    );
+    app
+}
+
+/// Every system registered in `label`'s schedule that belongs to this crate,
+/// by fully-qualified name.
+///
+/// Bevy's auto-inserted sync points and any third-party system are filtered out
+/// by the `project_phoenix::` prefix — what is being compared is *our* two
+/// registrations, not the executor's plumbing.
+fn crate_systems(app: &App, label: impl bevy::ecs::schedule::ScheduleLabel) -> BTreeSet<String> {
+    app.get_schedule(label)
+        .expect("the schedule is registered on this app")
+        .systems()
+        .expect("the schedule has run at least once, so its executor is initialized")
+        .map(|(_, system)| system.name().to_string())
+        .filter(|name| name.starts_with("project_phoenix::"))
+        .collect()
+}
+
+#[test]
+fn the_runtime_spawn_pass_cannot_silently_fall_behind_the_startup_chain() {
+    // `RuntimeWorldLoad` is a hand-written restatement of the order `Startup`
+    // produces, which means it is a DUPLICATE of a list that lives somewhere
+    // else — and the failure mode of a duplicate is not that it says something
+    // wrong but that it stops saying something the original now says. Add a
+    // system to `WorldPlugin`'s `Startup` chain and a `--world` host runs it
+    // while a runtime-loaded host silently does not: same world file, two
+    // different worlds.
+    //
+    // The ids test above cannot catch that on its own. A system that spawns
+    // nothing (a resource init, a runtime merge, an objective seed) moves no
+    // uuid at all; it just fails to happen on one path.
+    //
+    // So this compares the two REGISTRATIONS rather than their effects. It is
+    // structural in the only sense that matters here: nobody has to remember to
+    // update it, because it reads both schedules out of a live app.
+    let app = loaded_lobby_host();
+    let startup = crate_systems(&app, Startup);
+    let runtime = crate_systems(&app, RuntimeWorldLoad);
+
+    assert!(
+        startup
+            .iter()
+            .any(|name| name.ends_with("::spawn_world_entities")),
+        "system names came back as placeholders — this guard is blind without \
+         `bevy/debug`, which Cargo.toml declares as a dev-dependency for exactly \
+         this reason. Names seen: {startup:?}"
+    );
+
+    // 1. Everything `WorldPlugin` puts in its `Startup` chain. That plugin's
+    //    whole chain lives in `world::server`, so the module prefix IS the
+    //    membership test — no hand-kept list to fall behind.
+    const WORLD_CHAIN: &str = "project_phoenix::world::server::";
+    let missing: Vec<&str> = startup
+        .iter()
+        .filter(|name| name.starts_with(WORLD_CHAIN))
+        .filter(|name| !runtime.contains(*name))
+        .map(String::as_str)
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "these `world::server` systems run at Startup on a --world host but \
+         NOT on the runtime path, so a runtime-loaded host would silently skip \
+         them — add them to `RuntimeWorldLoad` in src/native_host/world_load.rs \
+         at the position `Startup`'s topological order gives them: {missing:?}"
+    );
+
+    // 2. The systems pinned INTO that chain from outside `world::server` —
+    //    `setup_world`'s three ordering edges in `server_app::registration`, and
+    //    the three hull-reading tail systems. The prefix test above cannot see
+    //    them, so they are named.
+    for pinned in [
+        "::setup_world",
+        "::update_session_with_config",
+        "::resolve_reference_grid_config",
+        "::spawn_viewscreen_radar_widgets",
+    ] {
+        assert!(
+            runtime.iter().any(|name| name.ends_with(pinned)),
+            "`{pinned}` runs at Startup against the hull the host booted with; \
+             the runtime path has to run it against the hull that was CHOSEN"
+        );
+    }
+
+    // 3. Nothing on the runtime path that a boot host never runs — with one
+    //    deliberate exception. `Startup` already spawned the viewscreen radar
+    //    widgets once, against whatever hull the world-less lobby defaulted to,
+    //    so the runtime pass takes them down before re-spawning; a boot host has
+    //    nothing to take down.
+    let extra: Vec<&str> = runtime
+        .iter()
+        .filter(|name| !startup.contains(*name))
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        extra,
+        vec!["project_phoenix::server::radar::despawn_viewscreen_radar_widgets"],
+        "a system that runs only on the runtime path is a second world-load \
+         design, not a restatement of the first"
+    );
+}
+
+/// A catalogue that publishes `world` under a synthetic scenario id, alongside
+/// every real entry — so a test can drive a doomed pick and then a good one
+/// through the ordinary arbiter.
+fn catalog_plus(id: &str, world: &str, ships: &[String]) -> ScenarioCatalog {
+    let mut catalog = catalog();
+    catalog
+        .scenarios
+        .push(project_phoenix::world::manifest::ScenarioCatalogEntry {
+            id: id.to_string(),
+            world: world.to_string(),
+            label: None,
+            description: None,
+            ships: ships
+                .iter()
+                .map(|path| project_phoenix::world::config::AvailableShipEntry {
+                    template_path: path.clone(),
+                    label: None,
+                })
+                .collect(),
+            origin: None,
+        });
+    catalog
+}
+
+/// Drive `app`'s lobby with a doomed pick and then a good one, asserting the
+/// host is genuinely retryable in between.
+///
+/// The shared body of the failure-class tests below: what every one of them
+/// claims is the same claim — a refused world leaves a clean lobby, not a host
+/// wedged holding half a world.
+fn a_refused_pick_then_a_good_one(app: &mut App, bad_id: &str, bad_hull: &str) {
+    select(app, "phone-1", bad_id, bad_hull);
+    pump(app, 30);
+
+    assert!(
+        app.world().get_resource::<WorldConfig>().is_none(),
+        "a refused world must not leave a `WorldConfig` behind — with one \
+         present `awaiting_world` is false and the lobby is deaf to every later \
+         pick"
+    );
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::Lobby,
+        "the host stays in the lobby"
+    );
+    assert_eq!(
+        app.world().resource::<LobbySelection>().0,
+        project_phoenix::lobby::scenario_arbiter::ScenarioSelection::default(),
+        "the refused selection is released so another participant can pick"
+    );
+    assert!(
+        !project_phoenix::content_ledger::is_frozen(),
+        "the content ledger must not stay frozen over a world this host does \
+         not have — `frozen_or_live` is what `snapshot::versions` answers a \
+         fleet peer's content check with, and what a save is bound to"
+    );
+
+    // And the whole point of unwinding rather than latching: the next pick works.
+    let (scenario_id, hull) = pick();
+    select(app, "phone-2", &scenario_id, &hull);
+    pump(app, 120);
+    assert!(
+        app.world().get_resource::<WorldConfig>().is_some(),
+        "a good selection after the refused one loads normally"
+    );
+    assert!(
+        project_phoenix::content_ledger::is_frozen(),
+        "and the good load freezes the ledger over ITS content"
+    );
+}
+
+#[test]
+fn a_world_file_that_cannot_be_read_leaves_a_pickable_lobby() {
+    // The first failure class the runtime path has and the boot path does not:
+    // `--world` naming an unreadable file dies at the prompt, but here the pick
+    // came from a participant and there is a lobby to go back to. The refusal
+    // happens inside `boot::ingest_world`, AFTER it has reset the content ledger
+    // and BEFORE it freezes one — the earliest of the three failure points.
+    let preload = preload();
+    let mut cfg = lobby_config();
+    cfg.solo = true;
+    cfg.catalog = catalog_plus(
+        "unreadable_world",
+        "assets/worlds/__no_such_world_exists__.toml",
+        &[pick().1],
+    );
+    let mut app = build_native_host_app(&cfg, &preload).expect("a world-less host assembles");
+    pump(&mut app, 4);
+    a_refused_pick_then_a_good_one(&mut app, "unreadable_world", &pick().1);
+}
+
+#[test]
+fn a_malformed_world_file_leaves_a_pickable_lobby() {
+    // The second: the file reads and does not parse. Written to the OS temp
+    // directory rather than into `assets/worlds/` so the repository's own
+    // catalogue, which every other test in this file reads, is untouched —
+    // `world::load::FsReader` is `std::fs::read_to_string`, so an absolute path
+    // is as good as a relative one.
+    let broken = std::env::temp_dir().join("phoenix_1326_malformed_world.toml");
+    std::fs::write(&broken, "[global\nthis is not toml = = =\n")
+        .expect("the temp directory is writable");
+
+    let preload = preload();
+    let mut cfg = lobby_config();
+    cfg.solo = true;
+    cfg.catalog = catalog_plus("malformed_world", &broken.to_string_lossy(), &[pick().1]);
+    let mut app = build_native_host_app(&cfg, &preload).expect("a world-less host assembles");
+    pump(&mut app, 4);
+    a_refused_pick_then_a_good_one(&mut app, "malformed_world", &pick().1);
+
+    let _ = std::fs::remove_file(&broken);
+}
+
+#[test]
+fn a_hull_with_no_station_blocks_leaves_a_pickable_lobby() {
+    // The third, and the latest of the three: the world ingests cleanly and the
+    // HULL is refused. By then `ingest_world` has inserted `WorldConfig` +
+    // `PreCompiledScripts` and frozen the ledger, and `install_world_selection`
+    // has re-recorded the hull and frozen it AGAIN — all before the
+    // `[[station]]` check that fails. Everything that unwinding has to undo is
+    // in place at this point and nowhere else, which is what makes this the
+    // failure worth pinning.
+    //
+    // `assets/entities/planet_earth.toml` is real content the picked world
+    // itself declares — so the preload has cached it and it reaches that check,
+    // rather than being turned away by the template-cache gate before it.
+    const NO_STATIONS: &str = "assets/entities/planet_earth.toml";
+    assert!(
+        project_phoenix::entities::include_resolve::load_entity_config(NO_STATIONS)
+            .expect("the planet template parses")
+            .ship_config
+            .is_none(),
+        "{NO_STATIONS} must author no [[station]] blocks for this test to \
+         provoke the failure it names"
+    );
+
+    let world = scenario_arbiter::find_scenario(&catalog(), SCENARIO)
+        .expect("the shipped catalogue publishes the flagship scenario")
+        .world
+        .clone();
+    let preload = preload();
+    let mut cfg = lobby_config();
+    cfg.solo = true;
+    cfg.catalog = catalog_plus("stationless_hull", &world, &[NO_STATIONS.to_string()]);
+    let mut app = build_native_host_app(&cfg, &preload).expect("a world-less host assembles");
+    pump(&mut app, 4);
+    a_refused_pick_then_a_good_one(&mut app, "stationless_hull", NO_STATIONS);
+}
+
 #[test]
 fn an_explicit_hull_outranks_the_lobbys_pick() {
     // `--ship` given without `--world` (issue #1326 makes that combination
@@ -613,5 +1027,70 @@ fn an_explicit_hull_outranks_the_lobbys_pick() {
             .0,
         project_phoenix::entities::include_resolve::canonical_template_path(&pinned),
         "--ship outranks the arbitrated hull"
+    );
+}
+
+#[test]
+fn a_pinned_hull_completes_the_selection_on_the_scenario_lock_alone() {
+    // `--lobby --ship X` is the scripted-run combination, and before this a
+    // participant still had to send a `SelectPlayerShip` the host would then
+    // discard — so a script that pinned its hull and picked only a scenario sat
+    // in the lobby forever waiting for a message whose content could not matter.
+    // A pinned hull now SATISFIES the hull half.
+    let preload = preload();
+    let (scenario_id, hull) = pick();
+    let mut cfg = lobby_config();
+    cfg.solo = true;
+    cfg.ship_path = Some(hull.clone());
+    let mut app = build_native_host_app(&cfg, &preload).expect("a world-less host assembles");
+
+    let handle = LoopbackHandle::default();
+    app.insert_resource(NativeTransportLink::new(handle.transport()));
+    pump(&mut app, 4);
+
+    // The scenario, and ONLY the scenario.
+    app.world_mut().write_message(InboundMessage {
+        token: "phone-1".to_string(),
+        msg: ClientMessage::SelectScenario { scenario_id },
+    });
+    pump(&mut app, 60);
+
+    assert!(
+        app.world().get_resource::<WorldConfig>().is_some(),
+        "a scenario lock alone completes the pick when --ship already named the hull"
+    );
+    assert_eq!(
+        app.world()
+            .resource::<project_phoenix::lobby::SelectedShipResource>()
+            .0,
+        project_phoenix::entities::include_resolve::canonical_template_path(&hull),
+        "and the hull flown is the pinned one"
+    );
+
+    // The catalogue the phones fold says so too, so their picker shows the
+    // decision that has already been made rather than a choice this host would
+    // overrule. `gui/lobby-state.js` reads both fields being set as "selection
+    // done" and leaves the picker on it.
+    let locked = handle
+        .drain_outbound()
+        .into_iter()
+        .filter_map(|(_, msg, _)| match msg {
+            ServerMessage::ScenarioCatalog {
+                locked_scenario,
+                locked_ship,
+                ..
+            } => Some((locked_scenario, locked_ship)),
+            _ => None,
+        })
+        .next_back()
+        .expect("the lobby publishes its catalogue");
+    assert_eq!(
+        locked.1.as_deref(),
+        Some(hull.as_str()),
+        "the published catalogue reports the pinned hull as locked"
+    );
+    assert!(
+        locked.0.is_some(),
+        "and the arbitrated scenario alongside it"
     );
 }

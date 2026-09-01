@@ -21,13 +21,26 @@
 //!
 //! | `gui/scenario-arbiter.js` | here |
 //! |---|---|
-//! | `normalizeSelection` | [`ScenarioSelection::default`] |
+//! | `normalizeSelection` | [`ScenarioSelection::normalized`] |
 //! | `findScenario` | [`find_scenario`] |
 //! | `selectScenario` | [`select_scenario`] |
 //! | `selectPlayerShip` | [`select_player_ship`] |
 //! | `isComplete` | [`ScenarioSelection::is_complete`] |
 //! | `worldPathFor` | [`world_path_for`] |
 //! | `curatedShipsFor` | [`curated_ships_for`] |
+//!
+//! # The table that keeps them honest
+//!
+//! A transcription held together by a doc comment drifts, and this one had
+//! already: `normalizeSelection` was mapped to `Default` — i.e. to nothing —
+//! and its rule that a **falsy field is not a lock** was missing here, so an
+//! empty id locked a native host and left a browser host open.
+//!
+//! `tests/fixtures/scenario-arbiter-parity.json` is the fix: one case table
+//! read by this module's own tests AND by
+//! `tests/client/scenario-arbiter-parity.test.js`, which drives the JS. Neither
+//! side owns the cases, and a case only one side can satisfy is a bug in that
+//! side rather than a reason to fork the table.
 //!
 //! The rules, restated so a reader need not open the JS: **the first request
 //! that validates against the pre-load catalogue wins.** There is no voting and
@@ -57,10 +70,38 @@ pub struct ScenarioSelection {
 }
 
 impl ScenarioSelection {
+    /// The locked scenario id, or `None` while nothing is locked.
+    ///
+    /// An **empty string is not a lock**. That is `normalizeSelection`'s rule in
+    /// the JS — every field is coerced through `|| null`, so `''` reads as
+    /// unlocked — and it was the one line of the arbiter this transcription
+    /// originally left out. Without it a manifest entry with an empty `id` locks
+    /// a native host into a selection the browser host would still treat as
+    /// open, and the two arbiters answer the same request differently.
+    pub fn scenario(&self) -> Option<&str> {
+        self.scenario_id.as_deref().filter(|id| !id.is_empty())
+    }
+
+    /// The locked hull's `template_path`, under [`scenario`](Self::scenario)'s
+    /// rule.
+    pub fn ship(&self) -> Option<&str> {
+        self.template_path.as_deref().filter(|p| !p.is_empty())
+    }
+
+    /// This selection with every falsy field coerced to `None` —
+    /// `normalizeSelection` in the JS, which returns the normalised object on
+    /// *every* path including `ignored` and `rejected`.
+    pub fn normalized(&self) -> ScenarioSelection {
+        ScenarioSelection {
+            scenario_id: self.scenario().map(str::to_string),
+            template_path: self.ship().map(str::to_string),
+        }
+    }
+
     /// True once both a scenario and a hull are locked — the moment the world
     /// may be loaded. `isComplete` in the JS.
     pub fn is_complete(&self) -> bool {
-        self.scenario_id.is_some() && self.template_path.is_some()
+        self.scenario().is_some() && self.ship().is_some()
     }
 }
 
@@ -100,11 +141,11 @@ pub fn select_scenario(
     catalog: &ScenarioCatalog,
     scenario_id: &str,
 ) -> (SelectionOutcome, ScenarioSelection) {
-    if selection.scenario_id.is_some() {
-        return (SelectionOutcome::Ignored, selection.clone());
+    if selection.scenario().is_some() {
+        return (SelectionOutcome::Ignored, selection.normalized());
     }
     if find_scenario(catalog, scenario_id).is_none() {
-        return (SelectionOutcome::Rejected, selection.clone());
+        return (SelectionOutcome::Rejected, selection.normalized());
     }
     (
         SelectionOutcome::Accepted,
@@ -124,17 +165,17 @@ pub fn select_player_ship(
     catalog: &ScenarioCatalog,
     template_path: &str,
 ) -> (SelectionOutcome, ScenarioSelection) {
-    let Some(scenario_id) = selection.scenario_id.as_deref() else {
-        return (SelectionOutcome::Rejected, selection.clone());
+    let Some(scenario_id) = selection.scenario() else {
+        return (SelectionOutcome::Rejected, selection.normalized());
     };
-    if selection.template_path.is_some() {
-        return (SelectionOutcome::Ignored, selection.clone());
+    if selection.ship().is_some() {
+        return (SelectionOutcome::Ignored, selection.normalized());
     }
     let Some(entry) = find_scenario(catalog, scenario_id) else {
-        return (SelectionOutcome::Rejected, selection.clone());
+        return (SelectionOutcome::Rejected, selection.normalized());
     };
     if !entry.ships.iter().any(|s| s.template_path == template_path) {
-        return (SelectionOutcome::Rejected, selection.clone());
+        return (SelectionOutcome::Rejected, selection.normalized());
     }
     (
         SelectionOutcome::Accepted,
@@ -151,7 +192,7 @@ pub fn world_path_for<'a>(
     catalog: &'a ScenarioCatalog,
     selection: &ScenarioSelection,
 ) -> Option<&'a str> {
-    let id = selection.scenario_id.as_deref()?;
+    let id = selection.scenario()?;
     find_scenario(catalog, id).map(|entry| entry.world.as_str())
 }
 
@@ -166,7 +207,7 @@ pub fn world_path_for<'a>(
 ///
 /// [`NativeHostConfig::curated_ships`]: crate::native_host::NativeHostConfig::curated_ships
 pub fn curated_ships_for(catalog: &ScenarioCatalog, selection: &ScenarioSelection) -> Vec<String> {
-    let Some(id) = selection.scenario_id.as_deref() else {
+    let Some(id) = selection.scenario() else {
         return Vec::new();
     };
     find_scenario(catalog, id)
@@ -365,6 +406,146 @@ mod tests {
             curated_ships_for(&catalog(), &ScenarioSelection::default()).is_empty(),
             "nothing locked means unrestricted, matching ScenarioEntry::ships"
         );
+    }
+
+    // ── The shared parity table ─────────────────────────────────────────────
+    //
+    // `tests/fixtures/scenario-arbiter-parity.json` is one case table read by
+    // BOTH implementations of this rule set: these two tests, and
+    // `tests/client/scenario-arbiter-parity.test.js` driving
+    // `gui/scenario-arbiter.js`. Until it existed the two arbiters were held
+    // together by prose and by each having its own hand-written cases — so a
+    // rule could move on one side with every test still green, which is exactly
+    // how the empty-string handling below came apart.
+    //
+    // `include_str!` rather than a runtime read: the path is checked at compile
+    // time, so the fixture cannot be moved or renamed without this failing to
+    // build, and a green run cannot mean "the file was not found".
+
+    const PARITY_FIXTURE: &str = include_str!("../../tests/fixtures/scenario-arbiter-parity.json");
+
+    fn parity_fixture() -> serde_json::Value {
+        serde_json::from_str(PARITY_FIXTURE).expect("the parity fixture is valid JSON")
+    }
+
+    fn parity_catalog(fixture: &serde_json::Value) -> ScenarioCatalog {
+        ScenarioCatalog {
+            scenarios: fixture["catalog"]
+                .as_array()
+                .expect("the fixture carries a `catalog` array")
+                .iter()
+                .map(|entry| ScenarioCatalogEntry {
+                    id: entry["id"].as_str().expect("every entry has an id").into(),
+                    world: entry["world"]
+                        .as_str()
+                        .expect("every entry names a world")
+                        .into(),
+                    label: entry["label"].as_str().map(str::to_string),
+                    description: entry["description"].as_str().map(str::to_string),
+                    ships: entry["ships"]
+                        .as_array()
+                        .expect("every entry has a ships array")
+                        .iter()
+                        .map(|s| AvailableShipEntry {
+                            template_path: s["template_path"]
+                                .as_str()
+                                .expect("every hull has a template_path")
+                                .into(),
+                            label: s["label"].as_str().map(str::to_string),
+                        })
+                        .collect(),
+                    origin: None,
+                })
+                .collect(),
+        }
+    }
+
+    /// A selection as the table writes it: `null` is unlocked, and `""` is a
+    /// deliberate case rather than a typo.
+    fn parity_selection(value: &serde_json::Value) -> ScenarioSelection {
+        ScenarioSelection {
+            scenario_id: value["scenario_id"].as_str().map(str::to_string),
+            template_path: value["template_path"].as_str().map(str::to_string),
+        }
+    }
+
+    /// The JS's own outcome strings, which are what the table records.
+    fn parity_outcome(outcome: SelectionOutcome) -> &'static str {
+        match outcome {
+            SelectionOutcome::Accepted => "accepted",
+            SelectionOutcome::Ignored => "ignored",
+            SelectionOutcome::Rejected => "rejected",
+        }
+    }
+
+    #[test]
+    fn scenario_arbiter_parity_outcomes() {
+        let fixture = parity_fixture();
+        let catalog = parity_catalog(&fixture);
+        let cases = fixture["cases"]
+            .as_array()
+            .expect("the fixture carries a `cases` array");
+        assert!(
+            !cases.is_empty(),
+            "a fixture nothing reads proves nothing about parity"
+        );
+        for case in cases {
+            let name = case["name"].as_str().unwrap_or("<unnamed case>");
+            let held = parity_selection(&case["selection"]);
+            let argument = case["argument"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{name}: every case names an argument"));
+            let (outcome, after) = match case["call"].as_str() {
+                Some("select_scenario") => select_scenario(&held, &catalog, argument),
+                Some("select_player_ship") => select_player_ship(&held, &catalog, argument),
+                other => panic!("{name}: unknown call {other:?}"),
+            };
+            assert_eq!(
+                parity_outcome(outcome),
+                case["outcome"].as_str().unwrap_or("<missing>"),
+                "{name}: outcome"
+            );
+            assert_eq!(
+                after,
+                parity_selection(&case["selection_after"]),
+                "{name}: the selection the call returns"
+            );
+        }
+    }
+
+    #[test]
+    fn scenario_arbiter_parity_derived_answers() {
+        let fixture = parity_fixture();
+        let catalog = parity_catalog(&fixture);
+        let rows = fixture["derived"]
+            .as_array()
+            .expect("the fixture carries a `derived` array");
+        assert!(!rows.is_empty(), "a fixture nothing reads proves nothing");
+        for row in rows {
+            let name = row["name"].as_str().unwrap_or("<unnamed row>");
+            let selection = parity_selection(&row["selection"]);
+            assert_eq!(
+                selection.is_complete(),
+                row["is_complete"].as_bool().unwrap_or(false),
+                "{name}: is_complete"
+            );
+            assert_eq!(
+                world_path_for(&catalog, &selection),
+                row["world_path"].as_str(),
+                "{name}: world_path_for"
+            );
+            let expected: Vec<String> = row["curated_ships"]
+                .as_array()
+                .expect("every derived row lists curated_ships")
+                .iter()
+                .map(|v| v.as_str().expect("a hull path").to_string())
+                .collect();
+            assert_eq!(
+                curated_ships_for(&catalog, &selection),
+                expected,
+                "{name}: curated_ships_for"
+            );
+        }
     }
 
     #[test]

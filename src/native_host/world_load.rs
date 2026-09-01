@@ -43,11 +43,27 @@
 //!   topological order stated explicitly — including the
 //!   `compile_world_scripts < setup_world < spawn_world_entities` pin
 //!   `server_app::registration` expresses with `.after`/`.before` edges, and
-//!   whose flip once moved the authoritative digest.
+//!   whose flip once moved the authoritative digest. Because that chain is a
+//!   DUPLICATE of a list that lives elsewhere, it is guarded structurally:
+//!   `the_runtime_spawn_pass_cannot_silently_fall_behind_the_startup_chain`
+//!   (`tests/native_host_lobby.rs`) reads both schedules out of a live app and
+//!   asserts the runtime set covers `WorldPlugin`'s `Startup` chain, so a system
+//!   added there cannot silently not-run here.
 //! * The ids those spawns mint are minted from a [`WorldIdMint`] parked at tick
 //!   0, then the live mint is restored — see [`park_mint`]. Without that, every
 //!   world entity's id would carry the tick the operator happened to press the
 //!   button on, and two hosts of one mission could not agree on a single uuid.
+//!
+//! # What the participants are told
+//!
+//! A world landing is not a private event. A phone that identified before the
+//! pick was welcomed with the world-less lobby's FALLBACK roster and client
+//! config, so [`apply_pending_world_load`] re-publishes a fresh `Welcome` (and
+//! the `ShipManual` that always accompanies one) to everyone the moment the load
+//! succeeds — see [`republish_loaded_world`], which also explains why the seats
+//! are cleared first and why a second `Welcome` is safe. A load that is REFUSED
+//! publishes the catalogue again instead, over a lobby put back to genuinely
+//! world-less by [`unwind_failed_load`].
 //!
 //! What is *not* claimed: that a runtime-loaded host reaches `InProgress` on the
 //! same tick a `--solo --world` host does. It does not, and it never could — the
@@ -58,7 +74,7 @@
 use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::*;
 
-use crate::core::messages::{ClientMessage, ServerMessage};
+use crate::core::messages::{ClientMessage, GamePhase, ServerMessage};
 use crate::lobby::handler::Target;
 use crate::lobby::scenario_arbiter::{self, ScenarioSelection, SelectionOutcome};
 use crate::lobby::stations_config::ShipStations;
@@ -100,6 +116,14 @@ pub struct LobbyScenarioCatalog(pub ScenarioCatalog);
 #[derive(Resource, Clone, Debug)]
 pub struct LobbyBootSettings {
     /// `--ship`, if one was given. Wins over the arbitrated hull.
+    ///
+    /// And therefore **satisfies the hull half of the selection**: with one
+    /// pinned, a scenario lock alone completes the pick and the world loads. The
+    /// alternative was asking a participant for a `SelectPlayerShip` this host
+    /// would then discard — a scripted `--lobby --ship X` run would hang waiting
+    /// for a message whose content cannot matter. The catalogue phones fold
+    /// reports it as the locked hull for the same reason: a picker offering a
+    /// choice the host has already overruled is a lie the phone acts on.
     pub ship_path: Option<String>,
     /// `--seed`, which outranks the world's `[global] seed`.
     pub seed: Option<u64>,
@@ -236,6 +260,14 @@ fn drain_scenario_selection(
     mut commands: Commands,
     log: Option<Res<LogFilterConfig>>,
 ) {
+    // `--ship` given without `--world` (issue #1326 makes that combination
+    // legal) already outranks whatever `SelectPlayerShip` locks, so asking a
+    // participant to send one anyway would be asking for a message the host
+    // discards. A pinned hull therefore SATISFIES the hull half of the
+    // selection: the scenario lock alone completes it, and the catalogue the
+    // phones fold reports the pinned hull as the locked one so their picker
+    // shows the decision that has actually been made rather than a live choice.
+    let pinned_ship: Option<String> = settings.as_ref().and_then(|s| s.ship_path.clone());
     let mut changed = false;
     let mut greet: Vec<String> = Vec::new();
 
@@ -270,16 +302,21 @@ fn drain_scenario_selection(
     for token in greet {
         outbox.0.push((
             Target::Token(token),
-            catalog_message(&catalog.0, &selection.0),
+            catalog_message(&catalog.0, &selection.0, pinned_ship.as_deref()),
         ));
     }
     if changed {
-        outbox
-            .0
-            .push((Target::All, catalog_message(&catalog.0, &selection.0)));
+        outbox.0.push((
+            Target::All,
+            catalog_message(&catalog.0, &selection.0, pinned_ship.as_deref()),
+        ));
     }
 
-    if !changed || !selection.0.is_complete() {
+    // Complete when the arbiter locked both halves, OR when it locked the
+    // scenario and `--ship` already supplied the other.
+    let complete =
+        selection.0.is_complete() || (selection.0.scenario().is_some() && pinned_ship.is_some());
+    if !changed || !complete {
         return;
     }
     let Some(world_path) = scenario_arbiter::world_path_for(&catalog.0, &selection.0) else {
@@ -289,20 +326,29 @@ fn drain_scenario_selection(
         world_path: world_path.to_string(),
         // `--ship` still outranks the lobby's pick, the way it outranks the
         // world's default hull on the `--world` path.
-        ship_path: settings
-            .and_then(|s| s.ship_path.clone())
-            .or_else(|| selection.0.template_path.clone()),
+        ship_path: pinned_ship.or_else(|| selection.0.ship().map(str::to_string)),
         curated_ships: scenario_arbiter::curated_ships_for(&catalog.0, &selection.0),
     });
 }
 
 /// The catalogue message a phone folds through `gui/lobby-state.js`, identical
 /// in shape to the one `server.html` synthesises before its own world load.
-fn catalog_message(catalog: &ScenarioCatalog, selection: &ScenarioSelection) -> ServerMessage {
+///
+/// `pinned_ship` is `--ship`. It is reported as the locked hull because it *is*
+/// the hull this host will fly whatever a phone picks, and a picker offering a
+/// choice the host has already overruled is a lie the phone acts on.
+fn catalog_message(
+    catalog: &ScenarioCatalog,
+    selection: &ScenarioSelection,
+    pinned_ship: Option<&str>,
+) -> ServerMessage {
     ServerMessage::ScenarioCatalog {
         scenarios: scenario_arbiter::catalog_wire(catalog),
-        locked_scenario: selection.scenario_id.clone(),
-        locked_ship: selection.template_path.clone(),
+        locked_scenario: selection.scenario().map(str::to_string),
+        locked_ship: selection
+            .ship()
+            .map(str::to_string)
+            .or_else(|| pinned_ship.map(str::to_string)),
     }
 }
 
@@ -340,40 +386,169 @@ fn apply_pending_world_load(world: &mut World) {
     let Some(pending) = world.remove_resource::<PendingWorldLoad>() else {
         return;
     };
-    if let Err(error) = load_selected_world(world, &pending) {
-        // Refuse the selection, do not refuse the host. An operator who picked a
-        // scenario whose content is broken should be able to pick another one —
-        // the boot-time equivalent (`--world` naming a broken world) fails at
-        // the prompt because there is a prompt to fail at; here there is a lobby
-        // to go back to.
-        let log = world.get_resource::<LogFilterConfig>().cloned();
-        crate::perror!(
-            log,
-            LogCat::World,
-            "loading {} failed, staying in the lobby: {error}",
-            pending.world_path
-        );
-        // Put the lobby back to genuinely world-less. `install_world_selection`
-        // can fail AFTER `ingest_world` has already inserted these two (an
-        // uncached hull, a hull with no `[[station]]` blocks), and leaving them
-        // behind would take `awaiting_world` false — a host holding a world it
-        // never spawned, unable to accept another pick. Nothing has spawned yet
-        // at either failure point, so removing them is the whole undo.
-        world.remove_resource::<crate::world::config::WorldConfig>();
-        world.remove_resource::<crate::world::server::PreCompiledScripts>();
-        if let Some(mut selection) = world.get_resource_mut::<LobbySelection>() {
-            selection.0 = ScenarioSelection::default();
-        }
-        if let (Some(catalog), Some(selection)) = (
-            world.get_resource::<LobbyScenarioCatalog>().cloned(),
-            world.get_resource::<LobbySelection>().cloned(),
-        ) {
-            let message = catalog_message(&catalog.0, &selection.0);
-            if let Some(mut outbox) = world.get_resource_mut::<LobbyOutbox>() {
-                outbox.0.push((Target::All, message));
+    match load_selected_world(world, &pending) {
+        Ok(()) => republish_loaded_world(world),
+        Err(error) => {
+            // Refuse the selection, do not refuse the host. An operator who
+            // picked a scenario whose content is broken should be able to pick
+            // another one — the boot-time equivalent (`--world` naming a broken
+            // world) fails at the prompt because there is a prompt to fail at;
+            // here there is a lobby to go back to.
+            let log = world.get_resource::<LogFilterConfig>().cloned();
+            crate::perror!(
+                log,
+                LogCat::World,
+                "loading {} failed, staying in the lobby: {error}",
+                pending.world_path
+            );
+            unwind_failed_load(world);
+            if let Some(mut selection) = world.get_resource_mut::<LobbySelection>() {
+                selection.0 = ScenarioSelection::default();
+            }
+            let pinned = world
+                .get_resource::<LobbyBootSettings>()
+                .and_then(|s| s.ship_path.clone());
+            if let (Some(catalog), Some(selection)) = (
+                world.get_resource::<LobbyScenarioCatalog>().cloned(),
+                world.get_resource::<LobbySelection>().cloned(),
+            ) {
+                let message = catalog_message(&catalog.0, &selection.0, pinned.as_deref());
+                if let Some(mut outbox) = world.get_resource_mut::<LobbyOutbox>() {
+                    outbox.0.push((Target::All, message));
+                }
             }
         }
     }
+}
+
+/// Put the lobby back to genuinely world-less after a refused selection.
+///
+/// Three things have to go, and the third is the one that is easy to miss:
+///
+///  * `WorldConfig` and `PreCompiledScripts`. `install_world_selection` can fail
+///    AFTER [`crate::boot::ingest_world`] has already inserted them (an uncached
+///    hull, a hull with no `[[station]]` blocks), and leaving them behind would
+///    take [`awaiting_world`] false — a host holding a world it never spawned,
+///    unable to accept another pick.
+///  * The **content ledger**. `ingest_world` froze it over the refused world's
+///    file set, and `install_world_selection` froze it again after re-recording
+///    the hull — both before either failure point. A frozen ledger is the input
+///    to [`crate::content_ledger::frozen_or_live`], which is what
+///    `snapshot::versions` answers a fleet peer's content check with and what a
+///    save is bound to; left alone it would go on answering for a world this
+///    host does not have and never spawned. `reset` is the whole undo rather
+///    than a restore because `ingest_world` opens every attempt — including the
+///    next, successful one — with exactly this `reset`, so an emptied, unfrozen
+///    ledger is precisely the state the next pick starts from. What it discards
+///    is the template preload's records, which the next load's own eager record
+///    re-reads from disk regardless.
+///
+/// Nothing has spawned at either failure point, so there are no entities to
+/// unwind alongside them.
+fn unwind_failed_load(world: &mut World) {
+    world.remove_resource::<crate::world::config::WorldConfig>();
+    world.remove_resource::<crate::world::server::PreCompiledScripts>();
+    crate::content_ledger::reset();
+}
+
+/// Tell every connected participant about the world that just loaded.
+///
+/// # Why a second `Welcome` rather than nothing
+///
+/// A phone that identified BEFORE the pick was welcomed by a host that had no
+/// world, so `update_session_with_config` answered from its two hard-coded
+/// fallbacks: `ShipStations` from `load_ship_config_from_disk`'s **battleship**,
+/// and the client config from `alliance_cruiser` (the literal path it uses when
+/// no `SelectedShipResource` has been installed). Those are the numbers and the
+/// seat list that phone mounted its consoles against, and they belong to two
+/// hulls, neither of them the one about to fly. The load has just replaced both
+/// with the chosen hull's, and nothing else on this path would ever say so —
+/// `gui/lobby-state.js`'s fully-locked-catalogue branch resumes the lobby on the
+/// *stale* `Welcome`, because that branch was written for issue #756's round-2
+/// world REUSE, where the roster genuinely has not moved. A native runtime load
+/// is round one, and the browser's round one re-welcomes for free: its phones
+/// are welcomed by a Bevy app that does not exist until `wasm_init`, i.e. until
+/// after the world is loaded.
+///
+/// The consequence of staying silent is not cosmetic. Consoles are mounted for
+/// the wrong hull with the wrong authored numbers, and
+/// `handler::handle_select_station` validates a claim against the REAL roster —
+/// so a phone tapping a seat it can see is silently ignored.
+///
+/// # Why the seats are cleared first
+///
+/// The roster is being replaced wholesale, so any seat claimed against the
+/// pre-load fallback was claimed on a ship this host is not flying. That is the
+/// same situation issue #756's `handle_return_to_lobby` is in when a new round
+/// picks a new hull, and it gets the same three-line answer: drop the seats, the
+/// lobby-chosen ratings and the per-token eligibility reports, and let every
+/// client re-report against the hull that is actually loaded. No separate
+/// `StationAssigned` broadcast is needed — the `Welcome` below carries the whole
+/// cleared roster to everyone at once.
+///
+/// # Idempotence
+///
+/// A second `Welcome` is exactly what an already-connected client is built to
+/// take: `gui/lobby-state.js`'s `replaceFrom` REPLACES phase, roster, players
+/// and ship config rather than merging, and its `Welcome` arm pushes
+/// `MOUNT_CONSOLES` unconditionally — "Emit it every time, even when the values
+/// equal the previous Welcome" — followed by `REBUILD_STATIONS`. The `ShipManual`
+/// that follows is the message `handle_identify_system` already pairs with every
+/// `Welcome` it produces (issue #772), and it is re-sent for this one's reason:
+/// it is built from the selected hull and the selected hull has just changed.
+fn republish_loaded_world(world: &mut World) {
+    {
+        let Some(mut sessions) = world.get_resource_mut::<crate::lobby::Sessions>() else {
+            return;
+        };
+        sessions.0.clear_all_stations();
+        sessions.0.clear_all_pending_ratings();
+        sessions.0.clear_all_eligibility();
+    }
+
+    // The ratings the `Welcome` reports, resolved the way
+    // `handle_identify_system` resolves them: the live ship's if it has spawned,
+    // else whatever the lobby has pending.
+    let mut live_ratings = world.query_filtered::<
+        &crate::ship_plugin::ActiveStationRatings,
+        With<crate::server_app::LocalShip>,
+    >();
+    let station_ratings = match live_ratings.single(world) {
+        Ok(ratings) => ratings.0.clone(),
+        Err(_) => world
+            .resource::<crate::lobby::Sessions>()
+            .0
+            .pending_ratings()
+            .clone(),
+    };
+
+    let phase = world.resource::<State<GamePhase>>().get().clone();
+    let world_data = world
+        .get_resource::<crate::lobby::WorldResource>()
+        .map(|w| w.0.clone());
+    let stations = world.resource::<ShipStations>().clone();
+    let ship_config = world
+        .resource::<crate::lobby::server::ShipClientConfigResource>()
+        .0
+        .clone();
+    let manual = world
+        .resource::<crate::lobby::server::ShipManualResource>()
+        .0
+        .clone();
+    let welcome = crate::lobby::handler::welcome_message(
+        &world.resource::<crate::lobby::Sessions>().0,
+        &phase,
+        world_data.as_ref(),
+        &stations,
+        &ship_config,
+        &station_ratings,
+    );
+
+    let mut outbox = world.resource_mut::<LobbyOutbox>();
+    outbox.0.push((Target::All, welcome));
+    outbox
+        .0
+        .push((Target::All, ServerMessage::ShipManual { manual }));
 }
 
 /// The whole runtime load, as one fallible step.

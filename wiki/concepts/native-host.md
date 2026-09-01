@@ -2,7 +2,7 @@
 title: Native Host
 type: concept
 tags: [native, viewscreen, lobby, scenario-selection, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile, media-devices, camera, microphone]
-sources: [src/native_host/mod.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs]
+sources: [src/native_host/mod.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs]
 updated: 2026-09-01
 ---
 
@@ -94,11 +94,31 @@ rule and the ingest had to move inside a process that is already ticking.
 | The catalogue | `delivery::serve::ManifestSource::merged_catalog`, the same `build_merged_catalog` call `wasm_get_scenario_catalog` makes |
 | The Bevy adapter | `native_host::world_load` — one drain system and one exclusive load, `.after(LobbySystemSet)` and `.before(SimSet::Input)` |
 
+The two implementations of that rule are held together by
+`tests/fixtures/scenario-arbiter-parity.json`, one case table read by both the
+vitest suite driving the JS and the Rust module's own tests. It exists because a
+transcription held together by a doc comment had already drifted: the JS's
+`normalizeSelection` coerces a falsy field to `null`, so `''` is not a lock — a
+rule the Rust port had omitted, which made an empty id lock a native host that a
+browser host would still treat as open.
+
+`--ship` given with `--lobby` **satisfies the hull half** of the selection: a
+scenario lock alone completes the pick, and the published catalogue reports the
+pinned hull as locked. An explicit hull already outranks whatever the arbiter
+locks, so the alternative was making a scripted run wait for a
+`SelectPlayerShip` whose content cannot matter, and showing phones a picker
+offering a choice the host has already overruled.
+
 ### Why the runtime load is the boot load
 
-The claim rests on reuse, and the guard is a test rather than a comment
-(`tests/native_host_lobby.rs`,
-`a_runtime_load_mints_the_same_world_entity_ids_as_a_boot_load`).
+The claim rests on reuse, and the guards are tests rather than comments — all in
+`tests/native_host_lobby.rs`:
+`a_runtime_load_mints_the_same_world_entity_ids_as_a_boot_load` compares
+`(who, uuid)` pairs and the world's own `name -> uuid` map, not a bare id list
+(a bare list is a multiset, so the two spawn passes swapping places permutes ids
+between entities and still compares equal), and
+`the_runtime_spawn_pass_cannot_silently_fall_behind_the_startup_chain` compares
+the two *registrations*.
 
 - **`boot::ingest_world` takes a `&mut World`, not a `&mut App`**, precisely so
   both callers are the same function: reset → read → validate → compile →
@@ -115,7 +135,13 @@ The claim rests on reuse, and the guard is a test rather than a comment
   order, including the `compile_world_scripts < setup_world <
   spawn_world_entities` pin `server_app::registration` expresses with
   `.after`/`.before` edges — a pin whose tie-break flip moved the authoritative
-  digest once already.
+  digest once already. Being a hand-written duplicate of a list that lives
+  elsewhere, it carries a structural guard of its own: the drift test above
+  reads both schedules out of a live app and asserts the runtime set covers
+  `WorldPlugin`'s `Startup` chain, names the systems pinned in from outside
+  `world::server`, and allows exactly one runtime-only system (the radar
+  despawn). The id test cannot see that hazard — a system that spawns nothing
+  moves no uuid, it just fails to happen on one path.
 - **`WorldIdMint` is parked at tick 0** across that pass and the live mint
   restored after. `begin_tick` resets a namespace's sequence only when the tick
   *moves*, so without parking the same authored world would mint different
@@ -129,11 +155,47 @@ same tick a `--solo --world` host does. It does not, and never could — the
 mission starts when the crew ready up, which is already true of every crewed
 boot. `spawn_game_start_entities` mints on the phase-transition tick either way.
 
-A load that fails **after** the ingest (an uncached `--ship`, a hull with no
-`[[station]]` blocks) removes `WorldConfig` and `PreCompiledScripts` again:
-nothing has spawned at either failure point, and leaving them behind would give
-the operator a host holding a world it never built and deaf to every later pick.
-`--world` has no such case; it reports at the prompt and exits.
+### What the participants are told
+
+A world landing is not a private event. A phone that identified **before** the
+pick was welcomed by a host with no world, so its roster came from
+`load_ship_config_from_disk`'s battleship fallback and its client config was a
+`Default` — the hull this host is not flying. So a successful runtime load
+re-publishes a fresh `Welcome` (built by the one `handler::welcome_message`, plus
+the `ShipManual` that always accompanies one) to every connected participant, and
+clears the seats first because the roster is being replaced wholesale — the same
+three lines `handle_return_to_lobby` runs when issue #756's round two picks a new
+hull.
+
+The browser host gets that refresh for free and therefore never needed the code:
+its phones are welcomed by a Bevy app that does not exist until `wasm_init`, i.e.
+until after the world is loaded. `gui/lobby-state.js`'s fully-locked-catalogue
+branch — which leaves the picker and resumes the lobby without a new `Welcome` —
+is issue #756's round-two world **reuse**, where the roster genuinely has not
+moved; a native runtime load is round one. Without the re-`Welcome` the crew get
+consoles mounted for the wrong hull with the wrong authored numbers, and
+`handle_select_station` (which validates against the *real* roster) silently
+ignores every seat they tap.
+
+A second `Welcome` is safe by construction: `replaceFrom` replaces rather than
+merges, and the `Welcome` arm emits `MOUNT_CONSOLES` unconditionally.
+
+### A refused world leaves a pickable lobby
+
+A load that fails **after** the ingest (an unreadable or malformed world, an
+uncached `--ship`, a hull with no `[[station]]` blocks) puts the lobby back:
+`WorldConfig` and `PreCompiledScripts` are removed — nothing has spawned at any
+failure point, and leaving them behind would give the operator a host holding a
+world it never built and deaf to every later pick — the arbiter's lock is
+released, the catalogue is re-published, and the **content ledger is reset**.
+That last one matters because `ingest_world` froze it over the refused world's
+file set and `install_world_selection` froze it again after re-recording the
+hull, both *before* the failure points; left alone, `content_ledger::frozen_or_live`
+would go on answering for a world this host does not have — and that is what
+`snapshot::versions` answers a fleet peer's content check with and what a save is
+bound to. `reset` is the whole undo rather than a restore because `ingest_world`
+opens every attempt, including the next successful one, with exactly that reset.
+`--world` has none of these cases; it reports at the prompt and exits.
 
 ## The catalogue restriction cuts both ways
 

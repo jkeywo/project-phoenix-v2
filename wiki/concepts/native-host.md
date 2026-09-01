@@ -1877,7 +1877,7 @@ the order a game night happens rather than in issue order.
 | 3 | The monitor row moves the viewscreen live, re-marks, and is inert on the screen it is already on | #1330 |
 | 4 | A station console opened, moved (seat kept), closed, and reopened mid-mission through F9 | #1331 |
 | 5 | Two per screen: the split, **both halves operable**, **legible at bridge distance**, **the re-tile blink timed**, the named greying, the survivor regrowing | #1332 |
-| 6 | A cable out mid-mission: the console closes, the crew drops to Backfill, nothing crashes, a press brings it back | #1333 |
+| 6 | A cable out mid-mission: the console closes, the crew drops to Backfill, nothing crashes, a press brings it back | #1125 / #1333 |
 | 7 | Arrange-quit-relaunch per ship class, the missing-monitor degradation, the copied-`--profile` refusal and its remedy | #1334 |
 | 8 | Keyboard-only operation of both rows, with visible focus and no colour-only state | #1128's bar |
 

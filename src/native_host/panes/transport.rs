@@ -373,12 +373,16 @@ impl PaneBus {
         }
     }
 
-    /// Arm the bus to rebuild a recreated pane's document (issue #1125).
+    /// Arm the bus to publish a document for a pane opened after init
+    /// (issues #1125, #1331).
     ///
     /// Called once by [`LocalPanes::publish`](super::LocalPanes::publish) with
     /// the connectable host address and the pane document body — the two things
-    /// [`recreate`](Self::recreate) needs to publish a fresh document and build a
-    /// URL for a pane brought back on the same identity.
+    /// [`recreate`](Self::recreate) needs to publish a fresh document and build
+    /// a URL for a pane brought back on the same identity, and the same two
+    /// [`open_console`](Self::open_console) needs for a console the lobby just
+    /// opened. A host with a client bundle arms this whether or not it was given
+    /// a `--pane`, because a screen row can open one at any moment.
     pub fn arm_recreation(&self, host_addr: String, document_body: String) {
         self.lock().recovery_template = Some((host_addr, document_body));
     }
@@ -414,21 +418,57 @@ impl PaneBus {
             return None;
         }
         let identity = closed.identity().clone();
-        let new_id = state.registry.open(identity.clone());
+        Some(Self::open_with_document(&mut state, identity))
+    }
+
+    /// Open a **new** pane for a console the bridge layout just seated
+    /// (issue #1331), and queue its view for the pane host to build.
+    ///
+    /// The runtime counterpart to `LocalPanes::open` + `LocalPanes::publish`,
+    /// which do the same thing once at boot from `--pane` flags. It shares
+    /// [`recreate`](Self::recreate)'s machinery rather than repeating it —
+    /// the same armed template ([`arm_recreation`](Self::arm_recreation)), the
+    /// same nonce'd path, the same
+    /// [`take_pending_views`](Self::take_pending_views) queue the pane host
+    /// drains once a frame — because "a pane that has to appear after init" is
+    /// one problem, and issue #1125 already solved it for the crash case.
+    ///
+    /// What it does **not** share is the identity: a recreation clones a closed
+    /// pane's token so the human reconnects as the same participant, and a
+    /// console the operator just opened has no participant yet. It mints a
+    /// fresh ordinary session token, exactly as a phone's browser tab does, so
+    /// admission cannot tell the console from a phone — which is the whole crew
+    /// symmetry criterion. `name` is the **station id**: the pane naming and
+    /// the layout share one namespace (issue #1327), which is what lets the
+    /// display watcher and the layout resolve the same console by the same key.
+    ///
+    /// The URL is empty when the bus was never armed (a test with no HTTP
+    /// server); the pane still opens, because the session token a seam-level
+    /// test needs is minted regardless.
+    pub fn open_console(&self, name: &str) -> (PaneId, String) {
+        let mut state = self.lock();
+        Self::open_with_document(&mut state, PaneIdentity::mint(name))
+    }
+
+    /// Open a pane on `identity`, publish it a document at a fresh nonce, and
+    /// queue its view. The body [`recreate`](Self::recreate) and
+    /// [`open_console`](Self::open_console) share.
+    fn open_with_document(state: &mut BusState, identity: PaneIdentity) -> (PaneId, String) {
+        let id = state.registry.open(identity.clone());
         let url = match state.recovery_template.clone() {
             Some((host_addr, body)) => {
                 let nonce = mint_document_nonce();
-                let path = pane_document_path(new_id, &nonce);
+                let path = pane_document_path(id, &nonce);
                 if let Some(documents) = &state.documents {
                     documents.publish(path.clone(), body);
-                    state.document_paths.insert(new_id, path);
+                    state.document_paths.insert(id, path);
                 }
-                pane_url(&host_addr, new_id, &nonce, &identity)
+                pane_url(&host_addr, id, &nonce, &identity)
             }
             None => String::new(),
         };
-        state.pending_views.push((new_id, url.clone()));
-        Some((new_id, url))
+        state.pending_views.push((id, url.clone()));
+        (id, url)
     }
 
     /// Record one recreation of a (closed) pane's identity and report whether it
@@ -460,9 +500,14 @@ impl PaneBus {
         true
     }
 
-    /// Panes recreated since the last call, each with the URL its view should
-    /// navigate to (issue #1125). Drained by the pane host, which builds one
-    /// Ultralight view per entry.
+    /// Panes opened since the last call that have no view yet, each with the URL
+    /// its view should navigate to — a pane recreated after a fault
+    /// (issue #1125) or a console the bridge layout just seated (issue #1331).
+    /// Drained by the pane host, which builds one Ultralight view per entry.
+    ///
+    /// One queue for both, deliberately: what the pane host has to do is
+    /// identical, and the difference — same token or a fresh one, tiled seat or
+    /// a Station window — is settled before the entry lands here.
     pub fn take_pending_views(&self) -> Vec<(PaneId, String)> {
         std::mem::take(&mut self.lock().pending_views)
     }
@@ -820,5 +865,104 @@ mod tests {
         }
         assert_eq!(bus.take_faulted(), vec![(id, PaneFault::ReliableOverflow)]);
         assert!(bus.take_faulted().is_empty(), "reported once per overflow");
+    }
+
+    // ── a console opened after init (issue #1331) ───────────────────────────
+
+    #[test]
+    fn a_console_opened_at_runtime_is_an_ordinary_participant_with_a_fresh_token() {
+        // The crew-symmetry criterion at the seam: a console the lobby's screen
+        // row opened joins on a minted, ordinary session token — not the host
+        // operator's, and not one shared with anything else — so nothing
+        // downstream of admission can tell it from a phone.
+        let bus = PaneBus::default();
+        let (helm, _) = bus.open_console("helm");
+        let (weapons, _) = bus.open_console("weapons");
+
+        let helm_token = bus.token_of(helm).expect("a console holds a token");
+        let weapons_token = bus.token_of(weapons).unwrap();
+        assert_ne!(helm_token, weapons_token);
+        assert!(!crate::lobby::handler::is_reserved_token(&helm_token));
+        assert_eq!(bus.name_of(helm).as_deref(), Some("helm"));
+        assert_eq!(
+            bus.open_pane_for_name("helm"),
+            Some(helm),
+            "the pane and the layout share one namespace, so the station id resolves it"
+        );
+        assert_eq!(bus.open_count(), 2);
+    }
+
+    #[test]
+    fn a_console_queues_its_view_on_the_same_queue_a_recreated_pane_does() {
+        // One queue for both, because what the pane host has to do is identical.
+        let bus = PaneBus::default();
+        let (id, _) = bus.open_console("helm");
+        assert_eq!(
+            bus.take_pending_views()
+                .into_iter()
+                .map(|(p, _)| p)
+                .collect::<Vec<_>>(),
+            vec![id]
+        );
+        assert!(bus.take_pending_views().is_empty(), "drained once");
+    }
+
+    #[test]
+    fn closing_a_console_owes_the_lobby_the_disconnect_a_dropped_phone_would() {
+        // Unassigning is the ordinary participant-left path — the station keeps
+        // its holder and flips to Backfill — rather than a native special case.
+        let bus = PaneBus::default();
+        let (id, _) = bus.open_console("helm");
+        let token = bus.token_of(id).unwrap();
+        bus.mark_live(id);
+
+        bus.close(id);
+
+        assert_eq!(bus.open_count(), 0);
+        assert_eq!(
+            bus.transport().poll(),
+            vec![TransportEvent::Disconnected { token }]
+        );
+        assert!(
+            bus.open_pane_for_name("helm").is_none(),
+            "and the station id resolves to nothing, so a re-open is a new console"
+        );
+    }
+
+    #[test]
+    fn a_console_gets_its_own_document_from_the_armed_template() {
+        // The same arming a recreated pane rebuilds from (issue #1125): a host
+        // with a client bundle arms it whether or not it was given a `--pane`,
+        // because a screen row can open a console at any moment.
+        let bus = PaneBus::default();
+        let documents = HostedDocuments::default();
+        bus.attach_documents(documents.clone());
+        bus.arm_recreation(
+            "127.0.0.1:8080".to_string(),
+            "<html>console</html>".to_string(),
+        );
+
+        let (id, url) = bus.open_console("helm");
+        let path = bus.document_path(id).expect("the console has a document");
+        assert_eq!(
+            documents.get(&path).as_deref(),
+            Some("<html>console</html>")
+        );
+        assert!(
+            url.starts_with("http://127.0.0.1:8080") && url.contains(&path),
+            "the view is sent to this host's own address, at the nonce'd path the \
+             document was published under: {url}"
+        );
+        assert!(
+            url.contains(&bus.token_of(id).unwrap()),
+            "…carrying the console's own session token, which is how its page \
+             identifies as an ordinary participant: {url}"
+        );
+
+        // …and closing it takes the document down, exactly as it does for a
+        // `--pane`: an unguessable path is no reason to keep serving a console
+        // for a participant that has gone.
+        bus.close(id);
+        assert!(documents.get(&path).is_none());
     }
 }

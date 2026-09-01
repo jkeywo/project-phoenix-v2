@@ -628,6 +628,11 @@ const DISPLAY_LOSS_DEBOUNCE_FRAMES: u32 = 10;
 /// sharper reason: a reconcile whose viewscreen monitor is missing moves the
 /// viewscreen to the primary, and acting on a one-frame winit blip would
 /// therefore drag the shared view across the room and back.
+// Eight parameters, and every one is a distinct thing this frame's observation
+// is judged against or written to. A Bevy system's parameter list IS its
+// dependency declaration to the scheduler, so bundling them into a struct would
+// hide what it reads rather than simplify anything.
+#[allow(clippy::too_many_arguments)]
 fn watch_runtime_displays(
     monitors: Query<(&Monitor, Has<PrimaryMonitor>)>,
     config: Res<BridgeDisplayConfig>,

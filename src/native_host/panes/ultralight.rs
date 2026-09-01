@@ -914,7 +914,12 @@ fn init_pane_host(world: &mut World) {
     // acceptance criterion 2). The Ultralight view is told to focus to match, so
     // the first keystroke lands without a preceding click or Ctrl+Tab —
     // Ultralight drops input into an unfocused view.
-    let focus = FocusRing::focused_on_first(router.focus_order());
+    //
+    // The first *pane*, not the first entry: `focused_on_first_pane` skips the
+    // host-lobby surface, which carries no typeable control and so would be
+    // framed by a reticle promising a keyboard target that accepts nothing. A
+    // host with no `--pane` seeds no focus at all, which is the honest state.
+    let focus = FocusRing::focused_on_first_pane(router.focus_order());
     if let Some(first) = focus.focused() {
         if let Some(window) = windows.iter().find(|w| w.id == first) {
             window.surface.view.focus();
@@ -991,19 +996,19 @@ fn sync_host_lobby_presence(
     // Re-place (or un-place) it in the router, and reconcile focus. `sync_order`
     // clears focus when the focused surface leaves the order rather than
     // carrying it onto whatever now occupies that position.
+    //
+    // A reveal does NOT seed focus onto the surface. Same rule as
+    // `FocusRing::focused_on_first_pane`: the reticle is a promise that the next
+    // keystroke lands somewhere, and this surface has no control to land it in,
+    // so on a host with no `--pane` every reveal would otherwise redraw a
+    // full-window focus frame around chrome that accepts nothing. It stays in
+    // the focus order, so a deliberate Ctrl+Tab still reaches it.
     let previously_focused = host.focus.focused();
     host.rebuild_layout();
-    if host.focus.focused().is_none() {
-        if present {
-            // The surface just came back and nothing else holds focus: seed it,
-            // so a keyboard operator has a defined target immediately rather
-            // than after a Ctrl+Tab. Same reasoning as `focused_on_first`.
-            host.focus.focus_next();
-        } else if previously_focused.is_some() {
-            // Focus left with the surface; the reticle goes with it.
-            if let Some((_, entity)) = host.ring.take() {
-                commands.entity(entity).try_despawn();
-            }
+    if host.focus.focused().is_none() && previously_focused.is_some() {
+        // Focus left with the surface; the reticle goes with it.
+        if let Some((_, entity)) = host.ring.take() {
+            commands.entity(entity).try_despawn();
         }
     }
     // Ultralight drops input into an unfocused view, so the views follow the

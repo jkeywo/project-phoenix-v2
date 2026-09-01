@@ -225,6 +225,12 @@ fn check(
     // pure-keyboard operator has a visible focus indicator and a defined target
     // for the first keystroke (acceptance criterion 2). It must be the first
     // pane in placement order, not left unset.
+    //
+    // The first *pane*: `FocusRing::focused_on_first_pane` skips the host-lobby
+    // surface (issue #1325), which carries no typeable control. This host opens
+    // no lobby, so the order is the two panes and `order[0]` is the first of
+    // them either way — the exclusion is pinned by the pure tests in
+    // `native_host::input_routing_tests`, which need no GPU to run.
     if host.focused_pane() != Some(order[0]) {
         finish(
             &outcome,

@@ -854,7 +854,18 @@ never reuses one, so `HOST_LOBBY_SURFACE_ID` is `PaneId(u32::MAX)`; everything
 that treats a `PaneId` as a participant — the pump, the fault path, the
 close-and-retire sweep — checks for it and skips. Its canvas draws at
 `ZIndex(-1)` and it is placed **last** in the router, so where a tiled `--pane`
-overlaps it the pane both draws on top and wins the hit test.
+overlaps it the pane both draws on top and wins the hit test. Taken to its
+conclusion: tiled `--pane` consoles divide the whole primary window between them
+and so cover the surface completely, which means the lobby is visible only with
+**no `--pane`** or with a `--profile` that seats every pane on a Station window.
+It is still composited and still pushed to in the tiled case — merely occluded.
+
+It is also **never the seeded keyboard focus**. `FocusRing::focused_on_first_pane`
+seeds the first *pane*, skipping this handle: the reticle is a promise that the
+next keystroke lands somewhere, and the surface carries no typeable control, so a
+`--pane`-less host would otherwise boot with a whole-window focus frame around
+chrome that accepts nothing. It stays in the focus order, so Ctrl+Tab still
+reaches it deliberately, and a reveal does not re-seed it either.
 
 Two costs worth stating out loud. `viewscreen_border::push_lobby_state` writes a
 `LobbyStateChanged` every `Update` whether or not anything moved, and every push
@@ -886,7 +897,7 @@ nobody is touching costs the simulation nothing.
 | `src/delivery/serve.rs` | A hosted document is served to a loopback peer and to nothing else, while the bundle and the version-pin endpoints stay LAN-open; `peer_origin` classifies IPv4, IPv6, IPv4-mapped and "the OS would not say" |
 | `tests/client/pane-scripts.test.js` | The two injected scripts, in jsdom, **driven through the real seam**: the boot script reads the identity out of the fragment, leaves a fragment `joinRouteFromLocation`/`parseJoinCode` accept (the literal is read out of `document.rs`, so the cross-language pin is checked), and caps the page's inbox; then the repository's own `createRendezvousJoiner` is run over the link's factories and asserted to produce the host-minted `Identify` on the page→host queue, to keep `JoinHandshake` off it, and to hand `onData` a `localiseTree`d message |
 | `tests/native_host_panes.rs` | A pane joins/claims/readies through the ordinary contracts; it is admitted for its own Station and refused another's by the real policy; it cannot read another pane's projection; a pane and a transport participant hold different Stations on the same running ship; a closed pane hands the lobby the disconnect a dropped phone would; and a pane's identity is in its URL, its document unenumerable, LAN-refused, and withdrawn on close. **#1125:** on a running ship, a view crash flips the seat to Backfill through the ordinary session path; no surviving pane inherits the failed pane's projection; recreating the pane reconnects on the same token and restores its held station out of Backfill with a Welcome; and a lost Station display disconnects its pane without recreating it |
-| `src/native_host/input_routing.rs` + `input_routing_tests.rs` | The pure input-routing model (issue #1124): coordinate transforms at scale 1.0/1.5/2.0 and at a non-zero monitor origin, the pane-boundary hit test (the shared seam belongs to one pane; side-by-side and stacked splits), mouse traversal across a boundary, per-window isolation, keyboard-focus cycling and the closed-focused-pane clear, and touch contact capture (pinned through drift, per-screen independence, duplicate-Started ignored, a closing pane releasing its contacts). All feature-agnostic, run by the ordinary `cargo test` |
+| `src/native_host/input_routing.rs` + `input_routing_tests.rs` | The pure input-routing model (issue #1124): coordinate transforms at scale 1.0/1.5/2.0 and at a non-zero monitor origin, the pane-boundary hit test (the shared seam belongs to one pane; side-by-side and stacked splits), mouse traversal across a boundary, per-window isolation, keyboard-focus cycling and the closed-focused-pane clear, seeded focus landing on the first *pane* (a lobby-surface-only ring seeds nothing, a mixed ring skips the surface at either end, and the surface is still reachable by Ctrl+Tab), and touch contact capture (pinned through drift, per-screen independence, duplicate-Started ignored, a closing pane releasing its contacts). All feature-agnostic, run by the ordinary `cargo test` |
 | `tests/native_host_input.rs` | The pane input adapter builds a router over the real primary window's geometry and scale, resolves a synthetic point to the correct tiled pane, and runs its whole input + draw pipeline for many frames against a live Ultralight runtime without panic. `#[ignore]`d: needs the SDK, a real window and a GPU. Multi-monitor and multi-touch are the kit's — one monitor, no touch, on the dev box |
 | `tests/native_host_pane_ultralight.rs` | The real built `client/index.html` loads in a real Ultralight view over this process's own HTTP, joins on the identity it read from the fragment, paints, answers a real click + keystroke on `#name-input` with a `SetName`, then claims a Station and operates its console: the iframe mounts with `__updateConsole` installed and a click on the Captain's Red Alert button inside it produces the expected `ControlSystem`. A second test proves two panes' `localStorage` are separate. Both `#[ignore]`d: they need the SDK and a built bundle, which CI has neither of |
 

@@ -52,6 +52,17 @@
 //! yields — see [`reveal`] — and one host key ([`HOST_LOBBY_REVEAL_KEY`])
 //! brings it back. Later slices put the QR overlay, the settings and the layout
 //! rows on this same surface, so nothing downstream should learn to rebuild it.
+//!
+//! # It is under the panes, so a tiled host never sees it
+//!
+//! The surface takes the **whole** primary window and draws beneath the panes
+//! (`ZIndex(-1)`), and tiled `--pane` consoles divide that same window between
+//! them and cover it completely — so on `phoenix-host --pane … --pane …` the
+//! lobby is composited and pushed to but never visible. It is on screen for the
+//! two arrangements that leave the primary window free: no `--pane` at all, and
+//! a `--profile` that seats every pane on a Station window. Nothing here fails
+//! in the tiled case; it is simply occluded, which is worth knowing before
+//! debugging a lobby that "does not appear".
 
 pub mod bridge;
 pub mod document;

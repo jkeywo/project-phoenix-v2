@@ -285,7 +285,7 @@ fn a_focus_ring_cycles_every_pane_across_monitors() {
     // returns to the start — no pane is unreachable by keyboard.
     let order = bridge_focus_order(&two_monitor_bridge());
     let ids: Vec<PaneId> = (0..order.len() as u32).map(PaneId).collect();
-    let mut ring = FocusRing::focused_on_first(ids.clone());
+    let mut ring = FocusRing::focused_on_first_pane(ids.clone());
     assert_eq!(ring.focused(), Some(ids[0]));
     let mut visited = vec![ring.focused().unwrap()];
     for _ in 0..order.len() - 1 {

@@ -303,16 +303,25 @@ fn main() {
     // It reports rather than exits: a `--pane` cannot work without it and says
     // so below, while a host that only wanted the lobby flies its mission with a
     // blank surface, which is far better than refusing to start over chrome.
+    //
+    // Staged only when something can actually use it: a `--pane`, which IS an
+    // embedded view, or a `--client-dir` bundle, which is the only thing the
+    // lobby surface can be built from. A host with neither can never open an
+    // embedded view, and copying DLLs and a `resources/` tree into the content
+    // directory for a surface it will never show is a side effect it did not
+    // ask for.
     #[allow(unused_mut)]
     let mut ultralight_ready = false;
     #[cfg(feature = "ultralight")]
     {
-        match native_host::panes::ultralight::stage_sdk() {
-            Ok(summary) => {
-                eprintln!("phoenix-host: {summary}");
-                ultralight_ready = true;
+        if !sim.panes.is_empty() || matches!(args.client, ClientSource::Bundled { .. }) {
+            match native_host::panes::ultralight::stage_sdk() {
+                Ok(summary) => {
+                    eprintln!("phoenix-host: {summary}");
+                    ultralight_ready = true;
+                }
+                Err(e) => eprintln!("phoenix-host: {e}"),
             }
-            Err(e) => eprintln!("phoenix-host: {e}"),
         }
     }
 
@@ -387,38 +396,37 @@ fn main() {
     //   2. a `--client-dir` bundle whose `index.html` is a Phoenix HOST page,
     //      because the lobby markup and the `gui/` modules that render it come
     //      out of that page rather than out of a copy in this binary.
+    //
+    // A ready SDK already implies the bundle: the staging above runs only for a
+    // `--pane` or a `--client-dir`, and `--pane` itself requires `--client-dir`.
+    // A bundle-less host stages nothing and was told "no client bundle —
+    // manifest endpoints only" when it printed its client source, which is the
+    // whole of why its viewscreen has no lobby.
     let mut host_lobby: Option<native_host::host_lobby::LocalHostLobby> = None;
     if ultralight_ready {
-        match &args.client {
-            ClientSource::Bundled { dir } => {
-                let index = std::path::Path::new(dir).join("index.html");
-                match std::fs::read_to_string(&index) {
-                    Ok(html) => {
-                        let lobby = native_host::host_lobby::LocalHostLobby::open(
-                            server.local_addr(),
-                        );
-                        match lobby.publish(&html, &server.hosted_documents()) {
-                            Ok(()) => {
-                                eprintln!(
-                                    "phoenix-host: the crew lobby is on the viewscreen (press F9 in play to show or hide it)"
-                                );
-                                host_lobby = Some(lobby);
-                            }
-                            Err(e) => eprintln!(
-                                "phoenix-host: no lobby on the viewscreen — {}: {e}",
-                                index.display()
-                            ),
+        if let ClientSource::Bundled { dir } = &args.client {
+            let index = std::path::Path::new(dir).join("index.html");
+            match std::fs::read_to_string(&index) {
+                Ok(html) => {
+                    let lobby = native_host::host_lobby::LocalHostLobby::open(server.local_addr());
+                    match lobby.publish(&html, &server.hosted_documents()) {
+                        Ok(()) => {
+                            eprintln!(
+                                "phoenix-host: the crew lobby is on the viewscreen (press F9 in play to show or hide it)"
+                            );
+                            host_lobby = Some(lobby);
                         }
+                        Err(e) => eprintln!(
+                            "phoenix-host: no lobby on the viewscreen — {}: {e}",
+                            index.display()
+                        ),
                     }
-                    Err(e) => eprintln!(
-                        "phoenix-host: no lobby on the viewscreen — cannot read {}: {e}",
-                        index.display()
-                    ),
                 }
+                Err(e) => eprintln!(
+                    "phoenix-host: no lobby on the viewscreen — cannot read {}: {e}",
+                    index.display()
+                ),
             }
-            ClientSource::Hosted => eprintln!(
-                "phoenix-host: no lobby on the viewscreen — it is built from the host page this process serves, and there is no --client-dir"
-            ),
         }
     }
     cfg.host_lobby = host_lobby.clone();

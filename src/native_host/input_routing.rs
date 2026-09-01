@@ -48,6 +48,7 @@
 use std::collections::BTreeMap;
 
 use super::bridge_profile::PaneRect;
+use super::host_lobby::HOST_LOBBY_SURFACE_ID;
 use super::panes::registry::PaneId;
 
 /// Which OS window (and so which monitor) a pane is composited on.
@@ -254,14 +255,27 @@ impl FocusRing {
         }
     }
 
-    /// A ring over `order` with its **first** pane already focused — the initial
+    /// A ring over `order` with its first **pane** already focused — the initial
     /// state a freshly-built pane host wants (issue #1124, acceptance criterion
     /// 2). Seeding focus means a pure-keyboard operator sees the visible reticle
     /// and has a defined target for the first keystroke the moment panes exist,
     /// rather than a blank ring in which keys go nowhere until the first Ctrl+Tab.
     /// An empty order focuses nothing.
-    pub fn focused_on_first(order: Vec<PaneId>) -> Self {
-        let focused = order.first().copied();
+    ///
+    /// The host-lobby surface (issue #1325) is in the order but is **never
+    /// seeded**: it is not a pane, and it carries no typeable control, so
+    /// framing it in the reticle would advertise a keyboard target that accepts
+    /// nothing — which is precisely the blank promise the seeding exists to
+    /// avoid. On `phoenix-host --client-dir dist --world <w>` with no `--pane`
+    /// the surface is the only entry, and the honest initial state there is *no*
+    /// focus and no reticle. It stays in the order, so a deliberate Ctrl+Tab
+    /// still reaches it (acceptance criterion 5's keyboard operability), and the
+    /// seeding returns on its own once a later slice puts a control on it.
+    pub fn focused_on_first_pane(order: Vec<PaneId>) -> Self {
+        let focused = order
+            .iter()
+            .find(|id| **id != HOST_LOBBY_SURFACE_ID)
+            .copied();
         Self { order, focused }
     }
 

@@ -1802,9 +1802,12 @@
     }
 
     // ── The lobby panel itself ──────────────────────────────
-    // gui/host-lobby-render.js (issue #1325) owns every write inside
-    // #lobby-panel — the panel's own show/hide included — and the native
-    // host's lobby document calls the same function with the same view model.
+    // gui/host-lobby-render.js (issue #1325) owns every write a lobby payload
+    // drives inside #lobby-panel — the panel's own show/hide included — and the
+    // native host's lobby document calls the same function with the same view
+    // model. Page-lifecycle code on this page still writes the panel outside
+    // that path: showLobbyPanel(), the return-to-lobby reset and the
+    // #ai-launch-btn handler. Keep new payload-driven writes in the renderer.
     //
     // NOTE: do NOT hide the Bevy canvas (#canvas) alongside the panel. The
     // lobby panel already covers it completely (z-index:180, solid

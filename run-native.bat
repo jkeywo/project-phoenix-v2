@@ -37,10 +37,17 @@ setlocal
 cd /d "%~dp0"
 
 set "HOST=target\release\phoenix-host.exe"
+
+REM Build-and-run: the host build is a fast no-op when nothing changed, and the
+REM client bundle rebuild is quick, so both run every time. build.rs stages the
+REM Ultralight SDK DLLs beside the exe, so a fresh build starts cleanly.
+echo [run-native] building phoenix-host (release, --features ultralight)...
+cargo build --release --features ultralight --bin phoenix-host || (echo [ERROR] cargo build failed & exit /b 1)
+echo [run-native] building the phone-client bundle...
+node scripts\build-client.mjs || (echo [ERROR] client build failed & exit /b 1)
+
 if not exist "%HOST%" (
-    echo [ERROR] %HOST% not found.
-    echo         Build it first:
-    echo           cargo build --release --features ultralight --bin phoenix-host
+    echo [ERROR] %HOST% not found after the build.
     exit /b 1
 )
 

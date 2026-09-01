@@ -58,9 +58,16 @@
 //!
 //! | edit | why |
 //! |---|---|
-//! | the AI-launch `<button>` removed | this surface is READ-ONLY in this slice — selection stays on the CLI — and a control that silently does nothing is worse than no control |
+//! | the AI-launch `<button>` removed | **scenario selection** stays on the CLI, and a control that silently does nothing is worse than no control |
 //! | the page's `#qr-panel` carried too, in an `#overlay` of this document's own (issue #1329) | the crew have to be shown how to JOIN the lobby they are looking at. The panel is the page's own markup for the same reason the lobby is; the overlay around it is not, because the page's also carries the fleet panel and the diagnostics readout, and neither has anything to say on a viewscreen |
 //! | `#host-lobby-qr-toggle` added (issue #1329) | a host page toggles the QR from its settings cog; this window has no cog, so the one decision that surface genuinely needs gets the one control it needs |
+//!
+//! That first edit is not "the surface is read-only": since issue #1329 it
+//! carries its own QR toggle, and since issue #1330 the bridge's **monitor
+//! row**, whose buttons are built by the shared renderer from a row the host
+//! pushes and whose presses ride the queue below. It is one control removed
+//! because nothing on this document is wired to launch a mission, not a policy
+//! about controls in general.
 //!
 //! Everything else the document does to the markup it does by *omission*: it
 //! leaves `--settings-cog-keepout` undefined, which selects the `0px` fallback
@@ -96,11 +103,12 @@ pub const HOST_LOBBY_LINK_JS: &str = include_str!("host_lobby_link.js");
 
 /// The JavaScript namespace the page→host queue lives under.
 ///
-/// Nothing rides it in this slice — the lobby is read-only, selection stays on
-/// the CLI — and it is installed anyway so the bridge has ONE shape from the
-/// start. The slices that put a QR overlay, settings and layout rows on this
-/// same permanent surface send through this queue rather than growing a second
-/// channel beside it.
+/// Installed by issue #1325 with nothing riding it, so the bridge would have
+/// ONE shape from the start rather than growing a second channel beside it the
+/// first time something needed to send. Issue #1330 is that first thing: a
+/// monitor button press crosses here as a
+/// [`LobbyLayoutRecord`](super::layout::LobbyLayoutRecord). The QR overlay and
+/// the settings rows that land on this same permanent surface use it too.
 ///
 /// Deliberately distinct from `phoenixPaneOut`: a pane's records are a
 /// participant's `ClientMessage`s and are admitted as such, and these will never
@@ -122,6 +130,19 @@ pub fn host_lobby_drain_script() -> String {
 /// cannot be a question about the payload.
 pub fn host_lobby_apply_script(json: &str) -> String {
     vellum_ultralight::bridge::push_call("window.__phoenixHostLobbyApply", json)
+}
+
+/// The script that hands the surface one encoded
+/// [`BridgeLayoutPayload`](super::layout::BridgeLayoutPayload) — the bridge's
+/// monitor row (issue #1330).
+///
+/// A push of its own rather than a field folded into the lobby payload above:
+/// that payload is `LobbyStatePayload`, the shared Rust wire type **the browser
+/// host also consumes**, and a browser host has no monitors. Growing it a
+/// monitor list would put a native-only concern on the one shape whose whole
+/// point is that both surfaces read the same bytes.
+pub fn host_lobby_layout_script(json: &str) -> String {
+    vellum_ultralight::bridge::push_call("window.__phoenixHostLobbyLayout", json)
 }
 
 /// The script that hands the surface one encoded [`JoinInvite`] (issue #1329).
@@ -477,10 +498,13 @@ mod tests {
     }
 
     #[test]
-    fn the_ai_launch_button_is_removed_because_this_surface_is_read_only() {
-        // Selection stays on the CLI in this slice. A button that silently does
+    fn the_ai_launch_button_is_removed_because_nothing_here_launches_a_mission() {
+        // Scenario selection stays on the CLI. A button that silently does
         // nothing is worse than no button: it invites the one press that would
-        // launch a mission, and answers it with nothing at all.
+        // launch a mission, and answers it with nothing at all. The monitor row
+        // (issue #1330) is not an exception to this — its buttons are BUILT by
+        // the shared renderer from a row the host pushes, so they exist exactly
+        // when something is wired behind them.
         let html = build_host_lobby_document(HOST_PAGE).unwrap();
         assert!(!html.contains("<button"));
         assert!(!html.contains("ai-launch-btn"));
@@ -684,6 +708,17 @@ mod tests {
         assert_eq!(
             host_lobby_apply_script(r#"{"phase":"Lobby","scenario_title":"O'Neil"}"#),
             r#"window.__phoenixHostLobbyApply('{"phase":"Lobby","scenario_title":"O\'Neil"}')"#
+        );
+    }
+
+    #[test]
+    fn a_pushed_monitor_row_is_escaped_into_its_own_call() {
+        // Its own entry point, not a field of the lobby payload: that payload
+        // is the shared `LobbyStatePayload` the browser host reads too, and a
+        // browser host has no monitors.
+        assert_eq!(
+            host_lobby_layout_script(r#"{"monitors":[{"name":"O'Neil's TV"}]}"#),
+            r#"window.__phoenixHostLobbyLayout('{"monitors":[{"name":"O\'Neil\'s TV"}]}')"#
         );
     }
 

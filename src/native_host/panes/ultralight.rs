@@ -85,7 +85,8 @@ use crate::logging::{LogCat, LogFilterConfig};
 use crate::native_host::bridge_display::BridgeStationSurfaces;
 use crate::native_host::bridge_profile::PaneRect;
 use crate::native_host::host_lobby::{
-    pump_host_lobby, HostLobbyBridgeResource, HostLobbyRevealResource, HOST_LOBBY_SURFACE_ID,
+    host_lobby_drain_script, pump_host_lobby, HostLobbyBridgeResource, HostLobbyRevealResource,
+    HOST_LOBBY_SURFACE_ID,
 };
 use crate::native_host::input_routing::{
     pointer_follow_focus, ContactCaptureMap, FocusRing, MouseCapture, PaneHit, PanePlacement,
@@ -241,16 +242,28 @@ pub fn stage_sdk() -> Result<String, String> {
     ))
 }
 
-/// One pane's Ultralight view, behind the trait the frame loop drives.
+/// One embedded view, behind the trait the frame loop drives.
 pub struct UltralightPaneSurface {
     view: UltralightPane,
     /// Set once the document has reported a completed load. Sticky: `is_loading`
     /// goes false between navigations too, and a pane navigates once.
     loaded: bool,
+    /// The script that collects what this document has queued.
+    ///
+    /// Held per surface because the two documents this type drives install
+    /// **different** queues: a pane's is `phoenixPaneOut` (a participant's
+    /// `ClientMessage`s, admitted as such) and the host lobby's is
+    /// `phoenixHostLobbyOut` (this machine's own screen arrangement, judged by
+    /// the layout law and never admitted at all). Two namespaces make a record
+    /// that arrived on the wrong one unrepresentable rather than merely wrong —
+    /// see `host_lobby::document::HOST_LOBBY_OUT_NAMESPACE` — and a surface that
+    /// drained the wrong one would simply find no function and report nothing,
+    /// forever, with a clean log.
+    drain_script: String,
 }
 
 impl UltralightPaneSurface {
-    /// Wrap a freshly created view.
+    /// Wrap a freshly created **pane** view.
     ///
     /// Public so an integration test can drive one pane without a Bevy `App`:
     /// the automated proof that a real console page loads and answers
@@ -260,6 +273,21 @@ impl UltralightPaneSurface {
         Self {
             view,
             loaded: false,
+            drain_script: pane_drain_script(),
+        }
+    }
+
+    /// Wrap a freshly created **host-lobby** view (issue #1325/#1330).
+    ///
+    /// Everything below the queue is identical to a pane's — the same runtime,
+    /// the same texture, the same push primitive — so this is a constructor
+    /// rather than a second type. What differs is the one thing that must:
+    /// which page→host queue it drains. See [`Self::drain_script`].
+    pub fn for_host_lobby(view: UltralightPane) -> Self {
+        Self {
+            view,
+            loaded: false,
+            drain_script: host_lobby_drain_script(),
         }
     }
 
@@ -301,7 +329,7 @@ impl PaneSurface for UltralightPaneSurface {
     }
 
     fn drain(&mut self) -> Vec<String> {
-        match self.view.evaluate(&pane_drain_script()) {
+        match self.view.evaluate(&self.drain_script) {
             Ok(drained) => vellum_ultralight::bridge::split_records(&drained)
                 .into_iter()
                 .map(str::to_string)
@@ -806,7 +834,15 @@ fn init_pane_host(world: &mut World) {
                 return;
             }
         };
-        let mut surface = UltralightPaneSurface::new(view);
+        // The lobby surface drains its OWN queue. It shares everything else
+        // with a pane, and sharing this too would leave its monitor buttons
+        // evaluating `window.__phoenixPaneOutDrain` — a function its document
+        // never installs, so every press would be swallowed with a clean log.
+        let mut surface = if seat.lobby {
+            UltralightPaneSurface::for_host_lobby(view)
+        } else {
+            UltralightPaneSurface::new(view)
+        };
         if let Err(e) = surface.load(url) {
             crate::perror!(
                 log,

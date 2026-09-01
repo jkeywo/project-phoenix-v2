@@ -203,6 +203,33 @@ pub fn encode_lobby_state(
     serde_json::to_string(s)
 }
 
+// ── The native lobby's monitor row (issue #1330) ────────────────────────────
+//
+// The native host's own lobby surface takes one more push beside the lobby
+// state above — the bridge's monitor roster — and answers with one record kind,
+// a monitor button press. Both cross as JSON, so both are encoded HERE and
+// nowhere else (AGENTS.md Key Constraint 1); the types stay pure and Bevy-free
+// in `native_host::host_lobby::layout`.
+//
+// Gated on the same cfg `crate::native_host` itself carries: a browser host has
+// no monitors to offer, and on wasm the module these name does not exist.
+
+/// Encode the bridge's monitor row for the native host's lobby surface.
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+pub fn encode_bridge_layout(
+    p: &crate::native_host::host_lobby::layout::BridgeLayoutPayload,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(p)
+}
+
+/// Decode one record the native lobby surface queued — a monitor button press.
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+pub fn decode_lobby_layout_record(
+    s: &str,
+) -> Result<crate::native_host::host_lobby::layout::LobbyLayoutRecord, serde_json::Error> {
+    serde_json::from_str(s)
+}
+
 // ── Batch inbound decode (issue #602) ───────────────────────────────────────
 
 /// A single decode failure from the bridge inbound drain, with truncated

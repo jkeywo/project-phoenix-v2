@@ -15,11 +15,13 @@
 //
 //   - It does not seed an identity. There is none. This surface holds no
 //     session token: it renders the lobby the host is already broadcasting, and
-//     the one control it has (the QR toggle, issue #1329) acts on this
-//     document's own DOM rather than sending anything. The page->host queue
-//     below is plumbing for the slices that WILL send — scenario and ship pick,
-//     the monitor rows — and it is installed now so the bridge has one shape
-//     rather than growing a second one later.
+//     the one control it owns outright (the QR toggle, issue #1329) acts on
+//     this document's own DOM rather than sending anything. What it DOES send
+//     back (issue #1330's monitor button presses) is a request to rearrange
+//     this machine's own screens, not anything a participant may say. The
+//     page->host queue the shim installs beside these entry points is what
+//     carries it — installed in #1325 before anything rode it, so the bridge
+//     would have one shape rather than grow a second one later.
 //   - It does not replace requestAnimationFrame. pane_boot.js has to, because
 //     the client page's render loop is `scheduleRender()` -> rAF and an
 //     offscreen Ultralight view only services rAF as part of a rendering
@@ -35,6 +37,11 @@
   var lobby = {
     payload: null,
     revealChrome: false,
+    // The bridge's monitor row (issue #1330), or null on a host that has not
+    // pushed one. Null is the honest starting value and the honest value
+    // forever on any surface that never gets one: the row renders only when a
+    // native bridge has reported its monitors.
+    layout: null,
     render: null,
     // The join panel's half of the same arrangement (issue #1329). `join` is
     // the last invitation pushed — a snapshot, like the payload above.
@@ -50,7 +57,7 @@
   lobby.paint = function () {
     if (!lobby.render || lobby.payload === null) return;
     try {
-      lobby.render(lobby.payload, lobby.revealChrome);
+      lobby.render(lobby.payload, lobby.revealChrome, lobby.layout);
     } catch (e) {
       // A throw here would propagate out of the host's evaluate_script and be
       // read as a failed push, which the host would retry with the same
@@ -72,6 +79,15 @@
   // 'true' / 'false' rather than as a boolean.
   window.__phoenixHostLobbyReveal = function (flag) {
     lobby.revealChrome = String(flag) === 'true';
+    lobby.paint();
+  };
+
+  // Host -> page: the bridge's monitor row, encoded BridgeLayoutPayload
+  // (native_host::host_lobby::layout). Held as the newest snapshot, like the
+  // lobby payload above and for the same reason — an older roster has nothing
+  // to say the newest one does not.
+  window.__phoenixHostLobbyLayout = function (json) {
+    lobby.layout = json;
     lobby.paint();
   };
 

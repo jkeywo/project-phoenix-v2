@@ -78,6 +78,7 @@
 pub mod bridge;
 pub mod document;
 pub mod join;
+pub mod layout;
 pub mod reveal;
 
 use bevy::prelude::*;
@@ -86,15 +87,17 @@ use crate::console_bridge::LobbyStateChanged;
 use crate::core::messages::GamePhase;
 use crate::delivery::serve::HostedDocuments;
 use crate::logging::{LogCat, LogFilterConfig};
+use crate::native_host::bridge_display::BridgeLayoutResource;
 use crate::native_host::panes::document::{connectable_host_addr, mint_document_nonce};
 use crate::native_host::panes::PaneId;
 
 pub use bridge::{pump_host_lobby, HostLobbyBridge, HostLobbyPumpReport};
-pub use document::{build_host_lobby_document, HostLobbyDocumentError};
+pub use document::{build_host_lobby_document, host_lobby_drain_script, HostLobbyDocumentError};
 pub use join::{
     join_addr_reach, phone_rendezvous, JoinAddrReach, JoinInvite, PhoneRendezvous,
     CLIENT_DEFAULT_RENDEZVOUS,
 };
+pub use layout::{monitor_row_payload, LayoutNotice, LobbyLayoutRecord};
 pub use reveal::{RevealState, SurfacePresence};
 
 /// The host key that reveals and hides the lobby surface during play.
@@ -304,6 +307,12 @@ impl Plugin for HostLobbyPlugin {
                 toggle_reveal_key.run_if(resource_exists::<ButtonInput<KeyCode>>),
                 drain_client_qr_toggle,
                 publish_reveal,
+                // The monitor row's two halves, in the order one frame needs
+                // them: what the surface asked for is applied to the live
+                // layout, and the layout that results — moved, or unmoved with
+                // a refusal to show for it — is what gets published back.
+                apply_lobby_layout_actions,
+                publish_bridge_layout,
             )
                 .chain(),
         );
@@ -430,6 +439,116 @@ fn publish_reveal(
     if *last != Some(force) {
         *last = Some(force);
         bridge.0.push_reveal(force);
+    }
+}
+
+/// Apply what the monitor row asked for to the **live** bridge layout
+/// (issue #1330).
+///
+/// The surface's records are drained by [`pump_host_lobby`] into the bridge;
+/// this is the reader on the other end. Every press goes through
+/// [`BridgeLayout::apply`](crate::native_host::bridge_layout::BridgeLayout::apply),
+/// so the lobby has no rule of its own: a monitor unplugged between the click
+/// and this frame is a `LayoutRefusal::UnknownMonitor` here exactly as a
+/// hand-authored profile naming it would be at boot.
+///
+/// A refusal is **shown**, not only logged. "The lobby never silently ignores
+/// me" is the user story, and a press that changed nothing with a clean log is
+/// indistinguishable from a broken button — so the refusal goes back to the
+/// surface as a notice, and `publish_bridge_layout` below carries it.
+///
+/// The records are drained even when there is no layout to apply them to, so a
+/// surface talking to a host that never seeded one does not sit on a queue
+/// forever; there is nothing to do with them but say so.
+fn apply_lobby_layout_actions(
+    bridge: Option<Res<HostLobbyBridgeResource>>,
+    layout: Option<ResMut<BridgeLayoutResource>>,
+    log: Option<Res<LogFilterConfig>>,
+) {
+    let Some(bridge) = bridge else {
+        return;
+    };
+    let records = bridge.0.take_records();
+    if records.is_empty() {
+        return;
+    }
+    let Some(mut layout) = layout else {
+        crate::pwarn!(
+            log,
+            LogCat::Lobby,
+            "host lobby: {} layout action(s) arrived before this host had a bridge layout to \
+             apply them to; they are dropped",
+            records.len()
+        );
+        return;
+    };
+
+    // Replaces rather than accumulates: the row shows what happened to the last
+    // thing the operator did, so an accepted press clears the refusal the one
+    // before it earned.
+    let mut notices = Vec::new();
+    for record in records {
+        let action = match crate::core::codec::decode_lobby_layout_record(&record) {
+            Ok(parsed) => parsed.into_action(),
+            Err(e) => {
+                // Not a refusal to show: a record this build cannot parse is a
+                // page/host mismatch, which is an operator's problem and not
+                // something to render as an answer to a press.
+                crate::pwarn!(
+                    log,
+                    LogCat::Lobby,
+                    "host lobby: unreadable layout record from the surface: {e}"
+                );
+                continue;
+            }
+        };
+        match layout.layout.apply(&action) {
+            Ok(next) => {
+                crate::pinfo!(
+                    log,
+                    LogCat::Lobby,
+                    "host lobby: viewscreen now on monitor {}",
+                    next.viewscreen()
+                );
+                layout.layout = next;
+                notices.clear();
+            }
+            Err(refusal) => {
+                crate::pwarn!(log, LogCat::Lobby, "host lobby: {refusal}");
+                notices.push(LayoutNotice::Refused(refusal));
+            }
+        }
+    }
+    layout.notices = notices;
+}
+
+/// Publish the live bridge layout to the surface as its monitor row.
+///
+/// Only when the layout resource actually changed — a press, a reconcile, or
+/// the seed. The bridge drops a byte-identical push on top of that, so a bridge
+/// nobody rearranged costs the simulation nothing; both guards are here because
+/// they answer different questions ("has anything touched it" and "does it
+/// still say the same thing"), and a `ResMut` deref that wrote the same value
+/// would pass the first.
+fn publish_bridge_layout(
+    bridge: Option<Res<HostLobbyBridgeResource>>,
+    layout: Option<Res<BridgeLayoutResource>>,
+    log: Option<Res<LogFilterConfig>>,
+) {
+    let (Some(bridge), Some(layout)) = (bridge, layout) else {
+        return;
+    };
+    if !layout.is_changed() {
+        return;
+    }
+    let payload = monitor_row_payload(&layout.layout, &layout.monitors, &layout.notices);
+    match crate::core::codec::encode_bridge_layout(&payload) {
+        Ok(json) => bridge.0.push_layout(json),
+        Err(e) => crate::pwarn!(
+            log,
+            LogCat::Lobby,
+            "host lobby: the monitor row could not be encoded: {e}"
+        ),
     }
 }
 

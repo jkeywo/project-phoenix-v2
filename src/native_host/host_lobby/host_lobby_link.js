@@ -7,8 +7,8 @@
 // to write into.
 //
 // It is the whole of the wiring, and there is deliberately very little of it —
-// every decision it makes is one the WEB host already makes with the same
-// modules:
+// every RENDER decision it makes is one the WEB host already makes with the
+// same modules:
 //
 //   gui/host-channel.js       resolve string ids in the payload (issue #949)
 //   gui/host-lobby-view.js    payload + previous phase -> view model (#1229)
@@ -17,13 +17,18 @@
 //                             law (#1329)
 //   gui/join-url.js           where a code sends a phone (#1329)
 //
-// If this file ever grows a decision of its own, that decision has escaped the
-// shared path and belongs back in one of those modules instead.
+// If this file ever grows a render decision of its own, that decision has
+// escaped the shared path and belongs back in one of those modules instead.
+//
+// What it DOES own alone is the send half (issue #1330): the web host has no
+// monitors to offer and therefore no monitor row to press, so the click
+// listener at the bottom has no counterpart in server.html and no shared module
+// to live in.
 import './gui/strings-boot.js';
 import { t, localiseTree, applyToDom } from './gui/strings.js';
 import { localiseHostPayload } from './gui/host-channel.js';
 import { hostLobbyViewModel } from './gui/host-lobby-view.js';
-import { renderHostLobby } from './gui/host-lobby-render.js';
+import { renderHostLobby, MONITOR_BUTTON_ATTR } from './gui/host-lobby-render.js';
 import { applyQrPhase, drawJoinQr, showJoiningOff, toggleQr } from './gui/host-qr.js';
 import { joinUrlForCode } from './gui/join-url.js';
 
@@ -43,7 +48,7 @@ let prevPhase = '';
 
 const strings = { t, localiseTree };
 
-window.__phoenixHostLobby.render = function (json, revealChrome) {
+window.__phoenixHostLobby.render = function (json, revealChrome, layoutJson) {
   // The localisation boundary, in the same place the web host puts it: a lobby
   // payload is built from authored data and can carry string ids (a world's
   // `[global] title`), and resolving them once at the edge is what stopped
@@ -56,7 +61,21 @@ window.__phoenixHostLobby.render = function (json, revealChrome) {
     console.warn('[host-lobby] bad lobby state json', e);
     return;
   }
-  const vm = hostLobbyViewModel(payload, prevPhase);
+  // The monitor row (issue #1330). It does NOT cross localiseHostPayload: its
+  // only free-form text is a display's own OS-reported name, which is never a
+  // string id, and its sentences are already `{ id, params }` pairs the
+  // renderer resolves. A bad row leaves the row absent and the rest of the
+  // lobby rendering — the crew is watching this surface, and a monitor button
+  // is not worth blanking it for.
+  let layout = null;
+  if (layoutJson) {
+    try {
+      layout = JSON.parse(layoutJson);
+    } catch (e) {
+      console.warn('[host-lobby] bad monitor row json', e);
+    }
+  }
+  const vm = hostLobbyViewModel(payload, prevPhase, layout);
   prevPhase = payload.phase;
   renderHostLobby(document, vm, t, { revealChrome });
   // The join panel's visibility follows the same law on this surface as on the
@@ -114,6 +133,28 @@ if (qrToggle) {
     }
   });
 }
+
+// Page -> host: a monitor button press (issue #1330). Delegated off the row's
+// container rather than bound per button, because `renderHostLobby` REPLACES
+// the buttons on every render — a per-button listener would be rebound sixty
+// times a lobby and lost the frame a render happened between the mousedown and
+// the click.
+//
+// It is the only thing this document sends, and what it sends is a request to
+// rearrange this machine's own screens: it carries no token, names no
+// participant, and the host judges it against the bridge layout law rather than
+// against command admission.
+document.addEventListener('click', (ev) => {
+  const target = ev.target && ev.target.closest
+    ? ev.target.closest(`[${MONITOR_BUTTON_ATTR}]`)
+    : null;
+  if (!target) return;
+  const monitor = target.getAttribute(MONITOR_BUTTON_ATTR);
+  if (!monitor) return;
+  window.phoenixHostLobbyOut.send(
+    JSON.stringify({ kind: 'set-viewscreen', monitor }),
+  );
+});
 
 // Anything the host pushed while this island was still loading renders now.
 window.__phoenixHostLobby.paint();

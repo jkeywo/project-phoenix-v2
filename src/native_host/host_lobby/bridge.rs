@@ -29,12 +29,15 @@
 //! and a pane that missed one sits in the lobby forever.
 //!
 //! Nothing here is one-shot. A `LobbyStatePayload` is a snapshot of the whole
-//! lobby, pushed every frame the lobby changes, and the reveal flag is a
+//! lobby, pushed every frame the lobby changes, the monitor row is a snapshot
+//! of the whole bridge layout (issue #1330), and the reveal flag is a
 //! current state rather than an edge — so an older value has nothing to say
 //! that the newest one does not, and holding a backlog of them would only cost
 //! main-thread time inside a browser engine (see [`super::super::panes::surface`]'s
-//! note on why that time is the *simulation's*). Two slots, latest wins, at most
-//! two pushes a frame.
+//! note on why that time is the *simulation's*). Four latest-wins slots — the
+//! reveal, the join invitation, the monitor row and the lobby state — at most
+//! one push each a frame. (The QR toggle beside them is the one edge on this
+//! bridge, and says why where it is declared.)
 //!
 //! A push that fails is still not lost: it goes back in its slot unless
 //! something newer has already taken it, which is the same "the page's modules
@@ -45,8 +48,8 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use super::document::{
-    host_lobby_apply_script, host_lobby_join_script, host_lobby_qr_toggle_script,
-    host_lobby_reveal_script,
+    host_lobby_apply_script, host_lobby_join_script, host_lobby_layout_script,
+    host_lobby_qr_toggle_script, host_lobby_reveal_script,
 };
 use crate::native_host::panes::{PaneSurface, PaneSurfaceError};
 
@@ -82,6 +85,14 @@ struct Inner {
     /// pressed the button". Two presses in a frame are two flips — collapsing
     /// them to "somebody asked" would turn a double-press into a single one.
     qr_toggles: usize,
+    /// The newest encoded `BridgeLayoutPayload` not yet handed to the page
+    /// (issue #1330).
+    layout: Option<String>,
+    /// The newest monitor row this bridge has ACCEPTED. Deduped for the same
+    /// reason `last_accepted` is: the row is republished whenever the layout
+    /// resource is touched, and a bridge nobody rearranged must cost the
+    /// simulation nothing.
+    last_accepted_layout: Option<String>,
     /// What the page has asked for, awaiting a reader.
     records: VecDeque<String>,
 }
@@ -155,6 +166,23 @@ impl HostLobbyBridge {
         self.lock().qr_toggles += 1;
     }
 
+    /// Hand the surface the current monitor row (issue #1330) — an encoded
+    /// [`BridgeLayoutPayload`](super::layout::BridgeLayoutPayload).
+    ///
+    /// Deduped exactly as [`push_lobby_state`](Self::push_lobby_state) is, and
+    /// for the same reason: the row is republished from a resource the applier
+    /// touches, and a bridge nobody rearranged must not spend the simulation's
+    /// thread re-rendering an unchanged button row.
+    pub fn push_layout(&self, json: impl Into<String>) {
+        let json = json.into();
+        let mut inner = self.lock();
+        if inner.last_accepted_layout.as_deref() == Some(json.as_str()) {
+            return;
+        }
+        inner.last_accepted_layout = Some(json.clone());
+        inner.layout = Some(json);
+    }
+
     /// Whether anything is waiting to be pushed. Diagnostic, and what a test
     /// asserts on to show that a failed push was kept.
     pub fn has_pending(&self) -> bool {
@@ -162,6 +190,7 @@ impl HostLobbyBridge {
         inner.payload.is_some()
             || inner.reveal.is_some()
             || inner.join.is_some()
+            || inner.layout.is_some()
             || inner.qr_toggles > 0
     }
 
@@ -187,6 +216,7 @@ impl HostLobbyBridge {
         Pending {
             reveal: inner.reveal.take(),
             join: inner.join.take(),
+            layout: inner.layout.take(),
             payload: inner.payload.take(),
             qr_toggles: std::mem::take(&mut inner.qr_toggles),
         }
@@ -215,6 +245,13 @@ impl HostLobbyBridge {
         }
     }
 
+    fn restore_layout(&self, json: String) {
+        let mut inner = self.lock();
+        if inner.layout.is_none() {
+            inner.layout = Some(json);
+        }
+    }
+
     /// Give back toggles that were not delivered.
     ///
     /// Added rather than replaced, unlike every other slot here: these are
@@ -229,6 +266,7 @@ impl HostLobbyBridge {
 struct Pending {
     reveal: Option<bool>,
     join: Option<String>,
+    layout: Option<String>,
     payload: Option<String>,
     qr_toggles: usize,
 }
@@ -236,7 +274,8 @@ struct Pending {
 /// What one frame of [`pump_host_lobby`] did.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct HostLobbyPumpReport {
-    /// Scripts handed to the surface — at most two, the reveal and the state.
+    /// Scripts handed to the surface — the reveal, the join invitation, the
+    /// monitor row and the state, plus one for every QR toggle.
     pub pushed: usize,
     /// Values put back because a push failed.
     pub deferred: usize,
@@ -260,14 +299,22 @@ pub struct HostLobbyPumpReport {
 ///    phase's answer and then correcting it;
 /// 2. **the join invitation**, before the state that decides whether the panel
 ///    carrying it is on screen;
-/// 3. **the lobby state**, which carries the phase, and with it the join
+/// 3. **the monitor row** (issue #1330), for the same reason the two above it
+///    go first: the state push is what repaints the whole lobby, so the row has
+///    to be in place when it lands rather than corrected after it;
+/// 4. **the lobby state**, which carries the phase, and with it the join
 ///    panel's show/hide law;
-/// 4. **QR toggles last**, because an operator's press is their answer to the
+/// 5. **QR toggles last**, because an operator's press is their answer to the
 ///    phase, not the other way round. Applied before the state, a toggle in the
 ///    same frame as a `Lobby` push would be silently overwritten by it.
 ///
+/// The rule the list encodes: **every snapshot before the state that repaints
+/// around it, and the one edge after it.** A slot added later goes with the
+/// snapshots unless it is an edge, in which case it joins the toggles.
+///
 /// (`host_lobby_boot.js` renders nothing until it has something to render, so a
-/// lone reveal or a lone toggle on the first frame is free.)
+/// lone reveal, a lone monitor row or a lone toggle on the first frame is
+/// free.)
 pub fn pump_host_lobby(
     bridge: &HostLobbyBridge,
     surface: &mut dyn PaneSurface,
@@ -280,8 +327,8 @@ pub fn pump_host_lobby(
     let pending = bridge.take_pending();
     // Once one push has thrown, the page has no bridge yet and the rest of the
     // frame would throw identically — replacing the reported failure with a
-    // copy of itself and costing three more `evaluate_script` calls on the
-    // simulation's own thread. Everything after it is deferred instead.
+    // copy of itself and spending an `evaluate_script` call per remaining slot
+    // on the simulation's own thread. Everything after it is deferred instead.
     let mut failed = false;
 
     if let Some(flag) = pending.reveal {
@@ -307,6 +354,23 @@ pub fn pump_host_lobby(
                     report.push_failure = Some(e);
                     report.deferred += 1;
                     bridge.restore_join(json);
+                    failed = true;
+                }
+            }
+        }
+    }
+
+    if let Some(json) = pending.layout {
+        if failed {
+            report.deferred += 1;
+            bridge.restore_layout(json);
+        } else {
+            match surface.push(&host_lobby_layout_script(&json)) {
+                Ok(()) => report.pushed += 1,
+                Err(e) => {
+                    report.push_failure = Some(e);
+                    report.deferred += 1;
+                    bridge.restore_layout(json);
                     failed = true;
                 }
             }
@@ -612,6 +676,103 @@ mod tests {
             vec![r#"{"kind":"hello"}"#.to_string()]
         );
         assert!(bridge.take_records().is_empty());
+    }
+
+    const ROW: &str = r#"{"monitors":[{"identity":"BRAVIA@3840x2160"}]}"#;
+    const MOVED_ROW: &str = r#"{"monitors":[{"identity":"BenQ@1920x1080"}]}"#;
+
+    #[test]
+    fn the_monitor_row_rides_the_same_latest_wins_slot_the_lobby_state_does() {
+        // A row is a snapshot of the whole bridge layout, so an older one has
+        // nothing to say the newest does not (issue #1330).
+        let bridge = HostLobbyBridge::new();
+        bridge.push_layout(ROW);
+        bridge.push_layout(MOVED_ROW);
+        let mut surface = RecordingSurface::ready();
+
+        let report = pump_host_lobby(&bridge, &mut surface);
+        assert_eq!(report.pushed, 1);
+        assert!(surface.pushed[0].starts_with("window.__phoenixHostLobbyLayout("));
+        assert!(surface.pushed[0].contains("BenQ@1920x1080"));
+    }
+
+    #[test]
+    fn an_unchanged_monitor_row_costs_the_simulation_nothing() {
+        // The row is republished whenever the layout resource is touched, which
+        // is every frame the applier looks at it. Re-pushing it would spend the
+        // simulation's own thread rebuilding a button row nobody moved.
+        let bridge = HostLobbyBridge::new();
+        let mut surface = RecordingSurface::ready();
+        for _ in 0..10 {
+            bridge.push_layout(ROW);
+            pump_host_lobby(&bridge, &mut surface);
+        }
+        assert_eq!(surface.pushed.len(), 1);
+
+        bridge.push_layout(MOVED_ROW);
+        pump_host_lobby(&bridge, &mut surface);
+        assert_eq!(surface.pushed.len(), 2);
+    }
+
+    #[test]
+    fn a_frame_carrying_all_three_paints_the_state_last() {
+        // The state push is what repaints the whole lobby, so the reveal and
+        // the row must already be in place when it lands — otherwise the
+        // surface paints the phase's answer and then corrects itself twice.
+        let bridge = HostLobbyBridge::new();
+        bridge.push_reveal(true);
+        bridge.push_layout(ROW);
+        bridge.push_lobby_state(PLAYING);
+        let mut surface = RecordingSurface::ready();
+
+        let report = pump_host_lobby(&bridge, &mut surface);
+        assert_eq!(report.pushed, 3);
+        assert!(surface.pushed[0].contains("__phoenixHostLobbyReveal('true')"));
+        assert!(surface.pushed[1].contains("__phoenixHostLobbyLayout("));
+        assert!(surface.pushed[2].contains("__phoenixHostLobbyApply("));
+    }
+
+    #[test]
+    fn a_monitor_row_that_throws_keeps_itself_and_the_state_for_the_next_frame() {
+        let bridge = HostLobbyBridge::new();
+        bridge.push_layout(ROW);
+        bridge.push_lobby_state(LOBBY);
+        let mut surface = RecordingSurface::ready();
+        surface.failing_pushes = 1;
+
+        let first = pump_host_lobby(&bridge, &mut surface);
+        assert_eq!(first.pushed, 0);
+        assert_eq!(first.deferred, 2);
+        assert!(first.push_failure.is_some());
+        assert!(bridge.has_pending());
+
+        let second = pump_host_lobby(&bridge, &mut surface);
+        assert_eq!(second.pushed, 2, "nothing was lost across the two frames");
+        assert!(surface.pushed[0].contains("__phoenixHostLobbyLayout("));
+        assert!(surface.pushed[1].contains(r#""phase":"Lobby""#));
+    }
+
+    #[test]
+    fn a_frame_carrying_every_slot_pins_the_documented_pump_order() {
+        // Every snapshot before the state that repaints around it, and the one
+        // edge after it — the rule the doc comment on `pump_host_lobby` states,
+        // asserted whole rather than pairwise, because the pairwise tests above
+        // each leave the slot they do not mention free to drift.
+        let bridge = HostLobbyBridge::new();
+        bridge.push_lobby_state(LOBBY);
+        bridge.push_qr_toggle();
+        bridge.push_layout(ROW);
+        bridge.push_join(r#"{"kind":"code","code":"ABCDE"}"#);
+        bridge.push_reveal(true);
+        let mut surface = RecordingSurface::ready();
+
+        let report = pump_host_lobby(&bridge, &mut surface);
+        assert_eq!(report.pushed, 5);
+        assert!(surface.pushed[0].contains("__phoenixHostLobbyReveal('true')"));
+        assert!(surface.pushed[1].contains("__phoenixHostLobbyJoin("));
+        assert!(surface.pushed[2].contains("__phoenixHostLobbyLayout("));
+        assert!(surface.pushed[3].contains("__phoenixHostLobbyApply("));
+        assert_eq!(surface.pushed[4], "window.__phoenixHostLobbyQrToggle()");
     }
 
     #[test]

@@ -27,34 +27,78 @@
 //!
 //! `bevy_winit` fills the [`Monitor`](bevy::window::Monitor) entities a frame or
 //! two into the run, not at `Startup`. So [`apply_bridge_profile`] is an
-//! exclusive system that runs every frame and does its work once: it returns
-//! quietly while no monitors are known yet, then applies the profile and inserts
-//! [`BridgeDisplayApplied`] so it never runs again. It is exclusive because it
-//! reads the monitor entities, mutates the primary window, spawns new windows and
-//! inserts resources in one pass — the same shape `panes::ultralight::init_pane_host`
-//! uses for the same reason.
+//! exclusive system that runs every frame and does its **boot** work once: it
+//! returns quietly while no monitors are known yet, then opens the surfaces and
+//! inserts [`BridgeDisplayApplied`] so it never runs again. It is exclusive
+//! because it reads the monitor entities, mutates the primary window, spawns new
+//! windows and inserts resources in one pass — the same shape
+//! `panes::ultralight::init_pane_host` uses for the same reason.
+//!
+//! # Boot is once; the viewscreen is apply-on-change (issue #1330)
+//!
+//! Windows can only be *spawned* once, so opening the Station surfaces stays a
+//! one-shot. The **viewscreen role** does not: the lobby's monitor row moves it
+//! while the host runs, so it is applied by [`follow_layout_viewscreen`], which
+//! compares the live [`BridgeLayoutResource`]'s viewscreen against the one
+//! [`BridgeDisplayApplied`] records and moves the primary window when — and only
+//! when — those differ.
+//!
+//! That is what makes the added machinery free to a host nobody touched. At boot
+//! the recorded identity is set to whatever the layout was *seeded* with,
+//! whether or not a window was moved to reach it, so:
+//!
+//! * an authored `--profile` is applied exactly as it was before, by the code
+//!   below, and then recorded — so the follower has nothing to do;
+//! * a host with **no** `--profile` seeds its layout from the monitors it found
+//!   ([`BridgeLayout::from_discovered`]) and touches no window at all: the
+//!   window stays where the OS opened it, which is the #1121 behaviour this
+//!   module promised when it had no config to run under.
+//!
+//! The promise therefore moved from "no config, so nothing runs" to "a config
+//! with no action, so nothing changes" — and a run with no lobby press produces
+//! the same window as it did before this issue. The synthesised config is what
+//! lets [`watch_runtime_displays`] run on every native host rather than only on
+//! a `--profile` one, which is what the monitor row needs to follow a cable.
 
 use bevy::prelude::*;
 use bevy::window::{Monitor, MonitorSelection, PrimaryMonitor, PrimaryWindow, Window, WindowMode};
 
 use crate::logging::{LogCat, LogFilterConfig};
 
+use super::bridge_layout::BridgeLayout;
 use super::bridge_profile::{
     identify, pane_rects, present_assigned_identities, resolve, runtime_display_losses,
-    runtime_display_returns, DisplayRole, MonitorGeometry, MonitorIdentity, PaneRect, RawMonitor,
-    RuntimeDisplayLoss, ValidatedProfile,
+    runtime_display_returns, DiscoveredMonitor, DisplayRole, MonitorGeometry, MonitorIdentity,
+    PaneRect, RawMonitor, RuntimeDisplayLoss, ValidatedProfile,
 };
+use super::host_lobby::LayoutNotice;
 
 /// The validated bridge profile a native host applies to its displays.
 ///
-/// Inserted by `native_host::app` only when `--profile` gave one and it
-/// validated — a bad profile fails at the prompt (issue #1123), so by the time
-/// this resource exists its roles and density are already sound. Absent means
-/// the single-window #1121 behaviour: the viewscreen is the one default window
-/// and no Station windows open.
+/// Inserted by `native_host::app` when `--profile` gave one and it validated —
+/// a bad profile fails at the prompt (issue #1123), so by the time this
+/// resource exists its roles and density are already sound.
+///
+/// Since issue #1330 a host given **no** `--profile` gets one too, synthesised
+/// by [`apply_bridge_profile`] from the monitors it found, so that
+/// [`watch_runtime_displays`] runs on every native host rather than only on a
+/// configured one. [`authored`](Self::authored) is the difference, and it is
+/// load-bearing rather than informational — see its note.
 #[derive(Resource, Clone, Debug)]
 pub struct BridgeDisplayConfig {
     pub profile: ValidatedProfile,
+    /// Whether an operator wrote this profile (`--profile`) or the host
+    /// synthesised it from the displays it enumerated.
+    ///
+    /// An authored profile is an **instruction**: it moves the primary window
+    /// into borderless fullscreen on the monitor it names, which is what
+    /// issue #1123 built. A synthesised one is a **description** of where the
+    /// windows already are, and applying it would put a host that was launched
+    /// with no display arguments at all into borderless fullscreen — a change
+    /// of behaviour nobody asked for and the one thing issue #1330's second
+    /// acceptance criterion forbids. So this decides whether the viewscreen is
+    /// *placed* at boot or merely *recorded*.
+    pub authored: bool,
 }
 
 /// Tags a window this adapter placed on a specific bridge monitor — the primary
@@ -106,32 +150,81 @@ pub struct BridgeStationSurface {
 #[derive(Resource, Clone, Debug, Default)]
 pub struct BridgeStationSurfaces(pub Vec<BridgeStationSurface>);
 
-/// Set once [`apply_bridge_profile`] has run, so it does its work exactly once.
-#[derive(Resource, Debug, Default, Clone, Copy)]
-pub struct BridgeDisplayApplied;
+/// The bridge arrangement this host is **running**, as opposed to the file it
+/// booted from (issue #1330).
+///
+/// Seeded by [`apply_bridge_profile`] the frame winit first reports its
+/// monitors, edited by the lobby's monitor row
+/// (`host_lobby::apply_lobby_layout_actions`), rebuilt by
+/// [`watch_runtime_displays`] when a cable moves, and read by
+/// [`follow_layout_viewscreen`] to decide whether a window has to move.
+///
+/// It is the single place a live arrangement lives, so the row the operator is
+/// looking at and the window they are looking at cannot disagree: both are
+/// projections of this one [`BridgeLayout`].
+#[derive(Resource, Clone, Debug)]
+pub struct BridgeLayoutResource {
+    /// The lawful arrangement. Only ever replaced by a
+    /// [`BridgeLayout`] transition, never edited field-wise.
+    pub layout: BridgeLayout,
+    /// The monitors it was last built against — the geometry and OS names the
+    /// row's buttons are drawn from, which the layout itself does not carry.
+    pub monitors: Vec<DiscoveredMonitor>,
+    /// What the lobby is owed about the most recent press or bridge change.
+    ///
+    /// Replaced, not accumulated: the row shows what happened to the last thing
+    /// that happened. **Boot-time** adoption notes are deliberately *not* here
+    /// — they are logged instead. A `--profile` full of `--pane` participant
+    /// slots produces one note per slot, and opening the lobby with a wall of
+    /// them would bury the one thing this row is for.
+    pub notices: Vec<LayoutNotice>,
+}
+
+/// What [`apply_bridge_profile`] has already put on screen.
+///
+/// Its presence is still the "boot has happened" latch it was in issue #1123 —
+/// [`apply_bridge_profile`] returns immediately once it exists, and
+/// `panes::ultralight::init_pane_host` waits for it. What it now also carries is
+/// the **viewscreen's applied monitor**, which is what turns the viewscreen role
+/// from a once-only application into a change-driven one: see
+/// [`follow_layout_viewscreen`] and the [module note](self#boot-is-once-the-viewscreen-is-apply-on-change-issue-1330).
+#[derive(Resource, Debug, Default, Clone)]
+pub struct BridgeDisplayApplied {
+    /// The monitor the viewscreen is on, as far as this adapter is concerned.
+    ///
+    /// Set at boot to the identity the layout was **seeded** with, whether or
+    /// not a window was moved to reach it — that is precisely what makes a host
+    /// with no `--profile` and no lobby press keep the window the OS gave it.
+    /// `None` only in the moment before the first seed.
+    pub viewscreen: Option<MonitorIdentity>,
+}
 
 /// Installs the bridge-display adapter.
 ///
-/// A no-op without a [`BridgeDisplayConfig`], so a host can add it
-/// unconditionally; `native_host::app` only inserts the config when a profile was
-/// given. The system is gated on the config existing so an app with none never
-/// touches a window.
+/// [`apply_bridge_profile`] is no longer gated on a [`BridgeDisplayConfig`]
+/// existing (issue #1330): it is the system that *synthesises* one for a host
+/// launched without `--profile`, so gating it on the thing it creates would
+/// leave that host with no monitor watcher and no monitor row. It is still inert
+/// where it matters — a composition with no [`Monitor`] entities (every
+/// `NativeRenderSurface::Contract` host, and every windowed one for the frame or
+/// two before winit enumerates) returns before it reads or writes anything.
 pub struct BridgeDisplayPlugin;
 
 impl Plugin for BridgeDisplayPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            apply_bridge_profile.run_if(resource_exists::<BridgeDisplayConfig>),
-        )
-        .add_systems(
-            Update,
-            // Only after the profile has been applied, so the watcher's first
-            // observation is the baseline it diffs against — see the system's
-            // own note. A no-op until then, and on a host with no profile.
-            watch_runtime_displays
-                .run_if(resource_exists::<BridgeDisplayConfig>)
-                .run_if(resource_exists::<BridgeDisplayApplied>),
+            (
+                apply_bridge_profile,
+                // Both of these need the boot seed to exist: the follower diffs
+                // against what boot recorded, and the watcher's first
+                // observation is the baseline it diffs against.
+                follow_layout_viewscreen.run_if(resource_exists::<BridgeDisplayApplied>),
+                watch_runtime_displays
+                    .run_if(resource_exists::<BridgeDisplayConfig>)
+                    .run_if(resource_exists::<BridgeDisplayApplied>),
+            )
+                .chain(),
         );
     }
 }
@@ -161,45 +254,123 @@ fn geometry_of(monitor: &Monitor) -> MonitorGeometry {
     }
 }
 
-/// Read the present monitors, resolve the profile against them, and open one
-/// borderless-fullscreen surface per configured monitor.
+/// The present monitors, in a deterministic order, with the identity each one
+/// answers to.
 ///
-/// Runs once — see the [module note](self#why-an-exclusive-system-and-why-it-retries).
+/// Sorted by virtual-desktop position before [`identify`] runs, so that two
+/// identical monitors get their `#x,y` suffixes assigned the same way whichever
+/// order the ECS happened to iterate them in. Every reader of a live monitor set
+/// goes through here so that no two of them can disagree about which display is
+/// which.
+fn identify_present(
+    mut monitors: Vec<(Entity, RawMonitor, MonitorGeometry)>,
+) -> Vec<(Entity, DiscoveredMonitor, MonitorGeometry)> {
+    monitors.sort_by_key(|(_, r, _)| (r.position_x, r.position_y));
+    let raws: Vec<RawMonitor> = monitors.iter().map(|(_, r, _)| r.clone()).collect();
+    let discovered = identify(&raws);
+    monitors
+        .into_iter()
+        .zip(discovered)
+        .map(|((entity, _, geometry), found)| (entity, found, geometry))
+        .collect()
+}
+
+/// The claimable stations of the hull this host is flying, as the layout law
+/// keys them.
+///
+/// Empty when no hull has been resolved — a delivery-only host, or a fixture.
+/// That is a lawful bridge with an empty roster: the viewscreen still moves,
+/// and there is simply nothing to seat.
+fn station_roster(world: &World) -> Vec<crate::core::messages::StationId> {
+    world
+        .get_resource::<crate::ship::components::PendingShipConfig>()
+        .map(|c| c.0.stations.iter().map(|s| s.id.clone()).collect())
+        .unwrap_or_default()
+}
+
+/// Read the present monitors, seed the live layout, and open one
+/// borderless-fullscreen surface per **configured** monitor.
+///
+/// Runs once — see the [module note](self#why-an-exclusive-system-and-why-it-retries)
+/// — and what it does depends on whether an operator authored a profile:
+///
+/// * **With `--profile`** it is issue #1123 unchanged: resolve the profile
+///   against the present displays, put the viewscreen on the primary window in
+///   borderless fullscreen, and spawn one window per Station.
+/// * **Without one** it synthesises a [`BridgeDisplayConfig`] from the displays
+///   it found so the runtime watcher has something to watch, seeds the layout
+///   from the same discovery, and **touches no window** — see the
+///   [module note](self#boot-is-once-the-viewscreen-is-apply-on-change-issue-1330).
 pub fn apply_bridge_profile(world: &mut World) {
     if world.get_resource::<BridgeDisplayApplied>().is_some() {
         return;
     }
-    let Some(config) = world.get_resource::<BridgeDisplayConfig>().cloned() else {
-        return;
-    };
     let log = world.get_resource::<LogFilterConfig>().cloned();
 
     // The monitors as winit reports them, paired with their entities. Cloned out
     // so no query borrow is held while we mutate windows and spawn below.
-    let mut monitors: Vec<(Entity, RawMonitor, MonitorGeometry)> = world
-        .query::<(Entity, &Monitor, Has<PrimaryMonitor>)>()
-        .iter(world)
-        .map(|(e, m, primary)| (e, raw_from_monitor(m, primary), geometry_of(m)))
-        .collect();
+    let monitors = identify_present(
+        world
+            .query::<(Entity, &Monitor, Has<PrimaryMonitor>)>()
+            .iter(world)
+            .map(|(e, m, primary)| (e, raw_from_monitor(m, primary), geometry_of(m)))
+            .collect(),
+    );
     if monitors.is_empty() {
         // winit has not populated the monitor list yet — try again next frame.
         return;
     }
-    // A stable order so identical-monitor disambiguation is deterministic;
-    // `identify` disambiguates by position, so this only affects the reported
-    // order, never the identities.
-    monitors.sort_by_key(|(_, r, _)| (r.position_x, r.position_y));
+    let discovered: Vec<DiscoveredMonitor> = monitors.iter().map(|(_, d, _)| d.clone()).collect();
 
-    let raws: Vec<RawMonitor> = monitors.iter().map(|(_, r, _)| r.clone()).collect();
-    let discovered = identify(&raws);
+    // The live layout's seed. `from_discovered` puts the viewscreen on the
+    // primary monitor — where the OS opened this process's window, and so where
+    // the lobby is already being drawn — and an authored profile is then adopted
+    // on top of it, which is what "an explicit --profile still wins at boot"
+    // means: it seeds the arrangement the lobby then edits.
+    let base = BridgeLayout::from_discovered(&discovered, station_roster(world))
+        .expect("a non-empty discovery always yields a bridge");
+    let authored = world.get_resource::<BridgeDisplayConfig>().cloned();
+    let (layout, adoption) = match &authored {
+        Some(config) => base.adopt_profile(&config.profile),
+        None => (base, Vec::new()),
+    };
+    // Boot notes are LOGGED, never pushed to the lobby: a hand-authored
+    // `--pane` profile produces one per participant slot, and opening the
+    // monitor row with a wall of them would bury the answers to actual presses.
+    for note in &adoption {
+        crate::pwarn!(log, LogCat::Lobby, "bridge display: {note}");
+    }
+
+    let config = match authored {
+        Some(config) => config,
+        None => {
+            // The runtime display config (issue #1330). A *description* of the
+            // displays as found, not an instruction: `authored` is false, so
+            // nothing below places a window from it.
+            let config = BridgeDisplayConfig {
+                profile: layout.to_validated_profile(),
+                authored: false,
+            };
+            crate::pinfo!(
+                log,
+                LogCat::Lobby,
+                "bridge display: no --profile, so the layout is the {} monitor(s) as found, with \
+                 the viewscreen on {} (the window is left exactly where it opened)",
+                discovered.len(),
+                layout.viewscreen()
+            );
+            world.insert_resource(config.clone());
+            config
+        }
+    };
+
     let resolved = resolve(&config.profile, &discovered);
 
     // identity → (monitor entity, geometry), for turning a resolved surface back
     // into the winit monitor it names.
-    let by_identity: std::collections::HashMap<String, (Entity, MonitorGeometry)> = discovered
+    let by_identity: std::collections::HashMap<String, (Entity, MonitorGeometry)> = monitors
         .iter()
-        .zip(monitors.iter())
-        .map(|(d, (e, _, g))| (d.identity.as_str().to_string(), (*e, g.clone())))
+        .map(|(e, d, g)| (d.identity.as_str().to_string(), (*e, g.clone())))
         .collect();
 
     for problem in &resolved.problems {
@@ -251,35 +422,40 @@ pub fn apply_bridge_profile(world: &mut World) {
         }
     }
 
-    // Place the viewscreen on the primary window.
-    if let Some((monitor_entity, identity, role)) = viewscreen_monitor {
-        if let Some(primary) = world
-            .query_filtered::<Entity, With<PrimaryWindow>>()
-            .iter(world)
-            .next()
-        {
-            if let Some(mut window) = world.entity_mut(primary).get_mut::<Window>() {
-                window.mode =
-                    WindowMode::BorderlessFullscreen(MonitorSelection::Entity(monitor_entity));
+    // Place the viewscreen on the primary window — but only for a profile an
+    // operator actually wrote. A synthesised one describes where the window
+    // already is, and acting on it would put a host launched with no display
+    // arguments into borderless fullscreen it never asked for.
+    if config.authored {
+        if let Some((monitor_entity, identity, role)) = viewscreen_monitor {
+            if let Some(primary) = world
+                .query_filtered::<Entity, With<PrimaryWindow>>()
+                .iter(world)
+                .next()
+            {
+                if let Some(mut window) = world.entity_mut(primary).get_mut::<Window>() {
+                    window.mode =
+                        WindowMode::BorderlessFullscreen(MonitorSelection::Entity(monitor_entity));
+                }
+                world.entity_mut(primary).insert(BridgeSurface {
+                    identity: identity.clone(),
+                    role,
+                });
+                crate::pinfo!(
+                    log,
+                    LogCat::Lobby,
+                    "bridge display: viewscreen on monitor {identity} (primary window, borderless \
+                     fullscreen)"
+                );
             }
-            world.entity_mut(primary).insert(BridgeSurface {
-                identity: identity.clone(),
-                role,
-            });
-            crate::pinfo!(
+        } else {
+            crate::pwarn!(
                 log,
                 LogCat::Lobby,
-                "bridge display: viewscreen on monitor {identity} (primary window, borderless \
-                 fullscreen)"
+                "bridge display: the profile assigns no present monitor the viewscreen role, so \
+                 the shared 3-D view has nowhere to draw. Check the profile against `--setup`."
             );
         }
-    } else {
-        crate::pwarn!(
-            log,
-            LogCat::Lobby,
-            "bridge display: the profile assigns no present monitor the viewscreen role, so the \
-             shared 3-D view has nowhere to draw. Check the profile against `--setup`."
-        );
     }
 
     // Open one borderless-fullscreen window per Station.
@@ -314,7 +490,78 @@ pub fn apply_bridge_profile(world: &mut World) {
     }
 
     world.insert_resource(BridgeStationSurfaces(station_surfaces));
-    world.insert_resource(BridgeDisplayApplied);
+    // The baseline the follower diffs against is the layout's viewscreen — the
+    // identity this host is *seeded* on — whether or not a window was moved to
+    // reach it. That is the whole of the "a run with no lobby action produces
+    // today's window" promise: with nothing to differ from, the follower never
+    // fires, and the window stays wherever it opened.
+    world.insert_resource(BridgeDisplayApplied {
+        viewscreen: Some(layout.viewscreen().clone()),
+    });
+    world.insert_resource(BridgeLayoutResource {
+        layout,
+        monitors: discovered,
+        notices: Vec::new(),
+    });
+}
+
+/// Keep the viewscreen on the monitor the **live layout** names (issue #1330).
+///
+/// The change-driven half of the applier: the lobby's monitor row and
+/// [`watch_runtime_displays`]'s reconcile both move
+/// [`BridgeLayoutResource`]'s viewscreen, and this is what makes the window
+/// follow — `BorderlessFullscreen` on the chosen display, with the primary
+/// window re-tagged so the same [`BridgeSurface`] that told the #1123
+/// integration test which surface is which keeps telling the truth.
+///
+/// **It does nothing at all unless the layout's viewscreen differs from the one
+/// [`BridgeDisplayApplied`] recorded.** Every frame of every host that nobody
+/// has touched takes the first `return` below.
+///
+/// A layout naming a monitor that is not present *this frame* is left alone
+/// rather than retried into a loop: that only happens in the window between a
+/// display going away and [`watch_runtime_displays`] believing it, and the
+/// reconcile at the end of that window is what moves the layout somewhere real.
+fn follow_layout_viewscreen(
+    monitors: Query<(Entity, &Monitor, Has<PrimaryMonitor>)>,
+    layout: Option<Res<BridgeLayoutResource>>,
+    mut applied: ResMut<BridgeDisplayApplied>,
+    mut primary: Query<(Entity, &mut Window), With<PrimaryWindow>>,
+    mut commands: Commands,
+    log: Option<Res<LogFilterConfig>>,
+) {
+    let Some(layout) = layout else {
+        return;
+    };
+    let wanted = layout.layout.viewscreen().clone();
+    if applied.viewscreen.as_ref() == Some(&wanted) {
+        return;
+    }
+
+    let present = identify_present(
+        monitors
+            .iter()
+            .map(|(e, m, is_primary)| (e, raw_from_monitor(m, is_primary), geometry_of(m)))
+            .collect(),
+    );
+    let Some((monitor_entity, _, _)) = present.iter().find(|(_, d, _)| d.identity == wanted) else {
+        return;
+    };
+    let Ok((window_entity, mut window)) = primary.single_mut() else {
+        return;
+    };
+    window.mode = WindowMode::BorderlessFullscreen(MonitorSelection::Entity(*monitor_entity));
+    commands.entity(window_entity).insert(BridgeSurface {
+        identity: wanted.as_str().to_string(),
+        role: DisplayRole::Viewscreen.summary(),
+    });
+    crate::pinfo!(
+        log,
+        LogCat::Lobby,
+        "bridge display: viewscreen moved to monitor {wanted} (primary window, borderless \
+         fullscreen)"
+    );
+    applied.viewscreen = Some(wanted);
 }
 
 // ── runtime display loss (issue #1125) ──────────────────────────────────────
@@ -370,15 +617,28 @@ const DISPLAY_LOSS_DEBOUNCE_FRAMES: u32 = 10;
 /// the ordinary `cargo test` runs; this adapter only reads the live monitors and
 /// closes the named panes on the bus. The unplug-and-replug proof itself needs
 /// real hardware and is the `#[ignore]`d `tests/native_bridge_displays.rs`.
+///
+/// # It also rebuilds the live layout (issue #1330)
+///
+/// The same frame's monitor list is what the lobby's monitor row is drawn from,
+/// so a cable that moves has to reach [`BridgeLayoutResource`] as well as the
+/// panes. It does, through [`BridgeLayout::reconcile`] — but only once the new
+/// roster has **settled**, on the same
+/// [`DISPLAY_LOSS_DEBOUNCE_FRAMES`] window the pane closures use and for a
+/// sharper reason: a reconcile whose viewscreen monitor is missing moves the
+/// viewscreen to the primary, and acting on a one-frame winit blip would
+/// therefore drag the shared view across the room and back.
 fn watch_runtime_displays(
     monitors: Query<(&Monitor, Has<PrimaryMonitor>)>,
     config: Res<BridgeDisplayConfig>,
     bus: Option<Res<crate::native_host::panes::PaneBusResource>>,
+    layout: Option<ResMut<BridgeLayoutResource>>,
     log: Option<Res<LogFilterConfig>>,
     mut baseline: Local<Option<std::collections::HashSet<MonitorIdentity>>>,
     mut absent_streak: Local<std::collections::HashMap<MonitorIdentity, u32>>,
+    mut settling_roster: Local<Option<(Vec<MonitorIdentity>, u32)>>,
 ) {
-    let raws: Vec<RawMonitor> = monitors
+    let mut raws: Vec<RawMonitor> = monitors
         .iter()
         .map(|(m, primary)| raw_from_monitor(m, primary))
         .collect();
@@ -388,6 +648,13 @@ fn watch_runtime_displays(
         // display was lost" would be wrong, so wait for a frame that has some.
         return;
     }
+    // The one order every reader of a live monitor set uses, so the identities
+    // this frame derives are the identities the applier seeded the layout with.
+    // The set below is a `HashSet` and the two diffs are set operations, so
+    // sorting changes nothing about the #1125 half.
+    raws.sort_by_key(|r| (r.position_x, r.position_y));
+
+    reconcile_layout(layout, &raws, &log, &mut settling_roster);
 
     let assigned = config.profile.assigned_surfaces();
     // The assigned monitors present THIS frame, matched STABLY against the raw
@@ -457,6 +724,73 @@ fn watch_runtime_displays(
     for loss in &confirmed {
         committed.remove(&loss.identity);
     }
+}
+
+/// Rebuild [`BridgeLayoutResource`] against the monitors present now, once the
+/// roster has stopped changing (issue #1330).
+///
+/// Split out of [`watch_runtime_displays`] because it answers a different
+/// question about the same frame: that system asks "did an *assigned* display
+/// go away, and whose console was on it"; this asks "is this still the bridge
+/// the layout describes". They share the observation and nothing else.
+///
+/// # Why it settles instead of reacting
+///
+/// [`BridgeLayout::reconcile`] moves the viewscreen to the primary when the
+/// monitor it was on is gone. That is right for an unplug and disastrous for a
+/// blip: winit's monitor list can flicker for a frame or two through a GPU
+/// reset or a monitor waking, and reacting to that would drag the shared view
+/// onto another screen and back while the crew watched. So a *different* roster
+/// has to be reported [`DISPLAY_LOSS_DEBOUNCE_FRAMES`] times **in a row, and be
+/// the same roster each time**, before it is believed — a set that is still
+/// changing simply restarts the count.
+///
+/// Every degradation the rebuild causes becomes a
+/// [`LayoutNotice`] on the resource, which is how the operator finds out that
+/// the screen they chose took the viewscreen's home with it.
+fn reconcile_layout(
+    layout: Option<ResMut<BridgeLayoutResource>>,
+    raws: &[RawMonitor],
+    log: &Option<Res<LogFilterConfig>>,
+    settling: &mut Local<Option<(Vec<MonitorIdentity>, u32)>>,
+) {
+    let Some(mut layout) = layout else {
+        return;
+    };
+    let discovered = identify(raws);
+    let identities: Vec<MonitorIdentity> = discovered.iter().map(|d| d.identity.clone()).collect();
+    if identities == layout.layout.monitors() {
+        **settling = None;
+        return;
+    }
+
+    let count = match settling.as_ref() {
+        Some((pending, count)) if pending == &identities => count + 1,
+        // A roster still in motion restarts the count rather than inheriting
+        // the previous candidate's.
+        _ => 1,
+    };
+    if count < DISPLAY_LOSS_DEBOUNCE_FRAMES {
+        **settling = Some((identities, count));
+        return;
+    }
+    **settling = None;
+
+    let roster = layout.layout.roster().to_vec();
+    let (next, notes) = layout.layout.reconcile(&discovered, roster);
+    for note in &notes {
+        crate::pwarn!(log, LogCat::Lobby, "bridge display: {note}");
+    }
+    crate::pinfo!(
+        log,
+        LogCat::Lobby,
+        "bridge display: the bridge now has {} monitor(s); the viewscreen is on {}",
+        next.monitors().len(),
+        next.viewscreen()
+    );
+    layout.layout = next;
+    layout.monitors = discovered;
+    layout.notices = notes.into_iter().map(LayoutNotice::Adopted).collect();
 }
 
 // ── the --setup enumeration mode ──────────────────────────────────────────
@@ -742,6 +1076,7 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(BridgeDisplayConfig {
             profile: viewscreen_and_station("Ada"),
+            authored: true,
         });
         let bus = PaneBus::default();
         let pane =
@@ -804,6 +1139,7 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(BridgeDisplayConfig {
             profile: viewscreen_and_station("Ada"),
+            authored: true,
         });
         let bus = PaneBus::default();
         let pane =
@@ -886,6 +1222,7 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(BridgeDisplayConfig {
             profile: two_identical_stations(),
+            authored: true,
         });
         let bus = PaneBus::default();
         let ada =

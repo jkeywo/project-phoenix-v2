@@ -211,7 +211,12 @@ fn drive(
                 )
             }),
         });
-        commands.insert_resource(BridgeDisplayConfig { profile: validated });
+        commands.insert_resource(BridgeDisplayConfig {
+            profile: validated,
+            // An operator wrote this one, so the adapter places the windows it
+            // names (issue #1330 made that distinction explicit).
+            authored: true,
+        });
         driver.built = true;
         return;
     }

@@ -1542,11 +1542,40 @@ fn the_viewscreens_launch_control_starts_a_crewless_mission() {
 
     surface.queue_record(r#"{"kind":"force_start"}"#);
     pump_surface(&lobby, &mut surface);
-    pump(&mut app, 30);
-    assert_ne!(
+    pump(&mut app, 600);
+    // The EXACT state, not `!= Lobby`: that spelling also passes on a host that
+    // starts a mission and then parks on the loading screen forever, which is
+    // the one failure this acceptance criterion is here to catch.
+    //
+    // `Loading` and not `InProgress` because **this binary cannot reach
+    // `InProgress`, and the reason is the harness rather than the host.** The
+    // way out is `asset_preload::auto_transition_from_loading`, which IS
+    // registered here (`build_native_host_app` passes `render: true`) and does
+    // run — but it waits on `AssetPreloadResource::complete`, and that gate
+    // wants every radar icon decoded into an `Image`. A `cargo test` binary
+    // stands up no image or GLB loader, so those handles fail instead of
+    // landing and the gate is unsatisfiable at any frame count; 600 frames here
+    // rather than 30 so "not enough time" is not the explanation either.
+    //
+    // The second assertion pins that reason, so a harness that later does load
+    // assets fails loudly and earns the stronger claim rather than leaving a
+    // weakened one to be discovered.
+    assert_eq!(
         app.world().resource::<State<GamePhase>>().get(),
-        &GamePhase::Lobby,
-        "the AI-launch control on the viewscreen starts the mission"
+        &GamePhase::Loading,
+        "the AI-launch control on the viewscreen starts the mission: the host \
+         leaves Lobby for the loading phase"
+    );
+    let preload = app
+        .world()
+        .resource::<project_phoenix::server::asset_preload::AssetPreloadResource>();
+    assert!(
+        !preload.complete && preload.ready_count < preload.total_count,
+        "the only thing between this host and InProgress is the asset gate this \
+         test binary cannot satisfy ({}/{} ready). If this now passes, the \
+         harness loads assets — assert GamePhase::InProgress above instead",
+        preload.ready_count,
+        preload.total_count
     );
 }
 

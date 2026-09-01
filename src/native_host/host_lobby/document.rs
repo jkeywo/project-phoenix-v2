@@ -643,6 +643,49 @@ mod tests {
         // …and keeping it took nothing else with it.
         assert!(html.contains("class=\"lobby-bg\""));
         assert!(html.contains("id=\"station-grid\""));
+
+        // The guard #1325 had as `!html.contains("<button")`, restored as an
+        // ALLOWLIST rather than dropped with the blanket strip. What the blanket
+        // assertion was really protecting is still true and still worth pinning:
+        // no control reaches this document that nothing behind it answers. Now
+        // that one control IS answered, the claim becomes a named set — so a
+        // third control arriving inside a borrowed subtree (the host page grows
+        // buttons for its own reasons, and both `#lobby-panel` and
+        // `#scenario-panel` are taken from it wholesale) fails here instead of
+        // appearing on a viewscreen as a dead button.
+        assert_eq!(
+            button_ids(&html),
+            vec!["ai-launch-btn", "host-lobby-qr-toggle"],
+            "every control on the assembled document has something wired behind \
+             it: the AI launch (issue #1328) and the QR toggle (issue #1329)"
+        );
+    }
+
+    /// Every button-shaped control in `html`, by id, sorted.
+    ///
+    /// Both spellings, because the document uses both: `<button>` for the
+    /// markup it borrows from the host page, and `role="button"` for the one
+    /// control it supplies itself ([`QR_TOGGLE_MARKUP`]). Matching only the
+    /// element name would let a hand-written `role="button"` in here unseen,
+    /// which is exactly the shape the surface's own additions take.
+    fn button_ids(html: &str) -> Vec<String> {
+        let mut ids: Vec<String> = html
+            .split('<')
+            .filter_map(|tag| {
+                let open = tag.split_once('>')?.0;
+                let is_button = open.starts_with("button") || open.contains("role=\"button\"");
+                if !is_button {
+                    return None;
+                }
+                Some(
+                    open.split_once("id=\"")
+                        .map(|(_, rest)| rest.split('"').next().unwrap_or("").to_string())
+                        .unwrap_or_else(|| format!("<unnamed: {open}>")),
+                )
+            })
+            .collect();
+        ids.sort();
+        ids
     }
 
     #[test]
@@ -1017,8 +1060,17 @@ mod tests {
         assert!(page.contains("id=\"snapshot-import\""));
         assert!(!html.contains("id=\"snapshot-import\""));
         // The only control the surface carries out of the lobby markup is the
-        // AI launch, which is now wired (issue #1328).
-        assert!(html.contains("id=\"ai-launch-btn\""));
+        // AI launch, which is now wired (issue #1328). Asserted as the whole
+        // allowlist and not just those three ids, because THIS is the page that
+        // can drift: the stub above is authored beside the test that reads it,
+        // and `server.html` grows controls for its own reasons inside the two
+        // subtrees this document borrows wholesale.
+        assert_eq!(
+            button_ids(&html),
+            vec!["ai-launch-btn", "host-lobby-qr-toggle"],
+            "a control on the viewscreen with nothing wired behind it is a dead \
+             button the operator will press"
+        );
         assert!(!html.contains("id=\"mod-pack-btn\""));
         assert!(!html.contains("id=\"snapshot-import-btn\""));
 

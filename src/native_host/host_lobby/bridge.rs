@@ -91,9 +91,9 @@ struct Inner {
     /// so an older one has nothing to say the newest does not.
     ///
     /// Unlike [`Self::payload`] it carries **no dedupe**, because its feed does
-    /// not push every frame: `host_lobby::publish_scenario_panel` pushes only
-    /// when the selection moved or a world arrived, exactly as `join` is pushed
-    /// only when a code is issued.
+    /// not push every frame: `host_lobby::feed_scenario_panel` pushes only when
+    /// the selection moved or a world arrived, exactly as `join` is pushed only
+    /// when a code is issued.
     scenario: Option<String>,
     /// QR toggles asked for but not yet applied (issue #1329).
     ///

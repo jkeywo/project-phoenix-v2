@@ -65,7 +65,22 @@ echo === Native host: delivery only ===
 exit /b %errorlevel%
 
 :lobby
+REM The default branch above forwards `%*` - every argument, however many. This
+REM branch cannot simply copy that line, because cmd's `shift` renumbers %1..%9
+REM and leaves `%*` naming the WHOLE original command line, mode word included.
+REM So the arguments are re-accumulated one at a time, which is the forwarding
+REM `%*` would have given: no nine-argument ceiling (`--rendezvous URL --origin
+REM URL --addr HOST:PORT --manifest M` is already eight), and each one carried
+REM with the quoting the caller typed, because %1 is expanded rather than %~1.
+set "LOBBY_ARGS="
 shift
+:lobby_args
+if "%~1"=="" goto :lobby_run
+set "LOBBY_ARGS=%LOBBY_ARGS% %1"
+shift
+goto :lobby_args
+
+:lobby_run
 echo === Native host: lobby (pick the scenario on the viewscreen) ===
-"%HOST%" --client-dir dist --lobby %1 %2 %3 %4 %5 %6 %7 %8 %9
+"%HOST%" --client-dir dist --lobby%LOBBY_ARGS%
 exit /b %errorlevel%

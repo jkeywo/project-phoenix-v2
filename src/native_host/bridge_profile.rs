@@ -259,9 +259,15 @@ fn identity_forms(raw: &RawMonitor) -> [String; 2] {
 /// screen a stronger one names.
 #[derive(Clone, Copy)]
 enum Rematch {
-    /// The known identity **is** this monitor's position-suffixed form. Exactly
-    /// one present monitor can satisfy it — no two displays share a top-left
-    /// corner — so this pass is unambiguous by construction.
+    /// The known identity **is** this monitor's position-suffixed form. At most
+    /// one *present* monitor can satisfy it — no two displays share a top-left
+    /// corner — so this pass never has two candidates to choose between.
+    ///
+    /// That is all it promises. It does not promise the one candidate is the
+    /// same physical display: a twin dragged into the corner the known display
+    /// used to occupy answers to that key too, and this pass would hand it the
+    /// role. Anchoring to the position is the strongest evidence a monitor list
+    /// can offer, not proof of identity.
     Suffixed,
     /// The known identity is this monitor's base key and it has not moved. The
     /// twin case: the display an operator has been looking at keeps the short

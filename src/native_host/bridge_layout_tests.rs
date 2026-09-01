@@ -1257,10 +1257,87 @@ fn a_station_new_to_the_roster_arrives_unassigned_with_nothing_to_report() {
 }
 
 #[test]
+fn the_viewscreens_fallback_prefers_a_screen_that_is_holding_nothing() {
+    // The fallback is a MOVE, and rule 2 governs moves. Chosen primary-else-first
+    // without asking what is on the screen, unplugging the TV on this bridge
+    // would have dropped the shared view straight on top of Ada's authored
+    // console — silently, because a reserved pane earns no `SeatRefused` and
+    // cannot be unassigned afterwards — while RIGHT sat there empty.
+    let layout = with_an_authored_console();
+    let (next, notes) = layout.reconcile(
+        &[discovered(LEFT, true), discovered(RIGHT, false)],
+        roster(),
+    );
+
+    assert_eq!(
+        next.viewscreen(),
+        &m(RIGHT),
+        "the free screen, even though the occupied one is the primary"
+    );
+    assert_eq!(
+        notes,
+        vec![LayoutAdoption::ViewscreenMonitorGone {
+            monitor: m(TV),
+            replacement: m(RIGHT),
+        }],
+        "and nothing was covered, so there is nothing more to say"
+    );
+    assert_eq!(
+        next.reserved_on(&m(LEFT)),
+        &["Ada".to_string()],
+        "Ada's console is still on the screen it was on"
+    );
+    assert!(
+        next.apply(&LayoutAction::SetViewscreen { monitor: m(LEFT) })
+            .is_err(),
+        "and still protected by rule 2's mirror"
+    );
+}
+
+#[test]
+fn a_fallback_with_nowhere_free_lands_on_an_occupied_screen_and_says_what_it_covered() {
+    // The other side of the same rule: preferring a free screen is not the same
+    // as refusing to land, because a bridge is at least one screen and the shared
+    // view has to be somewhere. What it may not do is land in silence — this is
+    // the case that used to produce NO note at all, because a reserved pane is
+    // never unseated and so never earns a `SeatRefused`.
+    let layout = with_an_authored_console();
+    let (next, notes) = layout.reconcile(&[discovered(LEFT, true)], roster());
+
+    assert_eq!(next.viewscreen(), &m(LEFT), "there was nowhere else");
+    assert_eq!(
+        notes,
+        vec![
+            LayoutAdoption::ViewscreenMonitorGone {
+                monitor: m(TV),
+                replacement: m(LEFT),
+            },
+            LayoutAdoption::ViewscreenCoversOccupants {
+                monitor: m(LEFT),
+                occupants: vec!["Ada".to_string()],
+            },
+        ]
+    );
+    let msg = notes[1].to_string();
+    assert!(msg.contains("\"Ada\""), "{msg}");
+    assert!(msg.contains(LEFT), "{msg}");
+    assert_eq!(
+        notes[1]
+            .params()
+            .iter()
+            .find(|(k, _)| *k == "occupants")
+            .map(|(_, v)| v.as_str()),
+        Some("Ada"),
+        "and the player-visible parameter names who was covered, unquoted"
+    );
+}
+
+#[test]
 fn a_viewscreen_falling_back_onto_an_occupied_screen_unseats_it_by_the_same_rule() {
     // The compound case, and the one that shows reconcile is not a second law:
-    // the TV is gone, the fallback lands on the monitor holding both consoles,
-    // and rule 2 refuses them there exactly as a button press would be refused.
+    // the TV is gone, there is no free screen to prefer, the fallback lands on
+    // the monitor holding both consoles — saying so — and rule 2 then refuses
+    // them there exactly as a button press would be refused.
     let layout = assign(&assign(&bridge(), "helm", LEFT), "weapons", LEFT);
     let (next, notes) = layout.reconcile(&[discovered(LEFT, true)], roster());
 
@@ -1272,6 +1349,10 @@ fn a_viewscreen_falling_back_onto_an_occupied_screen_unseats_it_by_the_same_rule
             LayoutAdoption::ViewscreenMonitorGone {
                 monitor: m(TV),
                 replacement: m(LEFT),
+            },
+            LayoutAdoption::ViewscreenCoversOccupants {
+                monitor: m(LEFT),
+                occupants: vec!["helm".to_string(), "weapons".to_string()],
             },
             LayoutAdoption::SeatRefused {
                 station: s("helm"),
@@ -1431,6 +1512,14 @@ fn every_adoption_note_names_a_string_id_and_the_parameters_that_id_interpolates
             },
             "server.bridge_layout.adopt_viewscreen_gone",
             vec!["monitor", "replacement"],
+        ),
+        (
+            LayoutAdoption::ViewscreenCoversOccupants {
+                monitor: m(LEFT),
+                occupants: vec!["helm".to_string(), "Ada".to_string()],
+            },
+            "server.bridge_layout.adopt_viewscreen_covers",
+            vec!["monitor", "occupants"],
         ),
         (
             LayoutAdoption::StationMonitorGone {

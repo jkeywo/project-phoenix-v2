@@ -395,7 +395,11 @@ pub fn apply_bridge_profile(world: &mut World) {
             // that really was on that screen and catastrophic if the rebuild
             // lands before the pane compositing that actually puts one there.
             // `unplugging_a_monitor_on_a_no_profile_host_closes_no_pane` is the
-            // test that fails when this changes; read it before changing this.
+            // test that fails when this changes — it flies a hull with a
+            // station, moves the viewscreen and opens that station's console on
+            // the very screen it then unplugs, so it goes red the moment this
+            // config starts following the live layout. Read it before changing
+            // this.
             let config = BridgeDisplayConfig {
                 profile: layout.to_validated_profile(),
                 authored: false,
@@ -1401,6 +1405,9 @@ mod tests {
 
     const DELL: &str = "DELL U2720Q@3840x2160";
     const BENQ: &str = "BenQ EX@1920x1080";
+    /// A third screen, for the tests that need somewhere the viewscreen can go
+    /// that is neither the primary nor the one about to be unplugged.
+    const ACME: &str = "ACME 1080@1920x1080";
 
     /// A host with the plugin, a primary window and two monitors, one frame in.
     /// `profile` is an operator's `--profile`; `None` is a plain
@@ -1504,6 +1511,22 @@ mod tests {
         app.world_mut()
             .resource_mut::<BridgeLayoutResource>()
             .layout = moved;
+    }
+
+    /// Open a station's console on a monitor, as a lobby button press does.
+    fn seat(app: &mut App, station: &str, identity: &str) {
+        let placed = app
+            .world()
+            .resource::<BridgeLayoutResource>()
+            .layout
+            .apply(&LayoutAction::AssignStation {
+                station: crate::core::messages::StationId(station.to_string()),
+                monitor: MonitorIdentity::new(identity),
+            })
+            .expect("a free monitor takes a console");
+        app.world_mut()
+            .resource_mut::<BridgeLayoutResource>()
+            .layout = placed;
     }
 
     #[test]
@@ -1847,6 +1870,15 @@ mod tests {
         // rather than a rule anybody wrote down. This is the rule, written
         // down — a slice that rebuilds the config from the live layout
         // (issue #1331) breaks it here rather than in a room full of people.
+        //
+        // Which is why the host under it is deliberately NOT trivial. A bridge
+        // with an empty roster and no press behind it seats nothing under any
+        // implementation, so it would stay green through exactly the change it
+        // is here to catch. This one flies a hull with a station, the operator
+        // has moved the viewscreen off the primary AND opened `helm`'s console
+        // on the screen about to be unplugged, and the pane on the bus is the
+        // one that console would be showing — so a config rebuilt from the live
+        // layout emits a `helm` pane on the BenQ, and this unplug closes it.
         use crate::native_host::panes::identity::PaneIdentity;
         use crate::native_host::panes::transport::PaneBus;
         use crate::native_host::panes::PaneBusResource;
@@ -1855,34 +1887,81 @@ mod tests {
         app.add_plugins(BridgeDisplayPlugin);
         let bus = PaneBus::default();
         let pane =
-            bus.open(PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000001", "Ada").unwrap());
+            bus.open(PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000001", "helm").unwrap());
         bus.mark_live(pane);
         app.insert_resource(PaneBusResource(bus.clone()));
+        // A hull with a claimable station, so the layout has something to seat.
+        app.insert_resource(crate::ship::components::PendingShipConfig(
+            toml::from_str(
+                r#"
+                [[station]]
+                id = "helm"
+                name = "Helm"
+                description = "-"
+                rank = "Crew"
+                "#,
+            )
+            .expect("a one-station hull parses"),
+        ));
         app.world_mut().spawn((Window::default(), PrimaryWindow));
         app.world_mut()
             .spawn((monitor("DELL U2720Q", 3840, 2160, 0, 0), PrimaryMonitor));
         app.world_mut()
             .spawn(monitor("BenQ EX", 1920, 1080, 3840, 0));
+        app.world_mut()
+            .spawn(monitor("ACME 1080", 1920, 1080, 5760, 0));
         app.update();
         assert!(!app.world().resource::<BridgeDisplayConfig>().authored);
+        assert_eq!(
+            app.world()
+                .resource::<BridgeLayoutResource>()
+                .layout
+                .roster()
+                .len(),
+            1,
+            "the hull's station reached the layout law"
+        );
+
+        // Two lobby presses, so the live layout is an arrangement rather than
+        // the boot default: the viewscreen is on a screen nobody's console is
+        // on, and helm's console is on the BenQ.
+        choose(&mut app, ACME);
+        seat(&mut app, "helm", BENQ);
+        assert_eq!(
+            app.world()
+                .resource::<BridgeLayoutResource>()
+                .layout
+                .stations_on(&MonitorIdentity::new(BENQ)),
+            &[crate::core::messages::StationId("helm".to_string())],
+        );
+        // One frame with the arrangement in place and every screen still
+        // plugged in, so the watcher's committed baseline is the arranged
+        // bridge. Without it the BenQ would never have been an assigned,
+        // present display, and the unplug below could not name it as a loss
+        // under ANY config — which would make the assertion vacuous.
+        app.update();
 
         let benq = benq_entity(&mut app);
         app.world_mut().entity_mut(benq).despawn();
         settle(&mut app);
 
+        let live = app.world().resource::<BridgeLayoutResource>();
         assert_eq!(
-            app.world()
-                .resource::<BridgeLayoutResource>()
-                .layout
-                .monitors()
-                .len(),
-            1,
+            live.layout.monitors().len(),
+            2,
             "the unplug itself was believed"
+        );
+        assert!(
+            live.layout
+                .monitor_of(&crate::core::messages::StationId("helm".to_string()))
+                .is_none(),
+            "and the law left helm's console unassigned, as it does for any lost screen"
         );
         assert_eq!(
             bus.open_count(),
             1,
-            "and it closed nobody's console: a synthesised profile carries no pane labels"
+            "but it closed nobody's console: the synthesised profile is the BOOT layout, which \
+             seated nothing, so it carries no pane labels for a loss to resolve"
         );
     }
 

@@ -355,6 +355,25 @@ pub struct BridgeLayout {
     /// (issue #1124), not this law's, and the viewscreen is the only surface this
     /// module actually moves today. Faking a `StationId` for one instead would
     /// have put a station no ship has on the roster-driven rows.
+    ///
+    /// # It does not survive a round trip through a profile (issue #1334)
+    ///
+    /// [`write_displays_into`](Self::write_displays_into) emits seats and only
+    /// seats, so `adopt_profile(to_validated_profile(L))` is **not** `L` whenever
+    /// `L` reserves anything: the participant panes go in and do not come back
+    /// out. That is harmless today, and only today — the one production caller
+    /// that writes a profile ([`super::bridge_display`]'s synthesised runtime
+    /// config) does it on a boot layout whose `reserved` is empty, and there is
+    /// no save-layout path at all for an operator to lose anything through.
+    ///
+    /// The moment one lands it becomes DATA LOSS with a face: an operator saves a
+    /// bridge that was seeded from a hand-authored `--profile`, the participant
+    /// panes are silently dropped from the file, and the next boot reads those
+    /// screens as free and moves the viewscreen onto a crew member's live
+    /// console — the exact failure `reserved` exists to prevent, re-introduced by
+    /// the save. Issue #1334 must therefore do one of two things: re-emit the
+    /// participant slots it read, or refuse to persist a `--profile`-seeded
+    /// layout at all. It may not simply write the file.
     reserved: Vec<Vec<String>>,
 }
 
@@ -735,6 +754,13 @@ impl BridgeLayout {
     /// (rule 1). The tests hold the proof directly —
     /// `a_layouts_profile_always_names_the_viewscreen` and
     /// `a_layouts_validated_profile_is_the_same_arrangement`.
+    ///
+    /// Valid is not the same as **lossless**, and this is not the latter:
+    /// participant slots are not re-emitted, so
+    /// [`adopt_profile`](Self::adopt_profile) of what this writes differs from
+    /// the layout it was written from whenever that layout reserves anything.
+    /// See [`reserved`](Self::reserved) — nothing today can reach the loss, and
+    /// issue #1334 is where it stops being free.
     pub fn to_validated_profile(&self) -> ValidatedProfile {
         self.to_profile()
             .validate()
@@ -855,10 +881,17 @@ impl BridgeLayout {
     /// - The **viewscreen** is kept when its monitor survived — even when it is
     ///   not the primary, because that was the operator's choice and a re-plug of
     ///   some *other* screen is no reason to overrule it. Only when its own
-    ///   monitor is gone does it fall back to primary-else-first, and that
-    ///   fallback is reported ([`ViewscreenMonitorGone`](LayoutAdoption::ViewscreenMonitorGone)):
-    ///   it is the one change here that would otherwise look like nothing
-    ///   happened.
+    ///   monitor is gone does it fall back, and the fallback obeys rule 2 like
+    ///   every other move: it prefers a screen holding **nothing** — the primary
+    ///   if that one is free, else the first free one in monitor order — because
+    ///   landing on an occupied screen covers a live console, and an authored one
+    ///   ([`reserved`](Self::reserved)) it cannot even be moved off afterwards.
+    ///   The fallback is always reported
+    ///   ([`ViewscreenMonitorGone`](LayoutAdoption::ViewscreenMonitorGone)): it is
+    ///   the one change here that would otherwise look like nothing happened. When
+    ///   **no** screen is free the shared view still has to be somewhere, so it
+    ///   lands primary-else-first and names what it landed on top of
+    ///   ([`ViewscreenCoversOccupants`](LayoutAdoption::ViewscreenCoversOccupants)).
     /// - A **station whose monitor is gone** is left unassigned and named
     ///   ([`StationMonitorGone`](LayoutAdoption::StationMonitorGone)); it is not
     ///   re-homed onto some other screen, for the same reason a missing display's
@@ -899,15 +932,35 @@ impl BridgeLayout {
         let viewscreen = if identities.contains(self.viewscreen()) {
             self.viewscreen().clone()
         } else {
-            let replacement = monitors
-                .iter()
-                .find(|d| d.primary)
-                .map(|d| d.identity.clone())
-                .unwrap_or_else(|| first.clone());
+            // Rule 2 governs the fallback too. Choosing primary-else-first
+            // *directly* — rather than through the transition that enforces the
+            // rule — drops the shared view on top of whatever a surviving screen
+            // is already holding, and an authored console is the worst case
+            // because nothing here can move it out from under afterwards. So a
+            // screen holding NOTHING is preferred: the primary when it is free,
+            // else the first free one in monitor order.
+            let free = |m: &MonitorIdentity| self.occupants_on(m).is_empty();
+            let primary = monitors.iter().find(|d| d.primary).map(|d| &d.identity);
+            let replacement = primary
+                .filter(|m| free(m))
+                .or_else(|| identities.iter().find(|m| free(m)))
+                .cloned()
+                // Nowhere free at all. The shared view still has to be
+                // somewhere — a bridge is at least one screen — so the plain
+                // primary-else-first fallback stands, and what it covers is
+                // named below instead of being covered in silence.
+                .unwrap_or_else(|| primary.cloned().unwrap_or_else(|| first.clone()));
             notes.push(LayoutAdoption::ViewscreenMonitorGone {
                 monitor: self.viewscreen().clone(),
                 replacement: replacement.clone(),
             });
+            let occupants = self.occupants_on(&replacement);
+            if !occupants.is_empty() {
+                notes.push(LayoutAdoption::ViewscreenCoversOccupants {
+                    monitor: replacement.clone(),
+                    occupants,
+                });
+            }
             replacement
         };
         let index = identities
@@ -1135,6 +1188,25 @@ pub enum LayoutAdoption {
         monitor: MonitorIdentity,
         replacement: MonitorIdentity,
     },
+    /// The viewscreen's fallback had **no free screen** to land on, so it landed
+    /// on one that was holding consoles — see [`BridgeLayout::reconcile`].
+    ///
+    /// Emitted *beside* [`ViewscreenMonitorGone`](Self::ViewscreenMonitorGone),
+    /// not instead of it: that note says the operator's chosen screen is gone,
+    /// this one says what the replacement is now sitting on top of. It is not a
+    /// refusal, because a bridge is at least one screen and the shared view has
+    /// to be somewhere — but it is never silent, and that is the whole reason it
+    /// exists. A **seated** station covered this way at least earns its own
+    /// [`SeatRefused`](Self::SeatRefused) when rule 2 unseats it below; an
+    /// authored surface ([`BridgeLayout::reserved_on`]) earns nothing at all,
+    /// cannot be unassigned, and would otherwise be covered without a word.
+    ViewscreenCoversOccupants {
+        monitor: MonitorIdentity,
+        /// What that screen was holding, in the order
+        /// [`BridgeLayout::occupants_on`] gives it: the seated station ids
+        /// first, then the authored surfaces this layout does not own.
+        occupants: Vec<String>,
+    },
     /// A station's console was open on a monitor that is no longer connected, so
     /// it is left unassigned rather than moved to some other screen — the same
     /// no-silent-re-homing rule a missing display gets one slice up.
@@ -1170,6 +1242,9 @@ impl LayoutAdoption {
             LayoutAdoption::SeatRefused { .. } => "server.bridge_layout.adopt_seat_refused",
             LayoutAdoption::ViewscreenMonitorGone { .. } => {
                 "server.bridge_layout.adopt_viewscreen_gone"
+            }
+            LayoutAdoption::ViewscreenCoversOccupants { .. } => {
+                "server.bridge_layout.adopt_viewscreen_covers"
             }
             LayoutAdoption::StationMonitorGone { .. } => {
                 "server.bridge_layout.adopt_station_monitor_gone"
@@ -1210,6 +1285,14 @@ impl LayoutAdoption {
             } => vec![
                 ("monitor", monitor.as_str().to_string()),
                 ("replacement", replacement.as_str().to_string()),
+            ],
+            LayoutAdoption::ViewscreenCoversOccupants { monitor, occupants } => vec![
+                ("monitor", monitor.as_str().to_string()),
+                // Already the player-facing list `occupants_on` draws on a
+                // button, so it is joined the way `occupant_params` joins one:
+                // unquoted, because quotes read as stray punctuation in a
+                // sentence somebody is reading off a screen.
+                ("occupants", occupants.join(", ")),
             ],
             LayoutAdoption::NoMonitorsReported { kept } => {
                 vec![("count", kept.len().to_string())]
@@ -1270,6 +1353,17 @@ impl std::fmt::Display for LayoutAdoption {
                 "monitor {monitor} was showing the viewscreen and is no longer connected, so the \
                  viewscreen moved to {replacement}; pick the screen you want it on again once \
                  {monitor} is back"
+            ),
+            LayoutAdoption::ViewscreenCoversOccupants { monitor, occupants } => write!(
+                f,
+                "no screen was free for the viewscreen to fall back to, so it moved onto monitor \
+                 {monitor} on top of {}; unassign them, or plug the missing display back in and \
+                 pick a screen again",
+                occupants
+                    .iter()
+                    .map(|o| format!("{o:?}"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
             ),
             LayoutAdoption::StationMonitorGone { station, monitor } => write!(
                 f,

@@ -612,6 +612,32 @@ describe('a station card’s screen row', () => {
     expect(benqButton.textContent).toContain(t('server.station_row.full'));
   });
 
+  it('names what a full screen is holding, beside the greyed button (issue #1332)', () => {
+    // Visible feedback for the refused third console: greyed says the press
+    // will not work, and this says which console to close to make room. The
+    // names come off the monitor row's own occupant list, so a `--pane`
+    // participant — who has no station card anywhere — is named here too.
+    installLobbyPanel(document);
+    renderWithLayout(
+      {
+        monitors: [monitor(), benq({ stations: ['Ada', 'weapons'] })],
+        stations: [{
+          station: 'helm',
+          monitors: [
+            screenChoice('BRAVIA@3840x2160', 'excluded', 'is-viewscreen'),
+            screenChoice('BenQ EX@1920x1080', 'excluded', 'full'),
+          ],
+        }],
+      },
+      { stations: [station({ id: 'helm' })] },
+    );
+    const [, benqButton] = screenButtons();
+    expect(benqButton.disabled).toBe(true);
+    const why = benqButton.querySelector('.station-screen-reason');
+    expect(why.textContent).toContain('Ada, weapons');
+    expect(why.textContent).not.toContain('⟨');
+  });
+
   it('says why there is no screen on a one-monitor bridge', () => {
     installLobbyPanel(document);
     renderWithLayout(

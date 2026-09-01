@@ -324,6 +324,15 @@ function monitorLabel(m) {
  *   console ever opens on — and a button that vanished would leave them
  *   wondering where their second monitor went.
  *
+ * That reason **names what the screen is holding** when the monitor row knows
+ * (issue #1332). Still not a second implementation of the rule: `full` is the
+ * law's own verdict and the names are the law's own `occupants_on` list, already
+ * on this payload's monitor entry; the row simply joins the two by identity
+ * rather than making the operator look the screen up themselves. It matters most
+ * for the occupant a station row can never show — a console a hand-authored
+ * `--profile` opened for a named crew member, which fills a slot, has no row of
+ * its own, and would otherwise grey a screen for no visible reason.
+ *
  * A row with no button left at all is the single-monitor bridge: there is
  * nowhere but the viewscreen, so the row carries a message instead of an empty
  * strip of nothing.
@@ -347,16 +356,27 @@ export function hostLobbyStationRows(layout) {
       // on a button; the host already skips those, so this is belt to braces.
       if (!monitor) continue;
       const excluded = screen.choice === 'excluded';
+      // The law's reason, as the words beside a greyed button. `full` is the
+      // only one that reaches here; `is-viewscreen` was dropped above. When the
+      // monitor row knows what that screen is holding, the reason says so —
+      // the same `occupants_on` list the monitor button shows and the same one
+      // the refusal names, so all three agree by construction.
+      const holding = monitor.stations || [];
+      let reason = null;
+      if (screen.excluded === 'full') {
+        reason = holding.length
+          // Joined here rather than in the string table for `occupants`' reason:
+          // `t()` interpolates values, and a comma is punctuation rather than
+          // English a translator can be handed a list for.
+          ? { id: 'server.station_row.full_holding', params: { stations: holding.join(', ') } }
+          : { id: 'server.station_row.full', params: {} };
+      }
       buttons.push({
         identity: screen.identity,
         label: monitorLabel(monitor),
         selected: screen.choice === 'selected',
         disabled: excluded,
-        // The law's reason, as the words beside a greyed button. `full` is the
-        // only one that reaches here; `is-viewscreen` was dropped above.
-        reason: screen.excluded === 'full'
-          ? { id: 'server.station_row.full', params: {} }
-          : null,
+        reason,
       });
     }
     rows[st.station] = buttons.length === 0

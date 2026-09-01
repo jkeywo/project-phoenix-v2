@@ -563,6 +563,113 @@ describe('hostLobbyStationRows — which state the row is in', () => {
   });
 });
 
+// ── two consoles per screen, and the greying (issue #1332) ───────────────────
+//
+// Same discipline as above and it is the whole acceptance criterion: the page
+// never works out for itself whether a screen is full. Every case here feeds the
+// law's verdict verbatim and checks only what the row DOES with it — including
+// the case the law now answers differently, a screen filled by a console a
+// hand-authored `--profile` opened, which no station row can ever show.
+
+describe('hostLobbyStationRows — a full screen says what is holding it', () => {
+  /** A payload whose BenQ is `full`, holding whatever `stations` names. */
+  const fullBenq = (stations) => bridge({
+    monitors: [monitor(), secondMonitor({ stations })],
+    stations: [{
+      station: 'helm',
+      monitors: [
+        screen('BRAVIA@3840x2160', 'excluded', 'is-viewscreen'),
+        screen('BenQ EX@1920x1080', 'excluded', 'full'),
+      ],
+    }],
+  });
+
+  it('names the two consoles already on it, so the operator knows what to close', () => {
+    // Visible feedback for the refused third: greyed is *that* it cannot be
+    // pressed, and this is *why*. The names are the monitor row's own occupant
+    // list — the law's `occupants_on` — joined, not a second list built here.
+    const row = hostLobbyStationRows(fullBenq(['weapons', 'comms'])).helm;
+    expect(row.buttons[0].disabled).toBe(true);
+    expect(row.buttons[0].reason).toEqual({
+      id: 'server.station_row.full_holding',
+      params: { stations: 'weapons, comms' },
+    });
+  });
+
+  it('names a console a hand-authored profile opened, which has no row of its own', () => {
+    // The case that would otherwise grey a screen for no visible reason: a
+    // `--pane` participant is a console on the glass and fills a slot, but is
+    // not on the roster, so no station card mentions them anywhere.
+    const row = hostLobbyStationRows(fullBenq(['Ada', 'Grace'])).helm;
+    expect(row.buttons[0].reason.params.stations).toBe('Ada, Grace');
+  });
+
+  it('falls back to the bare marker when the row was told nothing about it', () => {
+    // Not reachable from a live host — a screen cannot be full and empty — but
+    // the button must still say something rather than render a blank list.
+    const row = hostLobbyStationRows(fullBenq([])).helm;
+    expect(row.buttons[0].reason).toEqual({ id: 'server.station_row.full', params: {} });
+  });
+
+  it('never greys a screen the law called eligible, whatever it is holding', () => {
+    // The one that would break if the page started counting for itself: a
+    // screen holding ONE console has a slot free, and the law says so. A row
+    // that greyed on "stations is non-empty" would refuse the second console
+    // this whole issue exists to allow.
+    const row = hostLobbyStationRows(bridge({
+      monitors: [monitor(), secondMonitor({ stations: ['weapons'] })],
+    })).helm;
+    expect(row.buttons[0].disabled).toBe(false);
+    expect(row.buttons[0].reason).toBeNull();
+  });
+});
+
+describe('hostLobbyStationRows — a screen filling and emptying', () => {
+  /** Three stations, and a BenQ the law's verdict is supplied for. */
+  const threeStations = (benqChoices, holding) => ({
+    monitors: [monitor(), secondMonitor({ stations: holding })],
+    stations: ['helm', 'weapons', 'comms'].map((station) => ({
+      station,
+      assigned_to: benqChoices[station] === 'selected' ? 'BenQ EX@1920x1080' : undefined,
+      monitors: [
+        screen('BRAVIA@3840x2160', 'excluded', 'is-viewscreen'),
+        screen('BenQ EX@1920x1080', benqChoices[station],
+          benqChoices[station] === 'excluded' ? 'full' : undefined),
+      ],
+    })),
+  });
+
+  const benqOf = (rows, station) =>
+    rows[station].buttons.find((b) => b.identity === 'BenQ EX@1920x1080');
+
+  it('greys a full screen on every other station’s row and on neither occupant’s', () => {
+    const rows = hostLobbyStationRows(threeStations(
+      { helm: 'selected', weapons: 'selected', comms: 'excluded' },
+      ['helm', 'weapons'],
+    ));
+    expect(benqOf(rows, 'helm').selected).toBe(true);
+    expect(benqOf(rows, 'helm').disabled).toBe(false);
+    expect(benqOf(rows, 'weapons').selected).toBe(true);
+    expect(benqOf(rows, 'comms').disabled).toBe(true);
+    expect(benqOf(rows, 'comms').reason.params.stations).toBe('helm, weapons');
+  });
+
+  it('un-greys the vacated screen on every other row when a console leaves it', () => {
+    // The acceptance criterion, at the row: one console moved away, so the
+    // screen has a slot again — and it comes back on EVERY row that was greyed,
+    // not only on the row of the station that moved.
+    const rows = hostLobbyStationRows(threeStations(
+      { helm: 'selected', weapons: 'eligible', comms: 'eligible' },
+      ['helm'],
+    ));
+    for (const station of ['weapons', 'comms']) {
+      expect(benqOf(rows, station).disabled).toBe(false);
+      expect(benqOf(rows, station).reason).toBeNull();
+    }
+    expect(benqOf(rows, 'helm').selected).toBe(true);
+  });
+});
+
 describe('hostLobbyViewModel — a card carries its own screen row', () => {
   it('hangs the row on the card whose station id matches', () => {
     const vm = hostLobbyViewModel(

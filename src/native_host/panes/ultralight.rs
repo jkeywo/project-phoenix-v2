@@ -1556,6 +1556,11 @@ fn drive_panes(
     host: Option<NonSendMut<PaneHost>>,
     bus: Option<Res<PaneBusResource>>,
     lobby: Option<Res<HostLobbyBridgeResource>>,
+    // The live Station surfaces (issue #1331): where a console the lobby just
+    // opened is composited. Read rather than written — `follow_layout_stations`
+    // owns them — and optional, because a `NativeRenderSurface::Contract` host
+    // has no display adapter at all.
+    stations: Option<Res<BridgeStationSurfaces>>,
     mut images: ResMut<Assets<Image>>,
     mut commands: Commands,
     log: Option<Res<LogFilterConfig>>,
@@ -1574,11 +1579,19 @@ fn drive_panes(
         // live page's records into a registry that refuses them, once per frame,
         // for the rest of the run.
         retire_closed_panes(&mut host, bus, &mut commands, &log);
-        // Panes recreated after a fault (issue #1125) get a fresh view here,
-        // BEFORE the frame drives them, so a pane brought back on the same
-        // identity reloads its console and reconnects — the in-process analogue
-        // of a phone redialling.
-        open_pending_views(&mut host, bus, &mut images, &mut commands, &log);
+        // Panes the bus opened without a view get one here, BEFORE the frame
+        // drives them: a pane recreated after a fault (issue #1125), so it
+        // reloads its console and reconnects — the in-process analogue of a
+        // phone redialling — and a station console the lobby's screen row just
+        // opened (issue #1331), so it loads the client page and joins.
+        open_pending_views(
+            &mut host,
+            bus,
+            stations.as_deref(),
+            &mut images,
+            &mut commands,
+            &log,
+        );
     }
     host.runtime.update();
 
@@ -1716,16 +1729,27 @@ fn drive_panes(
     }
 }
 
-/// Build an Ultralight view for every pane recreated after a fault (issue #1125).
+/// Build an Ultralight view for every pane the bus opened without one — a pane
+/// recreated after a fault (issue #1125), and a station console the lobby's
+/// screen row just opened (issue #1331).
 ///
-/// A recreated pane carries the same participant identity as the one it replaces,
-/// so it rebuilds in that name's stored [`PaneSlotGeometry`] — the same tile on
-/// screen — and reloads the same console. A name with no stored slot (which
-/// should not happen for a recreation) is skipped with a warning rather than
-/// guessed at.
+/// **Where the view goes is decided by which kind it is**, and both answers are
+/// looked up by the pane's own participant name:
+///
+/// * A **station console** is seated on the Station window
+///   [`BridgeStationSurfaces`] gives its station id, in that slot's rectangle,
+///   on that window's own 2-D camera — the same seat `init_pane_host` gives a
+///   `--pane` the profile placed. The surfaces are live (`follow_layout_stations`
+///   rewrites them), so a console that moved screens is rebuilt on the screen it
+///   moved to.
+/// * A **recreated pane** falls back to that name's stored [`PaneSlotGeometry`]
+///   — the same tile on the primary window it had before the crash.
+///
+/// A name with neither is skipped with a warning rather than guessed at.
 fn open_pending_views(
     host: &mut PaneHost,
     bus: &PaneBusResource,
+    stations: Option<&BridgeStationSurfaces>,
     images: &mut Assets<Image>,
     commands: &mut Commands,
     log: &Option<Res<LogFilterConfig>>,
@@ -1750,40 +1774,73 @@ fn open_pending_views(
         let Some(name) = bus.0.name_of(new_id) else {
             continue;
         };
-        let Some(slot) = host.layout.iter().find(|s| s.name == name).cloned() else {
-            crate::pwarn!(
-                log,
-                LogCat::Lobby,
-                "pane host: recreated {new_id} ({name}) has no stored layout slot; its view is \
-                 not rebuilt — its station stays on AI control"
-            );
-            continue;
+        // The Station window this pane belongs on, if the live layout seats it
+        // (issue #1331). Resolved before the tiled fallback, because a console
+        // the operator put on a wall monitor must not be built on the
+        // viewscreen window instead.
+        let seat = stations.and_then(|s| s.slot_for(&name)).map(|(s, pane)| {
+            (
+                s.window,
+                (pane.rect.x, pane.rect.y),
+                (pane.rect.width.max(1), pane.rect.height.max(1)),
+                s.geometry.scale_factor.max(0.1),
+                (s.geometry.position_x, s.geometry.position_y),
+            )
+        });
+        let placement = match seat {
+            Some((window, origin, size, scale, window_origin)) => PaneSeat {
+                // One 2-D camera per Station window, reused as consoles come and
+                // go on it — the same arrangement `init_pane_host` makes, and
+                // the same list `retire_closed_panes` despawns from when a
+                // Station window's last console closes.
+                station_camera: Some(station_camera(host, commands, window)),
+                window,
+                origin,
+                size,
+                scale,
+                window_origin,
+            },
+            None => {
+                let Some(slot) = host.layout.iter().find(|s| s.name == name).cloned() else {
+                    crate::pwarn!(
+                        log,
+                        LogCat::Lobby,
+                        "pane host: {new_id} ({name}) has no Station slot and no stored tile; \
+                         its view is not built — its station stays on AI control"
+                    );
+                    continue;
+                };
+                PaneSeat {
+                    window: host.primary_window,
+                    station_camera: None,
+                    origin: slot.origin,
+                    size: slot.size,
+                    scale: host.scale,
+                    window_origin: (0, 0),
+                }
+            }
         };
-        match make_pane_view(
-            &host.runtime,
-            images,
-            commands,
-            new_id,
-            &url,
-            host.primary_window,
-            slot.origin,
-            slot.size,
-            host.scale,
-        ) {
+        let on_station = placement.station_camera.is_some();
+        match make_pane_view(&host.runtime, images, commands, new_id, &url, placement) {
             Ok(window) => {
                 host.windows.push(window);
                 recreated_any = true;
                 crate::pinfo!(
                     log,
                     LogCat::Lobby,
-                    "pane host: {new_id} ({name}) recreated after a fault — reloading its \
-                     console to reconnect on the same identity"
+                    "pane host: {new_id} ({name}) is showing its console on {} — loading the \
+                     client page, from which it joins and claims like any phone",
+                    if on_station {
+                        "its Station window"
+                    } else {
+                        "the viewscreen window"
+                    }
                 );
             }
             Err(e) => crate::pwarn!(
                 log,
                 LogCat::Lobby,
-                "pane host: could not rebuild the view for {new_id} ({name}): {e}"
+                "pane host: could not build the view for {new_id} ({name}): {e}"
             ),
         }
     }
@@ -1794,30 +1851,86 @@ fn open_pending_views(
     }
 }
 
-/// Create one pane's Ultralight view, its texture and its on-screen canvas, at
-/// `origin`/`size` (issue #1125's recreation path).
+/// Where one pane's view is built: which window, which rectangle on it, and
+/// which camera draws it.
+///
+/// A struct rather than six more parameters, and the six are exactly the fields
+/// [`PaneWindow`] needs to be told: they travel together everywhere, and a
+/// positional `(u32, u32)` pair next to another `(u32, u32)` pair is the shape
+/// of an argument-order bug nothing would catch.
+///
+/// Named for the seat rather than the placement, because
+/// [`PanePlacement`](crate::native_host::input_routing::PanePlacement) is the
+/// input router's own type for where a pane sits in *screen* coordinates. This
+/// one is how the view is BUILT; that one is how a click is resolved.
+struct PaneSeat {
+    /// The OS window this pane renders on — the primary (viewscreen) window for
+    /// a tiled pane, a Station window for a composited one.
+    window: Entity,
+    /// The 2-D camera drawing it onto a Station window. `None` for a pane on the
+    /// primary window, which uses the game's own default UI camera.
+    station_camera: Option<Entity>,
+    origin: (u32, u32),
+    size: (u32, u32),
+    scale: f64,
+    /// The window's top-left on the virtual desktop, physical pixels — `(0, 0)`
+    /// for the primary window. What makes the input router resolve a click in
+    /// the monitor's own coordinate space.
+    window_origin: (i32, i32),
+}
+
+/// The 2-D camera rendering `window`'s panes, spawned if this is the first one.
+///
+/// One camera per Station window, reused as consoles come and go on it — the
+/// same arrangement `init_pane_host` makes at boot, and the same
+/// `station_cameras` list `retire_closed_panes` despawns from when a Station
+/// window's last console closes.
+fn station_camera(host: &mut PaneHost, commands: &mut Commands, window: Entity) -> Entity {
+    if let Some((_, camera)) = host.station_cameras.iter().find(|(w, _)| *w == window) {
+        return *camera;
+    }
+    let camera = commands
+        .spawn((
+            Camera2d,
+            Camera {
+                order: 0,
+                clear_color: ClearColorConfig::Custom(Color::BLACK),
+                ..default()
+            },
+            RenderTarget::Window(WindowRef::Entity(window)),
+            CameraRenderGraph::new(Core2d),
+        ))
+        .id();
+    host.station_cameras.push((window, camera));
+    camera
+}
+
+/// Create one pane's Ultralight view, its texture and its on-screen canvas at
+/// `placement` — the path every pane built **after** init takes (issues #1125,
+/// #1331).
 ///
 /// The same construction `init_pane_host` does inline, but against
 /// `Assets<Image>`/`Commands` rather than an exclusive `&mut World`, because
 /// `drive_panes` is an ordinary system. A creation or load failure here fails
 /// only THIS pane — its station simply stays on Backfill — rather than the whole
-/// host, which is right for a recovery path.
-///
-/// The recreated pane returns tiled on `window` (the primary viewscreen window)
-/// on the game's default UI camera — the honest recovery seat; it does not
-/// re-composite onto a Station window, whose 2-D camera the close path may have
-/// already despawned.
+/// host, which is right for both a recovery and a console the operator can
+/// simply close and re-open.
 fn make_pane_view(
     runtime: &UltralightRuntime,
     images: &mut Assets<Image>,
     commands: &mut Commands,
     id: PaneId,
     url: &str,
-    window: Entity,
-    origin: (u32, u32),
-    size: (u32, u32),
-    scale: f64,
+    placement: PaneSeat,
 ) -> Result<PaneWindow, PaneSurfaceError> {
+    let PaneSeat {
+        window,
+        station_camera,
+        origin,
+        size,
+        scale,
+        window_origin,
+    } = placement;
     let spec = PaneSpec {
         width: size.0,
         height: size.1,
@@ -1842,31 +1955,35 @@ fn make_pane_view(
         RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
     );
     let handle = images.add(image);
-    let canvas = commands
-        .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(origin.0 as f32 / scale as f32),
-                top: Val::Px(origin.1 as f32 / scale as f32),
-                width: Val::Px(size.0 as f32 / scale as f32),
-                height: Val::Px(size.1 as f32 / scale as f32),
-                ..default()
-            },
-            ImageNode::new(handle.clone()),
-            PaneCanvas,
-        ))
-        .id();
+    let mut canvas = commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(origin.0 as f32 / scale as f32),
+            top: Val::Px(origin.1 as f32 / scale as f32),
+            width: Val::Px(size.0 as f32 / scale as f32),
+            height: Val::Px(size.1 as f32 / scale as f32),
+            ..default()
+        },
+        ImageNode::new(handle.clone()),
+        PaneCanvas,
+    ));
+    // A composited pane's canvas renders on its Station camera; a tiled one uses
+    // the default UI camera and takes no marker — as at init.
+    if let Some(cam) = station_camera {
+        canvas.insert(UiTargetCamera(cam));
+    }
+    let canvas = canvas.id();
     Ok(PaneWindow {
         id,
         surface,
         image: handle,
         canvas,
         window,
-        station_camera: None,
+        station_camera,
         origin,
         size,
         scale,
-        window_origin: (0, 0),
+        window_origin,
         copy_failures: 0,
     })
 }

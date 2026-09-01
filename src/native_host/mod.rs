@@ -81,6 +81,21 @@ pub mod host_lobby;
 /// that feeds it real events is [`panes::ultralight`] behind `--features
 /// ultralight`.
 pub mod input_routing;
+/// The **saved bridge layouts** (issue #1334) — pure, Bevy-free, and its
+/// location injected. One TOML file per ship class under the operator's own
+/// settings directory (`%APPDATA%\ProjectPhoenix\bridge-layouts` on Windows),
+/// holding the arrangement they built in the lobby the last time they flew that
+/// hull: the class key, the atomic temp-then-rename write, and the
+/// load-parse-revalidate that hands [`bridge_layout`] a profile as untrusted as
+/// a hand-authored one. Its Bevy adapter — the pre-apply at the hull-known
+/// moment and the write on every accepted lobby change — is
+/// [`layout_store_systems`].
+pub mod layout_store;
+/// The Bevy adapter for [`layout_store`] (issue #1334): the two systems that
+/// pre-apply a class's remembered bridge once the hull is known and file every
+/// accepted lobby change back to it, both gated off for a run an operator gave
+/// an explicit `--profile`.
+pub mod layout_store_systems;
 pub mod panes;
 /// The real WebSocket behind [`relay_transport`]. Behind the `host` feature
 /// because it is the only thing here that needs `tungstenite`; the protocol it

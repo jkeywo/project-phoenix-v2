@@ -821,6 +821,40 @@ pub fn build_native_host_app(
         });
     }
 
+    // The per-ship-class saved layouts (issue #1334). The plugin is installed
+    // unconditionally and is inert without the resource below, exactly as the
+    // display plugin above is inert without monitors.
+    //
+    // The resource is inserted only for a host whose bridge is the LOBBY's to
+    // remember, and the `else` arm is the whole of issue #1334's precedence
+    // rule: a run given an explicit `--profile` uses that profile verbatim, has
+    // nothing pre-applied over it, and files nothing back. That is stated here
+    // AND as a run condition on the systems, because it is also a data-loss
+    // guard — a saved `--profile`-seeded layout would drop the operator's
+    // `--pane` participant slots out of the file (`to_validated_profile` emits
+    // seats and only seats) and the next boot would move the viewscreen onto a
+    // live console. See `layout_store_systems`' module note.
+    app.add_plugins(crate::native_host::layout_store_systems::BridgeLayoutStorePlugin);
+    if cfg.bridge_profile.is_none() {
+        match crate::native_host::layout_store::LayoutStore::user() {
+            Some(store) => {
+                app.insert_resource(
+                    crate::native_host::layout_store_systems::BridgeLayoutStore {
+                        store,
+                        remembered: None,
+                    },
+                );
+            }
+            None => crate::pwarn!(
+                cfg.log,
+                crate::logging::LogCat::Lobby,
+                "no home directory could be resolved, so this host cannot remember the bridge \
+                 arrangement per ship class; every session starts from the displays as found. \
+                 Pass --profile to run a fixed arrangement instead."
+            ),
+        }
+    }
+
     // An unfocused bridge machine must keep simulating: the browser host
     // inserts exactly this, and a native window's default is to throttle when
     // it loses focus.

@@ -479,6 +479,22 @@ ron = "0.12"
 # filesystem is: the browser gets `backend-web` in the wasm stanza below. Both
 # unify into the single `vellum-save` declared in `[dependencies]`.
 vellum-save = { workspace = true, features = ["backend-fs"] }
+# The operator's own settings directory, for the per-ship-class bridge layouts
+# a native host remembers (issue #1334) — `%APPDATA%` on Windows,
+# `~/.local/share` on Linux, `~/Library/Application Support` on macOS.
+#
+# NATIVE-ONLY, in this stanza rather than in `[dependencies]`, for the reason
+# `ron` two lines up gives: `native_host` is itself `cfg(not(wasm32))`, so the
+# browser build must not carry a home-directory resolver it can never reach —
+# and on wasm this crate's platform code has nothing to resolve against.
+#
+# `BaseDirs` rather than `ProjectDirs` ([ai]): `ProjectDirs` appends its own
+# `config`/`data` leaf on Windows (`%APPDATA%\<Org>\<App>\data`), which is not
+# the path issue #1334 specifies. `BaseDirs::data_dir()` IS `%APPDATA%`, and the
+# store joins `ProjectPhoenix/bridge-layouts` onto it — so the Windows path is
+# exactly the authored one and the other platforms get their own conventional
+# root for free.
+directories = "6"
 
 # WASM: no parallel, uses single-threaded runtime
 # getrandom 0.3+ needs wasm_js feature + cfg(getrandom_backend="js")

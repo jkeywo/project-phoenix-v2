@@ -4208,4 +4208,442 @@ mod tests {
             "and it is a sentence, not a silence"
         );
     }
+
+    // ── a crashed console reopens on its own monitor (issue #1333) ──────────
+    //
+    // The placement rule itself is pure and lives in `panes::placement`, which
+    // is what makes it checkable by CI at all: before #1333 it was six lines
+    // inside `open_pending_views`, behind `--features ultralight`, which no job
+    // in this repository compiles. These ask that rule of a REAL running
+    // bridge — the surfaces `follow_layout_stations` wrote this frame and the
+    // law the row edits — at each step of a crash, a flap, an unplug and a move.
+    //
+    // Every one of them hands the decision a TEMPTING TILE: a stored
+    // primary-window rectangle under the console's own name, which is precisely
+    // what the pre-#1333 fallback would have reached for. The assertions are
+    // that it never does.
+
+    /// Where the pane host would build `name`'s view, decided from the live
+    /// bridge exactly as `open_pending_views` decides it.
+    fn home(
+        app: &App,
+        name: &str,
+        tiles: &[crate::native_host::panes::PaneTile],
+    ) -> crate::native_host::panes::PaneHome {
+        let live = app.world().resource::<BridgeLayoutResource>();
+        crate::native_host::panes::home_for_pane(
+            name,
+            Some(app.world().resource::<BridgeStationSurfaces>()),
+            Some(&live.layout),
+            tiles,
+        )
+    }
+
+    /// A stored primary-window tile under `name` — the thing a seated console
+    /// must never be rebuilt onto. On a real host a station id can never have
+    /// one (`app::install_world_selection` refuses a `--pane` label that
+    /// shadows a station id, and a runtime console records no tile at all), so
+    /// this is the trap made reachable on purpose: with it present, "the seated
+    /// console was not tiled" is a claim about the RULE rather than about an
+    /// empty list.
+    fn tempting_tile(name: &str) -> Vec<crate::native_host::panes::PaneTile> {
+        vec![crate::native_host::panes::PaneTile {
+            name: name.to_string(),
+            origin: (0, 0),
+            size: (1280, 720),
+        }]
+    }
+
+    /// The Station window a surface is open on, by monitor identity.
+    fn station_window(app: &App, identity: &str) -> Entity {
+        app.world()
+            .resource::<BridgeStationSurfaces>()
+            .on(identity)
+            .expect("a surface is open on that monitor")
+            .window
+    }
+
+    #[test]
+    fn a_crashed_seated_console_is_rebuilt_on_its_own_station_window() {
+        // The acceptance criterion, at the seam #1125 built and against the
+        // surfaces #1331 keeps live: a console seated on the BenQ has its view
+        // crash, is recreated on the same session token, and the pane host is
+        // told to build it on the BenQ's OWN window — not tiled onto the
+        // viewscreen, whose window is `primary` and whose home would be a
+        // `PrimaryTile`.
+        use crate::native_host::panes::recovery::{service_faults, PaneFault};
+        use crate::native_host::panes::PaneHome;
+
+        let (mut app, bus) = console_host();
+        seat(&mut app, "helm", BENQ);
+        app.update();
+        let pane = bus.open_pane_for_name("helm").unwrap();
+        let token = bus.token_of(pane).unwrap();
+        bus.mark_live(pane);
+        bus.take_pending_views();
+        let benq_window = station_window(&app, BENQ);
+
+        bus.fault(pane, PaneFault::ViewCrashed);
+        let (recreated, _url) = service_faults(&bus)
+            .pop()
+            .expect("one fault serviced")
+            .recreated
+            .expect("a view crash recreates the console");
+        assert_eq!(
+            bus.token_of(recreated).as_deref(),
+            Some(token.as_str()),
+            "on the same identity, so whoever was at it reconnects to it"
+        );
+        assert_eq!(
+            bus.take_pending_views()
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect::<Vec<_>>(),
+            vec![recreated],
+            "and exactly one view is queued for the pane host to build"
+        );
+
+        let PaneHome::Station { window, size, .. } = home(&app, "helm", &tempting_tile("helm"))
+        else {
+            panic!(
+                "a crashed console is rebuilt on its own Station window: {:?}",
+                home(&app, "helm", &tempting_tile("helm"))
+            );
+        };
+        assert_eq!(
+            window, benq_window,
+            "the BenQ's window, not the primary one"
+        );
+        assert_eq!(size, (1920, 1080), "at the seat the layout gives it now");
+    }
+
+    #[test]
+    fn a_console_that_crashed_and_moved_in_one_frame_lands_on_the_screen_it_moved_to() {
+        // The crash-during-a-move edge. `service_faults` closes and recreates
+        // (queueing view A), and before the pane host has drained that queue the
+        // operator's move closes THAT pane and recreates it again (queueing view
+        // B) — the same `close` + `recreate` pair, used deliberately.
+        //
+        // Two entries, one console: `open_pending_views` skips A because
+        // `is_open` says its pane was closed in the interval, and builds B on the
+        // surfaces the move rewrote. Nothing double-builds, nothing is orphaned,
+        // and the session token survives both hops.
+        use crate::native_host::panes::recovery::{service_faults, PaneFault};
+        use crate::native_host::panes::{PaneHome, PaneId};
+
+        let (mut app, bus) = console_host();
+        seat(&mut app, "helm", BENQ);
+        app.update();
+        let original = bus.open_pane_for_name("helm").unwrap();
+        let token = bus.token_of(original).unwrap();
+        bus.mark_live(original);
+        bus.take_pending_views();
+
+        // The crash, serviced but not yet built.
+        bus.fault(original, PaneFault::ViewCrashed);
+        let (after_crash, _) = service_faults(&bus)
+            .pop()
+            .expect("one fault serviced")
+            .recreated
+            .expect("a view crash recreates");
+
+        // The move, in the gap.
+        seat(&mut app, "helm", ACME);
+        app.update();
+
+        let queued: Vec<PaneId> = bus
+            .take_pending_views()
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(queued.len(), 2, "one entry from each close+recreate");
+        assert_eq!(queued[0], after_crash);
+        let open: Vec<PaneId> = queued
+            .iter()
+            .copied()
+            .filter(|id| bus.is_open(*id))
+            .collect();
+        assert_eq!(
+            open.len(),
+            1,
+            "and exactly one of them is still open, so exactly one view is built"
+        );
+        assert_eq!(
+            bus.open_count(),
+            1,
+            "one console on the bus, not two racing for the same seat"
+        );
+        assert_eq!(
+            bus.token_of(open[0]).as_deref(),
+            Some(token.as_str()),
+            "the token survived the crash AND the move, so nobody had to claim again"
+        );
+
+        let PaneHome::Station { window, .. } = home(&app, "helm", &tempting_tile("helm")) else {
+            panic!("the surviving console still belongs on a Station window");
+        };
+        assert_eq!(
+            window,
+            station_window(&app, ACME),
+            "on the screen the operator moved it to, not the one it crashed on \
+             and not the viewscreen"
+        );
+    }
+
+    #[test]
+    fn a_seated_console_with_nowhere_to_go_is_left_unbuilt_rather_than_put_on_the_viewscreen() {
+        // The failure this issue exists to close, made reachable directly: the
+        // law still seats helm, and the adapter has no slot for it — a monitor
+        // between hot-plug frames, a Station window not yet rebuilt. The
+        // pre-#1333 fallback would have taken the stored tile and drawn a wall
+        // console over the shared view.
+        //
+        // The honest answer is that nothing is built, and #1331's reconciler
+        // then repairs it boundedly and gives the seat back with a notice — which
+        // is the second half asserted here, so "not built" cannot quietly mean
+        // "a station card claiming a black screen forever".
+        use crate::native_host::panes::recovery::MAX_RECREATIONS_PER_WINDOW;
+        use crate::native_host::panes::{NoHome, PaneHome};
+
+        let (mut app, bus) = console_host();
+        seat(&mut app, "helm", BENQ);
+        app.update();
+        bus.mark_live(bus.open_pane_for_name("helm").unwrap());
+        bus.take_pending_views();
+
+        app.world_mut()
+            .resource_mut::<BridgeStationSurfaces>()
+            .0
+            .iter_mut()
+            .for_each(|s| s.panes.clear());
+
+        assert_eq!(
+            home(&app, "helm", &tempting_tile("helm")),
+            PaneHome::Nowhere(NoHome::SeatedButUnplaced),
+            "never the viewscreen, however tempting the tile"
+        );
+
+        // And it does not sit there: the reconciler rebuilds it on its own
+        // identity up to the #1125 budget and then surrenders the seat.
+        for _ in 0..((MAX_RECREATIONS_PER_WINDOW + 2) * CONSOLE_MISSING_GRACE_FRAMES) {
+            app.update();
+        }
+        let live = app.world().resource::<BridgeLayoutResource>();
+        assert!(
+            live.layout.monitor_of(&station("helm")).is_none(),
+            "the seat is given back, so the station is on AI control honestly"
+        );
+        assert!(
+            live.notices.iter().any(|n| matches!(
+                n,
+                LayoutNotice::Adopted(note)
+                    if note.string_id() == "server.bridge_layout.adopt_console_could_not_open"
+            )),
+            "and the operator is told: {:?}",
+            live.notices
+        );
+    }
+
+    #[test]
+    fn a_flapping_seated_console_never_touches_the_viewscreen_on_any_of_its_rebuilds() {
+        // The bounded-flap path of #1125, asked the #1333 question on every hop.
+        // A view that loads then crashes is rebuilt at most
+        // MAX_RECREATIONS_PER_WINDOW times and then left closed — and not one of
+        // those rebuilds, nor the give-up that follows, is ever aimed at the
+        // primary window.
+        use crate::native_host::panes::recovery::{
+            service_faults, PaneFault, MAX_RECREATIONS_PER_WINDOW,
+        };
+        use crate::native_host::panes::PaneHome;
+
+        let (mut app, bus) = console_host();
+        seat(&mut app, "helm", BENQ);
+        app.update();
+        let mut current = bus.open_pane_for_name("helm").unwrap();
+        let token = bus.token_of(current).unwrap();
+        let benq_window = station_window(&app, BENQ);
+
+        let mut rebuilds = 0u32;
+        let mut gave_up = false;
+        for _ in 0..(MAX_RECREATIONS_PER_WINDOW + 1) {
+            bus.fault(current, PaneFault::ViewCrashed);
+            let outcome = service_faults(&bus).pop().expect("one fault serviced");
+            match outcome.recreated {
+                Some((next, _)) => {
+                    rebuilds += 1;
+                    current = next;
+                    bus.mark_live(current);
+                    assert_eq!(bus.token_of(current).as_deref(), Some(token.as_str()));
+                    assert_eq!(
+                        home(&app, "helm", &tempting_tile("helm")),
+                        PaneHome::Station {
+                            window: benq_window,
+                            origin: (0, 0),
+                            size: (1920, 1080),
+                            scale: 1.0,
+                            window_origin: (3840, 0),
+                        },
+                        "every rebuild goes back to the same screen"
+                    );
+                }
+                None => {
+                    assert!(outcome.recreation_exhausted);
+                    gave_up = true;
+                }
+            }
+            app.update();
+        }
+        assert_eq!(rebuilds, MAX_RECREATIONS_PER_WINDOW);
+        assert!(gave_up, "and then it stopped, rather than flapping forever");
+        assert_eq!(bus.open_count(), 0, "left closed for the operator");
+
+        // The seat is surrendered through the law, with the notice the row
+        // renders — the end of the story a `--pane` does not need.
+        for _ in 0..CONSOLE_MISSING_GRACE_FRAMES {
+            app.update();
+        }
+        let live = app.world().resource::<BridgeLayoutResource>();
+        assert!(live.layout.monitor_of(&station("helm")).is_none());
+        assert!(live.notices.iter().any(|n| matches!(
+            n,
+            LayoutNotice::Adopted(note)
+                if note.string_id() == "server.bridge_layout.adopt_console_could_not_open"
+        )));
+    }
+
+    #[test]
+    fn an_unplugged_console_does_not_respawn_and_a_replug_puts_it_back_on_that_screen() {
+        // The unplug half, unchanged from #1331 and now stated: the console
+        // closes through the ordinary dropped-participant path, NOTHING is
+        // queued to rebuild it (which is what "it does not respawn on the
+        // viewscreen" actually means at this seam — a display loss is not a
+        // fault), and the operator's own row is what brings it back, onto the
+        // replugged monitor.
+        use crate::native_host::host_lobby::{
+            drain_surface_records, pump_host_lobby, HostLobbyBridge, HostLobbyBridgeResource,
+        };
+        use crate::native_host::panes::PaneHome;
+        use crate::native_host::panes::RecordingSurface;
+        use crate::native_host::transport::NativeTransport;
+
+        let (mut app, bus) = console_host();
+        let bridge = HostLobbyBridge::new();
+        app.insert_resource(HostLobbyBridgeResource(bridge.clone()));
+        app.add_message::<crate::lobby::InboundMessage>();
+        app.add_systems(PreUpdate, drain_surface_records);
+
+        seat(&mut app, "helm", BENQ);
+        app.update();
+        let pane = bus.open_pane_for_name("helm").unwrap();
+        bus.mark_live(pane);
+        let token = bus.token_of(pane).unwrap();
+        bus.take_pending_views();
+
+        let benq = benq_entity(&mut app);
+        app.world_mut().entity_mut(benq).despawn();
+        settle(&mut app);
+
+        assert_eq!(bus.open_count(), 0, "the console closed with its screen");
+        assert_eq!(
+            bus.transport().poll(),
+            vec![crate::native_host::transport::TransportEvent::Disconnected { token }],
+            "its crew drops to Backfill through the ordinary disconnect, with no crash"
+        );
+        assert!(
+            bus.take_pending_views().is_empty(),
+            "and nothing at all is queued to rebuild it: an unplug is a close, not a fault, \
+             so there is no view for the viewscreen to catch"
+        );
+
+        // Replug. Still nothing is re-homed automatically.
+        app.world_mut()
+            .spawn(monitor("BenQ EX", 1920, 1080, 3840, 0));
+        settle(&mut app);
+        assert_eq!(
+            bus.open_count(),
+            0,
+            "a returned display opens nothing by itself"
+        );
+
+        // The operator presses the row's button — the real record, over the real
+        // drain — and the console comes back on the screen they replugged.
+        let mut surface = RecordingSurface::ready();
+        surface.queue_record(
+            r#"{"kind":"assign-station","station":"helm","monitor":"BenQ EX@1920x1080"}"#,
+        );
+        pump_host_lobby(&bridge, &mut surface);
+        app.update();
+
+        let reopened = bus
+            .open_pane_for_name("helm")
+            .expect("the press opened a console again");
+        assert_eq!(
+            bus.take_pending_views()
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect::<Vec<_>>(),
+            vec![reopened],
+            "with a view queued, which is what a live console is"
+        );
+        let PaneHome::Station { window, .. } = home(&app, "helm", &tempting_tile("helm")) else {
+            panic!("the reopened console belongs on the replugged monitor's window");
+        };
+        assert_eq!(window, station_window(&app, BENQ));
+    }
+
+    #[test]
+    fn a_legacy_tiled_pane_still_rebuilds_on_the_primary_window() {
+        // Acceptance criterion 3, stated as a test rather than assumed from a
+        // suite staying green: a `--pane` on a host with no `--profile` has no
+        // Station window anywhere and is seated by no law, so it keeps issue
+        // #1125's home — its own tile on the primary window, at exactly the
+        // rectangle `init_pane_host` recorded. Nothing #1333 narrowed reaches it.
+        use crate::native_host::panes::identity::PaneIdentity;
+        use crate::native_host::panes::recovery::{service_faults, PaneFault};
+        use crate::native_host::panes::{PaneHome, PaneTile};
+
+        let (mut app, bus) = console_host();
+        let ada =
+            bus.open(PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000001", "Ada").unwrap());
+        bus.mark_live(ada);
+        // A console is open on a real Station window beside it, so this is not
+        // the degenerate host in which every home would be a tile.
+        seat(&mut app, "helm", BENQ);
+        app.update();
+
+        let tiles = vec![PaneTile {
+            name: "Ada".to_string(),
+            origin: (960, 0),
+            size: (960, 1080),
+        }];
+        assert_eq!(
+            home(&app, "Ada", &tiles),
+            PaneHome::PrimaryTile {
+                origin: (960, 0),
+                size: (960, 1080)
+            },
+            "the legacy tiling is untouched"
+        );
+
+        // And it survives the crash path exactly as it did: closed, recreated on
+        // the same identity, and rebuilt on the same tile.
+        bus.fault(ada, PaneFault::ViewCrashed);
+        let (recreated, _) = service_faults(&bus)
+            .pop()
+            .expect("one fault serviced")
+            .recreated
+            .expect("a view crash recreates a tiled pane too");
+        assert_eq!(
+            bus.token_of(recreated),
+            bus.token_of(ada),
+            "the same participant"
+        );
+        assert_eq!(
+            home(&app, "Ada", &tiles),
+            PaneHome::PrimaryTile {
+                origin: (960, 0),
+                size: (960, 1080)
+            }
+        );
+    }
 }

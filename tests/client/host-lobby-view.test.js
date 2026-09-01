@@ -374,6 +374,24 @@ describe('hostLobbyMonitorRow — marking', () => {
     });
     expect(row.buttons[1].stations).toEqual(['helm', 'weapons']);
   });
+
+  it('offers those consoles as a line the button can draw, not only as data', () => {
+    // The row promises to say what a screen is holding "up front rather than
+    // only after the press". A field nothing renders says nothing.
+    const row = hostLobbyMonitorRow({
+      monitors: [monitor(), secondMonitor({ stations: ['helm', 'weapons'] })],
+    });
+    expect(row.buttons[1].occupants).toEqual({
+      id: 'server.monitor_row.stations',
+      params: { stations: 'helm, weapons' },
+    });
+  });
+
+  it('says nothing about consoles on a monitor that is holding none', () => {
+    const row = hostLobbyMonitorRow({ monitors: [monitor(), secondMonitor()] });
+    expect(row.buttons[0].occupants).toBeNull();
+    expect(row.buttons[1].occupants).toBeNull();
+  });
 });
 
 describe('hostLobbyMonitorRow — feedback', () => {

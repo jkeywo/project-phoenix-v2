@@ -398,11 +398,19 @@
   border-color: #2a8a96;
   background: #101a1d;
 }
-.monitor-button .monitor-button-mark {
+/* #8a8aa0, not the #667 this started as: these are 0.65rem body text, and #667
+   on the button's #0e0e14 is 3.4:1 — under WCAG 1.4.3's 4.5:1 for normal text,
+   which the row cannot claim to meet while carrying words that matter. This is
+   5.7:1 and still reads as the button's quiet half. The viewscreen's own mark
+   below is 10.5:1 on #101a1d and is unchanged. */
+.monitor-button .monitor-button-mark,
+.monitor-button .monitor-button-stations {
   font-size: 0.65rem;
+  color: #8a8aa0;
+}
+.monitor-button .monitor-button-mark {
   text-transform: uppercase;
   letter-spacing: .1em;
-  color: #667;
 }
 .monitor-button.viewscreen .monitor-button-mark { color: #5fd8e8; }
 .monitor-button:focus,
@@ -432,7 +440,8 @@
     border-width: 2px;
     border-color: #5fd8e8;
   }
-  .monitor-button .monitor-button-mark { color: #ffffff; }
+  .monitor-button .monitor-button-mark,
+  .monitor-button .monitor-button-stations { color: #ffffff; }
   .monitor-button:focus,
   .monitor-button:focus-visible {
     outline: 3px solid #ffffff;

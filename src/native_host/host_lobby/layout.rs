@@ -68,8 +68,16 @@ pub struct MonitorButtonPayload {
     pub primary: bool,
     /// Whether this monitor is showing the shared viewscreen right now.
     pub viewscreen: bool,
-    /// The station consoles seated on it, if any — the reason a press may be
-    /// refused, carried so the row can say so without asking again.
+    /// The consoles open on it, if any — the reason a press may be refused,
+    /// carried so the row can say so *before* the press rather than only after.
+    ///
+    /// Everything the law counts as an occupant, not only the seats: a station
+    /// this layout placed, and the label of a console a hand-authored
+    /// `--profile` opened that the layout does not own
+    /// ([`BridgeLayout::reserved_on`](super::super::bridge_layout::BridgeLayout::reserved_on)).
+    /// The two are one list here because the button is answering one question —
+    /// what is on this screen — and the refusal a press would earn names them
+    /// together too.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stations: Vec<String>,
 }
@@ -183,11 +191,7 @@ pub fn monitor_row_payload(
                 height: found.geometry.physical_height,
                 primary: found.primary,
                 viewscreen: identity == &viewscreen,
-                stations: layout
-                    .stations_on(identity)
-                    .iter()
-                    .map(|s| s.0.clone())
-                    .collect(),
+                stations: layout.occupants_on(identity),
             })
         })
         .collect();
@@ -344,6 +348,37 @@ mod tests {
             .expect("a free non-viewscreen monitor takes a console");
         let payload = monitor_row_payload(&seated, &two_monitors(), &[]);
         assert_eq!(payload.monitors[1].stations, vec!["helm".to_string()]);
+    }
+
+    #[test]
+    fn a_monitor_holding_a_console_the_layout_does_not_own_says_so_too() {
+        // The `--pane`-shaped profile: its panes name a person rather than a
+        // station, so the layout seats nothing for them — but the display
+        // adapter opens a real console on that screen, and a press to move the
+        // viewscreen there is refused. The button has to say so BEFORE the
+        // press, not only in the sentence that comes back.
+        use crate::native_host::bridge_profile::{BridgeProfile, DisplayEntry, PaneSlot};
+        use crate::native_host::bridge_profile::{ROLE_STATION, ROLE_VIEWSCREEN};
+
+        let mut profile = BridgeProfile::empty();
+        profile.displays = vec![
+            DisplayEntry {
+                id: "BRAVIA@3840x2160".to_string(),
+                role: ROLE_VIEWSCREEN.to_string(),
+                split: None,
+                panes: Vec::new(),
+            },
+            DisplayEntry {
+                id: "BenQ EX@1920x1080".to_string(),
+                role: ROLE_STATION.to_string(),
+                split: None,
+                panes: vec![PaneSlot::for_participant("Ada")],
+            },
+        ];
+        let (adopted, _) = layout().adopt_profile(&profile.validate().unwrap());
+        let payload = monitor_row_payload(&adopted, &two_monitors(), &[]);
+        assert_eq!(payload.monitors[1].stations, vec!["Ada".to_string()]);
+        assert!(payload.monitors[0].stations.is_empty());
     }
 
     #[test]

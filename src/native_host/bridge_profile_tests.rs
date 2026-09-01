@@ -1133,3 +1133,151 @@ fn a_present_monitor_keeps_its_suffixed_identity_after_its_twin_leaves() {
     assert_eq!(losses[0].identity.as_str(), "ACME 1080@1920x1080#0,0");
     assert_eq!(losses[0].pane_labels, vec!["Ada".to_string()]);
 }
+
+// ── an identity that survives a roster change (issue #1330) ──────────────────
+//
+// `present_assigned_identities` above answers "is this ASSIGNMENT still on
+// screen". `identify_stable` answers the same question about a whole live
+// roster, which is what the lobby's monitor row and the bridge layout are
+// rebuilt from — and the three cases below are the ones where re-deriving with
+// `identify` would have thrown away the display the operator chose.
+
+/// The identity strings `identify_stable` gives `raws`, given what was known.
+fn stable(raws: &[RawMonitor], known: &[DiscoveredMonitor]) -> Vec<String> {
+    identify_stable(raws, known)
+        .iter()
+        .map(|d| d.identity.as_str().to_string())
+        .collect()
+}
+
+#[test]
+fn a_roster_nothing_is_known_about_is_identified_exactly_as_before() {
+    // The boot path, and the property that keeps every #1123 identity claim
+    // true: with nothing to carry forward this IS `identify`.
+    let raws = [
+        raw("DELL U2720Q", 3840, 2160, 0, 0),
+        raw("ACME 1080", 1920, 1080, 3840, 0),
+        raw("ACME 1080", 1920, 1080, 5760, 0),
+    ];
+    assert_eq!(identify_stable(&raws, &[]), identify(&raws));
+}
+
+#[test]
+fn a_known_display_keeps_its_short_key_when_its_twin_arrives() {
+    // `identify` alone suffixes BOTH twins the moment the second one appears,
+    // so the display an operator has been looking at changes its name behind
+    // their back. Only the newcomer pays the disambiguator here.
+    let alone = [raw("ACME 1080", 1920, 1080, 0, 0)];
+    let known = identify(&alone);
+    let with_twin = [
+        raw("ACME 1080", 1920, 1080, 0, 0),
+        raw("ACME 1080", 1920, 1080, 1920, 0),
+    ];
+    assert_eq!(
+        stable(&with_twin, &known),
+        vec!["ACME 1080@1920x1080", "ACME 1080@1920x1080#1920,0"]
+    );
+}
+
+#[test]
+fn a_known_display_keeps_its_suffixed_key_when_its_twin_leaves() {
+    // The mirror. `identify` would collapse the lone survivor back to the short
+    // key, and a layout comparing that against what it stored would conclude
+    // its own viewscreen had been unplugged.
+    let both = [
+        raw("ACME 1080", 1920, 1080, 0, 0),
+        raw("ACME 1080", 1920, 1080, 1920, 0),
+    ];
+    let known = identify(&both);
+    let survivor = [raw("ACME 1080", 1920, 1080, 1920, 0)];
+    assert_eq!(
+        stable(&survivor, &known),
+        vec!["ACME 1080@1920x1080#1920,0"]
+    );
+}
+
+#[test]
+fn a_display_that_renegotiated_its_mode_is_matched_by_name_and_place() {
+    // A television waking rewrites the `WxH` half outright, so no form match
+    // can find it — but it is the same screen in the same place, and its
+    // geometry follows while its key does not.
+    let before = [raw("BRAVIA", 3840, 2160, 0, 0)];
+    let known = identify(&before);
+    let after = [raw("BRAVIA", 1920, 1080, 0, 0)];
+    let out = identify_stable(&after, &known);
+    assert_eq!(out[0].identity.as_str(), "BRAVIA@3840x2160");
+    assert_eq!(
+        (
+            out[0].geometry.physical_width,
+            out[0].geometry.physical_height
+        ),
+        (1920, 1080),
+        "the KEY is carried; the geometry is whatever it is running at now"
+    );
+}
+
+#[test]
+fn a_display_that_only_moved_is_still_matched_wherever_it_went() {
+    // The OS-settings rearrange `identify`'s scheme was built to survive, held
+    // through the stable pass as well.
+    let before = [
+        raw("DELL U2720Q", 3840, 2160, 0, 0),
+        raw("BenQ EX", 1920, 1080, 3840, 0),
+    ];
+    let known = identify(&before);
+    let after = [
+        raw("BenQ EX", 1920, 1080, -1920, 0),
+        raw("DELL U2720Q", 3840, 2160, 0, 0),
+    ];
+    assert_eq!(
+        stable(&after, &known),
+        vec!["BenQ EX@1920x1080", "DELL U2720Q@3840x2160"]
+    );
+}
+
+#[test]
+fn a_display_that_moved_and_changed_mode_at_once_is_treated_as_a_new_one() {
+    // Nothing anchors that match, and guessing would re-home the viewscreen
+    // onto a screen the operator did not choose. Conservative on purpose: it
+    // reads as one display leaving and another arriving, which is the doctrine
+    // #1123 already holds for a display it cannot account for.
+    let before = [raw("BRAVIA", 3840, 2160, 0, 0)];
+    let known = identify(&before);
+    let after = [raw("BRAVIA", 1920, 1080, 1920, 0)];
+    assert_eq!(stable(&after, &known), vec!["BRAVIA@1920x1080"]);
+}
+
+#[test]
+fn a_newcomer_never_takes_a_key_a_carried_display_is_still_using() {
+    // The one collision this scheme can produce: a display carries `@3840x2160`
+    // forward after dropping to 1080p, and then a second display arrives in the
+    // mode the first one left. Deduplicated rather than allowed to repeat — a
+    // repeated identity is silently dropped by the layout, which is a display
+    // with no button.
+    let before = [raw("BRAVIA", 3840, 2160, 0, 0)];
+    let known = identify(&before);
+    let after = [
+        raw("BRAVIA", 1920, 1080, 0, 0),
+        raw("BRAVIA", 3840, 2160, 1920, 0),
+    ];
+    let out = stable(&after, &known);
+    assert_eq!(out[0], "BRAVIA@3840x2160", "carried by name and place");
+    assert_eq!(
+        out[1], "BRAVIA@3840x2160#1920,0",
+        "so the newcomer stands aside"
+    );
+    assert_ne!(out[0], out[1]);
+}
+
+#[test]
+fn a_display_that_is_genuinely_gone_is_still_gone() {
+    // The carry-forward must not resurrect anything: an unplug has to keep
+    // reading as an unplug, or the row would go on offering a dead button.
+    let before = [
+        raw("DELL U2720Q", 3840, 2160, 0, 0),
+        raw("BenQ EX", 1920, 1080, 3840, 0),
+    ];
+    let known = identify(&before);
+    let after = [raw("DELL U2720Q", 3840, 2160, 0, 0)];
+    assert_eq!(stable(&after, &known), vec!["DELL U2720Q@3840x2160"]);
+}

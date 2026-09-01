@@ -636,7 +636,10 @@ per-ship-class layout and a CLI profile cannot disagree:
    it — it is never `None`);
 2. a station's console never opens on the viewscreen's monitor, and the
    viewscreen never moves onto a monitor holding consoles (refused, never a
-   silent eviction — unassign them first);
+   silent eviction — unassign them first). A console a hand-authored `--pane`
+   profile opened counts, even though the layout cannot move it: those labels go
+   into a **reserved** set (`reserved_on`), because they seat no `StationId` and
+   the screen would otherwise read as free (issue #1330);
 3. at most `MAX_STATIONS_PER_MONITOR` (= `MAX_PANES_PER_STATION`) consoles per
    screen, split side by side (`LAYOUT_SPLIT`).
 
@@ -1051,16 +1054,56 @@ intercept it the way `server.html` does. A phone's press does **not** uncover
 the surface: the view composites into an opaque texture, so revealing it in play
 covers the mission, and F9 stays the only thing that does that.
 
+### The monitor row (issue #1330)
+
+**Revert hazard.** This surface only drains its *own* outbound queue because of a
+fix that landed in **issue #1330's `cfbff20b`**, not in any #1325 commit. #1325
+installed `phoenixHostLobbyOut` on the page and left `UltralightPaneSurface`
+evaluating `window.__phoenixPaneOutDrain` — a function the lobby document never
+defines — so the first record the page queued would have been swallowed with a
+completely clean log. The per-surface drain script (`UltralightPaneSurface::new`
+vs `::for_host_lobby`) is what fixed it. Backing out #1330 to remove the monitor
+row therefore silently re-breaks the lobby's page→host channel; take the drain
+script out of any such revert.
+
+**The monitor row** (issue #1330) is this surface's first control: one button per
+connected display, the current viewscreen marked, and pressing another moves it
+there live through the [layout law](#the-layout-law-issue-1327). Two
+properties are worth knowing before touching it.
+
+*Only a press or an unplug moves the window.* A windowed host always runs the
+display applier and the runtime watcher now, even with no `--profile` — it
+synthesises a `BridgeDisplayConfig` that **describes** rather than instructs. The
+live roster is therefore re-identified every settle, and it is re-identified
+against what the layout already knows (`identify_stable`) rather than re-derived
+with `identify`. That matters because `identify`'s answer depends on the set it
+is given: a twin arriving suffixes both of a pair, that twin leaving collapses
+the survivor back to the short key, and a display renegotiating its resolution
+rewrites the `name@WxH` key outright. Comparing a re-derived string against the
+stored one read all three as "the viewscreen's monitor has gone" and slammed the
+primary window into borderless fullscreen on a host nobody had touched. A display
+still plugged in now carries the identity it was known by, matched by *form* —
+the same technique `present_assigned_identities` uses on the pane side.
+
+*A console the layout cannot move is still a console.* A hand-authored `--pane`
+profile's panes name a person rather than a station, so `adopt_profile` seats
+nothing for them — but the adapter opens a real borderless-fullscreen Station
+window on that display all the same. The layout records those labels in a
+**reserved** set (`BridgeLayout::reserved_on`) so rule 2's mirror refuses the
+viewscreen moving onto them, and the row draws them on the button. Labels rather
+than minted `StationId`s: a faked id would appear on the roster-driven rows as a
+station no ship has.
+
 ## Tests
 
 | File | Claim |
 |---|---|
 | `src/native_host/host_lobby/*` | The lobby surface (#1325), all feature-**off**: the document assembles from the repository's own `server.html` and carries every element id the shared renderer writes into, stops at the panel (a comment mentioning a `div` cannot unbalance the count), drops the AI-launch button, links the shared stylesheet, refuses a page with no lobby by name; the bridge's latest-wins collapse, its identical-snapshot drop, its deferral of a failed push and the newer-wins restore; and the reveal state machine — boot showing, mission start yielding invisible *and* input-transparent, F9 both ways, a return to the lobby restoring it, and a latch that cannot survive a phase change |
 | `tests/client/host-lobby-render.test.js` | The extracted renderer, in jsdom, driven against `server.html`'s own `#lobby-panel` subtree: cards, avatars, chips, pills, the ready badge's `go` class, the countdown, a re-render replacing rather than appending — and the two documents, one with the AI-launch button and one (the native lobby's) without |
-| `tests/native_host_lobby_ultralight.rs` | The real lobby document in a real Ultralight view over this process's own HTTP: a real `LobbyStatePayload` fills the station grid through the shared modules, the chrome yields on mission start and comes back on the reveal flag with no reload, the surface rasterises, and (#1329) the vendored encoder loads from this process's own server and rasterises a join QR whose printed URL is the join URL a phone needs, which a phone's toggle and the surface's own control both hide and show, and which gives way to "joining is off" for a host nobody can join. `#[ignore]`d: needs the SDK and a `trunk build`ed `dist/`, which CI has neither of |
+| `tests/native_host_lobby_ultralight.rs` | The real lobby document in a real Ultralight view over this process's own HTTP: a real `LobbyStatePayload` fills the station grid through the shared modules, the chrome yields on mission start and comes back on the reveal flag with no reload, the surface rasterises, (#1329) the vendored encoder loads from this process's own server and rasterises a join QR whose printed URL is the join URL a phone needs, which a phone's toggle and the surface's own control both hide and show, and which gives way to "joining is off" for a host nobody can join, and (#1330) the monitor row draws real `<button>`s through the shared renderer, a real click comes back as a `set-viewscreen` record over the real bridge, and a refusal renders as a sentence the operator can read. `#[ignore]`d: needs the SDK and a `trunk build`ed `dist/`, which CI has neither of |
 | `tests/client/host-qr.test.js` + `tests/client/qr-encoder.test.js` | The shared join panel in jsdom against `server.html`'s own `#overlay` subtree — the visibility law (including the null that leaves a mid-mission QR alone), the draw, the native surface's link-less variant, the joining-off caption — plus the browser host's draw site pinned from `onCode` to the shared module (#1329 AC5), and the vendored encoder loaded from disk with no network and pinned to a known code |
-| `src/native_host/bridge_profile.rs` | The pure model: stable identity across a simulated OS-settings rearrange, identical-monitor disambiguation (including a TOML round-trip of a position-suffixed id), the one/two-pane geometry math (even and odd, side-by-side and stacked), the >2 density refusal, the one-viewscreen refusal (`ProfileError::MultipleViewscreens`, naming both monitors), the TOML round-trip (Windows backslash ids included), the missing/unassigned/changed-display reporting, and (#1125) the runtime loss/return detection — a lost Station names its panes, a lost viewscreen names none, a return is for explicit repair only. All feature-agnostic, run by the ordinary `cargo test` |
-| `src/native_host/bridge_display.rs` | A Bevy `Monitor` lifts into a `RawMonitor` and carries the documented identity; `--setup`'s exit code is clean only when a supplied profile both validates and resolves with no problems against the connected displays (`setup_profile_is_clean`); and (#1125) `watch_runtime_displays` itself — driven with *fake* `Monitor` entities spawned and despawned as bevy_winit does on hot-plug, so it runs in CI without a display — closes a lost Station's pane (→ Backfill) and no pane for a lost viewscreen |
+| `src/native_host/bridge_profile.rs` | The pure model: stable identity across a simulated OS-settings rearrange, identical-monitor disambiguation (including a TOML round-trip of a position-suffixed id), the one/two-pane geometry math (even and odd, side-by-side and stacked), the >2 density refusal, the one-viewscreen refusal (`ProfileError::MultipleViewscreens`, naming both monitors), the TOML round-trip (Windows backslash ids included), the missing/unassigned/changed-display reporting, and (#1125) the runtime loss/return detection — a lost Station names its panes, a lost viewscreen names none, a return is for explicit repair only. **#1330:** `identify_stable` — nothing known is exactly `identify`, a known display keeps its short key when its twin arrives and its suffixed key when its twin leaves, a renegotiated mode is matched by name and place while the geometry follows, a display that only moved is still matched, one that moved *and* re-moded is honestly treated as new, a newcomer never takes a carried key, and an unplug still reads as an unplug. All feature-agnostic, run by the ordinary `cargo test` |
+| `src/native_host/bridge_display.rs` | A Bevy `Monitor` lifts into a `RawMonitor` and carries the documented identity; `--setup`'s exit code is clean only when a supplied profile both validates and resolves with no problems against the connected displays (`setup_profile_is_clean`); and (#1125) `watch_runtime_displays` itself — driven with *fake* `Monitor` entities spawned and despawned as bevy_winit does on hot-plug, so it runs in CI without a display — closes a lost Station's pane (→ Backfill) and no pane for a lost viewscreen. **#1330:** the whole apply-on-change loop on the same fake hardware — a no-`--profile` host gains a config and a layout and keeps its `Windowed` window on every later frame, a press moves the window once, an unplug rebuilds the row and the viewscreen follows its note; and the three roster changes that must move **nothing** (an identical twin plugged in, an identical twin unplugged with the viewscreen on the survivor, the viewscreen's own display renegotiating its resolution), plus the invariant that an unplug on a no-`--profile` host closes no pane and that the viewscreen may not move onto an authored participant's console |
 | `src/native_host/bridge_media.rs` + `bridge_media_tests.rs` | The pure media model (#1126): stable `kind:name` identity (recovered to its kind, stable across a re-enumeration, kind keeps a same-named camera/mic distinct, identical devices disambiguated by hardware id or ordinal); the validate failure taxonomy (wrong-kind, malformed id, duplicate-on-surface, duplicate-surface, shared-without-consent); the consented-share warning; resolve naming a missing vs a denied device while the surface stays usable; the deterministic default (OS-default/first per kind, denied skipped, forced share consented); and the setup report. Also the `[[media]]` TOML round-trip in `bridge_profile_tests.rs`. All feature-agnostic, run by the ordinary `cargo test` |
 | `tests/native_bridge_displays.rs` | On the real machine's monitors, a profile opens one borderless-fullscreen surface per monitor at the monitor's geometry — the viewscreen on the primary window, a Station on its own. `#[ignore]`d: it opens real winit windows, which CI has no display for. Verified once locally |
 | `src/delivery/args.rs` | `--setup` is a standalone diagnostic needing no world and refuses every simulation/crew flag (`--world`, `--ship`, `--seed`, `--solo`, `--pane`, `--log`, `--log-entity`, `--rendezvous`, `--origin`) rather than silently discarding them; `--profile` applies with a world or validates with `--setup`, and is refused alone |

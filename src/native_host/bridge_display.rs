@@ -55,10 +55,21 @@
 //!   module promised when it had no config to run under.
 //!
 //! The promise therefore moved from "no config, so nothing runs" to "a config
-//! with no action, so nothing changes" — and a run with no lobby press produces
-//! the same window as it did before this issue. The synthesised config is what
-//! lets [`watch_runtime_displays`] run on every native host rather than only on
-//! a `--profile` one, which is what the monitor row needs to follow a cable.
+//! with no action, so nothing changes": **only a press or an unplug moves the
+//! window**, which is what AGENTS.md tells an operator, so a run in which
+//! neither happens produces the same window as it did before this issue. The
+//! two are one rule and not two, because they reach the follower by one route —
+//! a lawful transition on [`BridgeLayoutResource`]'s layout. The unplug half is
+//! narrower than it sounds: the viewscreen moves only when the monitor it is
+//! actually on stops being reported for a whole
+//! [`DISPLAY_LOSS_DEBOUNCE_FRAMES`] window, and a display arriving, leaving,
+//! moving or changing its resolution beside it moves nothing — see
+//! [`reconcile_layout`], which is where that is made true rather than merely
+//! intended.
+//!
+//! The synthesised config is what lets [`watch_runtime_displays`] run on every
+//! native host rather than only on a `--profile` one, which is what the monitor
+//! row needs to follow a cable.
 
 use bevy::prelude::*;
 use bevy::window::{Monitor, MonitorSelection, PrimaryMonitor, PrimaryWindow, Window, WindowMode};
@@ -67,9 +78,9 @@ use crate::logging::{LogCat, LogFilterConfig};
 
 use super::bridge_layout::BridgeLayout;
 use super::bridge_profile::{
-    identify, pane_rects, present_assigned_identities, resolve, runtime_display_losses,
-    runtime_display_returns, DiscoveredMonitor, DisplayRole, MonitorGeometry, MonitorIdentity,
-    PaneRect, RawMonitor, RuntimeDisplayLoss, ValidatedProfile,
+    identify, identify_stable, pane_rects, present_assigned_identities, resolve,
+    runtime_display_losses, runtime_display_returns, DiscoveredMonitor, DisplayRole,
+    MonitorGeometry, MonitorIdentity, PaneRect, RawMonitor, RuntimeDisplayLoss, ValidatedProfile,
 };
 use super::host_lobby::LayoutNotice;
 
@@ -204,10 +215,17 @@ pub struct BridgeDisplayApplied {
 /// [`apply_bridge_profile`] is no longer gated on a [`BridgeDisplayConfig`]
 /// existing (issue #1330): it is the system that *synthesises* one for a host
 /// launched without `--profile`, so gating it on the thing it creates would
-/// leave that host with no monitor watcher and no monitor row. It is still inert
-/// where it matters — a composition with no [`Monitor`] entities (every
-/// `NativeRenderSurface::Contract` host, and every windowed one for the frame or
-/// two before winit enumerates) returns before it reads or writes anything.
+/// leave that host with no monitor watcher and no monitor row.
+///
+/// It is gated on the two conditions that make it genuinely free instead, and
+/// they are run conditions rather than early `return`s on purpose. It is an
+/// **exclusive** system, and `World::query` builds a fresh `QueryState` every
+/// call — so a host it can never do anything for (every
+/// `NativeRenderSurface::Contract` and headless composition, which has no
+/// [`Monitor`] entities and so never inserts [`BridgeDisplayApplied`] to latch
+/// itself off) would otherwise build one every frame for the life of the
+/// process. `any_with_component` caches its state; the early `return`s inside
+/// stay as the belt to this braces.
 pub struct BridgeDisplayPlugin;
 
 impl Plugin for BridgeDisplayPlugin {
@@ -215,7 +233,12 @@ impl Plugin for BridgeDisplayPlugin {
         app.add_systems(
             Update,
             (
-                apply_bridge_profile,
+                apply_bridge_profile
+                    // Boot is once, and the latch is a resource: once it exists
+                    // there is nothing left to do, so do not even enter.
+                    .run_if(not(resource_exists::<BridgeDisplayApplied>))
+                    // And nothing to do at all until winit reports a display.
+                    .run_if(any_with_component::<Monitor>),
                 // Both of these need the boot seed to exist: the follower diffs
                 // against what boot recorded, and the watcher's first
                 // observation is the baseline it diffs against.
@@ -257,17 +280,24 @@ fn geometry_of(monitor: &Monitor) -> MonitorGeometry {
 /// The present monitors, in a deterministic order, with the identity each one
 /// answers to.
 ///
-/// Sorted by virtual-desktop position before [`identify`] runs, so that two
-/// identical monitors get their `#x,y` suffixes assigned the same way whichever
-/// order the ECS happened to iterate them in. Every reader of a live monitor set
-/// goes through here so that no two of them can disagree about which display is
+/// Sorted by virtual-desktop position before identities are assigned, so that
+/// two identical monitors get their `#x,y` suffixes the same way whichever order
+/// the ECS happened to iterate them in. Every reader of a live monitor set goes
+/// through here so that no two of them can disagree about which display is
 /// which.
+///
+/// `known` is what the caller already believed the bridge was — the identities
+/// it has published to the row and judged presses against. A display still
+/// plugged in keeps the identity it was known by rather than being re-derived
+/// out from under itself; see [`identify_stable`]. Pass an empty slice at boot,
+/// when nothing is known yet, which makes this exactly [`identify`].
 fn identify_present(
     mut monitors: Vec<(Entity, RawMonitor, MonitorGeometry)>,
+    known: &[DiscoveredMonitor],
 ) -> Vec<(Entity, DiscoveredMonitor, MonitorGeometry)> {
     monitors.sort_by_key(|(_, r, _)| (r.position_x, r.position_y));
     let raws: Vec<RawMonitor> = monitors.iter().map(|(_, r, _)| r.clone()).collect();
-    let discovered = identify(&raws);
+    let discovered = identify_stable(&raws, known);
     monitors
         .into_iter()
         .zip(discovered)
@@ -315,6 +345,8 @@ pub fn apply_bridge_profile(world: &mut World) {
             .iter(world)
             .map(|(e, m, primary)| (e, raw_from_monitor(m, primary), geometry_of(m)))
             .collect(),
+        // Boot: nothing is known yet, so there is nothing to carry forward.
+        &[],
     );
     if monitors.is_empty() {
         // winit has not populated the monitor list yet — try again next frame.
@@ -347,6 +379,23 @@ pub fn apply_bridge_profile(world: &mut World) {
             // The runtime display config (issue #1330). A *description* of the
             // displays as found, not an instruction: `authored` is false, so
             // nothing below places a window from it.
+            //
+            // INVARIANT this config must keep, for whatever comes next
+            // (issue #1331): it carries NO PANE LABELS. `layout` has seated
+            // nothing at boot — a fresh `from_discovered` opens no console — so
+            // `to_validated_profile` emits the viewscreen and nothing else, and
+            // `watch_runtime_displays` therefore resolves every unplug on this
+            // host to a loss with an empty `pane_labels` and closes no pane.
+            // That is the whole reason unplugging a screen on a no-`--profile`
+            // host disconnects nobody, and it holds by accident rather than by
+            // rule. A later slice that rebuilds this config from the LIVE layout
+            // (so the watcher follows the row's own seating) would start
+            // emitting `PaneSlot`s here, and the first unplug after a lobby
+            // press would then close a console — which is right for a station
+            // that really was on that screen and catastrophic if the rebuild
+            // lands before the pane compositing that actually puts one there.
+            // `unplugging_a_monitor_on_a_no_profile_host_closes_no_pane` is the
+            // test that fails when this changes; read it before changing this.
             let config = BridgeDisplayConfig {
                 profile: layout.to_validated_profile(),
                 authored: false,
@@ -373,8 +422,17 @@ pub fn apply_bridge_profile(world: &mut World) {
         .map(|(e, d, g)| (d.identity.as_str().to_string(), (*e, g.clone())))
         .collect();
 
-    for problem in &resolved.problems {
-        crate::pwarn!(log, LogCat::Lobby, "bridge display: {problem}");
+    // Only an AUTHORED profile has problems worth reporting. A synthesised one
+    // names the viewscreen and whatever monitors hold consoles — which, on a
+    // host nobody has arranged yet, is one monitor out of however many are
+    // plugged in. Every other display is then a `MonitorUnassigned`, so a
+    // three-screen host would WARN twice at every boot about a state that is
+    // simply "the operator has not put anything there yet". `resolve` is still
+    // run: it is what turns the profile into the surfaces below.
+    if config.authored {
+        for problem in &resolved.problems {
+            crate::pwarn!(log, LogCat::Lobby, "bridge display: {problem}");
+        }
     }
 
     // The viewscreen goes on the primary window; the Stations get their own.
@@ -538,11 +596,17 @@ fn follow_layout_viewscreen(
         return;
     }
 
+    // Resolved against the identities the LAYOUT knows, not against freshly
+    // derived ones: a display whose identity was carried across a roster change
+    // answers to the key the row published and the press named, and re-deriving
+    // here would leave a lawful press finding no monitor and silently doing
+    // nothing. See `identify_stable`.
     let present = identify_present(
         monitors
             .iter()
             .map(|(e, m, is_primary)| (e, raw_from_monitor(m, is_primary), geometry_of(m)))
             .collect(),
+        &layout.monitors,
     );
     let Some((monitor_entity, _, _)) = present.iter().find(|(_, d, _)| d.identity == wanted) else {
         return;
@@ -661,6 +725,17 @@ fn watch_runtime_displays(
 
     reconcile_layout(layout, &raws, &log, &mut settling_roster);
 
+    // The BOOT profile's assignments, deliberately — this is #1125's question
+    // ("was a monitor this host was configured for lost, and whose panes were on
+    // it"), which is about the arrangement the host was started with. It does
+    // NOT follow the lobby: after a `SetViewscreen` press the viewscreen role
+    // here still names the monitor the host booted on, so a loss/return report
+    // can name the wrong screen as "the viewscreen". Left as it is because the
+    // consequence is confined to two log lines — the pane closures below are
+    // driven by `pane_labels`, which a viewscreen entry never has, and on a
+    // no-`--profile` host no entry has any at all (see the invariant above). The
+    // fix is the same rebuild-from-the-live-layout that invariant guards, so the
+    // two land together or not at all.
     let assigned = config.profile.assigned_surfaces();
     // The assigned monitors present THIS frame, matched STABLY against the raw
     // monitors rather than re-derived with `identify` — so the survivor of two
@@ -753,6 +828,31 @@ fn watch_runtime_displays(
 /// Every degradation the rebuild causes becomes a
 /// [`LayoutNotice`] on the resource, which is how the operator finds out that
 /// the screen they chose took the viewscreen's home with it.
+///
+/// # Why the identities are carried, not re-derived
+///
+/// [`identify`]'s answer depends on the set it is given: an identical twin
+/// arriving suffixes *both* of a pair with `#x,y`, that twin leaving collapses
+/// the survivor back to the short key, and a television renegotiating its mode
+/// rewrites the `WxH` half outright. Comparing a freshly-derived string against
+/// the layout's stored one therefore reads three ordinary events — a plug, an
+/// unplug of some *other* screen, a resolution change — as "the monitor the
+/// viewscreen is on has gone", which fires
+/// [`ViewscreenMonitorGone`](super::bridge_layout::LayoutAdoption::ViewscreenMonitorGone),
+/// throws away the operator's choice and has
+/// [`follow_layout_viewscreen`] slam the primary window into borderless
+/// fullscreen. On a host nobody touched. That is precisely the promise in this
+/// module's [note](self#boot-is-once-the-viewscreen-is-apply-on-change-issue-1330).
+///
+/// So this rebuilds against [`identify_stable`], which matches the layout's
+/// existing identities to the monitors present *by form* — the same technique
+/// [`present_assigned_identities`] uses on the pane side, and for the same
+/// reason — and carries a survivor's identity forward. Only a display no known
+/// identity could claim is genuinely absent, and only that reconciles away. The
+/// carried identities are then written back to
+/// [`BridgeLayoutResource::monitors`], because the row is drawn from those and
+/// the button's round trip is exact string equality: the row must serve the key
+/// the layout will judge the press against.
 fn reconcile_layout(
     layout: Option<ResMut<BridgeLayoutResource>>,
     raws: &[RawMonitor],
@@ -762,10 +862,21 @@ fn reconcile_layout(
     let Some(mut layout) = layout else {
         return;
     };
-    let discovered = identify(raws);
+    let discovered = identify_stable(raws, &layout.monitors);
     let identities: Vec<MonitorIdentity> = discovered.iter().map(|d| d.identity.clone()).collect();
     if identities == layout.layout.monitors() {
         **settling = None;
+        // Same bridge, possibly moved or re-moded. The LAW has nothing to
+        // rebuild — a monitor's geometry is not part of its identity — but the
+        // row is drawn from these geometries and the next roster change is
+        // matched against these positions, so a stale copy would show the wrong
+        // size on a button and anchor the next carry-forward to a corner the
+        // display has left. Written only when it actually differs: an
+        // unconditional write would mark the resource changed every frame and
+        // re-encode the payload on the thread `FixedUpdate` runs `SimSet` on.
+        if discovered != layout.monitors {
+            layout.monitors = discovered;
+        }
         return;
     }
 
@@ -1295,6 +1406,22 @@ mod tests {
     /// `profile` is an operator's `--profile`; `None` is a plain
     /// `phoenix-host --world …`.
     fn booted(profile: Option<ValidatedProfile>) -> (App, Entity) {
+        booted_on(
+            profile,
+            vec![
+                (monitor("DELL U2720Q", 3840, 2160, 0, 0), true),
+                (monitor("BenQ EX", 1920, 1080, 3840, 0), false),
+            ],
+        )
+    }
+
+    /// [`booted`] over a monitor set of the test's own choosing — `(monitor,
+    /// is_primary)`, in whatever order, exactly as `bevy_winit` would have
+    /// spawned them.
+    fn booted_on(
+        profile: Option<ValidatedProfile>,
+        monitors: Vec<(Monitor, bool)>,
+    ) -> (App, Entity) {
         let mut app = App::new();
         app.add_plugins(BridgeDisplayPlugin);
         if let Some(profile) = profile {
@@ -1307,25 +1434,52 @@ mod tests {
             .world_mut()
             .spawn((Window::default(), PrimaryWindow))
             .id();
-        app.world_mut()
-            .spawn((monitor("DELL U2720Q", 3840, 2160, 0, 0), PrimaryMonitor));
-        app.world_mut()
-            .spawn(monitor("BenQ EX", 1920, 1080, 3840, 0));
+        for (m, primary) in monitors {
+            let mut entity = app.world_mut().spawn(m);
+            if primary {
+                entity.insert(PrimaryMonitor);
+            }
+        }
         app.update();
         (app, window)
+    }
+
+    /// The entity of the monitor the OS named `name` and put at `x` — so a test
+    /// can unplug or re-mode exactly the display it means, the way `bevy_winit`
+    /// does. Position as well as name because a twin test has two of each name.
+    fn monitor_entity(app: &mut App, name: &str, x: i32) -> Entity {
+        let mut found = None;
+        let mut query = app.world_mut().query::<(Entity, &Monitor)>();
+        for (entity, m) in query.iter(app.world()) {
+            if m.name.as_deref() == Some(name) && m.physical_position.x == x {
+                found = Some(entity);
+            }
+        }
+        found.expect("the monitor this test named is there")
     }
 
     /// The entity of the second monitor, so a test can unplug it the way
     /// `bevy_winit` does.
     fn benq_entity(app: &mut App) -> Entity {
-        let mut found = None;
-        let mut query = app.world_mut().query::<(Entity, &Monitor)>();
-        for (entity, m) in query.iter(app.world()) {
-            if m.name.as_deref() == Some("BenQ EX") {
-                found = Some(entity);
-            }
+        monitor_entity(app, "BenQ EX", 3840)
+    }
+
+    /// The lobby's monitor row, as the surface would receive it this frame.
+    fn row(app: &App) -> super::super::host_lobby::layout::BridgeLayoutPayload {
+        let live = app.world().resource::<BridgeLayoutResource>();
+        super::super::host_lobby::monitor_row_payload(&live.layout, &live.monitors, &live.notices)
+    }
+
+    /// The window mode of the process's primary window.
+    fn window_mode(app: &App, window: Entity) -> WindowMode {
+        app.world().entity(window).get::<Window>().unwrap().mode
+    }
+
+    /// Run the whole settle window, so a roster change is believed.
+    fn settle(app: &mut App) {
+        for _ in 0..DISPLAY_LOSS_DEBOUNCE_FRAMES + 1 {
+            app.update();
         }
-        found.expect("the second monitor is there")
     }
 
     fn viewscreen_identity(app: &App) -> String {
@@ -1548,6 +1702,241 @@ mod tests {
                 .identity,
             DELL,
             "and the window followed the layout onto the surviving display"
+        );
+    }
+
+    // ── the window moves only when somebody asks (issue #1330) ──────────────
+    //
+    // `identify`'s answer depends on the set it is given, and the layout stores
+    // its answer. Three ordinary events therefore used to read as "the monitor
+    // the viewscreen is on has gone": a twin arriving, that twin leaving, and a
+    // display renegotiating its mode. Each one fired ViewscreenMonitorGone,
+    // discarded the operator's choice and slammed the primary window into
+    // borderless fullscreen on a host nobody had touched. These three are the
+    // proof that it does not, and they fail on the commit before this one.
+
+    /// Neither the window nor the viewscreen moved, and nothing was reported.
+    fn nothing_moved(app: &App, window: Entity, viewscreen: &str) {
+        assert_eq!(
+            viewscreen_identity(app),
+            viewscreen,
+            "the viewscreen stayed on the display it was on"
+        );
+        let notices = &app.world().resource::<BridgeLayoutResource>().notices;
+        assert!(
+            notices.is_empty(),
+            "nothing degraded, so there is nothing to report: {notices:?}"
+        );
+        assert!(
+            matches!(window_mode(app, window), WindowMode::Windowed),
+            "and no lobby press happened, so the window is where the OS opened it"
+        );
+    }
+
+    #[test]
+    fn plugging_in_an_identical_twin_leaves_the_viewscreens_own_display_alone() {
+        // The survivor of a collision keeps the key it was known by. Without
+        // that, BOTH twins become `…#x,y` the moment the second one arrives,
+        // the layout's short-key viewscreen matches neither, and the shared
+        // view is dragged onto a display nobody chose.
+        let (mut app, window) = booted_on(
+            None,
+            vec![
+                (monitor("ACME 1080", 1920, 1080, 0, 0), true),
+                (monitor("BenQ EX", 1920, 1080, 1920, 0), false),
+            ],
+        );
+        assert_eq!(viewscreen_identity(&app), "ACME 1080@1920x1080");
+
+        app.world_mut()
+            .spawn(monitor("ACME 1080", 1920, 1080, 3840, 0));
+        settle(&mut app);
+
+        nothing_moved(&app, window, "ACME 1080@1920x1080");
+        let layout = app.world().resource::<BridgeLayoutResource>();
+        assert_eq!(
+            layout
+                .layout
+                .monitors()
+                .iter()
+                .map(|m| m.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "ACME 1080@1920x1080",
+                "BenQ EX@1920x1080",
+                // Only the NEWCOMER pays the disambiguator: it is the one
+                // nothing was known about.
+                "ACME 1080@1920x1080#3840,0",
+            ],
+            "the display that was already there kept its key; the new one joined"
+        );
+        let row = row(&app);
+        assert_eq!(row.monitors.len(), 3, "and every one of them has a button");
+        assert!(row.monitors[0].viewscreen);
+    }
+
+    #[test]
+    fn unplugging_one_identical_twin_leaves_the_survivor_where_it_was() {
+        // The mirror, and the one that reaches a live crew: the viewscreen is
+        // on a display whose identity is only suffixed BECAUSE its twin is
+        // there. When the twin leaves, re-deriving would collapse the survivor
+        // to the short key — so the layout would decide its own viewscreen had
+        // been unplugged while the operator was looking at it.
+        let (mut app, window) = booted_on(
+            None,
+            vec![
+                (monitor("ACME 1080", 1920, 1080, 0, 0), true),
+                (monitor("ACME 1080", 1920, 1080, 1920, 0), false),
+            ],
+        );
+        assert_eq!(viewscreen_identity(&app), "ACME 1080@1920x1080#0,0");
+
+        let twin = monitor_entity(&mut app, "ACME 1080", 1920);
+        app.world_mut().entity_mut(twin).despawn();
+        settle(&mut app);
+
+        nothing_moved(&app, window, "ACME 1080@1920x1080#0,0");
+        let layout = app.world().resource::<BridgeLayoutResource>();
+        assert_eq!(layout.layout.monitors().len(), 1, "the twin did leave");
+        let row = row(&app);
+        assert_eq!(row.monitors.len(), 1, "and the survivor still has a button");
+        assert_eq!(
+            row.monitors[0].identity, "ACME 1080@1920x1080#0,0",
+            "carrying the identity the press round-trips on, which is exact string equality"
+        );
+        assert!(row.monitors[0].viewscreen);
+    }
+
+    #[test]
+    fn a_display_that_renegotiates_its_resolution_is_still_the_same_display() {
+        // A television waking, or an EDID handshake settling, rewrites the
+        // `WxH` half of an identity outright. It is plainly the same screen in
+        // the same place, and treating it as a new one threw away whichever
+        // display the operator had chosen.
+        let (mut app, window) = booted(None);
+        assert_eq!(viewscreen_identity(&app), DELL);
+
+        let dell = monitor_entity(&mut app, "DELL U2720Q", 0);
+        {
+            let mut m = app.world_mut().entity_mut(dell);
+            let mut m = m.get_mut::<Monitor>().unwrap();
+            m.physical_width = 1920;
+            m.physical_height = 1080;
+        }
+        settle(&mut app);
+
+        nothing_moved(&app, window, DELL);
+        let row = row(&app);
+        assert_eq!(row.monitors.len(), 2);
+        assert_eq!(
+            row.monitors[0].identity, DELL,
+            "the key it has been known by all session"
+        );
+        assert_eq!(
+            (row.monitors[0].width, row.monitors[0].height),
+            (1920, 1080),
+            "while the row shows the size it is ACTUALLY running at"
+        );
+    }
+
+    #[test]
+    fn unplugging_a_monitor_on_a_no_profile_host_closes_no_pane() {
+        // The landmine under the synthesised config (see `apply_bridge_profile`):
+        // unplug-closes-nothing holds only because that config carries no pane
+        // labels, which is a consequence of the layout seating nothing at boot
+        // rather than a rule anybody wrote down. This is the rule, written
+        // down — a slice that rebuilds the config from the live layout
+        // (issue #1331) breaks it here rather than in a room full of people.
+        use crate::native_host::panes::identity::PaneIdentity;
+        use crate::native_host::panes::transport::PaneBus;
+        use crate::native_host::panes::PaneBusResource;
+
+        let mut app = App::new();
+        app.add_plugins(BridgeDisplayPlugin);
+        let bus = PaneBus::default();
+        let pane =
+            bus.open(PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000001", "Ada").unwrap());
+        bus.mark_live(pane);
+        app.insert_resource(PaneBusResource(bus.clone()));
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+        app.world_mut()
+            .spawn((monitor("DELL U2720Q", 3840, 2160, 0, 0), PrimaryMonitor));
+        app.world_mut()
+            .spawn(monitor("BenQ EX", 1920, 1080, 3840, 0));
+        app.update();
+        assert!(!app.world().resource::<BridgeDisplayConfig>().authored);
+
+        let benq = benq_entity(&mut app);
+        app.world_mut().entity_mut(benq).despawn();
+        settle(&mut app);
+
+        assert_eq!(
+            app.world()
+                .resource::<BridgeLayoutResource>()
+                .layout
+                .monitors()
+                .len(),
+            1,
+            "the unplug itself was believed"
+        );
+        assert_eq!(
+            bus.open_count(),
+            1,
+            "and it closed nobody's console: a synthesised profile carries no pane labels"
+        );
+    }
+
+    // ── an authored console is not free room (issue #1330) ──────────────────
+
+    #[test]
+    fn the_viewscreen_may_not_move_onto_an_authored_participants_console() {
+        // `--pane`-shaped profiles seat NOTHING: their panes name a person, not
+        // a station, so `adopt_profile` has no `StationId` to place. The
+        // adapter opens the Station window all the same — so a layout that
+        // recorded nothing would read that screen as free and let the
+        // viewscreen cover Ada's live console.
+        let (app, _) = booted(Some(viewscreen_and_station("Ada")));
+        assert_eq!(
+            app.world().resource::<BridgeStationSurfaces>().0.len(),
+            1,
+            "the profile's Station window really is open on the BenQ"
+        );
+
+        let refusal = app
+            .world()
+            .resource::<BridgeLayoutResource>()
+            .layout
+            .apply(&LayoutAction::SetViewscreen {
+                monitor: MonitorIdentity::new(BENQ),
+            })
+            .expect_err("Ada's console is on it");
+        assert_eq!(
+            refusal.string_id(),
+            "server.bridge_layout.viewscreen_holds_stations"
+        );
+        assert_eq!(
+            refusal
+                .params()
+                .iter()
+                .find(|(k, _)| *k == "stations")
+                .map(|(_, v)| v.as_str()),
+            Some("Ada"),
+            "and the notice names who is on it, which is the only way to act on it"
+        );
+    }
+
+    #[test]
+    fn the_row_draws_an_authored_participants_console_as_an_occupant() {
+        // The other half of the same fact: a press the law will refuse must be
+        // legible on the button BEFORE it is pressed, not only in the sentence
+        // that comes back.
+        let (app, _) = booted(Some(viewscreen_and_station("Ada")));
+        let row = row(&app);
+        assert_eq!(row.monitors[1].identity, BENQ);
+        assert_eq!(row.monitors[1].stations, vec!["Ada".to_string()]);
+        assert!(
+            row.monitors[0].stations.is_empty(),
+            "the viewscreen holds none"
         );
     }
 

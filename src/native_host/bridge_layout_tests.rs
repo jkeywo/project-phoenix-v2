@@ -172,6 +172,7 @@ fn moving_the_viewscreen_onto_a_monitor_holding_consoles_is_refused_not_forced()
         LayoutRefusal::ViewscreenMonitorHoldsStations {
             monitor: m(LEFT),
             stations: vec![s("helm"), s("weapons")],
+            panes: Vec::new(),
         }
     );
     assert!(err.to_string().contains("unassign them first"));
@@ -721,6 +722,12 @@ fn a_hand_authored_participant_profile_adopts_its_viewscreen_and_names_its_panes
     );
     assert!(adopted.stations_on(&m(RIGHT)).is_empty());
     assert_eq!(
+        adopted.reserved_on(&m(RIGHT)),
+        &["Ada".to_string(), "Grace".to_string()],
+        "nothing was SEATED, but the screen is not free either: the profile opens a \
+         console on it, and rule 2's mirror has to know"
+    );
+    assert_eq!(
         notes,
         vec![
             LayoutAdoption::PaneNamesNoStation {
@@ -734,6 +741,131 @@ fn a_hand_authored_participant_profile_adopts_its_viewscreen_and_names_its_panes
         ]
     );
     assert!(notes[0].to_string().contains("Ada"));
+}
+
+// ── an authored console is an occupant (issue #1330) ────────────────────────
+
+/// `bridge()` with a hand-authored `--pane` profile adopted: the viewscreen
+/// stays on the TV, and Ada's participant console is opened on `LEFT`.
+fn with_an_authored_console() -> BridgeLayout {
+    let mut profile = BridgeProfile::empty();
+    profile.displays = vec![
+        DisplayEntry {
+            id: TV.to_string(),
+            role: ROLE_VIEWSCREEN.to_string(),
+            split: None,
+            panes: Vec::new(),
+        },
+        DisplayEntry {
+            id: LEFT.to_string(),
+            role: ROLE_STATION.to_string(),
+            split: None,
+            panes: vec![PaneSlot::for_participant("Ada")],
+        },
+    ];
+    bridge().adopt_profile(&profile.validate().unwrap()).0
+}
+
+#[test]
+fn the_viewscreen_may_not_move_onto_a_console_the_layout_does_not_own() {
+    // The gap this closes: `adopt_profile` seats only panes that name a
+    // station, so a `--pane`-shaped profile seated NOTHING and the law read
+    // that screen as free — while the display adapter had opened a real
+    // borderless-fullscreen console on it. Rule 2's mirror applies to any
+    // console, not only to the ones this law is able to move.
+    let layout = with_an_authored_console();
+    let err = layout
+        .apply(&LayoutAction::SetViewscreen { monitor: m(LEFT) })
+        .expect_err("Ada's console is on it");
+    assert_eq!(
+        err,
+        LayoutRefusal::ViewscreenMonitorHoldsStations {
+            monitor: m(LEFT),
+            stations: Vec::new(),
+            panes: vec!["Ada".to_string()],
+        }
+    );
+    assert!(err.to_string().contains("\"Ada\""));
+    let params = err.params();
+    let stations = &params.iter().find(|(k, _)| *k == "stations").unwrap().1;
+    assert_eq!(
+        stations, "Ada",
+        "and the player-visible parameter names who is on it, unquoted"
+    );
+}
+
+#[test]
+fn a_refusal_names_the_seated_consoles_and_the_authored_ones_together() {
+    // One monitor, both kinds of occupant. The operator is looking at one
+    // screen and needs one list of what is on it.
+    let layout = assign(&with_an_authored_console(), "helm", LEFT);
+    let err = layout
+        .apply(&LayoutAction::SetViewscreen { monitor: m(LEFT) })
+        .expect_err("both are on it");
+    let params = err.params();
+    let stations = &params.iter().find(|(k, _)| *k == "stations").unwrap().1;
+    assert_eq!(stations, "helm, Ada", "seats first, then what was authored");
+}
+
+#[test]
+fn an_authored_console_is_an_occupant_but_never_a_station() {
+    // Which is exactly why it is not a faked `StationId`: it would otherwise
+    // show up on the roster-driven rows as a station no ship has, with an
+    // unassign button that could not work.
+    let layout = with_an_authored_console();
+    assert!(
+        layout.stations_on(&m(LEFT)).is_empty(),
+        "there is no station seated there"
+    );
+    assert!(
+        !layout.roster().iter().any(|s| s.0 == "Ada"),
+        "and Ada is not on the roster"
+    );
+    assert_eq!(
+        layout.occupants_on(&m(LEFT)),
+        vec!["Ada".to_string()],
+        "but the row must still draw the screen as taken"
+    );
+    let occupancy = layout.occupancy_of(&m(LEFT)).unwrap();
+    assert_eq!(occupancy.reserved, vec!["Ada".to_string()]);
+    assert_eq!(
+        occupancy.free_slots,
+        Some(MAX_STATIONS_PER_MONITOR),
+        "an authored console blocks the VIEWSCREEN, not a console's capacity — whether a \
+         station may share that window is the pane host's question, not this law's"
+    );
+    assert_eq!(
+        layout
+            .eligibility()
+            .iter()
+            .map(|e| e.station.0.clone())
+            .collect::<Vec<_>>(),
+        vec!["helm", "weapons", "comms", "engineering"],
+        "and no screen row appeared for it"
+    );
+}
+
+#[test]
+fn a_profile_the_layout_itself_wrote_reserves_nothing() {
+    // The other direction, unchanged: every pane a layout writes names a
+    // station, so a saved arrangement coming back is seats and nothing else.
+    let saved = assign(&bridge(), "helm", LEFT).to_validated_profile();
+    let (adopted, notes) = bridge().adopt_profile(&saved);
+    assert_eq!(adopted.stations_on(&m(LEFT)), &[s("helm")]);
+    assert!(adopted.reserved_on(&m(LEFT)).is_empty());
+    assert!(notes.is_empty());
+    let err = adopted
+        .apply(&LayoutAction::SetViewscreen { monitor: m(LEFT) })
+        .expect_err("helm's console is on it");
+    assert_eq!(
+        err,
+        LayoutRefusal::ViewscreenMonitorHoldsStations {
+            monitor: m(LEFT),
+            stations: vec![s("helm")],
+            panes: Vec::new(),
+        },
+        "the refusal an operator has always got, unchanged"
+    );
 }
 
 #[test]
@@ -946,6 +1078,30 @@ fn all_three() -> Vec<DiscoveredMonitor> {
         discovered(LEFT, false),
         discovered(RIGHT, false),
     ]
+}
+
+#[test]
+fn an_authored_console_follows_its_screen_through_a_reconcile() {
+    // A monitor that is still plugged in is still carrying whatever the
+    // profile opened on it — and a monitor that has gone took its console with
+    // it, so the screen that replaced it is genuinely free.
+    let layout = with_an_authored_console();
+    let (kept, _) = layout.reconcile(&all_three(), roster());
+    assert_eq!(kept.reserved_on(&m(LEFT)), &["Ada".to_string()]);
+    assert!(
+        kept.apply(&LayoutAction::SetViewscreen { monitor: m(LEFT) })
+            .is_err(),
+        "so the viewscreen still may not move onto it"
+    );
+
+    let (gone, _) = layout.reconcile(&[discovered(TV, true), discovered(RIGHT, false)], roster());
+    assert!(
+        gone.reserved_on(&m(LEFT)).is_empty(),
+        "the screen it was on is not part of this bridge any more"
+    );
+    assert!(gone
+        .apply(&LayoutAction::SetViewscreen { monitor: m(RIGHT) })
+        .is_ok());
 }
 
 #[test]
@@ -1194,6 +1350,7 @@ fn every_refusal_names_a_string_id_and_the_parameters_that_id_interpolates() {
             LayoutRefusal::ViewscreenMonitorHoldsStations {
                 monitor: m(LEFT),
                 stations: vec![s("helm")],
+                panes: Vec::new(),
             },
             "server.bridge_layout.viewscreen_holds_stations",
             vec!["monitor", "stations"],
@@ -1222,6 +1379,7 @@ fn a_refusals_station_list_reaches_a_player_unquoted() {
     let refusal = LayoutRefusal::ViewscreenMonitorHoldsStations {
         monitor: m(LEFT),
         stations: vec![s("helm"), s("weapons")],
+        panes: Vec::new(),
     };
     assert!(refusal.to_string().contains("\"helm\", \"weapons\""));
     let params = refusal.params();
@@ -1316,6 +1474,7 @@ fn a_note_carrying_a_refusal_reports_it_beside_itself_rather_than_inside_itself(
     let refusal = LayoutRefusal::ViewscreenMonitorHoldsStations {
         monitor: m(LEFT),
         stations: vec![s("helm")],
+        panes: Vec::new(),
     };
     let note = LayoutAdoption::ViewscreenRefused {
         monitor: m(LEFT),

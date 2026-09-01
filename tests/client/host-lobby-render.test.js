@@ -390,6 +390,23 @@ describe('the bridge monitor row', () => {
       .toEqual(['BRAVIA@3840x2160', 'BenQ EX@1920x1080']);
   });
 
+  it('draws what a monitor is already holding on the button itself', () => {
+    // The payload has carried `stations` since the row landed and nothing
+    // rendered it, so the row's own promise — say why a press would be refused
+    // BEFORE it is pressed — was not kept. A press onto a screen holding a
+    // console comes back as a refusal, never as a move.
+    installLobbyPanel(document);
+    renderWithLayout({
+      monitors: [monitor(), benq({ stations: ['helm', 'weapons'] })],
+    });
+    const buttons = rowButtons();
+    const held = buttons[1].querySelector('.monitor-button-stations');
+    expect(held).not.toBeNull();
+    expect(held.textContent).toContain('helm, weapons');
+    expect(held.textContent).not.toContain('⟨');
+    expect(buttons[0].querySelector('.monitor-button-stations')).toBeNull();
+  });
+
   it('says which monitor is the viewscreen in a way a screen reader gets too', () => {
     installLobbyPanel(document);
     renderWithLayout({ monitors: [monitor(), benq()] });

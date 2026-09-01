@@ -283,6 +283,17 @@ export function renderHostLobby(doc, vm, t, opts) {
           markEl.textContent = t(mark.id, mark.params);
           el.appendChild(markEl);
         }
+
+        // What this display is already holding. A console never moves aside
+        // for the viewscreen (the layout law refuses the press rather than
+        // evicting it), so a button that did not say so offered a press that
+        // could only ever come back as a refusal.
+        if (b.occupants) {
+          const held = doc.createElement('span');
+          held.className = 'monitor-button-stations';
+          held.textContent = t(b.occupants.id, b.occupants.params);
+          el.appendChild(held);
+        }
         buttons.appendChild(el);
       }
     }

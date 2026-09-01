@@ -185,6 +185,14 @@ const UNNAMED_DISPLAY: &str = "unnamed-display";
 ///
 /// The return order matches the input so a caller can zip it back against the
 /// Bevy monitor entities it came from.
+///
+/// **This answer is context-dependent, and a live reader must not compare it
+/// against a stored one.** Both exceptions above are decided by *this frame's*
+/// set: a display gains its `#x,y` suffix only while its twin is present, and a
+/// base key changes outright with a renegotiated resolution. A caller that has
+/// to recognise the same screen frame after frame wants
+/// [`identify_stable`] (a whole roster) or [`present_assigned_identities`] (a
+/// profile's assignments), both of which match by *form* instead.
 pub fn identify(raws: &[RawMonitor]) -> Vec<DiscoveredMonitor> {
     // Count base keys so a unique monitor keeps the short, position-free key and
     // only genuine collisions pay the position suffix.
@@ -220,6 +228,180 @@ pub fn identify(raws: &[RawMonitor]) -> Vec<DiscoveredMonitor> {
 fn base_key(raw: &RawMonitor) -> String {
     let name = raw.name.as_deref().unwrap_or(UNNAMED_DISPLAY);
     format!("{name}@{}x{}", raw.physical_width, raw.physical_height)
+}
+
+/// The position-suffixed form of an identity: `name@WxH#x,y`.
+fn positioned_key(raw: &RawMonitor) -> String {
+    format!("{}#{},{}", base_key(raw), raw.position_x, raw.position_y)
+}
+
+/// **Both** identity forms a present monitor answers to — its position-free
+/// base key and its position-suffixed key.
+///
+/// The one place that pair is spelled, because two readers of a live monitor
+/// set that disagree about which forms a display satisfies is exactly the class
+/// of bug this whole scheme exists to prevent. [`present_assigned_identities`]
+/// asks "is this assignment still on screen"; [`identify_stable`] asks "which
+/// display is the one I already knew" — the same question about the same
+/// context-dependence of [`identify`], asked by the two halves of the runtime
+/// watcher.
+fn identity_forms(raw: &RawMonitor) -> [String; 2] {
+    [positioned_key(raw), base_key(raw)]
+}
+
+// ── identity that survives a roster change (issue #1330) ────────────────────
+
+/// How hard one pass of [`identify_stable`] is willing to look for a monitor the
+/// caller already knew.
+///
+/// Ordered strongest first, and every pass but the last is anchored to the
+/// position the display was last seen at, so a weaker match can never take the
+/// screen a stronger one names.
+#[derive(Clone, Copy)]
+enum Rematch {
+    /// The known identity **is** this monitor's position-suffixed form. Exactly
+    /// one present monitor can satisfy it — no two displays share a top-left
+    /// corner — so this pass is unambiguous by construction.
+    Suffixed,
+    /// The known identity is this monitor's base key and it has not moved. The
+    /// twin case: the display an operator has been looking at keeps the short
+    /// key when its identical twin arrives beside it and forces `identify` to
+    /// start suffixing.
+    BaseHere,
+    /// Same OS name, same position, different mode — a display that
+    /// renegotiated its resolution (a television waking, an EDID handshake
+    /// settling). Its base key changed with `WxH`, so no form match can find
+    /// it, but it is plainly the same screen in the same place.
+    RenegotiatedHere,
+    /// The known identity is this monitor's base key, wherever it now sits —
+    /// the OS-settings rearrange [`identify`]'s whole scheme is built to
+    /// survive.
+    BaseAnywhere,
+}
+
+impl Rematch {
+    /// Every pass, strongest first.
+    const ALL: [Rematch; 4] = [
+        Rematch::Suffixed,
+        Rematch::BaseHere,
+        Rematch::RenegotiatedHere,
+        Rematch::BaseAnywhere,
+    ];
+
+    /// Whether `raw` is, under this pass, the display `known` names.
+    fn matches(self, raw: &RawMonitor, known: &DiscoveredMonitor) -> bool {
+        let here = raw.position_x == known.geometry.position_x
+            && raw.position_y == known.geometry.position_y;
+        let id = known.identity.as_str();
+        match self {
+            Rematch::Suffixed => id == positioned_key(raw),
+            Rematch::BaseHere => here && id == base_key(raw),
+            Rematch::RenegotiatedHere => here && raw.name == known.name,
+            Rematch::BaseAnywhere => id == base_key(raw),
+        }
+    }
+}
+
+/// Identify the monitors present now, keeping the identity a display the caller
+/// **already knew** was known by (issue #1330).
+///
+/// [`identify`] answers a *context-dependent* key: a display's identity gains
+/// its `#x,y` suffix only while an identical twin is present, and loses it again
+/// the moment that twin leaves — and a base key changes outright when the
+/// display renegotiates its resolution. That is harmless for a one-shot
+/// enumeration and actively wrong for anything that has to recognise the *same*
+/// screen frame after frame, because a re-derived string compared against a
+/// stored one reads an unchanged display as one that went away and a new one
+/// that arrived. [`present_assigned_identities`] solves that for a profile's
+/// assignments; this solves it for a whole live roster, which is what the
+/// lobby's monitor row and the bridge layout are rebuilt from.
+///
+/// Each display in `known` claims at most one present monitor, in four passes
+/// (see [`Rematch`]) so a weak, position-free match can never take the screen a
+/// stronger, position-anchored one names. A monitor no known display claimed
+/// gets the identity [`identify`] would have given it — that is a display that
+/// genuinely just arrived — and a known display that claimed nothing is
+/// genuinely absent, which is what makes an unplug still read as an unplug.
+///
+/// Two changes at once — a display that moved **and** changed its mode — are
+/// deliberately not chased: nothing anchors the match, and guessing would
+/// re-home the viewscreen onto a screen the operator did not choose. That reads
+/// as one display leaving and another arriving, which is the conservative
+/// answer and the one #1123's doctrine already gives.
+///
+/// `known` empty makes this exactly [`identify`], which is what the boot path
+/// (with nothing yet known) passes.
+pub fn identify_stable(raws: &[RawMonitor], known: &[DiscoveredMonitor]) -> Vec<DiscoveredMonitor> {
+    let fresh = identify(raws);
+    let mut carried: Vec<Option<MonitorIdentity>> = vec![None; raws.len()];
+    let mut taken: std::collections::HashSet<MonitorIdentity> = std::collections::HashSet::new();
+
+    for pass in Rematch::ALL {
+        for k in known {
+            if taken.contains(&k.identity) {
+                continue;
+            }
+            let Some(index) = raws
+                .iter()
+                .enumerate()
+                .find(|(i, raw)| carried[*i].is_none() && pass.matches(raw, k))
+                .map(|(i, _)| i)
+            else {
+                continue;
+            };
+            carried[index] = Some(k.identity.clone());
+            taken.insert(k.identity.clone());
+        }
+    }
+
+    fresh
+        .into_iter()
+        .enumerate()
+        .map(|(i, mut found)| {
+            found.identity = match carried[i].take() {
+                Some(carried) => carried,
+                // Every carried identity is already in `taken`, so a newcomer
+                // can only collide with one of those — never with another
+                // newcomer, which `identify` has already told apart.
+                None => {
+                    let unique = free_identity(&raws[i], found.identity, &taken);
+                    taken.insert(unique.clone());
+                    unique
+                }
+            };
+            found
+        })
+        .collect()
+}
+
+/// `preferred`, or a key close to it that nothing has claimed.
+///
+/// Only reachable when a display carrying an identity forward has kept the key a
+/// newly-arrived one would otherwise derive — a monitor that renegotiated its
+/// mode, and then a second monitor arriving in the mode the first one left. The
+/// position suffix settles it, since no two displays share a top-left corner;
+/// the counted tail after that is unreachable in practice and exists so this
+/// cannot return a duplicate, which the layout would silently deduplicate into a
+/// display with no button.
+fn free_identity(
+    raw: &RawMonitor,
+    preferred: MonitorIdentity,
+    taken: &std::collections::HashSet<MonitorIdentity>,
+) -> MonitorIdentity {
+    if !taken.contains(&preferred) {
+        return preferred;
+    }
+    let positioned = MonitorIdentity(positioned_key(raw));
+    if !taken.contains(&positioned) {
+        return positioned;
+    }
+    for n in 2.. {
+        let candidate = MonitorIdentity(format!("{}#{n}", positioned.as_str()));
+        if !taken.contains(&candidate) {
+            return candidate;
+        }
+    }
+    unreachable!("the counted tail is unbounded")
 }
 
 // ── pane layout ─────────────────────────────────────────────────────────────
@@ -1116,12 +1298,10 @@ pub fn present_assigned_identities(
     // Every identity form a present monitor could satisfy: its position-free base
     // key AND its position-suffixed key. Matching an assignment against this set
     // makes presence independent of the live disambiguation `identify` would do.
-    let mut present_forms: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for raw in raws {
-        let base = base_key(raw);
-        present_forms.insert(format!("{base}#{},{}", raw.position_x, raw.position_y));
-        present_forms.insert(base);
-    }
+    // The pair itself is `identity_forms`, shared with `identify_stable` so the
+    // two runtime readers cannot come to disagree about it.
+    let present_forms: std::collections::HashSet<String> =
+        raws.iter().flat_map(identity_forms).collect();
     assigned
         .iter()
         .filter(|a| present_forms.contains(a.identity.as_str()))

@@ -19,7 +19,9 @@
 //!    ([`LayoutRefusal::ViewscreenMonitorHoldsStations`]). The second refusal is
 //!    the one worth stating out loud: the alternative is silently evicting
 //!    somebody's console to make room, and this module never rearranges anything
-//!    the operator did not ask for. Unassign them first.
+//!    the operator did not ask for. Unassign them first. A console an
+//!    **authored** profile opened counts too, even though this layout cannot
+//!    move it — see [`BridgeLayout::reserved_on`].
 //! 3. **Two per screen.** A non-viewscreen monitor holds at most
 //!    [`MAX_STATIONS_PER_MONITOR`] stations, split deterministically side by
 //!    side. That is [`MAX_PANES_PER_STATION`] — the same legibility bound the
@@ -144,7 +146,14 @@ pub enum LayoutRefusal {
     /// first, so nothing they arranged disappears without them asking.
     ViewscreenMonitorHoldsStations {
         monitor: MonitorIdentity,
+        /// The consoles this layout seated there.
         stations: Vec<StationId>,
+        /// The labels of surfaces an authored profile opened there that this
+        /// layout does not own — see [`BridgeLayout::reserved_on`]. Named
+        /// beside the seats rather than folded into them because they are a
+        /// different kind of thing: the operator cannot unassign one, and a
+        /// `StationId` here would be an id no roster has.
+        panes: Vec<String>,
     },
 }
 
@@ -176,11 +185,15 @@ impl std::fmt::Display for LayoutRefusal {
                 occupants.len(),
                 station_list(occupants),
             ),
-            LayoutRefusal::ViewscreenMonitorHoldsStations { monitor, stations } => write!(
+            LayoutRefusal::ViewscreenMonitorHoldsStations {
+                monitor,
+                stations,
+                panes,
+            } => write!(
                 f,
                 "monitor {monitor} is holding the console(s) for {}, so the viewscreen may not \
                  move onto it; unassign them first — they are not evicted to make room",
-                station_list(stations),
+                occupant_list(stations, panes),
             ),
         }
     }
@@ -230,9 +243,13 @@ impl LayoutRefusal {
                 ("stations", station_params(occupants)),
                 ("max", MAX_STATIONS_PER_MONITOR.to_string()),
             ],
-            LayoutRefusal::ViewscreenMonitorHoldsStations { monitor, stations } => vec![
+            LayoutRefusal::ViewscreenMonitorHoldsStations {
+                monitor,
+                stations,
+                panes,
+            } => vec![
                 ("monitor", monitor.as_str().to_string()),
-                ("stations", station_params(stations)),
+                ("stations", occupant_params(stations, panes)),
             ],
         }
     }
@@ -258,6 +275,28 @@ fn station_params(stations: &[StationId]) -> String {
         .map(|s| s.0.as_str())
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// Everything on one monitor, for an operator log line: its seated consoles
+/// then the authored surfaces it also carries.
+fn occupant_list(stations: &[StationId], panes: &[String]) -> String {
+    join_occupants(
+        stations.iter().map(|s| format!("{:?}", s.0)),
+        panes.iter().map(|p| format!("{p:?}")),
+    )
+}
+
+/// Everything on one monitor, for a **player-visible** parameter. See
+/// [`station_params`] for why nothing is quoted here.
+fn occupant_params(stations: &[StationId], panes: &[String]) -> String {
+    join_occupants(stations.iter().map(|s| s.0.clone()), panes.iter().cloned())
+}
+
+fn join_occupants(
+    stations: impl Iterator<Item = String>,
+    panes: impl Iterator<Item = String>,
+) -> String {
+    stations.chain(panes).collect::<Vec<_>>().join(", ")
 }
 
 // ── the layout ──────────────────────────────────────────────────────────────
@@ -295,6 +334,28 @@ pub struct BridgeLayout {
     /// viewscreen's entry is always empty — that is rule 2, held as an invariant
     /// rather than re-derived.
     seats: Vec<Vec<StationId>>,
+    /// Parallel to `monitors`: the labels of surfaces an **authored** profile
+    /// opened on each, which this layout does not own (issue #1330).
+    ///
+    /// A hand-authored `--pane <NAME>` Station belongs to a named crew member
+    /// rather than to a claimable station ([`PaneSlot::for_participant`]), so
+    /// there is no [`StationId`] to seat and [`adopt_profile`](Self::adopt_profile)
+    /// seats nothing for it. The window is opened all the same — the display
+    /// adapter spawns one borderless-fullscreen surface per configured monitor —
+    /// so a layout that recorded nothing would read that monitor as **free** and
+    /// let the viewscreen move on top of somebody's live console. That is rule
+    /// 2's whole point, defeated by a bookkeeping gap.
+    ///
+    /// A reserved label is therefore an occupant for the purpose of rule 2's
+    /// mirror ([`set_viewscreen`](Self::set_viewscreen)) and nothing else. It is
+    /// **not** a seat: it is not on the roster, it has no
+    /// [`eligibility`](Self::eligibility) row, no action can move or free it, and
+    /// it does not consume a monitor's console capacity — seating a station
+    /// beside an authored pane is the pane host's compositing question
+    /// (issue #1124), not this law's, and the viewscreen is the only surface this
+    /// module actually moves today. Faking a `StationId` for one instead would
+    /// have put a station no ship has on the roster-driven rows.
+    reserved: Vec<Vec<String>>,
 }
 
 impl BridgeLayout {
@@ -318,11 +379,13 @@ impl BridgeLayout {
             });
         };
         let seats = vec![Vec::new(); monitors.len()];
+        let reserved = vec![Vec::new(); monitors.len()];
         Ok(Self {
             monitors,
             roster,
             viewscreen: index,
             seats,
+            reserved,
         })
     }
 
@@ -379,6 +442,30 @@ impl BridgeLayout {
         }
     }
 
+    /// The labels of authored surfaces on `monitor` this layout does not own —
+    /// see the [`reserved`](Self::reserved) note. Empty for a monitor this
+    /// bridge does not have.
+    pub fn reserved_on(&self, monitor: &MonitorIdentity) -> &[String] {
+        match self.index_of(monitor) {
+            Some(i) => &self.reserved[i],
+            None => &[],
+        }
+    }
+
+    /// Everything open on `monitor`, as the names a person reads: the stations
+    /// this layout seated, then the authored surfaces it merely knows about.
+    ///
+    /// What the lobby's monitor row draws on a button, and the same list a
+    /// refusal names — one function, so the row cannot promise a press the law
+    /// then refuses for a reason the row never showed.
+    pub fn occupants_on(&self, monitor: &MonitorIdentity) -> Vec<String> {
+        self.stations_on(monitor)
+            .iter()
+            .map(|s| s.0.clone())
+            .chain(self.reserved_on(monitor).iter().cloned())
+            .collect()
+    }
+
     /// Apply `action`, answering the layout it produces — or the typed reason it
     /// was refused. `self` is untouched either way.
     ///
@@ -410,11 +497,15 @@ impl BridgeLayout {
             return Ok(self.clone());
         }
         // Rule 2's mirror: no silent eviction. A monitor holding consoles keeps
-        // them, and the operator is told to unassign them first.
-        if !self.seats[index].is_empty() {
+        // them, and the operator is told to unassign them first. An authored
+        // surface counts — it is a live console on that screen too, and the
+        // fact that this layout cannot move it makes covering it worse, not
+        // more allowable (see `reserved`).
+        if !self.seats[index].is_empty() || !self.reserved[index].is_empty() {
             return Err(LayoutRefusal::ViewscreenMonitorHoldsStations {
                 monitor: monitor.clone(),
                 stations: self.seats[index].clone(),
+                panes: self.reserved[index].clone(),
             });
         }
         let mut next = self.clone();
@@ -516,6 +607,7 @@ impl BridgeLayout {
             monitor: self.monitors[index].clone(),
             is_viewscreen,
             stations: self.seats[index].clone(),
+            reserved: self.reserved[index].clone(),
             free_slots: (!is_viewscreen)
                 .then(|| MAX_STATIONS_PER_MONITOR - self.seats[index].len()),
         }
@@ -667,6 +759,11 @@ impl BridgeLayout {
     /// [`LayoutAdoption`] rather than silently dropped. A station whose monitor
     /// is missing is simply left unassigned, which is the graceful degradation a
     /// LAN party with different screens needs.
+    ///
+    /// A pane that names **no** station is reported the same way and is also
+    /// **reserved** on its monitor (see the [`reserved`](Self::reserved) note):
+    /// there is no seat to take, but the screen is not free either, and a
+    /// viewscreen that moved onto it would cover a crew member's live console.
     pub fn adopt_profile(&self, profile: &ValidatedProfile) -> (Self, Vec<LayoutAdoption>) {
         let mut notes = Vec::new();
         let mut next = Self {
@@ -674,6 +771,10 @@ impl BridgeLayout {
             roster: self.roster.clone(),
             viewscreen: self.viewscreen,
             seats: vec![Vec::new(); self.monitors.len()],
+            // Replaced along with the seating: adoption is "this arrangement",
+            // and a profile that no longer authors a participant pane no longer
+            // reserves the screen it was on.
+            reserved: vec![Vec::new(); self.monitors.len()],
         };
 
         // The viewscreen first: every seat below is judged against it, so
@@ -700,6 +801,12 @@ impl BridgeLayout {
             };
             for pane in panes {
                 let Some(id) = pane.station.as_deref() else {
+                    // Nothing to seat — but the authored profile opens a
+                    // surface here all the same, so the screen is recorded as
+                    // taken rather than left looking free to rule 2's mirror.
+                    if let Some(index) = next.index_of(&display.identity) {
+                        next.reserved[index].push(pane.label.clone());
+                    }
                     notes.push(LayoutAdoption::PaneNamesNoStation {
                         monitor: display.identity.clone(),
                         label: pane.label.clone(),
@@ -808,11 +915,20 @@ impl BridgeLayout {
             .position(|m| m == &viewscreen)
             .expect("the viewscreen is one of the monitors it was chosen from");
 
+        // An authored surface follows its screen: a monitor that is still here
+        // is still carrying whatever the profile opened on it, and one that is
+        // gone took its surface with it. Carried before the seats below so the
+        // occupancy a seat is judged against is the whole of it.
+        let reserved: Vec<Vec<String>> = identities
+            .iter()
+            .map(|m| self.reserved_on(m).to_vec())
+            .collect();
         let mut next = Self {
             seats: vec![Vec::new(); identities.len()],
             monitors: identities,
             roster,
             viewscreen: index,
+            reserved,
         };
 
         // Re-seat in the order this layout holds them — monitor by monitor, seat
@@ -871,6 +987,11 @@ pub struct MonitorOccupancy {
     pub is_viewscreen: bool,
     /// The stations seated on it, in the order their panes are laid out.
     pub stations: Vec<StationId>,
+    /// The labels of authored surfaces on it this layout does not own — see
+    /// [`BridgeLayout::reserved_on`]. They block the viewscreen moving here and
+    /// nothing else, so they are reported beside `free_slots` rather than
+    /// subtracted from it.
+    pub reserved: Vec<String>,
     /// How many more consoles it can take — `None` for the viewscreen, which
     /// takes none at all.
     ///

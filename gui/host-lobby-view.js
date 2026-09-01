@@ -249,16 +249,27 @@ export function hostLobbyMonitorRow(layout) {
     const marks = [];
     if (m.viewscreen) marks.push({ id: 'server.monitor_row.viewscreen', params: {} });
     if (m.primary) marks.push({ id: 'server.monitor_row.primary', params: {} });
+    // The consoles this monitor holds. A press onto one of these is refused by
+    // the layout law (no silent eviction), and the row says so up front rather
+    // than only after the press — which is what `occupants` is for. Kept
+    // separate from `marks` because it is not a status word: it is a list of
+    // names, and it is styled and read as one.
+    const stations = m.stations || [];
+    const occupants = stations.length
+      // Joined here rather than in the string table because a translator
+      // cannot be handed a list — `t()` interpolates values, and a comma is
+      // punctuation rather than English. The host joins its own copy of this
+      // list the same way for the refusal that names the same consoles.
+      ? { id: 'server.monitor_row.stations', params: { stations: stations.join(', ') } }
+      : null;
     return {
       identity: m.identity,
       label,
       marks,
       viewscreen: !!m.viewscreen,
       primary: !!m.primary,
-      // The consoles this monitor holds. A press onto one of these is refused
-      // by the layout law (no silent eviction), and the row says so up front
-      // rather than only after the press.
-      stations: m.stations || [],
+      stations,
+      occupants,
     };
   });
 

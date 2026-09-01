@@ -72,7 +72,18 @@ pub enum JoinInvite {
         /// Passed through rather than compared here: `gui/join-url.js` owns the
         /// rule that only a NON-default service has to appear in the URL, and it
         /// owns it for the browser host too. Duplicating the comparison in Rust
-        /// would be a second answer to a question with one right answer.
+        /// would be a second answer to a question with one right answer, and the
+        /// service's URL is deliberately ONE literal (a deploy-time sweep can
+        /// only find a literal), which is in that module.
+        ///
+        /// **A non-default service and a LAN phone do not combine**, and that is
+        /// #1112's decision rather than this one's: the `?rendezvous=` override
+        /// the URL then carries is honoured only for a LOOPBACK page origin, so
+        /// a phone opening `http://192.168.…/client/…?rendezvous=…` ignores it
+        /// and dials the built-in service. A host on a local `wrangler dev` is
+        /// therefore reachable by the machine it runs on and by nothing else,
+        /// with or without this QR. Nothing here papers over that; the code is
+        /// carried honestly and the constraint lives where the gate does.
         rendezvous: Option<String>,
     },
 }

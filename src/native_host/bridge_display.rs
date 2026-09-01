@@ -931,6 +931,8 @@ fn setup_profile_is_clean(
 mod tests {
     use super::*;
 
+    use crate::native_host::bridge_layout::LayoutAction;
+
     #[test]
     fn a_monitor_component_lifts_into_a_raw_monitor() {
         let monitor = Monitor {
@@ -1271,6 +1273,301 @@ mod tests {
             bus.transport().poll(),
             vec![crate::native_host::transport::TransportEvent::Disconnected { token: ada_token }],
             "exactly Ada's token disconnects — Grace's never does"
+        );
+    }
+
+    // ── the apply-on-change viewscreen (issue #1330) ────────────────────────
+    //
+    // Every one of these runs the REAL plugin against injected `Monitor`
+    // entities — the same fake-hardware path the #1125 tests above use. What a
+    // real display adds is only the pixels; which window is placed where is
+    // decided entirely by what follows.
+
+    const DELL: &str = "DELL U2720Q@3840x2160";
+    const BENQ: &str = "BenQ EX@1920x1080";
+
+    /// A host with the plugin, a primary window and two monitors, one frame in.
+    /// `profile` is an operator's `--profile`; `None` is a plain
+    /// `phoenix-host --world …`.
+    fn booted(profile: Option<ValidatedProfile>) -> (App, Entity) {
+        let mut app = App::new();
+        app.add_plugins(BridgeDisplayPlugin);
+        if let Some(profile) = profile {
+            app.insert_resource(BridgeDisplayConfig {
+                profile,
+                authored: true,
+            });
+        }
+        let window = app
+            .world_mut()
+            .spawn((Window::default(), PrimaryWindow))
+            .id();
+        app.world_mut()
+            .spawn((monitor("DELL U2720Q", 3840, 2160, 0, 0), PrimaryMonitor));
+        app.world_mut().spawn(monitor("BenQ EX", 1920, 1080, 3840, 0));
+        app.update();
+        (app, window)
+    }
+
+    /// The entity of the second monitor, so a test can unplug it the way
+    /// `bevy_winit` does.
+    fn benq_entity(app: &mut App) -> Entity {
+        let mut found = None;
+        let mut query = app.world_mut().query::<(Entity, &Monitor)>();
+        for (entity, m) in query.iter(app.world()) {
+            if m.name.as_deref() == Some("BenQ EX") {
+                found = Some(entity);
+            }
+        }
+        found.expect("the second monitor is there")
+    }
+
+    fn viewscreen_identity(app: &App) -> String {
+        app.world()
+            .resource::<BridgeLayoutResource>()
+            .layout
+            .viewscreen()
+            .as_str()
+            .to_string()
+    }
+
+    /// Move the live layout's viewscreen, as a lobby button press does.
+    fn choose(app: &mut App, identity: &str) {
+        let moved = app
+            .world()
+            .resource::<BridgeLayoutResource>()
+            .layout
+            .apply(&LayoutAction::SetViewscreen {
+                monitor: MonitorIdentity::new(identity),
+            })
+            .expect("a free monitor takes the viewscreen");
+        app.world_mut()
+            .resource_mut::<BridgeLayoutResource>()
+            .layout = moved;
+    }
+
+    #[test]
+    fn a_host_with_no_profile_gains_a_config_and_a_layout_and_keeps_its_window() {
+        // The whole of issue #1330's second acceptance criterion. The applier
+        // and the watcher now run on a host that was given no display arguments
+        // at all — which is what the monitor row needs — and the window that
+        // host opens is the one #1121 opened.
+        let (app, window) = booted(None);
+
+        assert!(
+            !app.world().resource::<BridgeDisplayConfig>().authored,
+            "a synthesised config describes the displays; it does not instruct"
+        );
+        let layout = &app.world().resource::<BridgeLayoutResource>().layout;
+        assert_eq!(layout.monitors().len(), 2);
+        assert_eq!(layout.viewscreen().as_str(), DELL, "the OS primary");
+
+        let placed = app.world().entity(window);
+        assert!(
+            matches!(placed.get::<Window>().unwrap().mode, WindowMode::Windowed),
+            "no lobby action, so the window is exactly where the OS opened it"
+        );
+        assert!(
+            placed.get::<BridgeSurface>().is_none(),
+            "and it is not tagged as a placed bridge surface either"
+        );
+        assert!(
+            app.world().resource::<BridgeStationSurfaces>().0.is_empty(),
+            "a layout with no seated console opens no Station window"
+        );
+        assert_eq!(
+            app.world()
+                .resource::<BridgeDisplayApplied>()
+                .viewscreen
+                .as_ref()
+                .map(|m| m.as_str()),
+            Some(DELL),
+            "the baseline is the SEEDED viewscreen, which is what leaves the follower idle"
+        );
+    }
+
+    #[test]
+    fn a_host_with_no_profile_still_never_touches_its_window_on_later_frames() {
+        // The follower runs every frame forever. "Apply-on-change" has to mean
+        // it does nothing on all of them, not that it settles down eventually.
+        let (mut app, window) = booted(None);
+        for _ in 0..20 {
+            app.update();
+        }
+        assert!(matches!(
+            app.world().entity(window).get::<Window>().unwrap().mode,
+            WindowMode::Windowed
+        ));
+    }
+
+    #[test]
+    fn an_authored_profile_still_places_the_viewscreen_at_boot() {
+        // Issue #1123, unchanged: `--profile` is an instruction, and it wins at
+        // boot — seeding the layout the lobby then edits.
+        let (app, window) = booted(Some(viewscreen_and_station("Ada")));
+
+        let placed = app.world().entity(window);
+        assert!(matches!(
+            placed.get::<Window>().unwrap().mode,
+            WindowMode::BorderlessFullscreen(_)
+        ));
+        assert_eq!(placed.get::<BridgeSurface>().unwrap().identity, DELL);
+        assert_eq!(
+            app.world().resource::<BridgeStationSurfaces>().0.len(),
+            1,
+            "the profile's Station monitor still gets its own window"
+        );
+        assert_eq!(viewscreen_identity(&app), DELL);
+    }
+
+    #[test]
+    fn choosing_another_monitor_moves_the_viewscreen_window_live() {
+        // The lobby's monitor row, at the model boundary: the press itself is
+        // `host_lobby::apply_lobby_layout_actions`, and what it does is exactly
+        // this — one lawful transition on the live layout. No restart.
+        let (mut app, window) = booted(None);
+        choose(&mut app, BENQ);
+        app.update();
+
+        let placed = app.world().entity(window);
+        assert!(
+            matches!(
+                placed.get::<Window>().unwrap().mode,
+                WindowMode::BorderlessFullscreen(_)
+            ),
+            "the viewscreen window moves onto the chosen display"
+        );
+        assert_eq!(placed.get::<BridgeSurface>().unwrap().identity, BENQ);
+        assert_eq!(
+            app.world()
+                .resource::<BridgeDisplayApplied>()
+                .viewscreen
+                .as_ref()
+                .map(|m| m.as_str()),
+            Some(BENQ)
+        );
+
+        // …and having moved once, it does not keep moving.
+        let before = app.world().entity(window).get::<Window>().unwrap().mode;
+        app.update();
+        assert_eq!(
+            app.world().entity(window).get::<Window>().unwrap().mode,
+            before
+        );
+    }
+
+    #[test]
+    fn unplugging_a_monitor_rebuilds_the_layout_the_row_is_drawn_from() {
+        // Issue #1330's third acceptance criterion, headlessly: the roster the
+        // lobby shows follows the cable, through the watcher #1125 built.
+        let (mut app, _) = booted(None);
+        let benq = benq_entity(&mut app);
+        app.world_mut().entity_mut(benq).despawn();
+
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<BridgeLayoutResource>()
+                .layout
+                .monitors()
+                .len(),
+            2,
+            "one missing frame is a winit blip, not an unplug"
+        );
+
+        for _ in 1..DISPLAY_LOSS_DEBOUNCE_FRAMES {
+            app.update();
+        }
+        let layout = app.world().resource::<BridgeLayoutResource>();
+        assert_eq!(layout.layout.monitors().len(), 1);
+        assert_eq!(layout.monitors.len(), 1, "and the row's geometry with it");
+        assert!(
+            layout.notices.is_empty(),
+            "losing a monitor nothing was on degrades nothing, so there is nothing to say"
+        );
+    }
+
+    #[test]
+    fn a_monitor_plugged_in_joins_the_row_once_the_roster_settles() {
+        // The other direction, and the reason the settle is on the ROSTER
+        // rather than only on losses: a display that arrives has to appear as a
+        // button, or the operator cannot choose it.
+        let (mut app, _) = booted(None);
+        app.world_mut().spawn(monitor("Acer VG", 1280, 1024, 5760, 0));
+        for _ in 0..DISPLAY_LOSS_DEBOUNCE_FRAMES {
+            app.update();
+        }
+        let layout = app.world().resource::<BridgeLayoutResource>();
+        assert_eq!(layout.layout.monitors().len(), 3);
+        assert_eq!(
+            layout.layout.viewscreen().as_str(),
+            DELL,
+            "a new screen is no reason to overrule where the viewscreen is"
+        );
+    }
+
+    #[test]
+    fn unplugging_the_chosen_viewscreen_falls_back_visibly_and_the_window_follows() {
+        // The degradation that would otherwise look like nothing happening: a
+        // working viewscreen on another screen. The operator is told, in a
+        // sentence the row can render, and the window goes where the note says.
+        let (mut app, window) = booted(None);
+        choose(&mut app, BENQ);
+        app.update();
+        assert_eq!(viewscreen_identity(&app), BENQ);
+
+        let benq = benq_entity(&mut app);
+        app.world_mut().entity_mut(benq).despawn();
+        for _ in 0..DISPLAY_LOSS_DEBOUNCE_FRAMES + 1 {
+            app.update();
+        }
+
+        assert_eq!(viewscreen_identity(&app), DELL, "primary-else-first");
+        let notices = &app.world().resource::<BridgeLayoutResource>().notices;
+        assert_eq!(notices.len(), 1);
+        let LayoutNotice::Adopted(note) = &notices[0] else {
+            panic!("a roster change reports an adoption note: {notices:?}");
+        };
+        assert_eq!(
+            note.string_id(),
+            "server.bridge_layout.adopt_viewscreen_gone",
+            "the fallback is reported, not silent"
+        );
+        assert_eq!(
+            app.world()
+                .entity(window)
+                .get::<BridgeSurface>()
+                .unwrap()
+                .identity,
+            DELL,
+            "and the window followed the layout onto the surviving display"
+        );
+    }
+
+    #[test]
+    fn a_press_for_a_monitor_that_vanished_is_refused_at_the_law() {
+        // The stale press: the row was drawn, the operator reached for it, and
+        // the cable came out in between. The layout law answers with a sentence
+        // the lobby renders rather than moving anything.
+        let (mut app, _) = booted(None);
+        let benq = benq_entity(&mut app);
+        app.world_mut().entity_mut(benq).despawn();
+        for _ in 0..DISPLAY_LOSS_DEBOUNCE_FRAMES + 1 {
+            app.update();
+        }
+
+        let refusal = app
+            .world()
+            .resource::<BridgeLayoutResource>()
+            .layout
+            .apply(&LayoutAction::SetViewscreen {
+                monitor: MonitorIdentity::new(BENQ),
+            })
+            .expect_err("the monitor is gone");
+        assert_eq!(
+            refusal.string_id(),
+            "server.bridge_layout.unknown_monitor",
+            "and it is a sentence, not a silence"
         );
     }
 }

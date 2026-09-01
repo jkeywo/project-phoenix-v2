@@ -844,4 +844,277 @@ mod tests {
         );
         assert!(documents.is_empty());
     }
+
+    // ── the monitor row's two directions (issue #1330) ──────────────────────
+    //
+    // The surface half of the row is `gui/host-lobby-{view,render}.js` and its
+    // vitest suites; the law is `bridge_layout`'s. What is left — and what is
+    // here — is the loop between them: a record the page queued becomes a
+    // transition on the live layout, and the layout that results becomes the
+    // row the page is handed back.
+
+    use crate::native_host::bridge_layout::BridgeLayout;
+    use crate::native_host::bridge_profile::{identify, DiscoveredMonitor, RawMonitor};
+    use crate::native_host::panes::RecordingSurface;
+
+    const DELL: &str = "DELL U2720Q@3840x2160";
+    const BENQ: &str = "BenQ EX@1920x1080";
+
+    fn two_monitors() -> Vec<DiscoveredMonitor> {
+        identify(&[
+            RawMonitor {
+                name: Some("DELL U2720Q".to_string()),
+                physical_width: 3840,
+                physical_height: 2160,
+                position_x: 0,
+                position_y: 0,
+                scale_factor: 1.0,
+                primary: true,
+            },
+            RawMonitor {
+                name: Some("BenQ EX".to_string()),
+                physical_width: 1920,
+                physical_height: 1080,
+                position_x: 3840,
+                position_y: 0,
+                scale_factor: 1.0,
+                primary: false,
+            },
+        ])
+    }
+
+    /// A two-monitor bridge with the viewscreen on the primary, as
+    /// `apply_bridge_profile` seeds one.
+    fn seeded_layout() -> BridgeLayoutResource {
+        let monitors = two_monitors();
+        let layout = BridgeLayout::from_discovered(
+            &monitors,
+            [crate::core::messages::StationId("helm".to_string())],
+        )
+        .expect("two monitors are a bridge");
+        BridgeLayoutResource {
+            layout,
+            monitors,
+            notices: Vec::new(),
+        }
+    }
+
+    /// An app with the lobby plugin and a seeded bridge layout, plus a surface
+    /// that has already taken the opening row.
+    fn app_with_layout() -> (App, HostLobbyBridge, RecordingSurface) {
+        let (mut app, bridge) = app_with_lobby();
+        app.insert_resource(seeded_layout());
+        app.update();
+        let mut surface = RecordingSurface::ready();
+        pump_host_lobby(&bridge, &mut surface);
+        surface.pushed.clear();
+        (app, bridge, surface)
+    }
+
+    /// Queue one record on the surface and run the frame that answers it.
+    fn press(app: &mut App, bridge: &HostLobbyBridge, surface: &mut RecordingSurface, json: &str) {
+        surface.queue_record(json);
+        pump_host_lobby(bridge, surface);
+        app.update();
+        pump_host_lobby(bridge, surface);
+    }
+
+    fn viewscreen(app: &App) -> String {
+        app.world()
+            .resource::<BridgeLayoutResource>()
+            .layout
+            .viewscreen()
+            .as_str()
+            .to_string()
+    }
+
+    #[test]
+    fn the_opening_row_is_pushed_as_soon_as_a_layout_exists() {
+        let (mut app, bridge) = app_with_lobby();
+        app.insert_resource(seeded_layout());
+        app.update();
+        let mut surface = RecordingSurface::ready();
+        pump_host_lobby(&bridge, &mut surface);
+        let row = surface
+            .pushed
+            .iter()
+            .find(|s| s.contains("__phoenixHostLobbyLayout"))
+            .expect("the row reaches the surface");
+        assert!(row.contains(DELL));
+        assert!(row.contains(BENQ));
+    }
+
+    #[test]
+    fn a_button_press_moves_the_live_viewscreen_and_the_row_says_so() {
+        // The acceptance criterion, end to end on the host side: a record the
+        // page queued becomes one lawful transition, and the row that comes
+        // back marks the display the operator chose.
+        let (mut app, bridge, mut surface) = app_with_layout();
+        assert_eq!(viewscreen(&app), DELL);
+
+        press(
+            &mut app,
+            &bridge,
+            &mut surface,
+            r#"{"kind":"set-viewscreen","monitor":"BenQ EX@1920x1080"}"#,
+        );
+
+        assert_eq!(viewscreen(&app), BENQ);
+        let row = surface
+            .pushed
+            .iter()
+            .find(|s| s.contains("__phoenixHostLobbyLayout"))
+            .expect("the moved row is pushed back");
+        // The mark travels as data — `viewscreen: true` on the display that
+        // was pressed and nowhere else — and the row's words are the page's.
+        assert!(
+            row.contains(r#"{"identity":"BenQ EX@1920x1080","name":"BenQ EX","width":1920,"height":1080,"primary":false,"viewscreen":true}"#),
+            "the pressed display is marked: {row}"
+        );
+        assert!(
+            row.contains(r#""identity":"DELL U2720Q@3840x2160","name":"DELL U2720Q","width":3840,"height":2160,"primary":true,"viewscreen":false"#),
+            "and the one it left is not: {row}"
+        );
+        assert!(
+            !row.contains("bridge_layout"),
+            "an accepted press has nothing to say: {row}"
+        );
+    }
+
+    #[test]
+    fn a_press_for_a_monitor_that_is_gone_is_refused_with_something_to_read() {
+        // The stale press. "The lobby never silently ignores me" is the user
+        // story, and a boolean cannot satisfy it — so the refusal comes back as
+        // the id of a sentence the row renders.
+        let (mut app, bridge, mut surface) = app_with_layout();
+
+        press(
+            &mut app,
+            &bridge,
+            &mut surface,
+            r#"{"kind":"set-viewscreen","monitor":"Unplugged@1920x1080"}"#,
+        );
+
+        assert_eq!(viewscreen(&app), DELL, "nothing moved");
+        let notices = &app.world().resource::<BridgeLayoutResource>().notices;
+        assert!(matches!(notices.as_slice(), [LayoutNotice::Refused(_)]));
+        let row = surface
+            .pushed
+            .iter()
+            .find(|s| s.contains("__phoenixHostLobbyLayout"))
+            .expect("the refusal is pushed back");
+        assert!(row.contains("server.bridge_layout.unknown_monitor"));
+        assert!(row.contains("Unplugged@1920x1080"));
+    }
+
+    #[test]
+    fn moving_the_viewscreen_onto_a_monitor_holding_a_console_is_refused_not_resolved() {
+        // Rule 2's mirror, reaching a person: the consoles are not evicted to
+        // make room, and the row says which ones are in the way.
+        let (mut app, bridge, mut surface) = app_with_layout();
+        let seated = app
+            .world()
+            .resource::<BridgeLayoutResource>()
+            .layout
+            .apply(&crate::native_host::bridge_layout::LayoutAction::AssignStation {
+                station: crate::core::messages::StationId("helm".to_string()),
+                monitor: crate::native_host::bridge_profile::MonitorIdentity::new(BENQ),
+            })
+            .expect("a free non-viewscreen monitor takes a console");
+        app.world_mut()
+            .resource_mut::<BridgeLayoutResource>()
+            .layout = seated;
+
+        press(
+            &mut app,
+            &bridge,
+            &mut surface,
+            r#"{"kind":"set-viewscreen","monitor":"BenQ EX@1920x1080"}"#,
+        );
+
+        assert_eq!(viewscreen(&app), DELL);
+        let row = surface
+            .pushed
+            .iter()
+            .find(|s| s.contains("__phoenixHostLobbyLayout"))
+            .expect("the refusal is pushed back");
+        assert!(row.contains("server.bridge_layout.viewscreen_holds_stations"));
+        assert!(row.contains("helm"));
+    }
+
+    #[test]
+    fn an_accepted_press_clears_the_refusal_the_one_before_it_earned() {
+        // The row shows what happened to the LAST thing the operator did.
+        let (mut app, bridge, mut surface) = app_with_layout();
+        press(
+            &mut app,
+            &bridge,
+            &mut surface,
+            r#"{"kind":"set-viewscreen","monitor":"Unplugged@1920x1080"}"#,
+        );
+        assert!(!app
+            .world()
+            .resource::<BridgeLayoutResource>()
+            .notices
+            .is_empty());
+
+        press(
+            &mut app,
+            &bridge,
+            &mut surface,
+            r#"{"kind":"set-viewscreen","monitor":"BenQ EX@1920x1080"}"#,
+        );
+        assert!(app
+            .world()
+            .resource::<BridgeLayoutResource>()
+            .notices
+            .is_empty());
+    }
+
+    #[test]
+    fn a_record_this_build_cannot_read_moves_nothing_and_says_nothing_to_the_row() {
+        // A page/host mismatch is an operator's problem, not an answer to a
+        // press — rendering it as feedback would tell the crew their button is
+        // broken when what is broken is the bundle.
+        let (mut app, bridge, mut surface) = app_with_layout();
+        press(&mut app, &bridge, &mut surface, r#"{"monitor":"BenQ EX@1920x1080"}"#);
+
+        assert_eq!(viewscreen(&app), DELL);
+        assert!(app
+            .world()
+            .resource::<BridgeLayoutResource>()
+            .notices
+            .is_empty());
+        assert!(
+            !surface
+                .pushed
+                .iter()
+                .any(|s| s.contains("__phoenixHostLobbyLayout")),
+            "and nothing changed, so there is no row to push"
+        );
+    }
+
+    #[test]
+    fn a_bridge_nobody_rearranged_pushes_no_row_at_all() {
+        // Every push is a synchronous evaluate_script on the thread the fixed
+        // tick runs on, and a monitor row changes about once a session.
+        let (mut app, bridge, _) = app_with_layout();
+        for _ in 0..10 {
+            app.update();
+        }
+        assert!(!bridge.has_pending());
+    }
+
+    #[test]
+    fn a_press_that_arrives_before_a_layout_exists_is_dropped_rather_than_queued() {
+        // A host whose winit has not enumerated its displays yet has no layout
+        // to judge a press against. Draining anyway is what stops a surface
+        // that started talking to it sitting on a queue for the whole mission.
+        let (mut app, bridge) = app_with_lobby();
+        let mut surface = RecordingSurface::ready();
+        surface.queue_record(r#"{"kind":"set-viewscreen","monitor":"BenQ EX@1920x1080"}"#);
+        pump_host_lobby(&bridge, &mut surface);
+        app.update();
+        assert!(bridge.take_records().is_empty());
+    }
 }

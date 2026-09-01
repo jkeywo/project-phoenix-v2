@@ -853,11 +853,10 @@ fn follow_layout_stations(
 
     // ── the layout's seating, monitor by monitor ────────────────────────────
     //
-    // Three things can be true of a console at this point, and each needs a
-    // different act: it is NEW (open one), it MOVED or was re-laid-out (its view
-    // is the wrong size or on the wrong window, so rebuild it), or it is exactly
-    // where it was (leave it alone — most passes, for most consoles).
-    let mut opened: Vec<(crate::core::messages::StationId, MonitorIdentity)> = Vec::new();
+    // The one thing worked out here is which consoles MOVED: a console whose
+    // monitor or rectangle changed has a view built for a seat it no longer has.
+    // Whether a console needs OPENING is not a diff at all — it is asked of the
+    // bus, below, for every station the layout seats.
     let mut reseated: Vec<(crate::core::messages::StationId, MonitorIdentity)> = Vec::new();
     for (entity, discovered, geometry) in &present {
         let identity = &discovered.identity;
@@ -886,13 +885,17 @@ fn follow_layout_stations(
             let Some(station) = &pane.station else {
                 continue;
             };
-            match carried.iter().find(|(s, _, _)| s == station) {
-                None => opened.push((station.clone(), identity.clone())),
-                Some((_, was_on, was_at)) => {
-                    if was_on != identity.as_str() || was_at != &pane.rect {
-                        reseated.push((station.clone(), identity.clone()));
-                    }
-                }
+            // A console this pass has never seen is simply opened below; one it
+            // has seen in a DIFFERENT seat has a view built for that seat.
+            let moved =
+                carried
+                    .iter()
+                    .find(|(s, _, _)| s == station)
+                    .is_some_and(|(_, was_on, was_at)| {
+                        was_on != identity.as_str() || was_at != &pane.rect
+                    });
+            if moved {
+                reseated.push((station.clone(), identity.clone()));
             }
         }
         match existing {
@@ -991,8 +994,8 @@ fn follow_layout_stations(
     // crash has: a moment on `Backfill` while the page loads.
     for (station, monitor) in &reseated {
         let Some(pane) = bus.0.open_pane_for_name(&station.0) else {
-            // No pane to rebuild — treat it as new, below.
-            opened.push((station.clone(), monitor.clone()));
+            // Nothing to rebuild. The open sweep below asks the bus about every
+            // seated station, so this one is simply opened there.
             continue;
         };
         bus.0.close(pane);
@@ -1014,14 +1017,24 @@ fn follow_layout_stations(
         }
     }
 
-    // ── open what it now seats ──────────────────────────────────────────────
-    for (station, monitor) in &opened {
-        // Already open is not an error: an authored `--profile` seats a station
-        // at boot and this pass is the first to see it, so the pane may already
-        // exist from an earlier pass that raced a reconcile.
+    // ── open a console for every seated station that has none ───────────────
+    //
+    // Asked of the BUS rather than derived from a diff, so the rule is "every
+    // station the layout seats has a console" rather than "a console is opened
+    // when a press adds one". The difference is what a **`--profile` that seats
+    // a station** gets: its Station window and its pane slot exist from boot, so
+    // a diff would find nothing new and leave the operator looking at an empty
+    // screen. It also makes the sweep idempotent — running it twice opens one
+    // console, which is what lets the pass above close-and-recreate without
+    // having to tell this one what it did.
+    for station in &seated {
         if bus.0.open_pane_for_name(&station.0).is_some() {
             continue;
         }
+        let monitor = layout
+            .layout
+            .monitor_of(station)
+            .expect("a seated station is on one of this bridge's monitors");
         let (pane, _url) = bus.0.open_console(&station.0);
         // The URL is NOT logged: it carries this console's session token in its
         // fragment, and an operator log is a file, a scrollback and a screenshot.
@@ -2360,6 +2373,85 @@ mod tests {
             .iter()
             .map(|s| s.identity.clone())
             .collect()
+    }
+
+    #[test]
+    fn a_profile_that_seats_a_station_gets_a_console_and_not_just_a_window() {
+        // The case a diff would have missed. An authored `--profile` may seat a
+        // STATION as well as a participant (`PaneSlot::for_station`), and its
+        // Station window and its pane slot exist from boot — so "open the
+        // consoles the layout has just gained" finds nothing new and leaves the
+        // operator looking at an empty borderless-fullscreen screen. Asking the
+        // BUS which seated stations have no console is what closes it.
+        use crate::native_host::bridge_profile::{PaneSlot, ROLE_STATION};
+        use crate::native_host::panes::transport::PaneBus;
+        use crate::native_host::panes::PaneBusResource;
+
+        let profile = BridgeProfile {
+            version: PROFILE_VERSION,
+            displays: vec![
+                DisplayEntry {
+                    id: DELL.to_string(),
+                    role: ROLE_VIEWSCREEN.to_string(),
+                    split: None,
+                    panes: Vec::new(),
+                },
+                DisplayEntry {
+                    id: BENQ.to_string(),
+                    role: ROLE_STATION.to_string(),
+                    split: None,
+                    panes: vec![PaneSlot::for_station("helm")],
+                },
+            ],
+            touch: Vec::new(),
+            media: Vec::new(),
+        }
+        .validate()
+        .unwrap();
+
+        let mut app = App::new();
+        app.add_plugins(BridgeDisplayPlugin);
+        let bus = PaneBus::default();
+        app.insert_resource(PaneBusResource(bus.clone()));
+        app.insert_resource(BridgeDisplayConfig {
+            profile,
+            authored: true,
+        });
+        app.insert_resource(crate::ship::components::PendingShipConfig(
+            toml::from_str(
+                r#"
+                [[station]]
+                id = "helm"
+                name = "Helm"
+                description = "-"
+                rank = "Crew"
+                "#,
+            )
+            .unwrap(),
+        ));
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+        app.world_mut()
+            .spawn((monitor("DELL U2720Q", 3840, 2160, 0, 0), PrimaryMonitor));
+        app.world_mut()
+            .spawn(monitor("BenQ EX", 1920, 1080, 3840, 0));
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .resource::<BridgeLayoutResource>()
+                .layout
+                .monitor_of(&station("helm"))
+                .map(|m| m.as_str()),
+            Some(BENQ),
+            "the profile's seat was adopted by the law"
+        );
+        assert_eq!(surfaces(&app), vec![BENQ.to_string()]);
+        assert_eq!(
+            bus.open_count(),
+            1,
+            "and the boot pass opened its console, so the screen is not merely lit"
+        );
+        assert!(bus.open_pane_for_name("helm").is_some());
     }
 
     #[test]

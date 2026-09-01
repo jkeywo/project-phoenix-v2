@@ -1219,6 +1219,13 @@ be released and re-claimed by anyone; admission cannot tell it from a phone. The
 station id in the layout decides only **which console document opens on which
 glass**, never who may sit there.
 
+*Every seated station has a console, and the bus is asked.* Whether one needs
+opening is not derived from a diff of what the surfaces gained — it is asked of
+the pane bus, for every station the layout seats. That is what a `--profile`
+which seats a *station* (`PaneSlot::for_station`) needs: its Station window and
+its pane slot exist from boot, so a diff would find nothing new and leave the
+operator looking at an empty borderless-fullscreen screen.
+
 *Moving one is rebuilding it, on the same identity.* An Ultralight view is
 created at one size on one window, so a console that moved screens — or whose
 rectangle changed because a second console joined its screen or left it — cannot

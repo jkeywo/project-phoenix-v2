@@ -32,6 +32,11 @@
      earlier in the inline sheet targets a lobby element, and the one later
      rule that did moved into this file with them. -->
 <link rel="stylesheet" href="gui/host-lobby.css" />
+<!-- The join panel's stylesheet (issue #1329), lifted out of the same inline
+     block for the same reason: the native lobby surface shows the join QR
+     over its lobby, so the panel's rules have to be reachable from a document
+     that is not this page. -->
+<link rel="stylesheet" href="gui/host-qr.css" />
 
   <!-- The QR encoder, loaded before our script so the global `QRCode` is in
        scope synchronously. VENDORED and same-origin since issue #1329: it used
@@ -164,67 +169,10 @@
       overflow: hidden;
     }
     #canvas { display: block; width: 100%; height: 100%; background: #000; }
-    #overlay { position: absolute; bottom: 1rem; right: 1rem; z-index: 190; display: none; }
-    #qr { display: none; }
-    /* The join panel (PRD #1023 module 4, user story 4): "I want the join QR
-       framed, captioned, and accompanied by a readable URL, so that guests can
-       join from across the room without being talked through it."
-
-       The frame is what makes it read as a thing to act on rather than an
-       artefact on the viewscreen; the caption says what acting on it does; the
-       URL is the fallback for every phone whose camera will not focus, and is
-       therefore SELECTABLE — the point is that it can be copied and read
-       aloud, not that it is present. */
-    #qr-panel {
-      display: flex; flex-direction: column; align-items: center; gap: 8px;
-      /* #overlay is a right-anchored block whose shrink-to-fit width is set by
-         its widest sibling (the diagnostics readout), so a plain block panel
-         stretches to that and leaves the code adrift in dead space. Size to the
-         content and keep the panel against the anchored edge. */
-      width: fit-content; margin-left: auto;
-      padding: 14px 16px 12px;
-      background: var(--scrim-panel);
-      border: 1px solid var(--edge-control);
-      border-radius: 8px;
-      font-family: 'Chakra Petch', monospace;
-    }
-    #qr-caption {
-      font-size: var(--text-md); font-weight: 600;
-      letter-spacing: var(--tracking-wide); text-transform: uppercase;
-      color: var(--ink);
-    }
-    /* The padding is the code's quiet zone, so it has to be the same white the
-       QR itself is drawn on — a scanner reads the margin as part of the code. */
-    #qr-link { display: block; line-height: 0; padding: 8px; border-radius: 4px;
-      background: rgb(var(--rgb-white)); }
-    #qr-url-row {
-      display: flex; flex-direction: column; align-items: center; gap: 2px;
-      max-width: 232px;
-    }
-    #qr-url-label {
-      font-size: var(--text-xs); letter-spacing: var(--tracking-wide);
-      text-transform: uppercase; color: var(--ink-faint);
-    }
-    #qr-url {
-      font-family: var(--font-mono); font-size: var(--text-sm);
-      color: var(--cyan-bright); word-break: break-all; text-align: center;
-      line-height: 1.35;
-      -webkit-user-select: all; user-select: all;
-    }
-    /* The five-letter join code (issue #1111). Sized to be read across a room
-       — that is the entire reason it exists next to a 90-character URL. */
-    #join-code-row {
-      display: flex; flex-direction: column; align-items: center; gap: 2px;
-    }
-    #join-code-caption {
-      font-size: var(--text-xs); letter-spacing: var(--tracking-wide);
-      text-transform: uppercase; color: var(--ink-faint);
-    }
-    #join-code {
-      font-family: var(--font-mono); font-size: var(--text-display);
-      letter-spacing: var(--tracking-widest); color: var(--gold-bright);
-      -webkit-user-select: all; user-select: all;
-    }
+    /* #overlay, #qr-panel and the join code's own rules moved to
+       gui/host-qr.css (issue #1329), linked above: the native host's lobby
+       surface carries this same panel and needed the same rules. The fleet
+       block below stayed, because that surface carries no fleet UI. */
     /* The fleet panel (issue #1114). Below the crew QR, deliberately quieter
        than it: the code above admits PLAYERS and is read across a room, this
        one admits other ship hosts and is read by one operator standing at a
@@ -1394,6 +1342,15 @@
        window.hostLobbyRender, the same load-order-tolerant pattern as the view
        model above; __updateLobby skips its paint until both are up. -->
   <script type="module" src="gui/host-lobby-render.js"></script>
+  <!-- Join panel (issue #1329): the QR draw, the URL under it, the five
+       letters beside it, and the one visibility law all three obey. Same
+       reason as the renderer above — the native host's lobby surface shows
+       this panel over its lobby and loads this very module, so there is one
+       QR rendering path rather than two. Self-registers window.hostQr; every
+       call site below is an async event (a code arriving, a cog press, a
+       phone's ToggleQrCode) long after this module has run, and the two that
+       could in principle fire earlier guard on it. -->
+  <script type="module" src="gui/host-qr.js"></script>
   <!-- Host audio engine (issue #1228): the data-driven audio graph
        (clampVol/applyMaster/setChannelVolume/mkLoop/initBlasterAudio/
        startGameAudio/startMenuMusic/stopMenuMusic/applyHudAudio, the
@@ -1635,14 +1592,19 @@
     return { action: 'show-picker', ships };
   }
 
-  // ── QR code toggle state (global, shared across handlers) ─────────────
-  let qrVisible = false;
+  // ── QR code toggle (issue #1329) ──────────────────────────────────────
+  // The state is #overlay itself, in gui/host-qr.js — there is no `qrVisible`
+  // flag here any more. Four call sites used to keep one in step (the cog, a
+  // phone's ToggleQrCode, the phase transition, the pre-scenario lift), and a
+  // flag four writers share is a flag that eventually disagrees with what is
+  // on screen. The native lobby surface reads the same law out of the same
+  // module, which is the other half of why it moved.
   window.__hostToggleQrCode = function() {
-    const qrOverlay = document.getElementById('overlay');
-    qrVisible = !qrVisible;
-    if (qrOverlay) qrOverlay.style.display = qrVisible ? 'block' : 'none';
+    if (window.hostQr) window.hostQr.toggleQr(document);
   };
-  window.__hostIsQrVisible = function() { return qrVisible; };
+  window.__hostIsQrVisible = function() {
+    return !!window.hostQr && window.hostQr.isQrVisible(document);
+  };
 
   // ── HTML viewscreen HUD overlay (issue #422) ───────────────────────────
   //
@@ -1733,13 +1695,15 @@
     // panel itself live in gui/host-lobby-render.js (issue #1325), which the
     // NATIVE host's lobby document loads too — one lobby, one renderer. What
     // stays here is what is this page's alone: the side effects (audio, the
-    // shared qrVisible flag, the fleet freeze, the mesh pump) and the three
-    // overlays that are viewscreen chrome rather than lobby chrome.
+    // fleet freeze, the mesh pump) and the three overlays that are viewscreen
+    // chrome rather than lobby chrome — of which the join panel is now
+    // gui/host-qr.js's, shared with the native lobby surface (issue #1329).
     //
-    // Boot race: skip the paint until BOTH modules load — the next lobby push
-    // re-renders (mirrors client.html's window.lobbyViewModel guard).
+    // Boot race: skip the paint until ALL THREE modules load — the next lobby
+    // push re-renders (mirrors client.html's window.lobbyViewModel guard).
     if (typeof window.hostLobbyViewModel !== 'function') return;
     if (!window.hostLobbyRender) return;
+    if (!window.hostQr) return;
     const vm = window.hostLobbyViewModel(s, _lobbyPrevPhase);
     const tr = vm.transitions;
 
@@ -1761,8 +1725,8 @@
     if (tr.dismissLoadingOverlay) {
       const al = document.getElementById('asset-loading');
       if (al) al.style.display = 'none';
-      const qrOverlay = document.getElementById('overlay');
-      if (qrOverlay) qrOverlay.style.display = 'none';
+      // The viewscreen is clean at mission start (PRD #1324 user story 22).
+      window.hostQr.setQrVisible(document, false);
     }
 
     // Audio unlocks on ANY entry into InProgress, not just from Loading:
@@ -1792,14 +1756,12 @@
     // speak".
     pumpMeshFrames();
 
-    // ── QR overlay ── this page's own chrome, not the lobby's ───────
-    const qrOverlay = document.getElementById('overlay');
-    if (qrOverlay && tr.qrOverlayAction) {
-      if (tr.qrOverlayAction === 'show') { qrVisible = true; qrOverlay.style.display = 'block'; }
-      else { qrVisible = false; qrOverlay.style.display = 'none'; }
-      // During InProgress the settings menus are the sole controllers (no
-      // qrOverlayAction, so this branch is skipped entirely).
-    }
+    // ── Join panel ── viewscreen chrome, not the lobby's ───────────────
+    // The view model decided this (`qrOverlayAction`) and gui/host-qr.js
+    // carries it out, on this surface and on the native one. During InProgress
+    // the action is null and the settings menus are the sole controllers —
+    // which is what lets a late arrival's QR stay up mid-mission.
+    window.hostQr.applyQrPhase(document, tr.qrOverlayAction);
 
     // ── Game-over overlay: force-hidden once the phase leaves GameOver ──
     // (the HUD push that normally drives this overlay only fires while
@@ -1951,41 +1913,50 @@
       mode: 'auto', iceTransportPolicy: 'all', useIceServers: true, wsRelay: 'auto', pinned: false,
     };
 
-    /** Paint the join panel for a URL: the QR, the click-through and the text. */
-    function paintJoinPanel(url) {
-      const canvas = document.getElementById('qr');
-      if (canvas && typeof QRCode !== 'undefined') {
-        canvas.style.display = 'block';
-        QRCode.toCanvas(canvas, url, { width: 200 });
-      }
+    /**
+     * Paint the join panel for a URL: the QR, the click-through and the text.
+     *
+     * The draw itself is gui/host-qr.js (issue #1329), which the native host's
+     * lobby surface calls too — one QR rendering path, the way #1325 made one
+     * lobby renderer. What stays here is the one thing that is this PAGE's:
+     * what clicking the code does in a desktop browser.
+     */
+    function paintJoinPanel(url, code) {
+      if (!window.hostQr) return;
+      window.hostQr.drawJoinQr(document, { url, code }, window.QRCode);
       const qrLink = document.getElementById('qr-link');
       if (qrLink) {
-        qrLink.href = url;
         // Clicking the QR opens the client in a separate WINDOW, not a tab, so
         // testers can run several clients side-by-side on one desktop. A
         // features string (size) is what makes the browser spawn a window
         // rather than a tab; '_blank' name gives each click its own window.
-        // The href is kept for QR scanning and right-click "copy link".
+        // The href (set by drawJoinQr) is kept for QR scanning and right-click
+        // "copy link".
         qrLink.onclick = (e) => {
           e.preventDefault();
           window.open(url, '_blank', 'popup,noopener,width=440,height=800');
         };
       }
-      // Written from the one `url` variable so the QR and the text under it
-      // can never disagree.
-      const qrUrl = document.getElementById('qr-url');
-      if (qrUrl) qrUrl.textContent = url;
     }
 
-    /** Paint an issued join code: the letters, plus the QR/link that carry it. */
+    /**
+     * Paint an issued join code: the letters, plus the QR/link that carry it.
+     *
+     * THE draw site for this page's join QR, and reached from exactly one
+     * place: `onCode` on the rendezvous host below. That is worth stating
+     * because it used not to be true — the draw sat inside PeerJS's
+     * `peer.on('open')` callback, and #1112 deleted PeerJS. `tests/client/
+     * host-qr.test.js` pins the chain from `onCode` to here to the shared
+     * module, so a future transport change cannot quietly re-home it
+     * somewhere the boot path never reaches.
+     */
     function showJoinCode(code) {
-      paintJoinPanel(window.rendezvousTransport.joinUrlForCode(
-        location.href, code.full, rendezvousBase,
-      ));
-      const codeEl = document.getElementById('join-code');
-      if (codeEl) codeEl.textContent = code.suffix;
-      const row = document.getElementById('join-code-row');
-      if (row) row.style.display = '';
+      paintJoinPanel(
+        window.rendezvousTransport.joinUrlForCode(
+          location.href, code.full, rendezvousBase,
+        ),
+        code.suffix,
+      );
       rendezvousCodeShown = true;
       rendezvousFault = null;
       rendezvousRetrying = false;
@@ -2010,16 +1981,12 @@
      * and showJoinCode repaints exactly the same way either time.
      */
     function clearJoinCode() {
-      const codeEl = document.getElementById('join-code');
-      if (codeEl) codeEl.textContent = '';
-      const row = document.getElementById('join-code-row');
-      if (row) row.style.display = 'none';
-      const qrUrl = document.getElementById('qr-url');
-      if (qrUrl) qrUrl.textContent = '';
+      if (window.hostQr) window.hostQr.clearJoinQr(document);
+      // The click-through is this page's, so unhooking it is this page's too:
+      // the shared module drops the href, and a live onclick over a dead panel
+      // would still open a window at the URL it closed over.
       const qrLink = document.getElementById('qr-link');
-      if (qrLink) { qrLink.removeAttribute('href'); qrLink.onclick = null; }
-      const canvas = document.getElementById('qr');
-      if (canvas) canvas.style.display = 'none';
+      if (qrLink) qrLink.onclick = null;
       rendezvousCodeShown = false;
     }
 
@@ -2940,13 +2907,16 @@
           }
 
           if (token) {
-            // Intercept ToggleQrCode — purely visual server-side toggle, no Rust message needed.
+            // Intercept ToggleQrCode — purely visual, and this page owns the
+            // panel, so the message stops here and never reaches wasm. (A
+            // NATIVE host has no page in front of its simulation, so there the
+            // same message decodes into `ClientMessage::ToggleQrCode` and
+            // crosses the host-lobby bridge instead — issue #1329. Same phone,
+            // same button, two hosts.)
             try {
               const parsed = JSON.parse(json);
               if (parsed.type === 'ToggleQrCode') {
-                qrVisible = !qrVisible;
-                const qrOverlay = document.getElementById('overlay');
-                if (qrOverlay) qrOverlay.style.display = qrVisible ? 'block' : 'none';
+                if (window.hostQr) window.hostQr.toggleQr(document);
                 return;
               }
               // QR-first pre-scenario selections (issue #755): phones send these
@@ -3159,9 +3129,8 @@
     // revert the z-index so the normal Lobby-phase behaviour is untouched.
     function showJoinQrOverPanel() {
       const qrOverlay = document.getElementById('overlay');
-      if (!qrOverlay) return;
-      qrVisible = true;
-      qrOverlay.style.display = 'block';
+      if (!qrOverlay || !window.hostQr) return;
+      window.hostQr.setQrVisible(document, true);
       qrOverlay.style.zIndex = '210'; // above #scenario-panel (z-index 200)
     }
     function resetJoinQrLayer() {

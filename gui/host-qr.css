@@ -1,0 +1,133 @@
+/*
+ * gui/host-qr.css - the join panel's stylesheet (issue #1329).
+ *
+ * Lifted verbatim out of server.html's inline <style> so that the ONE join
+ * panel has ONE stylesheet: server.html links it, and so does the host-lobby
+ * document the native host assembles in memory
+ * (src/native_host/host_lobby/document.rs). The same move gui/host-lobby.css
+ * made for the lobby panel in issue #1325, applied to the other surface that
+ * document now carries - and for the same reason, that a second copy of these
+ * rules is a second join panel that drifts the first time either is touched.
+ *
+ * SEPARATE from gui/host-lobby.css rather than appended to it, because the two
+ * are different chrome with different lifetimes: the lobby panel is the lobby,
+ * and the join panel is viewscreen furniture that OUTLIVES it - it is shown in
+ * the lobby phase, hidden at mission start, and toggled back on mid-mission for
+ * a late arrival, at which point there is no lobby panel on screen at all. The
+ * module that owns those decisions, gui/host-qr.js, is likewise its own file
+ * beside gui/host-lobby-render.js.
+ *
+ * `#fleet-*` is deliberately NOT here. The fleet panel shares #overlay with
+ * this one but admits other ship HOSTS rather than crew (issue #1114), and the
+ * native lobby surface carries no fleet UI, so its rules stay inline in
+ * server.html where its markup and its glue are.
+ *
+ * Linked from server.html BEFORE its inline <style>, which is where these rules
+ * sat: nothing between there and here targets a join-panel element, so the
+ * cascade they were written against is unchanged.
+ */
+
+/* ── The overlay this panel lives in ─────────────────────────────────── */
+/* Anchored bottom-right over the viewscreen, above the HUD (z-index 190).
+   `display: none` is the ground state on both surfaces: the join panel is
+   shown by gui/host-qr.js when the phase (or an operator) says so, never by
+   being present. */
+#overlay { position: absolute; bottom: 1rem; right: 1rem; z-index: 190; display: none; }
+#qr { display: none; }
+/* The join panel (PRD #1023 module 4, user story 4): "I want the join QR
+   framed, captioned, and accompanied by a readable URL, so that guests can
+   join from across the room without being talked through it."
+
+   The frame is what makes it read as a thing to act on rather than an
+   artefact on the viewscreen; the caption says what acting on it does; the
+   URL is the fallback for every phone whose camera will not focus, and is
+   therefore SELECTABLE — the point is that it can be copied and read
+   aloud, not that it is present. */
+#qr-panel {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  /* #overlay is a right-anchored block whose shrink-to-fit width is set by
+     its widest sibling (the diagnostics readout), so a plain block panel
+     stretches to that and leaves the code adrift in dead space. Size to the
+     content and keep the panel against the anchored edge. */
+  width: fit-content; margin-left: auto;
+  padding: 14px 16px 12px;
+  background: var(--scrim-panel);
+  border: 1px solid var(--edge-control);
+  border-radius: 8px;
+  font-family: 'Chakra Petch', monospace;
+}
+#qr-caption {
+  font-size: var(--text-md); font-weight: 600;
+  letter-spacing: var(--tracking-wide); text-transform: uppercase;
+  color: var(--ink);
+}
+/* The padding is the code's quiet zone, so it has to be the same white the
+   QR itself is drawn on — a scanner reads the margin as part of the code. */
+#qr-link { display: block; line-height: 0; padding: 8px; border-radius: 4px;
+  background: rgb(var(--rgb-white)); }
+#qr-url-row {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  max-width: 232px;
+}
+#qr-url-label {
+  font-size: var(--text-xs); letter-spacing: var(--tracking-wide);
+  text-transform: uppercase; color: var(--ink-faint);
+}
+#qr-url {
+  font-family: var(--font-mono); font-size: var(--text-sm);
+  color: var(--cyan-bright); word-break: break-all; text-align: center;
+  line-height: 1.35;
+  -webkit-user-select: all; user-select: all;
+}
+/* The five-letter join code (issue #1111). Sized to be read across a room
+   — that is the entire reason it exists next to a 90-character URL. */
+#join-code-row {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+}
+#join-code-caption {
+  font-size: var(--text-xs); letter-spacing: var(--tracking-wide);
+  text-transform: uppercase; color: var(--ink-faint);
+}
+#join-code {
+  font-family: var(--font-mono); font-size: var(--text-display);
+  letter-spacing: var(--tracking-widest); color: var(--gold-bright);
+  -webkit-user-select: all; user-select: all;
+}
+/* Nobody can join this host at all - a native host run with `--solo`, or with
+   no `--rendezvous` (issue #1329). `gui/host-qr.js` puts the reason in the
+   caption and hides the three rows that would otherwise be an empty frame
+   inviting a crew to scan something that cannot work. Ruled here rather than
+   with inline styles so that "the panel is saying joining is off" is one class
+   on one element, visible in a DOM inspector. */
+#qr-panel.joining-off #qr-link,
+#qr-panel.joining-off #qr-url-row,
+#qr-panel.joining-off #join-code-row { display: none; }
+#qr-panel.joining-off #qr-caption { color: var(--ink-faint); max-width: 232px; text-align: center; }
+
+/* ── The native surface's own toggle (issue #1329) ───────────────────── */
+/* A host page has a settings cog whose Gameplay tab carries "show/hide the QR"
+   (gui/server-settings.js). The native viewscreen window has no cog and no
+   pointer chrome of its own, so the lobby document grows this one control -
+   the smallest honest affordance for the same decision. It renders only there:
+   server.html has no #host-lobby-qr-toggle, and this rule matches nothing on a
+   page that does not carry the element.
+
+   Top-right, because the join panel is bottom-right and a control that moved
+   under the thing it toggles would be unreachable exactly when the panel is
+   shown. Above #overlay's own layer so it stays clickable either way. */
+#host-lobby-qr-toggle {
+  position: absolute; top: 1rem; right: 1rem; z-index: 191;
+  padding: 6px 12px;
+  background: var(--scrim-panel);
+  border: 1px solid var(--edge-control);
+  border-radius: 4px;
+  font-family: 'Chakra Petch', monospace;
+  font-size: var(--text-sm); letter-spacing: var(--tracking-wide);
+  text-transform: uppercase; color: var(--ink);
+  cursor: pointer; user-select: none;
+}
+/* #1128's bar: a visible focus ring, from the shared token, on a surface a
+   keyboard can reach. */
+#host-lobby-qr-toggle:focus-visible {
+  outline: 2px solid var(--cyan-bright); outline-offset: 2px;
+}

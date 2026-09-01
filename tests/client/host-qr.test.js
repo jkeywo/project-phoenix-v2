@@ -26,6 +26,7 @@ import {
   isQrVisible, setQrVisible, toggleQr, applyQrPhase,
   drawJoinQr, clearJoinQr, showJoiningOff,
 } from '../../gui/host-qr.js';
+import { joinUrlForCode } from '../../gui/join-url.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SERVER_HTML = fs.readFileSync(path.join(ROOT, 'server.html'), 'utf-8');
@@ -190,6 +191,41 @@ describe('a host nobody can join', () => {
     drawJoinQr(document, INVITE, recordingEncoder());
     expect(document.getElementById('qr-caption').textContent).toBe(original);
     expect(document.getElementById('qr-panel').classList.contains('joining-off')).toBe(false);
+  });
+});
+
+describe('where a native host QR sends a phone', () => {
+  // The equality this issue's AC1 turns on: what the QR encodes has to BE the
+  // join URL a phone needs. The physical scan belongs to the #1335 kit; this is
+  // the half a test can hold.
+  //
+  // `page_base` comes from `native_host::host_lobby::join`, which pins the same
+  // literal in `an_invitation_carries_the_letters_the_code_and_where_to_go` —
+  // and the URL is built by the very function the browser host builds its own
+  // from, so "the native QR points somewhere else" is not a shape this can take.
+  const PAGE_BASE = 'http://192.168.1.5:8080/';
+
+  it('is the client page beside the host bundle, with the code in the fragment', () => {
+    expect(joinUrlForCode(PAGE_BASE, 'PHX-1-ABCDE'))
+      .toBe('http://192.168.1.5:8080/client/index.html#PHX-1-ABCDE');
+  });
+
+  it('names a non-default service, so the phone dials the one the host registered with', () => {
+    expect(joinUrlForCode(PAGE_BASE, 'PHX-1-ABCDE', 'http://127.0.0.1:8788')).toBe(
+      'http://192.168.1.5:8080/client/index.html'
+        + '?rendezvous=http%3A%2F%2F127.0.0.1%3A8788#PHX-1-ABCDE',
+    );
+  });
+
+  it('is exactly what the panel encodes and prints', () => {
+    // The other half of the equality: the URL the QR carries and the URL the
+    // selectable text carries are one value, so a guest who cannot scan and a
+    // guest who can end up in the same place.
+    const encoder = recordingEncoder();
+    const url = joinUrlForCode(PAGE_BASE, 'PHX-1-ABCDE');
+    drawJoinQr(document, { url, code: 'ABCDE' }, encoder, { link: false });
+    expect(encoder.draws[0].text).toBe(url);
+    expect(document.getElementById('qr-url').textContent).toBe(url);
   });
 });
 

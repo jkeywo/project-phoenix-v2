@@ -2,8 +2,8 @@
 title: Build & Deployment
 type: concept
 tags: [trunk, wasm, github-pages, cloudflare, native-host, ci]
-sources: [Trunk.toml, scripts/build-client.mjs, scripts/generate-debug-surfaces.mjs, scripts/check-deploy-headers.mjs, gui/debug-surfaces.generated.js, .github/workflows/, README.md, worker/wrangler.toml, worker/wrangler.demo.toml, deploy/cloudflare/_headers, src/delivery/, docs/delivery-checklist.md, pasm/spec/architecture/native-delivery.yaml]
-updated: 2026-08-28
+sources: [Trunk.toml, scripts/build-client.mjs, scripts/generate-debug-surfaces.mjs, scripts/check-deploy-headers.mjs, gui/debug-surfaces.generated.js, gui/vendor/README.md, .github/workflows/, README.md, worker/wrangler.toml, worker/wrangler.demo.toml, deploy/cloudflare/_headers, src/delivery/, docs/delivery-checklist.md, pasm/spec/architecture/native-delivery.yaml]
+updated: 2026-09-01
 ---
 
 # Build & Deployment
@@ -32,6 +32,8 @@ node scripts/build-client.mjs
 ```
 
 Outputs land in `dist/` with the client at `dist/client/`. The QR code on the view screen encodes `https://<host>/client/index.html#<PROJECT_GUID>_<VERSION_GUID>_<CODE>` so phones land on the right page already carrying the join code; the same code's five-letter suffix is printed beside it for guests who type instead of scanning.
+
+**Nothing in a built bundle fetches a script from a CDN.** The QR encoder is vendored at `gui/vendor/qrcode.js` (issue #1329) and carried into both bundles by Trunk's `copy-dir gui` link and `build-client.mjs`, so a host serving its own bundle — a native host on a bridge machine especially — draws a join code with no internet at all. Google Fonts is the one remaining external `<link>`, and it degrades to a fallback face rather than to no join code.
 
 Debug Surface identity, stable order, and wire names are authored in the Rust
 macro at `src/core/debug_surface.rs`. Run `npm run debug-surfaces` after changing

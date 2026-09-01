@@ -579,6 +579,12 @@ entities:
         - "[ai] It is in the focus ORDER but is NEVER the SEEDED focus. FocusRing::focused_on_first_pane seeds the first PANE and skips this handle, and a reveal does not re-seed it either. The reticle #1128 draws is a promise that the next keystroke lands somewhere, and this surface carries no typeable control — the one it inherited from the host page, the AI-launch button, is stripped by the document slice for the same read-only reason. Seeding the first router ENTRY meant that a host with no --pane, where the surface is the ONLY entry, booted with a whole-primary-window focus frame and corner brackets framing chrome that accepts nothing, and redrew it on every F9. Such a host now seeds no focus and draws no reticle, which is the honest state. Excluding it from the SEED is not excluding it from the CYCLE: Ctrl+Tab still reaches it deliberately, which is what #1124's keyboard-operability criterion asks for and what the slices adding real controls here will need."
         - "[ai] No flag turns it on: it is what a windowed authoritative host has in front of it before a mission, and a native host had nothing there between #1121 and this. It needs a build with --features ultralight and a --client-dir bundle whose index.html is a Phoenix host page, and it REPORTS and carries on when either is missing rather than refusing to boot — a host that flies the mission with a blank surface is far better than one that refuses to start over its chrome. The SDK staging consequently moved out of the --pane block, since both embedded surfaces need it, but is still GATED on one of them being possible — a --pane, or a --client-dir the lobby could be built from. A host with neither can never open an embedded view, and copying SDK libraries and a resources/ tree into its content directory for a surface it will never show is a side effect it did not ask for. Staging still exits for a pane, which cannot work without it, and merely reports for the lobby."
         - "[ai] The split along the SDK line is #1122's, unchanged: the document assembly, the bridge's rules and the reveal state machine are feature-OFF and run by the ordinary cargo test, together with the renderer's jsdom suite driven against server.html's own lobby markup. Only the compositing itself — the Bevy node, its display, the router placement — needs a window and a GPU, and the real-window proof (tests/native_host_lobby_ultralight.rs) is ignored-by-default and run deliberately, needing a trunk-built dist/ rather than the pane test's build-client.mjs bundle."
+        - "[ai] THE JOIN QR IS ON THIS SURFACE (issue #1329), and the extraction that put it there is the same one #1325 made for the lobby panel, applied to the panel that floats over it: gui/host-qr.js is the only place the QR is drawn and the only place its visibility is decided, gui/host-qr.css the only place it is styled, and server.html now links and calls what it used to contain — including losing its qrVisible flag, because the state is #overlay itself and two documents in two engines cannot share a module-level boolean. The visibility law is unchanged and now stated once: shown in the Lobby phase, hidden at mission start and at game over, and LEFT ALONE in play. That null is what lets an operator open the code for a late arrival and have it stay open, since the phase pushes arrive every frame the lobby changes."
+        - "[ai] The ENCODER IS VENDORED (gui/vendor/qrcode.js, qrcode@1.5.1's own browser build, MIT, byte-identical to what jsdelivr was serving) and loaded from whichever process is serving the page. It had been a CDN script tag, which made the one thing a crew cannot start without depend on the room having internet — and a native host is the case that breaks: a bridge machine is not assumed to have a network, so the alternative was a viewscreen lobby that could show a crew everything except how to join it. Version 1.5.1 is deliberate, not stale: every release after it drops the browser bundle from the published tarball, so 'upgrade to latest' here means 'add a bundler step'."
+        - "[ai] WHERE THE QR POINTS is the one genuinely native decision, and it is the defect a naive implementation ships. The surface loads over loopback, because that is what an embedded view on this machine can dial — and it is the one address in the building no phone can open, so a QR built from the document's own location.href would look perfectly correct on the viewscreen and be unscannable. native_host::host_lobby::join therefore decides the page base from what the LISTENER bound: a specific --addr is the operator's own answer and is used as given; the documented 0.0.0.0 wildcard takes the interface the machine would route out of (a UDP connect to TEST-NET-3 — a routing-table lookup, no packet, no DNS, nothing that could be mistaken for a call home); no route falls back to loopback and says so at the prompt. The URL itself is still assembled by gui/join-url.js, extracted out of the crew transport for this, so both hosts build a join link the same way and the rule about naming a non-default rendezvous service lives in one place."
+        - "[ai] Two states, not three: a code, or joining is OFF. --solo (or no --rendezvous) means there will never be a code, so the panel says that in words from the string table rather than framing an empty QR — 'the code has not arrived yet' and 'there will never be a code' look identical on a wall. The waiting window itself is deliberately unmodelled: nothing is pushed until the service answers, which leaves the same empty framed panel a browser host shows for the same second. A transient service loss likewise leaves the code up, because a reclaim (#1115) usually returns the very same letters and blanking the wall for a reconnection that succeeds seconds later costs the room more than it tells them."
+        - "[ai] A phone's ToggleQrCode reaches a native host at last. That button predates the native host and had never worked against one: server.html intercepts the frame in its own per-connection handler, so the message had no Rust variant and arrived at the codec as undecodable. It is now ClientMessage::ToggleQrCode — a unit variant, TogglePause's shape, in EVERY build unlike its two toggle neighbours, because showing the code that lets somebody else join is what the panel is for rather than a lever a stranger can pull — drained frame-driven and never through command admission. It is the one EDGE on this bridge (a count, not a state: two presses are two flips), and the page owns the resulting visibility, so no boolean crosses to be a second opinion about what is on screen."
+        - "[ai] In play the QR is visible only while the surface is revealed, and that is the shape of the native answer rather than a gap. The view composites into an OPAQUE texture, so there is no floating a QR alone over a running viewscreen the way a browser host does — showing the code means showing the surface. F9 is therefore the in-play 'show the join code' gesture; a phone's press sets what the operator finds when they make it, and deliberately does NOT uncover the surface itself, because a phone in a player's pocket must not be able to drop a black sheet over a running mission. On the surface, the toggle is a control of the document's own (this window has no settings cog), named from the same string id the host page's cog menu uses, and it acts on the document's DOM without a round trip: a click is not something the host needs to be told about."
     architecture:
       kind: service
       authority: non-authoritative
@@ -592,6 +598,7 @@ entities:
           src/native_host/host_lobby/document.rs,
           src/native_host/host_lobby/bridge.rs,
           src/native_host/host_lobby/reveal.rs,
+          src/native_host/host_lobby/join.rs,
           src/native_host/host_lobby/host_lobby_boot.js,
           src/native_host/host_lobby/host_lobby_link.js,
           src/native_host/panes/ultralight.rs,
@@ -600,6 +607,10 @@ entities:
           gui/host-lobby-render.js,
           gui/host-lobby.css,
           gui/host-lobby-view.js,
+          gui/host-qr.js,
+          gui/host-qr.css,
+          gui/join-url.js,
+          gui/vendor/qrcode.js,
           server.html,
         ]
       symbols:
@@ -615,5 +626,11 @@ entities:
           HOST_LOBBY_SURFACE_ID,
           HostLobbyDisplayConfig,
           renderHostLobby,
+          JoinInvite,
+          HostLobbyJoinResource,
+          shareable_host_addr,
+          drawJoinQr,
+          applyQrPhase,
+          joinUrlForCode,
         ]
       tests: [cargo test, npx vitest run, tests/native_host_lobby_ultralight.rs]

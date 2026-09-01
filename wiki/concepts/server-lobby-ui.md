@@ -2,15 +2,17 @@
 title: Server HTML Lobby UI
 type: concept
 tags: [lobby, server, html, ui, bridge, responsive, accessibility, reduced-motion, native]
-sources: [server.html, gui/host-lobby-view.js, gui/host-lobby-render.js, gui/host-lobby.css, src/server/viewscreen_border.rs, src/console_bridge.rs, src/server/bridge.rs, src/native_host/host_lobby/mod.rs]
-updated: 2026-08-31
+sources: [server.html, gui/host-lobby-view.js, gui/host-lobby-render.js, gui/host-lobby.css, gui/host-qr.js, gui/host-qr.css, gui/join-url.js, src/server/viewscreen_border.rs, src/console_bridge.rs, src/server/bridge.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/join.rs]
+updated: 2026-09-01
 ---
 
 # Server HTML Lobby UI
 
 The lobby UI on the **server** (viewscreen) page is rendered as HTML/CSS/JS. The global `window.__updateLobby(json)` callback applies each `LobbyStatePayload` snapshot pushed by the Bevy server.
 
-Since issue #1325 the render itself is **not** in `server.html`: the decisions are `gui/host-lobby-view.js` (#1229), the DOM writes are `gui/host-lobby-render.js`, and the panel's rules are `gui/host-lobby.css`. `server.html` links all three and keeps only what is its own — the audio graph, the `qrVisible` flag, the fleet freeze and mesh pump, and the three overlays that are viewscreen chrome rather than lobby chrome (asset-loading, QR, game-over).
+Since issue #1325 the render itself is **not** in `server.html`: the decisions are `gui/host-lobby-view.js` (#1229), the DOM writes are `gui/host-lobby-render.js`, and the panel's rules are `gui/host-lobby.css`. Issue #1329 did the same for the join panel that floats over the lobby — `gui/host-qr.js` and `gui/host-qr.css`. `server.html` links all five and keeps only what is its own: the audio graph, the fleet freeze and mesh pump, the asset-loading and game-over overlays, and what a click on the QR does in a desktop browser (it opens a client in its own window).
+
+There is no `qrVisible` flag any more. The join panel's visibility **is** `#overlay`, read and written only through `gui/host-qr.js`: two documents in two engines cannot share a module-level boolean, and four handlers keeping one in step is how it came to disagree with the screen.
 
 The split exists because there are now **two** surfaces rendering this lobby from the same payload: the host page, and the native host's viewscreen surface (see [Native Host](./native-host.md#the-host-lobby-on-the-viewscreen-issue-1325)), whose document is built from this page's own `#lobby-panel` markup. Both call the same `renderHostLobby`. A second implementation of these element ids would drift the first time either was touched, so there is not one.
 
@@ -102,8 +104,31 @@ A scroll fallback (`overflow-y: auto` on `#station-grid`) handles rosters that d
 
 The lobby cards, rail and responsive layout are DOM owned by
 `gui/host-lobby-render.js` + `gui/host-lobby.css` over `gui/host-lobby-view.js`;
-the QR area stays `server.html`'s. Bevy publishes data but does not build a
-lobby UI tree — on either surface.
+the join panel is `gui/host-qr.js` + `gui/host-qr.css` over the same view
+model's `qrOverlayAction` (issue #1329). Bevy publishes data but does not build
+a lobby UI tree — on either surface.
+
+## The join panel
+
+One panel, one draw site, two surfaces. `gui/host-qr.js` owns the `#qr-panel`
+nest and the visibility of the `#overlay` that carries it:
+
+| when | the join panel |
+|---|---|
+| the Lobby phase | shown |
+| Loading, GameOver | hidden |
+| InProgress | left exactly as it was |
+
+That last row is why a QR opened mid-mission for a late arrival stays open: the
+view model returns `null` for the action, and nothing else touches the panel.
+Toggles reach the same `toggleQr` from three places — the host page's settings
+cog (`__hostToggleQrCode`), a phone's `ClientMessage::ToggleQrCode`, and the
+native surface's own control.
+
+The encoder is **vendored** (`gui/vendor/qrcode.js`, `qrcode@1.5.1`'s browser
+build, MIT) and served by whichever process serves the page. It used to be a
+`cdn.jsdelivr.net` `<script>`, which made the join code depend on the room
+having internet — untenable for a native host on a bridge machine.
 
 ## Viewscreen reduced motion
 

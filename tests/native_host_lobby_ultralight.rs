@@ -57,6 +57,15 @@
 //! 4. **The surface rasterises.** A frame is copied out with a non-empty dirty
 //!    region, which is the difference between a page that ran and a page that
 //!    would draw nothing.
+//! 5. **The join QR draws, toggles, and says when there is nothing to draw**
+//!    (issue #1329). The vendored encoder loads from this process's own
+//!    delivery server — the claim a CDN `<script>` could not make on a bridge
+//!    machine with no internet — and rasterises into the page's canvas; a
+//!    phone's toggle and the surface's own control both flip the panel; and a
+//!    host nobody can join says so instead of framing a dead code. What the QR
+//!    *encodes* is settled without a browser, in
+//!    `native_host::host_lobby::join` and `tests/client/host-qr.test.js`, which
+//!    pin the same join-URL literal this file asserts on screen.
 //!
 //! The half this cannot reach is the compositing itself — the Bevy node, its
 //! `display`, and the router placement. Those need a window and a GPU adapter;
@@ -68,9 +77,10 @@ use std::time::{Duration, Instant};
 
 use project_phoenix::core::codec;
 use project_phoenix::core::messages::{LobbyStatePayload, StationPayload};
+use project_phoenix::core::rendezvous::JoinCode;
 use project_phoenix::delivery::args::{ClientSource, HostArgs};
 use project_phoenix::delivery::serve::{HostServer, ShutdownSignal};
-use project_phoenix::native_host::host_lobby::{pump_host_lobby, LocalHostLobby};
+use project_phoenix::native_host::host_lobby::{pump_host_lobby, JoinInvite, LocalHostLobby};
 use project_phoenix::native_host::panes::surface::PaneSurface;
 use project_phoenix::native_host::panes::ultralight::{stage_sdk, UltralightPaneSurface};
 use vellum_ultralight::runtime::{PaneSession, PaneSpec, RuntimeOptions, UltralightRuntime};
@@ -328,7 +338,9 @@ fn the_native_lobby_renders_the_web_hosts_own_lobby_over_the_bridge() {
         "…still showing the state it was last given — the surface was never rebuilt"
     );
 
-    // The read-only half: nothing on this surface can launch anything.
+    // Nothing on this surface can launch anything: the AI-launch button is
+    // stripped, and the one control the document DOES carry (the QR toggle,
+    // issue #1329) is a div, not a `<button>` that a lobby renderer would find.
     assert_eq!(
         probe(
             &mut surface,
@@ -336,6 +348,115 @@ fn the_native_lobby_renders_the_web_hosts_own_lobby_over_the_bridge() {
         )
         .as_deref(),
         Some("0"),
-        "the lobby document carries no controls in this slice"
+        "the lobby document carries no launch control"
+    );
+
+    // ── 5. The join QR, in a real browser engine (issue #1329) ──────────────
+    //
+    // The half no unit test can reach: the VENDORED encoder actually loading
+    // from this process's own delivery server, and actually rasterising into
+    // the page's canvas. Everything about what it encodes is settled in
+    // `native_host::host_lobby::join` and `tests/client/host-qr.test.js`; what
+    // is settled here is that the code appears on a screen.
+    bridge.push_lobby_state(lobby_payload("Lobby", Some("ada")));
+    lobby.publish_join(&JoinInvite::from_code(
+        &JoinCode {
+            full: "PHX-1-ABCDE".to_string(),
+            suffix: "ABCDE".to_string(),
+            ..Default::default()
+        },
+        "http://192.168.1.5:8080/",
+        None,
+    ));
+    for _ in 0..8 {
+        frame(&mut surface);
+    }
+
+    assert_eq!(
+        probe(
+            &mut surface,
+            "document.getElementById('qr-url').textContent"
+        )
+        .as_deref(),
+        Some("http://192.168.1.5:8080/client/index.html#PHX-1-ABCDE"),
+        "the URL under the code is the join URL a phone needs — the SAME literal \
+         tests/client/host-qr.test.js pins, built by the same gui/join-url.js the \
+         browser host uses"
+    );
+    assert_eq!(
+        probe(
+            &mut surface,
+            "document.getElementById('join-code').textContent"
+        )
+        .as_deref(),
+        Some("ABCDE"),
+        "…and the five letters beside it, for a camera that will not focus"
+    );
+    assert_eq!(
+        probe(
+            &mut surface,
+            "String(document.getElementById('qr').width > 0 \
+             && document.getElementById('qr').style.display === 'block')"
+        )
+        .as_deref(),
+        Some("true"),
+        "the vendored encoder loaded from this host's own server and rasterised into \
+         the canvas — the claim a CDN <script> could not make on a bridge machine"
+    );
+    assert_eq!(
+        probe(
+            &mut surface,
+            "document.getElementById('overlay').style.display"
+        )
+        .as_deref(),
+        Some("block"),
+        "the lobby phase shows the join panel"
+    );
+
+    // A phone's ToggleQrCode, arriving the way `drain_client_qr_toggle` sends it.
+    bridge.push_qr_toggle();
+    for _ in 0..8 {
+        frame(&mut surface);
+    }
+    assert_eq!(
+        probe(
+            &mut surface,
+            "document.getElementById('overlay').style.display"
+        )
+        .as_deref(),
+        Some("none"),
+        "a phone's toggle hides the panel"
+    );
+
+    // The surface's own control, which is what an operator has once F9 has
+    // revealed the surface in play: a click on it, in the page, flips the same
+    // state without asking the host anything.
+    assert_eq!(
+        probe(
+            &mut surface,
+            "(function(){ document.getElementById('host-lobby-qr-toggle').click(); \
+             return document.getElementById('overlay').style.display; })()"
+        )
+        .as_deref(),
+        Some("block"),
+        "the surface's own control flips the panel back"
+    );
+
+    // A host nobody can join says so, in the string table's words, instead of
+    // framing a QR that cannot work.
+    lobby.publish_join(&JoinInvite::Off);
+    for _ in 0..8 {
+        frame(&mut surface);
+    }
+    assert_eq!(
+        probe(
+            &mut surface,
+            "String(document.getElementById('qr-panel').classList.contains('joining-off') \
+             && document.getElementById('qr').style.display === 'none')"
+        )
+        .as_deref(),
+        Some("true"),
+        "`--solo` (or no --rendezvous) states that joining is off rather than \
+         showing a dead QR"
     );
 }

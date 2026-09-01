@@ -163,6 +163,15 @@ cargo build --release --features host --bin phoenix-host
 #     and hides it in play, and returning to the lobby phase brings it back.
 #     Missing either prerequisite is a log line and a blank surface, never a
 #     refusal to start — chrome does not get to stop a mission.
+#     THE JOIN QR IS ON IT TOO (issue #1329): the real crew code, drawn by the
+#     shared gui/host-qr.js from a VENDORED encoder (gui/vendor/qrcode.js) this
+#     process serves itself, so a bridge machine with no internet still shows a
+#     code. Its URL points at the address the LISTENER bound, not the loopback
+#     one the surface loaded from — pass --addr <lan-ip>:<port> if the machine's
+#     routing cannot answer that (the boot log says when it could not). With no
+#     --rendezvous, or --solo, the panel says joining is off rather than framing
+#     a dead code. Shown in the lobby, hidden at mission start, and toggled in
+#     play from the surface's own control (after F9) or a phone's settings menu.
 #   --manifest also narrows what this process FLIES, not only what it publishes:
 #     with a curating manifest in force the default hull is drawn from that
 #     manifest's allowlist (issue #917). An explicit --ship still wins.

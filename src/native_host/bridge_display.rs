@@ -34,14 +34,25 @@
 //! windows and inserts resources in one pass — the same shape
 //! `panes::ultralight::init_pane_host` uses for the same reason.
 //!
-//! # Boot is once; the viewscreen is apply-on-change (issue #1330)
+//! # Boot is once; the arrangement is apply-on-change (issues #1330, #1331)
 //!
-//! Windows can only be *spawned* once, so opening the Station surfaces stays a
-//! one-shot. The **viewscreen role** does not: the lobby's monitor row moves it
-//! while the host runs, so it is applied by [`follow_layout_viewscreen`], which
-//! compares the live [`BridgeLayoutResource`]'s viewscreen against the one
-//! [`BridgeDisplayApplied`] records and moves the primary window when — and only
-//! when — those differ.
+//! The **boot** pass is a one-shot: it seeds the live layout and applies an
+//! authored `--profile` exactly as issue #1123 did. Everything after it is
+//! change-driven, by two followers that read the one live
+//! [`BridgeLayoutResource`] and nothing else:
+//!
+//! * [`follow_layout_viewscreen`] compares the layout's viewscreen against the
+//!   one [`BridgeDisplayApplied`] records and moves the primary window when —
+//!   and only when — those differ;
+//! * [`follow_layout_stations`] compares the layout's **seating** against
+//!   [`BridgeStationSurfaces`], opens a Station window and a console pane for a
+//!   station the layout has just seated, and closes them for one it has not.
+//!
+//! Station windows are therefore spawned and despawned *while the host runs*,
+//! which is what makes "press a screen button and a console opens on that
+//! monitor" true. Nothing else in this module opens one, and the lobby does not:
+//! a press and an unplug both arrive as a lawful transition on the layout, and
+//! two places that opened consoles would disagree the first time either ran.
 //!
 //! That is what makes the added machinery free to a host nobody touched. At boot
 //! the recorded identity is set to whatever the layout was *seeded* with,
@@ -130,6 +141,15 @@ pub struct BridgeSurface {
 pub struct StationPane {
     pub label: String,
     pub rect: PaneRect,
+    /// The station whose console this pane shows, when the **layout** placed it
+    /// (issue #1331) — the `PaneSlot::station` of the slot it came from.
+    ///
+    /// `None` for a hand-authored `--pane <NAME>` slot, which belongs to a
+    /// person rather than to a station. That is the whole difference
+    /// [`follow_layout_stations`] works on: a pane with a station is one the
+    /// lobby owns and may close, and a pane without one is the operator's and is
+    /// never touched.
+    pub station: Option<crate::core::messages::StationId>,
 }
 
 /// A Station surface this adapter opened: its monitor identity, the window
@@ -147,19 +167,41 @@ pub struct BridgeStationSurface {
     pub panes: Vec<StationPane>,
 }
 
-/// Every Station surface the applied profile opened.
+/// Every Station surface open right now — the ones an authored `--profile`
+/// opened at boot, and the ones the lobby's screen rows opened since
+/// (issue #1331).
 ///
-/// Published for the pane host to consume. **The pane→Station-window compositing
-/// is the documented continuation of this work**, sharing #1124's input-routing
-/// concern: this slice opens the Station windows and computes each pane's
-/// rectangle (both testable — the geometry purely, the windows under the ignored
-/// integration test), and leaves the Ultralight pane rendering pointed at those
-/// windows for the follow-on. Until then a host launched with both `--profile`
-/// and `--pane` opens the Station windows AND tiles the panes on the viewscreen
-/// window as #1122 always did; nothing regresses, and this resource is the seam
-/// the compositing step reads.
+/// The seam the pane host composites onto: `panes::ultralight`'s
+/// `init_pane_host` seats a `--pane <NAME>` on the slot carrying its label, and
+/// `open_pending_views` seats a station's console on the slot carrying its
+/// station id. Both read this one list, so there is one answer to "where does
+/// this pane live" rather than a boot answer and a runtime answer.
+///
+/// It is **live**, not a boot record: [`follow_layout_stations`] rewrites the
+/// station panes of every surface whenever the layout moves, spawns a Station
+/// window for a monitor that gains its first console and despawns one that
+/// loses its last.
 #[derive(Resource, Clone, Debug, Default)]
 pub struct BridgeStationSurfaces(pub Vec<BridgeStationSurface>);
+
+impl BridgeStationSurfaces {
+    /// The surface open on `identity`, if any.
+    pub fn on(&self, identity: &str) -> Option<&BridgeStationSurface> {
+        self.0.iter().find(|s| s.identity == identity)
+    }
+
+    /// The slot a pane named `label` should be composited into: its monitor's
+    /// surface and the pane's own rectangle.
+    ///
+    /// One lookup for both kinds of pane — a `--pane` participant label and a
+    /// station id — because [`StationPane::label`] carries both (a lobby-opened
+    /// console's label *is* its station id; see `PaneSlot::for_station`).
+    pub fn slot_for(&self, label: &str) -> Option<(&BridgeStationSurface, &StationPane)> {
+        self.0
+            .iter()
+            .find_map(|s| s.panes.iter().find(|p| p.label == label).map(|p| (s, p)))
+    }
+}
 
 /// The bridge arrangement this host is **running**, as opposed to the file it
 /// booted from (issue #1330).
@@ -246,6 +288,12 @@ impl Plugin for BridgeDisplayPlugin {
                 watch_runtime_displays
                     .run_if(resource_exists::<BridgeDisplayConfig>)
                     .run_if(resource_exists::<BridgeDisplayApplied>),
+                // LAST, and chained after the watcher on purpose (issue #1331):
+                // an unplug reconciles a station's console away inside
+                // `watch_runtime_displays`, and this is what closes it. Running
+                // it first would leave that console open for a frame on a
+                // display that is gone.
+                follow_layout_stations.run_if(resource_exists::<BridgeDisplayApplied>),
             )
                 .chain(),
         );
@@ -380,26 +428,33 @@ pub fn apply_bridge_profile(world: &mut World) {
             // displays as found, not an instruction: `authored` is false, so
             // nothing below places a window from it.
             //
-            // INVARIANT this config must keep, for whatever comes next
-            // (issue #1331): it carries NO PANE LABELS. `layout` has seated
-            // nothing at boot — a fresh `from_discovered` opens no console — so
-            // `to_validated_profile` emits the viewscreen and nothing else, and
-            // `watch_runtime_displays` therefore resolves every unplug on this
-            // host to a loss with an empty `pane_labels` and closes no pane.
-            // That is the whole reason unplugging a screen on a no-`--profile`
-            // host disconnects nobody, and it holds by accident rather than by
-            // rule. A later slice that rebuilds this config from the LIVE layout
-            // (so the watcher follows the row's own seating) would start
-            // emitting `PaneSlot`s here, and the first unplug after a lobby
-            // press would then close a console — which is right for a station
-            // that really was on that screen and catastrophic if the rebuild
-            // lands before the pane compositing that actually puts one there.
-            // `unplugging_a_monitor_on_a_no_profile_host_closes_no_pane` is the
-            // test that fails when this changes — it flies a hull with a
-            // station, moves the viewscreen and opens that station's console on
-            // the very screen it then unplugs, so it goes red the moment this
-            // config starts following the live layout. Read it before changing
-            // this.
+            // IT IS THE BOOT LAYOUT AND IT STAYS THAT WAY (settled in
+            // issue #1331). It carries no pane labels, because `layout` has
+            // seated nothing at boot, so `watch_runtime_displays` resolves every
+            // unplug on this host to a loss with an empty `pane_labels` and
+            // closes no pane. #1330 left that holding by accident and flagged a
+            // rebuild-from-the-live-layout as the obvious next move. It is not
+            // the move, and here is why it was not taken:
+            //
+            //   * A console the lobby opened is closed on an unplug ALREADY,
+            //     through the law rather than through this config.
+            //     `BridgeLayout::reconcile` leaves a station whose monitor is
+            //     gone unassigned, and `follow_layout_stations` closes exactly
+            //     what the layout no longer seats — the same debounce window,
+            //     the same `PaneBus::close`, the same flip to `Backfill`. A
+            //     rebuilt config would close it a second time.
+            //   * The two lists mean different things. `assigned_surfaces`'s
+            //     `pane_labels` are the AUTHORED profile's participant names —
+            //     issue #1125's question, "was a monitor this host was
+            //     *configured* for lost, and whose panes were on it". Folding
+            //     lobby-opened station ids into them would make one list answer
+            //     two questions, and the answer to neither would be checkable.
+            //
+            // So the watcher keeps the boot arrangement and the layout keeps the
+            // live one. The pair of tests that pins this is
+            // `unplugging_a_monitor_with_no_console_on_it_closes_no_pane` and
+            // `unplugging_a_monitor_holding_a_runtime_console_closes_exactly_it`
+            // — read them before changing this.
             let config = BridgeDisplayConfig {
                 profile: layout.to_validated_profile(),
                 authored: false,
@@ -471,6 +526,12 @@ pub fn apply_bridge_profile(world: &mut World) {
                     .map(|(slot, rect)| StationPane {
                         label: slot.label.clone(),
                         rect,
+                        // An authored profile may seat a STATION as well as a
+                        // participant (`PaneSlot::for_station`). Carrying which
+                        // it is here is what lets `follow_layout_stations` treat
+                        // the two differently: it owns the station consoles and
+                        // never touches the participants'.
+                        station: slot.station.clone().map(crate::core::messages::StationId),
                     })
                     .collect();
                 station_spawns.push(StationSpawn {
@@ -632,6 +693,295 @@ fn follow_layout_viewscreen(
     applied.viewscreen = Some(wanted);
 }
 
+// ── consoles opened and closed while the host runs (issue #1331) ────────────
+
+/// Spawn one borderless-fullscreen Station window on `monitor`, tagged so the
+/// #1123 integration test and any diagnostics can tell which surface is which.
+///
+/// The same window [`apply_bridge_profile`] opens at boot, built through
+/// `Commands` rather than `&mut World` because [`follow_layout_stations`] is an
+/// ordinary system. One constructor, so a console opened at boot and one opened
+/// from the lobby are the same kind of window.
+fn spawn_station_window(commands: &mut Commands, monitor: Entity, identity: &str) -> Entity {
+    commands
+        .spawn((
+            Window {
+                title: format!("{} — Station", super::WINDOW_TITLE),
+                name: Some(format!("phoenix-station-{identity}")),
+                mode: WindowMode::BorderlessFullscreen(MonitorSelection::Entity(monitor)),
+                ..default()
+            },
+            BridgeSurface {
+                identity: identity.to_string(),
+                role: DisplayRole::Station {
+                    split: super::bridge_layout::LAYOUT_SPLIT,
+                    panes: Vec::new(),
+                }
+                .summary(),
+            },
+        ))
+        .id()
+}
+
+/// Open and close station consoles as the **live layout** seats and unseats
+/// them (issue #1331).
+///
+/// The station half of the apply-on-change applier, and the exact counterpart of
+/// [`follow_layout_viewscreen`]: the lobby's screen rows and
+/// [`watch_runtime_displays`]'s reconcile both move
+/// [`BridgeLayoutResource`]'s seating, and this is what makes the *screens*
+/// follow — a Station window on the chosen monitor, a pane seated on it, and
+/// the console going through the ordinary client join flow from there.
+///
+/// # A console is opened here, never by the lobby
+///
+/// `host_lobby::apply_lobby_layout_actions` only moves the layout. That is
+/// deliberate: an unplug reconciles a station's console away with nobody
+/// pressing anything, and if the press path opened consoles the unplug path
+/// would have to learn to close them separately — two implementations of one
+/// rule, disagreeing the first time either was touched. Both changes reach the
+/// layout, and the layout is the only thing this reads.
+///
+/// It is also what makes the **display-loss** semantics fall out rather than be
+/// re-stated: [`BridgeLayout::reconcile`] leaves a station whose monitor is gone
+/// unassigned, so its console is closed here on the same frame — the pane's
+/// token disconnects and its station flips to `Backfill` through the ordinary
+/// dropped-participant path, exactly as issue #1125 does it for a `--pane`.
+/// [`watch_runtime_displays`]'s own pane closing is untouched and stays what it
+/// always was: the **authored** profile's participant panes. See the invariant
+/// note in [`apply_bridge_profile`].
+///
+/// # What a console is
+///
+/// A pane on the bus, minted with a fresh ordinary session token and named for
+/// its station (`PaneBus::open_console`), loading the same client document a
+/// `--pane` loads and a phone loads. The station id in the layout decides only
+/// **which console document opens on which glass** — never who may sit there:
+/// the page claims its station through the ordinary lobby flow, and may be
+/// released and re-claimed by anyone.
+fn follow_layout_stations(
+    monitors: Query<(Entity, &Monitor, Has<PrimaryMonitor>)>,
+    layout: Option<Res<BridgeLayoutResource>>,
+    surfaces: Option<ResMut<BridgeStationSurfaces>>,
+    bus: Option<Res<crate::native_host::panes::PaneBusResource>>,
+    mut commands: Commands,
+    log: Option<Res<LogFilterConfig>>,
+    // Station windows that emptied on an earlier pass, despawned on this one.
+    //
+    // One frame of grace, and it is not tidiness: the pane host tears a closed
+    // pane's view, its canvas and its Station camera down in
+    // `retire_closed_panes` on its own schedule, and that system and this one
+    // are unordered within `Update`. Despawning the window in the same pass
+    // therefore leaves a live camera rendering to a window that is gone for as
+    // long as it takes the pane host to notice. Draining a list next frame costs
+    // an `is_empty` on every other frame of the run.
+    mut pending_close: Local<Vec<Entity>>,
+) {
+    for window in pending_close.drain(..) {
+        commands.entity(window).try_despawn();
+    }
+    let (Some(layout), Some(mut surfaces)) = (layout, surfaces) else {
+        return;
+    };
+    // Apply-on-change, like the viewscreen follower: a seat only moves through a
+    // lawful transition on this resource, so a host nobody has rearranged takes
+    // this return on every frame of its life.
+    if !layout.is_changed() {
+        return;
+    }
+
+    // A console is a pane, and without a bus there is nothing to open one on: a
+    // host with no `--client-dir` bundle has no client document to load. It has
+    // no lobby surface to press either, so this is unreachable in production —
+    // but the layout is still lawful, and spawning a borderless-fullscreen
+    // window showing nothing would be worse than saying so.
+    let Some(bus) = bus else {
+        let seated: Vec<&crate::core::messages::StationId> = layout
+            .layout
+            .monitors()
+            .iter()
+            .flat_map(|m| layout.layout.stations_on(m))
+            .collect();
+        if !seated.is_empty() {
+            crate::pwarn!(
+                log,
+                LogCat::Lobby,
+                "bridge display: the layout seats {} console(s), but this host has no pane bus \
+                 to open one on — it needs a --client-dir bundle",
+                seated.len()
+            );
+        }
+        return;
+    };
+
+    // Every console the surfaces are carrying, and every console the layout now
+    // says should be open. The bus is the authority on whether a pane exists;
+    // these two are the authority on whether one *should*.
+    let carried: Vec<crate::core::messages::StationId> = surfaces
+        .0
+        .iter()
+        .flat_map(|s| s.panes.iter().filter_map(|p| p.station.clone()))
+        .collect();
+
+    // Resolved against the identities the LAYOUT knows rather than freshly
+    // derived ones, for `follow_layout_viewscreen`'s reason: a display whose
+    // identity was carried across a twin arriving or a mode change answers to
+    // the key the row published and the press named.
+    let present = identify_present(
+        monitors
+            .iter()
+            .map(|(e, m, is_primary)| (e, raw_from_monitor(m, is_primary), geometry_of(m)))
+            .collect(),
+        &layout.monitors,
+    );
+
+    // ── the layout's seating, monitor by monitor ────────────────────────────
+    let mut opened: Vec<(crate::core::messages::StationId, MonitorIdentity)> = Vec::new();
+    for (entity, discovered, geometry) in &present {
+        let identity = &discovered.identity;
+        // The deterministic split, resolved against this monitor's real
+        // geometry: one console is the whole screen, two divide it side by side.
+        // Recomputed for the WHOLE monitor rather than per console, because
+        // seating a second console re-lays out the first.
+        let seats = layout.layout.station_rects(identity, geometry);
+        let existing = surfaces
+            .0
+            .iter()
+            .position(|s| &s.identity == identity.as_str());
+        if seats.is_empty() && existing.is_none() {
+            continue;
+        }
+        let panes: Vec<StationPane> = seats
+            .into_iter()
+            .map(|(station, rect)| StationPane {
+                label: station.0.clone(),
+                rect,
+                station: Some(station),
+            })
+            .collect();
+        for pane in &panes {
+            if let Some(station) = &pane.station {
+                if !carried.contains(station) {
+                    opened.push((station.clone(), identity.clone()));
+                }
+            }
+        }
+        match existing {
+            Some(index) => {
+                let surface = &mut surfaces.0[index];
+                surface.geometry = geometry.clone();
+                // An authored participant's pane is not this system's to move:
+                // it keeps its slot, and the station consoles are replaced
+                // around it. (A monitor carrying both is only reachable through
+                // a `--profile` plus a lobby press; the 2-up composition of that
+                // pair is issue #1332's.)
+                surface.panes.retain(|p| p.station.is_none());
+                surface.panes.extend(panes);
+            }
+            None => {
+                let window = spawn_station_window(&mut commands, *entity, identity.as_str());
+                crate::pinfo!(
+                    log,
+                    LogCat::Lobby,
+                    "bridge display: station window opened on monitor {identity} for {} \
+                     console(s) (borderless fullscreen)",
+                    panes.len()
+                );
+                surfaces.0.push(BridgeStationSurface {
+                    identity: identity.as_str().to_string(),
+                    window,
+                    geometry: geometry.clone(),
+                    panes,
+                });
+            }
+        }
+    }
+
+    // A monitor the layout no longer has — unplugged, and the reconcile
+    // believed it — keeps no surface: its window went with the display. The
+    // consoles it was carrying are closed by the sweep below, because they are
+    // in `carried` and the reconcile has already unseated them.
+    let live: Vec<&str> = present
+        .iter()
+        .map(|(_, d, _)| d.identity.as_str())
+        .collect();
+    surfaces.0.retain(|surface| {
+        if live.contains(&surface.identity.as_str()) {
+            return true;
+        }
+        pending_close.push(surface.window);
+        false
+    });
+
+    // ── close what the layout no longer seats ───────────────────────────────
+    let seated: Vec<&crate::core::messages::StationId> = layout
+        .layout
+        .monitors()
+        .iter()
+        .flat_map(|m| layout.layout.stations_on(m))
+        .collect();
+    for station in carried.iter().filter(|s| !seated.contains(s)) {
+        // The dropped-phone path, deliberately: a plain `close`, which owes the
+        // lobby one `PlayerDisconnected` and flips the station to `Backfill`.
+        // NOT a fault — a fault asks the pane host to rebuild the view, and this
+        // console was closed on purpose.
+        match bus.0.open_pane_for_name(&station.0) {
+            Some(pane) => {
+                bus.0.close(pane);
+                crate::pinfo!(
+                    log,
+                    LogCat::Lobby,
+                    "bridge display: station {:?}'s console is closed; its station falls back \
+                     to AI control until somebody claims it again",
+                    station.0
+                );
+            }
+            None => crate::pdebug!(
+                log,
+                LogCat::Lobby,
+                "bridge display: station {:?}'s console was unseated with no pane open for it",
+                station.0
+            ),
+        }
+    }
+
+    // ── open what it now seats ──────────────────────────────────────────────
+    for (station, monitor) in &opened {
+        // Already open is not an error: an authored `--profile` seats a station
+        // at boot and this pass is the first to see it, so the pane may already
+        // exist from an earlier pass that raced a reconcile.
+        if bus.0.open_pane_for_name(&station.0).is_some() {
+            continue;
+        }
+        let (pane, _url) = bus.0.open_console(&station.0);
+        // The URL is NOT logged: it carries this console's session token in its
+        // fragment, and an operator log is a file, a scrollback and a screenshot.
+        crate::pinfo!(
+            log,
+            LogCat::Lobby,
+            "bridge display: station {:?}'s console is opening on monitor {monitor} as {pane}; \
+             it joins and claims like any phone",
+            station.0
+        );
+    }
+
+    // ── close the windows nothing is left on ────────────────────────────────
+    surfaces.0.retain(|surface| {
+        if !surface.panes.is_empty() {
+            return true;
+        }
+        pending_close.push(surface.window);
+        crate::pinfo!(
+            log,
+            LogCat::Lobby,
+            "bridge display: monitor {} is holding no console, so its station window closes and \
+             the screen is free again",
+            surface.identity
+        );
+        false
+    });
+}
+
 // ── runtime display loss (issue #1125) ──────────────────────────────────────
 
 /// How many consecutive frames a configured monitor must be absent before its
@@ -737,9 +1087,13 @@ fn watch_runtime_displays(
     // can name the wrong screen as "the viewscreen". Left as it is because the
     // consequence is confined to two log lines — the pane closures below are
     // driven by `pane_labels`, which a viewscreen entry never has, and on a
-    // no-`--profile` host no entry has any at all (see the invariant above). The
-    // fix is the same rebuild-from-the-live-layout that invariant guards, so the
-    // two land together or not at all.
+    // no-`--profile` host no entry has any at all.
+    //
+    // A console the LOBBY opened on a screen that is unplugged is closed all the
+    // same, and by the layout rather than by this: `reconcile_layout` above
+    // unseats it and `follow_layout_stations` closes it on the same frame. See
+    // the settled note in `apply_bridge_profile` for why the two lists are kept
+    // apart instead of merged.
     let assigned = config.profile.assigned_surfaces();
     // The assigned monitors present THIS frame, matched STABLY against the raw
     // monitors rather than re-derived with `identify` — so the survivor of two
@@ -1862,35 +2216,410 @@ mod tests {
         );
     }
 
-    #[test]
-    fn unplugging_a_monitor_on_a_no_profile_host_closes_no_pane() {
-        // The landmine under the synthesised config (see `apply_bridge_profile`):
-        // unplug-closes-nothing holds only because that config carries no pane
-        // labels, which is a consequence of the layout seating nothing at boot
-        // rather than a rule anybody wrote down. This is the rule, written
-        // down — a slice that rebuilds the config from the live layout
-        // (issue #1331) breaks it here rather than in a room full of people.
-        //
-        // Which is why the host under it is deliberately NOT trivial. A bridge
-        // with an empty roster and no press behind it seats nothing under any
-        // implementation, so it would stay green through exactly the change it
-        // is here to catch. This one flies a hull with a station, the operator
-        // has moved the viewscreen off the primary AND opened `helm`'s console
-        // on the screen about to be unplugged, and the pane on the bus is the
-        // one that console would be showing — so a config rebuilt from the live
-        // layout emits a `helm` pane on the BenQ, and this unplug closes it.
-        use crate::native_host::panes::identity::PaneIdentity;
+    // ── consoles opened and closed while the host runs (issue #1331) ────────
+    //
+    // Everything below drives the REAL plugin against injected `Monitor`
+    // entities, exactly as the #1125 and #1330 tests above do — so the
+    // open/close transitions, which are the whole of this slice, are checked by
+    // the ordinary `cargo test` runs rather than only on a machine with three
+    // screens. What a real display adds is the pixels.
+
+    fn station(id: &str) -> crate::core::messages::StationId {
+        crate::core::messages::StationId(id.to_string())
+    }
+
+    /// A three-screen host with a two-station hull, one frame in: a pane bus, a
+    /// primary window, and the plugin. The shape a `phoenix-host --client-dir …`
+    /// with no `--profile` boots into.
+    fn console_host() -> (App, crate::native_host::panes::transport::PaneBus) {
         use crate::native_host::panes::transport::PaneBus;
         use crate::native_host::panes::PaneBusResource;
 
         let mut app = App::new();
         app.add_plugins(BridgeDisplayPlugin);
         let bus = PaneBus::default();
-        let pane =
-            bus.open(PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000001", "helm").unwrap());
-        bus.mark_live(pane);
         app.insert_resource(PaneBusResource(bus.clone()));
-        // A hull with a claimable station, so the layout has something to seat.
+        app.insert_resource(crate::ship::components::PendingShipConfig(
+            toml::from_str(
+                r#"
+                [[station]]
+                id = "helm"
+                name = "Helm"
+                description = "-"
+                rank = "Crew"
+
+                [[station]]
+                id = "weapons"
+                name = "Tactical"
+                description = "-"
+                rank = "Crew"
+                "#,
+            )
+            .expect("a two-station hull parses"),
+        ));
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+        app.world_mut()
+            .spawn((monitor("DELL U2720Q", 3840, 2160, 0, 0), PrimaryMonitor));
+        app.world_mut()
+            .spawn(monitor("BenQ EX", 1920, 1080, 3840, 0));
+        app.world_mut()
+            .spawn(monitor("ACME 1080", 1920, 1080, 5760, 0));
+        app.update();
+        (app, bus)
+    }
+
+    /// Close a station's console, as the row's off button does.
+    fn unseat(app: &mut App, station_id: &str) {
+        let closed = app
+            .world()
+            .resource::<BridgeLayoutResource>()
+            .layout
+            .apply(&LayoutAction::UnassignStation {
+                station: station(station_id),
+            })
+            .expect("closing a console the roster has is always lawful");
+        app.world_mut()
+            .resource_mut::<BridgeLayoutResource>()
+            .layout = closed;
+    }
+
+    /// The Station surfaces open right now, by monitor identity.
+    fn surfaces(app: &App) -> Vec<String> {
+        app.world()
+            .resource::<BridgeStationSurfaces>()
+            .0
+            .iter()
+            .map(|s| s.identity.clone())
+            .collect()
+    }
+
+    #[test]
+    fn seating_a_station_opens_a_station_window_and_a_console_on_it() {
+        // The acceptance criterion, headlessly: a press seats the station, and
+        // the follower opens the window and the pane — at RUNTIME, frames after
+        // boot, with nothing pre-opened.
+        let (mut app, bus) = console_host();
+        assert!(
+            surfaces(&app).is_empty(),
+            "nothing is pre-opened: a bridge nobody has arranged has no Station window"
+        );
+        assert_eq!(bus.open_count(), 0);
+
+        seat(&mut app, "helm", BENQ);
+        app.update();
+
+        assert_eq!(surfaces(&app), vec![BENQ.to_string()]);
+        assert_eq!(
+            bus.open_count(),
+            1,
+            "and a console pane opened for it, which is what reaches the client join flow"
+        );
+        let pane = bus
+            .open_pane_for_name("helm")
+            .expect("the pane is named for its station, which is the shared key");
+        let token = bus.token_of(pane).expect("an ordinary session token");
+        assert!(
+            !crate::lobby::handler::is_reserved_token(&token),
+            "an ordinary participant: admission cannot tell it from a phone"
+        );
+
+        // The pane's slot is the whole monitor, which is what the pane host
+        // composites it into.
+        let surface = app.world().resource::<BridgeStationSurfaces>();
+        let (_, slot) = surface.slot_for("helm").expect("the console has a home");
+        assert_eq!(
+            (slot.rect.width, slot.rect.height),
+            (1920, 1080),
+            "one console is the whole screen"
+        );
+        assert_eq!(slot.station.as_ref(), Some(&station("helm")));
+    }
+
+    #[test]
+    fn unassigning_closes_the_console_frees_the_screen_and_shuts_its_window() {
+        // The off button: the pane closes through the ordinary dropped-phone
+        // path (its station falls back to AI control), the Station window goes,
+        // and the monitor reads as free everywhere.
+        use crate::native_host::transport::NativeTransport;
+
+        let (mut app, bus) = console_host();
+        seat(&mut app, "helm", BENQ);
+        app.update();
+        let pane = bus.open_pane_for_name("helm").unwrap();
+        bus.mark_live(pane);
+        let token = bus.token_of(pane).unwrap();
+        let window = app.world().resource::<BridgeStationSurfaces>().0[0].window;
+        // Drain the view the open queued, as the pane host does once a frame,
+        // so what is left below is only what the CLOSE queued.
+        assert_eq!(bus.take_pending_views().len(), 1);
+
+        unseat(&mut app, "helm");
+        app.update();
+
+        assert_eq!(bus.open_count(), 0, "the console closed");
+        assert_eq!(
+            bus.transport().poll(),
+            vec![crate::native_host::transport::TransportEvent::Disconnected { token }],
+            "and the lobby is owed exactly the disconnect a dropped phone would produce"
+        );
+        assert!(
+            surfaces(&app).is_empty(),
+            "the Station surface went with it"
+        );
+        assert!(
+            bus.take_pending_views().is_empty(),
+            "and nothing was queued to rebuild it: this was a close, not a fault"
+        );
+
+        // The window is despawned a frame later, so the pane host has a frame to
+        // tear down the view and the Station camera that were rendering to it.
+        app.update();
+        assert!(
+            app.world().get_entity(window).is_err(),
+            "the Station window is closed and the screen is free again"
+        );
+
+        // Occupancy updates everywhere: the monitor row draws no occupant, and
+        // the viewscreen may now move onto the screen the console had.
+        let row = row(&app);
+        assert!(row.monitors[1].stations.is_empty());
+        assert!(app
+            .world()
+            .resource::<BridgeLayoutResource>()
+            .layout
+            .apply(&LayoutAction::SetViewscreen {
+                monitor: MonitorIdentity::new(BENQ),
+            })
+            .is_ok());
+    }
+
+    #[test]
+    fn moving_a_console_to_another_screen_is_one_console_that_moved() {
+        // Assigning a seated station elsewhere IS the move (the law has no move
+        // action), and the follower must read it as one: the same pane, on the
+        // other screen's window, rather than a close and a re-open that would
+        // drop the human at it.
+        let (mut app, bus) = console_host();
+        seat(&mut app, "helm", BENQ);
+        app.update();
+        let pane = bus.open_pane_for_name("helm").unwrap();
+
+        seat(&mut app, "helm", ACME);
+        app.update();
+
+        assert_eq!(surfaces(&app), vec![ACME.to_string()]);
+        assert_eq!(bus.open_count(), 1);
+        assert_eq!(
+            bus.open_pane_for_name("helm"),
+            Some(pane),
+            "the same console: its session token, and whoever claimed with it, survive the move"
+        );
+    }
+
+    #[test]
+    fn two_consoles_on_one_screen_divide_it_side_by_side() {
+        // The law caps a screen at two, and `station_rects` is what turns that
+        // into geometry. The 2-up polish is issue #1332's; the tiling is free
+        // here and refusing to draw it would be a rule this module invented.
+        let (mut app, bus) = console_host();
+        seat(&mut app, "helm", BENQ);
+        seat(&mut app, "weapons", BENQ);
+        app.update();
+
+        assert_eq!(
+            surfaces(&app),
+            vec![BENQ.to_string()],
+            "one window, two panes"
+        );
+        assert_eq!(bus.open_count(), 2);
+        let surface = app.world().resource::<BridgeStationSurfaces>();
+        let (_, helm) = surface.slot_for("helm").unwrap();
+        let (_, weapons) = surface.slot_for("weapons").unwrap();
+        assert_eq!((helm.rect.x, helm.rect.width), (0, 960));
+        assert_eq!((weapons.rect.x, weapons.rect.width), (960, 960));
+    }
+
+    #[test]
+    fn closing_one_of_two_consoles_gives_the_other_the_whole_screen() {
+        // The re-layout the move above only hinted at: a monitor's rectangles
+        // are recomputed for the WHOLE monitor, so the survivor grows rather
+        // than staying in its half beside a black one.
+        let (mut app, bus) = console_host();
+        seat(&mut app, "helm", BENQ);
+        seat(&mut app, "weapons", BENQ);
+        app.update();
+
+        unseat(&mut app, "weapons");
+        app.update();
+
+        assert_eq!(bus.open_count(), 1);
+        let surface = app.world().resource::<BridgeStationSurfaces>();
+        let (_, helm) = surface.slot_for("helm").unwrap();
+        assert_eq!((helm.rect.x, helm.rect.width), (0, 1920));
+    }
+
+    #[test]
+    fn a_bridge_nobody_rearranged_opens_and_closes_nothing_forever() {
+        // Apply-on-change has to mean the follower does nothing on every frame,
+        // not that it settles down eventually — it runs for the life of the
+        // process on every windowed host.
+        let (mut app, bus) = console_host();
+        for _ in 0..20 {
+            app.update();
+        }
+        assert!(surfaces(&app).is_empty());
+        assert_eq!(bus.open_count(), 0);
+    }
+
+    // ── an unplugged screen, and the two halves of the #1330 tripwire ───────
+    //
+    // Issue #1330 left the no-`--profile` host's unplug-closes-nothing holding
+    // by accident: the synthesised `BridgeDisplayConfig` is the BOOT layout, so
+    // it carries no pane labels and `watch_runtime_displays` resolves every loss
+    // to an empty one. #1331 settled that it STAYS the boot layout — see the
+    // note in `apply_bridge_profile` — and that a lobby-opened console is closed
+    // by the LAW instead: the reconcile unseats it and `follow_layout_stations`
+    // closes it. These two are that decision, split into its two claims.
+
+    #[test]
+    fn unplugging_a_monitor_with_no_console_on_it_closes_no_pane() {
+        // Half one: the watcher still closes nothing of its own. The pane on the
+        // bus here is a `--pane`-shaped one the layout does not own — nothing
+        // seated it, nothing may close it — and the screen that is unplugged is
+        // one the layout has no console on. A config rebuilt from the live
+        // layout would start naming panes here, and this is what would go red.
+        use crate::native_host::panes::identity::PaneIdentity;
+
+        let (mut app, bus) = console_host();
+        let stray =
+            bus.open(PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000001", "Ada").unwrap());
+        bus.mark_live(stray);
+        // The operator has arranged the bridge — viewscreen moved, a console
+        // open — so this is not the trivial host that would seat nothing under
+        // any implementation. What it has NOT done is put a console on the BenQ.
+        choose(&mut app, BENQ);
+        seat(&mut app, "helm", ACME);
+        app.update();
+        assert!(!app.world().resource::<BridgeDisplayConfig>().authored);
+
+        let benq = benq_entity(&mut app);
+        app.world_mut().entity_mut(benq).despawn();
+        settle(&mut app);
+
+        assert_eq!(
+            app.world()
+                .resource::<BridgeLayoutResource>()
+                .layout
+                .monitors()
+                .len(),
+            2,
+            "the unplug itself was believed"
+        );
+        assert_eq!(
+            bus.open_count(),
+            2,
+            "and nobody's console closed: neither the stray pane nor the console on \
+             the screen that is still plugged in"
+        );
+        assert!(bus.open_pane_for_name("Ada").is_some());
+        assert!(bus.open_pane_for_name("helm").is_some());
+    }
+
+    #[test]
+    fn unplugging_a_monitor_holding_a_runtime_console_closes_exactly_it() {
+        // Half two, and the behaviour #1331 wants: a console open on the screen
+        // that is unplugged closes — its token disconnects and its station falls
+        // back to AI control, the #1125 display-loss semantics — while a console
+        // on a screen that is still there does not.
+        use crate::native_host::transport::NativeTransport;
+
+        let (mut app, bus) = console_host();
+        choose(&mut app, DELL);
+        seat(&mut app, "helm", BENQ);
+        seat(&mut app, "weapons", ACME);
+        app.update();
+        let helm_pane = bus.open_pane_for_name("helm").unwrap();
+        bus.mark_live(helm_pane);
+        let helm_token = bus.token_of(helm_pane).unwrap();
+        bus.mark_live(bus.open_pane_for_name("weapons").unwrap());
+        assert_eq!(bus.open_count(), 2);
+
+        let benq = benq_entity(&mut app);
+        app.world_mut().entity_mut(benq).despawn();
+        settle(&mut app);
+
+        let live = app.world().resource::<BridgeLayoutResource>();
+        assert!(
+            live.layout.monitor_of(&station("helm")).is_none(),
+            "the law left helm's console unassigned, as it does for any lost screen"
+        );
+        assert_eq!(
+            live.layout
+                .monitor_of(&station("weapons"))
+                .map(|m| m.as_str()),
+            Some(ACME),
+            "and weapons kept its seat on the screen that is still there"
+        );
+        assert_eq!(
+            bus.open_count(),
+            1,
+            "exactly the console on the unplugged screen closed"
+        );
+        assert!(bus.open_pane_for_name("helm").is_none());
+        assert!(bus.open_pane_for_name("weapons").is_some());
+        assert_eq!(
+            bus.transport().poll(),
+            vec![crate::native_host::transport::TransportEvent::Disconnected { token: helm_token }],
+            "through the ordinary dropped-participant path, so its station goes to Backfill"
+        );
+        assert_eq!(
+            surfaces(&app),
+            vec![ACME.to_string()],
+            "and the lost screen's Station surface went with the display"
+        );
+    }
+
+    #[test]
+    fn a_replugged_monitor_can_take_its_console_back_without_ending_the_mission() {
+        // Story 27's half that a headless test can hold: the layout leaves a
+        // console unassigned rather than re-homing it, and re-seating it on the
+        // returned display opens a fresh console — a new participant on an
+        // ordinary token, claiming through the normal flow. (The other half —
+        // that the row is REACHABLE mid-mission — is the revealed surface's, in
+        // `host_lobby::reveal`.)
+        let (mut app, bus) = console_host();
+        seat(&mut app, "helm", BENQ);
+        app.update();
+        let benq = benq_entity(&mut app);
+        app.world_mut().entity_mut(benq).despawn();
+        settle(&mut app);
+        assert_eq!(bus.open_count(), 0);
+
+        app.world_mut()
+            .spawn(monitor("BenQ EX", 1920, 1080, 3840, 0));
+        settle(&mut app);
+        assert!(
+            app.world()
+                .resource::<BridgeLayoutResource>()
+                .layout
+                .monitor_of(&station("helm"))
+                .is_none(),
+            "a returned display is never silently re-homed onto"
+        );
+
+        seat(&mut app, "helm", BENQ);
+        app.update();
+        assert_eq!(bus.open_count(), 1, "and an explicit press opens it again");
+        assert_eq!(surfaces(&app), vec![BENQ.to_string()]);
+    }
+
+    #[test]
+    fn a_host_with_no_pane_bus_says_so_rather_than_opening_a_black_window() {
+        // A host with no `--client-dir` bundle has nothing to load a console
+        // from. It also has no lobby surface to press, so this is unreachable in
+        // production — but the layout is still lawful, so the follower must
+        // decline rather than spawn a fullscreen window showing nothing.
+        let (mut app, _) = booted(None);
         app.insert_resource(crate::ship::components::PendingShipConfig(
             toml::from_str(
                 r#"
@@ -1901,67 +2630,26 @@ mod tests {
                 rank = "Crew"
                 "#,
             )
-            .expect("a one-station hull parses"),
+            .unwrap(),
         ));
-        app.world_mut().spawn((Window::default(), PrimaryWindow));
-        app.world_mut()
-            .spawn((monitor("DELL U2720Q", 3840, 2160, 0, 0), PrimaryMonitor));
-        app.world_mut()
-            .spawn(monitor("BenQ EX", 1920, 1080, 3840, 0));
-        app.world_mut()
-            .spawn(monitor("ACME 1080", 1920, 1080, 5760, 0));
-        app.update();
-        assert!(!app.world().resource::<BridgeDisplayConfig>().authored);
-        assert_eq!(
-            app.world()
+        // Re-seed the layout with the roster, as a runtime world load would.
+        let seeded = BridgeLayout::from_discovered(
+            &app.world()
                 .resource::<BridgeLayoutResource>()
-                .layout
-                .roster()
-                .len(),
-            1,
-            "the hull's station reached the layout law"
-        );
-
-        // Two lobby presses, so the live layout is an arrangement rather than
-        // the boot default: the viewscreen is on a screen nobody's console is
-        // on, and helm's console is on the BenQ.
-        choose(&mut app, ACME);
+                .monitors
+                .clone(),
+            [station("helm")],
+        )
+        .unwrap();
+        app.world_mut()
+            .resource_mut::<BridgeLayoutResource>()
+            .layout = seeded;
         seat(&mut app, "helm", BENQ);
-        assert_eq!(
-            app.world()
-                .resource::<BridgeLayoutResource>()
-                .layout
-                .stations_on(&MonitorIdentity::new(BENQ)),
-            &[crate::core::messages::StationId("helm".to_string())],
-        );
-        // One frame with the arrangement in place and every screen still
-        // plugged in, so the watcher's committed baseline is the arranged
-        // bridge. Without it the BenQ would never have been an assigned,
-        // present display, and the unplug below could not name it as a loss
-        // under ANY config — which would make the assertion vacuous.
         app.update();
 
-        let benq = benq_entity(&mut app);
-        app.world_mut().entity_mut(benq).despawn();
-        settle(&mut app);
-
-        let live = app.world().resource::<BridgeLayoutResource>();
-        assert_eq!(
-            live.layout.monitors().len(),
-            2,
-            "the unplug itself was believed"
-        );
         assert!(
-            live.layout
-                .monitor_of(&crate::core::messages::StationId("helm".to_string()))
-                .is_none(),
-            "and the law left helm's console unassigned, as it does for any lost screen"
-        );
-        assert_eq!(
-            bus.open_count(),
-            1,
-            "but it closed nobody's console: the synthesised profile is the BOOT layout, which \
-             seated nothing, so it carries no pane labels for a loss to resolve"
+            surfaces(&app).is_empty(),
+            "no bus, no console — and therefore no window"
         );
     }
 

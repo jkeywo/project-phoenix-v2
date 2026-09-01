@@ -36,10 +36,11 @@
 //! [`build_pane_document`]: crate::native_host::panes::document::build_pane_document
 //!
 //! What the assembled document adds around that fragment is only what a
-//! fragment cannot carry: a `<head>` naming the two stylesheets the web host
-//! links (`gui/tokens.css`, `gui/host-lobby.css` — the second one exists
-//! *because* of this surface), a ground colour, the bridge scripts, and the
-//! module island that wires the shared view model to the shared renderer.
+//! fragment cannot carry: a `<head>` naming the three stylesheets the web host
+//! links (`gui/tokens.css`, `gui/host-lobby.css`, `gui/host-qr.css` — the last
+//! two exist *because* of this surface), a ground colour, the vendored QR
+//! encoder, the bridge scripts, and the module island that wires the shared
+//! view model to the shared renderer.
 //!
 //! It carries no `<title>`, deliberately: an embedded view has no tab bar, so a
 //! title would be player-visible English nothing ever shows — and every string a
@@ -53,11 +54,13 @@
 //! with a fallback stack (`'Chakra Petch', system-ui, monospace`), so the cost
 //! is the substitute face rather than an unstyled lobby.
 //!
-//! # The one edit
+//! # What the document adds and takes away
 //!
 //! | edit | why |
 //! |---|---|
 //! | the AI-launch `<button>` removed | this surface is READ-ONLY in this slice — selection stays on the CLI — and a control that silently does nothing is worse than no control |
+//! | the page's `#qr-panel` carried too, in an `#overlay` of this document's own (issue #1329) | the crew have to be shown how to JOIN the lobby they are looking at. The panel is the page's own markup for the same reason the lobby is; the overlay around it is not, because the page's also carries the fleet panel and the diagnostics readout, and neither has anything to say on a viewscreen |
+//! | `#host-lobby-qr-toggle` added (issue #1329) | a host page toggles the QR from its settings cog; this window has no cog, so the one decision that surface genuinely needs gets the one control it needs |
 //!
 //! Everything else the document does to the markup it does by *omission*: it
 //! leaves `--settings-cog-keepout` undefined, which selects the `0px` fallback
@@ -121,6 +124,33 @@ pub fn host_lobby_apply_script(json: &str) -> String {
     vellum_ultralight::bridge::push_call("window.__phoenixHostLobbyApply", json)
 }
 
+/// The script that hands the surface one encoded [`JoinInvite`] (issue #1329).
+///
+/// The crew's join code, the structured code its QR carries, and the address a
+/// phone should be sent to — decided in [`super::join`], because the surface's
+/// own `location.href` is the loopback URL the embedded view had to dial and is
+/// the one address in the building no phone can open.
+///
+/// [`JoinInvite`]: super::join::JoinInvite
+pub fn host_lobby_join_script(json: &str) -> String {
+    vellum_ultralight::bridge::push_call("window.__phoenixHostLobbyJoin", json)
+}
+
+/// The script that flips the join QR (issue #1329).
+///
+/// One press, from a phone's `ClientMessage::ToggleQrCode` — the same button on
+/// the same phone that a browser host answers in its own JavaScript. The
+/// surface's own control does not come through here: it is a click inside the
+/// document, on state the document already owns.
+///
+/// Takes no argument, and is the only call on this bridge that does not: the
+/// panel's visibility lives in `#overlay` (`gui/host-qr.js`), so there is no
+/// value to carry — a `true`/`false` here would be a second opinion about a
+/// state the page can already read, and the two would eventually disagree.
+pub fn host_lobby_qr_toggle_script() -> String {
+    "window.__phoenixHostLobbyQrToggle()".to_string()
+}
+
 /// The script that tells the surface whether to force its chrome visible.
 ///
 /// The bridge's only primitive is a call taking a single **string** argument
@@ -147,6 +177,16 @@ pub enum HostLobbyDocumentError {
     /// `#lobby-panel` opens and never closes: its `<div>`s do not balance
     /// before the end of the document.
     UnbalancedLobbyPanel,
+    /// The page has no `#qr-panel` element, so there is no join panel to show
+    /// (issue #1329).
+    ///
+    /// Refused rather than assembled without one, for the same reason as the
+    /// lobby: a viewscreen showing a crew lobby that cannot show them how to
+    /// join it is worse than a host that says at the prompt what is wrong with
+    /// the bundle it was pointed at.
+    NoJoinPanel,
+    /// `#qr-panel` opens and never closes.
+    UnbalancedJoinPanel,
 }
 
 impl std::fmt::Display for HostLobbyDocumentError {
@@ -162,6 +202,17 @@ impl std::fmt::Display for HostLobbyDocumentError {
                 f,
                 "the host page's #lobby-panel never closes — its <div> elements do not \
                  balance before the end of the document"
+            ),
+            HostLobbyDocumentError::NoJoinPanel => write!(
+                f,
+                "the host page has no #qr-panel element, so the viewscreen lobby would have \
+                 no way to show a crew how to join it; check that --client-dir points at a \
+                 bundle built from this checkout's server.html"
+            ),
+            HostLobbyDocumentError::UnbalancedJoinPanel => write!(
+                f,
+                "the host page's #qr-panel never closes — its <div> elements do not balance \
+                 before the end of the document"
             ),
         }
     }
@@ -195,16 +246,37 @@ pub fn host_lobby_url(host_addr: &str, nonce: &str) -> String {
 /// The element the lobby markup hangs off, in the host page.
 const LOBBY_PANEL_MARKER: &str = "<div id=\"lobby-panel\"";
 
+/// The element the join panel hangs off, in the host page (issue #1329).
+///
+/// `#qr-panel` and not its parent `#overlay`, deliberately: that parent also
+/// carries the fleet panel (which admits other ship HOSTS, issue #1114) and the
+/// connection diagnostics readout, neither of which this surface has anything
+/// to say about. The overlay itself is one `<div>` with no content of its own,
+/// so the document supplies it below rather than taking the page's.
+const JOIN_PANEL_MARKER: &str = "<div id=\"qr-panel\"";
+
 /// Assemble the lobby document from the host page's own `index.html`.
 ///
 /// Pure: bytes in, bytes out. Everything that makes this document different
 /// from the lobby a browser shows is decided here, so it is decided somewhere a
 /// unit test can read without an SDK, a GPU or an HTTP server.
 pub fn build_host_lobby_document(host_index_html: &str) -> Result<String, HostLobbyDocumentError> {
-    let panel = extract_lobby_panel(host_index_html)?;
+    let panel = extract_element(
+        host_index_html,
+        LOBBY_PANEL_MARKER,
+        HostLobbyDocumentError::NoLobbyPanel,
+        HostLobbyDocumentError::UnbalancedLobbyPanel,
+    )?;
     // The one control in that markup, and it must not appear on a read-only
     // surface: nothing on this document is wired to launch anything.
     let panel = strip_elements_matching(panel, "button", None);
+
+    let join_panel = extract_element(
+        host_index_html,
+        JOIN_PANEL_MARKER,
+        HostLobbyDocumentError::NoJoinPanel,
+        HostLobbyDocumentError::UnbalancedJoinPanel,
+    )?;
 
     let head = format!(
         "\n<script>\n{}\n{}</script>\n",
@@ -218,15 +290,49 @@ pub fn build_host_lobby_document(host_index_html: &str) -> Result<String, HostLo
          <meta charset=\"UTF-8\" />\n\
          <link rel=\"stylesheet\" href=\"gui/tokens.css\" />\n\
          <link rel=\"stylesheet\" href=\"gui/host-lobby.css\" />\n\
+         <link rel=\"stylesheet\" href=\"gui/host-qr.css\" />\n\
          <style>\n{GROUND_CSS}</style>{head}\
+         <script src=\"{QR_ENCODER_SRC}\"></script>\n\
          </head>\n\
          <body>\n\
          {panel}\n\
+         <div id=\"overlay\">\n{join_panel}\n</div>\n\
+         {QR_TOGGLE_MARKUP}\n\
          <script type=\"module\">\n{HOST_LOBBY_LINK_JS}\n</script>\n\
          </body>\n\
          </html>\n"
     ))
 }
+
+/// The QR encoder, from this host's own delivery server (issue #1329).
+///
+/// The whole reason it is vendored: a bridge machine is not assumed to have
+/// internet, and until #1329 this was a `<script src="https://cdn…">` on the
+/// host page — which would have meant a native lobby that could show a crew
+/// everything except how to join. Same file, same path, same bytes as
+/// `server.html` loads; see `gui/vendor/README.md`.
+///
+/// A CLASSIC script, and after the boot block above rather than before it: it
+/// assigns the global `QRCode` that `gui/host-qr.js` is handed, and nothing
+/// needs it until the module island renders the first invitation.
+const QR_ENCODER_SRC: &str = "gui/vendor/qrcode.js";
+
+/// The native surface's own QR control (issue #1329).
+///
+/// A host PAGE has a settings cog whose Gameplay tab carries "toggle the QR"
+/// (`gui/server-settings.js` → `__hostToggleQrCode`). The native viewscreen
+/// window has no cog and no chrome of its own, so this document grows the one
+/// control that decision needs — the smallest honest affordance, reachable
+/// exactly when the surface is: in the lobby, and in play once F9 has revealed
+/// it (`super::reveal`).
+///
+/// It carries **no text of its own**. `data-i18n` is resolved by `applyToDom`
+/// in `host_lobby_link.js`, from the same string the host page's settings menu
+/// uses for the same action — one button, one name, whatever language the room
+/// is in (AGENTS.md rule 11). An English fallback inside the element would be
+/// player-visible prose authored in a Rust source file.
+const QR_TOGGLE_MARKUP: &str = "<div id=\"host-lobby-qr-toggle\" role=\"button\" tabindex=\"0\" \
+     data-i18n=\"settings.toggle_qr\"></div>";
 
 /// The page ground this document supplies, because a fragment cannot.
 ///
@@ -249,17 +355,24 @@ const GROUND_CSS: &str = "\
 html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }\n\
 body { font-family: monospace; }\n";
 
-/// The `#lobby-panel` element of `html`, opening tag to closing tag.
+/// One `<div>` element of `html`, opening tag to closing tag.
 ///
 /// Depth-counted over `<div>`/`</div>` rather than "find the next `</div>`",
-/// because the panel is six levels of nesting deep. HTML comments are skipped
-/// while counting: the real markup carries several, and one of them mentioning a
-/// `div` would otherwise unbalance the count and truncate the lobby at a
-/// plausible-looking place.
-fn extract_lobby_panel(html: &str) -> Result<&str, HostLobbyDocumentError> {
-    let start = html
-        .find(LOBBY_PANEL_MARKER)
-        .ok_or(HostLobbyDocumentError::NoLobbyPanel)?;
+/// because the panels are several levels of nesting deep. HTML comments are
+/// skipped while counting: the real markup carries several, and one of them
+/// mentioning a `div` would otherwise unbalance the count and truncate the
+/// element at a plausible-looking place.
+///
+/// The two errors are passed in rather than derived, so a caller says which
+/// panel it could not find — "the host page has no join panel" and "the host
+/// page has no lobby" are different things to be told at a prompt.
+fn extract_element<'a>(
+    html: &'a str,
+    marker: &str,
+    missing: HostLobbyDocumentError,
+    unbalanced: HostLobbyDocumentError,
+) -> Result<&'a str, HostLobbyDocumentError> {
+    let start = html.find(marker).ok_or(missing)?;
     let rest = &html[start..];
     let bytes = rest.as_bytes();
     let mut depth = 0usize;
@@ -273,7 +386,7 @@ fn extract_lobby_panel(html: &str) -> Result<&str, HostLobbyDocumentError> {
                 }
                 // An unterminated comment swallows the rest of the document, so
                 // the panel never closes — which is exactly what this says.
-                None => return Err(HostLobbyDocumentError::UnbalancedLobbyPanel),
+                None => return Err(unbalanced),
             }
         }
         if rest[i..].starts_with("</div>") {
@@ -301,7 +414,7 @@ fn extract_lobby_panel(html: &str) -> Result<&str, HostLobbyDocumentError> {
             .map(char::len_utf8)
             .unwrap_or(bytes.len());
     }
-    Err(HostLobbyDocumentError::UnbalancedLobbyPanel)
+    Err(unbalanced)
 }
 
 #[cfg(test)]
@@ -328,6 +441,15 @@ mod tests {
          <aside class=\"lobby-rail\"><div id=\"lobby-status-hint\"></div></aside>\n\
          </div>\n\
          </div>\n\
+         <div id=\"overlay\">\n\
+         <div id=\"qr-panel\">\n\
+         <div id=\"qr-caption\" data-i18n=\"server.qr_caption\"></div>\n\
+         <a id=\"qr-link\"><canvas id=\"qr\"></canvas></a>\n\
+         <div id=\"qr-url-row\"><span id=\"qr-url\"></span></div>\n\
+         <div id=\"join-code-row\" style=\"display:none\"><span id=\"join-code\"></span></div>\n\
+         </div>\n\
+         <div id=\"fleet-panel\"><div id=\"fleet-slots\"></div></div>\n\
+         </div>\n\
          <canvas id=\"canvas\"></canvas>\n\
          </body>\n</html>\n";
 
@@ -345,9 +467,13 @@ mod tests {
             "the scenario picker is the host page's, not the lobby's"
         );
         assert!(
-            !html.contains("<canvas"),
+            !html.contains("id=\"canvas\""),
             "the depth count must stop at the panel's own closing tag"
         );
+        // The `<canvas>` that IS here is the join panel's own (issue #1329) —
+        // the QR is drawn into it — and it comes from the page's `#qr-panel`,
+        // never from a runaway count over the viewscreen's.
+        assert!(html.contains("id=\"qr\""));
     }
 
     #[test]
@@ -400,16 +526,86 @@ mod tests {
     }
 
     #[test]
-    fn the_document_loads_the_same_two_stylesheets_the_web_lobby_does() {
-        // gui/host-lobby.css exists BECAUSE of this surface (issue #1325 lifted
-        // it out of server.html's inline <style>), so a document that did not
-        // link it would have re-created the duplication the extraction removed.
+    fn the_document_loads_the_same_stylesheets_the_web_lobby_does() {
+        // gui/host-lobby.css and gui/host-qr.css exist BECAUSE of this surface
+        // (issues #1325 and #1329 lifted them out of server.html's inline
+        // <style>), so a document that did not link them would have re-created
+        // the duplication the extractions removed.
         let html = build_host_lobby_document(HOST_PAGE).unwrap();
         assert!(html.contains("href=\"gui/tokens.css\""));
         assert!(html.contains("href=\"gui/host-lobby.css\""));
+        assert!(html.contains("href=\"gui/host-qr.css\""));
         // Relative, not absolute: the path is what makes the served depth do the
         // resolving, exactly as it does for a pane document.
         assert!(!html.contains("href=\"/gui/"));
+    }
+
+    #[test]
+    fn the_join_panel_comes_with_the_lobby_because_a_crew_has_to_get_in() {
+        // Issue #1329. The page's OWN join markup, for the same reason the
+        // lobby's is the page's own: a hand-written copy here would render
+        // nowhere the first time somebody added a row to the web panel.
+        let html = build_host_lobby_document(HOST_PAGE).unwrap();
+        for id in [
+            "overlay",
+            "qr-panel",
+            "qr-caption",
+            "qr-link",
+            "qr",
+            "qr-url",
+            "join-code",
+        ] {
+            assert!(
+                html.contains(&format!("id=\"{id}\"")),
+                "the lobby document must carry #{id}, which gui/host-qr.js writes into"
+            );
+        }
+    }
+
+    #[test]
+    fn the_overlay_carries_the_join_panel_and_nothing_else_the_page_puts_there() {
+        // #overlay is this document's own one-line wrapper, not the page's: the
+        // page's also holds the fleet panel (which admits other ship HOSTS,
+        // issue #1114) and the connection diagnostics, and a viewscreen has
+        // nothing to say about either.
+        let html = build_host_lobby_document(HOST_PAGE).unwrap();
+        assert!(!html.contains("id=\"fleet-panel\""));
+        assert!(!html.contains("id=\"fleet-slots\""));
+    }
+
+    #[test]
+    fn the_encoder_is_the_local_copy_because_a_bridge_has_no_internet() {
+        // The whole point of vendoring it (issue #1329): the host serves this
+        // document AND the encoder it loads, so a room with no network still
+        // gets a join code. A CDN here would have been a lobby that shows a
+        // crew everything except how to join.
+        let html = build_host_lobby_document(HOST_PAGE).unwrap();
+        assert!(html.contains("<script src=\"gui/vendor/qrcode.js\"></script>"));
+        assert!(!html.contains("http://cdn."));
+        assert!(!html.contains("https://"));
+    }
+
+    #[test]
+    fn the_surfaces_own_qr_control_carries_a_string_id_and_no_english() {
+        // A host page toggles the QR from its settings cog; this window has no
+        // cog. The control's text is resolved by `applyToDom` from the same
+        // string id the page's own menu uses — prose in this file would be
+        // player-visible English authored in a Rust source (AGENTS.md rule 11).
+        let html = build_host_lobby_document(HOST_PAGE).unwrap();
+        assert!(html.contains("id=\"host-lobby-qr-toggle\""));
+        assert!(html.contains("data-i18n=\"settings.toggle_qr\""));
+        assert!(html.contains("role=\"button\" tabindex=\"0\""));
+    }
+
+    #[test]
+    fn a_page_with_no_join_panel_is_refused_by_name_too() {
+        // A lobby nobody can be shown how to join is not a lobby to composite
+        // silently — it is a bundle that is not what the operator thinks.
+        let page = "<body><div id=\"lobby-panel\"><div id=\"station-grid\"></div></div></body>";
+        assert_eq!(
+            build_host_lobby_document(page),
+            Err(HostLobbyDocumentError::NoJoinPanel)
+        );
     }
 
     #[test]
@@ -455,6 +651,7 @@ mod tests {
         // `</div>` would truncate the panel at a place that still looked like
         // valid markup.
         let page = "<div id=\"lobby-panel\"><!-- a </div> in prose --><div>x</div></div>\
+                    <div id=\"qr-panel\"></div>\
                     <canvas id=\"trailing\"></canvas>";
         let html = build_host_lobby_document(page).unwrap();
         assert!(html.contains("<div>x</div>"));
@@ -538,10 +735,21 @@ mod tests {
             );
         }
 
-        // …and stops at the lobby. `#hud-overlay` is the next full-screen
-        // surface in the page and a runaway count would swallow it.
+        // The join panel's own ids, which gui/host-qr.js writes into (issue
+        // #1329) — taken out of the same page, by the same rule.
+        for id in ["qr-panel", "qr", "qr-url", "join-code", "join-code-row"] {
+            assert!(
+                html.contains(&format!("id=\"{id}\"")),
+                "the lobby document must carry #{id}, which the shared join panel writes into"
+            );
+        }
+
+        // …and stops at each panel. `#hud-overlay` is the next full-screen
+        // surface in the page and a runaway count would swallow it; the fleet
+        // panel is #overlay's other child and is not this surface's business.
         assert!(!html.contains("id=\"hud-overlay\""));
         assert!(!html.contains("id=\"canvas\""));
+        assert!(!html.contains("id=\"fleet-panel\""));
         assert!(!html.contains("<button"));
     }
 
@@ -558,6 +766,18 @@ mod tests {
         assert!(
             !page.contains(".lobby-panel-wrap {"),
             "the lobby's rules belong in gui/host-lobby.css, not back in server.html"
+        );
+        assert!(
+            page.contains("href=\"gui/host-qr.css\""),
+            "server.html must link the shared join-panel stylesheet this document also links"
+        );
+        assert!(
+            !page.contains("#qr-panel {"),
+            "the join panel's rules belong in gui/host-qr.css, not back in server.html"
+        );
+        assert!(
+            page.contains("src=\"gui/vendor/qrcode.js\""),
+            "both surfaces load the vendored encoder from the host's own server (issue #1329)"
         );
     }
 }

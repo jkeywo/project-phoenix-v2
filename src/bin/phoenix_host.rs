@@ -489,6 +489,39 @@ fn main() {
              to start with every station on Backfill."
         );
     }
+
+    // The viewscreen's join panel (issue #1329). Here rather than beside the
+    // surface itself, because half of what an invitation needs — which service
+    // this host registered with — is only known once the block above has run.
+    if let Some(lobby) = &host_lobby {
+        app.insert_resource(native_host::host_lobby::HostLobbyJoinResource::from_lobby(
+            lobby,
+            sim.rendezvous.as_deref(),
+        ));
+        if sim.rendezvous.is_none() {
+            // `--solo`, or no `--rendezvous` at all: there will never be a code.
+            // Said on the viewscreen in words, because a framed empty QR would
+            // have a crew stand in front of it scanning something that cannot
+            // work, and would look identical to a code that has not arrived yet.
+            lobby.publish_join(&native_host::host_lobby::JoinInvite::Off);
+        } else {
+            eprintln!(
+                "phoenix-host: the join QR is on the viewscreen, pointing phones at {}",
+                lobby.join_base
+            );
+            if lobby.join_base.contains("127.0.0.1") || lobby.join_base.contains("[::1]") {
+                // Loopback is what a bind of `127.0.0.1` asks for, and what a
+                // machine with no route falls back to. Either way the QR on the
+                // wall opens on this machine and nowhere else, which is worth
+                // saying at the prompt rather than discovering with a phone.
+                eprintln!(
+                    "phoenix-host: …which is a loopback address, so no phone can open it. Bind \
+                     the LAN address explicitly with --addr <ip>:<port> if this machine has one."
+                );
+            }
+        }
+    }
+
     eprintln!(
         "phoenix-host: authoritative simulation on {} — native viewscreen",
         sim.world
@@ -552,6 +585,12 @@ fn report_relay_notices(
     notices: Option<
         bevy::prelude::Res<project_phoenix::native_host::relay_transport::RelayNotices>,
     >,
+    join: Option<
+        bevy::prelude::Res<project_phoenix::native_host::host_lobby::HostLobbyJoinResource>,
+    >,
+    lobby: Option<
+        bevy::prelude::Res<project_phoenix::native_host::host_lobby::HostLobbyBridgeResource>,
+    >,
 ) {
     use project_phoenix::native_host::relay_transport::RelayNotice;
     let Some(notices) = notices else {
@@ -559,10 +598,26 @@ fn report_relay_notices(
     };
     for notice in notices.drain() {
         match notice {
-            RelayNotice::Coded(code) => eprintln!(
-                "phoenix-host: crew join code {} (full: {})",
-                code.suffix, code.full
-            ),
+            RelayNotice::Coded(code) => {
+                eprintln!(
+                    "phoenix-host: crew join code {} (full: {})",
+                    code.suffix, code.full
+                );
+                // …and onto the viewscreen, which is the point of issue #1329:
+                // a code printed into a terminal window nobody at the bridge can
+                // see is not a code the crew has been given.
+                //
+                // The SAME code every time it is re-issued, including a reclaim
+                // after a dropped service (issue #1115), because the panel is
+                // repainted from whatever arrives rather than from a first
+                // sighting. A transient fault deliberately leaves the code up:
+                // a reclaim usually returns the very same letters, and blanking
+                // the wall for a reconnection that succeeds seconds later costs
+                // the room more than it tells them.
+                if let (Some(join), Some(lobby)) = (&join, &lobby) {
+                    lobby.0.push_join(join.invite(&code).to_json());
+                }
+            }
             RelayNotice::Refused { peer, code } => {
                 eprintln!("phoenix-host: refused {peer}: {code}")
             }

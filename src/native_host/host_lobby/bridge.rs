@@ -44,7 +44,10 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use super::document::{host_lobby_apply_script, host_lobby_reveal_script};
+use super::document::{
+    host_lobby_apply_script, host_lobby_join_script, host_lobby_qr_toggle_script,
+    host_lobby_reveal_script,
+};
 use crate::native_host::panes::{PaneSurface, PaneSurfaceError};
 
 /// How many records the page may queue before the oldest are dropped.
@@ -65,6 +68,20 @@ struct Inner {
     last_accepted: Option<String>,
     /// The newest reveal flag not yet handed to the page.
     reveal: Option<bool>,
+    /// The newest join invitation not yet handed to the page (issue #1329).
+    ///
+    /// Latest-wins like the lobby state, and for the same reason: an invitation
+    /// is a statement of where the crew should go NOW, and a reclaimed or
+    /// rotated code makes the previous one wrong rather than merely older.
+    join: Option<String>,
+    /// QR toggles asked for but not yet applied (issue #1329).
+    ///
+    /// A COUNT, not a flag, because this is the one thing on this bridge that is
+    /// an edge rather than a state: the page owns whether the panel is on
+    /// screen (`gui/host-qr.js` reads `#overlay`), and what crosses is "somebody
+    /// pressed the button". Two presses in a frame are two flips — collapsing
+    /// them to "somebody asked" would turn a double-press into a single one.
+    qr_toggles: usize,
     /// What the page has asked for, awaiting a reader.
     records: VecDeque<String>,
 }
@@ -121,11 +138,31 @@ impl HostLobbyBridge {
         self.lock().reveal = Some(force_chrome);
     }
 
+    /// Hand the surface the crew's join invitation
+    /// ([`super::join::JoinInvite`], already encoded).
+    pub fn push_join(&self, json: impl Into<String>) {
+        self.lock().join = Some(json.into());
+    }
+
+    /// Somebody asked for the join QR to be flipped (issue #1329).
+    ///
+    /// A phone's `ClientMessage::ToggleQrCode`, arriving over the relay at a
+    /// host with no page in front of its simulation. The surface's OWN control
+    /// does not come through here — it is a click inside the document, on the
+    /// state the document already owns, and a round trip through the host would
+    /// only add a frame of latency to a decision nobody else needs to know.
+    pub fn push_qr_toggle(&self) {
+        self.lock().qr_toggles += 1;
+    }
+
     /// Whether anything is waiting to be pushed. Diagnostic, and what a test
     /// asserts on to show that a failed push was kept.
     pub fn has_pending(&self) -> bool {
         let inner = self.lock();
-        inner.payload.is_some() || inner.reveal.is_some()
+        inner.payload.is_some()
+            || inner.reveal.is_some()
+            || inner.join.is_some()
+            || inner.qr_toggles > 0
     }
 
     /// Take everything the surface has asked for since the last call, in order.
@@ -144,10 +181,15 @@ impl HostLobbyBridge {
         inner.records.push_back(json.to_string());
     }
 
-    /// Take the pending pair, leaving both slots empty.
-    fn take_pending(&self) -> (Option<bool>, Option<String>) {
+    /// Take everything pending, leaving every slot empty.
+    fn take_pending(&self) -> Pending {
         let mut inner = self.lock();
-        (inner.reveal.take(), inner.payload.take())
+        Pending {
+            reveal: inner.reveal.take(),
+            join: inner.join.take(),
+            payload: inner.payload.take(),
+            qr_toggles: std::mem::take(&mut inner.qr_toggles),
+        }
     }
 
     /// Put a value back **only if nothing newer has arrived** while the push was
@@ -165,6 +207,30 @@ impl HostLobbyBridge {
             inner.reveal = Some(flag);
         }
     }
+
+    fn restore_join(&self, json: String) {
+        let mut inner = self.lock();
+        if inner.join.is_none() {
+            inner.join = Some(json);
+        }
+    }
+
+    /// Give back toggles that were not delivered.
+    ///
+    /// Added rather than replaced, unlike every other slot here: these are
+    /// edges, and one that failed to cross plus one that arrived while it was
+    /// failing are two presses, both of which the operator made.
+    fn restore_qr_toggles(&self, count: usize) {
+        self.lock().qr_toggles += count;
+    }
+}
+
+/// One frame's worth of everything waiting to cross.
+struct Pending {
+    reveal: Option<bool>,
+    join: Option<String>,
+    payload: Option<String>,
+    qr_toggles: usize,
 }
 
 /// What one frame of [`pump_host_lobby`] did.
@@ -187,10 +253,21 @@ pub struct HostLobbyPumpReport {
 /// that owns `window.__phoenixHostLobbyApply` has not run, so every push would
 /// throw and the state it carried would have to be retried anyway.
 ///
-/// The reveal is pushed **before** the state, so that a frame carrying both
-/// paints once with both answers rather than painting the phase's answer and
-/// then correcting it. (`host_lobby_boot.js` renders nothing until a payload has
-/// arrived, so a lone reveal on the first frame is free.)
+/// The order within a frame is the order the page has to hear them in:
+///
+/// 1. **the reveal**, before the state whose meaning it changes, so a frame
+///    carrying both paints once with both answers rather than painting the
+///    phase's answer and then correcting it;
+/// 2. **the join invitation**, before the state that decides whether the panel
+///    carrying it is on screen;
+/// 3. **the lobby state**, which carries the phase, and with it the join
+///    panel's show/hide law;
+/// 4. **QR toggles last**, because an operator's press is their answer to the
+///    phase, not the other way round. Applied before the state, a toggle in the
+///    same frame as a `Lobby` push would be silently overwritten by it.
+///
+/// (`host_lobby_boot.js` renders nothing until it has something to render, so a
+/// lone reveal or a lone toggle on the first frame is free.)
 pub fn pump_host_lobby(
     bridge: &HostLobbyBridge,
     surface: &mut dyn PaneSurface,
@@ -200,10 +277,14 @@ pub fn pump_host_lobby(
         return report;
     }
 
-    let (reveal, payload) = bridge.take_pending();
+    let pending = bridge.take_pending();
+    // Once one push has thrown, the page has no bridge yet and the rest of the
+    // frame would throw identically — replacing the reported failure with a
+    // copy of itself and costing three more `evaluate_script` calls on the
+    // simulation's own thread. Everything after it is deferred instead.
     let mut failed = false;
 
-    if let Some(flag) = reveal {
+    if let Some(flag) = pending.reveal {
         match surface.push(&host_lobby_reveal_script(flag)) {
             Ok(()) => report.pushed += 1,
             Err(e) => {
@@ -215,10 +296,24 @@ pub fn pump_host_lobby(
         }
     }
 
-    if let Some(json) = payload {
-        // A failed reveal means the page has no bridge yet, so the state push
-        // would fail too — and attempting it would replace the reported failure
-        // with an identical second one. Defer it instead.
+    if let Some(json) = pending.join {
+        if failed {
+            report.deferred += 1;
+            bridge.restore_join(json);
+        } else {
+            match surface.push(&host_lobby_join_script(&json)) {
+                Ok(()) => report.pushed += 1,
+                Err(e) => {
+                    report.push_failure = Some(e);
+                    report.deferred += 1;
+                    bridge.restore_join(json);
+                    failed = true;
+                }
+            }
+        }
+    }
+
+    if let Some(json) = pending.payload {
         if failed {
             report.deferred += 1;
             bridge.restore_payload(json);
@@ -229,6 +324,27 @@ pub fn pump_host_lobby(
                     report.push_failure = Some(e);
                     report.deferred += 1;
                     bridge.restore_payload(json);
+                    failed = true;
+                }
+            }
+        }
+    }
+
+    if pending.qr_toggles > 0 {
+        if failed {
+            report.deferred += pending.qr_toggles;
+            bridge.restore_qr_toggles(pending.qr_toggles);
+        } else {
+            for applied in 0..pending.qr_toggles {
+                match surface.push(&host_lobby_qr_toggle_script()) {
+                    Ok(()) => report.pushed += 1,
+                    Err(e) => {
+                        report.push_failure = Some(e);
+                        let unsent = pending.qr_toggles - applied;
+                        report.deferred += unsent;
+                        bridge.restore_qr_toggles(unsent);
+                        break;
+                    }
                 }
             }
         }
@@ -394,6 +510,89 @@ mod tests {
 
         let second = pump_host_lobby(&bridge, &mut surface);
         assert_eq!(second.pushed, 2, "nothing was lost across the two frames");
+    }
+
+    #[test]
+    fn the_join_invitation_crosses_before_the_state_that_decides_it_is_on_screen() {
+        // Issue #1329. Both in one frame must paint once: the panel's contents
+        // before the phase law that shows or hides the panel.
+        let bridge = HostLobbyBridge::new();
+        bridge.push_join(r#"{"kind":"code","code":"ABCDE"}"#);
+        bridge.push_lobby_state(LOBBY);
+        let mut surface = RecordingSurface::ready();
+
+        let report = pump_host_lobby(&bridge, &mut surface);
+        assert_eq!(report.pushed, 2);
+        assert!(surface.pushed[0].contains("__phoenixHostLobbyJoin("));
+        assert!(surface.pushed[0].contains("ABCDE"));
+        assert!(surface.pushed[1].contains("__phoenixHostLobbyApply("));
+    }
+
+    #[test]
+    fn a_newer_invitation_replaces_the_one_that_had_not_crossed_yet() {
+        // A rotated or reclaimed code makes the previous one WRONG, not merely
+        // older: a snapshot, like the lobby state beside it.
+        let bridge = HostLobbyBridge::new();
+        bridge.push_join(r#"{"kind":"off"}"#);
+        bridge.push_join(r#"{"kind":"code","code":"ABCDE"}"#);
+        let mut surface = RecordingSurface::ready();
+
+        pump_host_lobby(&bridge, &mut surface);
+        assert_eq!(surface.pushed.len(), 1);
+        assert!(surface.pushed[0].contains("ABCDE"));
+    }
+
+    #[test]
+    fn a_phones_qr_toggle_is_applied_after_the_phase_it_is_answering() {
+        // The operator's press is their answer to the phase, not the other way
+        // round. Pushed before the state, a toggle in the same frame as a
+        // `Lobby` push would be silently overwritten by the phase law.
+        let bridge = HostLobbyBridge::new();
+        bridge.push_lobby_state(LOBBY);
+        bridge.push_qr_toggle();
+        let mut surface = RecordingSurface::ready();
+
+        let report = pump_host_lobby(&bridge, &mut surface);
+        assert_eq!(report.pushed, 2);
+        assert!(surface.pushed[0].contains("__phoenixHostLobbyApply("));
+        assert_eq!(surface.pushed[1], "window.__phoenixHostLobbyQrToggle()");
+    }
+
+    #[test]
+    fn two_presses_in_one_frame_are_two_flips_and_not_one() {
+        // The one edge on this bridge. Collapsing them the way the snapshot
+        // slots collapse would turn a double-press into a single one — and a
+        // double-press is how an operator lands back where they started.
+        let bridge = HostLobbyBridge::new();
+        bridge.push_qr_toggle();
+        bridge.push_qr_toggle();
+        let mut surface = RecordingSurface::ready();
+
+        let report = pump_host_lobby(&bridge, &mut surface);
+        assert_eq!(report.pushed, 2);
+        assert_eq!(surface.pushed.len(), 2);
+        assert!(!bridge.has_pending());
+    }
+
+    #[test]
+    fn a_toggle_that_could_not_cross_is_kept_rather_than_swallowed() {
+        // A press that vanished into a document still loading its modules is a
+        // press the operator made and the room never saw.
+        let bridge = HostLobbyBridge::new();
+        bridge.push_qr_toggle();
+        let mut surface = RecordingSurface::ready();
+        surface.failing_pushes = 1;
+
+        let first = pump_host_lobby(&bridge, &mut surface);
+        assert_eq!(first.pushed, 0);
+        assert_eq!(first.deferred, 1);
+        assert!(bridge.has_pending());
+
+        // …and a second press while it was failing is a SECOND flip, added to
+        // the one held back rather than replacing it.
+        bridge.push_qr_toggle();
+        let second = pump_host_lobby(&bridge, &mut surface);
+        assert_eq!(second.pushed, 2);
     }
 
     #[test]

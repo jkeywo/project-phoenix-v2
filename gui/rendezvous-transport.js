@@ -120,24 +120,23 @@ import {
   relayPeerStub,
 } from './rendezvous-relay.js';
 import { defaultTransportLevers } from './transport-levers.js';
+import { DEV_RENDEZVOUS_URL, joinUrlForCode } from './join-url.js';
 
 /** Re-exported so a consumer of this module needs only one import. */
 export { RENDEZVOUS_PROTOCOL };
 
 /**
- * The dev rendezvous service. One hardcoded literal, in the same shape as the
- * TURN worker's at gui/connection-manager.js — keep it a whole string rather
- * than building it from parts, because a deploy-time URL sweep can only find a
- * literal.
+ * The service's own URL and the join link a code points at both live in
+ * `gui/join-url.js` now (issue #1329), and are re-exported here unchanged so
+ * that every importer of this module — and `window.rendezvousTransport` — sees
+ * them exactly where they were.
  *
- * NOTE, and this is the honest state of it: no such sweep exists for THIS
- * literal yet, and worker-rendezvous/ has never been deployed.
- * .github/workflows/deploy-demo.yml sweeps `DEV_TURN_URL` only. Both are open
- * items in docs/delivery-checklist.md §3a, and since #1112 they are BLOCKING
- * rather than cosmetic: PeerJS is gone, so a build pointed at a service that is
- * not there has no join path at all.
+ * They moved because the native host's lobby surface has to build a join URL (it
+ * draws the QR) while speaking no WebRTC whatsoever: its host does the transport
+ * in Rust. Loading this whole module there, to concatenate a string, would have
+ * been the wrong dependency in the wrong direction.
  */
-export const DEV_RENDEZVOUS_URL = 'https://phoenix-rendezvous.project-phoenix.workers.dev';
+export { DEV_RENDEZVOUS_URL, joinUrlForCode };
 
 /** Label of the reliable ordered channel: commands and reliable messages. */
 export const RELIABLE_CHANNEL = 'reliable';
@@ -294,21 +293,8 @@ export function socketUrl(base, path) {
   return url.toString();
 }
 
-/**
- * The link a QR encodes and a guest reads aloud: the client page with the full
- * structured code in the fragment. There is no QR *scanner* in the product —
- * the phone's own camera opens this URL — so "QR entry" and "pasted full code"
- * are the same string arriving by two routes.
- */
-export function joinUrlForCode(pageHref, fullCode, base = DEV_RENDEZVOUS_URL) {
-  const dir = String(pageHref).replace(/[?#].*$/, '').replace(/[^/]*$/, '');
-  // Only a non-default service needs saying: the built-in one is what a bare
-  // structured code already implies, and a shorter URL is a shorter QR.
-  const search = base && base !== DEV_RENDEZVOUS_URL
-    ? `?rendezvous=${encodeURIComponent(base)}`
-    : '';
-  return `${dir}client/index.html${search}#${fullCode}`;
-}
+// `joinUrlForCode` moved to gui/join-url.js (issue #1329) and is imported and
+// re-exported above.
 
 /** Default factories; overridable for tests and for a native in-process host. */
 export function defaultFactories() {

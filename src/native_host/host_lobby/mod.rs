@@ -33,8 +33,9 @@
 //!
 //! | piece | what it decides |
 //! |---|---|
-//! | [`document`] | what the surface loads: the host page's own `#lobby-panel`, assembled in memory and served at the host page's own depth |
+//! | [`document`] | what the surface loads: the host page's own `#lobby-panel` and `#qr-panel`, assembled in memory and served at the host page's own depth |
 //! | [`bridge`] | what crosses, in both directions, and what a failed push costs |
+//! | [`join`] | what the join panel says, and where its QR points |
 //! | [`reveal`] | when the surface is on screen, and when it has yielded |
 //! | this file | the Bevy wiring, and [`LocalHostLobby`], which the binary assembles after its listener has bound |
 //!
@@ -50,8 +51,18 @@
 //!
 //! It is created once and never torn down. On mission start the *chrome*
 //! yields — see [`reveal`] — and one host key ([`HOST_LOBBY_REVEAL_KEY`])
-//! brings it back. Later slices put the QR overlay, the settings and the layout
-//! rows on this same surface, so nothing downstream should learn to rebuild it.
+//! brings it back. The join QR arrived on this same surface in issue #1329, and
+//! the settings and layout rows follow, so nothing downstream should learn to
+//! rebuild it.
+//!
+//! One consequence is worth stating plainly, because it is the shape of the
+//! native answer rather than an omission: **in play, the QR is visible only
+//! while the surface is revealed.** The view is composited into an opaque
+//! texture (its body is painted; see [`document`]), so there is no way to float
+//! a QR alone over a running viewscreen the way a browser host does — showing
+//! the code means showing the surface. F9 is therefore the in-play "show the
+//! join code" gesture, and a phone's toggle sets what the operator sees when
+//! they press it.
 //!
 //! # It is under the panes, so a tiled host never sees it
 //!
@@ -66,6 +77,7 @@
 
 pub mod bridge;
 pub mod document;
+pub mod join;
 pub mod reveal;
 
 use bevy::prelude::*;
@@ -79,6 +91,7 @@ use crate::native_host::panes::PaneId;
 
 pub use bridge::{pump_host_lobby, HostLobbyBridge, HostLobbyPumpReport};
 pub use document::{build_host_lobby_document, HostLobbyDocumentError};
+pub use join::JoinInvite;
 pub use reveal::{RevealState, SurfacePresence};
 
 /// The host key that reveals and hides the lobby surface during play.
@@ -127,6 +140,39 @@ pub struct HostLobbyBridgeResource(pub HostLobbyBridge);
 #[derive(Resource, Clone, Default)]
 pub struct HostLobbyRevealResource(pub RevealState);
 
+/// Everything needed to turn an issued join code into an invitation
+/// (issue #1329).
+///
+/// A resource rather than a field on [`LocalHostLobby`], because the second
+/// half of it — which rendezvous service this host registered with — is not
+/// known when the surface is opened. The listener has to be bound before the
+/// document can be published, and the relay socket is dialled after that.
+///
+/// Installed only by a host that has a lobby surface. A delivery-only or
+/// headless host has nothing to put an invitation on.
+#[derive(Resource, Clone)]
+pub struct HostLobbyJoinResource {
+    /// See [`LocalHostLobby::join_base`].
+    pub join_base: String,
+    /// The `--rendezvous` base, verbatim, or `None` for a host nobody can join.
+    pub rendezvous: Option<String>,
+}
+
+impl HostLobbyJoinResource {
+    /// Read the surface's own answer to "where should a phone be sent".
+    pub fn from_lobby(lobby: &LocalHostLobby, rendezvous: Option<&str>) -> Self {
+        Self {
+            join_base: lobby.join_base.clone(),
+            rendezvous: rendezvous.map(str::to_string),
+        }
+    }
+
+    /// The invitation an issued code makes.
+    pub fn invite(&self, code: &crate::core::rendezvous::JoinCode) -> JoinInvite {
+        JoinInvite::from_code(code, &self.join_base, self.rendezvous.as_deref())
+    }
+}
+
 /// The lobby surface one host process owns.
 ///
 /// Assembled by `phoenix-host` **after** the delivery listener has bound,
@@ -145,18 +191,38 @@ pub struct LocalHostLobby {
     /// [`connectable_host_addr`], because the documented default bind is
     /// `0.0.0.0:8080` and nothing can dial that.
     pub host_addr: String,
+    /// The base URL a **phone** should be sent to (issue #1329).
+    ///
+    /// Deliberately NOT [`Self::host_addr`], and this is the difference the
+    /// join QR turns on: the surface's own address is loopback, because that is
+    /// what an embedded view on this machine has to dial, and it is the one
+    /// address in the building no phone can open. See [`join`] for how the
+    /// shareable one is chosen.
+    pub join_base: String,
 }
 
 impl LocalHostLobby {
     /// Open the lobby surface's side of the bridge and mint its document path.
     ///
-    /// `host_addr` is the listener's **bind** address, and is normalised here.
+    /// `host_addr` is the listener's **bind** address, and is normalised twice
+    /// here — once for the view that has to dial it, and once for the phones
+    /// that have to reach it.
     pub fn open(host_addr: impl AsRef<str>) -> Self {
+        let bound = host_addr.as_ref();
         Self {
             bridge: HostLobbyBridge::new(),
             nonce: mint_document_nonce(),
-            host_addr: connectable_host_addr(host_addr.as_ref()),
+            host_addr: connectable_host_addr(bound),
+            join_base: join::join_page_base(&join::shareable_host_addr(
+                bound,
+                join::discover_lan_addr(),
+            )),
         }
+    }
+
+    /// Tell the surface what to put in its join panel.
+    pub fn publish_join(&self, invite: &JoinInvite) {
+        self.bridge.push_join(invite.to_json());
     }
 
     /// The URL the surface's view navigates to.
@@ -418,6 +484,71 @@ mod tests {
         );
         assert!(lobby.url().ends_with(&lobby.path()));
         assert!(lobby.path().starts_with("/host-lobby-"));
+    }
+
+    #[test]
+    fn the_address_a_phone_is_sent_to_is_not_the_one_the_view_dialled() {
+        // Issue #1329, and the whole reason `join_base` exists beside
+        // `host_addr`: the surface loads over loopback because that is what an
+        // embedded view on this machine can dial, and a QR built from THAT
+        // encodes the one address in the room no phone can open.
+        //
+        // Which address the discovery finds depends on the machine running the
+        // test, so what is asserted is the shape and the port — the parts that
+        // are decisions rather than environment.
+        let lobby = LocalHostLobby::open("0.0.0.0:8080");
+        assert!(lobby.join_base.starts_with("http://"));
+        assert!(
+            lobby.join_base.ends_with(":8080/"),
+            "the port the listener bound, and the trailing slash the URL builder needs: {}",
+            lobby.join_base
+        );
+
+        // A bind that names an address is the operator's own answer and is used
+        // as given — which is also the one case with no environment in it.
+        let pinned = LocalHostLobby::open("192.168.1.5:8080");
+        assert_eq!(pinned.join_base, "http://192.168.1.5:8080/");
+    }
+
+    #[test]
+    fn an_issued_join_code_reaches_the_surface_as_the_page_can_use_it() {
+        // The bridge plumbing for issue #1329's AC1: the code the relay was
+        // issued becomes a push the document's own `__phoenixHostLobbyJoin`
+        // answers, carrying the letters, the structured code and the address a
+        // phone should be sent to.
+        let lobby = LocalHostLobby::open("192.168.1.5:8080");
+        let code = crate::core::rendezvous::JoinCode {
+            full: "PHX-1-ABCDE".to_string(),
+            suffix: "ABCDE".to_string(),
+            ..Default::default()
+        };
+        let join = HostLobbyJoinResource::from_lobby(&lobby, None);
+        lobby.publish_join(&join.invite(&code));
+
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        pump_host_lobby(&lobby.bridge, &mut surface);
+        assert_eq!(surface.pushed.len(), 1);
+        let pushed = &surface.pushed[0];
+        assert!(pushed.starts_with("window.__phoenixHostLobbyJoin("));
+        assert!(pushed.contains("ABCDE"));
+        assert!(pushed.contains("PHX-1-ABCDE"));
+        assert!(pushed.contains("http://192.168.1.5:8080/"));
+    }
+
+    #[test]
+    fn a_host_with_no_join_service_says_so_rather_than_showing_a_dead_qr() {
+        // `--solo`, or no `--rendezvous` (issue #1329 AC2). The crew must not be
+        // stood in front of the viewscreen scanning something that can never
+        // work, and "no code yet" must not look like "no code ever".
+        let lobby = LocalHostLobby::open("0.0.0.0:8080");
+        lobby.publish_join(&JoinInvite::Off);
+
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        pump_host_lobby(&lobby.bridge, &mut surface);
+        assert_eq!(
+            surface.pushed,
+            vec![r#"window.__phoenixHostLobbyJoin('{"kind":"off"}')"#.to_string()]
+        );
     }
 
     #[test]

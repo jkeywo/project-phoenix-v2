@@ -13,12 +13,13 @@
 //
 // WHAT IT DOES NOT DO, and why that is worth saying:
 //
-//   - It does not seed an identity. There is none. This surface is READ-ONLY in
-//     this slice and holds no session token: it renders the lobby the host is
-//     already broadcasting and sends nothing back. The page->host queue below
-//     is plumbing for the slices that will (a QR overlay, settings, layout
-//     rows), and it is installed now so the bridge has one shape rather than
-//     growing a second one later.
+//   - It does not seed an identity. There is none. This surface holds no
+//     session token: it renders the lobby the host is already broadcasting, and
+//     the one control it has (the QR toggle, issue #1329) acts on this
+//     document's own DOM rather than sending anything. The page->host queue
+//     below is plumbing for the slices that WILL send — scenario and ship pick,
+//     the monitor rows — and it is installed now so the bridge has one shape
+//     rather than growing a second one later.
 //   - It does not replace requestAnimationFrame. pane_boot.js has to, because
 //     the client page's render loop is `scheduleRender()` -> rAF and an
 //     offscreen Ultralight view only services rAF as part of a rendering
@@ -35,6 +36,14 @@
     payload: null,
     revealChrome: false,
     render: null,
+    // The join panel's half of the same arrangement (issue #1329). `join` is
+    // the last invitation pushed — a snapshot, like the payload above.
+    // `qrPending` is NOT a snapshot: it counts presses of a phone's QR toggle
+    // that have not been applied yet, because two presses are two flips and
+    // collapsing them would turn a double-press into a single one.
+    join: null,
+    qrPending: 0,
+    renderJoin: null,
   };
   window.__phoenixHostLobby = lobby;
 
@@ -64,5 +73,34 @@
   window.__phoenixHostLobbyReveal = function (flag) {
     lobby.revealChrome = String(flag) === 'true';
     lobby.paint();
+  };
+
+  lobby.paintJoin = function () {
+    if (!lobby.renderJoin) return;
+    try {
+      var pending = lobby.qrPending;
+      // Cleared BEFORE the call, not after: a throw inside renderJoin would
+      // otherwise leave the presses queued and re-apply them on the next push,
+      // flipping the panel for reasons nobody in the room can see.
+      lobby.qrPending = 0;
+      lobby.renderJoin(lobby.join, pending);
+    } catch (e) {
+      console.error('[host-lobby] join render failed', e);
+    }
+  };
+
+  // Host -> page: one encoded JoinInvite (native_host::host_lobby::join) —
+  // the crew's code, and where a phone that scans it should go.
+  window.__phoenixHostLobbyJoin = function (json) {
+    lobby.join = json;
+    lobby.paintJoin();
+  };
+
+  // Host -> page: somebody pressed the QR toggle on a phone. No argument: the
+  // panel's visibility lives in the DOM (gui/host-qr.js reads #overlay), so
+  // there is nothing for the host to have an opinion about.
+  window.__phoenixHostLobbyQrToggle = function () {
+    lobby.qrPending += 1;
+    lobby.paintJoin();
   };
 })();

@@ -301,6 +301,23 @@ cargo build --release --features host --bin phoenix-host
 #     fullscreen only on a mode change), and BridgeLayoutResource::notices is
 #     APPENDED to by every writer and drained by publish_bridge_layout, so a
 #     press racing a console surrender cannot erase either sentence.
+#     TWO CONSOLES PER SCREEN (#1332): rule 3's cap counts a monitor's SEATS
+#     AND its reserved_on surfaces together (BridgeLayout::occupant_count), so a
+#     screen holding a hand-authored --pane console has ONE free slot and one
+#     holding two has none — assign, Excluded(Full) and free_slots all read that
+#     one count, and MonitorFull names the authored labels beside the station
+#     ids. A monitor has exactly ONE Station window, so the runtime console
+#     SHARES it: BridgeLayout::surface_rects tiles the WHOLE occupancy in one
+#     pane_rects call (reserved first, then seats in seat order) and
+#     follow_layout_stations writes that over the surface wholesale. Before
+#     this, two tilings each took the full rectangle and the pair OVERLAPPED.
+#     A console whose rectangle changed where it stood — the NEIGHBOUR nobody
+#     asked to move — is rebuilt on its own token like any move and now SAYS so
+#     (LayoutAdoption::ConsoleRetiling on the row); a console whose MONITOR
+#     changed is the operator's own press and stays silent. The rebuilt page
+#     reclaims its seat through handle_identify's reconnect-yield ON THE SAME
+#     TOKEN, but only while nobody else claimed it during the page load — that
+#     gap is #1125's, disclosed rather than removed.
 #   --manifest also narrows what this process FLIES, not only what it publishes:
 #     with a curating manifest in force the default hull is drawn from that
 #     manifest's allowlist (issue #917). An explicit --ship still wins.

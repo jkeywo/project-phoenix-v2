@@ -18,6 +18,38 @@
 //! It briefly takes over the screen(s) it covers, which is the nature of the
 //! proof; it exits the instant it has verified the geometry.
 //!
+//! # What a real run still has to show for the 2-up split (issue #1332)
+//!
+//! What this test proves is the part a machine can judge: that a surface covers
+//! the display it was assigned, at that display's geometry. Everything issue
+//! #1332 decides *about* a screen holding two consoles is decided in code that
+//! runs headlessly — the law's occupancy, capacity and greying in
+//! `src/native_host/bridge_layout.rs`, the single tiling and the re-tile rebuild
+//! in `follow_layout_stations`, the row in
+//! `tests/client/host-lobby-view.test.js` — because none of it needs a pixel.
+//!
+//! Three claims are left that only real monitors can settle, and they belong in
+//! issue #1335's guided acceptance kit rather than here, because each one ends
+//! in a person saying whether what they are looking at is right:
+//!
+//! * **Both halves are operable.** Two consoles side by side on one physical
+//!   screen, each taking touch and keyboard on its own half — the routing is
+//!   #1124's `route_touch_input`, and only a finger proves the boundary is where
+//!   the rectangle says it is. A screen shared by a hand-authored `--pane`
+//!   console and a lobby-opened one is the same claim with both kinds on it.
+//! * **The split is legible at bridge distance.** That is what
+//!   `MAX_PANES_PER_STATION = 2` exists to bound, and it is a judgement about a
+//!   room rather than about a number.
+//! * **The re-tile blink is tolerable.** Seating a second console rebuilds the
+//!   first (`LayoutAdoption::ConsoleRetiling`); the seat comes back on the same
+//!   token, but how long the page takes to load — and whether the operator's
+//!   notice arrives before the crew member asks what happened — is a stopwatch
+//!   question on real hardware.
+//!
+//! Running this file's own test with a `--profile` that seats two panes on one
+//! monitor is the nearest automated approximation: it confirms that the Station
+//! window the two halves are composited onto does cover its display.
+//!
 //! # Why it is one app, not two
 //!
 //! winit's event loop can be created **once per process**, so the test cannot

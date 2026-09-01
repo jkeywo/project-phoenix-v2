@@ -837,6 +837,24 @@ fn spawn_station_window(commands: &mut Commands, monitor: Entity, identity: &str
 /// the page claims its station through the ordinary lobby flow, and may be
 /// released and re-claimed by anyone.
 ///
+/// # Every console on a monitor is laid out together (issue #1332)
+///
+/// A monitor's rectangles come from ONE
+/// [`BridgeLayout::surface_rects`](super::bridge_layout::BridgeLayout::surface_rects)
+/// call over its whole occupancy — the authored surfaces a `--profile` opened
+/// *and* the stations the layout seats — rather than a station tiling laid
+/// beside whatever was already there. Two tilings is precisely what produced
+/// issue #1331's carried defect: an authored `--pane` was spawned across its
+/// whole monitor at boot, the law let a station be seated on that same screen
+/// because it counted only seats, and this pass then handed the newcomer the
+/// full rectangle too — two consoles **overlapping** instead of tiling.
+///
+/// The fix has two halves and they only work together. The law counts a reserved
+/// surface against the two-per-screen cap, so a mixed monitor holds at most two;
+/// and this pass rewrites **all** of a monitor's panes, so the authored one
+/// yields half its screen instead of being tiled around. An authored pane is
+/// still not the layout's to open, move or close — only to *place*.
+///
 /// # Moving one is rebuilding it, on the same identity
 ///
 /// An Ultralight view is created at one size on one window, so a console that
@@ -847,12 +865,29 @@ fn spawn_station_window(commands: &mut Commands, monitor: Entity, identity: &str
 /// survives, so the rebuilt page's `Identify` is a reconnect the lobby answers
 /// by restoring the held station. Whoever claimed that console keeps it across
 /// the move, with the same moment on `Backfill` a view crash costs.
-// Eight parameters, and every one is a distinct thing this pass reads, writes or
+///
+/// # …and a console nobody moved says so out loud
+///
+/// That rebuild is the price of the operator's own press for the console they
+/// pressed for. For its **neighbour** — a person who pressed nothing, whose
+/// screen blinks and whose seat is claimable by somebody else for one page load
+/// — it is a surprise, and the PRD's "reassignment must not steal seats
+/// gratuitously" is why it is announced rather than absorbed. The two are told
+/// apart by the evidence this pass already has: a console whose *monitor*
+/// changed was moved, and one whose *rectangle* changed on the monitor it was
+/// already on was re-tiled. The latter earns a
+/// [`LayoutAdoption::ConsoleRetiling`](super::bridge_layout::LayoutAdoption::ConsoleRetiling)
+/// on the lobby's row.
+// Nine parameters, and every one is a distinct thing this pass reads, writes or
 // remembers — the same reason `watch_runtime_displays` carries nine.
 #[allow(clippy::too_many_arguments)]
 fn follow_layout_stations(
     monitors: Query<(Entity, &Monitor, Has<PrimaryMonitor>)>,
-    layout: Option<Res<BridgeLayoutResource>>,
+    // `ResMut` only for the re-tiling notice at the end (issue #1332). Nothing
+    // here edits the arrangement — that is the law's, and this pass follows it —
+    // and the resource is deref'd immutably everywhere else, so a frame with
+    // nothing to report does not mark it changed and does not schedule a push.
+    layout: Option<ResMut<BridgeLayoutResource>>,
     surfaces: Option<ResMut<BridgeStationSurfaces>>,
     bus: Option<Res<crate::native_host::panes::PaneBusResource>>,
     // The Station windows this pass has already opened, so one whose display
@@ -882,7 +917,7 @@ fn follow_layout_stations(
     for window in pending_close.drain(..) {
         commands.entity(window).try_despawn();
     }
-    let (Some(layout), Some(mut surfaces)) = (layout, surfaces) else {
+    let (Some(mut layout), Some(mut surfaces)) = (layout, surfaces) else {
         return;
     };
 
@@ -957,61 +992,69 @@ fn follow_layout_stations(
     // the rectangle its view was built for. Both halves matter: a console that
     // changed either has a view sized and placed for a seat it no longer has,
     // and rebuilding it is what makes a move a move.
-    let carried: Vec<(crate::core::messages::StationId, String, PaneRect)> = surfaces
+    //
+    // Keyed by the pane's LABEL and covering authored panes as well as seated
+    // ones (issue #1332), because a re-tile moves an authored `--pane`'s
+    // rectangle exactly as it moves a station's, and its view is just as unable
+    // to follow. The label is the one key the pane bus resolves either kind by.
+    let carried: Vec<(String, String, PaneRect)> = surfaces
         .0
         .iter()
         .flat_map(|s| {
             s.panes
                 .iter()
-                .filter_map(|p| p.station.clone().map(|st| (st, s.identity.clone(), p.rect)))
+                .map(|p| (p.label.clone(), s.identity.clone(), p.rect))
         })
         .collect();
 
-    // ── the layout's seating, monitor by monitor ────────────────────────────
+    // ── the layout's occupancy, monitor by monitor ──────────────────────────
     //
-    // The one thing worked out here is which consoles MOVED: a console whose
-    // monitor or rectangle changed has a view built for a seat it no longer has.
-    // Whether a console needs OPENING is not a diff at all — it is asked of the
-    // bus, below, for every station the layout seats.
-    let mut reseated: Vec<(crate::core::messages::StationId, MonitorIdentity)> = Vec::new();
+    // The one thing worked out here is which consoles have a view built for a
+    // seat they no longer have, and which of the two reasons it is for: the
+    // operator MOVED this one (its monitor changed), or a neighbour arriving or
+    // leaving RE-TILED it (its rectangle changed where it stood). Whether a
+    // console needs OPENING is not a diff at all — it is asked of the bus, below,
+    // for every station the layout seats.
+    let mut reseated: Vec<(String, MonitorIdentity)> = Vec::new();
+    let mut retiled: Vec<(String, MonitorIdentity)> = Vec::new();
     for (entity, discovered, geometry) in &present {
         let identity = &discovered.identity;
         // The deterministic split, resolved against this monitor's real
         // geometry: one console is the whole screen, two divide it side by side.
-        // Recomputed for the WHOLE monitor rather than per console, because
-        // seating a second console re-lays out the first — and the first's view
-        // then has to be rebuilt at its new half, which is what `reseated` is.
-        let seats = layout.layout.station_rects(identity, geometry);
+        // Recomputed for the WHOLE monitor and over its WHOLE occupancy — the
+        // authored surfaces it carries as well as the stations the law seats —
+        // because seating a second console re-lays out the first whichever kind
+        // the first is, and a tiling that skipped the authored one would hand two
+        // panes the same pixels.
+        let occupancy = layout.layout.surface_rects(identity, geometry);
         let existing = surfaces
             .0
             .iter()
             .position(|s| s.identity == identity.as_str());
-        if seats.is_empty() && existing.is_none() {
+        if occupancy.is_empty() && existing.is_none() {
             continue;
         }
-        let panes: Vec<StationPane> = seats
+        let panes: Vec<StationPane> = occupancy
             .into_iter()
-            .map(|(station, rect)| StationPane {
-                label: station.0.clone(),
+            .map(|(occupant, rect)| StationPane {
+                label: occupant.name().to_string(),
                 rect,
-                station: Some(station),
+                station: occupant.station().cloned(),
             })
             .collect();
         for pane in &panes {
-            let Some(station) = &pane.station else {
+            // A console this pass has never seen is simply opened below; one it
+            // has seen elsewhere, or at another size, has a view built for that
+            // seat and cannot be re-placed into this one.
+            let Some((_, was_on, was_at)) =
+                carried.iter().find(|(label, _, _)| label == &pane.label)
+            else {
                 continue;
             };
-            // A console this pass has never seen is simply opened below; one it
-            // has seen in a DIFFERENT seat has a view built for that seat.
-            let moved =
-                carried
-                    .iter()
-                    .find(|(s, _, _)| s == station)
-                    .is_some_and(|(_, was_on, was_at)| {
-                        was_on != identity.as_str() || was_at != &pane.rect
-                    });
-            if moved {
-                reseated.push((station.clone(), identity.clone()));
+            if was_on != identity.as_str() {
+                reseated.push((pane.label.clone(), identity.clone()));
+            } else if was_at != &pane.rect {
+                retiled.push((pane.label.clone(), identity.clone()));
             }
         }
         match existing {
@@ -1045,13 +1088,24 @@ fn follow_layout_stations(
                          station window is re-anchored to it"
                     );
                 }
-                // An authored participant's pane is not this system's to move:
-                // it keeps its slot, and the station consoles are replaced
-                // around it. (A monitor carrying both is only reachable through
-                // a `--profile` plus a lobby press; the 2-up composition of that
-                // pair is issue #1332's.)
-                surface.panes.retain(|p| p.station.is_none());
-                surface.panes.extend(panes);
+                // REPLACED WHOLESALE, authored panes included (issue #1332).
+                //
+                // It used to retain the authored panes and rebuild only the
+                // station ones around them, which is what let a station's console
+                // be laid across an authored one. The law's occupancy is now the
+                // whole truth about what is on a screen, so the surface is its
+                // rendering and nothing more: `surface_rects` above already
+                // carried the authored slots forward, at their share of the
+                // screen, in the order they have held since boot.
+                //
+                // The two lists cannot drift apart. A Station surface exists only
+                // for a monitor an authored `--profile` named, `adopt_profile`
+                // reserved that profile's participant panes on the same monitors
+                // at boot, and `reconcile` carries a surviving monitor's
+                // reservations forward — a monitor that goes away loses its
+                // surface, its reservation and (through the #1125 watcher) its
+                // authored panes together.
+                surface.panes = panes;
             }
             None => {
                 let window = spawn_station_window(&mut commands, *entity, identity.as_str());
@@ -1162,37 +1216,65 @@ fn follow_layout_stations(
     // the new view against the surfaces this pass just rewrote, so it lands on
     // the screen the operator chose. The gap in between is the same one a view
     // crash has: a moment on `Backfill` while the page loads.
-    for (station, monitor) in &reseated {
-        let Some(pane) = bus.0.open_pane_for_name(&station.0) else {
+    //
+    // Moved and re-tiled consoles are rebuilt by the SAME two calls — the work is
+    // identical and the reason is the same lost rectangle. What differs is only
+    // what is *said* about them: `announce` is the re-tiled ones, the consoles
+    // nobody asked to move (see this function's note). The notice is raised HERE
+    // rather than from `retiled` directly, so it is only ever said about a
+    // console that really was rebuilt — a pane the bus does not have yet
+    // reconnects nothing, and promising a reconnect for it would be a sentence
+    // the code does not honour.
+    let mut retile_notices: Vec<LayoutNotice> = Vec::new();
+    for (console, monitor, announce) in reseated
+        .iter()
+        .map(|(c, m)| (c, m, false))
+        .chain(retiled.iter().map(|(c, m)| (c, m, true)))
+    {
+        let Some(pane) = bus.0.open_pane_for_name(console) else {
             // Nothing to rebuild. The open sweep below asks the bus about every
             // seated station, so this one is simply opened there.
             continue;
         };
+        if announce {
+            crate::pinfo!(
+                log,
+                LogCat::Lobby,
+                "bridge display: monitor {monitor}'s split changed, so {console:?}'s console is \
+                 re-tiling and will reconnect on the same identity"
+            );
+            retile_notices.push(LayoutNotice::Adopted(
+                super::bridge_layout::LayoutAdoption::ConsoleRetiling {
+                    console: console.clone(),
+                    monitor: monitor.clone(),
+                },
+            ));
+        }
         bus.0.close(pane);
         match bus.0.recreate(pane) {
             Some((rebuilt, _url)) => crate::pinfo!(
                 log,
                 LogCat::Lobby,
-                "bridge display: station {:?}'s console moved to monitor {monitor}; its view is \
-                 rebuilt as {rebuilt} on the same identity, so whoever claimed it keeps it",
-                station.0
+                "bridge display: {console:?}'s console is now on monitor {monitor}; its view is \
+                 rebuilt as {rebuilt} on the same identity, so whoever claimed it keeps it"
             ),
             // `recreate` refuses a pane the registry cannot resolve, or one that
             // is not `Closed` — neither of which the line above can produce, so
             // this is a defensive arm rather than a reachable state. What it says
             // is nonetheless what the CODE then does, which is the only thing an
-            // operator log may say: the console was closed, so the open sweep
-            // immediately below finds the layout seating a station with no pane
-            // and mints a FRESH one. The console comes back on the screen the
-            // operator chose; what does not come back is the identity, so
-            // whoever had claimed it has to claim it again.
+            // operator log may say: the console was closed, and only a STATION's
+            // comes back on its own — the open sweep immediately below finds the
+            // layout seating it with no pane and mints a FRESH one, on the screen
+            // the operator chose but not on the old identity. An authored
+            // `--pane`'s console is nothing's to reopen, so it says so rather
+            // than promising a return.
             None => crate::pwarn!(
                 log,
                 LogCat::Lobby,
-                "bridge display: station {:?}'s console moved to monitor {monitor} but its own \
-                 identity could not be carried across; a fresh console opens there instead, so \
-                 whoever had claimed it must claim it again",
-                station.0
+                "bridge display: {console:?}'s console is now on monitor {monitor} but its own \
+                 identity could not be carried across; a station's console reopens there as a \
+                 fresh one and must be claimed again, and a --pane participant's must be \
+                 restarted with the host"
             ),
         }
     }
@@ -1242,6 +1324,20 @@ fn follow_layout_stations(
         );
         false
     });
+
+    // ── and say so, for the consoles nobody asked to move (issue #1332) ──────
+    //
+    // APPENDED, like every other writer of this list, and it marks the resource
+    // changed — which is exactly how the notice reaches the row, because
+    // `publish_bridge_layout` only pushes a layout that changed. The cost is one
+    // extra pass next frame, which finds the rectangles it just wrote, re-tiles
+    // nothing, says nothing and settles.
+    //
+    // LAST in the pass, after the window sweep, so a frame that surrenders every
+    // console on a screen has already finished with it before the row is told.
+    if !retile_notices.is_empty() {
+        layout.notices.extend(retile_notices);
+    }
 }
 
 /// How many consecutive frames a seated station may have no console on screen
@@ -3642,6 +3738,333 @@ mod tests {
         assert!(
             bus.transport().poll().is_empty(),
             "nobody was disconnected by the unplug of a screen they were not on"
+        );
+    }
+
+    // ── two consoles on one screen (issue #1332) ────────────────────────────
+    //
+    // #1331 tiled two SEATED consoles because the geometry was free, and carried
+    // two things forward. First the overlap: the law counted only seats, so a
+    // screen already holding a hand-authored `--pane` console offered a station a
+    // slot and the adapter then laid the newcomer across the whole monitor on top
+    // of it. Second the neighbour rebuild: a console nobody moved loses its
+    // rectangle when one arrives beside it or leaves, so its page reloads and its
+    // crew member spends that load on `Backfill`.
+
+    /// A three-screen host booted from an AUTHORED `--profile` that opens a
+    /// **participant** pane for `Ada` on the BenQ — the `--pane`-shaped profile.
+    ///
+    /// The one shape in which a screen carries a console the layout may lay out
+    /// but never seat, move or close.
+    fn participant_pane_host() -> (App, crate::native_host::panes::transport::PaneBus) {
+        use crate::native_host::bridge_profile::{PaneSlot, ROLE_STATION};
+        use crate::native_host::panes::identity::PaneIdentity;
+        use crate::native_host::panes::transport::PaneBus;
+        use crate::native_host::panes::PaneBusResource;
+
+        let profile = BridgeProfile {
+            version: PROFILE_VERSION,
+            displays: vec![
+                DisplayEntry {
+                    id: DELL.to_string(),
+                    role: ROLE_VIEWSCREEN.to_string(),
+                    split: None,
+                    panes: Vec::new(),
+                },
+                DisplayEntry {
+                    id: BENQ.to_string(),
+                    role: ROLE_STATION.to_string(),
+                    split: None,
+                    panes: vec![PaneSlot::for_participant("Ada")],
+                },
+            ],
+            touch: Vec::new(),
+            media: Vec::new(),
+        }
+        .validate()
+        .expect("a viewscreen and a one-participant display validate");
+
+        let mut app = App::new();
+        app.add_plugins(BridgeDisplayPlugin);
+        let bus = PaneBus::default();
+        app.insert_resource(PaneBusResource(bus.clone()));
+        app.insert_resource(BridgeDisplayConfig {
+            profile,
+            authored: true,
+        });
+        app.insert_resource(crate::ship::components::PendingShipConfig(
+            toml::from_str(
+                r#"
+                [[station]]
+                id = "helm"
+                name = "Helm"
+                description = "-"
+                rank = "Crew"
+
+                [[station]]
+                id = "weapons"
+                name = "Tactical"
+                description = "-"
+                rank = "Crew"
+                "#,
+            )
+            .expect("a two-station hull parses"),
+        ));
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+        app.world_mut()
+            .spawn((monitor("DELL U2720Q", 3840, 2160, 0, 0), PrimaryMonitor));
+        app.world_mut()
+            .spawn(monitor("BenQ EX", 1920, 1080, 3840, 0));
+        app.world_mut()
+            .spawn(monitor("ACME 1080", 1920, 1080, 5760, 0));
+        app.update();
+        // The `--pane` participant's own console, as `LocalPanes` opens it at
+        // boot: an ordinary pane on the bus under her name, which the layout
+        // never seated and may never close.
+        let ada =
+            bus.open(PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000042", "Ada").unwrap());
+        bus.mark_live(ada);
+        bus.take_pending_views();
+        (app, bus)
+    }
+
+    /// The rectangle a named pane occupies on the surface it is composited onto.
+    fn rect_of(app: &App, label: &str) -> PaneRect {
+        app.world()
+            .resource::<BridgeStationSurfaces>()
+            .slot_for(label)
+            .unwrap_or_else(|| panic!("{label} has a slot"))
+            .1
+            .rect
+    }
+
+    /// The notices the row is owed this frame, by their `strings.csv` id.
+    fn notice_ids(app: &App) -> Vec<String> {
+        row(app).notices.into_iter().map(|n| n.id).collect()
+    }
+
+    #[test]
+    fn a_console_seated_beside_an_authored_one_tiles_rather_than_covering_it() {
+        // The carried defect, end to end. Before this the law offered the BenQ
+        // (it counted only seats), took the press, and this pass then handed helm
+        // `pane_rects(count = 1)` — the WHOLE monitor — while Ada's authored slot
+        // was retained at the whole monitor too. Two consoles, one rectangle.
+        let (mut app, bus) = participant_pane_host();
+        assert_eq!(
+            rect_of(&app, "Ada").width,
+            1920,
+            "Ada has the screen to herself at boot"
+        );
+
+        seat(&mut app, "helm", BENQ);
+        app.update();
+
+        assert_eq!(
+            surfaces(&app),
+            vec![BENQ.to_string()],
+            "one window, as ever — a monitor has exactly one Station surface, so \
+             sharing it is the only honest answer"
+        );
+        let ada = rect_of(&app, "Ada");
+        let helm = rect_of(&app, "helm");
+        assert_eq!(
+            (ada.x, ada.width),
+            (0, 960),
+            "the authored one keeps the left"
+        );
+        assert_eq!((helm.x, helm.width), (960, 960));
+        assert_eq!(ada.width + helm.width, 1920, "they tile the screen exactly");
+        assert_eq!(bus.open_count(), 2, "and both consoles are live");
+    }
+
+    #[test]
+    fn an_authored_console_is_rebuilt_at_its_new_half_and_keeps_its_identity() {
+        // Laying it out is not the same as owning it. The pane is never closed
+        // by the layout and never re-minted — but its VIEW was built at one size
+        // on one window, so yielding half the screen costs it the same
+        // close+recreate a station's console pays, on the same session token.
+        let (mut app, bus) = participant_pane_host();
+        let before = bus.open_pane_for_name("Ada").expect("her console is open");
+        let token = bus.token_of(before).expect("an ordinary session token");
+
+        seat(&mut app, "helm", BENQ);
+        app.update();
+
+        let after = bus
+            .open_pane_for_name("Ada")
+            .expect("her console is still open");
+        assert_ne!(after, before, "a rebuilt view is a new handle");
+        assert_eq!(
+            bus.token_of(after).as_deref(),
+            Some(token.as_str()),
+            "on the SAME identity, so she reconnects as herself rather than as a stranger"
+        );
+        assert_eq!(
+            bus.take_pending_views()
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect::<Vec<_>>(),
+            vec![after, bus.open_pane_for_name("helm").unwrap()],
+            "one view to rebuild for her and one to build for the newcomer"
+        );
+    }
+
+    #[test]
+    fn the_console_that_was_re_tiled_is_named_on_the_row_and_the_one_that_moved_is_not() {
+        // The neighbour flap, made visible (issue #1332). The operator watched
+        // themselves seat `weapons`; what they did not ask for — and would
+        // otherwise never be told — is that `helm`'s page is reloading and
+        // `helm` is on AI control until it finishes.
+        let (mut app, _bus) = console_host();
+        seat(&mut app, "helm", BENQ);
+        app.update();
+        assert!(
+            notice_ids(&app).is_empty(),
+            "the first console on an empty screen re-tiles nothing"
+        );
+
+        seat(&mut app, "weapons", BENQ);
+        app.update();
+
+        assert_eq!(
+            notice_ids(&app),
+            vec!["server.bridge_layout.adopt_console_retiling".to_string()],
+            "exactly one line, and it is about the neighbour"
+        );
+        let notice = &row(&app).notices[0];
+        assert_eq!(
+            notice.params.get("console").map(String::as_str),
+            Some("helm"),
+            "the console nobody asked to move"
+        );
+        assert_eq!(notice.params.get("monitor").map(String::as_str), Some(BENQ));
+    }
+
+    #[test]
+    fn a_console_the_operator_moved_between_screens_is_not_announced_as_a_surprise() {
+        // The other half of the same rule, and why the two are told apart by the
+        // evidence rather than by a flag: a console whose MONITOR changed was
+        // moved by the press the operator just made. Narrating that back to them
+        // would bury the neighbour's line, which is the one that is news.
+        let (mut app, _bus) = console_host();
+        seat(&mut app, "helm", BENQ);
+        app.update();
+
+        seat(&mut app, "helm", ACME);
+        app.update();
+
+        assert!(
+            notice_ids(&app).is_empty(),
+            "the move says nothing; the operator watched themselves make it"
+        );
+    }
+
+    #[test]
+    fn moving_a_console_off_a_shared_screen_regrows_the_one_that_stayed_and_says_so() {
+        // The move at the 2-up boundary, which is the acceptance criterion's
+        // other direction: leaving a shared screen re-tiles the survivor to the
+        // whole of it, and the survivor is a neighbour nobody asked to move.
+        let (mut app, bus) = console_host();
+        seat(&mut app, "helm", BENQ);
+        seat(&mut app, "weapons", BENQ);
+        app.update();
+        let helm_token = bus
+            .token_of(bus.open_pane_for_name("helm").unwrap())
+            .unwrap();
+        bus.take_pending_views();
+        assert_eq!(rect_of(&app, "helm").width, 960);
+
+        seat(&mut app, "weapons", ACME);
+        app.update();
+
+        assert_eq!(
+            surfaces(&app),
+            vec![BENQ.to_string(), ACME.to_string()],
+            "two screens now, one console each"
+        );
+        assert_eq!(
+            (rect_of(&app, "helm").x, rect_of(&app, "helm").width),
+            (0, 1920),
+            "the console that stayed grows into the whole screen"
+        );
+        assert_eq!(rect_of(&app, "weapons").width, 1920);
+        assert_eq!(
+            bus.token_of(bus.open_pane_for_name("helm").unwrap())
+                .as_deref(),
+            Some(helm_token.as_str()),
+            "and whoever was at it keeps it across the re-tile"
+        );
+        assert_eq!(
+            notice_ids(&app),
+            vec!["server.bridge_layout.adopt_console_retiling".to_string()],
+        );
+        assert_eq!(
+            row(&app).notices[0]
+                .params
+                .get("console")
+                .map(String::as_str),
+            Some("helm"),
+        );
+
+        // The vacated slot is offered again, everywhere at once. The law decides
+        // it and the row is a `map` over the law, so this is the whole of "the
+        // vacated monitor un-greys on every other station's row".
+        let benq_for = |station: &str| {
+            row(&app)
+                .stations
+                .into_iter()
+                .find(|r| r.station == station)
+                .unwrap_or_else(|| panic!("{station} has a row"))
+                .monitors
+                .into_iter()
+                .find(|s| s.identity == BENQ)
+                .expect("the BenQ has an entry")
+                .choice
+        };
+        assert_eq!(benq_for("helm"), "selected", "helm is still on it");
+        assert_eq!(
+            benq_for("weapons"),
+            "eligible",
+            "and the station that left is offered it back — the screen has a slot again"
+        );
+        assert_eq!(
+            app.world()
+                .resource::<BridgeLayoutResource>()
+                .layout
+                .occupancy_of(&MonitorIdentity::new(BENQ))
+                .unwrap()
+                .free_slots,
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn a_re_tiling_notice_settles_rather_than_flapping() {
+        // The notice marks the layout changed, which is how it reaches the row —
+        // and the pass therefore runs once more. That pass must find the
+        // rectangles it just wrote, re-tile nothing and say nothing, or the host
+        // would rebuild a console on every frame for the rest of the run.
+        let (mut app, bus) = console_host();
+        seat(&mut app, "helm", BENQ);
+        seat(&mut app, "weapons", BENQ);
+        app.update();
+        let handles = |b: &crate::native_host::panes::transport::PaneBus| {
+            (
+                b.open_pane_for_name("helm"),
+                b.open_pane_for_name("weapons"),
+            )
+        };
+        let settled = handles(&bus);
+
+        for _ in 0..20 {
+            app.update();
+        }
+
+        assert_eq!(handles(&bus), settled, "nothing was rebuilt again");
+        assert_eq!(bus.open_count(), 2);
+        assert!(
+            row(&app).notices.len() <= 1,
+            "and the row was told once, not once a frame"
         );
     }
 

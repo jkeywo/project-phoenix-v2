@@ -82,7 +82,8 @@ use vellum_ultralight::runtime::{
 use vellum_ultralight::staging;
 
 use crate::logging::{LogCat, LogFilterConfig};
-use crate::native_host::bridge_display::BridgeStationSurfaces;
+use crate::native_host::bridge_display::{BridgeLayoutResource, BridgeStationSurfaces};
+use crate::native_host::bridge_layout::BridgeLayout;
 use crate::native_host::bridge_profile::PaneRect;
 use crate::native_host::host_lobby::{
     host_lobby_drain_script, pump_host_lobby, HostLobbyBridgeResource, HostLobbyRevealResource,
@@ -96,6 +97,7 @@ use crate::native_host::setup_accessibility::{FocusReticle, FocusReticleStyle};
 
 use super::document::pane_drain_script;
 use super::os_prefs;
+use super::placement::{home_for_pane, PaneHome, PaneTile};
 use super::recovery::{service_faults, PaneFault};
 use super::registry::PaneId;
 use super::surface::{pump_pane, PaneSurface, PaneSurfaceError};
@@ -402,16 +404,6 @@ impl PaneWindow {
     }
 }
 
-/// Where a named pane's view sits, kept so a pane recreated after a crash
-/// (issue #1125) rebuilds in the same place — its participant name is stable
-/// across the recreation, its [`PaneId`] is not.
-#[derive(Clone)]
-struct PaneSlotGeometry {
-    name: String,
-    origin: (u32, u32),
-    size: (u32, u32),
-}
-
 /// The Ultralight runtime and every pane hanging off it.
 ///
 /// `!Send` by construction — `Renderer` and `View` are raw pointers with thread
@@ -420,10 +412,16 @@ struct PaneSlotGeometry {
 pub struct PaneHost {
     runtime: UltralightRuntime,
     windows: Vec<PaneWindow>,
-    /// Each named pane's on-screen slot, so a recreated pane rebuilds where its
-    /// predecessor sat. Built once at init from the tiling; a name that is not
-    /// here has no home and its recreated view is skipped with a warning.
-    layout: Vec<PaneSlotGeometry>,
+    /// Each **tiled** pane's slot on the primary window, so a recreated pane
+    /// rebuilds where its predecessor sat (issue #1125).
+    ///
+    /// Built once at init, and only for a pane genuinely tiled on the primary
+    /// window: a pane the profile seated on a Station window has its home in
+    /// [`BridgeStationSurfaces`] instead, and storing that monitor's rectangle
+    /// here would describe a viewscreen tile nobody ever wanted (issue #1333).
+    /// [`home_for_pane`] is what reads this, and it is the last of the four
+    /// homes it considers.
+    tiles: Vec<PaneTile>,
     /// The primary (viewscreen) window, where a pane recreated after a crash
     /// (issue #1125) is rebuilt — tiled, on the game's default UI camera.
     primary_window: Entity,
@@ -765,18 +763,28 @@ fn init_pane_host(world: &mut World) {
 
     let mut windows = Vec::new();
     let mut station_cameras: Vec<(Entity, Entity)> = Vec::new();
-    let mut layout: Vec<PaneSlotGeometry> = Vec::new();
+    let mut tiles: Vec<PaneTile> = Vec::new();
     for seat in seats {
         let id = seat.entry.id;
         let url = seat.entry.url.as_str();
-        // Record this pane's slot by its stable participant name, so a pane
+        // Record this pane's tile by its stable participant name, so a pane
         // recreated after a view crash reopens in the same place (issue #1125).
-        if let Some(name) = bus.as_ref().and_then(|b| b.0.name_of(id)) {
-            layout.push(PaneSlotGeometry {
-                name,
-                origin: seat.origin,
-                size: seat.size,
-            });
+        //
+        // ONLY for a pane genuinely tiled on the primary window (issue #1333). A
+        // pane the profile seated on a Station window has its home in the live
+        // `BridgeStationSurfaces`, which follows it when the layout moves; the
+        // rectangle it occupies THERE is measured on that monitor, and recording
+        // it here would describe a strip of the viewscreen the profile never
+        // asked for. `home_for_pane` refuses to tile a seated console anyway —
+        // this is the trap removed rather than merely guarded.
+        if !seat.station {
+            if let Some(name) = bus.as_ref().and_then(|b| b.0.name_of(id)) {
+                tiles.push(PaneTile {
+                    name,
+                    origin: seat.origin,
+                    size: seat.size,
+                });
+            }
         }
         // One 2-D camera per Station window, rendering that window's panes. The
         // primary window already has the game's default UI camera, so a tiled
@@ -968,7 +976,7 @@ fn init_pane_host(world: &mut World) {
     world.insert_non_send_resource(PaneHost {
         runtime,
         windows,
-        layout,
+        tiles,
         primary_window: primary_entity,
         scale: primary_scale,
         focus,
@@ -1561,6 +1569,11 @@ fn drive_panes(
     // owns them — and optional, because a `NativeRenderSurface::Contract` host
     // has no display adapter at all.
     stations: Option<Res<BridgeStationSurfaces>>,
+    // The live bridge LAW (issue #1333), read for one question: does it seat a
+    // console under this pane's name? A console with a screen of its own is
+    // never rebuilt over the viewscreen, even in the frames where that screen
+    // has no slot to offer — see `super::placement`.
+    bridge: Option<Res<BridgeLayoutResource>>,
     mut images: ResMut<Assets<Image>>,
     mut commands: Commands,
     log: Option<Res<LogFilterConfig>>,
@@ -1588,6 +1601,7 @@ fn drive_panes(
             &mut host,
             bus,
             stations.as_deref(),
+            bridge.as_ref().map(|b| &b.layout),
             &mut images,
             &mut commands,
             &log,
@@ -1733,23 +1747,19 @@ fn drive_panes(
 /// recreated after a fault (issue #1125), and a station console the lobby's
 /// screen row just opened (issue #1331).
 ///
-/// **Where the view goes is decided by which kind it is**, and both answers are
-/// looked up by the pane's own participant name:
-///
-/// * A **station console** is seated on the Station window
-///   [`BridgeStationSurfaces`] gives its station id, in that slot's rectangle,
-///   on that window's own 2-D camera — the same seat `init_pane_host` gives a
-///   `--pane` the profile placed. The surfaces are live (`follow_layout_stations`
-///   rewrites them), so a console that moved screens is rebuilt on the screen it
-///   moved to.
-/// * A **recreated pane** falls back to that name's stored [`PaneSlotGeometry`]
-///   — the same tile on the primary window it had before the crash.
-///
-/// A name with neither is skipped with a warning rather than guessed at.
+/// **Where the view goes is [`home_for_pane`]'s decision, not this function's**
+/// (issue #1333). That rule — the live Station slot first, then a refusal for a
+/// console the law seats but the adapter cannot place, then the stored primary
+/// tile — is pure and CI-tested in [`super::placement`], because "a crashed
+/// console reopens on its own monitor, never over the viewscreen" is a claim,
+/// and a claim only provable on a Windows machine with a GPU is a claim nobody
+/// checks. What is left here is the Ultralight half: mint the Station camera,
+/// build the view, and say what happened.
 fn open_pending_views(
     host: &mut PaneHost,
     bus: &PaneBusResource,
     stations: Option<&BridgeStationSurfaces>,
+    bridge: Option<&BridgeLayout>,
     images: &mut Assets<Image>,
     commands: &mut Commands,
     log: &Option<Res<LogFilterConfig>>,
@@ -1774,25 +1784,18 @@ fn open_pending_views(
         let Some(name) = bus.0.name_of(new_id) else {
             continue;
         };
-        // The Station window this pane belongs on, if the live layout seats it
-        // (issue #1331). Resolved before the tiled fallback, because a console
-        // the operator put on a wall monitor must not be built on the
-        // viewscreen window instead.
-        let seat = stations.and_then(|s| s.slot_for(&name)).map(|(s, pane)| {
-            (
-                s.window,
-                (pane.rect.x, pane.rect.y),
-                (pane.rect.width.max(1), pane.rect.height.max(1)),
-                s.geometry.scale_factor.max(0.1),
-                (s.geometry.position_x, s.geometry.position_y),
-            )
-        });
         // A camera this pane's build MINTED, as opposed to one it joined. Only
         // the minted one is this build's to clean up if the view then fails —
         // see the `Err` arm below.
         let mut minted_camera: Option<Entity> = None;
-        let placement = match seat {
-            Some((window, origin, size, scale, window_origin)) => PaneSeat {
+        let placement = match home_for_pane(&name, stations, bridge, &host.tiles) {
+            PaneHome::Station {
+                window,
+                origin,
+                size,
+                scale,
+                window_origin,
+            } => PaneSeat {
                 // One 2-D camera per Station window, reused as consoles come and
                 // go on it — the same arrangement `init_pane_host` makes, and
                 // the same list `retire_closed_panes` despawns from when a
@@ -1810,24 +1813,23 @@ fn open_pending_views(
                 scale,
                 window_origin,
             },
-            None => {
-                let Some(slot) = host.layout.iter().find(|s| s.name == name).cloned() else {
-                    crate::pwarn!(
-                        log,
-                        LogCat::Lobby,
-                        "pane host: {new_id} ({name}) has no Station slot and no stored tile; \
-                         its view is not built — its station stays on AI control"
-                    );
-                    continue;
-                };
-                PaneSeat {
-                    window: host.primary_window,
-                    station_camera: None,
-                    origin: slot.origin,
-                    size: slot.size,
-                    scale: host.scale,
-                    window_origin: (0, 0),
-                }
+            PaneHome::PrimaryTile { origin, size } => PaneSeat {
+                window: host.primary_window,
+                station_camera: None,
+                origin,
+                size,
+                scale: host.scale,
+                window_origin: (0, 0),
+            },
+            PaneHome::Nowhere(reason) => {
+                crate::pwarn!(
+                    log,
+                    LogCat::Lobby,
+                    "pane host: {new_id} ({name}) is not built: {} — its station stays on AI \
+                     control",
+                    reason.reason()
+                );
+                continue;
             }
         };
         let on_station = placement.station_camera.is_some();

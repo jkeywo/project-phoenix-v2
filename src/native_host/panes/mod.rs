@@ -67,14 +67,21 @@
 //! The split is not an accident of packaging either: it is where the acceptance
 //! criteria live. "A pane cannot use the host operator's token", "a pane cannot
 //! read another pane's projection", "a `Welcome` is not lost while the document
-//! is loading", "a pane's identity never appears in a served body" are all
-//! claims about [`identity`], [`routing`], [`surface`] and [`document`], and a
+//! is loading", "a pane's identity never appears in a served body", "a crashed
+//! console is never rebuilt over the viewscreen" are all claims about
+//! [`identity`], [`routing`], [`surface`], [`document`] and [`placement`], and a
 //! claim that could only be checked on a Windows machine with a GPU is a claim
 //! nobody checks.
+//!
+//! [`placement`] is the most recent move across that line (issue #1333): where a
+//! rebuilt view goes used to be decided inside [`ultralight`], so the one rule
+//! this host has about which screen a console lives on was in the half no CI job
+//! compiles.
 
 pub mod document;
 pub mod identity;
 pub mod os_prefs;
+pub mod placement;
 pub mod recovery;
 pub mod registry;
 pub mod routing;
@@ -261,6 +268,7 @@ impl LocalPanes {
 pub struct PaneBusResource(pub PaneBus);
 
 pub use identity::{IdentityRefusal, PaneIdentity};
+pub use placement::{home_for_pane, NoHome, PaneHome, PaneTile};
 pub use recovery::{service_faults, FaultOutcome, PaneFault};
 pub use registry::{PaneDispatch, PaneId, PaneLifecycle, PaneRegistry};
 pub use routing::pane_receives;

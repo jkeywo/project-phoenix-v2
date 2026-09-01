@@ -264,6 +264,20 @@ cargo build --release --features host --bin phoenix-host
 #     the same token (#1125's own budget) and, when that is spent, has its SEAT
 #     GIVEN BACK through the law with a LayoutNotice the row renders — an honest
 #     Backfill instead of a station card claiming a screen that is black.
+#     A CRASHED CONSOLE REOPENS ON ITS OWN MONITOR, NEVER OVER THE VIEWSCREEN
+#     (issue #1333). Where a rebuilt view goes is the pure
+#     panes::placement::home_for_pane, not a fallback chain inside the
+#     ultralight-gated adapter — the live Station slot first, so a console that
+#     moved screens is rebuilt on the screen it moved to; then, for a console
+#     the LAW seats that has no slot this frame, NOTHING is built, because the
+#     one thing a wall console may never do is come back on top of the shared
+#     view (reconcile_seated_consoles above repairs or surrenders that seat);
+#     then the stored primary tile, which is the legacy --pane-without---profile
+#     home, unchanged. A tile is recorded only for a genuinely tiled pane now: a
+#     --pane the profile seated on a Station window recorded THAT monitor's
+#     rectangle, which on the primary window is an arbitrary strip over the
+#     viewscreen. An unplug still queues no view at all — it is a close, not a
+#     fault — so it is the operator's row press that brings the console back.
 #     A PANE NAME colliding with a station id on the loaded hull is REFUSED
 #     (app::install_world_selection): pane names and station ids are one
 #     namespace on the pane bus since #1331, so a screen row's off button would

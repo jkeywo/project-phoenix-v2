@@ -138,12 +138,22 @@ impl Plugin for BridgeLayoutStorePlugin {
                 // displays and `apply_bridge_profile` has seeded the law.
                 .run_if(resource_exists::<BridgeLayoutResource>)
                 .run_if(lobby_built)
-                // AFTER the seed, so the frame the layout first exists is the
-                // frame a remembered bridge can be applied to it, rather than
-                // the frame after. The station consoles the adoption seats are
-                // opened by `follow_layout_stations` on the next frame, which is
-                // the same one-frame settle a lobby press takes.
-                .after(super::bridge_display::apply_bridge_profile),
+                // AFTER THE WHOLE DISPLAY ADAPTER, not merely after the system
+                // that seeds the layout. `adopt_remembered_layout` takes
+                // `ResMut<BridgeLayoutResource>`, which `follow_layout_stations`
+                // and `watch_runtime_displays` also want — so with only an
+                // `.after(apply_bridge_profile)` the executor would serialise
+                // this against them in an order that is arbitrary but silent,
+                // and the consoles a remembered layout seats would open on the
+                // seed frame or the one after it depending on how the run went.
+                //
+                // Ordered after the set, it is always the frame after: this
+                // adopts in the frame the layout is first seeded (the resource
+                // exists by then — `apply_bridge_profile` is exclusive and
+                // inserts it directly), and `follow_layout_stations` opens the
+                // consoles on the next pass. That is the same one-frame settle a
+                // lobby press already takes.
+                .after(super::bridge_display::BridgeDisplaySet),
         );
     }
 }

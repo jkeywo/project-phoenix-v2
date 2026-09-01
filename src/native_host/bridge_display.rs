@@ -340,6 +340,24 @@ pub struct BridgeDisplayApplied {
 /// stay as the belt to this braces.
 pub struct BridgeDisplayPlugin;
 
+/// Everything [`BridgeDisplayPlugin`] runs, as one ordering handle.
+///
+/// The chain inside is already total, so this exists for what is *outside* it:
+/// another plugin that reads or edits [`BridgeLayoutResource`] in `Update` needs
+/// to say where it stands relative to the whole adapter, and naming a private
+/// member of the chain is not something it can do.
+///
+/// [`super::layout_store_systems`] is the caller (issue #1334) and shows what
+/// the alternative costs: it takes `ResMut<BridgeLayoutResource>`, so Bevy would
+/// serialise it against [`follow_layout_stations`] and [`watch_runtime_displays`]
+/// in an order that is *arbitrary but silent* — the consoles a remembered layout
+/// seats would open on the seed frame or the one after it depending on how the
+/// executor felt, which is the kind of difference that shows up once on somebody
+/// else's machine. Ordering after this set makes it always the frame after, on
+/// purpose.
+#[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct BridgeDisplaySet;
+
 impl Plugin for BridgeDisplayPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
@@ -371,7 +389,8 @@ impl Plugin for BridgeDisplayPlugin {
                 // it true rather than merely tolerated.
                 reconcile_seated_consoles.run_if(resource_exists::<BridgeDisplayApplied>),
             )
-                .chain(),
+                .chain()
+                .in_set(BridgeDisplaySet),
         );
     }
 }

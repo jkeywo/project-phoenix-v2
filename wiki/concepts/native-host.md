@@ -1632,6 +1632,17 @@ one it booted with. Both are logged rather than pushed to the lobby's notice
 row, for the reason boot-time adoption notes already are — this is a bridge
 arriving, not an answer to a press.
 
+Both systems are ordered **after the whole display adapter**
+(`bridge_display::BridgeDisplaySet`, added for this), not merely after
+`apply_bridge_profile`. They take `ResMut<BridgeLayoutResource>`, which
+`follow_layout_stations` and `watch_runtime_displays` also want, so a narrower
+constraint would have the executor serialise them in an order that is arbitrary
+but silent — and the consoles a remembered layout seats would open on the seed
+frame or the one after it depending on how the run went. After the set it is
+always the frame after: the adoption lands in the frame the layout is first
+seeded, and the follower opens the consoles on the next pass, which is the same
+one-frame settle a lobby press already takes.
+
 **Write on every accepted change** ([ai]). Not debounced and not deferred to
 shutdown: a saved layout is a handful of `[[display]]` tables written through one
 atomic rename, so the cost per press is a rounding error beside the frame that

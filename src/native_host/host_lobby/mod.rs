@@ -1226,7 +1226,14 @@ mod tests {
         (app, bridge, surface)
     }
 
-    /// Queue one record on the surface and run the frame that answers it.
+    /// Queue one record on the surface and run **one** frame that answers it.
+    ///
+    /// Exactly one `app.update()`, which is what makes every test below an
+    /// assertion about the schedule as well as about the rule: the drain is in
+    /// `PreUpdate` and `publish_bridge_layout` in `Update`, so a press and the
+    /// row that answers it land in the same frame. Move the drain after the
+    /// publish and every one of these fails, because the row would be a frame
+    /// late and this helper never runs that frame.
     fn press(app: &mut App, bridge: &HostLobbyBridge, surface: &mut RecordingSurface, json: &str) {
         surface.queue_record(json);
         pump_host_lobby(bridge, surface);
@@ -1438,5 +1445,59 @@ mod tests {
         pump_host_lobby(&bridge, &mut surface);
         app.update();
         assert!(bridge.take_records().is_empty());
+    }
+
+    #[test]
+    fn one_drain_serves_every_verb_the_surface_speaks_in_one_frame() {
+        // The claim this whole arrangement exists for. `take_records` is a
+        // DRAIN, so a second reader would swallow the first's records and warn
+        // about a vocabulary it does not speak while the first saw an empty
+        // queue for the rest of the run — with a clean log at both ends, which
+        // is why nothing else here would catch it.
+        //
+        // A frame carrying a pick, a launch and a monitor press proves all
+        // three arrive: the pick as an InboundMessage the arbiter reads, the
+        // launch on the force-start latch, the press on the live layout — and
+        // the row reporting it published in that SAME frame, which is the
+        // PreUpdate-drain → Update-publish edge stated as a claim rather than
+        // left to the other tests to imply.
+        let (mut app, bridge, mut surface) = app_with_layout();
+        app.insert_resource(crate::server::bridge::PendingForceStart(false));
+        assert_eq!(viewscreen(&app), DELL);
+
+        surface.queue_record(r#"{"kind":"select_scenario","scenario_id":"combat_test"}"#);
+        surface.queue_record(r#"{"kind":"force_start"}"#);
+        surface.queue_record(r#"{"kind":"set-viewscreen","monitor":"BenQ EX@1920x1080"}"#);
+        pump_host_lobby(&bridge, &mut surface);
+        app.update();
+        pump_host_lobby(&bridge, &mut surface);
+
+        let picks = inbound(&mut app);
+        assert_eq!(picks.len(), 1, "the pick reached the arbiter's bus");
+        assert_eq!(picks[0].token, LOCAL_CONSOLE_TOKEN);
+        assert!(matches!(
+            picks[0].msg,
+            ClientMessage::SelectScenario { ref scenario_id } if scenario_id == "combat_test"
+        ));
+        assert!(
+            app.world()
+                .resource::<crate::server::bridge::PendingForceStart>()
+                .0,
+            "the launch reached the latch in the same frame as the pick"
+        );
+        assert_eq!(
+            viewscreen(&app),
+            BENQ,
+            "and the monitor press reached the live layout, rather than being \
+             swallowed by whichever reader ran first"
+        );
+        assert!(
+            surface
+                .pushed
+                .iter()
+                .any(|s| s.contains("__phoenixHostLobbyLayout") && s.contains(BENQ)),
+            "the row that answers the press is published in that same frame: {:?}",
+            surface.pushed
+        );
     }
 }

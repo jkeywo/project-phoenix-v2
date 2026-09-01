@@ -188,11 +188,74 @@ impl std::fmt::Display for LayoutRefusal {
 
 impl std::error::Error for LayoutRefusal {}
 
+impl LayoutRefusal {
+    /// The `strings.csv` id a **player-visible** surface renders this refusal
+    /// through (issue #1330).
+    ///
+    /// [`Display`](std::fmt::Display) above is the *operator log*'s sentence —
+    /// Rust-composed English, which is exactly what AGENTS.md rule 11 says may
+    /// never reach a screen a player reads. The lobby's monitor row does reach
+    /// one, so what crosses the bridge to it is this id plus
+    /// [`params`](Self::params), and `gui/strings.js`'s `t()` resolves the
+    /// sentence on the page. One refusal, two renderings, and neither is the
+    /// other's fallback.
+    pub fn string_id(&self) -> &'static str {
+        match self {
+            LayoutRefusal::UnknownMonitor { .. } => "server.bridge_layout.unknown_monitor",
+            LayoutRefusal::UnknownStation { .. } => "server.bridge_layout.unknown_station",
+            LayoutRefusal::StationOnViewscreenMonitor { .. } => {
+                "server.bridge_layout.station_on_viewscreen"
+            }
+            LayoutRefusal::MonitorFull { .. } => "server.bridge_layout.monitor_full",
+            LayoutRefusal::ViewscreenMonitorHoldsStations { .. } => {
+                "server.bridge_layout.viewscreen_holds_stations"
+            }
+        }
+    }
+
+    /// The `{placeholder}` values [`string_id`](Self::string_id)'s row
+    /// interpolates, in a fixed order.
+    pub fn params(&self) -> Vec<(&'static str, String)> {
+        match self {
+            LayoutRefusal::UnknownMonitor { monitor } => {
+                vec![("monitor", monitor.as_str().to_string())]
+            }
+            LayoutRefusal::UnknownStation { station } => vec![("station", station.0.clone())],
+            LayoutRefusal::StationOnViewscreenMonitor { station, monitor } => vec![
+                ("station", station.0.clone()),
+                ("monitor", monitor.as_str().to_string()),
+            ],
+            LayoutRefusal::MonitorFull { monitor, occupants } => vec![
+                ("monitor", monitor.as_str().to_string()),
+                ("stations", station_params(occupants)),
+                ("max", MAX_STATIONS_PER_MONITOR.to_string()),
+            ],
+            LayoutRefusal::ViewscreenMonitorHoldsStations { monitor, stations } => vec![
+                ("monitor", monitor.as_str().to_string()),
+                ("stations", station_params(stations)),
+            ],
+        }
+    }
+}
+
 /// `"helm", "weapons"` — station ids, quoted and joined, for a refusal message.
 fn station_list(stations: &[StationId]) -> String {
     stations
         .iter()
         .map(|s| format!("{:?}", s.0))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// `helm, weapons` — station ids joined for a **player-visible** parameter.
+///
+/// Unquoted, unlike [`station_list`]: the quotes in an operator log line read as
+/// "this is a machine key", and on the lobby's own surface they read as stray
+/// punctuation in a sentence.
+fn station_params(stations: &[StationId]) -> String {
+    stations
+        .iter()
+        .map(|s| s.0.as_str())
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -968,6 +1031,87 @@ pub enum LayoutAdoption {
     /// bridge is at least one screen, so the layout was kept exactly as it was;
     /// these are the monitors it still names.
     NoMonitorsReported { kept: Vec<MonitorIdentity> },
+}
+
+impl LayoutAdoption {
+    /// The `strings.csv` id a **player-visible** surface renders this note
+    /// through (issue #1330) — see [`LayoutRefusal::string_id`] for why this is
+    /// a separate rendering from [`Display`](std::fmt::Display).
+    pub fn string_id(&self) -> &'static str {
+        match self {
+            LayoutAdoption::ViewscreenRefused { .. } => {
+                "server.bridge_layout.adopt_viewscreen_refused"
+            }
+            LayoutAdoption::PaneNamesNoStation { .. } => {
+                "server.bridge_layout.adopt_pane_no_station"
+            }
+            LayoutAdoption::StationNamedTwice { .. } => {
+                "server.bridge_layout.adopt_station_twice"
+            }
+            LayoutAdoption::SeatRefused { .. } => "server.bridge_layout.adopt_seat_refused",
+            LayoutAdoption::ViewscreenMonitorGone { .. } => {
+                "server.bridge_layout.adopt_viewscreen_gone"
+            }
+            LayoutAdoption::StationMonitorGone { .. } => {
+                "server.bridge_layout.adopt_station_monitor_gone"
+            }
+            LayoutAdoption::StationOffRoster { .. } => {
+                "server.bridge_layout.adopt_station_off_roster"
+            }
+            LayoutAdoption::NoMonitorsReported { .. } => "server.bridge_layout.adopt_no_monitors",
+        }
+    }
+
+    /// The `{placeholder}` values [`string_id`](Self::string_id)'s row
+    /// interpolates, in a fixed order.
+    ///
+    /// The nested [`LayoutRefusal`] two of these carry is **not** among them —
+    /// see [`cause`](Self::cause).
+    pub fn params(&self) -> Vec<(&'static str, String)> {
+        match self {
+            LayoutAdoption::ViewscreenRefused { monitor, .. } => {
+                vec![("monitor", monitor.as_str().to_string())]
+            }
+            LayoutAdoption::PaneNamesNoStation { monitor, label } => vec![
+                ("label", label.clone()),
+                ("monitor", monitor.as_str().to_string()),
+            ],
+            LayoutAdoption::StationNamedTwice { station, monitor }
+            | LayoutAdoption::SeatRefused {
+                station, monitor, ..
+            }
+            | LayoutAdoption::StationMonitorGone { station, monitor }
+            | LayoutAdoption::StationOffRoster { station, monitor } => vec![
+                ("station", station.0.clone()),
+                ("monitor", monitor.as_str().to_string()),
+            ],
+            LayoutAdoption::ViewscreenMonitorGone {
+                monitor,
+                replacement,
+            } => vec![
+                ("monitor", monitor.as_str().to_string()),
+                ("replacement", replacement.as_str().to_string()),
+            ],
+            LayoutAdoption::NoMonitorsReported { kept } => {
+                vec![("count", kept.len().to_string())]
+            }
+        }
+    }
+
+    /// The refusal that produced this note, when there was one.
+    ///
+    /// Reported as its own line beside the note rather than interpolated into
+    /// it: `t()` substitutes **values** into a sentence, and a second localised
+    /// sentence is not a value — a translator handed `{reason}` cannot see what
+    /// grammar is about to land in it, and this build would have to resolve two
+    /// ids in a fixed English order to fill it.
+    pub fn cause(&self) -> Option<&LayoutRefusal> {
+        match self {
+            LayoutAdoption::ViewscreenRefused { refusal, .. }
+            | LayoutAdoption::SeatRefused { refusal, .. } => Some(refusal),
+            _ => None,
+        }
+    }
 }
 
 impl std::fmt::Display for LayoutAdoption {

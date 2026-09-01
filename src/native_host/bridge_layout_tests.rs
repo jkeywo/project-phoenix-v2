@@ -1154,3 +1154,184 @@ fn reconciling_against_no_monitors_at_all_keeps_the_layout_and_says_so() {
     );
     assert!(notes[0].to_string().contains("3 monitors"));
 }
+
+// ── the player-visible rendering (issue #1330) ──────────────────────────────
+
+#[test]
+fn every_refusal_names_a_string_id_and_the_parameters_that_id_interpolates() {
+    // The lobby's monitor row is a screen a player reads, so what crosses to it
+    // is an id and values rather than the Rust-composed sentence `Display`
+    // writes for the operator log (AGENTS.md rule 11). The pairing is checked
+    // here so a new variant cannot reach a surface with no id at all.
+    let cases: Vec<(LayoutRefusal, &str, Vec<&str>)> = vec![
+        (
+            LayoutRefusal::UnknownMonitor { monitor: m(TV) },
+            "server.bridge_layout.unknown_monitor",
+            vec!["monitor"],
+        ),
+        (
+            LayoutRefusal::UnknownStation { station: s("helm") },
+            "server.bridge_layout.unknown_station",
+            vec!["station"],
+        ),
+        (
+            LayoutRefusal::StationOnViewscreenMonitor {
+                station: s("helm"),
+                monitor: m(TV),
+            },
+            "server.bridge_layout.station_on_viewscreen",
+            vec!["station", "monitor"],
+        ),
+        (
+            LayoutRefusal::MonitorFull {
+                monitor: m(LEFT),
+                occupants: vec![s("helm"), s("weapons")],
+            },
+            "server.bridge_layout.monitor_full",
+            vec!["monitor", "stations", "max"],
+        ),
+        (
+            LayoutRefusal::ViewscreenMonitorHoldsStations {
+                monitor: m(LEFT),
+                stations: vec![s("helm")],
+            },
+            "server.bridge_layout.viewscreen_holds_stations",
+            vec!["monitor", "stations"],
+        ),
+    ];
+    for (refusal, id, keys) in cases {
+        assert_eq!(refusal.string_id(), id, "{refusal:?}");
+        let params = refusal.params();
+        assert_eq!(
+            params.iter().map(|(k, _)| *k).collect::<Vec<_>>(),
+            keys,
+            "{refusal:?}"
+        );
+        assert!(
+            params.iter().all(|(_, v)| !v.is_empty()),
+            "no parameter is blank: {params:?}"
+        );
+    }
+}
+
+#[test]
+fn a_refusals_station_list_reaches_a_player_unquoted() {
+    // `station_list` quotes, because an operator log line is naming machine
+    // keys. The same list inside a sentence a player reads is just punctuation
+    // noise, so the two renderings do not share a formatter.
+    let refusal = LayoutRefusal::ViewscreenMonitorHoldsStations {
+        monitor: m(LEFT),
+        stations: vec![s("helm"), s("weapons")],
+    };
+    assert!(refusal.to_string().contains("\"helm\", \"weapons\""));
+    let params = refusal.params();
+    let stations = &params.iter().find(|(k, _)| *k == "stations").unwrap().1;
+    assert_eq!(stations, "helm, weapons");
+}
+
+#[test]
+fn every_adoption_note_names_a_string_id_and_the_parameters_that_id_interpolates() {
+    let refusal = LayoutRefusal::UnknownMonitor { monitor: m(TV) };
+    let cases: Vec<(LayoutAdoption, &str, Vec<&str>)> = vec![
+        (
+            LayoutAdoption::ViewscreenRefused {
+                monitor: m(TV),
+                refusal: refusal.clone(),
+            },
+            "server.bridge_layout.adopt_viewscreen_refused",
+            vec!["monitor"],
+        ),
+        (
+            LayoutAdoption::PaneNamesNoStation {
+                monitor: m(LEFT),
+                label: "Ada".to_string(),
+            },
+            "server.bridge_layout.adopt_pane_no_station",
+            vec!["label", "monitor"],
+        ),
+        (
+            LayoutAdoption::StationNamedTwice {
+                station: s("helm"),
+                monitor: m(LEFT),
+            },
+            "server.bridge_layout.adopt_station_twice",
+            vec!["station", "monitor"],
+        ),
+        (
+            LayoutAdoption::SeatRefused {
+                station: s("helm"),
+                monitor: m(LEFT),
+                refusal: refusal.clone(),
+            },
+            "server.bridge_layout.adopt_seat_refused",
+            vec!["station", "monitor"],
+        ),
+        (
+            LayoutAdoption::ViewscreenMonitorGone {
+                monitor: m(TV),
+                replacement: m(LEFT),
+            },
+            "server.bridge_layout.adopt_viewscreen_gone",
+            vec!["monitor", "replacement"],
+        ),
+        (
+            LayoutAdoption::StationMonitorGone {
+                station: s("helm"),
+                monitor: m(LEFT),
+            },
+            "server.bridge_layout.adopt_station_monitor_gone",
+            vec!["station", "monitor"],
+        ),
+        (
+            LayoutAdoption::StationOffRoster {
+                station: s("helm"),
+                monitor: m(LEFT),
+            },
+            "server.bridge_layout.adopt_station_off_roster",
+            vec!["station", "monitor"],
+        ),
+        (
+            LayoutAdoption::NoMonitorsReported {
+                kept: vec![m(TV), m(LEFT)],
+            },
+            "server.bridge_layout.adopt_no_monitors",
+            vec!["count"],
+        ),
+    ];
+    for (note, id, keys) in cases {
+        assert_eq!(note.string_id(), id, "{note:?}");
+        assert_eq!(
+            note.params().iter().map(|(k, _)| *k).collect::<Vec<_>>(),
+            keys,
+            "{note:?}"
+        );
+    }
+}
+
+#[test]
+fn a_note_carrying_a_refusal_reports_it_beside_itself_rather_than_inside_itself() {
+    // `t()` interpolates VALUES. A second localised sentence is not a value:
+    // a translator handed `{reason}` cannot see what grammar lands in it, so
+    // the cause is rendered as its own line.
+    let refusal = LayoutRefusal::ViewscreenMonitorHoldsStations {
+        monitor: m(LEFT),
+        stations: vec![s("helm")],
+    };
+    let note = LayoutAdoption::ViewscreenRefused {
+        monitor: m(LEFT),
+        refusal: refusal.clone(),
+    };
+    assert_eq!(note.cause(), Some(&refusal));
+    assert!(
+        !note.params().iter().any(|(k, _)| *k == "reason"),
+        "the cause is not smuggled in as a parameter"
+    );
+    assert_eq!(
+        LayoutAdoption::StationOffRoster {
+            station: s("helm"),
+            monitor: m(LEFT),
+        }
+        .cause(),
+        None
+    );
+}

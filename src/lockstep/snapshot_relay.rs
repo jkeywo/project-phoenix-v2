@@ -248,12 +248,12 @@ impl MeshSnapshotReceiver {
 #[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
 pub struct MeshRestoreArm {
     armed_from: Option<HostSlot>,
-    /// A returning GM is a fresh private world, not an already-booted recovery
+    /// A joining GM is a fresh private world, not an already-booted recovery
     /// target. Its accepted canonical record must stage the saved GameStart
     /// identities before that world enters `InProgress`; otherwise the normal
     /// GameStart mint creates different UUIDs and a by-UUID restore can never
     /// become ready. Ordinary divergence and slot recovery never use this mode.
-    bootstrap_reconnect: bool,
+    bootstrap_join_candidate: bool,
     /// The bounded join bootstrap exhausted its owner-granted wait boundary,
     /// so snapshot restore may build captured authored rows which the fresh
     /// world still has not produced. Ordinary divergence/slot recovery keeps
@@ -265,15 +265,15 @@ impl MeshRestoreArm {
     /// Arm this host to restore a record from `leader`.
     pub fn arm(&mut self, leader: HostSlot) {
         self.armed_from = Some(leader);
-        self.bootstrap_reconnect = false;
+        self.bootstrap_join_candidate = false;
         self.allow_rebuild = false;
     }
 
-    /// Arm a fresh returning-GM candidate whose private GameStart identities
-    /// must come from the accepted canonical record.
-    pub(crate) fn arm_reconnect(&mut self, leader: HostSlot) {
+    /// Arm a fresh GM candidate whose private GameStart identities must come
+    /// from the accepted canonical record before either join kind can restore.
+    pub(crate) fn arm_join_candidate(&mut self, leader: HostSlot) {
         self.armed_from = Some(leader);
-        self.bootstrap_reconnect = true;
+        self.bootstrap_join_candidate = true;
         self.allow_rebuild = false;
     }
 
@@ -288,7 +288,7 @@ impl MeshRestoreArm {
     /// Disarm: a staged record must not overwrite the world.
     pub fn disarm(&mut self) {
         self.armed_from = None;
-        self.bootstrap_reconnect = false;
+        self.bootstrap_join_candidate = false;
         self.allow_rebuild = false;
     }
 
@@ -306,8 +306,8 @@ impl MeshRestoreArm {
         self.allow_rebuild
     }
 
-    pub(crate) fn bootstraps_reconnect(&self) -> bool {
-        self.bootstrap_reconnect
+    pub(crate) fn bootstraps_join_candidate(&self) -> bool {
+        self.bootstrap_join_candidate
     }
 }
 
@@ -476,7 +476,7 @@ fn gate_and_restore_against_with_readiness(
     text: &str,
     current: &Versions,
     allow_rebuild: bool,
-    bootstrap_reconnect: bool,
+    bootstrap_join_candidate: bool,
 ) -> MeshRestoreOutcome {
     // 1. The gate. Parse and version-check BEFORE touching the world.
     let run = match snapshot::import_artifact(text, current) {
@@ -489,7 +489,7 @@ fn gate_and_restore_against_with_readiness(
         );
     };
 
-    // A fresh reconnect candidate cannot mint its GameStart identities before
+    // A fresh GM candidate cannot mint its GameStart identities before
     // seeing the canonical record: those UUIDs are part of the by-UUID restore
     // contract. `import_artifact` above has already version- and
     // semantic-gated `boot_identity`, so it is safe to stage only that private
@@ -502,25 +502,26 @@ fn gate_and_restore_against_with_readiness(
     // not a partial authoritative restore; a later corrupt-record rollback must
     // return to the now-booted private world so a terminal refusal can be
     // reported without trying to undo a state transition.
-    if bootstrap_reconnect && !world.contains_resource::<crate::server_app::GameStartEntityUuids>()
+    if bootstrap_join_candidate
+        && !world.contains_resource::<crate::server_app::GameStartEntityUuids>()
     {
         let Some(phase) = world
             .get_resource::<State<crate::core::messages::GamePhase>>()
             .map(|phase| phase.get().clone())
         else {
             return MeshRestoreOutcome::RefusedGate(
-                "the reconnect candidate has no GamePhase bootstrap state".to_string(),
+                "the joining GM candidate has no GamePhase bootstrap state".to_string(),
             );
         };
         if phase == crate::core::messages::GamePhase::InProgress {
             return MeshRestoreOutcome::RefusedGate(
-                "the reconnect candidate entered GameStart before canonical identities were staged"
+                "the joining GM candidate entered GameStart before canonical identities were staged"
                     .to_string(),
             );
         }
         if !world.contains_resource::<NextState<crate::core::messages::GamePhase>>() {
             return MeshRestoreOutcome::RefusedGate(
-                "the reconnect candidate cannot request its GameStart bootstrap".to_string(),
+                "the joining GM candidate cannot request its GameStart bootstrap".to_string(),
             );
         }
         let boot = snap
@@ -658,13 +659,13 @@ pub fn drain_mesh_restore(world: &mut World) {
     let staged_from = world
         .get_resource::<MeshSnapshotReceiver>()
         .and_then(|r| r.staged_from);
-    let (armed_from, allow_rebuild, bootstrap_reconnect) = world
+    let (armed_from, allow_rebuild, bootstrap_join_candidate) = world
         .get_resource::<MeshRestoreArm>()
         .map_or((None, false, false), |arm| {
             (
                 arm.armed_from(),
                 arm.allows_rebuild(),
-                arm.bootstraps_reconnect(),
+                arm.bootstraps_join_candidate(),
             )
         });
 
@@ -686,7 +687,7 @@ pub fn drain_mesh_restore(world: &mut World) {
                 &text,
                 &current,
                 allow_rebuild,
-                bootstrap_reconnect,
+                bootstrap_join_candidate,
             )
         }
     };

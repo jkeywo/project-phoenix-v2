@@ -51,6 +51,7 @@ pub(crate) fn stage_resume_game_start_entity_uuids(
 fn select_game_start_entity_uuid(
     resume: Option<&ResumeGameStartEntityUuids>,
     authored_index: u32,
+    registered_uuid: Option<&String>,
     minted_uuid: String,
 ) -> String {
     resume
@@ -61,6 +62,7 @@ fn select_game_start_entity_uuid(
                 .ok()
                 .map(|index| saved.0[index].entity_uuid.clone())
         })
+        .or_else(|| registered_uuid.cloned())
         .unwrap_or(minted_uuid)
 }
 
@@ -532,16 +534,23 @@ pub(crate) fn spawn_game_start_entities(
 
         // Always consume the ordinary mint, including on resume. Its counter is
         // authoritative state and the fresh bootstrap must take the identical
-        // draw it would have taken without a saved run. Only the value attached
-        // to a saved authored GameStart row is substituted before `spawn_entity`
-        // creates anything keyed by it. A row skipped by its `when` predicate
-        // consumes neither a mint nor a saved identity; every non-resume spawn
-        // therefore remains byte-for-byte on the existing path.
+        // draw it would have taken without a saved run. The value attached to a
+        // saved authored GameStart row takes precedence; on a normal boot, a
+        // named row uses the UUID Startup already registered in `name_to_uuid`.
+        // That is the same identity guarantee the Immediate named path makes:
+        // trigger/GM lookups must resolve to the entity that actually spawned.
+        // A row skipped by its `when` predicate consumes neither a mint nor a
+        // saved identity.
         let minted_uuid =
             crate::world_id::mint_id_with(id_mint.as_deref(), crate::world_id::IdNamespace::Entity);
+        let registered_uuid = entity_inst
+            .name
+            .as_ref()
+            .and_then(|name| mc.name_to_uuid.get(name));
         let uuid = select_game_start_entity_uuid(
             resume_game_start_uuids.as_deref(),
             authored_index,
+            registered_uuid,
             minted_uuid,
         );
         let pos = match crate::world::config::resolve_entity_position_with(
@@ -684,8 +693,18 @@ mod game_start_identity_tests {
     fn non_resume_keeps_the_normal_mint_value_unchanged() {
         let minted = "00000000-0000-8000-8000-000000000009".to_string();
         assert_eq!(
-            select_game_start_entity_uuid(None, 7, minted.clone()),
+            select_game_start_entity_uuid(None, 7, None, minted.clone()),
             minted
+        );
+    }
+
+    #[test]
+    fn a_named_game_start_row_uses_its_registered_world_identity() {
+        let registered = "00000000-0000-8000-8000-000000000007".to_string();
+        assert_eq!(
+            select_game_start_entity_uuid(None, 7, Some(&registered), "unused-mint".into()),
+            registered,
+            "the name-to-UUID map and spawned entity must describe the same contact"
         );
     }
 
@@ -701,18 +720,24 @@ mod game_start_identity_tests {
                 entity_uuid: "00000000-0000-8000-8000-000000000008".into(),
             },
         ]);
+        let registered_player = "registered-player".to_string();
 
         assert_eq!(
-            select_game_start_entity_uuid(Some(&saved), 3, "fresh-player".into()),
+            select_game_start_entity_uuid(
+                Some(&saved),
+                3,
+                Some(&registered_player),
+                "fresh-player".into(),
+            ),
             "00000000-0000-8000-8000-000000000003"
         );
         assert_eq!(
-            select_game_start_entity_uuid(Some(&saved), 5, "fresh-skipped".into()),
+            select_game_start_entity_uuid(Some(&saved), 5, None, "fresh-skipped".into()),
             "fresh-skipped",
             "a predicate-skipped authored row cannot shift the later mapping"
         );
         assert_eq!(
-            select_game_start_entity_uuid(Some(&saved), 8, "fresh-npc".into()),
+            select_game_start_entity_uuid(Some(&saved), 8, None, "fresh-npc".into()),
             "00000000-0000-8000-8000-000000000008",
             "GameStart NPCs take their own saved identity too"
         );

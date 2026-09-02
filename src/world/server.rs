@@ -1178,22 +1178,46 @@ pub(crate) fn compile_world_scripts(
 }
 
 /// `OnEnter(GamePhase::InProgress)` system: seeds the `ship_power` counter in
-/// the world flag store from the selected ship's `power_rating`.
+/// the world flag store from the fleet's authoritative hull `power_rating`.
 ///
 /// This runs before `spawn_game_start_entities` so that `when` predicates on
 /// `[[entity]]` entries with `spawn_on = "GameStart"` can gate spawns on
 /// `counter(ship_power) >= N`.
 ///
-/// If `ShipClientConfigResource.power_rating` is `None` (the ship TOML omits
-/// the field), no counter is written and `ship_power` defaults to `0`.
+/// The value must fold identically on every peer (issue #1116): the counter is
+/// part of the scenario-flag digest, and a stationless GM owns no local ship
+/// while two ship hosts each own a *different* one. So the rating is derived
+/// from the frozen [`FleetRoster`]'s hull paths — resolved through the same
+/// config cache on every peer — rather than from this peer's own
+/// `ShipClientConfigResource`. A fleet ship whose `ship_path` is `None` is the
+/// solo default ("the hull this peer's own lobby selected"), which is exactly
+/// the local ship config; a solo run therefore keeps its pre-fleet value to the
+/// byte. Multiple crewed hulls take the highest rating, so a mixed fleet is
+/// gated by its heaviest ship rather than by whichever host happens to seed.
+///
+/// If no hull declares a `power_rating`, no counter is written and `ship_power`
+/// defaults to `0`.
 pub fn seed_ship_power_counter(
+    fleet_roster: Option<Res<crate::lockstep::FleetRoster>>,
     ship_client_config: Res<crate::lobby::server::ShipClientConfigResource>,
     runtime: Option<ResMut<WorldContentRuntime>>,
 ) {
     let Some(mut runtime) = runtime else {
         return;
     };
-    if let Some(rating) = ship_client_config.0.power_rating {
+    let cache = crate::entities::config_cache::get_config_cache();
+    let rating = match fleet_roster.as_deref() {
+        Some(roster) => roster
+            .ships()
+            .iter()
+            .filter_map(|ship| match &ship.ship_path {
+                Some(path) => cache.get(path).and_then(|config| config.power_rating),
+                None => ship_client_config.0.power_rating,
+            })
+            .max(),
+        None => ship_client_config.0.power_rating,
+    };
+    if let Some(rating) = rating {
         runtime.flags.set_flag_value("ship_power", rating as i64);
     }
 }

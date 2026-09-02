@@ -1248,12 +1248,17 @@ pub fn drive_join(world: &mut World) {
                         // only after the record passes its version/content gate.
                         set_join_pause(world);
                     }
-                    let mut arm = world.resource_mut::<crate::lockstep::MeshRestoreArm>();
-                    if approval.kind == GmJoinKind::Reconnect {
-                        arm.arm_reconnect(approval.owner);
-                    } else {
-                        arm.arm(approval.owner);
-                    }
+                    // Both join kinds arrive as private Lobby worlds. Their
+                    // canonical record must stage the original GameStart UUIDs
+                    // before requesting InProgress; otherwise a named authored
+                    // row can mint a different identity and a by-UUID restore
+                    // can never become ready. Reconnect engages its pause above
+                    // immediately because its local clock may be arbitrarily
+                    // stale; a first-time candidate still reaches the one
+                    // owner-authored pause boundary normally.
+                    world
+                        .resource_mut::<crate::lockstep::MeshRestoreArm>()
+                        .arm_join_candidate(approval.owner);
                     world
                         .resource_mut::<crate::lockstep::MeshSnapshotReceiver>()
                         .clear_outcome();
@@ -1554,18 +1559,17 @@ fn report_restore_wait_boundary(
     runtime.restore_boundary_reported = true;
 }
 
-/// A fresh reconnect page cannot spend its bounded restore clock before the
-/// authenticated Pause has actually produced the authored GameStart roster.
+/// A fresh joining-GM page cannot spend its bounded restore clock before the
+/// canonical record has actually produced the authored GameStart roster.
 ///
 /// `GameStartEntityUuids` is inserted only after the spawn system has walked
 /// every authored row (including an empty roster). This is the same durable
 /// prerequisite used by browser save resume: phase alone is too early because
-/// its `OnEnter` commands are deferred. First-time joins retain #1293's existing
-/// clock because their candidate bootstrap is already established before the
-/// paused transfer starts.
-fn reconnect_restore_clock_started(world: &World, approval: &GmJoinApproval) -> bool {
-    approval.kind != GmJoinKind::Reconnect
-        || world.contains_resource::<crate::server_app::GameStartEntityUuids>()
+/// its `OnEnter` commands are deferred. It applies equally to a first-time
+/// mid-session candidate and a returning one: both remain private Lobby worlds
+/// until the accepted record stages the original UUID map.
+fn join_restore_clock_started(world: &World) -> bool {
+    world.contains_resource::<crate::server_app::GameStartEntityUuids>()
 }
 
 /// After the #1117 relay resolves, report either the proven fold or a terminal
@@ -1629,12 +1633,12 @@ pub fn report_restored_join(world: &mut World) {
                 Some(outcome) => {
                     if let Some(reason) = restore_refusal(&outcome) {
                         candidate_refusal(world, &mut runtime, &approval, reason);
-                    } else if reconnect_restore_clock_started(world, &approval) {
+                    } else if join_restore_clock_started(world) {
                         report_restore_wait_boundary(world, &mut runtime, &approval);
                     }
                 }
                 None => {
-                    if reconnect_restore_clock_started(world, &approval)
+                    if join_restore_clock_started(world)
                         && (restore_started
                             || world
                                 .get_resource::<GmJoinPauseHold>()
@@ -1686,6 +1690,26 @@ mod tests {
                 operator_id: "gm-1".into(),
             }],
             local,
+            HostSlot(1),
+        )
+        .unwrap()
+    }
+
+    fn first_time_candidate_roster() -> FleetRoster {
+        FleetRoster::with_participants_and_gms(
+            vec![FleetShip::new(HostSlot(1))],
+            vec![HostSlot(1), HostSlot(2), HostSlot(3)],
+            vec![
+                FleetGm {
+                    host: HostSlot(2),
+                    operator_id: "gm-1".into(),
+                },
+                FleetGm {
+                    host: HostSlot(3),
+                    operator_id: "gm-2".into(),
+                },
+            ],
+            HostSlot(3),
             HostSlot(1),
         )
         .unwrap()
@@ -1870,9 +1894,45 @@ mod tests {
         assert!(world.resource::<GmJoinPauseHold>().active());
         let arm = world.resource::<crate::lockstep::MeshRestoreArm>();
         assert!(arm.is_armed());
-        assert!(arm.bootstraps_reconnect());
+        assert!(arm.bootstraps_join_candidate());
         assert!(!world.contains_resource::<FleetRoster>());
         assert!(!world.contains_resource::<crate::lockstep::FleetLockstep>());
+    }
+
+    #[test]
+    fn first_time_pause_also_arms_the_canonical_game_start_bootstrap() {
+        let mut app = App::new();
+        app.add_plugins(bevy::state::app::StatesPlugin);
+        app.init_state::<crate::core::messages::GamePhase>();
+        let world = app.world_mut();
+        world.insert_resource(FleetRoster::default());
+        world.insert_resource(crate::lockstep::MeshOutbox::default());
+        world.insert_resource(crate::lockstep::MeshRestoreArm::default());
+        world.insert_resource(crate::lockstep::MeshSnapshotReceiver::default());
+        world.insert_resource(GmJoinInbox::default());
+        world.insert_resource(GmJoinRuntime::default());
+        world.insert_resource(GmJoinPauseHold::default());
+        world.insert_resource(GmJoinPendingHostLoss::default());
+        prepare_candidate_bootstrap(world, first_time_candidate_roster()).unwrap();
+        world
+            .resource_mut::<GmJoinInbox>()
+            .push(GmJoinFrame::Pause(approval()));
+
+        drive_join(world);
+
+        assert!(matches!(
+            world.resource::<NextState<crate::core::messages::GamePhase>>(),
+            NextState::Unchanged
+        ));
+        let arm = world.resource::<crate::lockstep::MeshRestoreArm>();
+        assert!(arm.is_armed());
+        assert!(arm.bootstraps_join_candidate());
+        assert!(!world.contains_resource::<FleetRoster>());
+        assert!(!world.contains_resource::<crate::lockstep::FleetLockstep>());
+        assert!(
+            !join_restore_clock_started(world),
+            "the private candidate cannot spend its wait budget before GameStart is built"
+        );
     }
 
     #[test]
@@ -2108,6 +2168,9 @@ mod tests {
         world.insert_resource(crate::lockstep::MeshSnapshotReceiver::default());
         world.insert_resource(crate::lockstep::MeshRestoreArm::default());
         world.insert_resource(crate::lockstep::MeshOutbox::default());
+        // The candidate may not spend its wait boundary before the authored
+        // GameStart walk completes, so this fixture starts past that gate.
+        world.insert_resource(crate::server_app::GameStartEntityUuids::default());
         world.insert_resource(GmJoinPauseHold {
             active: true,
             resolved: false,
@@ -2236,21 +2299,20 @@ mod tests {
     }
 
     #[test]
-    fn reconnect_restore_clock_waits_for_the_authored_game_start_roster_walk() {
+    fn join_restore_clock_waits_for_the_authored_game_start_roster_walk() {
         let mut world = World::new();
         let reconnect = reconnect_approval();
+        let first_time = approval();
 
-        assert!(!reconnect_restore_clock_started(&world, &reconnect));
-        assert!(
-            reconnect_restore_clock_started(&world, &approval()),
-            "#1293's established first-time clock is unchanged"
-        );
+        assert!(!join_restore_clock_started(&world));
 
         world.insert_resource(crate::server_app::GameStartEntityUuids::default());
         assert!(
-            reconnect_restore_clock_started(&world, &reconnect),
-            "the reconnect budget starts only after every authored row was walked"
+            join_restore_clock_started(&world),
+            "both join kinds start their budget only after every authored row was walked"
         );
+        assert_eq!(reconnect.kind, GmJoinKind::Reconnect);
+        assert_eq!(first_time.kind, GmJoinKind::FirstTime);
     }
 
     #[test]

@@ -262,7 +262,8 @@ impl JoinCodeTable {
         let guid = project.to_ascii_lowercase();
         if guid == self.client_project.to_ascii_lowercase() {
             Some(NAMESPACE_CLIENT)
-        } else if !self.server_project.is_empty() && guid == self.server_project.to_ascii_lowercase()
+        } else if !self.server_project.is_empty()
+            && guid == self.server_project.to_ascii_lowercase()
         {
             Some(NAMESPACE_SERVER)
         } else {
@@ -544,7 +545,10 @@ mod tests {
             i += 1;
             t.alphabet.iter().position(|c| *c == ch).unwrap()
         });
-        assert!(minted.is_none(), "64 denied draws produce no code, not ADMIN");
+        assert!(
+            minted.is_none(),
+            "64 denied draws produce no code, not ADMIN"
+        );
     }
 
     fn record(t: &JoinCodeTable) -> crate::core::rendezvous::JoinCode {
@@ -573,7 +577,11 @@ mod tests {
         assert_eq!(t.resolve("QUARK", NAMESPACE_CLIENT, &rec), Ok(()));
         assert_eq!(t.resolve("qu-ark", NAMESPACE_CLIENT, &rec), Ok(()));
         assert_eq!(
-            t.resolve(&format!("http://host/client/index.html#{}", rec.full), NAMESPACE_CLIENT, &rec),
+            t.resolve(
+                &format!("http://host/client/index.html#{}", rec.full),
+                NAMESPACE_CLIENT,
+                &rec
+            ),
             Ok(()),
             "a whole scanned URL carries its code in the fragment"
         );
@@ -587,7 +595,11 @@ mod tests {
         let t = table();
         let rec = record(&t);
         assert_eq!(t.resolve("XYZAB", NAMESPACE_CLIENT, &rec), Err("unknown"));
-        let other_release = t.compose(&rec.project, "00000000-0000-4000-8000-000000000000", "QUARK");
+        let other_release = t.compose(
+            &rec.project,
+            "00000000-0000-4000-8000-000000000000",
+            "QUARK",
+        );
         assert_eq!(
             t.resolve(&other_release, NAMESPACE_CLIENT, &rec),
             Err("version-mismatch")
@@ -613,7 +625,11 @@ mod tests {
         assert_eq!(t.resolve("", NAMESPACE_CLIENT, &rec), Err("empty"));
         assert_eq!(t.resolve("ABC", NAMESPACE_CLIENT, &rec), Err("length"));
         assert_eq!(
-            t.resolve(&"A".repeat(t.limits.max_code_length + 1), NAMESPACE_CLIENT, &rec),
+            t.resolve(
+                &"A".repeat(t.limits.max_code_length + 1),
+                NAMESPACE_CLIENT,
+                &rec
+            ),
             Err("malformed"),
             "a bounded identifier, bounded before it is parsed"
         );
@@ -625,7 +641,11 @@ mod tests {
         // Two GUID-shaped parts and no third is a paste that went wrong, not a
         // spaced-out suffix.
         assert_eq!(
-            t.resolve(&format!("{}_{}", rec.project, rec.version), NAMESPACE_CLIENT, &rec),
+            t.resolve(
+                &format!("{}_{}", rec.project, rec.version),
+                NAMESPACE_CLIENT,
+                &rec
+            ),
             Err("malformed")
         );
     }

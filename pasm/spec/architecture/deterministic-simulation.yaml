@@ -386,3 +386,31 @@ entities:
         - server.html
       symbols: [ProbeConfig, ProbeReport, run_probe, build_probe_app, wasm_cross_target_probe]
       tests: [cargo test, npx playwright test]
+
+  - component: schedule-order-determinism-policy
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Schedule-Order Determinism — An Unordered Producer/Consumer Pair Is A Divergence
+      summary: "Issue #1346's discovered constraint and its guard. Two systems in the same `SimSet` with no `.before`/`.after` between them run in whatever relative order the schedule's topological sort produces, and that order is a function of the WHOLE graph — so it can flip when an unrelated system joins the set. When the pair is a producer and a consumer of the same authoritative state, the flip is an authoritative divergence. `crate::sim_sets::RedAlertApplied` is the fix pattern; `tests/schedule_order_determinism.rs` is the standing guard."
+      rationale:
+        - "THE CONCRETE FAILURE, SO THE CLASS IS NOT ABSTRACT. `console::captain::server::handle_set_red_alert` writes `ShipRedAlert` in `SimSet::Input`; `console::command::server::operate_command_ai` and `apply_alert_change_to_stances` read it in the same set. Nothing ordered the three. The sort settled it in the readers' favour until #1346's `SecurityPlugin` added `operate_security_ai` and `handle_security_commands` to `SimSet::Input`, at which point it settled the other way and every AI-commanded ship in `duel` held the previous Tactical stance for a full `ai_snapshot_hz` period after each alert change — a folded `station-stances` difference, and a red `tests/archetype_order_determinism.rs`."
+        - "A CADENCE-GATED CONSUMER TURNS ONE STEP INTO A PERIOD. An ungated consumer that loses the race reads last tick's value and self-corrects on the next step; the difference is one tick of staleness. `operate_command_ai` runs on `ai_snapshot_ready`, so losing the race costs it the whole cadence period — six ticks in `duel` — which is long enough for the wrong posture to change what the ship does. That is why this hazard is worth a label rather than a comment: the cost is not proportional to the size of the mistake."
+        - "[ai] A LABEL, NOT `.after(the_system)`. The readers depend on the CONTRACT — 'this tick's `SetRedAlert` orders have landed' — not on the identity of the applier, which is private to the Captain console and could be split or renamed. `RedAlertApplied` is the same shape as `AiTickLabel`: an empty marker `SystemSet` the producer joins and consumers order against, so a cross-module edge does not force a private system public and a second applier joining the label is automatically covered. `.after` on a set with no members is a no-op, so a bare-`App` fixture that never adds the Captain plugin is unaffected."
+        - "THE GUARD PERTURBS ONE VARIABLE. `tests/schedule_order_determinism.rs` runs `duel` twice under the same seed and adds a system that takes NO parameters — no queries, no resources, no commands — to `SimSet::Input` on the second run. It cannot change the simulation by executing; the only thing it can change is the shape of the graph the executor sorts. `tests/archetype_order_determinism.rs` moves TWO variables (the archetype layout it means to test, and the schedule, because the system performing its insert joins a set), which is why it caught #1346's regression while its failure message sent the reader looking for a raw-order RNG walk that was not there. One variable per guard."
+        - "[ai] WHAT IS NOT CLAIMED, AND THE KNOWN REMAINING EXPOSURE. This slice does not assert that `SimSet::Input` is free of unordered producer/consumer pairs — only that the ones `duel` exercises over 900 ticks are ordered. `console::weapons::beam::ai_phaser_auto_fire` and `console::weapons::blaster::ai_blaster_auto_fire` read `ShipRedAlert` and `ShipStationStances` in `SimSet::Input` with no edge against either applier, and today sort favourably. Adding those edges is a behavioural change to fire timing that would move recorded digests, so it is deliberately NOT bundled into a determinism fix; the guard above is what makes the day it flips a red test with a message naming the pattern rather than a bisection."
+    architecture:
+      kind: design-policy
+      authority: authoritative
+      depends_on: [authoritative-state-digest]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: observed
+      paths:
+        - src/sim_sets.rs
+        - src/console/captain/server.rs
+        - src/console/command/server.rs
+        - tests/schedule_order_determinism.rs
+        - tests/archetype_order_determinism.rs
+      symbols: [RedAlertApplied, handle_set_red_alert, operate_command_ai, apply_alert_change_to_stances]
+      tests: [cargo test]

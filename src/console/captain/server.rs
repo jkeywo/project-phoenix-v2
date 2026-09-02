@@ -76,7 +76,14 @@ impl Plugin for CaptainPlugin {
                     .in_set(crate::sim_sets::SimSet::Input)
                     .before(handle_set_view)
                     .run_if(crate::ai::cadence::ai_snapshot_ready),
-                handle_set_red_alert.in_set(crate::sim_sets::SimSet::Input),
+                // Carries `RedAlertApplied`: every `Input` reader that decides
+                // authoritative state from the alert level orders itself after
+                // this label rather than against this system by name, so the
+                // "current alert level" contract survives an unrelated system
+                // joining the set (issue #1346's determinism regression).
+                handle_set_red_alert
+                    .in_set(crate::sim_sets::SimSet::Input)
+                    .in_set(crate::sim_sets::RedAlertApplied),
                 handle_set_weapons_hold.in_set(crate::sim_sets::SimSet::Input),
                 // The scenario's half of the same lever, and its mirror. Both
                 // in `Modifiers`, chained: a scripted order lands and is

@@ -663,6 +663,12 @@ fn serve_joiner(record: &Arc<Record>, mut socket: JoinerSocket) {
         pending: Vec::new(),
         cut: false,
     };
+    // The registry greets EVERY socket it accepts with `ready`, host and joiner
+    // alike, and a joiner sends nothing until it has seen one
+    // (`gui/rendezvous-transport.js`'s `case 'ready'` is where `join` goes out).
+    // Without this the phone would sit on "connecting" against a host that was
+    // waiting for it to speak first.
+    reply(&mut joiner, &RendezvousFrame::new("ready"));
     let opened = std::time::Instant::now();
     loop {
         if !record.open.load(Ordering::Relaxed) {

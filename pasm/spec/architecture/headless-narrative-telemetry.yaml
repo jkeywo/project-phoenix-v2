@@ -178,6 +178,8 @@ entities:
         - "A beat only on a real change. A scenario may re-state a row every tick — a running count re-scored as a window moves — and that is a RATE, not a beat. MissionReport::set_row reports whether anything moved, so an identical restatement produces nothing; NarrativeKind::in_timeline_stream additionally holds report_row_updated out of the ndjson flow, so even a genuinely churning row reaches the folded timeline without flooding a reader's scrollback. report_finalized happens once and is streamed."
         - "Finalization lives at OnEnter(GameOver) beside the broadcast, and fires only when the report has rows: beating 'finalized' over an empty report would tell an after-action reader a report existed. OnEnter runs before the telemetry collectors in Last on the same frame, so the beat is stamped with the tick the run ended on."
         - "RunOutcome::Reported OUTRANKS victory and defeat in classify() rather than sitting beside them. A run that pulls Lyra clear and then loses the skyway is a declared defeat AND a report holding a saved row; framing it as DEFEAT throws the row away, which is the exact failure the report exists to fix. The declared Outcome is not lost — still latched on GameOverReason, still folded, still on the wire — it simply stops being the frame, on the phone and on the Viewscreen alike."
+        - "Two player surfaces, one normalizer. The phone reads rows off ServerMessage::GameOver and the Viewscreen reads them off ViewscreenHudState, so the two overlays are genuinely different code — but both run their rows through the single exported reportRows in gui/game-over-view.js, which decides which row is renderable (a row missing either String Id is dropped: a blank line says less than no line) and lower-cases the state before anything styles on it. A second copy of those two rules is how the surfaces come to disagree about what the report SAYS, so there is one."
+        - "Emptiness is refused at the AUTHORING boundary, not at the renderers. report_row rejects a blank id/heading/outcome with the same raise a missing key gets, because a row with an empty heading is dropped by reportRows on both surfaces while its score still folds into MissionReport::total — a total counting a row no player can see is exactly the invariant #1344 states as 'a total equal to the visible report rows' hidden scores'."
     architecture:
       kind: effect-applier
       authority: authoritative
@@ -187,6 +189,6 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [src/mission_report.rs, src/world/dispatch.rs, src/world/server.rs, src/world/script/effects.rs, src/server_app/broadcast_publish.rs, src/server/viewscreen_border.rs, src/core/balance.rs, gui/game-over-view.js, gui/lobby-state.js]
-      symbols: [apply_report_rows, reset_mission_report, finalized_event, SetReportRow, report_row, on_game_over_enter, RunOutcome, classify, gameOverView]
+      paths: [src/mission_report.rs, src/world/dispatch.rs, src/world/server.rs, src/world/script/effects.rs, src/server_app/broadcast_publish.rs, src/server/viewscreen_border.rs, src/core/balance.rs, gui/game-over-view.js, gui/lobby-state.js, client.html, server.html]
+      symbols: [apply_report_rows, reset_mission_report, finalized_event, SetReportRow, report_row, on_game_over_enter, RunOutcome, classify, gameOverView, reportRows]
       tests: [cargo test, tests/narrative_timeline.rs, tests/client/game-over-view.test.js]

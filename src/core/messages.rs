@@ -2966,8 +2966,16 @@ pub struct ScenarioCatalogWire {
 }
 
 /// One row of the post-mission report as it travels to a player surface
-/// (issue #1344) — the Viewscreen and the phone render the same rows through
-/// the same `gui/game-over-view.js`.
+/// (issue #1344).
+///
+/// Two pages render these rows and both normalize them through the ONE
+/// exported `reportRows` in `gui/game-over-view.js`, which each loads as a
+/// module: the phone (client.html) reaches it via that module's `gameOverView`,
+/// and the Viewscreen (server.html) calls it directly from `__updateHud`,
+/// because its rows ride [`ViewscreenHudState::game_over_report`] rather than a
+/// [`ServerMessage::GameOver`]. Different messages and different overlays, but
+/// one definition of which row is renderable and which `state` words style — so
+/// the two surfaces cannot disagree about what the report says.
 ///
 /// The **player-safe** projection of [`crate::core::report::ReportRow`]: the
 /// authored row id, the two `strings.csv` ids the surface localizes, and the

@@ -1314,26 +1314,42 @@ pub(super) fn destroy_entity_action(entity: &str) -> Result<TriggerAction, Strin
 /// });
 /// ```
 ///
-/// All four text keys are REQUIRED and every one of them raises when missing,
-/// unlike `open_comms`'s optional metadata: a row with no heading or no outcome
-/// id renders as a blank line on the crew's screen, which is worse than the
-/// call failing loudly. `score` is optional and defaults to 0 — a row that is
-/// purely a statement of fact, with no diagnostic weight, should not have to
-/// spell out a zero.
+/// All four text keys are REQUIRED, and `id` / `heading` / `outcome` must each
+/// be NON-BLANK — missing and present-but-empty raise the same way, unlike
+/// `open_comms`'s optional metadata. That is the point of the check and not
+/// belt-and-braces: `heading: ""` is a string, so a presence-only test admits
+/// it, and the row it builds then disagrees with itself across the two player
+/// surfaces. `gui/game-over-view.js`'s `reportRows` drops a row with an empty
+/// heading or outcome (a blank line says less than no line), so the phone and
+/// the Viewscreen never show it — while the headless report still carries it
+/// and still folds its score into `MissionReport::total`. The total would then
+/// count a row no player surface displays, which is precisely the invariant
+/// issue #1344 states as "a total equal to the visible report rows' hidden
+/// scores". Enforcing it HERE, at the authoring boundary, is what makes that a
+/// property of the report rather than a coincidence of the renderers.
+///
+/// `score` is optional and defaults to 0 — a row that is purely a statement of
+/// fact, with no diagnostic weight, should not have to spell out a zero.
 ///
 /// `state` is validated through
 /// [`ReportRowState::parse`](crate::core::report::ReportRowState::parse), the
 /// same parser the vocabulary defines, exactly as `narrative_outcome`'s word
 /// and `game_over`'s outcome are.
 fn report_row(spec: &Map) -> Result<crate::core::report::ReportRow, String> {
-    let id = map_str(spec, "id")
-        .ok_or_else(|| "report_row requires a string `id` (the stable row id)".to_string())?;
-    let heading_id = map_str(spec, "heading").ok_or_else(|| {
-        "report_row requires a string `heading` (the row's heading String Id)".to_string()
-    })?;
-    let outcome_id = map_str(spec, "outcome").ok_or_else(|| {
-        "report_row requires a string `outcome` (the row's outcome String Id)".to_string()
-    })?;
+    /// Read a required, non-blank text key. Absent and blank raise the SAME
+    /// error, so an author who typed `heading: ""` is told the same thing as
+    /// one who forgot the key — which is the same mistake wearing two faces.
+    fn required_text(spec: &Map, key: &str, what: &str) -> Result<String, String> {
+        match map_str(spec, key) {
+            Some(value) if !value.trim().is_empty() => Ok(value),
+            _ => Err(format!(
+                "report_row requires a non-empty string `{key}` ({what})"
+            )),
+        }
+    }
+    let id = required_text(spec, "id", "the stable row id")?;
+    let heading_id = required_text(spec, "heading", "the row's heading String Id")?;
+    let outcome_id = required_text(spec, "outcome", "the row's outcome String Id")?;
     let state = map_str(spec, "state")
         .ok_or_else(|| "report_row requires a string `state`".to_string())
         .and_then(|s| {
@@ -1729,9 +1745,14 @@ mod tests {
         assert!(err.to_string().contains("state"), "{err}");
     }
 
-    /// Every text key is required. A row missing its heading or its outcome id
-    /// renders as a blank line on the crew's screen, which is worse than the
-    /// call failing loudly.
+    /// Every text key is required, and PRESENT-BUT-EMPTY raises exactly as
+    /// missing does. A row with no heading or no outcome id renders as a blank
+    /// line on the crew's screen, which is worse than the call failing loudly —
+    /// and `heading: ""` is a string, so a presence-only check would have let
+    /// one through. It would then be dropped by `reportRows`
+    /// (gui/game-over-view.js) on both player surfaces while still contributing
+    /// its score to `MissionReport::total`, breaking the #1344 invariant that
+    /// the total equals the visible rows' hidden scores.
     #[test]
     fn report_row_requires_every_text_key() {
         for (missing, source) in [
@@ -1751,13 +1772,36 @@ mod tests {
                 "state",
                 r#"fn f(ctx) { ctx.effects.report_row(#{ id: "r", heading: "h", outcome: "o" }); }"#,
             ),
+            // The empty-string arms. Same key, same raise, same message.
+            (
+                "id",
+                r#"fn f(ctx) { ctx.effects.report_row(#{ id: "", heading: "h", outcome: "o", state: "saved" }); }"#,
+            ),
+            (
+                "heading",
+                r#"fn f(ctx) { ctx.effects.report_row(#{ id: "r", heading: "", outcome: "o", state: "saved" }); }"#,
+            ),
+            (
+                "outcome",
+                r#"fn f(ctx) { ctx.effects.report_row(#{ id: "r", heading: "h", outcome: "", state: "saved" }); }"#,
+            ),
+            // Whitespace is not content either: " " would render a blank line
+            // just as "" does, and the JS filter tests emptiness after nothing.
+            (
+                "heading",
+                r#"fn f(ctx) { ctx.effects.report_row(#{ id: "r", heading: "   ", outcome: "o", state: "saved" }); }"#,
+            ),
+            (
+                "state",
+                r#"fn f(ctx) { ctx.effects.report_row(#{ id: "r", heading: "h", outcome: "o", state: "" }); }"#,
+            ),
         ] {
             let err = run_result(source, "f")
                 .err()
-                .unwrap_or_else(|| panic!("a row missing `{missing}` must raise"));
+                .unwrap_or_else(|| panic!("a row with a missing or empty `{missing}` must raise"));
             assert!(
                 err.to_string().contains(missing),
-                "the error must name the missing key `{missing}`: {err}"
+                "the error must name the offending key `{missing}`: {err}"
             );
         }
     }

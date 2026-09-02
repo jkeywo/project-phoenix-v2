@@ -20,7 +20,7 @@
 //
 // The report contract this consumes (src/headless/report.rs, src/core/balance.rs):
 //   report.outcome                         "victory" | "defeat" | "draw" | "timeout" | "reported"
-//   report.report.rows[]                   {id, heading, outcome, state}  (score omitted)
+//   report.report.rows[]                   {id, heading, outcome, state, score}
 //   report.report.total                    hidden diagnostic sum of the rows
 //   report.sides.{player,enemy}.damage_dealt
 //   report.damage_by_ship[uuid].death      [tick, sim_t] | null
@@ -28,6 +28,17 @@
 //   report.scenario.objectives[]           {id, mandatory, status, ...}
 //   report.scenario.flags[]                {name, value}
 //   report.seed, report.final_phase, report.sim_seconds
+//
+// The `score` on a row is deliberate here, and is NOT a leak to be filtered out
+// on the way in. TWO shapes of a report row exist and this script reads the
+// wider one. `core::report::ReportRow::to_json` is the HEADLESS artifact — the
+// file this script parses — and it carries the row's signed diagnostic score,
+// which is the whole reason issue #1344 could assert Lyra's `+6`/`-6` at all.
+// `core::messages::GameOverReportRow` is the narrower WIRE/HUD projection a
+// phone and the Viewscreen render, and it has no `score` field whatsoever. So
+// design's number reaches design through this artifact and reaches no player
+// surface anywhere, as a shape guarantee rather than a filter somebody has to
+// remember to apply — see the module docs on src/core/report.rs.
 //
 // Merge conventions (documented so the numbers are unambiguous):
 //   - win = victory, loss = defeat. `draw` and `timeout` are tallied in their

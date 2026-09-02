@@ -64,8 +64,13 @@
  * field at all, so this is a shape guarantee rather than a filter somebody has
  * to remember to apply.
  *
- * Pure and DOM-free; client.html renders the result, on the Viewscreen and on
- * a phone alike — they are the same code path.
+ * Pure and DOM-free. Two pages render what it returns and each imports this
+ * module to do it: client.html (the phone) calls `gameOverView` for the whole
+ * frame, and server.html (the Viewscreen) calls `reportRows` for the rows — its
+ * rows ride the HUD payload rather than a `GameOver` message, so it composes its
+ * own headline from `game_over_message` and takes only the row normalisation
+ * from here. Different callers, ONE definition of what a renderable row is and
+ * which `state` words style; that is the part that must not be written twice.
  */
 
 /** The four frames the overlay can wear. */
@@ -89,10 +94,20 @@ const ROW_STATES = new Set(['saved', 'lost', 'partial', 'neutral']);
  * neutral presentation rather than inventing a mood from a word it does not
  * know.
  *
+ * EXPORTED (and self-registered as `window.gameOverReportRows`) because it is
+ * the whole of what the VIEWSCREEN needs. server.html receives the same rows on
+ * its HUD payload rather than on a `GameOver` message, so it has no use for the
+ * headline/body half of `gameOverView` below — but the validity filter and the
+ * state lower-casing here are precisely the parts that must not exist twice.
+ * Until issue #1344's review server.html carried its own row loop with neither,
+ * and rendered as a pair of blank lines the row a phone had dropped: the two
+ * player surfaces disagreed about what the report SAID. One function, both
+ * surfaces, and the disagreement has nowhere left to live.
+ *
  * @param {unknown} report
  * @returns {{ id: string, headingId: string, outcomeId: string, state: string }[]}
  */
-function reportRows(report) {
+export function reportRows(report) {
   if (!Array.isArray(report)) return [];
   return report
     .filter((row) => row && typeof row === 'object')
@@ -153,7 +168,11 @@ export function gameOverView(s = {}) {
   };
 }
 
-// Expose for the classic inline script in client.html.
+// Expose for the classic inline scripts that render this: client.html's shell
+// takes the whole view model, server.html's __updateHud takes just the rows.
+// Neither page can `import` from a classic script, and both call long after the
+// module graph has run.
 if (typeof window !== 'undefined') {
   window.gameOverView = gameOverView;
+  window.gameOverReportRows = reportRows;
 }

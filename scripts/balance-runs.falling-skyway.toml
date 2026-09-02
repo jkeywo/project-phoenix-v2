@@ -66,12 +66,26 @@ max_failures = 0
 # 80–95% band five-point resolution (16–19 completions). Do not move the seeds
 # or shorten the run to manufacture movement.
 
-# ── NARRATIVE-TIMELINE BASELINE RECORDED ON #1338 (2026-09-02) ───────────────
+# ── NARRATIVE-TIMELINE BASELINE — OPENED ON #1338, RE-RECORDED ON #1344 ──────
 #
-# Taken BEFORE any scenario tuning, which is what issue #1338 asks for: the
-# mission-timeline recorder is new, Falling Skyway is unchanged by that slice
-# (not one line of assets/worlds/falling_skyway.toml moved), and this block is
-# the thing the tuning slices of PRD #1337 will be A/B'd against.
+# ORIGINALLY taken BEFORE any scenario tuning, which is what issue #1338 asked
+# for: the mission-timeline recorder was new and Falling Skyway was unchanged by
+# that slice. Issue #1344 is the first slice to edit the scenario, so the census
+# below is a FRESH reading of the same command on the same seed, taken after
+# that edit. This block remains the thing the tuning slices of PRD #1337 are
+# A/B'd against; what follows is now its second entry, not its first.
+#
+# WHAT #1344 MOVED IN THE SCENARIO — read this before comparing to anything
+# quoted from the #1338 wording:
+#   * `lyra_ascending` now carries `narrative = true`, so the one marked hull in
+#     the mission reaches the timeline. The #1338 entry's "marks no [[entity]]"
+#     sentence and its `marked_entity_* 0` line are SUPERSEDED by this one.
+#   * `on_lyra_recovered` now writes `narrative_outcome(.., "rescued")` and the
+#     mission's first post-mission report row.
+# `beat_fired` is still 0, and that zero is still honest: Falling Skyway authors
+# no `ctx.effects.narrative_beat(..)` call. Marking the Skyhook and the three
+# claimants — and punctuating the storm bands with beats — is still the next
+# thing a tuning slice should do, and this block is still what it will move.
 #
 # Exact run — ONE fixed seed, not the 20-seed sweep above, because this is a
 # story reading rather than a rate:
@@ -81,25 +95,39 @@ max_failures = 0
 #     --seed 1 --hz 30 --sim-seconds 1850 --report-format json
 #
 # RUN SHAPE
-#   ended  GameOver at t=1836.07 (110,163 ticks), classified `victory`
+#   ended  GameOver at t=1836.07 (110,163 ticks), classified `reported`
 #   player 2527/2690 hull remaining (93.9 %), 1511.0 damage taken, 0 dealt
 #   32 entities alive at exit, 7 ships carrying damage ledgers
 #
-# NARRATIVE TIMELINE — 132 events
-#   objective_posted     25      comms_opened     46
-#   objective_completed  22      comms_answered   23
-#   objective_failed      3      deadline_fired   13
-#   beat_fired            0      marked_entity_*   0
+#   Every number on those three lines is BIT-IDENTICAL to the #1338 reading —
+#   same tick count, same hull, same damage, same entity count — which is the
+#   control this re-record exists to provide: marking a hull and writing a
+#   report row are recording, not simulation, and neither moved the run. The one
+#   changed word is the classification, and it changed for the reason #1344
+#   introduced: the ending is report-bearing, so `reported` OUTRANKS the
+#   `victory` the scenario still declares (that flag is still latched, still
+#   folded, still on the wire). Anything reading win rate off this sweep must
+#   read the `reported` column — see the note in scripts/balance-runs.mjs.
 #
-# The two zeroes are the honest state of the world, not a gap in the recorder:
-# Falling Skyway authors no `ctx.effects.narrative_beat(..)` call and marks no
-# `[[entity]]` with `narrative = true` yet, because #1338 deliberately did not
-# edit the scenario. `assets/worlds/probe_narrative.toml` exercises both, and
-# `tests/narrative_timeline.rs` proves them. Marking Lyra, the Skyhook and the
-# three claimants — and punctuating the storm bands with beats — is the first
-# thing a tuning slice should do, and this block is what it will move.
+# NARRATIVE TIMELINE — 137 events (was 132 on #1338; +5, all of them #1344's)
+#   objective_posted     25      comms_opened             46
+#   objective_completed  22      comms_answered           23
+#   objective_failed      3      deadline_fired           13
+#   beat_fired            0      marked_entity_spawned     1
+#   report_row_updated    1      marked_entity_rescued     1
+#   report_finalized      1      marked_entity_destroyed   1
+#
+# THE POST-MISSION REPORT this run produced
+#   rows  1 — `lyra` / world.falling_skyway.report.lyra.{heading,saved},
+#             state `saved`, hidden score +6
+#   total 6
+#   The score and the total are HEADLESS-ONLY. Neither reaches a player surface:
+#   `core::messages::GameOverReportRow` has no score field, so the phone and the
+#   Viewscreen render the heading and the outcome and nothing else.
 #
 # SHORT-STORY INTERPRETATION (read straight off the timeline, in order)
+#   t=0.03   Lyra Ascending enters the world and the timeline says so
+#            (`marked_entity_spawned`). She is the mission's one marked hull.
 #   t=0      The crew arrive to two mandatory jobs: clear the corridor, triage
 #            the ladder. The corridor is clear by t=50.
 #   t=120    The strike committee hardens before anybody has spoken to them.
@@ -122,6 +150,20 @@ max_failures = 0
 #   t=400    The storm front arrives. Shelter, rescue and storm objectives
 #            post; the rescue scan completes at t=420 and the rescue itself at
 #            t=433 — the fastest work of the mission.
+#   t=433.30 Lyra is RESCUED, said outright rather than inferred
+#            (`marked_entity_rescued`), and the mission's first post-mission
+#            report row is written in the same tick: `lyra`, saved, +6.
+#   t=613.83 And then the storm kills her anyway. Her Captain system is knocked
+#            out at t=605.37 and her hull is gone by t=613.83, 400.0 damage
+#            taken in all — a real death, so `marked_entity_destroyed` fires
+#            beside the rescue rather than instead of it (the suppression only
+#            covers a SCRIPTED removal of a hull whose fate was already told).
+#            THE REPORT ROW DOES NOT MOVE. It still reads saved, +6, because the
+#            row is written where the FATE IS DECIDED and the crew did pull her
+#            clear; the loss row lives in `on_lyra_clear_due` and that branch
+#            never ran. Whether "saved, and then lost to the second band" should
+#            read as one row or two is the first real design question this
+#            surface has raised, and it is #1337 tuning, not a defect.
 #   t=580-900 Three storm bands pass. At t=768 Lyra's clear-by deadline fires
 #            with the approach already made, and the lee objective posts.
 #   t=1072   The storm passes. Every shelter objective completes together, the
@@ -134,6 +176,11 @@ max_failures = 0
 #   t=1800   The window closes with nobody through it. `obj-a3-window` fails.
 #   t=1826   The three claimants ride it out, the debrief is empty, and both
 #            `obj-a3-choice` (mandatory) and `obj-a3-confront` fail.
+#   t=1836.07 The run ends and the report is finalized — one row, total 6, named
+#            against `world.falling_skyway.game_over.mission_complete`. The
+#            ending declared `victory`; because it carries a row it CLASSIFIES
+#            `reported`, which is the whole of what #1344 changed about how this
+#            mission ends.
 #
 #   READ AS A STORY: the crew are excellent at the work and cannot make a
 #   decision. They settle a strike in a fifth of a second and then spend the
@@ -158,6 +205,11 @@ max_failures = 0
 #   control this baseline needs. Helm and Tactical dominate by four orders of
 #   magnitude — they are per-tick control surfaces — while Comms, Captain,
 #   Navigation and Engineering are event-shaped. That is the split the mission
-#   timeline is the other half of: the 132 narrative events above are the whole
+#   timeline is the other half of: the 137 narrative events above are the whole
 #   of what the low-frequency stations DID, and no amount of reading the
 #   activity counters would recover a single one of them.
+#
+#   (These six counters are quoted as recorded on #1338 and were not re-taken:
+#   they are a bounded TAIL rather than a run total, and #1344 issued no
+#   commands — it marked a hull and wrote a report row. The timeline census
+#   above is the part that moved, and it was re-read on the same seed.)

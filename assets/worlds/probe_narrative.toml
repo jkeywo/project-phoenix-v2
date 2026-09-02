@@ -1,4 +1,5 @@
-# Probe world for issue #1338 — the authored mission timeline, end to end.
+# Probe world for issues #1338, #1342 and #1344 — the authored mission timeline,
+# the ship's-computer message and the post-mission report, end to end.
 #
 # No combat, no traffic, no hazard. Every event this world produces is one a
 # SCENARIO AUTHOR asked for, which is the whole claim PRD #1337 makes about the
@@ -17,24 +18,28 @@
 #   t=4   `resolve` runs. The mandatory objective completes, the optional one
 #         fails, and the author declares Lyra rescued — an outcome no amount of
 #         simulation could have inferred, which is why it is authorable at all.
-#         The ship's computer shows a second, `critical`, Station-cued message,
-#         and the mission's ONE post-mission report row (issue #1344) is
-#         written on the tick her fate is decided rather than at the ending.
-#   t=5   The scheduled restatement re-writes that row identically. Nothing
-#         moved, so it produces NO second `report_row_updated` beat — the rate
-#         guard is the whole reason the row is re-stated here.
+#         The ship's computer shows a second, `critical`, Station-cued message
+#         (issue #1342). The SAME tick writes the run's one post-mission report
+#         row (`lyra`, saved, hidden score +6): a row is written when the fate
+#         is decided, not at the ending, which is what makes an inapplicable
+#         row an ABSENT row rather than an invented one.
+#   t=5   `resolve`'s one-second follow-up re-states that row IDENTICALLY. This
+#         is the rate guard, and the assertion is a NEGATIVE one: nothing moved,
+#         so the timeline must carry no second beat.
 #   t=6   `window_opens` fires. Its handler records the beat that says the
 #         deadline mattered.
 #   t=8   `clear_the_wreck` runs. The derelict — marked, and with no authored
 #         outcome — is removed with `destroy_entity`, and Lyra, already
 #         declared rescued, is removed too. A THIRD computer message supersedes
 #         the still-active t=4 message immediately.
-#   t=10  `close_the_probe` runs. The run ends, DECLARED a defeat and still
-#         report-bearing: `reported` outranks the declaration, the report is
-#         finalized (one `report_finalized` beat, and the last word the
-#         timeline says), and the ending clears the still-active t=8 computer
-#         message — deliberately NOT a beat, because the shown / superseded /
-#         expired trio does not include a mission-end clear.
+#   t=10  `close_the_probe` runs. The run ends in `GamePhase::GameOver` with a
+#         DECLARED defeat that is still report-bearing — and so classifies
+#         `reported`, not `defeat` (issue #1344). The declaration is deliberate:
+#         the flag the rows outrank is still latched, still folded and still on
+#         the wire, which is the only way to prove the ranking rather than
+#         assume it. The ending also clears the still-active t=8 computer
+#         message — deliberately NOT a beat, because #1342's shown / superseded
+#         / expired trio does not include a mission-end clear.
 #
 # Every one of those reaches the headless run report's `narrative` field and,
 # under `--format ndjson`, the inline stream — except `report_row_updated`,
@@ -43,6 +48,21 @@
 # and `comms_opened` on the tick Lyra's hail lands. The unmarked player hull
 # produces no entity beat at all: marking is the gate, and this world proves it
 # by leaving the player unmarked.
+#
+# THE TWO REPORT BEATS, and why one of them is a count of one:
+#
+#   * `report_row_updated` fires ONCE, at t=4. The identical re-statement at t=5
+#     moves nothing, so it writes nothing — a re-scored row is a rate, and the
+#     ndjson stream drops this kind entirely for that reason while the folded
+#     timeline still counts it.
+#   * `report_finalized` fires ONCE, at t=10, carrying the ending's reason id
+#     (`world.probe_narrative.game_over.closed`), the row count and the hidden
+#     total. It fires only because the report is non-empty: an ending that
+#     authored no report is not a report-bearing ending.
+#
+# The score itself never leaves the host. It is on the row here and in the
+# headless run report, and it is absent by construction from
+# `core::messages::GameOverReportRow` — the shape both player surfaces render.
 #
 # THE TWO REMOVALS AT t=8 ARE THE POINT OF THE DERELICT. A scripted
 # `destroy_entity` writes no combat event — an authorial removal is not a kill,

@@ -1378,6 +1378,18 @@
        right now" gate (issue #1115 AC2: rotatable in Lobby/GameOver, refused
        in Loading/InProgress). Self-registers window.codesRotatable. -->
   <script type="module" src="gui/phase-toggle.js"></script>
+  <!-- Post-mission report rows (issue #1344). The SAME module client.html
+       loads: the phone calls its gameOverView() for the whole game-over frame,
+       and __updateHud's overlay below calls its reportRows() for the rows. The
+       Viewscreen gets those rows on the HUD payload rather than on a GameOver
+       message, so it needs only the row half — but "which row is renderable"
+       and "which state words style" are the two rules that must not exist
+       twice, and a second copy of them here is exactly what a review of #1344
+       found rendering blank lines a phone dropped. Self-registers
+       window.gameOverReportRows, the same load-order-tolerant pattern as the
+       view models above; __updateHud fires from a WASM push long after this
+       module graph has run. -->
+  <script type="module" src="gui/game-over-view.js"></script>
   <!-- Host lobby view-model (issue #1229): the pure phase-transition, title/
        crew/ready-badge/countdown/station-card/reserved-chip/spectator-pill/
        hint computation behind __updateLobby's station-grid renderer lives in
@@ -1783,20 +1795,35 @@
     // The same rows a phone renders, in the same order, arriving already
     // localised through localiseHostPayload like every other id in this
     // payload. `state` is a machine label and drives the accent only; there is
-    // no score in the payload to leak, by construction.
+    // no score in the payload to leak, by construction (see
+    // core::messages::GameOverReportRow — the wire shape has no score field).
+    //
+    // Normalised by gui/game-over-view.js's reportRows(), the SAME function
+    // client.html's overlay runs its rows through. That is the point of the
+    // call and not a convenience: the rules it applies — drop a row missing
+    // either of its two texts, and lower-case `state` before styling on it —
+    // are what makes the phone and the Viewscreen agree about what the report
+    // says. This block used to apply neither, so an empty heading rendered here
+    // as a blank dt/dd pair and did not render at all on a phone.
+    //
+    // The typeof guard is defensive only: the module tag above is deferred and
+    // so has run before DOMContentLoaded, while every call to __updateHud comes
+    // from a WASM push that boots later. Showing no rows beats showing
+    // unfiltered ones, which is why the fallback is [] and not the raw array.
     const goReport = document.getElementById('game-over-report');
     if (goReport) {
-      const rows = Array.isArray(s.game_over_report) ? s.game_over_report : [];
+      const rows = typeof window.gameOverReportRows === 'function'
+        ? window.gameOverReportRows(s.game_over_report)
+        : [];
       goReport.replaceChildren();
       const accent = { saved: '#7ad48f', lost: '#e8705a', partial: '#e0c060', neutral: '#8a98c4' };
       for (const row of rows) {
-        if (!row || typeof row !== 'object') continue;
         const dt = document.createElement('dt');
-        dt.textContent = row.heading != null ? String(row.heading) : '';
+        dt.textContent = row.headingId;
         dt.style.cssText = 'letter-spacing:0.18em;text-transform:uppercase;white-space:nowrap;color:'
           + (accent[row.state] || '#8a98c4') + ';';
         const dd = document.createElement('dd');
-        dd.textContent = row.outcome != null ? String(row.outcome) : '';
+        dd.textContent = row.outcomeId;
         dd.style.cssText = 'margin:0;line-height:1.6;color:#cde;';
         goReport.append(dt, dd);
       }

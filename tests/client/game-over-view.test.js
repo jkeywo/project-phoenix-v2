@@ -13,7 +13,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { gameOverView } from '../../gui/game-over-view.js';
+import { gameOverView, reportRows } from '../../gui/game-over-view.js';
 import { LobbyState } from '../../gui/lobby-state.js';
 import { localiseTree, setTable, getTable, wireText } from '../../gui/strings.js';
 
@@ -418,5 +418,66 @@ describe('the report through the phone ingress', () => {
     );
     expect(page).toMatch(/heading\.textContent\s*=\s*wireText\(row\.headingId\)/);
     expect(page).toMatch(/outcome\.textContent\s*=\s*wireText\(row\.outcomeId\)/);
+  });
+});
+
+// ── The OTHER player surface: the Viewscreen (server.html) ────────────────────
+//
+// The rows reach server.html on the HUD payload (`ViewscreenHudState.
+// game_over_report`) rather than on a `GameOver` message, so it renders its own
+// overlay and does not call `gameOverView`. What it must NOT do is normalise the
+// rows itself: until this issue's review it looped the raw array, which meant a
+// row a phone dropped rendered here as a pair of blank lines, and a `state` of
+// "SAVED" styled on a phone and not here. Those two rules live in `reportRows`,
+// and the page source is the only place that can say which function runs.
+describe('the report on the Viewscreen', () => {
+  const serverPage = () =>
+    readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), '../../server.html'),
+      'utf8',
+    );
+
+  it('loads the shared module rather than carrying a second row renderer', () => {
+    expect(serverPage()).toMatch(
+      /<script type="module" src="gui\/game-over-view\.js"><\/script>/,
+    );
+  });
+
+  it('normalises its HUD rows through reportRows and renders what it returns', () => {
+    const page = serverPage();
+    expect(page).toMatch(/window\.gameOverReportRows\(s\.game_over_report\)/);
+    expect(page).toMatch(/dt\.textContent\s*=\s*row\.headingId/);
+    expect(page).toMatch(/dd\.textContent\s*=\s*row\.outcomeId/);
+    // The two rules must not be re-implemented beside the call: no second
+    // filter on the raw wire field names, and no second state vocabulary.
+    expect(page).not.toMatch(/row\.heading\s*!=\s*null/);
+    expect(page).not.toMatch(/row\.outcome\s*!=\s*null/);
+  });
+
+  // What the module the page now loads actually enforces, asserted directly so
+  // the scrape above is pinned to behaviour and not just to a spelling.
+  it('drops an unrenderable row and lower-cases the state it styles on', () => {
+    const rows = reportRows([
+      { id: 'lyra', heading: 'h.lyra', outcome: 'o.lyra', state: 'SAVED' },
+      // An empty heading is what `report_row`'s boundary now refuses to author
+      // (src/world/script/effects.rs); a host that predates that check can
+      // still send one, and both surfaces must drop it rather than draw a
+      // blank line.
+      { id: 'blank', heading: '', outcome: 'o.blank', state: 'lost' },
+      { id: 'noOutcome', heading: 'h.noOutcome', state: 'lost' },
+      null,
+    ]);
+    expect(rows).toEqual([
+      { id: 'lyra', headingId: 'h.lyra', outcomeId: 'o.lyra', state: 'saved' },
+    ]);
+  });
+
+  // One function, two surfaces: the window global server.html reaches for is
+  // the very export client.html's view model runs its rows through.
+  it('exposes the same function the phone path uses', async () => {
+    const mod = await import('../../gui/game-over-view.js');
+    expect(globalThis.window?.gameOverReportRows ?? mod.reportRows).toBe(reportRows);
+    const vm = gameOverView({ phase: 'GameOver', report: [{ ...lyraSaved, state: 'SAVED' }] });
+    expect(vm.rows).toEqual(reportRows([{ ...lyraSaved, state: 'SAVED' }]));
   });
 });

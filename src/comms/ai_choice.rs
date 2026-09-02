@@ -114,8 +114,24 @@ pub fn weighted_pool(responses: &[CommsResponse], available: bool) -> Vec<Weight
 
 /// The total weight of a pool — the exclusive upper bound the single RNG draw
 /// is taken below.
+///
+/// SATURATING, for the same reason [`pick_by_draw`]'s walk is. Authored weights
+/// are clamped only to `u32::MAX` apiece (`world::script::comms::take_count`),
+/// so two large ones on one node overflow a plain sum: a debug build panics
+/// inside the comms host and a release build wraps to a smaller total. Either is
+/// unacceptable here. The panic is a dialogue bringing the server down, which
+/// the module contract above forbids outright; the wrap is worse than the panic,
+/// because it is a debug/release split in a number that feeds the draw, in a
+/// simulation two peers have to agree on bit-for-bit.
+///
+/// Saturating makes an absurdly-weighted node merely absurd rather than fatal:
+/// the total pins at `u32::MAX`, `pick_by_draw`'s cursor saturates at the same
+/// place, and every draw lands on the first response whose running total reaches
+/// it. Total, deterministic, and identical in both profiles — which is all this
+/// has to be for a shape no mission authors.
 pub fn pool_total_weight(pool: &[WeightedResponse]) -> u32 {
-    pool.iter().map(|e| e.weight).sum()
+    pool.iter()
+        .fold(0u32, |acc, entry| acc.saturating_add(entry.weight))
 }
 
 /// Turn one uniform draw in `0..pool_total_weight(pool)` into the response
@@ -310,6 +326,27 @@ mod tests {
         assert_eq!(pick_by_draw(&pool, 0), Some(1));
         for draw in 1..4 {
             assert_eq!(pick_by_draw(&pool, draw), Some(2), "draw {draw}");
+        }
+    }
+
+    /// Authored data must not be able to overflow the total — a panic here is a
+    /// dialogue taking the server down in a debug build, and a wrap is a
+    /// debug/release disagreement inside the draw of a deterministic sim.
+    #[test]
+    fn absurd_authored_weights_saturate_rather_than_overflow() {
+        let node = vec![
+            r("enormous", Some(u32::MAX), None),
+            r("also_enormous", Some(u32::MAX), None),
+        ];
+        let pool = weighted_pool(&node, true);
+        let total = pool_total_weight(&pool);
+        assert_eq!(total, u32::MAX, "the total pins rather than wrapping");
+
+        // And the pick stays total over the whole draw range: the first entry
+        // already saturates the cursor, so every draw resolves to it and none
+        // falls off the end.
+        for draw in [0, 1, u32::MAX / 2, u32::MAX - 1] {
+            assert_eq!(pick_by_draw(&pool, draw), Some(0), "draw {draw}");
         }
     }
 

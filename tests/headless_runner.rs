@@ -17159,6 +17159,100 @@ fn falling_skyway_lift_nodes_author_a_five_second_weighted_backfill_decision() {
     );
 }
 
+/// Issue #1343, AC3 — the repricing case, asserted against the REAL script
+/// rather than a hand-seated pair of messages.
+///
+/// `console::comms::server::message_is_superseded` cancels an unmanned console's
+/// pending choice when a later live message shares the answered message's
+/// `thread_id`, and that is the whole of AC3's repricing half. It rests entirely
+/// on an authoring contract this mission has to keep: `ctx.effects.open_comms`
+/// MINTS a fresh thread id whenever `thread_id` is omitted, so a repricing that
+/// does not name the claim's thread is a different conversation as far as the
+/// runtime can tell — the pre-move node stays live with its wait still running,
+/// and one claimant gets answered twice, once against a ledger that has moved.
+///
+/// Each claimant is asked on three roads — the parley, the twenty-two-second
+/// call-back after a hold, and the repricing watch — and every one of them has
+/// to land on the same thread. Read off the open requests the script actually
+/// buffers, so a future open that forgets its `thread_id` fails here rather than
+/// in a mission nobody replays.
+#[test]
+fn falling_skyway_reprices_a_claim_on_the_thread_it_was_claimed_on() {
+    let script = WindowScript::compile();
+    // Room for every claim at once and nothing decided, which is the state all
+    // four of these calls are reachable in.
+    let room: i64 = SKYWAY_CLAIM_IDS.iter().map(|id| script.authored(id)).sum();
+    let flags = script.flags(&WindowLedger {
+        banked: room,
+        live: room,
+        reserved: 0,
+        decided: [None, None, None],
+        convoy_lost: false,
+    });
+
+    // The thread each call asked to open, by the node fn it opened on.
+    let opens = |fn_name: &str| -> std::collections::BTreeMap<String, Option<String>> {
+        let effects = script.call(fn_name, &flags);
+        assert!(
+            !effects.comms_opens.is_empty(),
+            "{fn_name} must open at least one thread in a window that is still open"
+        );
+        effects
+            .comms_opens
+            .into_iter()
+            .map(|open| (open.root_fn, open.thread_id))
+            .collect()
+    };
+
+    let parley = opens("the_parley_at_the_ladder");
+    let repriced = opens("reprice_the_other_claims");
+    let call_backs = [
+        opens("call_the_committee_back"),
+        opens("call_havelock_back"),
+        opens("call_the_convoy_back"),
+    ];
+    let reprice_nodes = ["committee_reprices", "havelock_reprices", "convoy_reprices"];
+
+    let mut threads = Vec::new();
+    for index in 0..3 {
+        let claim_node = SKYWAY_CLAIM_NODES[index];
+        let thread = parley
+            .get(claim_node)
+            .unwrap_or_else(|| panic!("the parley must open {claim_node}"))
+            .clone()
+            .unwrap_or_else(|| {
+                panic!(
+                    "{claim_node} must be opened on a NAMED thread — an omitted \
+                     `thread_id` mints a fresh one, and a repricing then cannot \
+                     supersede it"
+                )
+            });
+
+        assert_eq!(
+            repriced.get(reprice_nodes[index]),
+            Some(&Some(thread.clone())),
+            "{}: the repricing must reopen the claim's own thread, or an unmanned \
+             console answers the pre-move node as well as this one",
+            reprice_nodes[index]
+        );
+        assert_eq!(
+            call_backs[index].get(claim_node),
+            Some(&Some(thread.clone())),
+            "{claim_node}: the call-back after a hold is the same conversation \
+             resuming, so it belongs on the same thread"
+        );
+        threads.push(thread);
+    }
+
+    let distinct: std::collections::BTreeSet<&String> = threads.iter().collect();
+    assert_eq!(
+        distinct.len(),
+        threads.len(),
+        "the three claimants are three separate decisions and must not share a \
+         thread — sharing one would have each claim supersede the last: {threads:?}"
+    );
+}
+
 /// **Issue #1340, AC1/AC2/AC4 — every reachable ledger, and not one offer on
 /// it that the booking seam would refuse.**
 ///

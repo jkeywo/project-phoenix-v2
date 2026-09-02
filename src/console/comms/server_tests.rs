@@ -2290,6 +2290,13 @@ fn a_human_taking_the_console_cancels_the_pending_choice() {
 /// AC3, the repricing case — a repriced claim opens a NEW message on the same
 /// thread and the old one stays answerable. The wait follows the current screen:
 /// the superseded message's is cancelled and the new message arms its own.
+///
+/// The shared thread id below is not a convenience of the fixture: it is the
+/// shape the shipped mission authors, because `open_comms` mints a FRESH thread
+/// whenever `thread_id` is omitted and a repricing on a fresh thread supersedes
+/// nothing. `falling_skyway_reprices_a_claim_on_the_thread_it_was_claimed_on` in
+/// `tests/headless_runner.rs` is what keeps the world honest to it, so this test
+/// and the world cannot drift apart silently.
 #[test]
 fn repricing_a_claim_moves_the_wait_to_the_new_message() {
     let mut app = weighted_response_app(5);
@@ -2329,6 +2336,45 @@ fn repricing_a_claim_moves_the_wait_to_the_new_message() {
         admitted_response_indices(&mut app),
         vec![1],
         "only the refusal is left on the repriced node"
+    );
+}
+
+/// The other side of supersession: two conversations that are NOT one.
+///
+/// Threadless messages are their own threads — the fallback the inbox's
+/// live-thread reading and the client's grouping both apply — so two of them
+/// must not cancel each other, and neither must two different threads. Both get
+/// their own pause and both get answered; anything else would leave a live
+/// conversation unanswered for ever because an unrelated one arrived after it.
+#[test]
+fn separate_conversations_do_not_supersede_one_another() {
+    let mut app = weighted_response_app(5);
+    // No thread at all on either, and the same sender on both: neither identity
+    // makes these one conversation.
+    seat_weighted_dialogue(&mut app, "lift-1", "", "sender-uuid", lift_responses());
+    seat_weighted_dialogue(&mut app, "lift-2", "", "sender-uuid", lift_responses());
+    // And a third on a thread of its own, from that same sender.
+    seat_weighted_dialogue(
+        &mut app,
+        "lift-3",
+        "another-claim",
+        "sender-uuid",
+        lift_responses(),
+    );
+
+    tick_to(&mut app, 0);
+    for id in ["lift-1", "lift-2", "lift-3"] {
+        assert!(
+            pending_wait(&app, id).is_some(),
+            "{id} is its own decision and must arm its own wait"
+        );
+    }
+
+    tick_to(&mut app, skyway_delay_ticks());
+    assert_eq!(
+        admitted_response_indices(&mut app).len(),
+        3,
+        "three separate conversations get three answers"
     );
 }
 

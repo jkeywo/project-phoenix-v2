@@ -2354,11 +2354,37 @@ fn weighted_backfill_choice(
 /// Inbox order is injection order, so "later" is a position comparison and needs
 /// no timestamps. Only messages with a live, unanswered dialogue count: a
 /// superseding message that has itself been answered supersedes nothing.
+///
+/// # The authoring contract this depends on
+///
+/// `ctx.effects.open_comms` MINTS a fresh thread id whenever the author omits
+/// `thread_id` ([`crate::comms::scripted::open_scripted_comms_threads`]), so a
+/// repricing that does not name its thread is not on the claim's thread and
+/// nothing here can tell the two apart. A world that reopens a weighted decision
+/// at a new price must therefore author the SAME `thread_id` on both opens —
+/// Falling Skyway's three lift conversations name `falling-skyway-claim-*` on
+/// every road into each one (the parley, the twenty-two-second call-back after a
+/// hold, and the repricing watch), and
+/// `falling_skyway_reprices_a_claim_on_the_thread_it_was_claimed_on` in
+/// `tests/headless_runner.rs` is what holds that true against the real script.
+///
+/// Sender identity is deliberately NOT the key. Two live conversations from one
+/// party are two decisions, and answering only the later of them would leave the
+/// earlier open for ever; the thread is the modelled unit of a conversation
+/// here, the same unit the inbox's own live-thread reading uses.
+///
+/// An EMPTY thread id supersedes nothing, matching the fallback the inbox and
+/// the client both apply (`CommsInbox::has_live_critical_thread`): a message
+/// with no thread is its own thread, so two of them are two conversations rather
+/// than one.
 fn message_is_superseded(
     comms: &CommsRuntime,
     inbox: &CommsInboxRes,
     message: &CommsMessage,
 ) -> bool {
+    if message.thread_id.is_empty() {
+        return false;
+    }
     inbox
         .0
         .iter()

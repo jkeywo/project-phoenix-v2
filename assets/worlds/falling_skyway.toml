@@ -6041,16 +6041,29 @@ fn the_parley_at_the_ladder(ctx) {
     // corridor lost before the parley never put one — counting a party who
     // could not speak as an unanswered request would fail a crew for silence
     // that was never theirs.
+    // ONE THREAD PER CLAIMANT, and it is load-bearing rather than cosmetic
+    // (#1343). A claim is asked once here, asked AGAIN twenty-two seconds after
+    // a hold (`call_the_committee_back` and its two siblings), and re-asked at a
+    // new price every time the board moves (`reprice_the_other_claims`) — four
+    // roads to what is, to everyone in the room, one conversation about one
+    // corridor slot. Naming the thread is what makes the runtime agree: the
+    // client groups the thread, the inbox's live-thread reading takes the
+    // LATEST message on it, and `console::comms::server::message_is_superseded`
+    // cancels an unmanned console's pending choice on every earlier message of
+    // the thread. Leave these off and a backfilled bridge answers the claim AND
+    // its repricing separately, which is two answers to one question.
     ctx.flags.skyway_claim_asked_committee = 1;
     ctx.effects.open_comms(#{
         from: "world.falling_skyway.entity.strike_committee.name",
         node_fn: "committee_claims",
+        thread_id: "falling-skyway-claim-committee",
         urgent: true,
     });
     ctx.flags.skyway_claim_asked_havelock = 1;
     ctx.effects.open_comms(#{
         from: "world.falling_skyway.entity.havelock_cutter.name",
         node_fn: "havelock_claims",
+        thread_id: "falling-skyway-claim-havelock",
         urgent: true,
     });
     if ctx.flags.skyway_convoy_lost == 0 {
@@ -6058,6 +6071,7 @@ fn the_parley_at_the_ladder(ctx) {
         ctx.effects.open_comms(#{
             from: "world.falling_skyway.entity.convoy_meridian.name",
             node_fn: "convoy_claims",
+            thread_id: "falling-skyway-claim-convoy",
             urgent: true,
         });
     }
@@ -6354,12 +6368,14 @@ fn reprice_the_other_claims(ctx) {
         ctx.effects.open_comms(#{
             from: "world.falling_skyway.entity.strike_committee.name",
             node_fn: "committee_reprices",
+            thread_id: "falling-skyway-claim-committee",
         });
     }
     if !claim_decided(ctx, "skyway_granted_havelock", "skyway_refused_havelock") {
         ctx.effects.open_comms(#{
             from: "world.falling_skyway.entity.havelock_cutter.name",
             node_fn: "havelock_reprices",
+            thread_id: "falling-skyway-claim-havelock",
         });
     }
     if ctx.flags.skyway_convoy_lost == 0 &&
@@ -6367,6 +6383,7 @@ fn reprice_the_other_claims(ctx) {
         ctx.effects.open_comms(#{
             from: "world.falling_skyway.entity.convoy_meridian.name",
             node_fn: "convoy_reprices",
+            thread_id: "falling-skyway-claim-convoy",
         });
     }
 }
@@ -6391,6 +6408,14 @@ fn convoy_reprices(ctx)    { convoy_node(ctx, "world.falling_skyway.comms.convoy
 // answered on sight would spend the window inside one watch tick. A pause longer
 // than the beat means an unmanned bridge decides against a ledger that has
 // settled, exactly as a crew reading the manifest would.
+//
+// THAT ONLY HOLDS BECAUSE THE REPRICING SHARES THE CLAIM'S THREAD. A reprice is
+// a NEW message — it does not edit the one already on the screen — so the old
+// node stays live and answerable beside it, and a wait still running on the old
+// one is cancelled only because `message_is_superseded` can see the two are the
+// same conversation. The `thread_id` on every one of these opens is what it
+// sees; without it an empty chair answers the pre-move node and the repriced
+// node both, and one claimant is decided twice.
 //
 // The confrontation options on Havelock's node author NOTHING, which keeps them
 // out of the pool entirely — the comment there already said that was the last
@@ -6440,6 +6465,7 @@ fn call_the_committee_back(ctx) {
     ctx.effects.open_comms(#{
         from: "world.falling_skyway.entity.strike_committee.name",
         node_fn: "committee_claims",
+        thread_id: "falling-skyway-claim-committee",
         urgent: true,
     });
 }
@@ -6540,6 +6566,7 @@ fn call_havelock_back(ctx) {
     ctx.effects.open_comms(#{
         from: "world.falling_skyway.entity.havelock_cutter.name",
         node_fn: "havelock_claims",
+        thread_id: "falling-skyway-claim-havelock",
         urgent: true,
     });
 }
@@ -6655,6 +6682,7 @@ fn call_the_convoy_back(ctx) {
     ctx.effects.open_comms(#{
         from: "world.falling_skyway.entity.convoy_meridian.name",
         node_fn: "convoy_claims",
+        thread_id: "falling-skyway-claim-convoy",
         urgent: true,
     });
 }

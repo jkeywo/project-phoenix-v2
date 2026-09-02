@@ -1174,7 +1174,7 @@
         <!-- Ship's-computer message banner (issue #1342): shown/hidden and
              styled by severity from window.__updateHud's s.computer_message. -->
         <div class="vs-computer-message" id="hud-computer-message">
-          <div class="vs-computer-message-source"><span data-i18n="server.computer_message.label">SHIP'S COMPUTER</span><span id="hud-computer-message-station"></span></div>
+          <div class="vs-computer-message-source"><span data-i18n="server.computer_message.label">SHIP'S COMPUTER</span><span id="hud-computer-message-severity"></span><span id="hud-computer-message-station"></span></div>
           <div class="vs-computer-message-text" id="hud-computer-message-text"></div>
         </div>
         <!-- 4-slot status strip (bottom-centre, inside cap-bottom) -->
@@ -1610,6 +1610,14 @@
       return window.phStrings ? window.phStrings.t(id, params) : id;
     }
 
+    // Whether a string id exists in the table — the local mirror of `t()`
+    // above, for call sites (like the computer-message Station badge below)
+    // that need to fall back gracefully instead of showing t()'s ⟨missing⟩
+    // marker for a free-form value that is only SOMETIMES a known id.
+    function has(id) {
+      return !!(window.phStrings && window.phStrings.has(id));
+    }
+
     // Resolve a string id that came from authored DATA rather than from this
     // page's own markup — an `[[available_ships]] label`, a `[[scenario]]
     // label`. Phones get those already resolved, because every peer message
@@ -1719,22 +1727,38 @@
     // string here, exactly like `game_over_message` below, because both ride
     // the same "hud" channel payload. `severity` and `station` are bare wire
     // words (never string ids themselves) and are resolved with t() here.
-    const cmBanner  = document.getElementById('hud-computer-message');
-    const cmText    = document.getElementById('hud-computer-message-text');
-    const cmStation = document.getElementById('hud-computer-message-station');
+    //
+    // `severity` is a closed Rust enum (`info`/`advisory`/`warning`/
+    // `critical`) with a strings.csv row authored for every variant, so it is
+    // always safe to resolve directly with t(). `station`, by contrast, is a
+    // free-form Rhai-authored cue that `show_message` deliberately does NOT
+    // validate against the ship's roster (src/core/computer_message.rs) — an
+    // unrecognised or mistyped id must degrade to no badge rather than show
+    // t()'s ⟨station.xxx.name⟩ miss marker on the live Viewscreen (issue
+    // #949's stationLabel() in client.html sets the precedent), so that one
+    // goes through has() first.
+    const cmBanner   = document.getElementById('hud-computer-message');
+    const cmText     = document.getElementById('hud-computer-message-text');
+    const cmSeverity = document.getElementById('hud-computer-message-severity');
+    const cmStation  = document.getElementById('hud-computer-message-station');
     if (cmBanner && cmText) {
       const cm = s.computer_message;
       if (cm) {
         cmText.textContent = cm.text;
         cmBanner.className = 'vs-computer-message shown sev-' + cm.severity;
+        if (cmSeverity) {
+          cmSeverity.textContent = ' · ' + t('server.computer_message.severity.' + cm.severity);
+        }
         if (cmStation) {
-          cmStation.textContent = cm.station
-            ? (' · ' + t('station.' + cm.station + '.name'))
+          const stationId = 'station.' + cm.station + '.name';
+          cmStation.textContent = cm.station && has(stationId)
+            ? (' · ' + t(stationId))
             : '';
         }
       } else {
         cmBanner.className = 'vs-computer-message';
         cmText.textContent = '';
+        if (cmSeverity) cmSeverity.textContent = '';
         if (cmStation) cmStation.textContent = '';
       }
     }

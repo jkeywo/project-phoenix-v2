@@ -265,7 +265,14 @@ impl Joiner {
     /// its own backoff. A test that treated one busy answer as a failure would
     /// be asserting the opposite of the property the soft limits are for.
     fn connect_soon(host: &Host) -> Self {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        Self::connect_by(host, Instant::now() + Duration::from_secs(5))
+    }
+
+    /// [`Self::connect_soon`] with the patience stated, for the one probe whose
+    /// door is deliberately shut until a budget it is measuring reopens it —
+    /// and which therefore has to be given that budget's own clock rather than
+    /// a client-shaped five seconds.
+    fn connect_by(host: &Host, deadline: Instant) -> Self {
         loop {
             match tungstenite::connect(host.join_url()) {
                 Ok((socket, response)) if response.status().as_u16() == 101 => {
@@ -750,22 +757,91 @@ fn wait_for_answer(
     None
 }
 
-/// Churn connections firing wrong codes for `window`, on `workers` threads.
+/// When a storm stops.
+///
+/// The unbudgeted half of the comparison below runs until it has PROVED
+/// itself — a stated number of evaluated guesses is what makes it a probe
+/// rather than a stopwatch reading of the machine — and the budgeted half then
+/// runs for exactly the wall clock that took. A saturated CPU therefore
+/// stretches the window instead of shrinking the proof, and the two halves are
+/// still measured over the same window, which is the whole comparison.
+#[derive(Clone, Copy, Debug)]
+enum StormEnd {
+    /// Guess for exactly this long.
+    Window(Duration),
+    /// Guess until the door has evaluated `guesses` wrong codes AND `floor` has
+    /// passed, giving up at `ceiling` so a machine that cannot run the probe at
+    /// all says so with its numbers rather than hanging.
+    Guesses {
+        guesses: usize,
+        floor: Duration,
+        ceiling: Duration,
+    },
+}
+
+/// The stop condition of one storm, shared by its workers.
+#[derive(Clone)]
+struct StormClock {
+    /// Nothing stops before here, whatever has been counted.
+    floor: Instant,
+    /// Everything stops here, whatever has NOT been counted.
+    ceiling: Instant,
+    /// Guesses the door must have evaluated before the floor may release it.
+    target: usize,
+    /// What it has evaluated so far, across every worker.
+    evaluated: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl StormClock {
+    fn running(&self) -> bool {
+        let now = Instant::now();
+        now < self.ceiling
+            && (now < self.floor || self.evaluated.load(Ordering::Relaxed) < self.target)
+    }
+
+    fn count_guess(&self) {
+        self.evaluated.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// Churn connections firing wrong codes until `end`, on `workers` threads.
 ///
 /// Deliberately the reviewer's shape rather than one long socket: a few guesses
 /// per connection and then throw it away, which is what made the per-connection
 /// cap a batch size instead of a limit.
-fn guess_storm(url: &str, right: &str, window: Duration, workers: usize) -> Storm {
+///
+/// Returns what the run got out of the service and how long it ran, because the
+/// second is what the next run is given as its own window.
+fn guess_storm(url: &str, right: &str, end: StormEnd, workers: usize) -> (Storm, Duration) {
     const GUESSES_PER_CONNECTION: usize = 8;
-    let deadline = Instant::now() + window;
+    let started = Instant::now();
+    let clock = match end {
+        StormEnd::Window(window) => StormClock {
+            floor: started + window,
+            ceiling: started + window,
+            target: usize::MAX,
+            evaluated: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        },
+        StormEnd::Guesses {
+            guesses,
+            floor,
+            ceiling,
+        } => StormClock {
+            floor: started + floor,
+            ceiling: started + ceiling,
+            target: guesses,
+            evaluated: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        },
+    };
     let mut threads = Vec::new();
     for worker in 0..workers {
         let url = url.to_string();
         let right = right.to_string();
+        let clock = clock.clone();
         threads.push(std::thread::spawn(move || {
             let mut local = Storm::default();
             let mut n = worker * 1_000_000;
-            while Instant::now() < deadline {
+            while clock.running() {
                 let Ok((mut socket, response)) = tungstenite::connect(&url) else {
                     local.turned_away += 1;
                     std::thread::sleep(Duration::from_millis(5));
@@ -779,7 +855,7 @@ fn guess_storm(url: &str, right: &str, window: Duration, workers: usize) -> Stor
                     let _ = stream.set_read_timeout(Some(Duration::from_millis(20)));
                 }
                 for _ in 0..GUESSES_PER_CONNECTION {
-                    if Instant::now() >= deadline {
+                    if !clock.running() {
                         break;
                     }
                     n += 1;
@@ -806,7 +882,10 @@ fn guess_storm(url: &str, right: &str, window: Duration, workers: usize) -> Stor
                             local.refused += 1;
                             break;
                         }
-                        Some(_) => local.guesses += 1,
+                        Some(_) => {
+                            local.guesses += 1;
+                            clock.count_guess();
+                        }
                         None => break,
                     }
                 }
@@ -823,7 +902,7 @@ fn guess_storm(url: &str, right: &str, window: Duration, workers: usize) -> Stor
         total.refused += local.refused;
         total.turned_away += local.turned_away;
     }
-    total
+    (total, started.elapsed())
 }
 
 #[test]
@@ -831,25 +910,53 @@ fn guessing_the_code_by_reconnecting_collapses_under_the_shipped_budgets() {
     // The blocker, measured. The SAME probe runs against two hosts that differ
     // only in their transport-plane budgets, so the number is a before/after of
     // this round's fix rather than of the machine it ran on.
-    let window = Duration::from_millis(1500);
+    //
+    // What the machine does decide is how LONG the probe needs. So the
+    // unbudgeted half runs until it has landed the guesses that make it a probe
+    // at all, and the budgeted half is then given exactly the wall clock that
+    // took: on a saturated CPU the window stretches and every relative
+    // assertion below still reads the same property. Only a machine that cannot
+    // reach the bar inside `patience` fails here, and it fails saying so.
+    const MEANINGFUL: usize = 200;
+    let floor = Duration::from_millis(1500);
+    let patience = Duration::from_secs(40);
 
-    let before = {
+    let (before, window) = {
         let host = Host::start_with(unlimited());
-        guess_storm(&host.join_url(), &host.code.suffix, window, 4)
+        guess_storm(
+            &host.join_url(),
+            &host.code.suffix,
+            StormEnd::Guesses {
+                guesses: MEANINGFUL,
+                floor,
+                ceiling: patience,
+            },
+            4,
+        )
     };
-    let after = {
-        let host = Host::start();
-        guess_storm(&host.join_url(), &host.code.suffix, window, 4)
-    };
-    println!("guess storm before={before:?} after={after:?}");
-
     assert!(
-        before.guesses > 200,
+        before.guesses >= MEANINGFUL,
         "the probe has to actually work against an unbudgeted door, or this \
-         test proves nothing: {before:?}"
+         test proves nothing: {before:?} in {window:?}, having been given \
+         {patience:?} to evaluate {MEANINGFUL} guesses — this machine cannot \
+         run the probe, which is not the same as the budgets working"
     );
+
+    let (after, _) = {
+        let host = Host::start();
+        guess_storm(
+            &host.join_url(),
+            &host.code.suffix,
+            StormEnd::Window(window),
+            4,
+        )
+    };
+    println!("guess storm over {window:?}: before={before:?} after={after:?}");
     // The per-source bucket is the bound, and it is the bound whatever the
-    // connections do: a burst, then a refill clock nobody can hurry.
+    // connections do: a burst, then a refill clock nobody can hurry. Read
+    // against the window that was actually run, so a stretched window buys the
+    // budgeted storm exactly the refills a stretched window is owed and not
+    // one guess more.
     let budgets = AdmissionBudgets::default();
     let ceiling = budgets.guess_burst as usize
         + (window.as_millis() / budgets.guess_refill.as_millis()) as usize
@@ -880,7 +987,9 @@ fn the_crew_still_joins_from_the_address_the_guessing_is_coming_from() {
     let host = Host::start();
     let url = host.join_url();
     let right = host.code.suffix.clone();
-    let storm = std::thread::spawn(move || guess_storm(&url, &right, Duration::from_secs(3), 2));
+    let storm = std::thread::spawn(move || {
+        guess_storm(&url, &right, StormEnd::Window(Duration::from_secs(3)), 2).0
+    });
 
     // Give the storm long enough to have emptied the bucket and started
     // collecting refusals before the crew member tries at all.
@@ -1026,28 +1135,59 @@ fn a_joined_socket_that_never_attaches_gives_the_rooms_place_back() {
     // covers it is `attach_deadline`, and what it is measured against is the
     // ONE thing a real joiner does next: `gui/rendezvous-transport.js` sends
     // `relay-open` from the same `case 'joined'` arm that received the frame.
-    let budgets = AdmissionBudgets {
-        // Long enough that filling every seat finishes well inside it — the
-        // assertion below fails loudly rather than confusingly if a loaded
-        // machine ever makes that untrue — and short enough to wait out.
-        attach_deadline: Duration::from_secs(4),
-        ..AdmissionBudgets::default()
-    };
-    let host = Host::start_with(budgets.clone());
     let cap = JoinCodeTable::read(std::path::Path::new(JOIN_TABLE))
         .expect("the table reads")
         .limits
         .max_peers_per_record;
 
+    // What opening `cap` sockets COSTS on this machine, measured before
+    // anything is timed against it. The deadline the probe then runs under is
+    // derived from that rather than guessed at, because the fill has to finish
+    // before the first seat is reaped — a room that emptied while it was still
+    // being filled was never observably full — and how long thirty-two loopback
+    // sockets take is a fact about the machine (a fraction of a second idle,
+    // several seconds under a full workspace build) rather than about the code
+    // under test. The calibrating host's own deadline is out of reach on
+    // purpose: nothing is reaped while the cost is being measured.
+    let calibrating = Instant::now();
+    let calibration = {
+        let host = Host::start_with(AdmissionBudgets {
+            attach_deadline: Duration::from_secs(600),
+            ..AdmissionBudgets::default()
+        });
+        let sockets: Vec<Joiner> = (0..cap).map(|_| Joiner::joined_and_silent(&host)).collect();
+        assert_eq!(sockets.len(), cap);
+        calibrating.elapsed()
+    };
+    let unrunnable = Duration::from_secs(30);
+    assert!(
+        calibration < unrunnable,
+        "a machine that needs {calibration:?} to open {cap} loopback sockets \
+         cannot run this probe at all, and that is what is wrong rather than \
+         anything about attach deadlines (ceiling {unrunnable:?})"
+    );
+    // Three fills' worth of room, and never longer than it is bearable to wait
+    // out. Whatever it comes to, the assertion after the fill re-reads it
+    // against what the fill actually cost, so the derivation is a starting
+    // guess that gets checked and not a second assumption about the machine.
+    let attach_deadline = (calibration * 3 + Duration::from_secs(2)).min(Duration::from_secs(45));
+    let host = Host::start_with(AdmissionBudgets {
+        attach_deadline,
+        ..AdmissionBudgets::default()
+    });
+
     // The probe, verbatim: fill the record's crew bound with sockets that
     // resolved the code and then said nothing.
     let filling = Instant::now();
     let zombies: Vec<Joiner> = (0..cap).map(|_| Joiner::joined_and_silent(&host)).collect();
-    let fill = filling.elapsed();
+    let filled = Instant::now();
+    let fill = filled - filling;
     assert_eq!(zombies.len(), cap);
     assert!(
-        fill < budgets.attach_deadline,
-        "the fill has to finish inside the deadline it is measuring: {fill:?}"
+        fill < attach_deadline,
+        "the fill has to finish inside the deadline it is measuring: {fill:?} \
+         against a {attach_deadline:?} derived from a {calibration:?} \
+         calibration fill — the machine got slower between the two"
     );
     let refused = http(&host.addr, &upgrade_head(&host.addr));
     assert!(
@@ -1057,7 +1197,15 @@ fn a_joined_socket_that_never_attaches_gives_the_rooms_place_back() {
 
     // …and then it empties itself, with no operator doing anything. A real crew
     // member joins into a seat a zombie was holding.
-    let mut crew = Joiner::connect_soon(&host);
+    //
+    // The wait is measured from the END of the fill, which is the conservative
+    // reading of the clock being proved: the LAST zombie owes its seat back one
+    // deadline after that instant, and every earlier one owes it sooner, so a
+    // slow fill can only make the room empty earlier in this window and never
+    // later. Nothing here sleeps for a fixed guess — `connect_by` retries a
+    // door that is legitimately shut and gives up loudly at the far end.
+    let slack = Duration::from_secs(5);
+    let mut crew = Joiner::connect_by(&host, filled + attach_deadline + slack);
     crew.wait_for("ready");
     crew.send(&RendezvousFrame {
         code: Some(CodeField::Typed(host.code.full.clone())),
@@ -1067,6 +1215,12 @@ fn a_joined_socket_that_never_attaches_gives_the_rooms_place_back() {
         crew.wait_for("joined").admission.as_deref(),
         Some("open"),
         "the reaped places came back to the room"
+    );
+    println!(
+        "{cap} zombies filled the record in {fill:?} (calibrated {calibration:?}); \
+         a seat came back {:?} after the last of them joined, against a \
+         {attach_deadline:?} deadline",
+        filled.elapsed()
     );
 }
 

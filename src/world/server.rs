@@ -2990,15 +2990,17 @@ pub(crate) struct EffectQueuesOut<'a> {
     /// Drained by `crate::console::captain::server::apply_scripted_weapons_holds`,
     /// as `(ship uuid, held)`.
     pub weapons_holds: &'a mut Vec<(String, bool)>,
-    /// Drained by `crate::narrative::drain_narrative_requests` (issue #1338):
-    /// the authored beats and marked-entity outcomes a script declared this
-    /// tick, on their way to `Messages<NarrativeEvent>`.
+    /// Drained by `crate::narrative::emit_authored_and_marked_entity_narrative`
+    /// (issue #1338): the authored beats and marked-entity outcomes a script
+    /// declared this tick, plus the scripted-removal signal every
+    /// `DestroyEntity` leaves behind, on their way to
+    /// `Messages<NarrativeEvent>`.
     pub narrative: &'a mut Vec<crate::core::narrative::NarrativeRequest>,
 }
 
-/// The four per-owner [`EffectQueue`] resources an effect-applying SYSTEM needs,
+/// The per-owner [`EffectQueue`] resources an effect-applying SYSTEM needs,
 /// bundled as one `SystemParam` (issue #1223) so a dispatch system gains one
-/// parameter rather than four. Each resource is registered and declared
+/// parameter rather than one each. Each resource is registered and declared
 /// `ClearedAtFold` by its OWNING plugin (Infrastructure / Civilian / captain);
 /// this bundle only borrows them at the push site.
 ///
@@ -3098,10 +3100,11 @@ pub(crate) fn apply_dispatch_result(
     mut balance_events: Option<
         &mut bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>,
     >,
-    // The four transient effect queues a name-resolved command lands on (issue
+    // The transient effect queues a name-resolved command lands on (issue
     // #1223): condition/capacity adjustments, civilian orders and weapons holds
     // used to be `pending_*` fields on `runtime`; each is now its owning plugin's
-    // `EffectQueue<T>` resource, lent here as plain `&mut Vec<T>`.
+    // `EffectQueue<T>` resource, lent here as plain `&mut Vec<T>`. The narrative
+    // queue (issue #1338) joined them last.
     effects: &mut EffectQueuesOut,
 ) {
     let DispatchResult {
@@ -3198,12 +3201,13 @@ pub(crate) fn apply_dispatch_result(
             // read back, and no message is written here — the applier holds no
             // message writers, and the three systems that call it are at Bevy's
             // parameter limit, which is exactly what the #1223 effect-queue
-            // pattern exists for. `narrative::drain_narrative_requests` turns
-            // each request into its event on the same tick.
+            // pattern exists for.
+            // `narrative::emit_authored_and_marked_entity_narrative` turns each
+            // request into its event on the same tick.
             ActionCmd::NarrativeBeat { id } => {
                 effects
                     .narrative
-                    .push(crate::core::narrative::NarrativeRequest {
+                    .push(crate::core::narrative::NarrativeRequest::Authored {
                         kind: crate::core::narrative::NarrativeKind::BeatFired,
                         id,
                         entity_uuid: None,
@@ -3219,7 +3223,7 @@ pub(crate) fn apply_dispatch_result(
                 let entity_uuid = runtime.name_to_uuid.get(&entity).cloned();
                 effects
                     .narrative
-                    .push(crate::core::narrative::NarrativeRequest {
+                    .push(crate::core::narrative::NarrativeRequest::Authored {
                         kind: outcome,
                         id: entity,
                         entity_uuid,
@@ -3593,6 +3597,23 @@ pub(crate) fn apply_dispatch_result(
 
             ActionCmd::DestroyEntity { uuid } => {
                 let target_entity = uuid_to_entity.get(&uuid).copied();
+                // The mission timeline's no-silent-vanish signal (issue #1338).
+                // Queued for EVERY scripted removal because this applier cannot
+                // see a `NarrativeMark` — it is lent plain `&mut Vec<_>` sinks
+                // and no component query — so the mark gate lives in
+                // `narrative::emit_authored_and_marked_entity_narrative`, which
+                // already remembers every marked uuid it has seen and drops an
+                // unmarked one. Deliberately NOT a `BalanceEvent`: a scripted
+                // removal is an authorial act, and a rescue-by-despawn must
+                // never count as a destruction in the combat ledger (PRD
+                // #1337's "supplements the ledger, never changes it"). The
+                // emitter turns it into `marked_entity_destroyed` only when the
+                // author recorded no outcome of their own for that entity.
+                effects
+                    .narrative
+                    .push(crate::core::narrative::NarrativeRequest::ScriptedRemoval {
+                        entity_uuid: uuid.clone(),
+                    });
                 // The matching `WorldEvent::Destroyed` is already in
                 // `events_out` so chained `on_destroyed` triggers fire.
                 //

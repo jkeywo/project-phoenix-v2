@@ -332,11 +332,11 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 StateClass::ClearedAtFold,
                 "inter-system-message-state",
             )
-            // The authored-beat queue (issue #1338): pushed by the shared
-            // dispatch applier, drained in full every tick by
-            // `narrative::drain_narrative_requests`, so it is empty at every
-            // fold/snapshot boundary — the same `ClearedAtFold` contract every
-            // other `EffectQueue<T>` carries.
+            // The authored-beat / scripted-removal queue (issue #1338): pushed
+            // by the shared dispatch applier, drained in full every tick by
+            // `narrative::emit_authored_and_marked_entity_narrative`, so it is
+            // empty at every fold/snapshot boundary — the same `ClearedAtFold`
+            // contract every other `EffectQueue<T>` carries.
             .declare_state::<
                 crate::effect_queue::EffectQueue<crate::core::narrative::NarrativeRequest>,
             >(StateClass::ClearedAtFold, "digest-exclusion-classes")
@@ -810,8 +810,9 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         // inside it — the per-ship ledgers must stay a fold of the balance
         // stream alone.
         .add_message::<crate::core::narrative::NarrativeEvent>()
-        // The authored-beat / authored-entity-outcome queue the shared dispatch
-        // applier pushes onto (issue #1223's pattern, issue #1338's payload).
+        // The authored-beat / authored-entity-outcome / scripted-removal queue
+        // the shared dispatch applier pushes onto (issue #1223's pattern, issue
+        // #1338's payload).
         .init_resource::<
             crate::effect_queue::EffectQueue<crate::core::narrative::NarrativeRequest>,
         >()
@@ -904,8 +905,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             FixedUpdate,
             (
                 crate::narrative::emit_scenario_narrative,
-                crate::narrative::emit_marked_entity_narrative,
-                crate::narrative::drain_narrative_requests,
+                crate::narrative::emit_authored_and_marked_entity_narrative,
             )
                 .chain()
                 .after(crate::sim_sets::SimSet::Broadcast),

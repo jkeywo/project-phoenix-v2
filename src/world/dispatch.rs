@@ -206,9 +206,9 @@ pub enum ActionCmd {
     /// `id` is the author's own semantic identifier — the scenario's
     /// punctuation, with no other meaning to the simulation. Nothing branches
     /// on it and no state moves: the applier buffers it onto the narrative
-    /// effect queue and `narrative::drain_narrative_requests` turns it into a
-    /// `NarrativeKind::BeatFired` event. This is the "authors explicitly mark
-    /// beats" half of PRD #1337 — the sim never infers one.
+    /// effect queue and `narrative::emit_authored_and_marked_entity_narrative`
+    /// turns it into a `NarrativeKind::BeatFired` event. This is the "authors
+    /// explicitly mark beats" half of PRD #1337 — the sim never infers one.
     NarrativeBeat { id: String },
     /// Record an authored outcome for a marked narrative entity (issue #1338).
     ///
@@ -221,9 +221,19 @@ pub enum ActionCmd {
     /// beat.
     ///
     /// Spawn and death are emitted automatically for any entity carrying a
-    /// [`crate::core::narrative::NarrativeMark`]; this is the door for the
-    /// outcomes only an author can judge — escaped, rescued, abandoned,
-    /// disabled.
+    /// [`crate::core::narrative::NarrativeMark`] — death on BOTH removal paths,
+    /// the combat kill and the scripted
+    /// [`ActionCmd::DestroyEntity`]. This is the door for the outcomes only an
+    /// author can judge — escaped, rescued, abandoned, disabled.
+    ///
+    /// It is also how an author says a scripted removal was NOT a death.
+    /// Because a marked hull `ctx.effects.destroy_entity(..)` removes reports
+    /// `marked_entity_destroyed` by default, an author who despawns one to
+    /// mean something else records that outcome **before, or on the same tick
+    /// as, the destroy**; the automatic death is then suppressed and the
+    /// authored outcome stands alone. Recording it a tick LATER is too late —
+    /// the death has already been written. See
+    /// [`crate::core::narrative::NarrativeKind::MarkedEntityDestroyed`].
     NarrativeOutcome {
         entity: String,
         outcome: crate::core::narrative::NarrativeKind,

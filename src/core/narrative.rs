@@ -83,8 +83,25 @@ pub enum NarrativeKind {
     /// A marked entity was disabled but not destroyed. Authored:
     /// `ctx.effects.narrative_outcome("name", "disabled")`.
     MarkedEntityDisabled,
-    /// A marked entity was destroyed. Emitted automatically off the kill
-    /// chokepoint for any entity carrying a [`NarrativeMark`].
+    /// A marked entity was destroyed.
+    ///
+    /// Emitted automatically for any entity carrying a [`NarrativeMark`] on
+    /// EITHER of the engine's two removal paths, so a marked hull can never
+    /// vanish from the timeline unremarked:
+    ///
+    /// * a combat kill, off the `BalanceEvent::EntityDestroyed` chokepoint; and
+    /// * a **scripted** removal — `ctx.effects.destroy_entity(name)` or the
+    ///   deferred `ctx.schedule.in_seconds(n).destroy_entity(name)`.
+    ///
+    /// The scripted path is a *fallback*, not a second chokepoint. A scripted
+    /// removal is an authorial act, and an author who removes a hull to say
+    /// something else about it — rescued, escaped, abandoned — says so with
+    /// `ctx.effects.narrative_outcome(..)` **before, or on the same tick as,**
+    /// the destroy; that outcome then stands alone and no death is invented.
+    /// The automatic death fires only when the run's timeline holds no authored
+    /// outcome for that entity at all. Nothing is written to
+    /// [`crate::core::balance`] either way: a rescue-by-despawn must never
+    /// count as a destruction in the combat ledger.
     MarkedEntityDestroyed,
     /// A marked entity got away. Authored.
     MarkedEntityEscaped,
@@ -207,6 +224,25 @@ impl NarrativeKind {
                  disabled, destroyed, escaped, rescued, abandoned)"
             )),
         }
+    }
+
+    /// Whether this kind is a marked entity's *outcome* — the fate the story
+    /// records for it, as opposed to its arrival.
+    ///
+    /// The one consumer is the no-silent-vanish fallback in
+    /// `crate::narrative::emit_authored_and_marked_entity_narrative`: an entity
+    /// that already has one of these recorded has had its fate stated, so a
+    /// later scripted removal adds nothing and stays silent. Spawning is
+    /// deliberately excluded — arriving is not a fate.
+    pub fn is_marked_entity_outcome(self) -> bool {
+        matches!(
+            self,
+            NarrativeKind::MarkedEntityDisabled
+                | NarrativeKind::MarkedEntityDestroyed
+                | NarrativeKind::MarkedEntityEscaped
+                | NarrativeKind::MarkedEntityRescued
+                | NarrativeKind::MarkedEntityAbandoned
+        )
     }
 }
 
@@ -495,23 +531,52 @@ pub fn fold_narrative(events: &[StampedNarrativeEvent]) -> NarrativeTimeline {
 #[derive(Component, Clone, Debug, PartialEq)]
 pub struct NarrativeMark(pub String);
 
-/// An authored narrative moment on its way from the script boundary to the
-/// event stream (issue #1338).
+/// A narrative moment on its way from the script boundary to the event stream
+/// (issue #1338).
 ///
 /// Buffered onto an [`crate::effect_queue::EffectQueue`] by the shared dispatch
 /// applier rather than written straight to `Messages<NarrativeEvent>`, for the
 /// reason every other #1223 effect is: the applier is lent plain `&mut Vec<_>`
 /// sinks and holds no message writers, and the systems that call it are at
-/// Bevy's parameter limit. `crate::narrative::drain_narrative_requests` turns
-/// each request into its event.
+/// Bevy's parameter limit.
+/// `crate::narrative::emit_authored_and_marked_entity_narrative` turns each
+/// request into its event, in queue order.
+///
+/// Two variants because the queue carries two different KINDS of claim, and
+/// only one of them is the author speaking. [`Self::Authored`] is a statement —
+/// it becomes its event unconditionally. [`Self::ScriptedRemoval`] is a
+/// *report of a mechanical act* that may or may not deserve a death beat, and
+/// the emitter decides.
 #[derive(Clone, Debug, PartialEq)]
-pub struct NarrativeRequest {
-    /// The kind this request becomes.
-    pub kind: NarrativeKind,
-    /// The authored id: a beat id, or a marked entity's authored name.
-    pub id: String,
-    /// The entity uuid, when the applier resolved one.
-    pub entity_uuid: Option<String>,
+pub enum NarrativeRequest {
+    /// A beat or marked-entity outcome the scenario declared outright —
+    /// `ctx.effects.narrative_beat(..)` / `ctx.effects.narrative_outcome(..)`.
+    Authored {
+        /// The kind this request becomes.
+        kind: NarrativeKind,
+        /// The authored id: a beat id, or a marked entity's authored name.
+        id: String,
+        /// The entity uuid, when the applier resolved one.
+        entity_uuid: Option<String>,
+    },
+    /// A script removed an entity from the world —
+    /// `ctx.effects.destroy_entity(name)`, or its deferred schedule form.
+    ///
+    /// Queued for EVERY scripted removal, marked or not, because the applier
+    /// cannot see a [`NarrativeMark`]: it is lent plain `&mut Vec<_>` sinks and
+    /// no component query, so the mark gate lives in the emitter, which already
+    /// remembers every marked uuid it has seen. An unmarked removal is dropped
+    /// there and produces nothing.
+    ///
+    /// It exists so a marked hull cannot leave the world silently — see
+    /// [`NarrativeKind::MarkedEntityDestroyed`] for the whole contract, and
+    /// note that it is deliberately NOT a
+    /// [`crate::core::balance::BalanceEvent`]: an authorial removal must not
+    /// enter the combat ledger.
+    ScriptedRemoval {
+        /// The uuid the `DestroyEntity` command named.
+        entity_uuid: String,
+    },
 }
 
 /// `Some("x")` → `"x"`, `None` → `null`. The same escaping trick the run report
@@ -576,6 +641,32 @@ mod tests {
         // An Objective transition is observed, never declared.
         assert!(NarrativeKind::parse_outcome("completed").is_err());
         assert!(NarrativeKind::parse_outcome("wibble").is_err());
+    }
+
+    /// The fates a marked entity can be given, spelled out: these are the kinds
+    /// whose presence tells the scripted-removal fallback that the story has
+    /// already said what became of this hull. Spawning is not a fate, and
+    /// nothing outside the marked-entity family is one — a new kind that should
+    /// count has to be added here deliberately.
+    #[test]
+    fn only_the_marked_entity_fates_count_as_an_outcome() {
+        let fates: Vec<&str> = NarrativeKind::ALL
+            .iter()
+            .filter(|k| k.is_marked_entity_outcome())
+            .map(|k| k.as_str())
+            .collect();
+        assert_eq!(
+            fates,
+            vec![
+                "marked_entity_disabled",
+                "marked_entity_destroyed",
+                "marked_entity_escaped",
+                "marked_entity_rescued",
+                "marked_entity_abandoned",
+            ]
+        );
+        assert!(!NarrativeKind::MarkedEntitySpawned.is_marked_entity_outcome());
+        assert!(!NarrativeKind::BeatFired.is_marked_entity_outcome());
     }
 
     /// The stamped JSON carries the sequence, the fixed tick, the derived time

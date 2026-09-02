@@ -6838,7 +6838,7 @@ fn a_nameless_game_start_entity_takes_no_mark() {
 /// A marked GameStart hull must spawn under the SAME uuid its authored name
 /// resolves to, because the timeline records it under both.
 ///
-/// `narrative::emit_marked_entity_narrative` reads the uuid off the spawned
+/// `narrative::emit_authored_and_marked_entity_narrative` reads the uuid off the spawned
 /// entity (`EntityUuid` + `NarrativeMark`) for `marked_entity_spawned`, while
 /// `ActionCmd::NarrativeOutcome` resolves the author's
 /// `ctx.effects.narrative_outcome("name", ..)` through

@@ -98,13 +98,14 @@ fn every_authored_category_reaches_the_run_report() {
     // ── Objectives ────────────────────────────────────────────────────────────
     assert_eq!(
         count(&report, "objective_posted"),
-        2,
-        "both authored Objectives must be posted: {:?}",
+        3,
+        "every authored Objective must be posted, including the one posted and \
+         completed inside a single tick: {:?}",
         report.narrative.counts_by_kind
     );
     assert_eq!(
         ids(&report, "objective_completed"),
-        vec!["hold_the_channel".to_string()]
+        vec!["sound_off".to_string(), "hold_the_channel".to_string()]
     );
     assert_eq!(
         ids(&report, "objective_failed"),
@@ -206,11 +207,14 @@ fn every_authored_category_reaches_the_run_report() {
         answered.event.source
     );
 
-    // ── The marked entity ─────────────────────────────────────────────────────
+    // ── The marked entities ───────────────────────────────────────────────────
     assert_eq!(
         ids(&report, "marked_entity_spawned"),
-        vec!["world.probe_narrative.entity.lyra.name".to_string()],
-        "exactly one entity is marked in this world"
+        vec![
+            "world.probe_narrative.entity.lyra.name".to_string(),
+            "world.probe_narrative.entity.wreck.name".to_string(),
+        ],
+        "both marked hulls arrive, in authored-id order"
     );
     assert_eq!(
         ids(&report, "marked_entity_rescued"),
@@ -269,6 +273,7 @@ fn routine_simulation_never_reaches_the_timeline() {
         "comms_answered",
         "marked_entity_spawned",
         "marked_entity_rescued",
+        "marked_entity_destroyed",
     ]
     .into_iter()
     .collect();
@@ -281,14 +286,13 @@ fn routine_simulation_never_reaches_the_timeline() {
         );
     }
 
-    // The player hull is unmarked, so exactly one entity spawn beat exists —
-    // Lyra's — however many hulls the world puts in the sky.
+    // The player hull is unmarked, so exactly two entity spawn beats exist —
+    // Lyra's and the derelict's — however many hulls the world puts in the sky.
     assert_eq!(
         count(&report, "marked_entity_spawned"),
-        1,
-        "marking is the gate: only the marked hull reports a spawn"
+        2,
+        "marking is the gate: only the marked hulls report a spawn"
     );
-    assert_eq!(count(&report, "marked_entity_destroyed"), 0);
 
     // And the whole timeline stays small. A four-beat scenario that produced
     // hundreds of events would be inferring, not recording.
@@ -297,6 +301,100 @@ fn routine_simulation_never_reaches_the_timeline() {
         "a no-combat probe produced {} timeline events — something is inferring \
          story from routine simulation",
         report.narrative.events.len()
+    );
+}
+
+/// A scripted removal is the engine's OTHER death path, and it writes no
+/// `BalanceEvent` — an authorial removal must never enter the combat ledger. So
+/// the timeline records it from the scripted-removal signal instead, and only
+/// when the author claimed nothing else for that hull.
+///
+/// Both halves in one run, through the real script boundary: at t=8 the world
+/// calls `destroy_entity` on the derelict (no authored outcome) and on Lyra
+/// (declared `rescued` at t=4).
+#[test]
+fn a_scripted_removal_records_a_death_only_when_the_author_claimed_nothing_else() {
+    let (report, _) = probe_run(ReportFormat::Json);
+
+    assert_eq!(
+        ids(&report, "marked_entity_destroyed"),
+        vec!["world.probe_narrative.entity.wreck.name".to_string()],
+        "the derelict the script removed must not vanish from the timeline \
+         unremarked, and Lyra's rescue must not be re-read as a death: {:?}",
+        report.narrative.counts_by_kind
+    );
+
+    // The death is the derelict's LAST word — it arrives after its spawn, and
+    // after the rescue that spared Lyra the same fate.
+    let spawn = report
+        .narrative
+        .events
+        .iter()
+        .find(|e| {
+            e.event.kind.as_str() == "marked_entity_spawned"
+                && e.event.id == "world.probe_narrative.entity.wreck.name"
+        })
+        .expect("the derelict is marked and spawns");
+    let death = report
+        .narrative
+        .events
+        .iter()
+        .find(|e| e.event.kind.as_str() == "marked_entity_destroyed")
+        .expect("asserted above");
+    assert!(
+        death.seq > spawn.seq && death.tick > spawn.tick,
+        "a hull cannot die before it arrives: {spawn:?} / {death:?}"
+    );
+
+    // And the combat ledger did not move. `DamageLedger::death` is written from
+    // `BalanceEvent::EntityDestroyed` and from nothing else, so two hulls
+    // leaving the world with every ledger's `death` still `None` is the proof
+    // that the narrative death above came from the scripted-removal signal —
+    // and that a rescue-by-despawn cannot be counted as a destruction by
+    // anything reading the balance stream.
+    assert!(
+        report
+            .damage_by_ship
+            .values()
+            .all(|ledger| ledger.death.is_none()),
+        "a scripted removal is not a kill and must leave the combat ledger \
+         alone: {:?}",
+        report.damage_by_ship
+    );
+}
+
+/// Issue #1338's first acceptance criterion asks for posted/completed/failed as
+/// DISTINCT recorded transitions. `post` adds `sound_off` and completes it in
+/// the same handler — one fixed tick, one end-of-tick status, two beats — so
+/// this is the end-to-end proof that a transition cannot be swallowed by
+/// sharing a tick with the next one.
+#[test]
+fn an_objective_posted_and_completed_in_one_tick_records_both_transitions() {
+    let (report, _) = probe_run(ReportFormat::Json);
+
+    let sound_off: Vec<(&str, u64, u64)> = report
+        .narrative
+        .events
+        .iter()
+        .filter(|e| e.event.id == "sound_off")
+        .map(|e| (e.event.kind.as_str(), e.seq, e.tick))
+        .collect();
+    assert_eq!(
+        sound_off.len(),
+        2,
+        "both transitions must be recorded: {:?}",
+        report.narrative.events
+    );
+    assert_eq!(sound_off[0].0, "objective_posted");
+    assert_eq!(sound_off[1].0, "objective_completed");
+    assert!(
+        sound_off[0].1 < sound_off[1].1,
+        "the posting must sequence before the completion: {sound_off:?}"
+    );
+    assert_eq!(
+        sound_off[0].2, sound_off[1].2,
+        "both happened on the same fixed tick, which is the whole point: \
+         {sound_off:?}"
     );
 }
 

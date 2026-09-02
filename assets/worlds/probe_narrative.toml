@@ -9,19 +9,36 @@
 #
 # The authored timeline, in mission seconds:
 #
-#   t=1   `post` runs. Two objectives are posted (one mandatory, one not), the
-#         opening beat fires, and Lyra Ascending hails the crew.
+#   t=1   `post` runs. Two objectives are posted (one mandatory, one not), a
+#         THIRD is posted and completed in the same tick, the opening beat
+#         fires, and Lyra Ascending hails the crew.
 #   t=4   `resolve` runs. The mandatory objective completes, the optional one
 #         fails, and the author declares Lyra rescued — an outcome no amount of
 #         simulation could have inferred, which is why it is authorable at all.
 #   t=6   `window_opens` fires. Its handler records the beat that says the
 #         deadline mattered.
+#   t=8   `clear_the_wreck` runs. The derelict — marked, and with no authored
+#         outcome — is removed with `destroy_entity`, and Lyra, already
+#         declared rescued, is removed too.
 #
 # Every one of those reaches the headless run report's `narrative` field and,
 # under `--format ndjson`, the inline stream — plus `marked_entity_spawned` for
-# Lyra on the tick she enters the world, and `comms_opened` on the tick her hail
-# lands. The unmarked player hull produces no entity beat at all: marking is the
-# gate, and this world proves it by leaving the player unmarked.
+# each marked hull on the tick it enters the world, and `comms_opened` on the
+# tick Lyra's hail lands. The unmarked player hull produces no entity beat at
+# all: marking is the gate, and this world proves it by leaving the player
+# unmarked.
+#
+# THE TWO REMOVALS AT t=8 ARE THE POINT OF THE DERELICT. A scripted
+# `destroy_entity` writes no combat event — an authorial removal is not a kill,
+# and must never enter the combat ledger — so the timeline records it from the
+# scripted-removal signal instead, and only when the author said nothing else:
+#
+#   * the derelict has no authored outcome, so it records `marked_entity_destroyed`;
+#   * Lyra was declared `rescued` four seconds earlier, so her removal records
+#     NOTHING and the rescue stands alone.
+#
+# Without that pair, a scenario could remove a marked hull and leave it in the
+# timeline with a spawn and no fate at all.
 #
 # THE PLAYER HULL IS A COURIER, not the destroyer the other probes fly, and the
 # reason is `[comms_console.ai]`: a headless run has no human on Comms, so the
@@ -61,6 +78,16 @@ narrative = true
 transform = { position = [120.0, 0.0, 0.0] }
 overrides = { comms = { hailable = true } }
 
+# The derelict. Marked exactly as Lyra is, and never spoken about again: the
+# script simply removes it at t=8. That is the case the timeline used to lose —
+# a hull the story introduced and the story took away, with nothing in between.
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+id = "wreck"
+name = "world.probe_narrative.entity.wreck.name"
+narrative = true
+transform = { position = [-120.0, 0.0, 0.0] }
+
 # The clock. One named deadline, visible, with a handler that records the beat.
 [[deadline]]
 id = "window_opens"
@@ -72,6 +99,7 @@ visible = true
 setup = """
 on_timer(1, "post");
 on_timer(4, "resolve");
+on_timer(8, "clear_the_wreck");
 on_deadline("window_opens", "on_window_opens");
 
 // The opening. Two objectives, one authored beat, one hail.
@@ -86,6 +114,15 @@ fn post(ctx) {
         text: "world.probe_narrative.objective.log_the_wreck",
         mandatory: false,
     });
+    // Posted and resolved inside ONE tick. The timeline must carry both beats:
+    // a recorder that only diffed the tick's end state would report the
+    // completion and silently swallow the posting.
+    ctx.effects.add_objective(#{
+        id: "sound_off",
+        text: "world.probe_narrative.objective.sound_off",
+        mandatory: false,
+    });
+    ctx.effects.complete_objective("sound_off");
     ctx.effects.narrative_beat("probe_opening");
     ctx.effects.open_comms(#{
         from: "world.probe_narrative.entity.lyra.name",
@@ -118,5 +155,12 @@ fn resolve(ctx) {
 
 fn on_window_opens(ctx) {
     ctx.effects.narrative_beat("probe_deadline_beat");
+}
+
+// The two scripted removals. Neither writes a combat event; the derelict still
+// gets its death, and Lyra — already rescued — does not.
+fn clear_the_wreck(ctx) {
+    ctx.effects.destroy_entity("world.probe_narrative.entity.wreck.name");
+    ctx.effects.destroy_entity("world.probe_narrative.entity.lyra.name");
 }
 """

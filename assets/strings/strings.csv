@@ -1142,9 +1142,11 @@ world.probe_deadlines.deadline.first_warning.label,assets/worlds/probe_deadlines
 world.probe_narrative.global.title,assets/worlds/probe_narrative.toml → [global] title,[Narrative timeline probe]
 world.probe_narrative.global.description,assets/worlds/probe_narrative.toml → [global] description,[A probe world that authors one of every mission-timeline beat (issue #1338).]
 world.probe_narrative.entity.lyra.name,assets/worlds/probe_narrative.toml → [[entity]] name,[Lyra Ascending]
+world.probe_narrative.entity.wreck.name,assets/worlds/probe_narrative.toml → [[entity]] name,[Derelict hauler]
 world.probe_narrative.deadline.window_opens.label,assets/worlds/probe_narrative.toml → [deadline] label,[Transfer window opens]
 world.probe_narrative.objective.hold_the_channel,assets/worlds/probe_narrative.toml → add_objective text,[Hold the channel open]
 world.probe_narrative.objective.log_the_wreck,assets/worlds/probe_narrative.toml → add_objective text,[Log the wreck]
+world.probe_narrative.objective.sound_off,assets/worlds/probe_narrative.toml → add_objective text,[Sound off]
 world.probe_narrative.comms.lyra_hails,assets/worlds/probe_narrative.toml → comms node message,[Lyra Ascending: we are still on the ladder. Are you receiving?]
 world.probe_narrative.comms.stand_by,assets/worlds/probe_narrative.toml → comms response text,[Receiving you. Stand by.]
 system_hull.power_reactor.display_name,Shared hull component display name — the ship's reactor. Shared by every hull carrying that component,Power Reactor

@@ -80,6 +80,18 @@ pub struct DebrisConfig {
     /// it, world units. Must be positive when a `protected_target` is named.
     #[serde(default)]
     pub impact_radius: f32,
+    /// How many seconds a reading of this contact stays current before the
+    /// Sensors seat should go back and take another. `0.0` — the default —
+    /// means a rock is read ONCE and never again.
+    ///
+    /// Authored because it is the pace of the beat rather than a property of the
+    /// rock: a field the crew are meant to work down wants a long number, so the
+    /// seat moves on to the next unknown, and a single contact the mission wants
+    /// watched wants a short one. It is what stops "keep assessing" from meaning
+    /// "re-scan the same rock every tick", and it is the only knob that decides
+    /// how stale the deadline Tactical prioritises on is allowed to get.
+    #[serde(default)]
+    pub reassess_secs: f32,
     /// How many seconds before impact the contact is reckoned URGENT — the
     /// point at which a crew who have not fired yet are running out of room.
     ///
@@ -137,6 +149,12 @@ impl DebrisConfig {
             return Err(format!(
                 "[debris] urgent_secs must be finite and non-negative, got {}",
                 self.urgent_secs
+            ));
+        }
+        if !self.reassess_secs.is_finite() || self.reassess_secs < 0.0 {
+            return Err(format!(
+                "[debris] reassess_secs must be finite and non-negative, got {}",
+                self.reassess_secs
             ));
         }
         if !self.protected_target.is_empty() && !positive(self.impact_radius) {

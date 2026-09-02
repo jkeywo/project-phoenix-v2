@@ -20,6 +20,9 @@ fn config() -> DebrisConfig {
         protected_target: DEPOT_NAME.into(),
         impact_radius: 20.0,
         urgent_secs: 5.0,
+        // Read once. A cadence is exercised on its own below rather than left
+        // running under every other assertion here.
+        reassess_secs: 0.0,
         assessed_flag: "probe_rock_read".into(),
         confirmed_flag: "probe_rock_confirmed".into(),
         urgent_flag: "probe_rock_urgent".into(),

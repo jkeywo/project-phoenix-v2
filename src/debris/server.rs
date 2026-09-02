@@ -91,6 +91,15 @@ pub struct DebrisThreat {
     /// Whether this contact has reached its protected asset. Latches, and stops
     /// the drift: a rock that has arrived does not arrive twice.
     pub struck: bool,
+    /// The crew's own seconds-to-impact, carried forward to THIS tick.
+    ///
+    /// Republished every tick by [`tick_debris_state`] from
+    /// [`seconds_to_impact_at`](Self::seconds_to_impact_at), so every consumer
+    /// reads one number that one system owns rather than each re-deriving it
+    /// from `assessed_at_tick` against its own idea of how long a tick is.
+    /// `None` until somebody looks, and `None` again when the reading said this
+    /// contact never arrives.
+    pub reckoned_secs_to_impact: Option<f32>,
 }
 
 impl DebrisThreat {
@@ -116,6 +125,37 @@ impl DebrisThreat {
     /// 30 Hz here would quietly disagree with a scenario that authored anything
     /// else. Every caller passes `Time::delta_secs()` read inside `FixedUpdate`,
     /// which IS that step.
+    /// Whether this contact is worth pointing an instrument at right now
+    /// (issue #1347) — the test the Sensors seat works a debris field by.
+    ///
+    /// True while nobody has read it, and true again once the crew's reading has
+    /// aged past the contact's authored [`reassess_secs`](DebrisConfig::
+    /// reassess_secs). An authored `0.0` therefore means "read once", which is
+    /// what makes a seat move on down a field instead of staring at the first
+    /// rock: the contact it has just read stops asking for attention, and the
+    /// next unknown one is the best candidate the selector can see.
+    ///
+    /// A STRUCK contact never wants assessing — there is nothing left to learn
+    /// about a rock that has already landed — and that test lives here rather
+    /// than at the call site so every consumer inherits it.
+    pub fn needs_assessment(&self, now_tick: u64, secs_per_tick: f32) -> bool {
+        if self.struck {
+            return false;
+        }
+        if !self.assessed {
+            return true;
+        }
+        let cadence = self.config.reassess_secs;
+        // `> 0.0` rather than `!= 0.0` so a nonsensical negative (which
+        // `validate` already refuses at load) fails closed to "read once"
+        // instead of re-scanning every tick forever.
+        if !matches!(cadence.partial_cmp(&0.0), Some(std::cmp::Ordering::Greater)) {
+            return false;
+        }
+        let age = now_tick.saturating_sub(self.assessed_at_tick) as f32 * secs_per_tick;
+        age >= cadence
+    }
+
     pub fn seconds_to_impact_at(&self, now_tick: u64, secs_per_tick: f32) -> Option<f32> {
         let assessment = self.assessment.as_ref()?;
         let held = assessment.seconds_to_impact?;
@@ -281,8 +321,18 @@ pub fn tick_debris_state(
         // has assessed is never urgent, however close it is, because urgency is
         // a statement about the firing problem and there is no firing problem
         // until somebody has posed one.
+        //
+        // The reckoned number is republished here, on the tick it is true, so
+        // this system is its ONE owner: the Tactical selector reads the field
+        // rather than re-deriving it against its own idea of how long a tick is.
+        let remaining = threat.seconds_to_impact_at(now_tick, secs_per_tick);
+        // A `Mut` read before the write, so a contact whose deadline has not
+        // moved this tick costs no change-detection mark.
+        if threat.reckoned_secs_to_impact != remaining {
+            threat.reckoned_secs_to_impact = remaining;
+        }
         if threat.confirmed && !threat.urgent {
-            if let Some(remaining) = threat.seconds_to_impact_at(now_tick, secs_per_tick) {
+            if let Some(remaining) = remaining {
                 if remaining <= threat.config.urgent_secs {
                     threat.urgent = true;
                     raise.push((uuid.clone(), "urgent", threat.config.urgent_flag.clone()));

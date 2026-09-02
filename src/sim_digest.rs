@@ -1812,10 +1812,17 @@ fn fold_umbilical_namespace(world: &World, mut acc: u64) -> u64 {
 /// where, and how far along, is the state that decides whether the next tick
 /// completes the work at all — exactly as the umbilical folds its running fact
 /// and the dock the docked one. The authored terms are content, which
-/// `content_digest` answers for; the risk, the elapsed clock and the last refusal
-/// are projections the next tick re-derives, so none of them is folded (the
-/// elapsed clock would also make every tick of a live assignment a fresh digest,
-/// which is a rate, not a fact).
+/// `content_digest` answers for; the risk and the last refusal are projections the
+/// next tick re-derives, so neither is folded.
+///
+/// The elapsed phase clock is a different case, and the difference matters. It is
+/// accumulated authoritative state — `tick_security_teams` adds this tick's delta
+/// to it and nothing reconstructs it from anything else, which is precisely why
+/// `SecuritySaveState` has to carry it. It is left UNFOLDED deliberately, not
+/// because it is derived: folding it would make every tick of a live assignment a
+/// fresh digest, which reports a rate rather than a fact. Two hosts whose clocks
+/// drift still diverge here — one tick later, when a clock crosses a phase
+/// boundary and the team's folded state changes underneath it.
 ///
 /// The empty-walk affordance is [`fold_umbilical_namespace`]'s, and does the same
 /// real work: a hull that authored `[security]` and has every team home folds

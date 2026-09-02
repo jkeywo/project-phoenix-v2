@@ -216,11 +216,15 @@ impl Plugin for SecurityPlugin {
         // Gated AI decider; `register_ai_cadence` is idempotent.
         crate::ai::cadence::register_ai_cadence(app);
         // Authoritative-state exclusion declaration (issue #1221, Track 3 step C9).
-        // `SecurityAiDispatched` is the DERIVED "these teams are mine" marker —
-        // re-derived every AI tick from the still-folded operate directive plus
-        // the folded team states, never a second copy of either, so a lost marker
-        // self-heals within one AI tick. Declared here at its owning site; inert
-        // to the digest.
+        // `SecurityAiDispatched` is the DERIVED "these teams are mine" marker.
+        // `operate_security_ai`'s adoption pass re-derives it every AI tick from
+        // the folded team states plus the candidate pool the still-folded world
+        // and operate directive produce: a committed team on work that is still in
+        // that pool is work this host would have sent it to, so the host adopts
+        // it. Never a second copy of either input, so a lost marker — including
+        // the one a snapshot restore leaves behind, which brings committed teams
+        // back with no marker at all — self-heals within one AI tick. Declared
+        // here at its owning site; inert to the digest.
         {
             use crate::authoritative::{DeclareState, StateClass};
             app.declare_state::<SecurityAiDispatched>(StateClass::Derived, "security-team-state");
@@ -744,11 +748,18 @@ pub fn tick_security_teams(
 
 // ── The backfill host ────────────────────────────────────────────────────────
 
-/// Marks the teams the backfill host dispatched (issue #1346), one bit per team
-/// index. Inserted on dispatch, cleared on recall; the host recalls only a team
-/// whose bit is set, so it never recalls one a console dispatched on the same
-/// AI-operated system. Not folded/snapshotted: re-adopted from the still-present
-/// directive on resume.
+/// Marks the teams the backfill host is driving (issue #1346), one bit per team
+/// index. Claimed on dispatch, released on recall and the moment a team is home;
+/// the host recalls only a team whose bit is set, so it never recalls one sent to
+/// work the host itself would not have chosen.
+///
+/// Neither folded nor snapshotted, because it is genuinely derived:
+/// `operate_security_ai` re-derives it each AI tick by ADOPTING every committed
+/// team whose current target-and-action is still in this tick's candidate pool —
+/// the pool built from the folded world and the folded operate directive. A
+/// restore, which brings committed teams back with no marker at all, therefore
+/// heals within one AI tick and the host goes on to recall those teams when their
+/// job leaves the pool.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SecurityAiDispatched(pub u32);
 
@@ -865,10 +876,12 @@ fn already_done(
 /// A team the host committed is recalled when its job leaves the candidate pool:
 /// the target left the world, or the work there is FINISHED — its authored
 /// `outcome_flag` has come up, which is the one durable record of a Security
-/// action's consequence ([`already_done`]). It never recalls a team a console
-/// dispatched, and it lets go of a team the moment that team is home, so a later
-/// console dispatch of the same team is never mistaken for its own. Decides ONLY
-/// on the shared AI cadence (rule 7).
+/// action's consequence ([`already_done`]). Which teams are the host's is
+/// RE-DERIVED each tick rather than remembered: it adopts a committed team whose
+/// work is still in the pool — work it would have sent that team to itself,
+/// whoever actually did — and lets go of a team the moment that team is home. A
+/// team on work outside the pool is nobody's but the console's and is left alone.
+/// Decides ONLY on the shared AI cadence (rule 7).
 #[allow(clippy::type_complexity)]
 pub fn operate_security_ai(
     mut commands: Commands,
@@ -975,6 +988,35 @@ pub fn operate_security_ai(
             }
         }
 
+        // Then RE-DERIVE the claim, which is what makes the marker a derived
+        // state rather than a second copy of one. A committed team whose current
+        // (target, action) is still in this tick's candidate pool is a team this
+        // host would have sent there itself, so it adopts it — and after a
+        // snapshot restore, which brings back committed teams and no marker at
+        // all, that is how the host remembers within one AI tick which teams are
+        // its own and goes on to recall them when their job leaves the pool.
+        //
+        // The cost is deliberate and small: a team a console sent to work the
+        // host also wanted becomes the host's, and comes home when that work is
+        // done. A team on work the host would NOT have chosen — a job outside the
+        // pool — is never adopted and never recalled by us.
+        //
+        // Teams in index order, candidates in the deterministic order the adapter
+        // built: no map iteration feeds this.
+        for (index, team) in security.teams.iter().enumerate() {
+            if claimed.holds(index) || !team.is_committed() {
+                continue;
+            }
+            let host_would_have_sent_it = team.target.as_deref().is_some_and(|target| {
+                candidates
+                    .iter()
+                    .any(|c| c.target == target && Some(c.action) == team.action)
+            });
+            if host_would_have_sent_it {
+                claimed.claim(index);
+            }
+        }
+
         // Recall next: a host-driven team whose job has left the pool — the target
         // left the world, or the work there is finished — has nothing left to do.
         // (Drifting out of reach does NOT leave the pool: the candidate is still
@@ -1039,7 +1081,12 @@ pub fn operate_security_ai(
             emitted = true;
         }
 
-        if emitted || host_dispatched.is_some() {
+        // Write the claim back whenever it says anything — an emitted command, a
+        // marker already on the entity to keep up to date, or an adoption that
+        // put a bit on where there was no marker at all. That last one is what
+        // carries a re-derived claim across to the tick where the job leaves the
+        // pool and the recall arm needs it.
+        if emitted || host_dispatched.is_some() || claimed != SecurityAiDispatched::default() {
             commands.entity(entity).insert(claimed);
         }
     }

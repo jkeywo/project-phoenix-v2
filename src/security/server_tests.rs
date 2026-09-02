@@ -936,9 +936,10 @@ fn a_completed_job_is_never_re_dispatched_on_the_following_ticks() {
 }
 
 /// The claim marker means "the host is driving this COMMITTED team", and nothing
-/// else: a team the console sent out is never recalled by the host.
+/// else: a team out on work the host would not have chosen — work that is not in
+/// its candidate pool — is never adopted and never recalled by it.
 #[test]
-fn the_host_never_recalls_a_team_a_console_dispatched() {
+fn the_host_never_recalls_a_team_on_work_outside_its_pool() {
     // No targets at all, so anything committed has no job left in the pool —
     // exactly the condition the recall arm fires on.
     let (mut app, operator) = host_only_app(&[]);
@@ -952,7 +953,14 @@ fn the_host_never_recalls_a_team_a_console_dispatched() {
     app.update();
     assert!(
         host_payloads(&app, operator).is_empty(),
-        "team 1 is the console's; the host holds no claim on it and leaves it alone"
+        "team 1 is on work outside the pool; the host adopts no claim on it and leaves it alone"
+    );
+    assert!(
+        app.world()
+            .entity(operator)
+            .get::<SecurityAiDispatched>()
+            .is_none_or(|claim| !claim.holds(1)),
+        "and the adoption pass does not invent a claim on it either"
     );
 
     // The same team, but claimed by the host: now it comes home.
@@ -964,6 +972,86 @@ fn the_host_never_recalls_a_team_a_console_dispatched() {
         host_payloads(&app, operator),
         vec![SystemControlPayload::RecallSecurityTeam { team_idx: 1 }],
         "a team the host committed is recalled when its job leaves the pool"
+    );
+}
+
+/// What makes the claim marker genuinely DERIVED, and therefore honest to
+/// exclude from the authoritative digest and from the snapshot: the host
+/// re-derives it.
+///
+/// A restore is the exact shape that proves it. `restore_entities` reseeds the
+/// muster from `SecuritySaveState` — committed teams, their targets and their
+/// clocks — and brings back NO `SecurityAiDispatched`, because nothing captures
+/// one. Unless the host adopts that team back, it has forgotten the team is its
+/// own and will leave it standing on finished work forever.
+#[test]
+fn a_restored_team_is_re_adopted_within_one_ai_tick_and_still_recalled() {
+    let (mut app, operator) =
+        host_only_app(&[(TARGET, Vec3::new(100.0, 0.0, 0.0), head_target_config())]);
+
+    // The post-restore shape, built through the real save/restore seam rather
+    // than by hand, so it cannot drift from what a resume actually produces.
+    let save = SecuritySaveState {
+        teams: vec![SecurityTeamSaveState {
+            team_idx: 0,
+            state: SecurityTeamState::Working,
+            target: Some(TARGET.to_string()),
+            action: Some(SecurityAction::AssistEvacuation),
+            risk: 0.6,
+            elapsed: 1.0,
+            phase_duration: 4.0,
+        }],
+    };
+    {
+        let mut ship = app.world_mut().entity_mut(operator);
+        ship.get_mut::<ShipSecurityTeams>()
+            .expect("the operator musters Security teams")
+            .restore(&save);
+    }
+    assert!(
+        app.world()
+            .entity(operator)
+            .get::<SecurityAiDispatched>()
+            .is_none(),
+        "a restore brings the committed team back and no claim marker with it"
+    );
+
+    // One AI tick. The team's job is still in the pool, so there is nothing to
+    // send and nothing to recall — but the host recognises the work as its own.
+    app.update();
+    assert!(
+        host_payloads(&app, operator).is_empty(),
+        "the restored team is already on the only job there is"
+    );
+    assert_eq!(
+        app.world()
+            .entity(operator)
+            .get::<SecurityAiDispatched>()
+            .copied(),
+        Some(SecurityAiDispatched(1)),
+        "the lost marker healed within one AI tick: team 0 is the host's again"
+    );
+
+    // The work's authored consequence lands, so the job leaves the pool. The
+    // re-adopted team comes home — which is the behaviour the marker exists for
+    // and the behaviour a restore used to lose.
+    app.world_mut()
+        .resource_mut::<WorldContentRuntime>()
+        .flags
+        .set_flag(EVACUATED);
+    app.update();
+    assert_eq!(
+        host_payloads(&app, operator),
+        vec![SystemControlPayload::RecallSecurityTeam { team_idx: 0 }],
+        "the re-adopted team is recalled when its job leaves the pool"
+    );
+    assert!(
+        app.world()
+            .entity(operator)
+            .get::<SecurityAiDispatched>()
+            .copied()
+            .is_some_and(|claim| !claim.holds(0)),
+        "and the claim is let go with the recall"
     );
 }
 

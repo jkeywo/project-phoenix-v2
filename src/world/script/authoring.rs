@@ -254,6 +254,14 @@ mod tests {
         ("effects", "order_divert_anchor", &["entity", "anchor"]),
         ("effects", "order_dock", &["entity", "structure"]),
         ("effects", "open_comms", &["spec"]),
+        // The Viewscreen computer-message vocabulary (issue #1342): a scenario
+        // author schedules a timed, severity-graded message the same way they
+        // author any other effect.
+        (
+            "effects",
+            "show_message",
+            &["id", "text", "severity", "duration_secs"],
+        ),
         // ctx.schedule.* and the in_seconds(n).<verb> delay builder.
         ("schedule", "in_seconds", &["secs"]),
         ("schedule", "after", &["secs", "callback"]),

@@ -226,6 +226,29 @@ impl<A: NativeTransport, B: NativeTransport> PairedTransport<A, B> {
     }
 }
 
+/// A boxed transport is a transport (issue #1353).
+///
+/// [`PairedTransport`] nests, so three legs are `new(new(a, b), c)` — but the
+/// legs a native host actually has are each OPTIONAL (local panes, the cloud
+/// relay, direct LAN accept), and spelling every combination of three optional
+/// generic types out is eight arms of `match` in the binary for one resource.
+/// With this, `phoenix-host` folds whichever legs it has into one
+/// `Box<dyn NativeTransport>` and inserts that — and adding a fourth leg later
+/// is one more fold, not sixteen arms.
+impl NativeTransport for Box<dyn NativeTransport> {
+    fn poll(&mut self) -> Vec<TransportEvent> {
+        (**self).poll()
+    }
+
+    fn dispatch(&mut self, dispatch: TransportDispatch<'_>) {
+        (**self).dispatch(dispatch)
+    }
+
+    fn name(&self) -> &'static str {
+        (**self).name()
+    }
+}
+
 impl<A: NativeTransport, B: NativeTransport> NativeTransport for PairedTransport<A, B> {
     fn poll(&mut self) -> Vec<TransportEvent> {
         let mut events = self.first.poll();

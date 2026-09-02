@@ -223,6 +223,19 @@ impl RelayTransport {
         self.notices.clone()
     }
 
+    /// Report into `notices` rather than into this transport's own queue
+    /// (issue #1353).
+    ///
+    /// A host can now hold TWO of these — the cloud relay and the in-process
+    /// direct-accept service — while `NativeTransportLink` is one resource and
+    /// `RelayNotices` is one resource. That is not an accident of Bevy: the
+    /// queue is a channel to the OPERATOR, and there is one operator with one
+    /// terminal. Call this on the second leg, right after building it, so both
+    /// legs' codes, refusals and faults arrive in the order they happened.
+    pub fn share_notices(&mut self, notices: RelayNotices) {
+        self.notices = notices;
+    }
+
     /// The join code the service issued, if it has yet.
     pub fn code(&self) -> Option<&JoinCode> {
         self.code.as_ref()

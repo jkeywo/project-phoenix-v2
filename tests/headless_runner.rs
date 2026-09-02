@@ -15819,6 +15819,582 @@ fn falling_skyway_no_state_of_falling_skyway_covers_all_three_claimants() {
     );
 }
 
+// ── Issue #1340: lift offers against the LIVE ledger ────────────────────────
+//
+// A headless simulation can walk one road through the window. What #1340
+// promises is a property of EVERY road: that no reachable combination of chain
+// capacity, prior grants, refusals and losses can put a lift on a console that
+// the booking seam would then refuse. The sweep below asserts exactly that, by
+// compiling the mission's own `[script]` — the same compiler, the same retained
+// AST, the same dialogue entry point the sim uses — and driving its nodes over
+// the whole reachable ledger rather than over one run's worth of it.
+
+/// The mission's own script, compiled the way the loader compiles it, plus the
+/// host that runs its dialogue nodes and the parsed world it was lifted from.
+struct WindowScript {
+    host: project_phoenix::world::script::engine::RuntimeHost,
+    compiled: project_phoenix::world::script::load::CompiledScripts,
+    path: String,
+    /// The world, and the head's own template. The window's supply arithmetic
+    /// deliberately reads the skyhook's two published numbers off the structure
+    /// rather than restating them in the mission, so a test that wants the
+    /// chain's ceiling has to read both files for the same reason.
+    docs: Vec<toml::Value>,
+}
+
+/// One reachable state of the window's ledger.
+///
+/// `banked` is what the chain could deliver when the shutters went up — the
+/// authored unit-supply ceiling this act is tuned against, and the figure a
+/// booked climber is measured against for the whole window. `live` is what the
+/// chain can deliver NOW. The two differ whenever a rung, a shift or the head's
+/// certification went between the announcement and the answer.
+#[derive(Clone, Copy, Debug)]
+struct WindowLedger {
+    banked: i64,
+    live: i64,
+    reserved: i64,
+    /// Per claimant, in committee/havelock/convoy order: `None` undecided,
+    /// `Some(true)` granted, `Some(false)` refused.
+    decided: [Option<bool>; 3],
+    convoy_lost: bool,
+}
+
+impl WindowScript {
+    fn compile() -> Self {
+        let source = std::fs::read_to_string(SKYWAY_WORLD_PATH)
+            .expect("the mission world must be readable from the crate root");
+        let doc: toml::Value =
+            toml::from_str(&source).expect("the mission world must be valid TOML");
+        let compiled = project_phoenix::world::script::load::load_world_scripts(
+            SKYWAY_WORLD_PATH,
+            &doc,
+            &project_phoenix::world::script::load::NoSiblingScripts,
+        );
+        assert!(
+            !project_phoenix::world::validate::has_error(&compiled.findings),
+            "the mission script must compile clean: {:?}",
+            compiled.findings
+        );
+        let path = compiled
+            .asts
+            .keys()
+            .next()
+            .expect("the mission authors a [script] block")
+            .clone();
+        let head = std::fs::read_to_string(SKYWAY_HEAD_TEMPLATE_PATH)
+            .expect("the head's template must be readable from the crate root");
+        Self {
+            host: project_phoenix::world::script::engine::RuntimeHost::new(),
+            compiled,
+            path,
+            docs: vec![
+                doc,
+                toml::from_str(&head).expect("the head's template must be valid TOML"),
+            ],
+        }
+    }
+
+    /// One authored capacity amount, wherever in the world it is declared.
+    /// Read rather than restated so a tuning pass that moves a claim or a rung
+    /// moves this sweep with it.
+    fn authored(&self, id: &str) -> i64 {
+        fn walk(value: &toml::Value, id: &str, found: &mut Option<i64>) {
+            match value {
+                toml::Value::Table(table) => {
+                    if table.get("id").and_then(toml::Value::as_str) == Some(id) {
+                        if let Some(amount) = table.get("amount").and_then(toml::Value::as_integer)
+                        {
+                            *found = Some(amount);
+                        }
+                    }
+                    for nested in table.values() {
+                        walk(nested, id, found);
+                    }
+                }
+                toml::Value::Array(items) => {
+                    for nested in items {
+                        walk(nested, id, found);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut found = None;
+        for doc in &self.docs {
+            walk(doc, id, &mut found);
+        }
+        found.unwrap_or_else(|| panic!("{id} must be an authored capacity amount"))
+    }
+
+    fn call(
+        &self,
+        fn_name: &str,
+        flags: &project_phoenix::world::flags::FlagStore,
+    ) -> project_phoenix::world::script::schedule::CallEffects {
+        let mut budget = project_phoenix::world::script::schedule::TickBudget::new();
+        self.host.call(
+            &mut budget,
+            &project_phoenix::world::script::schedule::SchedClock::ZERO,
+            &self.compiled.asts[&self.path],
+            &self.path,
+            fn_name,
+            std::slice::from_ref(flags),
+            &project_phoenix::world::deadlines::DeadlineTable::default(),
+            &project_phoenix::world::commitments::CommitmentLedger::default(),
+            &project_phoenix::dossier::evidence::EvidenceLog::default(),
+            rhai::Map::new(),
+        )
+    }
+
+    fn node(
+        &self,
+        fn_name: &str,
+        flags: &project_phoenix::world::flags::FlagStore,
+    ) -> project_phoenix::world::script::comms::ScriptDialogueNode {
+        let mut budget = project_phoenix::world::script::schedule::TickBudget::new();
+        let (_effects, node) = project_phoenix::world::script::comms::enter_node(
+            &self.host,
+            &mut budget,
+            &project_phoenix::world::script::schedule::SchedClock::ZERO,
+            &self.compiled.asts[&self.path],
+            &self.path,
+            fn_name,
+            flags,
+            &project_phoenix::world::deadlines::DeadlineTable::default(),
+            &project_phoenix::world::commitments::CommitmentLedger::default(),
+            &project_phoenix::dossier::evidence::EvidenceLog::default(),
+        )
+        .unwrap_or_else(|error| panic!("{fn_name} must enter cleanly: {error:?}"));
+        node.unwrap_or_else(|| panic!("{fn_name} must return a node"))
+    }
+
+    /// The window's ledger as flags, with the chain tuned so `window_supply`
+    /// re-derives to `live` — a head certified for exactly that much and one
+    /// rung pumping exactly that much, which is the smallest honest way to say
+    /// "the chain delivers this now" through the authored arithmetic.
+    fn flags(&self, ledger: &WindowLedger) -> project_phoenix::world::flags::FlagStore {
+        let mut flags = project_phoenix::world::flags::FlagStore::new();
+        flags.set_flag_value("skyway_window_open", 1);
+        flags.set_flag_value("skyway_window_supply", ledger.banked);
+        flags.set_flag_value("skyway_window_reserved", ledger.reserved);
+
+        flags.set_flag_value("skyhook_lift_capable", 1);
+        flags.set_flag_value("skyhook_transfer_berths", ledger.live);
+        flags.set_flag_value("skyhook_climber_load", 1);
+        flags.set_flag_value("depot_a_pumping", 1);
+        flags.set_flag_value("depot_a_fuel_lift", ledger.live);
+        flags.set_flag_value("depot_b_pumping", 0);
+        flags.set_flag_value("depot_b_fuel_lift", 0);
+
+        for (index, id) in SKYWAY_CLAIM_IDS.iter().enumerate() {
+            flags.set_flag_value(id, self.authored(id));
+            match ledger.decided[index] {
+                None => {}
+                Some(true) => {
+                    flags.set_flag_value(SKYWAY_GRANTED_FLAGS[index], 1);
+                }
+                Some(false) => {
+                    flags.set_flag_value(SKYWAY_REFUSED_FLAGS[index], 1);
+                }
+            }
+        }
+        if ledger.convoy_lost {
+            flags.set_flag_value("skyway_convoy_lost", 1);
+        }
+        flags
+    }
+}
+
+const SKYWAY_WORLD_PATH: &str = "assets/worlds/falling_skyway.toml";
+const SKYWAY_HEAD_TEMPLATE_PATH: &str = "assets/entities/skyhook.toml";
+const SKYWAY_CLAIM_IDS: [&str; 3] = [
+    "skyway_claim_committee",
+    "skyway_claim_havelock",
+    "skyway_claim_convoy",
+];
+const SKYWAY_GRANTED_FLAGS: [&str; 3] = [
+    "skyway_granted_committee",
+    "skyway_granted_havelock",
+    "skyway_granted_convoy",
+];
+const SKYWAY_REFUSED_FLAGS: [&str; 3] = [
+    "skyway_refused_committee",
+    "skyway_refused_havelock",
+    "skyway_refused_convoy",
+];
+const SKYWAY_CLAIM_NODES: [&str; 3] = ["committee_claims", "havelock_claims", "convoy_claims"];
+const SKYWAY_LIFT_LINES: [&str; 3] = [
+    "world.falling_skyway.comms.lift_committee",
+    "world.falling_skyway.comms.lift_havelock",
+    "world.falling_skyway.comms.lift_convoy",
+];
+const SKYWAY_BOOK_HANDLERS: [&str; 3] = ["on_book_committee", "on_book_havelock", "on_book_convoy"];
+
+/// Every counter increment a call buffered, by flag name.
+fn window_increments(
+    effects: &project_phoenix::world::script::schedule::CallEffects,
+) -> std::collections::BTreeMap<String, i64> {
+    use project_phoenix::world::dispatch::{ActionCmd, FlagMutation};
+    use project_phoenix::world::script::effects::BufferedEffect;
+    let mut out = std::collections::BTreeMap::new();
+    for effect in &effects.commands {
+        if let BufferedEffect::Cmd(ActionCmd::MutateFlag {
+            name,
+            mutation: FlagMutation::Increment(by),
+            ..
+        }) = effect
+        {
+            *out.entry(name.clone()).or_insert(0) += by;
+        }
+    }
+    out
+}
+
+/// Every absolute flag write a call buffered, by flag name.
+fn window_flag_values(
+    effects: &project_phoenix::world::script::schedule::CallEffects,
+) -> std::collections::BTreeMap<String, i64> {
+    use project_phoenix::world::dispatch::{ActionCmd, FlagMutation};
+    use project_phoenix::world::script::effects::BufferedEffect;
+    let mut out = std::collections::BTreeMap::new();
+    for effect in &effects.commands {
+        if let BufferedEffect::Cmd(ActionCmd::MutateFlag {
+            name,
+            mutation: FlagMutation::SetValue(value),
+            ..
+        }) = effect
+        {
+            out.insert(name.clone(), *value);
+        }
+    }
+    out
+}
+
+/// The objective ids a call completed and failed.
+fn window_objective_verdicts(
+    effects: &project_phoenix::world::script::schedule::CallEffects,
+) -> (Vec<String>, Vec<String>) {
+    use project_phoenix::world::dispatch::ActionCmd;
+    use project_phoenix::world::script::effects::BufferedEffect;
+    let mut completed = Vec::new();
+    let mut failed = Vec::new();
+    for effect in &effects.commands {
+        match effect {
+            BufferedEffect::Cmd(ActionCmd::CompleteObjective { id, .. }) => {
+                completed.push(id.clone())
+            }
+            BufferedEffect::Cmd(ActionCmd::FailObjective { id, .. }) => failed.push(id.clone()),
+            _ => {}
+        }
+    }
+    (completed, failed)
+}
+
+/// **Issue #1340, AC1/AC2/AC4 — every reachable ledger, and not one offer on
+/// it that the booking seam would refuse.**
+///
+/// The sweep walks every value the window's unspoken-for lift can take, reached
+/// BOTH ways it can be reached — lift already granted away, and a chain that
+/// stopped delivering after the shutters went up — crossed with every
+/// combination of which claimants have been answered, how (granted or refused),
+/// and whether the corridor still has a convoy in it. That is the whole
+/// reachable space of this conversation.
+///
+/// Two claims are asserted over all of it. First, that a lift line appears on a
+/// claimant's tree exactly when that claimant is still standing and their claim
+/// fits inside what is left — no more, and no fewer. Second, and this is the
+/// one that matters, that pulling the booking seam behind every offered line
+/// GRANTS: the seam and the dialogue read one arithmetic, so a displayed grant
+/// is executable at the moment it is displayed.
+///
+/// It also asserts the converse, which is the half a "no stale offers" test
+/// usually forgets: where the line is withheld, the seam would have refused.
+/// Withholding an option the window could actually honour is the same bug
+/// wearing the other coat.
+#[test]
+fn falling_skyway_no_reachable_ledger_offers_a_lift_the_window_cannot_honour() {
+    let script = WindowScript::compile();
+    let claims: Vec<i64> = SKYWAY_CLAIM_IDS
+        .iter()
+        .map(|id| script.authored(id))
+        .collect();
+    let ceiling = (script.authored("skyhook_transfer_berths")
+        * script.authored("skyhook_climber_load"))
+    .min(script.authored("depot_a_fuel_lift") + script.authored("depot_b_fuel_lift"));
+    assert!(
+        ceiling > 0 && ceiling < claims.iter().sum::<i64>(),
+        "precondition: the authored chain has lift in it and never covers all three"
+    );
+
+    let decisions = [None, Some(true), Some(false)];
+    let mut checked = 0usize;
+    for room in 0..=ceiling {
+        // The same shortage, reached the two ways the mission can reach it.
+        for ledger_shape in 0..2 {
+            let (banked, live, reserved) = if ledger_shape == 0 {
+                (ceiling, ceiling, ceiling - room)
+            } else {
+                (ceiling, room, 0)
+            };
+            for committee in decisions {
+                for havelock in decisions {
+                    for convoy in decisions {
+                        for convoy_lost in [false, true] {
+                            let ledger = WindowLedger {
+                                banked,
+                                live,
+                                reserved,
+                                decided: [committee, havelock, convoy],
+                                convoy_lost,
+                            };
+                            let flags = script.flags(&ledger);
+                            for index in 0..3 {
+                                let standing = ledger.decided[index].is_none()
+                                    && !(index == 2 && ledger.convoy_lost);
+                                let should_offer = standing && claims[index] <= room;
+
+                                let node = script.node(SKYWAY_CLAIM_NODES[index], &flags);
+                                let offered = node
+                                    .responses
+                                    .iter()
+                                    .any(|r| r.text == SKYWAY_LIFT_LINES[index]);
+                                assert_eq!(
+                                    offered, should_offer,
+                                    "AC1: {} offered={offered} with {ledger:?} and \
+                                     {room} unspoken for against a claim of {}",
+                                    SKYWAY_CLAIM_NODES[index], claims[index]
+                                );
+
+                                // AC2: and what is offered is what the seam grants.
+                                let booking = window_increments(
+                                    &script.call(SKYWAY_BOOK_HANDLERS[index], &flags),
+                                );
+                                let refused = booking
+                                    .get("skyway_window_refused_short")
+                                    .copied()
+                                    .unwrap_or(0)
+                                    + booking
+                                        .get("skyway_window_refused_shut")
+                                        .copied()
+                                        .unwrap_or(0);
+                                if should_offer {
+                                    assert_eq!(
+                                        refused, 0,
+                                        "AC2: an offered lift must be executable when it is \
+                                         picked, and {} was refused with {ledger:?}",
+                                        SKYWAY_BOOK_HANDLERS[index]
+                                    );
+                                    assert_eq!(
+                                        booking.get("skyway_window_reserved").copied().unwrap_or(0),
+                                        claims[index],
+                                        "…and it spends exactly the claim it was drawn for"
+                                    );
+                                } else if standing {
+                                    assert_eq!(
+                                        refused, 1,
+                                        "AC2 (the other coat): a withheld line must be a line \
+                                         the window could not honour, and {} would have \
+                                         granted with {ledger:?}",
+                                        SKYWAY_BOOK_HANDLERS[index]
+                                    );
+                                }
+                                checked += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        checked > 1_000,
+        "the sweep must actually walk the space: {checked} combinations"
+    );
+}
+
+/// **Issue #1340, AC3 — six things Control can say about this board, and a
+/// crew in one state never reads another one's sentence.**
+///
+/// The same sweep, asked a different question: the restatement Control opens
+/// whenever the manifest moves has to have a body for every shape the live
+/// ledger can take — any pair, particular pairs, one of several, one specific
+/// party, none at all, and the opening state where nobody has been answered yet
+/// — and every one of those has to be REACHABLE. A variant the mission cannot
+/// produce is copy nobody hears; a shape with no variant is a console rendering
+/// somebody else's news.
+#[test]
+fn falling_skyway_control_has_a_body_for_every_shape_the_window_can_take() {
+    let script = WindowScript::compile();
+    let claims: Vec<i64> = SKYWAY_CLAIM_IDS
+        .iter()
+        .map(|id| script.authored(id))
+        .collect();
+    let ceiling = (script.authored("skyhook_transfer_berths")
+        * script.authored("skyhook_climber_load"))
+    .min(script.authored("depot_a_fuel_lift") + script.authored("depot_b_fuel_lift"));
+
+    let expected = [
+        "world.falling_skyway.comms.window_stands_undecided",
+        "world.falling_skyway.comms.window_stands_any_pair",
+        "world.falling_skyway.comms.window_stands_particular",
+        "world.falling_skyway.comms.window_stands_one",
+        "world.falling_skyway.comms.window_stands_sole_committee",
+        "world.falling_skyway.comms.window_stands_sole_havelock",
+        "world.falling_skyway.comms.window_stands_sole_convoy",
+        "world.falling_skyway.comms.window_stands_none",
+    ];
+    let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+
+    let decisions = [None, Some(true), Some(false)];
+    for room in 0..=ceiling {
+        for committee in decisions {
+            for havelock in decisions {
+                for convoy in decisions {
+                    for convoy_lost in [false, true] {
+                        let ledger = WindowLedger {
+                            banked: ceiling,
+                            live: ceiling,
+                            reserved: ceiling - room,
+                            decided: [committee, havelock, convoy],
+                            convoy_lost,
+                        };
+                        let flags = script.flags(&ledger);
+                        let node = script.node("window_stands", &flags);
+                        assert!(
+                            expected.contains(&node.message.as_str()),
+                            "an unauthored restatement body {} for {ledger:?}",
+                            node.message
+                        );
+                        assert!(
+                            node.responses.is_empty(),
+                            "the restatement is terminal: the allocation is answered on the \
+                             claimants' own threads"
+                        );
+                        assert_eq!(
+                            node.params["available"],
+                            room.max(0).to_string(),
+                            "the sentence and the ledger must agree about what is left"
+                        );
+
+                        // The one classification claim worth restating in Rust:
+                        // "none" means nothing standing fits, and nothing else
+                        // may say that.
+                        let anything_fits = (0..3).any(|i| {
+                            ledger.decided[i].is_none()
+                                && !(i == 2 && ledger.convoy_lost)
+                                && claims[i] <= room
+                        });
+                        assert_eq!(
+                            node.message == "world.falling_skyway.comms.window_stands_none",
+                            !anything_fits,
+                            "AC3: the no-feasible-request body is exactly the no-feasible-request \
+                             state, and {ledger:?} is the other one"
+                        );
+                        seen.insert(node.message.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    for id in expected {
+        assert!(
+            seen.contains(id),
+            "AC3: {id} is authored for a state the mission cannot reach — the reachable set \
+             was {seen:?}"
+        );
+    }
+
+    // …and each of them is in the table the console renders from.
+    let table = std::fs::read_to_string("assets/strings/strings.csv")
+        .expect("the string table must be readable");
+    for id in expected {
+        assert!(
+            table.contains(&format!("{id},")),
+            "{id} must have a string-table row, or the console renders the id"
+        );
+    }
+}
+
+/// **Issue #1340, AC4 — a refusal is an answer; silence is not.**
+///
+/// The allocation objective scores the captain on the requests that actually
+/// reached the bridge. Telling a claimant no is a decision somebody made and
+/// closes their request; leaving one unanswered does not. And a claimant the
+/// corridor lost before the parley opened never put a request at all, so
+/// counting them as silence would fail a crew for a hull they did not sink.
+#[test]
+fn falling_skyway_a_refusal_answers_a_claim_and_silence_does_not() {
+    let script = WindowScript::compile();
+
+    /// `(asked, granted, refused)` per claimant → the verdict on the choice.
+    fn verdict(
+        script: &WindowScript,
+        asked: [bool; 3],
+        answered: [Option<bool>; 3],
+    ) -> (bool, i64) {
+        let mut flags = project_phoenix::world::flags::FlagStore::new();
+        const ASKED_FLAGS: [&str; 3] = [
+            "skyway_claim_asked_committee",
+            "skyway_claim_asked_havelock",
+            "skyway_claim_asked_convoy",
+        ];
+        for index in 0..3 {
+            if asked[index] {
+                flags.set_flag_value(ASKED_FLAGS[index], 1);
+            }
+            match answered[index] {
+                None => {}
+                Some(true) => {
+                    flags.set_flag_value(SKYWAY_GRANTED_FLAGS[index], 1);
+                }
+                Some(false) => {
+                    flags.set_flag_value(SKYWAY_REFUSED_FLAGS[index], 1);
+                }
+            }
+        }
+        let effects = script.call("resolve_the_choice", &flags);
+        let (completed, failed) = window_objective_verdicts(&effects);
+        let unanswered = window_flag_values(&effects)["skyway_claims_unanswered"];
+        assert!(
+            completed.contains(&"obj-a3-choice".to_string())
+                != failed.contains(&"obj-a3-choice".to_string()),
+            "the choice gets exactly one verdict"
+        );
+        (completed.contains(&"obj-a3-choice".to_string()), unanswered)
+    }
+
+    assert_eq!(
+        verdict(
+            &script,
+            [true, true, true],
+            [Some(true), Some(false), Some(false)]
+        ),
+        (true, 0),
+        "one lift and two refusals is three answers: the captain answered everybody"
+    );
+    assert_eq!(
+        verdict(&script, [true, true, true], [Some(true), Some(true), None]),
+        (false, 1),
+        "the claimant who was never told anything is the failure this objective names"
+    );
+    assert_eq!(
+        verdict(
+            &script,
+            [true, true, false],
+            [Some(false), Some(false), None]
+        ),
+        (true, 0),
+        "a convoy the corridor lost before the parley never asked, and cannot go unanswered"
+    );
+    assert_eq!(
+        verdict(&script, [false, false, false], [None, None, None]),
+        (false, 0),
+        "a window nobody ever reached is not a window everybody was answered on"
+    );
+}
+
 /// **Issue #1135 — early transfer pre-emption.** The manifold is live before
 /// Act 3 posts its run-up objective. A crew who physically dock and move reserve
 /// fuel over the umbilical crosses the receiver's own authored capacity

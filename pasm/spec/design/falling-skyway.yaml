@@ -661,6 +661,43 @@ entities:
     implementation:
       status: declared
       paths: [tests/headless_runner.rs]
+  - design_invariant: fs-window-offer-is-executable
+    core:
+      status: proposed
+      confidence: provisional
+      origin: ai
+      title: A Displayed Grant Can Always Be Honoured
+      summary: >
+        [ai] Every lift line the conversation draws is drawn from the live
+        ledger — the chain re-derived now, capped by what it could deliver when
+        the window opened, less what is already spoken for — and the booking
+        seam grants against that same arithmetic. A rung failing, a shift
+        walking off, the head losing certification, a prior grant or the
+        convoy's own hull being destroyed all reprice the open threads and
+        Control's manifest. Correcting the conversation never raises the
+        authored unit-supply ceiling: the live reading can only lower it.
+    game_design:
+      relation: >
+        lift response offered for claim C implies min(window_supply_now,
+        skyway_window_supply) - skyway_window_reserved >= C, which is exactly
+        book_lift's grant condition; and min(...) <= skyway_window_supply
+        always, so no repair mid-window mints lift the act was not priced for.
+      asserted_by:
+        - falling_skyway_no_reachable_ledger_offers_a_lift_the_window_cannot_honour
+        - falling_skyway_control_has_a_body_for_every_shape_the_window_can_take
+        - falling_skyway_a_refusal_answers_a_claim_and_silence_does_not
+      anchors:
+        # The ceiling the live reading is capped by. If a tuning pass moves it,
+        # this invariant wants re-reading rather than silently re-scaling.
+        - name: window-ceiling-rung-a
+          path: assets/worlds/falling_skyway.toml
+          table: entity.overrides.infrastructure.capacity
+          match: "id=depot_a_fuel_lift"
+          key: amount
+          expect: "40"
+    implementation:
+      status: declared
+      paths: [assets/worlds/falling_skyway.toml, tests/headless_runner.rs]
 
   # ── Pacing: global intensity eras over the 20-30 minute envelope ───────────
   - pacing: fs-mission-clock

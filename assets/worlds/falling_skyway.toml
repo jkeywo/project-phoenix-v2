@@ -4604,6 +4604,27 @@ fn window_supply(ctx) {
     if head < ladder { head } else { ladder }
 }
 
+// WHAT THE CHAIN CAN STILL DELIVER, which is not always what it could deliver
+// when the shutters went up (issue #1340).
+//
+// `skyway_window_supply` is banked at the opening and deliberately never moves:
+// a rung that fails while a climber is on the ribbon does not un-book the
+// climber, and that is the rule every booked lift is measured against. But a
+// claim that has NOT been granted yet is a different question — offering lift
+// off a chain that has since stopped delivering is offering something the head
+// cannot honour, and this act's whole promise is that a displayed grant is
+// executable when it is picked.
+//
+// So: the lower of the two, never the higher. Re-deriving the chain can only
+// ever LOWER what is on offer here, which is the ceiling rule stated as code —
+// a rung repaired mid-window does not mint lift the window was not priced for,
+// and no correction to this conversation can raise the authored unit supply.
+fn window_deliverable(ctx) {
+    let banked = ctx.flags.skyway_window_supply;
+    let live = window_supply(ctx);
+    if live < banked { live } else { banked }
+}
+
 // What the three of them have asked for. Read off the manifest rows rather than
 // restated here, so the claims are authored data in exactly one place.
 fn window_demand(ctx) {
@@ -4648,6 +4669,20 @@ fn on_transfer_window_opens(ctx) {
     ctx.flags.skyway_window_supply = supply;
     ctx.flags.skyway_window_demand_total = demand;
     ctx.flags.skyway_window_shortfall_at_open = short;
+    // WHAT THE ROOM HAS ALREADY BEEN TOLD (#1340), as one number: the lift
+    // still unspoken for, doubled, plus one if the corridor has already lost
+    // the convoy. One mark rather than a flag per term, so every trigger that
+    // can move this board — a grant, a rung failing, a hull destroyed, the
+    // periodic watch — asks the same question before it announces anything and
+    // no two of them announce one movement twice.
+    //
+    // Computed off the locals the arithmetic above already produced. Nothing is
+    // reserved yet on the tick a window opens, so the room and the supply are
+    // the same figure and there is no reason to derive it twice.
+    let mark = supply * 2;
+    if ctx.flags.skyway_convoy_lost > 0 { mark += 1; }
+    ctx.flags.skyway_board_marked = 1;
+    ctx.flags.skyway_board_seen = mark;
 
     // The manifest, on the panel, from this tick. `skyway_window_committed`
     // stays at its authored zero: nothing has been put on the ribbon yet.
@@ -4698,6 +4733,9 @@ fn on_transfer_window_opens(ctx) {
         node_fn: node,
         urgent: true,
     });
+
+    // …and the board is watched from here until the shutters come down (#1340).
+    ctx.schedule.after(3, |ctx| { watch_the_manifest(ctx); });
 }
 
 // The two bodies. Each is its own node function because `open_comms` names a
@@ -4770,9 +4808,14 @@ fn book_lift(ctx, claim_id) {
     let need = ctx.flags[claim_id];
     // The ledger, not the panel row: the counter a capacity mirrors onto is
     // re-published by the infrastructure tick, so a second booking in the same
-    // tick would read the first one's row before it had moved. These two flags
-    // land between calls.
-    let left = ctx.flags.skyway_window_supply - ctx.flags.skyway_window_reserved;
+    // tick would read the first one's row before it had moved. These flags land
+    // between calls.
+    //
+    // `window_room` rather than the banked figure since #1340, so the one place
+    // a lift is granted asks the SAME question the dialogue asked before it drew
+    // the option: what can the chain put through this window right now, less
+    // what is already spoken for.
+    let left = window_room(ctx);
     if left < need {
         ctx.flags.increment("skyway_window_refused_short", 1);
         return false;
@@ -5019,7 +5062,13 @@ on_flag_set("skyway_berth_ask_committee", "on_berth_ask_committee");
 on_flag_set("skyway_berth_ask_havelock", "on_berth_ask_havelock");
 on_flag_set("skyway_berth_ask_convoy", "on_berth_ask_convoy");
 
-fn on_convoy_lost(ctx) { ctx.flags.skyway_convoy_lost = 1; }
+// Losing the hull changes what is feasible without anybody having picked
+// anything, so it moves the board like any other loss (#1340). The window guard
+// keeps this to the one act where a claim is a live offer.
+fn on_convoy_lost(ctx) {
+    ctx.flags.skyway_convoy_lost = 1;
+    if ctx.flags.skyway_window_open > 0 { the_board_moved(ctx); }
+}
 
 // ── Moored means moored ─────────────────────────────────────────────────────
 //
@@ -5166,17 +5215,25 @@ fn the_parley_at_the_ladder(ctx) {
         ],
     });
 
+    // WHO ACTUALLY ASKED, latched as they ask (#1340). `resolve_the_choice`
+    // scores the captain on the requests that reached them, and a claimant the
+    // corridor lost before the parley never put one — counting a party who
+    // could not speak as an unanswered request would fail a crew for silence
+    // that was never theirs.
+    ctx.flags.skyway_claim_asked_committee = 1;
     ctx.effects.open_comms(#{
         from: "world.falling_skyway.entity.strike_committee.name",
         node_fn: "committee_claims",
         urgent: true,
     });
+    ctx.flags.skyway_claim_asked_havelock = 1;
     ctx.effects.open_comms(#{
         from: "world.falling_skyway.entity.havelock_cutter.name",
         node_fn: "havelock_claims",
         urgent: true,
     });
     if ctx.flags.skyway_convoy_lost == 0 {
+        ctx.flags.skyway_claim_asked_convoy = 1;
         ctx.effects.open_comms(#{
             from: "world.falling_skyway.entity.convoy_meridian.name",
             node_fn: "convoy_claims",
@@ -5190,12 +5247,208 @@ fn the_parley_at_the_ladder(ctx) {
 // panel row — the counter a capacity mirrors onto is re-published by the
 // infrastructure tick, so a row read inside the same tick as a booking is a tick
 // stale. These two flags land between calls.
+// `window_deliverable` rather than the banked supply since #1340: a chain that
+// stopped delivering after the shutters went up cannot be offered against, and
+// the same subtraction is what `book_lift` grants against — one arithmetic, so
+// the option the crew are shown and the answer they get cannot disagree.
 fn window_room(ctx) {
-    ctx.flags.skyway_window_supply - ctx.flags.skyway_window_reserved
+    window_deliverable(ctx) - ctx.flags.skyway_window_reserved
 }
 
 fn claim_decided(ctx, granted_flag, refused_flag) {
     ctx.flags[granted_flag] > 0 || ctx.flags[refused_flag] > 0
+}
+
+// ── What is still standing, and what still fits (issue #1340) ───────────────
+//
+// A claim is STANDING when it is still a thing the captain can answer with a
+// lift: nobody has answered it, and there is still somebody there to answer.
+// The convoy is the one claimant this corridor can lose outright, and a hull
+// that is gone is neither a refusal nor an unanswered request — there is nobody
+// left to put on a climber.
+fn committee_standing(ctx) {
+    !claim_decided(ctx, "skyway_granted_committee", "skyway_refused_committee")
+}
+fn havelock_standing(ctx) {
+    !claim_decided(ctx, "skyway_granted_havelock", "skyway_refused_havelock")
+}
+fn convoy_standing(ctx) {
+    ctx.flags.skyway_convoy_lost == 0 &&
+    !claim_decided(ctx, "skyway_granted_convoy", "skyway_refused_convoy")
+}
+
+fn claims_decided_count(ctx) {
+    let n = 0;
+    if claim_decided(ctx, "skyway_granted_committee", "skyway_refused_committee") { n += 1; }
+    if claim_decided(ctx, "skyway_granted_havelock", "skyway_refused_havelock") { n += 1; }
+    if claim_decided(ctx, "skyway_granted_convoy", "skyway_refused_convoy") { n += 1; }
+    n
+}
+
+// THE SHAPE OF THE CHOICE AS IT STANDS, in one word, and there are six of them
+// because there are six things Control can truthfully say about this board — a
+// crew who are in one of those states should not be read another one's
+// sentence. Derived from the live ledger every time it is asked, never from a
+// figure banked at the opening, so a rung that went under between the
+// announcement and the answer changes the sentence as well as the option.
+//
+//   `none`            nothing still standing fits what is left. There is no
+//                     lift to give anybody, whatever anybody asks.
+//   `sole_*`          exactly one claim fits, and it is THAT one. The most
+//                     specific thing the act can say, and the one that has to
+//                     name a party.
+//   `one`             several fit on their own but no two fit together. One
+//                     name, and the captain picks which.
+//   `particular`      some pairings fit and some do not. This is where the
+//                     arithmetic stops being "any two" and starts being a
+//                     choice about WHICH two.
+//   `any_pair`        every pairing still standing fits — after somebody has
+//                     already been answered.
+//   `undecided`       the same board, before anybody has been answered at all.
+//                     The opening state of the choice, restated.
+fn window_shape(ctx) {
+    let room = window_room(ctx);
+    let c = committee_standing(ctx);
+    let h = havelock_standing(ctx);
+    let v = convoy_standing(ctx);
+    let cn = ctx.flags["skyway_claim_committee"];
+    let hn = ctx.flags["skyway_claim_havelock"];
+    let vn = ctx.flags["skyway_claim_convoy"];
+
+    let c_fits = c && cn <= room;
+    let h_fits = h && hn <= room;
+    let v_fits = v && vn <= room;
+
+    let fits = 0;
+    if c_fits { fits += 1; }
+    if h_fits { fits += 1; }
+    if v_fits { fits += 1; }
+
+    if fits == 0 { return "none"; }
+    if fits == 1 {
+        if c_fits { return "sole_committee"; }
+        if h_fits { return "sole_havelock"; }
+        return "sole_convoy";
+    }
+
+    // The pairings, over the claims still standing. `all` counts the pairs the
+    // scene still HAS; `fit` counts the ones the ledger can honour.
+    let all = 0;
+    let fit = 0;
+    if c && h { all += 1; if cn + hn <= room { fit += 1; } }
+    if c && v { all += 1; if cn + vn <= room { fit += 1; } }
+    if h && v { all += 1; if hn + vn <= room { fit += 1; } }
+
+    if fit == 0 { return "one"; }
+    if fit < all { return "particular"; }
+    if claims_decided_count(ctx) == 0 { return "undecided"; }
+    "any_pair"
+}
+
+// Control's restatement of its own manifest, one body per shape. Terminal — no
+// responses — for `window_opens_short`'s reason: the allocation is answered on
+// the claimants' own threads, and a status line a backfilled console could
+// answer would be a second way to spend the window.
+fn window_stands(ctx) {
+    let shape = window_shape(ctx);
+    let body = "world.falling_skyway.comms.window_stands_none";
+    if shape == "sole_committee" {
+        body = "world.falling_skyway.comms.window_stands_sole_committee";
+    } else if shape == "sole_havelock" {
+        body = "world.falling_skyway.comms.window_stands_sole_havelock";
+    } else if shape == "sole_convoy" {
+        body = "world.falling_skyway.comms.window_stands_sole_convoy";
+    } else if shape == "one" {
+        body = "world.falling_skyway.comms.window_stands_one";
+    } else if shape == "particular" {
+        body = "world.falling_skyway.comms.window_stands_particular";
+    } else if shape == "any_pair" {
+        body = "world.falling_skyway.comms.window_stands_any_pair";
+    } else if shape == "undecided" {
+        body = "world.falling_skyway.comms.window_stands_undecided";
+    }
+    // A room that has gone negative is a chain that failed under climbers
+    // already on the ribbon. There is nothing left to offer either way, and a
+    // manifest reading a minus figure is a bug on a panel rather than news.
+    let room = window_room(ctx);
+    if room < 0 { room = 0; }
+    #{ message: body, params: #{ available: room }, responses: [] }
+}
+
+// ── The board moved ─────────────────────────────────────────────────────────
+//
+// ONE ENTRY POINT for every reason the ledger can change, which is the whole of
+// #1340's second criterion. A grant spends lift; a rung going under, a shift
+// walking off, the head losing its certification or the convoy's own hull being
+// destroyed all change what is feasible without anybody picking anything. Before
+// this they had one trigger between them — a grant — so a window that got poorer
+// on its own left three threads describing a chain that no longer existed.
+//
+// It republishes the manifest row as well as the copy: the panel is where a
+// captain reads what is on offer, and a row that still says 40 after the ladder
+// stopped is the same lie in a different place.
+//
+// GUARDED ON THE MARK, and that guard is what lets every trigger call this
+// unconditionally. Two triggers landing on one tick would otherwise open the
+// same three threads twice and publish the same absolute row twice — and an
+// absolute publish computes its delta from a level the infrastructure tick has
+// not re-mirrored yet, so the second one would move the row again by the whole
+// of the first one's delta. One mark, checked before anything is spent.
+fn board_mark(ctx) {
+    window_room(ctx) * 2 + ctx.flags.skyway_convoy_lost
+}
+
+fn the_board_moved(ctx) {
+    if ctx.flags.skyway_window_open == 0 { return; }
+    let mark = board_mark(ctx);
+    if ctx.flags.skyway_board_marked > 0 && mark == ctx.flags.skyway_board_seen { return; }
+    ctx.flags.skyway_board_marked = 1;
+    ctx.flags.skyway_board_seen = mark;
+
+    let room = window_room(ctx);
+    if room < 0 { room = 0; }
+    publish_manifest(ctx, "skyway_window_available", room);
+    reprice_the_other_claims(ctx);
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.skyway_control.name",
+        node_fn: "window_stands",
+    });
+}
+
+// The watch itself, three seconds at a time for as long as the window is open.
+//
+// A WATCH RATHER THAN A HANDLER PER LOSS, and that is the point: the supply
+// arithmetic reads a head certification, two operational thresholds, two
+// workforce stoppages and two published rung capacities, and a scene that hooked
+// each of those separately would be seven registrations that go stale the moment
+// somebody tunes the chain. This asks the arithmetic what it says NOW and
+// notices when the answer is different, so any future term in `window_supply` is
+// covered the day it is authored.
+//
+// It says nothing on a board that has not moved — `the_board_moved`'s own mark
+// does that — so a quiet window is a silent one. Supply can only fall, and only
+// through a small set of authored values, so the message count stays bounded
+// whether a person or a backfilled console is answering.
+fn watch_the_manifest(ctx) {
+    if ctx.flags.skyway_window_open == 0 { return; }
+    if ctx.flags.skyway_shelter_only > 0 {
+        // The smaller scene has its own one-line ledger, and it moves for the
+        // same reasons: a rung that goes under after Control has asked for a
+        // name has no mooring left to put the name against.
+        let berths = berth_room(ctx);
+        if berths != ctx.flags.skyway_berth_seen {
+            ctx.flags.skyway_berth_seen = berths;
+            if ctx.flags.skyway_berth_decided == 0 {
+                ctx.effects.open_comms(#{
+                    from: "world.falling_skyway.entity.skyway_control.name",
+                    node_fn: "control_berth_offer",
+                });
+            }
+        }
+    } else {
+        the_board_moved(ctx);
+    }
+    ctx.schedule.after(3, |ctx| { watch_the_manifest(ctx); });
 }
 
 // A DIALOGUE NODE IS BUILT ONCE AND ANSWERED LATER, and this act is the first
@@ -5205,12 +5458,18 @@ fn claim_decided(ctx, granted_flag, refused_flag) {
 // are watching the same manifest the captain is — and say so, and the node they
 // say it on is rebuilt from the ledger as it stands now.
 //
-// Three seconds out, because the seam's booking lands a tick after the pick that
-// set it and `skyway_window_reserved` has to have moved before a repricing can
-// mean anything. The claimant who was just granted is skipped by `claim_decided`,
-// so this only ever reaches parties who are still waiting on an answer, and two
-// grants is the most a window can ever hold — the message count is bounded at
-// four whether a person or a backfilled console is answering.
+// Three seconds out from a grant, because the seam's booking lands a tick after
+// the pick that set it and `skyway_window_reserved` has to have moved before a
+// repricing can mean anything. The claimant who was just granted is skipped by
+// `claim_decided`, so this only ever reaches parties who are still waiting on
+// an answer.
+//
+// CALLED THROUGH `the_board_moved` since #1340, never directly, so that a grant
+// and the chain failing under everybody reach these three threads by the same
+// road and its mark bounds how often they hear about it. A window can hold two
+// grants and its supply can only fall, and only through a small set of authored
+// values, so the message count stays bounded whether a person or a backfilled
+// console is answering.
 fn reprice_the_other_claims(ctx) {
     if ctx.flags.skyway_window_open == 0 { return; }
     if !claim_decided(ctx, "skyway_granted_committee", "skyway_refused_committee") {
@@ -5295,7 +5554,7 @@ fn on_lift_committee(ctx) {
     // [ai] Unratified. Giving these people the corridor after six weeks of
     // nobody giving them anything is worth more than either promise was.
     ctx.effects.set_workforce_disposition("skyway_workers", 75);
-    ctx.schedule.after(3, |ctx| { reprice_the_other_claims(ctx); });
+    ctx.schedule.after(3, |ctx| { the_board_moved(ctx); });
     committee_node(ctx, "world.falling_skyway.comms.committee_lifting")
 }
 
@@ -5377,7 +5636,7 @@ fn on_lift_havelock(ctx) {
     }
     ctx.flags.skyway_granted_havelock = 1;
     ctx.flags.skyway_book_havelock = 1;
-    ctx.schedule.after(3, |ctx| { reprice_the_other_claims(ctx); });
+    ctx.schedule.after(3, |ctx| { the_board_moved(ctx); });
     havelock_node(ctx, "world.falling_skyway.comms.havelock_lifting")
 }
 
@@ -5429,7 +5688,12 @@ fn convoy_node(ctx, body) {
     let responses = [];
     if !claim_decided(ctx, "skyway_granted_convoy", "skyway_refused_convoy") {
         responses.push(#{ text: "world.falling_skyway.comms.claim_stand_by", on_pick: "on_convoy_hold" });
-        if window_room(ctx) >= ctx.flags["skyway_claim_convoy"] {
+        // `convoy_standing` and not just the ledger (#1340): the corridor can
+        // lose this hull outright while its thread is still on a console, and a
+        // lift offered to a craft that is no longer there would spend the window
+        // on nobody. The refusal stays offered — a captain answering a thread
+        // that has outlived its sender is still closing it.
+        if convoy_standing(ctx) && window_room(ctx) >= ctx.flags["skyway_claim_convoy"] {
             responses.push(#{
                 text: "world.falling_skyway.comms.lift_convoy",
                 on_pick: "on_lift_convoy",
@@ -5465,12 +5729,12 @@ fn call_the_convoy_back(ctx) {
 }
 
 fn on_lift_convoy(ctx) {
-    if window_room(ctx) < ctx.flags["skyway_claim_convoy"] {
+    if !convoy_standing(ctx) || window_room(ctx) < ctx.flags["skyway_claim_convoy"] {
         return convoy_node(ctx, "world.falling_skyway.comms.convoy_reprices");
     }
     ctx.flags.skyway_granted_convoy = 1;
     ctx.flags.skyway_book_convoy = 1;
-    ctx.schedule.after(3, |ctx| { reprice_the_other_claims(ctx); });
+    ctx.schedule.after(3, |ctx| { the_board_moved(ctx); });
     convoy_node(ctx, "world.falling_skyway.comms.convoy_lifting")
 }
 
@@ -5492,9 +5756,26 @@ fn shelter_supply(ctx) {
     ctx.flags["depot_a_shelter_berths"]
 }
 
+// WHAT IS STILL TIED UP ALONGSIDE, on `window_room`'s rule and for its reason
+// (#1340). The banked figure is what Ladder A could offer when the scene opened
+// and is the ceiling; the live reading can only lower it, and the reservation
+// comes off both. A rung that goes under after Control asks for a name has a
+// name and nothing to put it against, and the offer has to say so.
+fn berth_room(ctx) {
+    let deliverable = ctx.flags.skyway_shelter_supply;
+    let live = shelter_supply(ctx);
+    if live < deliverable { deliverable = live; }
+    deliverable - ctx.flags.skyway_shelter_reserved
+}
+
 fn the_last_berth(ctx) {
     ctx.flags.skyway_shelter_only = 1;
-    ctx.flags.skyway_shelter_supply = shelter_supply(ctx);
+    let berths = shelter_supply(ctx);
+    ctx.flags.skyway_shelter_supply = berths;
+    // The berth ledger's own mark. Nothing is reserved yet and the live reading
+    // is the banked one on this tick, so what the room has been told is exactly
+    // what Ladder A can offer.
+    ctx.flags.skyway_berth_seen = berths;
 
     // No approach objective. There is nowhere to go: on the collapse road the
     // ship is in a debris field at priority 85 with people in it, and Skyway
@@ -5515,17 +5796,20 @@ fn the_last_berth(ctx) {
     // A message is DELIVERED whatever the range; only a reply has to reach back.
     // That is the scene: three parties calling a ship that is somewhere else,
     // doing something else, with one berth to give away.
+    ctx.flags.skyway_claim_asked_committee = 1;
     ctx.effects.open_comms(#{
         from: "world.falling_skyway.entity.strike_committee.name",
         node_fn: "committee_pleads",
         urgent: true,
     });
+    ctx.flags.skyway_claim_asked_havelock = 1;
     ctx.effects.open_comms(#{
         from: "world.falling_skyway.entity.havelock_cutter.name",
         node_fn: "havelock_pleads",
         urgent: true,
     });
     if ctx.flags.skyway_convoy_lost == 0 {
+        ctx.flags.skyway_claim_asked_convoy = 1;
         ctx.effects.open_comms(#{
             from: "world.falling_skyway.entity.convoy_meridian.name",
             node_fn: "convoy_pleads",
@@ -5548,7 +5832,13 @@ fn convoy_pleads(ctx)    { #{ message: "world.falling_skyway.comms.convoy_pleads
 // ONE node, one berth, four names to put on it — and the fourth is nobody.
 // Index 0 is the hold, for the whole band's reason.
 fn control_berth_offer(ctx) {
-    if ctx.flags.skyway_shelter_supply <= 0 {
+    // The live reading since #1340, not the figure banked when the scene opened.
+    // Conservative by construction: a booked berth comes off `berth_room` twice
+    // — once as a reservation, once when the mirrored row catches up a tick
+    // later — and both readings are the same side of zero, which is all this
+    // asks. Erring towards "there is nothing left" is the only safe direction
+    // for an offer that has to be honourable when it is picked.
+    if berth_room(ctx) <= 0 {
         return #{ message: "world.falling_skyway.comms.control_no_berth", responses: [] };
     }
     if ctx.flags.skyway_berth_decided > 0 {
@@ -5638,7 +5928,9 @@ fn book_berth(ctx, taken_flag) {
         ctx.flags.increment("skyway_berth_refused_shut", 1);
         return;
     }
-    if ctx.flags.skyway_shelter_reserved >= ctx.flags.skyway_shelter_supply {
+    // `berth_room` since #1340, so the one place a berth is granted asks the
+    // same question the offer asked before it drew the three names.
+    if berth_room(ctx) <= 0 {
         ctx.flags.increment("skyway_berth_refused_short", 1);
         return;
     }
@@ -5713,15 +6005,32 @@ fn lifted_count(ctx) {
 // claimant who was never told anything is the failure this objective exists to
 // name — not a claimant who was told no.
 fn resolve_the_choice(ctx) {
+    // Measured against the requests that actually reached the bridge (#1340),
+    // not against the number three. A grant and a refusal are both ANSWERS and
+    // score the same here — the mission distinguishes them everywhere it
+    // matters, and refusing somebody to their face is a decision a captain
+    // made. What this counts is silence.
+    let asked = 0;
     let answered = 0;
-    if claim_decided(ctx, "skyway_granted_committee", "skyway_refused_committee") { answered += 1; }
-    if claim_decided(ctx, "skyway_granted_havelock", "skyway_refused_havelock") { answered += 1; }
-    if claim_decided(ctx, "skyway_granted_convoy", "skyway_refused_convoy") { answered += 1; }
+    if ctx.flags.skyway_claim_asked_committee > 0 {
+        asked += 1;
+        if claim_decided(ctx, "skyway_granted_committee", "skyway_refused_committee") { answered += 1; }
+    }
+    if ctx.flags.skyway_claim_asked_havelock > 0 {
+        asked += 1;
+        if claim_decided(ctx, "skyway_granted_havelock", "skyway_refused_havelock") { answered += 1; }
+    }
+    if ctx.flags.skyway_claim_asked_convoy > 0 {
+        asked += 1;
+        if claim_decided(ctx, "skyway_granted_convoy", "skyway_refused_convoy") { answered += 1; }
+    }
+    ctx.flags.skyway_claims_asked = asked;
     ctx.flags.skyway_claims_answered = answered;
+    ctx.flags.skyway_claims_unanswered = asked - answered;
 
     let id = "obj-a3-choice";
     if ctx.flags.skyway_shelter_only > 0 { id = "obj-a3-berth"; }
-    if answered >= 3 {
+    if asked > 0 && answered >= asked {
         ctx.effects.complete_objective(id);
     } else {
         ctx.effects.fail_objective(id);

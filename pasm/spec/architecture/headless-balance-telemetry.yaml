@@ -153,9 +153,10 @@ entities:
       status: implemented
       confidence: confirmed
       title: Run Outcome Classifier
-      summary: Pure classifier assigning each run an outcome — victory, defeat, draw, or timeout — with per-side margins (remaining hull fraction, cumulative damage both ways, closing-window damage rate), sides bucketed by faction relative to the player ship.
+      summary: Pure classifier assigning each run an outcome — victory, defeat, draw, timeout, or reported — with per-side margins (remaining hull fraction, cumulative damage both ways, closing-window damage rate), sides bucketed by faction relative to the player ship.
       rationale:
         - "[ai] Victory vs defeat has no other structured signal, so the game_over trigger action carries an author-declared outcome threaded through GameOverReason; built-in player-ship death latches Defeat, an undeclared scenario game_over defaults to Victory. Budget exhaustion is timeout when damage still flows in the closing window, draw when it has gone silent — a reported heuristic, never adjudicated by the engine."
+        - "[ai] An ending holding a non-empty MissionReport classifies `reported`, which OUTRANKS the declared victory/defeat rather than sitting beside it: a report-bearing ending is described by its rows, not by one word, and the declared outcome stays latched on GameOverReason for anything that still wants it. Every consumer of the outcome vocabulary carries a first-class arm for it — the batch runner's merge in scripts/balance-runs.mjs tallies `reported` in its own column and holds it out of the win-rate denominator, because folding it into wins invents a victory and folding it into losses or timeouts invents a failure."
     architecture:
       kind: pure-classifier
       authority: observational

@@ -19,7 +19,9 @@
 // ── Design notes (the merge is a PURE fold; keep it that way) ────────────────
 //
 // The report contract this consumes (src/headless/report.rs, src/core/balance.rs):
-//   report.outcome                         "victory" | "defeat" | "draw" | "timeout"
+//   report.outcome                         "victory" | "defeat" | "draw" | "timeout" | "reported"
+//   report.report.rows[]                   {id, heading, outcome, state}  (score omitted)
+//   report.report.total                    hidden diagnostic sum of the rows
 //   report.sides.{player,enemy}.damage_dealt
 //   report.damage_by_ship[uuid].death      [tick, sim_t] | null
 //   report.station_activity.buckets[].stations[]  {station, human, ai, offline}
@@ -29,9 +31,28 @@
 //
 // Merge conventions (documented so the numbers are unambiguous):
 //   - win = victory, loss = defeat. `draw` and `timeout` are tallied in their
-//     own columns and NOT merged together. Win-rate denominator is every run
-//     that produced a report (wins+losses+draws+timeouts); failed/crashed runs
-//     are excluded from the rate and reported separately.
+//     own columns and NOT merged together. Failed/crashed runs are excluded
+//     from every rate and reported separately.
+//   - `reported` (issue #1344) is a FIFTH first-class outcome with its own
+//     column, not a flavour of any of the four above. A scenario that authors a
+//     post-mission report ends holding ROWS rather than a verdict, and the Rust
+//     classifier deliberately ranks that ABOVE the declared victory/defeat it
+//     still latches. So folding it into wins would invent a victory, and
+//     folding it into losses or timeouts would invent a failure — which is what
+//     this arm's absence did to the flagship Falling Skyway sweep, every run of
+//     which is report-bearing.
+//   - Win rate is therefore `wins / (wins+losses+draws+timeouts)`: the runs the
+//     victory/defeat frame actually applies to. `reported` runs still count
+//     toward `completed` — they ran to a report — but not toward that
+//     denominator, so a wholly report-bearing sweep shows a win rate of `—`
+//     ("this measure does not apply here") rather than a false 0%. What such a
+//     sweep IS measured on is the mandatory-set completion rate and the
+//     clean-ledger columns beside it, which is what those exist for.
+//   - The `default` arm stays a catch-all for an outcome string this script has
+//     never heard of, and buckets it with timeout so the run still counts as
+//     completed. A NEW first-class outcome gets its own arm in the same change
+//     that introduces it — landing in `default` is the exact bug this note
+//     exists to stop happening twice.
 //   - Time-to-kill per run = the LATEST ship death time (death[1], sim_t) in
 //     damage_by_ship — the last death observed. In a 1v1 that is the decisive
 //     kill (player death → defeat, last enemy death → victory), so it marks
@@ -82,7 +103,9 @@
 //     [matchup.thresholds]       # overrides the global table per key
 //     min_win_rate = 0.5
 //
-// Known metrics: min_win_rate / max_win_rate (over completed runs),
+// Known metrics: min_win_rate / max_win_rate (over DECIDED runs — see the merge
+// conventions above; a wholly report-bearing sweep has none, and records "no
+// data" rather than failing a rate it cannot have),
 // min_ttk_median / max_ttk_median (seconds), min_damage_margin /
 // max_damage_margin (mean player-minus-enemy damage),
 // min_mandatory_set_completion_rate / max_mandatory_set_completion_rate,
@@ -457,6 +480,7 @@ export function mergeReports(runs, { mandatoryObjectiveIds = null } = {}) {
         losses: 0,
         draws: 0,
         timeouts: 0,
+        reported: 0,
         failures: 0,
         ttkSamples: [],
         marginSamples: [],
@@ -515,6 +539,9 @@ export function mergeReports(runs, { mandatoryObjectiveIds = null } = {}) {
       case 'defeat': m.losses += 1; break;
       case 'draw': m.draws += 1; break;
       case 'timeout': m.timeouts += 1; break;
+      // A report-bearing ending (issue #1344). Its own tally, never folded into
+      // one of the four above — see the merge conventions at the top of this file.
+      case 'reported': m.reported += 1; break;
       default: m.timeouts += 1; break; // unknown outcome: bucket with timeout, still "completed"
     }
 
@@ -592,7 +619,13 @@ export function mergeReports(runs, { mandatoryObjectiveIds = null } = {}) {
 
   const matchups = {};
   for (const m of byMatchup.values()) {
-    const completed = m.wins + m.losses + m.draws + m.timeouts;
+    // Every run that produced a report, report-bearing endings included.
+    const completed = m.wins + m.losses + m.draws + m.timeouts + m.reported;
+    // The subset the victory/defeat frame applies to — the win-rate denominator.
+    // `reported` runs are outside that frame by construction, so a wholly
+    // report-bearing sweep yields `null` (rendered `—`) rather than a 0% that
+    // would read as twenty straight losses.
+    const decided = m.wins + m.losses + m.draws + m.timeouts;
     const mandatorySetUnmeasurable = {
       total: Object.values(m.mandatorySetUnmeasurable).reduce((a, n) => a + n, 0),
       ...m.mandatorySetUnmeasurable,
@@ -611,8 +644,10 @@ export function mergeReports(runs, { mandatoryObjectiveIds = null } = {}) {
       losses: m.losses,
       draws: m.draws,
       timeouts: m.timeouts,
+      reported: m.reported,
       failures: m.failures,
-      winRate: completed > 0 ? m.wins / completed : null,
+      decided,
+      winRate: decided > 0 ? m.wins / decided : null,
       ttk: {
         min: m.ttkSamples.length ? Math.min(...m.ttkSamples) : null,
         median: median(m.ttkSamples),
@@ -664,13 +699,14 @@ export function mergeReports(runs, { mandatoryObjectiveIds = null } = {}) {
     };
   }
 
-  const totals = { runs: 0, wins: 0, losses: 0, draws: 0, timeouts: 0, failures: 0 };
+  const totals = { runs: 0, wins: 0, losses: 0, draws: 0, timeouts: 0, reported: 0, failures: 0 };
   for (const s of Object.values(matchups)) {
     totals.runs += s.total;
     totals.wins += s.wins;
     totals.losses += s.losses;
     totals.draws += s.draws;
     totals.timeouts += s.timeouts;
+    totals.reported += s.reported;
     totals.failures += s.failures;
   }
 
@@ -721,7 +757,7 @@ export function formatMarkdown(summary) {
   const rows = Object.values(summary.matchups);
   const showFallingSkywayCleanLedger = rows.some((s) => s.fallingSkywayCleanLedger !== null);
   const lines = [];
-  const headings = ['Matchup', 'Runs', 'Win%', 'W/L/D/T', 'Fail', 'Mandatory set complete'];
+  const headings = ['Matchup', 'Runs', 'Win%', 'W/L/D/T/R', 'Fail', 'Mandatory set complete'];
   const separators = ['---', '---:', '---:', ':---:', '---:', ':---:'];
   if (showFallingSkywayCleanLedger) {
     headings.push('Falling Skyway clean ledger');
@@ -732,7 +768,10 @@ export function formatMarkdown(summary) {
   lines.push(`| ${headings.join(' | ')} |`);
   lines.push(`|${separators.join('|')}|`);
   for (const s of rows) {
-    const wldt = `${s.wins}/${s.losses}/${s.draws}/${s.timeouts}`;
+    // R = report-bearing endings (issue #1344), the fifth outcome. Always
+    // rendered, even as a 0, so the column set does not change shape between
+    // sweeps and a reader never has to wonder which four the four numbers were.
+    const wldtr = `${s.wins}/${s.losses}/${s.draws}/${s.timeouts}/${s.reported}`;
     const ttk = s.ttk.count
       ? `${num(s.ttk.min)} / ${num(s.ttk.median)} / ${num(s.ttk.max)}`
       : '—';
@@ -740,7 +779,7 @@ export function formatMarkdown(summary) {
       s.label,
       s.total,
       pct(s.winRate),
-      wldt,
+      wldtr,
       s.failures,
       formatMandatorySet(s.mandatorySetCompletion),
     ];
@@ -753,7 +792,7 @@ export function formatMarkdown(summary) {
   const t = summary.totals;
   lines.push('');
   lines.push(
-    `**Totals:** ${t.runs} runs — ${t.wins}W / ${t.losses}L / ${t.draws}D / ${t.timeouts}T, ${t.failures} failed.`,
+    `**Totals:** ${t.runs} runs — ${t.wins}W / ${t.losses}L / ${t.draws}D / ${t.timeouts}T / ${t.reported}R, ${t.failures} failed.`,
   );
   const mandatoryObjectives = formatMandatoryObjectives(summary);
   if (mandatoryObjectives) lines.push('', mandatoryObjectives);

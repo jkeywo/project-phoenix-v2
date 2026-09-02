@@ -5474,13 +5474,39 @@ fn restore_comms(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut Res
 /// (`server_app.rs`) and `push_game_over_hud_state`
 /// (`server/viewscreen_border.rs`) to run, or the host never emits the
 /// `GameOver` message and the HUD never leaves its live state. Both are
-/// audited safe to re-run: they only *read* `GameOverReason` (restored above,
-/// before this call) and *write* an outbox message / HUD resource — neither
-/// spawns, despawns, or resets anything the rest of this restore depends on.
-/// Run via `OnEnter(GameOver)` itself rather than by naming the two systems,
-/// so a future addition to that schedule is covered by construction — but that
-/// also means a system landing in `OnEnter(GameOver)` later needs this same
-/// audit before it can be trusted here.
+/// audited safe to re-run: they only *read* `GameOverReason` and
+/// `MissionReport` — both restored above, before this call — and *write* an
+/// outbox message, a HUD resource, and one `ReportFinalized` narrative beat.
+/// None of the three spawns, despawns, or resets anything the rest of this
+/// restore depends on.
+///
+/// That third effect is issue #1344's, and it is REPRODUCED on purpose rather
+/// than suppressed. `on_game_over_enter` writes
+/// `NarrativeKind::ReportFinalized` when the report holds rows, and a restored
+/// report-bearing `GameOver` comes back holding exactly those rows — so
+/// `core::balance::classify` still calls the resumed run `reported`. A resumed
+/// timeline with no `report_finalized` in it would then contradict the outcome
+/// printed beside it in the very same exit report. The beat is the ending's
+/// observable effect on the after-action surface in precisely the way the
+/// `GameOver` message is its effect on the wire, and putting those back is this
+/// function's whole job.
+///
+/// It is also inert with respect to the continuation claim this module exists
+/// to make: nothing authoritative reads `RunTelemetry::narrative_events` — no
+/// digest stage folds it (see the note on that field) — so re-emitting the beat
+/// cannot move a resumed run's simulation off the live one's. What it does NOT
+/// do is reconstruct the *captured* run's timeline: the snapshot carries no
+/// narrative telemetry at all, by the same design that keeps it out of the
+/// digest. A resumed run's timeline is therefore what the resumed process
+/// itself observed, ending beat included, and `tests/snapshot_resume.rs` pins
+/// that count at exactly one.
+///
+/// Run via `OnEnter(GameOver)` itself rather than by naming the systems, so a
+/// future addition to that schedule is covered by construction — but that also
+/// means a system landing in `OnEnter(GameOver)` later needs this same audit
+/// before it can be trusted here. #1344's `ReportFinalized` write is what that
+/// sentence looks like when it comes due, and the paragraphs above are the
+/// audit it asked for.
 fn run_restored_phase_entry_effects(world: &mut World, phase: GamePhase) {
     if phase == GamePhase::GameOver {
         let _ = world.try_run_schedule(OnEnter(GamePhase::GameOver));

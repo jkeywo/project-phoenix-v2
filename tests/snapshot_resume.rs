@@ -3962,6 +3962,94 @@ fn a_restore_clears_a_report_the_captured_tick_did_not_have() {
     );
 }
 
+/// How many `report_finalized` beats a run's collected timeline holds.
+///
+/// Read off `RunTelemetry` rather than the folded `RunReport`, because the
+/// question here is about a world mid-restore, not about an exit summary.
+fn finalized_beats(app: &bevy::prelude::App) -> usize {
+    app.world()
+        .resource::<project_phoenix::headless::report::RunTelemetry>()
+        .narrative_events
+        .iter()
+        .filter(|stamped| stamped.event.kind.as_str() == "report_finalized")
+        .count()
+}
+
+/// Issue #1344's re-audit of `run_restored_phase_entry_effects`: re-running
+/// `OnEnter(GameOver)` on a restore now emits a THIRD observable effect —
+/// `NarrativeKind::ReportFinalized` — and this pins how many of them a resumed
+/// report-bearing run's timeline ends up holding.
+///
+/// One, the same as the live run's, and that number is the point rather than an
+/// implementation detail. The restored `MissionReport` still holds its rows, so
+/// `core::balance::classify` still calls the resumed run `reported`; a resumed
+/// timeline carrying ZERO finalized beats would be an after-action surface
+/// contradicting the outcome printed beside it in the same report. Two would be
+/// the opposite error — an ending that closed twice. The snapshot deliberately
+/// carries no narrative telemetry (nothing authoritative reads it, so nothing
+/// folds it), which is exactly why this has to be asserted rather than inferred
+/// from the digest.
+#[test]
+fn a_restored_report_bearing_game_over_finalizes_exactly_once() {
+    use project_phoenix::core::report::{MissionReport, ReportRow, ReportRowState};
+
+    let mut live = duel();
+    step(&mut live, CAPTURE_AT);
+    assert_eq!(
+        finalized_beats(&live),
+        0,
+        "a mid-run world has finalized nothing"
+    );
+    live.world_mut()
+        .resource_mut::<MissionReport>()
+        .set_row(ReportRow {
+            id: "lyra".into(),
+            heading_id: "world.probe.report.lyra.heading".into(),
+            outcome_id: "world.probe.report.lyra.saved".into(),
+            state: ReportRowState::Saved,
+            score: 6,
+        });
+    force_game_over(
+        &mut live,
+        "hull breach",
+        project_phoenix::core::balance::Outcome::Defeat,
+    );
+    assert_eq!(
+        finalized_beats(&live),
+        1,
+        "the live report-bearing ending beats finalized once"
+    );
+
+    let payload = capture(live.world());
+    assert_eq!(
+        payload.mission_report.len(),
+        1,
+        "the capture is report-bearing, which is what makes the re-run interesting"
+    );
+
+    let mut resumed = boot_to_restore_point(&args(DUEL, ("cruiser", "destroyer")), &payload);
+    assert_eq!(
+        finalized_beats(&resumed),
+        0,
+        "the fresh app is still mid-run and has finalized nothing of its own"
+    );
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    // The beat is WRITTEN into the message buffer by the re-run `OnEnter`
+    // schedule; `collect_narrative_events` runs in `Last`, so one frame is what
+    // moves it onto the timeline.
+    step(&mut resumed, 1);
+
+    assert_eq!(
+        finalized_beats(&resumed),
+        1,
+        "restoring a report-bearing GameOver should beat `report_finalized` \
+         exactly once — the ending's effect on the after-action surface, put \
+         back the same way the GameOver wire message is"
+    );
+}
+
 /// The other half of #934's fix: a save button is a no-op outside a run, and
 /// says so, rather than recording a `Lobby`/`Loading` phase a restore would
 /// have nothing meaningful to re-enter.

@@ -68,6 +68,7 @@ REM makes the shift take.
 if /i "%~1"=="lobby" goto :lobby
 
 echo === Native host: delivery only ===
+echo     (no game window opens in this mode - for the on-screen game lobby, run:  run-native.bat lobby)
 "%HOST%" --client-dir dist %*
 exit /b %errorlevel%
 

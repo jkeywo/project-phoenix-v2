@@ -4799,8 +4799,16 @@ fn window_opens_dead(ctx)  { #{ message: "world.falling_skyway.comms.window_open
 
 // ── Booking a lift ──────────────────────────────────────────────────────────
 
+// `still_there` is `book_berth`'s parameter, on this ledger and for its reason
+// (#1340). The pick that pulls one of these seams has ALREADY written
+// `skyway_granted_*`, and the seam runs a tick later — so `convoy_standing`
+// cannot be re-asked here, because by now it answers "settled" rather than
+// "gone". What is left to ask is the half of that question a decision does not
+// cover: whether there is still a hull to put on a climber. The convoy is the
+// one claimant this corridor can lose; the other two are on the rock and pass
+// `true`.
 fn on_book_committee(ctx) {
-    if book_lift(ctx, "skyway_claim_committee") {
+    if book_lift(ctx, "skyway_claim_committee", true) {
         ctx.schedule.after(24, |ctx| {
             land_lift(ctx, "skyway_claim_committee",
                       "skyway_window_served_committee",
@@ -4810,7 +4818,7 @@ fn on_book_committee(ctx) {
 }
 
 fn on_book_havelock(ctx) {
-    if book_lift(ctx, "skyway_claim_havelock") {
+    if book_lift(ctx, "skyway_claim_havelock", true) {
         ctx.schedule.after(24, |ctx| {
             land_lift(ctx, "skyway_claim_havelock",
                       "skyway_window_served_havelock",
@@ -4820,7 +4828,7 @@ fn on_book_havelock(ctx) {
 }
 
 fn on_book_convoy(ctx) {
-    if book_lift(ctx, "skyway_claim_convoy") {
+    if book_lift(ctx, "skyway_claim_convoy", ctx.flags.skyway_convoy_lost == 0) {
         ctx.schedule.after(24, |ctx| {
             land_lift(ctx, "skyway_claim_convoy",
                       "skyway_window_served_convoy",
@@ -4829,12 +4837,23 @@ fn on_book_convoy(ctx) {
     }
 }
 
-// The one place a request for lift is granted or refused. Two refusals, and
-// both are recorded rather than silent: a captain who asks for something the
-// window cannot give is told which of the two walls they hit.
-fn book_lift(ctx, claim_id) {
+// The one place a request for lift is granted or refused. Three refusals, and
+// all three are recorded rather than silent: a captain who asks for something
+// the window cannot give is told which of the walls they hit.
+fn book_lift(ctx, claim_id, still_there) {
     if ctx.flags.skyway_window_open == 0 {
         ctx.flags.increment("skyway_window_refused_shut", 1);
+        return false;
+    }
+    // The wall `book_berth` grew for the sibling ledger (#1340), and the same
+    // race put it here. `on_lift_convoy` asks `convoy_standing` at PICK time,
+    // but the booking it schedules lands a tick later, and the corridor can
+    // destroy the hull inside that tick. Spending the window on nobody is the
+    // worse half of that bug: the claim is the largest number in the act, the
+    // committee and Havelock are repriced out of lift that will never fly, and
+    // `got_out` would then report a destroyed convoy as having got off the rock.
+    if !still_there {
+        ctx.flags.increment("skyway_window_refused_lost", 1);
         return false;
     }
     let need = ctx.flags[claim_id];
@@ -5313,14 +5332,6 @@ fn convoy_standing(ctx) {
     !claim_decided(ctx, "skyway_granted_convoy", "skyway_refused_convoy")
 }
 
-fn claims_decided_count(ctx) {
-    let n = 0;
-    if claim_decided(ctx, "skyway_granted_committee", "skyway_refused_committee") { n += 1; }
-    if claim_decided(ctx, "skyway_granted_havelock", "skyway_refused_havelock") { n += 1; }
-    if claim_decided(ctx, "skyway_granted_convoy", "skyway_refused_convoy") { n += 1; }
-    n
-}
-
 // THE SHAPE OF THE CHOICE AS IT STANDS, in one word, and there are six of them
 // because there are six things Control can truthfully say about this board — a
 // crew who are in one of those states should not be read another one's
@@ -5338,10 +5349,12 @@ fn claims_decided_count(ctx) {
 //   `particular`      some pairings fit and some do not. This is where the
 //                     arithmetic stops being "any two" and starts being a
 //                     choice about WHICH two.
-//   `any_pair`        every pairing still standing fits — after somebody has
-//                     already been answered.
-//   `undecided`       the same board, before anybody has been answered at all.
-//                     The opening state of the choice, restated.
+//   `any_pair`        every pairing still standing fits, and the board is no
+//                     longer the three the act opened with — somebody has been
+//                     answered, or the corridor took one of them.
+//   `undecided`       the same board, with all three claims still on it and
+//                     nobody answered. The opening state of the choice,
+//                     restated, and its body counts the three out loud.
 fn window_shape(ctx) {
     let room = window_room(ctx);
     let c = committee_standing(ctx);
@@ -5377,7 +5390,16 @@ fn window_shape(ctx) {
 
     if fit == 0 { return "one"; }
     if fit < all { return "particular"; }
-    if claims_decided_count(ctx) == 0 { return "undecided"; }
+    // THE OPENING STATE IS THREE CLAIMS, not merely an unanswered one. Its body
+    // says the number "is any two of the claims standing against it and not the
+    // three", so a board with two claimants on it is a board that sentence is
+    // false about — and the corridor can take the convoy before the parley ever
+    // opens its thread, which leaves exactly that board with nothing decided on
+    // it. Standing already carries the decision (a claim that was answered is not
+    // standing), so this is the whole of the test: three of them, all still
+    // waiting. Anything else is `any_pair`, whose body names whoever is left
+    // rather than counting them.
+    if c && h && v { return "undecided"; }
     "any_pair"
 }
 
@@ -5453,17 +5475,30 @@ fn the_board_moved(ctx) {
     // The mark is banked either way, so the opening announcement is measured
     // against what the ledger says when the room is finally told, not against
     // what it said before the room existed.
+    //
+    // THE ROW IS STILL BROUGHT TO THE LIVE FIGURE, and that is the half this
+    // guard must not swallow (#1340). Having no board to move is a reason not to
+    // SPEAK; it is not a reason to leave Control's manifest reading a number the
+    // chain stopped being able to deliver. Banking the mark without republishing
+    // would strand the row for the whole window — the mark says the movement has
+    // been dealt with, so the watch three seconds later finds nothing to notice —
+    // and "a row that still says 40 after the ladder stopped" is the same lie
+    // this function exists to stop telling. The publisher is latched, so a
+    // republish that agrees with the row emits nothing; in the berth scene the
+    // chain delivers zero and the row is already there, so this is a no-op by
+    // arithmetic rather than by a second guard.
+    let room = window_room(ctx);
+    if room < 0 { room = 0; }
     if ctx.flags.skyway_shelter_only > 0 || ctx.flags.a3_parley_open == 0 {
         ctx.flags.skyway_board_marked = 1;
         ctx.flags.skyway_board_seen = mark;
+        publish_window_available(ctx, room);
         return;
     }
     if ctx.flags.skyway_board_marked > 0 && mark == ctx.flags.skyway_board_seen { return; }
     ctx.flags.skyway_board_marked = 1;
     ctx.flags.skyway_board_seen = mark;
 
-    let room = window_room(ctx);
-    if room < 0 { room = 0; }
     publish_window_available(ctx, room);
     reprice_the_other_claims(ctx);
     ctx.effects.open_comms(#{

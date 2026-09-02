@@ -16146,7 +16146,16 @@ fn window_objective_verdicts(
 /// It also asserts the converse, which is the half a "no stale offers" test
 /// usually forgets: where the line is withheld, the seam would have refused.
 /// Withholding an option the window could actually honour is the same bug
-/// wearing the other coat.
+/// wearing the other coat — and the converse is asked of every UNDECIDED
+/// claimant rather than every standing one, because "standing" already excludes
+/// the destroyed convoy and would quietly skip the rows where the seam's own
+/// loss wall is the thing under test.
+///
+/// The loss wall gets its own claim across the whole sweep: a convoy the
+/// corridor destroyed never spends a unit of the window, whatever the board says
+/// and whatever the captain picked. The seam has to ask that itself, because the
+/// pick that reaches it wrote `skyway_granted_convoy` a tick earlier and the
+/// hull can go inside that tick.
 #[test]
 fn falling_skyway_no_reachable_ledger_offers_a_lift_the_window_cannot_honour() {
     let script = WindowScript::compile();
@@ -16205,14 +16214,30 @@ fn falling_skyway_no_reachable_ledger_offers_a_lift_the_window_cannot_honour() {
                                 let booking = window_increments(
                                     &script.call(SKYWAY_BOOK_HANDLERS[index], &flags),
                                 );
-                                let refused = booking
-                                    .get("skyway_window_refused_short")
-                                    .copied()
-                                    .unwrap_or(0)
-                                    + booking
-                                        .get("skyway_window_refused_shut")
-                                        .copied()
-                                        .unwrap_or(0);
+                                let wall = |name: &str| booking.get(name).copied().unwrap_or(0);
+                                let refused = wall("skyway_window_refused_short")
+                                    + wall("skyway_window_refused_shut")
+                                    + wall("skyway_window_refused_lost");
+
+                                // AC1: the seam's own loss wall. The pick wrote
+                                // the grant a tick ago and cannot re-ask this,
+                                // so a destroyed convoy is refused here or the
+                                // window is spent on nobody and the ending
+                                // reports a lost hull as having got out.
+                                if index == 2 && ledger.convoy_lost {
+                                    assert_eq!(
+                                        wall("skyway_window_refused_lost"),
+                                        1,
+                                        "AC1: a convoy the corridor lost must be refused at the \
+                                         booking seam, and {ledger:?} booked one"
+                                    );
+                                    assert_eq!(
+                                        booking.get("skyway_window_reserved").copied().unwrap_or(0),
+                                        0,
+                                        "…and must not spend a unit of lift on its way past"
+                                    );
+                                }
+
                                 if should_offer {
                                     assert_eq!(
                                         refused, 0,
@@ -16225,7 +16250,12 @@ fn falling_skyway_no_reachable_ledger_offers_a_lift_the_window_cannot_honour() {
                                         claims[index],
                                         "…and it spends exactly the claim it was drawn for"
                                     );
-                                } else if standing {
+                                } else if ledger.decided[index].is_none() {
+                                    // Every claimant nobody has answered, INCLUDING
+                                    // the one the corridor took: `standing` is false
+                                    // exactly where the loss wall is what refuses,
+                                    // so guarding on it would skip the rows that
+                                    // matter most.
                                     assert_eq!(
                                         refused, 1,
                                         "AC2 (the other coat): a withheld line must be a line \
@@ -16325,6 +16355,24 @@ fn falling_skyway_control_has_a_body_for_every_shape_the_window_can_take() {
                             !anything_fits,
                             "AC3: the no-feasible-request body is exactly the no-feasible-request \
                              state, and {ledger:?} is the other one"
+                        );
+
+                        // …and the second one, for the same reason at the other
+                        // end of the board. The opening-state body counts the
+                        // claims out loud — "any two of the claims standing
+                        // against it and not the three" — so it is a sentence
+                        // about a board that still has three claimants on it.
+                        // The corridor can take the convoy before its thread
+                        // ever opens, which leaves two claimants and nothing
+                        // decided; `any_pair` is that crew's sentence.
+                        let all_standing = (0..3).all(|i| {
+                            ledger.decided[i].is_none() && !(i == 2 && ledger.convoy_lost)
+                        });
+                        assert!(
+                            node.message != "world.falling_skyway.comms.window_stands_undecided"
+                                || all_standing,
+                            "AC3: the opening-state body says three claims stand against the \
+                             number, and {ledger:?} does not have three"
                         );
                         seen.insert(node.message.clone());
                     }
@@ -16680,6 +16728,8 @@ fn falling_skyway_the_board_only_moves_in_the_scene_that_has_a_board() {
     let mut gap = script.flags(&ledger);
     gap.set_flag_value("skyway_board_marked", 1);
     gap.set_flag_value("skyway_board_seen", ceiling * 2);
+    gap.set_flag_value("skyway_window_published", ceiling);
+    gap.set_flag_value("skyway_window_available", ceiling);
     let effects = script.call("the_ledger_moved", &gap);
     assert!(
         window_comms_opened(&effects).is_empty(),
@@ -16691,6 +16741,59 @@ fn falling_skyway_the_board_only_moves_in_the_scene_that_has_a_board() {
         Some(&window_board_mark(&ledger)),
         "…and the mark is banked anyway, so the parley opens against what the ledger says \
          when the room is finally told"
+    );
+
+    // …and the manifest ROW is still brought to the live figure in that gap.
+    // Having no board to move is a reason not to speak, not a reason to leave
+    // Control's panel advertising lift the chain stopped being able to deliver:
+    // the mark is banked either way, so a supply change swallowed here is
+    // swallowed for the rest of the window — the watch three seconds later finds
+    // a mark that says the movement was already dealt with.
+    let dropped_in_the_gap = WindowLedger {
+        live: ceiling / 2,
+        ..ledger
+    };
+    assert!(
+        dropped_in_the_gap.live < ceiling,
+        "precondition: the chain has room to lose inside the gap"
+    );
+    let mut quiet = script.flags(&dropped_in_the_gap);
+    quiet.set_flag_value("skyway_board_marked", 1);
+    quiet.set_flag_value("skyway_board_seen", ceiling * 2);
+    quiet.set_flag_value("skyway_window_published", ceiling);
+    quiet.set_flag_value("skyway_window_available", ceiling);
+    let effects = script.call("the_ledger_moved", &quiet);
+    assert!(
+        window_comms_opened(&effects).is_empty(),
+        "AC2: still no board to announce — the row moves, the room is not told twice"
+    );
+    assert_eq!(
+        window_capacity_moves(&effects)
+            .get("skyway_window_available")
+            .copied(),
+        Some(dropped_in_the_gap.live - ceiling),
+        "AC2: a chain that stopped delivering between the shutters going up and the claimants \
+         speaking must take the panel down with it — the mark is banked here, so nothing \
+         later notices"
+    );
+    assert_eq!(
+        window_flag_values(&effects)
+            .get("skyway_window_published")
+            .copied(),
+        Some(dropped_in_the_gap.live),
+        "…and the latch records where it left the row"
+    );
+
+    // A gap that nothing moved in publishes nothing: the latch makes the
+    // republish a no-op rather than a second delta.
+    let mut steady_gap = script.flags(&ledger);
+    steady_gap.set_flag_value("skyway_board_marked", 1);
+    steady_gap.set_flag_value("skyway_board_seen", ceiling * 2);
+    steady_gap.set_flag_value("skyway_window_published", ceiling);
+    steady_gap.set_flag_value("skyway_window_available", ceiling);
+    assert!(
+        window_capacity_moves(&script.call("the_ledger_moved", &steady_gap)).is_empty(),
+        "publishing a figure the row already carries is not a movement"
     );
 
     // ── The parley, open, on a board that has since moved ────────────────────

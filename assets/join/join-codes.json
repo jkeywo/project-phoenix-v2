@@ -10,7 +10,7 @@
   ],
   "format_version": 1,
   "suffix": {
-    "length": 5,
+    "length": 8,
     "alphabet": "ABCDEFGHIJKMNOPQRSTUVWXYZ",
     "strip": "-_ \t",
     "normalise": {

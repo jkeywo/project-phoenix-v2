@@ -45,7 +45,7 @@ use project_phoenix::delivery::args::{ClientSource, HostArgs};
 use project_phoenix::delivery::serve::{load_content, HostServer, ShutdownSignal};
 use project_phoenix::delivery::stamp::DeliveryStamp;
 use project_phoenix::lobby::handler::Target;
-use project_phoenix::native_host::direct_join::DirectJoinService;
+use project_phoenix::native_host::direct_join::{AdmissionBudgets, DirectJoinService};
 use project_phoenix::native_host::join_codes::JoinCodeTable;
 use project_phoenix::native_host::relay_transport::{RelayHostConfig, RelayNotice, RelayTransport};
 use project_phoenix::native_host::transport::{NativeTransport, TransportDispatch, TransportEvent};
@@ -88,12 +88,21 @@ impl Host {
     /// it: bind, open the service, install the door, then wrap the service in
     /// the ordinary host-half transport.
     fn start() -> Self {
+        Self::start_with(AdmissionBudgets::default())
+    }
+
+    /// The same host with the transport-plane budgets named — the seam the
+    /// attack tests below drive, so a bucket empties and a breaker ramps
+    /// inside a test's patience rather than over a production minute. Nothing
+    /// ships test-sized numbers: [`Self::start`] takes the defaults.
+    fn start_with(budgets: AdmissionBudgets) -> Self {
         let content = load_content(".", MANIFEST).expect("the repo's own content loads");
         let server = HostServer::bind(&args()).expect("host binds");
         let addr = server.local_addr();
 
         let table = JoinCodeTable::read(std::path::Path::new(JOIN_TABLE)).expect("the table reads");
-        let (service, code) = DirectJoinService::open(table).expect("the service opens");
+        let (service, code) =
+            DirectJoinService::open_with_budgets(table, budgets).expect("the service opens");
         server.on_upgrade(Arc::new(service.gate()));
 
         let shutdown = ShutdownSignal::new();
@@ -249,6 +258,33 @@ impl Joiner {
         Self { socket }
     }
 
+    /// [`Self::connect`], but riding out a door that is momentarily busy.
+    ///
+    /// What a real client does with a 503 on the upgrade: the refusal is soft
+    /// and carries `Retry-After`, and `gui/connection-manager.js` comes back on
+    /// its own backoff. A test that treated one busy answer as a failure would
+    /// be asserting the opposite of the property the soft limits are for.
+    fn connect_soon(host: &Host) -> Self {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match tungstenite::connect(host.join_url()) {
+                Ok((socket, response)) if response.status().as_u16() == 101 => {
+                    if let tungstenite::stream::MaybeTlsStream::Plain(stream) = socket.get_ref() {
+                        let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
+                    }
+                    return Self { socket };
+                }
+                other => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "the door never opened for a legitimate joiner: {other:?}"
+                    );
+                    std::thread::sleep(Duration::from_millis(25));
+                }
+            }
+        }
+    }
+
     fn send(&mut self, frame: &RendezvousFrame) {
         let text = encode_rendezvous_frame(frame).expect("encodable");
         self.socket
@@ -346,7 +382,7 @@ fn a_phone_joins_a_native_host_with_no_external_service_anywhere() {
     let host = Host::start();
     assert_eq!(
         host.code.suffix.chars().count(),
-        5,
+        8,
         "the code is on the viewscreen before anybody has scanned anything"
     );
 
@@ -516,7 +552,7 @@ fn the_code_and_the_protocol_version_are_checked_as_the_worker_checks_them() {
     let mut joiner = Joiner::connect(&host);
     joiner.wait_for("ready");
     joiner.send(&RendezvousFrame {
-        code: Some(CodeField::Typed("XYZAB".to_string())),
+        code: Some(CodeField::Typed("XYZABCDE".to_string())),
         ..RendezvousFrame::new("join")
     });
     let refusal = joiner.wait_for("error");
@@ -593,9 +629,391 @@ fn a_malformed_upgrade_cannot_stall_the_delivery_of_the_bundle() {
 #[test]
 fn a_socket_that_upgrades_and_says_nothing_holds_nothing_open() {
     // Slow-loris, past the upgrade: the head-read timeout bounds the HTTP half
-    // and the socket cap bounds this one, so a silent joiner costs one slot and
-    // no crew member is refused because of it.
+    // and the un-joined budget bounds this one, so a silent joiner costs one
+    // slot and no crew member is refused because of it.
     let host = Host::start();
     let _silent = Joiner::connect(&host);
     let _ = Joiner::admitted(&host);
+}
+
+// ── Guessing the code, empirically ──────────────────────────────────────────
+//
+// The security review's finding, and its own probe shape reproduced as a test.
+// `max_lookups_per_connection` is charged to a SOCKET, so a caller willing to
+// reconnect is not rate-limited at all: the reviewer measured ~2,340 wrong
+// guesses a second across churned connections, which walked the old
+// five-letter keyspace (25^5, 23.2 bits) in ~35 minutes. What is asserted here
+// is the fix working end to end on a real socket, not the arithmetic — the
+// arithmetic is in `AdmissionBudgets`'s note and in the authored table.
+
+/// A wrong code, of the authored length and in the authored alphabet — so it
+/// reaches the lookup rather than being turned back by `validateSuffix`'s
+/// length or charset rules, which would measure nothing.
+fn wrong_code(n: usize) -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKMNOPQRSTUVWXYZ";
+    let mut out = String::new();
+    let mut v = n;
+    for _ in 0..8 {
+        out.push(ALPHABET[v % ALPHABET.len()] as char);
+        v /= ALPHABET.len();
+    }
+    out
+}
+
+/// What one guessing run got out of the service.
+#[derive(Clone, Copy, Debug, Default)]
+struct Storm {
+    /// Wrong codes the service actually EVALUATED — the throughput that
+    /// matters, because only these walk the keyspace.
+    guesses: usize,
+    /// Answers that were a budget refusing rather than a lookup happening.
+    refused: usize,
+    /// Upgrades the door would not take at all.
+    turned_away: usize,
+}
+
+/// The budgets as they were BEFORE this round: every cross-connection limit
+/// off, leaving only the authored per-connection cap that a reconnect resets.
+fn unlimited() -> AdmissionBudgets {
+    AdmissionBudgets {
+        guess_burst: u32::MAX,
+        unjoined_per_source: 4096,
+        unjoined_total: 4096,
+        breaker_free: u32::MAX,
+        breaker_step: Duration::ZERO,
+        breaker_max: Duration::ZERO,
+        ..AdmissionBudgets::default()
+    }
+}
+
+/// Read frames until an `error` answers, or `until` passes.
+fn wait_for_answer(
+    socket: &mut tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<TcpStream>>,
+    until: Instant,
+) -> Option<String> {
+    while Instant::now() < until {
+        match socket.read() {
+            Ok(tungstenite::Message::Text(text)) => {
+                let frame = decode_rendezvous_frame(&text).ok()?;
+                if frame.kind == "error" {
+                    return frame.reason;
+                }
+                if frame.kind == "joined" {
+                    return Some("joined".to_string());
+                }
+            }
+            Ok(_) => {}
+            Err(tungstenite::Error::Io(e))
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) => {}
+            Err(_) => return None,
+        }
+    }
+    None
+}
+
+/// Churn connections firing wrong codes for `window`, on `workers` threads.
+///
+/// Deliberately the reviewer's shape rather than one long socket: a few guesses
+/// per connection and then throw it away, which is what made the per-connection
+/// cap a batch size instead of a limit.
+fn guess_storm(url: &str, right: &str, window: Duration, workers: usize) -> Storm {
+    const GUESSES_PER_CONNECTION: usize = 8;
+    let deadline = Instant::now() + window;
+    let mut threads = Vec::new();
+    for worker in 0..workers {
+        let url = url.to_string();
+        let right = right.to_string();
+        threads.push(std::thread::spawn(move || {
+            let mut local = Storm::default();
+            let mut n = worker * 1_000_000;
+            while Instant::now() < deadline {
+                let Ok((mut socket, response)) = tungstenite::connect(&url) else {
+                    local.turned_away += 1;
+                    std::thread::sleep(Duration::from_millis(5));
+                    continue;
+                };
+                if response.status().as_u16() != 101 {
+                    local.turned_away += 1;
+                    continue;
+                }
+                if let tungstenite::stream::MaybeTlsStream::Plain(stream) = socket.get_ref() {
+                    let _ = stream.set_read_timeout(Some(Duration::from_millis(20)));
+                }
+                for _ in 0..GUESSES_PER_CONNECTION {
+                    if Instant::now() >= deadline {
+                        break;
+                    }
+                    n += 1;
+                    let code = wrong_code(n);
+                    if code == right {
+                        continue;
+                    }
+                    let frame = RendezvousFrame {
+                        code: Some(CodeField::Typed(code)),
+                        ..RendezvousFrame::new("join")
+                    };
+                    let text = encode_rendezvous_frame(&frame).expect("encodable");
+                    if socket
+                        .send(tungstenite::Message::Text(text.into()))
+                        .is_err()
+                    {
+                        break;
+                    }
+                    // Generous per-guess patience, so a throttled answer is
+                    // counted as the slow answer it is rather than as a
+                    // timeout that would flatter the fix.
+                    match wait_for_answer(&mut socket, Instant::now() + Duration::from_secs(4)) {
+                        Some(reason) if reason == "too-many-attempts" => {
+                            local.refused += 1;
+                            break;
+                        }
+                        Some(_) => local.guesses += 1,
+                        None => break,
+                    }
+                }
+                let _ = socket.close(None);
+                let _ = socket.flush();
+            }
+            local
+        }));
+    }
+    let mut total = Storm::default();
+    for t in threads {
+        let local = t.join().expect("a storm worker");
+        total.guesses += local.guesses;
+        total.refused += local.refused;
+        total.turned_away += local.turned_away;
+    }
+    total
+}
+
+#[test]
+fn guessing_the_code_by_reconnecting_collapses_under_the_shipped_budgets() {
+    // The blocker, measured. The SAME probe runs against two hosts that differ
+    // only in their transport-plane budgets, so the number is a before/after of
+    // this round's fix rather than of the machine it ran on.
+    let window = Duration::from_millis(1500);
+
+    let before = {
+        let host = Host::start_with(unlimited());
+        guess_storm(&host.join_url(), &host.code.suffix, window, 4)
+    };
+    let after = {
+        let host = Host::start();
+        guess_storm(&host.join_url(), &host.code.suffix, window, 4)
+    };
+    println!("guess storm before={before:?} after={after:?}");
+
+    assert!(
+        before.guesses > 200,
+        "the probe has to actually work against an unbudgeted door, or this \
+         test proves nothing: {before:?}"
+    );
+    // The per-source bucket is the bound, and it is the bound whatever the
+    // connections do: a burst, then a refill clock nobody can hurry.
+    let budgets = AdmissionBudgets::default();
+    let ceiling = budgets.guess_burst as usize
+        + (window.as_millis() / budgets.guess_refill.as_millis()) as usize
+        + 2;
+    assert!(
+        after.guesses <= ceiling,
+        "the whole run may evaluate at most the burst plus what refilled \
+         ({ceiling}), however many sockets it spread itself over: {after:?}"
+    );
+    assert!(
+        after.guesses * 5 < before.guesses,
+        "and that is a collapse, not a trim: {before:?} → {after:?}"
+    );
+    assert!(
+        after.refused > 0,
+        "the budget said so in band, rather than dropping sockets silently: \
+         {after:?}"
+    );
+}
+
+#[test]
+fn the_crew_still_joins_from_the_address_the_guessing_is_coming_from() {
+    // The point of every limit here being SOFT, at the sharpest angle the
+    // no-Origin decision leaves standing: on loopback the guesser and the crew
+    // member ARE the same address, exactly as a hostile page open in a crew
+    // member's own browser would be. A correct code costs no budget, so the
+    // guest gets in WHILE the guessing is going on.
+    let host = Host::start();
+    let url = host.join_url();
+    let right = host.code.suffix.clone();
+    let storm = std::thread::spawn(move || guess_storm(&url, &right, Duration::from_secs(3), 2));
+
+    // Give the storm long enough to have emptied the bucket and started
+    // collecting refusals before the crew member tries at all.
+    std::thread::sleep(Duration::from_millis(300));
+
+    let joined_at = Instant::now();
+    let mut joiner = Joiner::connect_soon(&host);
+    joiner.wait_for("ready");
+    joiner.send(&RendezvousFrame {
+        code: Some(CodeField::Typed(host.code.full.clone())),
+        ..RendezvousFrame::new("join")
+    });
+    let joined = joiner.wait_for("joined");
+    let waited = joined_at.elapsed();
+    println!("legit join during the attack took {waited:?}");
+    assert_eq!(joined.admission.as_deref(), Some("open"));
+    assert!(
+        waited < Duration::from_secs(8),
+        "and inside the client's own first connect timeout, not merely \
+         eventually: {waited:?}"
+    );
+
+    // …all the way to an acting participant, not just past the code check.
+    joiner.send(&RendezvousFrame::new("relay-open"));
+    joiner.wait_for("relay-ready");
+    joiner.relay(host.handshake_payload());
+    let verdict = decode_handshake_frame(
+        joiner
+            .wait_for("relay")
+            .payload
+            .as_deref()
+            .unwrap_or_default(),
+    )
+    .expect("a decodable verdict");
+    assert_eq!(verdict.kind, JOIN_ACCEPTED);
+
+    let storm = storm.join().expect("the storm ends");
+    println!("storm alongside the join: {storm:?}");
+    assert!(
+        storm.refused > 0,
+        "the guessing really was being refused throughout: {storm:?}"
+    );
+}
+
+#[test]
+fn a_crew_sharing_one_address_survives_its_own_typos() {
+    // The sizing argument for `guess_burst`, asserted rather than asserted-to:
+    // a whole crew behind one NAT fumbling the code must not lock the room out.
+    // Only FAILED lookups are charged, so the budget is a typo allowance.
+    let host = Host::start();
+    let budgets = AdmissionBudgets::default();
+    let typos = budgets.guess_burst as usize - 4;
+    for n in 0..typos {
+        let mut fumbling = Joiner::connect(&host);
+        fumbling.wait_for("ready");
+        fumbling.send(&RendezvousFrame {
+            code: Some(CodeField::Typed(wrong_code(n))),
+            ..RendezvousFrame::new("join")
+        });
+        assert_eq!(
+            fumbling.wait_for("error").reason.as_deref(),
+            Some("unknown"),
+            "typo {n} is answered as a wrong code, not as an accusation"
+        );
+    }
+    // …and the next person, on that same address, reads the viewscreen
+    // correctly and is in.
+    let _ = Joiner::admitted(&host);
+}
+
+#[test]
+fn a_device_hoarding_silent_sockets_cannot_spend_the_rooms_places() {
+    // The secondary finding. Un-joined sockets used to be counted against the
+    // authored `max_peers_per_record`, so one device holding thirty-two silent
+    // sockets refused the crew with `join-sockets-full`. Silence now has a
+    // budget of its own, and crossing it is a stated, retryable refusal.
+    let host = Host::start_with(AdmissionBudgets {
+        unjoined_per_source: 3,
+        unjoined_total: 6,
+        ..AdmissionBudgets::default()
+    });
+
+    // Three real crew members, admitted. They cost the RECORD's peer cap, and
+    // pointedly not the un-joined budget — which is what the next step proves.
+    let _crew: Vec<Joiner> = (0..3).map(|_| Joiner::admitted(&host)).collect();
+
+    let mut silent = Vec::new();
+    for _ in 0..3 {
+        silent.push(Joiner::connect(&host));
+    }
+    let refused = http(&host.addr, &upgrade_head(&host.addr));
+    assert!(
+        refused.starts_with("HTTP/1.1 503"),
+        "the fourth silent socket is refused: {refused}"
+    );
+    assert!(
+        refused.contains("join-sockets-busy"),
+        "…by the budget that is about silence, and it says which: {refused}"
+    );
+    assert!(
+        refused.contains("Retry-After"),
+        "…softly, with the truth that it is a budget filling back up: {refused}"
+    );
+
+    // A slot frees the instant a silent socket closes: nothing here is a ban.
+    silent.pop();
+    let freed = Instant::now() + Duration::from_secs(5);
+    loop {
+        let again = http(&host.addr, &upgrade_head(&host.addr));
+        if again.starts_with("HTTP/1.1 101") {
+            break;
+        }
+        assert!(Instant::now() < freed, "the freed slot never came back");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// A WebSocket upgrade head for `/v1/join`, as `delivery::serve` wants it.
+fn upgrade_head(addr: &str) -> String {
+    format!(
+        "GET /v1/join HTTP/1.1\r\nHost: {addr}\r\nUpgrade: websocket\r\n\
+         Connection: Upgrade\r\nSec-WebSocket-Version: 13\r\n\
+         Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"
+    )
+}
+
+#[test]
+fn a_joiner_that_stops_reading_is_detached_rather_than_parking_a_thread() {
+    // The minor finding: only a READ timeout was set, so a joiner that stalled
+    // its own reads parked this host's thread inside `send` for as long as the
+    // OS would hold a full send buffer — minutes, with the peer still in the
+    // host's audience. The write timeout bounds it, and a timed-out write ends
+    // the same way a reliable-queue overflow does: detached, and said so.
+    let host = Host::start_with(AdmissionBudgets {
+        write_timeout: Duration::from_millis(300),
+        ..AdmissionBudgets::default()
+    });
+    let mut joiner = Joiner::admitted(&host);
+    joiner.relay(
+        JsonCodec
+            .encode_client(&ClientMessage::Identify {
+                token: "stalled".to_string(),
+                name: "Ada".to_string(),
+            })
+            .expect("encodable"),
+    );
+    host.events_until(1);
+
+    // From here the joiner reads NOTHING, and the host writes more than any
+    // socket buffer will hold. Reliable, deliberately: the snapshot class is
+    // allowed to shed, and shedding is not what is being tested.
+    for _ in 0..8 {
+        host.dispatch(
+            &Target::Token("stalled".to_string()),
+            &ServerMessage::NameChanged {
+                token: "stalled".to_string(),
+                name: "x".repeat(200_000),
+            },
+            DeliveryClass::Reliable,
+        );
+    }
+
+    let events = host.events_until(2);
+    assert_eq!(
+        events[1],
+        TransportEvent::Disconnected {
+            token: "stalled".to_string()
+        },
+        "the stalled peer is detached, not left holding a thread"
+    );
+    drop(joiner);
 }

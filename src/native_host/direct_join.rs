@@ -52,7 +52,7 @@
 //! and may not block the simulation for a network round trip. `Cargo.toml`
 //! records why this repository has no async runtime to reach for instead.
 //!
-//! # `[ai]` — no Origin allow-list on this leg
+//! # `[ai]` — no Origin allow-list on this leg, and what gates a join instead
 //!
 //! The worker demands a present, allow-listed `Origin` on every upgrade
 //! (`worker-rendezvous/src/index.js`), and that gate is right THERE: it is a
@@ -67,16 +67,37 @@
 //! operator passed to `--addr`), and getting it wrong refuses the whole crew
 //! with nothing on screen saying why. That is the 2026-08 TURN incident's
 //! failure mode, bought for no defence: this port already hands the entire
-//! client bundle to anyone on the LAN, and what actually gates a JOIN is the
-//! five-letter code, the compatibility handshake and the reserved-token gate,
-//! all of which are applied below.
+//! client bundle to anyone on the LAN.
+//!
+//! What that decision leaves behind is a gate that has to be somewhere else,
+//! and the minimal honest one is **attempt-limiting, not an origin list**. A
+//! hostile page open in a crew member's browser dials this port with whatever
+//! `Origin` its own site has, so a header list would not have stopped it; and
+//! the join stamp is PUBLIC (this host serves it), which leaves the code as the
+//! only secret between a stranger on the LAN and an acting participant. So the
+//! defence is at the transport plane, in three layers that hold whether or not
+//! the caller is a browser:
+//!
+//! 1. a per-source failed-guess budget that SURVIVES reconnection, plus a
+//!    per-source cap on sockets that never join ([`AdmissionBudgets`]);
+//! 2. a global circuit-breaker that slows every lookup ANSWER while the service
+//!    is being guessed at, which is the layer that covers a guesser spread
+//!    across many addresses;
+//! 3. enough authored letters in the code that the keyspace is out of reach at
+//!    any rate those two allow (`assets/join/join-codes.toml`, and the
+//!    arithmetic is in [`AdmissionBudgets`]'s note).
+//!
+//! The compatibility handshake and the reserved-token gate still apply on top,
+//! as they always did — but they gate what a joiner may BE, not whether it may
+//! guess, and only these three bound the guessing.
 
 use std::collections::{HashMap, VecDeque};
 use std::io::Write;
-use std::net::TcpStream;
+use std::net::{IpAddr, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::sync::{mpsc, Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use crate::core::codec::{decode_rendezvous_frame, encode_rendezvous_frame};
 use crate::core::rendezvous::{
@@ -101,18 +122,32 @@ pub const JOIN_PATH: &str = "/v1/join";
 /// quiet link for more than a couple of simulation frames, long enough that an
 /// idle joiner is not a spin loop. Not a gameplay value — it is one socket
 /// thread's own scheduling (AGENTS.md rule 11).
-const PUMP_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(20);
+const PUMP_READ_TIMEOUT: Duration = Duration::from_millis(20);
+
+/// How long one `send` may block this joiner's own thread.
+///
+/// Without it a joiner that stops READING parks this thread inside
+/// `socket.send()` until the OS gives up on the send buffer — minutes on a
+/// default Windows or Linux stack — while the peer still holds its slot and its
+/// place in the host's audience. Five seconds is far longer than any healthy
+/// phone needs to accept a frame off a LAN and far shorter than the OS's own
+/// patience; past it the peer is detached down the same path a reliable-queue
+/// overflow takes, because both mean the same thing: this link can no longer
+/// keep the promise its class makes. Not a gameplay value (AGENTS.md rule 11) —
+/// it is one socket thread's own scheduling.
+const PUMP_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// How long an accepted socket may hold a thread without ever joining.
 ///
 /// The upgrade itself is bounded by `delivery::serve`'s head-read timeout, and
-/// the number of live join sockets is bounded by the authored
-/// `max_peers_per_record`. This is the third leg: without it, that cap could be
-/// filled by sockets that upgraded and then said nothing, and the crew standing
-/// in the room would be refused by a full table of silence. A phone that has
-/// scanned the QR sends `join` in the same breath as the upgrade, so the window
-/// is generous. Not a gameplay value (AGENTS.md rule 11).
-const JOIN_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
+/// the number of live UN-JOINED sockets is bounded by
+/// [`AdmissionBudgets::unjoined_total`] — deliberately its own budget rather
+/// than the authored `max_peers_per_record`, which is the record's crew bound
+/// (see that field's note). This is the third leg: without it a silent socket
+/// would hold its slot for the length of the mission. A phone that has scanned
+/// the QR sends `join` in the same breath as the upgrade, so the window is
+/// generous. Not a gameplay value (AGENTS.md rule 11).
+const JOIN_DEADLINE: Duration = Duration::from_secs(30);
 
 /// The peer id this service uses for the host itself, on the `from` field of a
 /// frame it hands a joiner. The worker puts the host's connection id there; a
@@ -129,6 +164,339 @@ const HOST_PEER: &str = "host";
 /// if they were ever put in one table — by an operator reading a log, if
 /// nothing else.
 const PEER_PREFIX: &str = "lan-";
+
+// ── Transport-plane admission budgets ───────────────────────────────────────
+
+/// The bounds that make guessing the join code pointless, held by the SERVICE
+/// so that they survive a caller hanging up and dialling again.
+///
+/// # Why the per-connection cap was not a limit
+///
+/// The authored `max_lookups_per_connection` (60) is charged against a
+/// [`Joiner`], and a `Joiner` is one socket. Against anybody willing to
+/// reconnect it is not a rate limit at all, it is a batch size: guess sixty
+/// times, close, dial again. Measured against this service before these
+/// budgets existed, a single machine on loopback sustained ~2,340 wrong-code
+/// guesses per second across churned connections — at which rate the five
+/// letters this scheme used to author (25^5 ≈ 9.77e6, 23.2 bits) fall in about
+/// **35 minutes** of expected search, single-threaded. The join stamp is
+/// public, so a hit is a join, a `relay-open` and an acting participant.
+///
+/// # The arithmetic these numbers are sized against
+///
+/// The authored suffix is now **eight** letters over the same 25-letter
+/// alphabet: 25^8 ≈ 1.526e11 codes, 37.15 bits. Even at the OLD unlimited
+/// 2,340 guesses/s the expected search is 1.526e11 / 2 / 2340 ≈ 3.26e7 s ≈
+/// **377 days**. The three layers below then take the achievable rate down by
+/// another three orders of magnitude, so the code is out of reach by a margin
+/// no session, LAN party or weekend has room for. The layering is deliberate:
+/// entropy alone would be a single point of failure, and limits alone would
+/// leave a 35-minute secret behind a lock somebody only has to be patient with.
+///
+/// # AGENTS.md rule 11
+///
+/// These are **transport-plane** numbers, not gameplay ones: they describe one
+/// TCP listener defending itself, they never enter the simulation, a snapshot
+/// or a digest, and no designer tunes them from
+/// `assets/join/join-codes.toml` (which authors what a CODE is, and is read by
+/// three languages). They live in Rust beside [`PUMP_READ_TIMEOUT`] and
+/// [`JOIN_DEADLINE`], which are here for the same reason. They are a struct
+/// rather than bare constants only so a test can prove the SHAPE — a bucket
+/// emptying, a breaker ramping — in milliseconds instead of waiting out a
+/// production window, exactly as this module already injects a table path.
+#[derive(Clone, Debug)]
+pub struct AdmissionBudgets {
+    /// Wrong guesses one source may make back to back before it is refused.
+    ///
+    /// Sized for a NAT'd crew, which is the case that must not break: the whole
+    /// room can share one address (a phone hotspot, a venue router, a
+    /// port-forward from outside), and a CORRECT code costs nothing — only a
+    /// FAILED lookup is charged — so this is a budget for TYPOS, not for joins.
+    /// Twenty covers a dozen people fumbling eight letters once or twice each
+    /// in the same minute, and it refills underneath them while they do.
+    pub guess_burst: u32,
+    /// How long one wrong guess takes to refund.
+    ///
+    /// Five seconds: a sustained 0.2 guesses/s per source. A human retyping a
+    /// code cannot notice it; a churner drops from 2,340/s to 17,280/DAY, which
+    /// against 25^8 is expected search measured in millions of years.
+    pub guess_refill: Duration,
+    /// Accepted-but-not-yet-joined sockets one source may hold at once.
+    ///
+    /// An un-joined socket is a live thread, so this is the DoS bound as well
+    /// as an attack bound: without it one device holds every slot and the crew
+    /// standing in the room is refused. A real phone is un-joined for the
+    /// milliseconds between the `ready` frame and its own `join`, so eight
+    /// concurrent from one address is already far past a whole crew scanning
+    /// the QR at the same moment — and the refusal is soft, because a slot
+    /// frees the instant its socket closes.
+    pub unjoined_per_source: usize,
+    /// Un-joined sockets across ALL sources, the second half of the same bound.
+    ///
+    /// Deliberately NOT the authored `max_peers_per_record`: that number is
+    /// "how much CREW one record may hold", and letting silence spend it is how
+    /// a hostile device refuses the room. Sixteen bounds the thread cost of
+    /// callers that never join, on top of (not out of) the record's own peer
+    /// cap — so the thread ceiling this module can reach is
+    /// `max_peers_per_record + unjoined_total`, and it is stated here rather
+    /// than left to be discovered.
+    pub unjoined_total: usize,
+    /// Distinct source addresses tracked at once.
+    ///
+    /// A per-source table is itself memory a stranger can spend, so it is
+    /// bounded and swept of settled sources. Past the bound a NEW source is
+    /// simply not tracked per-source — the global breaker below is the layer
+    /// that answers a guesser spread across many addresses, and pretending
+    /// otherwise (refusing every unknown source) would be a self-inflicted
+    /// outage the moment a venue NAT presents a thousand addresses.
+    pub tracked_sources: usize,
+    /// The window the global failed-guess count is kept over.
+    pub breaker_window: Duration,
+    /// Failed guesses in that window before any answer is slowed at all.
+    ///
+    /// Thirty a minute is more fumbling than a whole crew produces on its worst
+    /// arrival; below it nobody waits for anything.
+    pub breaker_free: u32,
+    /// Further failures per added step of delay.
+    pub breaker_ramp: u32,
+    /// One step of the ramp.
+    pub breaker_step: Duration,
+    /// How long one `send` may block a joiner's own thread — see
+    /// [`PUMP_WRITE_TIMEOUT`], which is this field's production value.
+    ///
+    /// It rides here, with the admission budgets, rather than staying a bare
+    /// constant because it is the one socket bound a test has to be able to
+    /// shorten: proving that a joiner which stops READING is detached rather
+    /// than parking a thread otherwise means waiting out the production number
+    /// on every run.
+    pub write_timeout: Duration,
+    /// The most any single lookup answer is held.
+    ///
+    /// Two seconds, and the ceiling is chosen against the CLIENT: a joiner's
+    /// first connect attempt allows 8 s (`gui/rendezvous-transport.js`'s
+    /// `connectTimeoutMs`), so a legitimate guest caught in the middle of an
+    /// attack waits once and gets in, while a guesser that must eat it on every
+    /// answer is capped at one guess per two seconds per socket — and, since
+    /// [`JOIN_DEADLINE`] is 30 s, at about fifteen guesses per connection.
+    /// Combined with `unjoined_total`, the whole service cannot answer more
+    /// than `unjoined_total / breaker_max` ≈ 8 wrong guesses a second however
+    /// many addresses the guesser has.
+    pub breaker_max: Duration,
+}
+
+impl Default for AdmissionBudgets {
+    fn default() -> Self {
+        Self {
+            guess_burst: 20,
+            guess_refill: Duration::from_secs(5),
+            unjoined_per_source: 8,
+            unjoined_total: 16,
+            tracked_sources: 1024,
+            breaker_window: Duration::from_secs(60),
+            breaker_free: 30,
+            breaker_ramp: 10,
+            breaker_step: Duration::from_millis(100),
+            write_timeout: PUMP_WRITE_TIMEOUT,
+            breaker_max: Duration::from_secs(2),
+        }
+    }
+}
+
+/// What one source address has spent and is holding.
+#[derive(Debug, Default)]
+struct SourceBudget {
+    /// Failed lookups charged and not yet refunded.
+    spent: u32,
+    /// When the last whole token was refunded — `None` until the first charge.
+    refilled_at: Option<Instant>,
+    /// Accepted sockets from this source that have not joined.
+    unjoined: usize,
+}
+
+impl SourceBudget {
+    /// Refund whole tokens for the time since the last refund.
+    ///
+    /// Integer, and the clock is advanced by exactly what was refunded rather
+    /// than to `now`: rounding the remainder away on every charge is how a
+    /// token bucket quietly becomes a hard cap for anyone charged faster than
+    /// the refill period.
+    fn refill(&mut self, now: Instant, step: Duration) {
+        let Some(at) = self.refilled_at else {
+            self.refilled_at = Some(now);
+            return;
+        };
+        if self.spent == 0 {
+            self.refilled_at = Some(now);
+            return;
+        }
+        let step_ms = step.as_millis().max(1);
+        let elapsed = now.saturating_duration_since(at).as_millis();
+        let gained = (elapsed / step_ms).min(u128::from(self.spent)) as u32;
+        if gained == 0 {
+            return;
+        }
+        self.spent -= gained;
+        self.refilled_at = Some(at + step * gained);
+    }
+
+    /// Nothing outstanding and nothing held: safe to forget.
+    fn settled(&self) -> bool {
+        self.spent == 0 && self.unjoined == 0
+    }
+}
+
+/// The global failed-guess count, over one window.
+struct Breaker {
+    window_start: Instant,
+    failures: u32,
+}
+
+/// The service's cross-connection budgets. Lives on the [`Record`], because a
+/// [`Joiner`] is exactly the thing an attacker throws away.
+struct Admissions {
+    budgets: AdmissionBudgets,
+    sources: Mutex<HashMap<IpAddr, SourceBudget>>,
+    unjoined: AtomicUsize,
+    breaker: Mutex<Breaker>,
+}
+
+/// Which budget refused an upgrade, as the reason the operator's log carries.
+type SocketRefusal = &'static str;
+
+impl Admissions {
+    fn new(budgets: AdmissionBudgets) -> Self {
+        Self {
+            budgets,
+            sources: Mutex::new(HashMap::new()),
+            unjoined: AtomicUsize::new(0),
+            breaker: Mutex::new(Breaker {
+                window_start: Instant::now(),
+                failures: 0,
+            }),
+        }
+    }
+
+    /// Take one un-joined socket slot for `source`, or name the budget that
+    /// refused it.
+    fn take_socket(&self, source: Option<IpAddr>) -> Result<(), SocketRefusal> {
+        loop {
+            let live = self.unjoined.load(Ordering::Relaxed);
+            if live >= self.budgets.unjoined_total {
+                return Err("join-sockets-full");
+            }
+            if self
+                .unjoined
+                .compare_exchange_weak(live, live + 1, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
+            {
+                break;
+            }
+        }
+        let Some(ip) = source else {
+            return Ok(());
+        };
+        let now = Instant::now();
+        let mut sources = self.sources.lock().unwrap_or_else(|e| e.into_inner());
+        self.sweep(&mut sources, now, &ip);
+        if !sources.contains_key(&ip) && sources.len() >= self.budgets.tracked_sources {
+            // Untracked because the table is full: the global cap above and the
+            // breaker below are what answer this caller.
+            return Ok(());
+        }
+        let entry = sources.entry(ip).or_default();
+        if entry.unjoined >= self.budgets.unjoined_per_source {
+            drop(sources);
+            self.unjoined.fetch_sub(1, Ordering::Relaxed);
+            return Err("join-sockets-busy");
+        }
+        entry.unjoined += 1;
+        Ok(())
+    }
+
+    /// Give one un-joined slot back — the socket closed, or it joined.
+    fn release_socket(&self, source: Option<IpAddr>) {
+        let live = self.unjoined.load(Ordering::Relaxed);
+        self.unjoined.fetch_sub(1.min(live), Ordering::Relaxed);
+        let Some(ip) = source else {
+            return;
+        };
+        let mut sources = self.sources.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(entry) = sources.get_mut(&ip) {
+            entry.unjoined = entry.unjoined.saturating_sub(1);
+            if entry.settled() {
+                sources.remove(&ip);
+            }
+        }
+    }
+
+    /// Charge one wrong guess. `true` when this source is out of budget.
+    fn charge_failure(&self, source: Option<IpAddr>) -> bool {
+        self.note_failure();
+        let Some(ip) = source else {
+            return false;
+        };
+        let now = Instant::now();
+        let mut sources = self.sources.lock().unwrap_or_else(|e| e.into_inner());
+        self.sweep(&mut sources, now, &ip);
+        if !sources.contains_key(&ip) && sources.len() >= self.budgets.tracked_sources {
+            return false;
+        }
+        let entry = sources.entry(ip).or_default();
+        entry.refill(now, self.budgets.guess_refill);
+        entry.spent = entry.spent.saturating_add(1);
+        if entry.refilled_at.is_none() {
+            entry.refilled_at = Some(now);
+        }
+        entry.spent > self.budgets.guess_burst
+    }
+
+    /// Count one failure against the global window.
+    fn note_failure(&self) {
+        let now = Instant::now();
+        let mut breaker = self.breaker.lock().unwrap_or_else(|e| e.into_inner());
+        if now.saturating_duration_since(breaker.window_start) >= self.budgets.breaker_window {
+            breaker.window_start = now;
+            breaker.failures = 0;
+        }
+        breaker.failures = breaker.failures.saturating_add(1);
+    }
+
+    /// How long the NEXT lookup answer is held, right now.
+    ///
+    /// Applied to every lookup answer, a correct one included. That is not
+    /// generosity to the attacker: answering a right code faster than a wrong
+    /// one during an attack would be a timing oracle over the same keyspace the
+    /// delay exists to protect.
+    fn answer_delay(&self) -> Duration {
+        let now = Instant::now();
+        let mut breaker = self.breaker.lock().unwrap_or_else(|e| e.into_inner());
+        if now.saturating_duration_since(breaker.window_start) >= self.budgets.breaker_window {
+            breaker.window_start = now;
+            breaker.failures = 0;
+        }
+        let over = breaker.failures.saturating_sub(self.budgets.breaker_free);
+        if over == 0 {
+            return Duration::ZERO;
+        }
+        let steps = over.div_ceil(self.budgets.breaker_ramp.max(1));
+        (self.budgets.breaker_step * steps).min(self.budgets.breaker_max)
+    }
+
+    /// Keep the source table bounded, without ever forgetting a source that
+    /// still owes something (`keep` is the one being charged right now).
+    fn sweep(&self, sources: &mut HashMap<IpAddr, SourceBudget>, now: Instant, keep: &IpAddr) {
+        if sources.len() < self.budgets.tracked_sources {
+            return;
+        }
+        let step = self.budgets.guess_refill;
+        for (ip, entry) in sources.iter_mut() {
+            if ip != keep {
+                entry.refill(now, step);
+            }
+        }
+        sources.retain(|ip, entry| ip == keep || !entry.settled());
+    }
+}
 
 // ── The shared record ───────────────────────────────────────────────────────
 
@@ -252,9 +620,20 @@ struct Record {
     code: JoinCode,
     /// Frames for the host half, drained by [`DirectJoinService::poll`].
     to_host: Mutex<Sender<String>>,
-    /// Live joiner sockets, whether or not they have joined yet — this is the
-    /// count `max_peers_per_record` bounds.
-    sockets: AtomicUsize,
+    /// Joiner sockets that have RESOLVED THE CODE — the count
+    /// `max_peers_per_record` bounds.
+    ///
+    /// Un-joined sockets are counted separately, by [`Admissions`], and the
+    /// split is the point: `max_peers_per_record` is the authored answer to
+    /// "how much crew may one record hold", and a hostile device holding
+    /// thirty-two silent sockets used to spend all of it, refusing the room
+    /// with `join-sockets-full`. Silence now has a budget of its own, so the
+    /// thread cost is still bounded (`max_peers_per_record + unjoined_total`)
+    /// without a stranger being able to spend the crew's half of it.
+    joined: AtomicUsize,
+    /// The cross-connection budgets, held here so that they outlive any one
+    /// connection — see [`AdmissionBudgets`].
+    admissions: Admissions,
     /// Attached relay peers, by minted peer id.
     peers: Mutex<HashMap<String, Arc<PeerOutbox>>>,
     next_peer: AtomicU64,
@@ -328,6 +707,17 @@ impl DirectJoinService {
     /// goes on the viewscreen before anybody has scanned anything, which is the
     /// whole point of the join panel (issue #1329).
     pub fn open(table: JoinCodeTable) -> Result<(Self, JoinCode), String> {
+        Self::open_with_budgets(table, AdmissionBudgets::default())
+    }
+
+    /// [`Self::open`] with the transport-plane budgets named rather than
+    /// defaulted — the seam a test uses to watch a bucket empty in
+    /// milliseconds. Production calls [`Self::open`]; nothing ships
+    /// test-scaled numbers.
+    pub fn open_with_budgets(
+        table: JoinCodeTable,
+        budgets: AdmissionBudgets,
+    ) -> Result<(Self, JoinCode), String> {
         let code = table
             .mint_client_code(crate::native_host::join_codes::os_draw)
             .ok_or_else(|| "the authored join-code table minted no usable code".to_string())?;
@@ -336,7 +726,8 @@ impl DirectJoinService {
             table,
             code: code.clone(),
             to_host: Mutex::new(tx),
-            sockets: AtomicUsize::new(0),
+            joined: AtomicUsize::new(0),
+            admissions: Admissions::new(budgets),
             peers: Mutex::new(HashMap::new()),
             next_peer: AtomicU64::new(1),
             open: AtomicBool::new(true),
@@ -544,15 +935,30 @@ impl ConnectionUpgrade for DirectJoinGate {
         key: &str,
     ) -> Result<(), UpgradeRefusal> {
         if !self.record.open.load(Ordering::Relaxed) {
-            return Err(refuse(&mut stream, 503, "join-closed"));
+            return Err(refuse(&mut stream, 503, "join-closed", Duration::ZERO));
         }
-        // The bound on live join sockets, and the reason it is on SOCKETS
-        // rather than on joined peers: a socket that upgraded and never joined
-        // still costs a thread. `max_peers_per_record` is the authored number
-        // for "how much presence one record may hold", which is what this is.
-        let live = self.record.sockets.load(Ordering::Relaxed);
-        if live >= self.record.table.limits.max_peers_per_record {
-            return Err(refuse(&mut stream, 503, "join-sockets-full"));
+        // The record's own crew bound, on JOINED peers — silence has its own
+        // budget below, so a device holding silent sockets can no longer spend
+        // the room's places (see `Record::joined`).
+        let crew = self.record.joined.load(Ordering::Relaxed);
+        if crew >= self.record.table.limits.max_peers_per_record {
+            return Err(refuse(&mut stream, 503, "join-record-full", Duration::ZERO));
+        }
+        // The source address is read HERE, at accept, because it is the only
+        // identity a caller cannot discard by reconnecting — which is exactly
+        // what the per-connection lookup cap could not survive. `None` (a
+        // socket whose peer is already gone) still spends the global un-joined
+        // budget; it simply cannot be told apart from another such socket.
+        let source = stream.peer_addr().ok().map(|addr| addr.ip());
+        if let Err(reason) = self.record.admissions.take_socket(source) {
+            // Soft, and said so: a `Retry-After` of one refill period is the
+            // truth about a budget that is filling back up, not a ban.
+            return Err(refuse(
+                &mut stream,
+                503,
+                reason,
+                self.record.admissions.budgets.guess_refill,
+            ));
         }
 
         let accept_key = tungstenite::handshake::derive_accept_key(key.as_bytes());
@@ -563,12 +969,22 @@ impl ConnectionUpgrade for DirectJoinGate {
              Sec-WebSocket-Accept: {accept_key}\r\n\r\n"
         );
         if stream.write_all(head.as_bytes()).is_err() || stream.flush().is_err() {
+            self.record.admissions.release_socket(source);
             return Err(UpgradeRefusal {
                 status: 500,
                 reason: "join-handshake-write-failed",
             });
         }
-        if stream.set_read_timeout(Some(PUMP_READ_TIMEOUT)).is_err() {
+        // Both directions are bounded. The read timeout is the pump's cadence;
+        // the WRITE timeout is what stops a joiner that stalls its own reads
+        // from parking this thread inside `send` for as long as the OS will
+        // hold a full send buffer (see [`PUMP_WRITE_TIMEOUT`]).
+        if stream.set_read_timeout(Some(PUMP_READ_TIMEOUT)).is_err()
+            || stream
+                .set_write_timeout(Some(self.record.admissions.budgets.write_timeout))
+                .is_err()
+        {
+            self.record.admissions.release_socket(source);
             return Err(UpgradeRefusal {
                 status: 500,
                 reason: "join-socket-not-pollable",
@@ -587,15 +1003,17 @@ impl ConnectionUpgrade for DirectJoinGate {
             None,
         );
         let record = Arc::clone(&self.record);
-        record.sockets.fetch_add(1, Ordering::Relaxed);
+        let slot = SocketSlot {
+            record: Arc::clone(&record),
+            source,
+            joined: false,
+        };
         let spawned = std::thread::Builder::new()
             .name("phoenix-join".to_string())
-            .spawn(move || {
-                serve_joiner(&record, socket);
-                record.sockets.fetch_sub(1, Ordering::Relaxed);
-            });
+            .spawn(move || serve_joiner(&record, socket, slot));
         if spawned.is_err() {
-            self.record.sockets.fetch_sub(1, Ordering::Relaxed);
+            // The slot went into the closure that was never spawned, so it was
+            // dropped with it and has already given its budget back.
             return Err(UpgradeRefusal {
                 status: 503,
                 reason: "join-thread-unavailable",
@@ -605,20 +1023,70 @@ impl ConnectionUpgrade for DirectJoinGate {
     }
 }
 
+/// One accepted socket's place in the budgets, given back however it ends.
+///
+/// A guard rather than a pair of `fetch_sub` calls because the counters are the
+/// difference between a crew being refused and not: a thread that panicked
+/// between them would leak a slot for the rest of the mission, and the leak
+/// would look exactly like a busy service.
+struct SocketSlot {
+    record: Arc<Record>,
+    source: Option<IpAddr>,
+    /// Which budget this socket is currently spending.
+    joined: bool,
+}
+
+impl SocketSlot {
+    /// This socket resolved the code: it stops spending the un-joined budget
+    /// and starts counting as crew.
+    fn promote(&mut self) {
+        if self.joined {
+            return;
+        }
+        self.joined = true;
+        self.record.admissions.release_socket(self.source);
+        self.record.joined.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+impl Drop for SocketSlot {
+    fn drop(&mut self) {
+        if self.joined {
+            let live = self.record.joined.load(Ordering::Relaxed);
+            self.record.joined.fetch_sub(1.min(live), Ordering::Relaxed);
+        } else {
+            self.record.admissions.release_socket(self.source);
+        }
+    }
+}
+
 /// Answer a refused upgrade as ordinary HTTP and report it.
 ///
 /// Written before the 101, so the caller reads a status rather than watching a
 /// socket close for no stated reason — the same courtesy the worker's 403 and
-/// 426 extend.
-fn refuse(stream: &mut TcpStream, status: u16, reason: &'static str) -> UpgradeRefusal {
+/// 426 extend. A non-zero `retry_after` says the refusal is a budget filling
+/// back up rather than a door that has closed: no refusal this door gives is
+/// ever permanent, and a NAT'd crew sharing one address has to be able to read
+/// that difference.
+fn refuse(
+    stream: &mut TcpStream,
+    status: u16,
+    reason: &'static str,
+    retry_after: Duration,
+) -> UpgradeRefusal {
     let body = reason;
+    let extra: Vec<(&str, String)> = if retry_after.is_zero() {
+        Vec::new()
+    } else {
+        vec![("Retry-After", retry_after.as_secs().max(1).to_string())]
+    };
     let head = crate::delivery::http::response_head(
         status,
         "Service Unavailable",
         "text/plain; charset=utf-8",
         crate::delivery::http::CachePolicy::Revalidate,
         body.len(),
-        &[],
+        &extra,
     );
     let _ = stream.write_all(head.as_bytes());
     let _ = stream.write_all(body.as_bytes());
@@ -643,6 +1111,16 @@ struct Joiner {
     outbox: Option<Arc<PeerOutbox>>,
     /// Lookups charged, against the authored per-connection cap.
     lookups: usize,
+    /// Where this connection came from, for the budgets a reconnect cannot
+    /// shed. `None` when the peer address could not be read at accept, or in
+    /// the unit tests, which drive the protocol with no socket under it.
+    source: Option<IpAddr>,
+    /// How long this connection's next answer is held, set by the global
+    /// circuit-breaker. Carried on the joiner rather than slept inside the
+    /// protocol so that the frame handler stays a pure decision and only the
+    /// pump waits — which is also what lets a unit test assert the ramp
+    /// without waiting it out.
+    throttle: Duration,
     /// Frames to write before the next read, for a connection that has not
     /// attached yet (and so has no outbox).
     pending: Vec<String>,
@@ -654,12 +1132,18 @@ struct Joiner {
 type JoinerSocket = tungstenite::WebSocket<TcpStream>;
 
 /// Pump one joiner until its socket dies or the service closes it.
-fn serve_joiner(record: &Arc<Record>, mut socket: JoinerSocket) {
+///
+/// `slot` is this socket's place in the transport-plane budgets: it moves from
+/// the un-joined budget to the record's crew count the moment the code
+/// resolves, and gives whichever it holds back when this function returns.
+fn serve_joiner(record: &Arc<Record>, mut socket: JoinerSocket, mut slot: SocketSlot) {
     let mut joiner = Joiner {
         id: record.mint_peer_id(),
         joined: false,
         outbox: None,
         lookups: 0,
+        source: slot.source,
+        throttle: Duration::ZERO,
         pending: Vec::new(),
         cut: false,
     };
@@ -669,7 +1153,7 @@ fn serve_joiner(record: &Arc<Record>, mut socket: JoinerSocket) {
     // Without this the phone would sit on "connecting" against a host that was
     // waiting for it to speak first.
     reply(&mut joiner, &RendezvousFrame::new("ready"));
-    let opened = std::time::Instant::now();
+    let opened = Instant::now();
     loop {
         if !record.open.load(Ordering::Relaxed) {
             break;
@@ -693,11 +1177,8 @@ fn serve_joiner(record: &Arc<Record>, mut socket: JoinerSocket) {
         }
 
         for text in std::mem::take(&mut joiner.pending) {
-            if socket
-                .send(tungstenite::Message::Text(text.into()))
-                .is_err()
-            {
-                return finish(record, &joiner, "closed");
+            if let Err(e) = socket.send(tungstenite::Message::Text(text.into())) {
+                return finish(record, &joiner, write_reason(&e));
             }
         }
         if joiner.cut {
@@ -707,11 +1188,8 @@ fn serve_joiner(record: &Arc<Record>, mut socket: JoinerSocket) {
         }
         if let Some(outbox) = &joiner.outbox {
             for text in outbox.drain() {
-                if socket
-                    .send(tungstenite::Message::Text(text.into()))
-                    .is_err()
-                {
-                    return finish(record, &joiner, "closed");
+                if let Err(e) = socket.send(tungstenite::Message::Text(text.into())) {
+                    return finish(record, &joiner, write_reason(&e));
                 }
             }
         }
@@ -719,6 +1197,18 @@ fn serve_joiner(record: &Arc<Record>, mut socket: JoinerSocket) {
         match socket.read() {
             Ok(tungstenite::Message::Text(text)) => {
                 on_client_frame(record, &mut joiner, &text);
+                if joiner.joined {
+                    // Idempotent, and this is the one place the socket stops
+                    // being silence and starts being crew.
+                    slot.promote();
+                }
+                // Whatever the circuit-breaker demanded is waited out HERE,
+                // before the answer is written: a delay applied after the
+                // reply would slow nothing down but this host.
+                let owed = std::mem::take(&mut joiner.throttle);
+                if !owed.is_zero() {
+                    std::thread::sleep(owed);
+                }
             }
             Ok(tungstenite::Message::Close(_)) => break,
             // Binary, ping and pong are `tungstenite`'s own business or nothing
@@ -745,6 +1235,28 @@ fn finish(record: &Arc<Record>, joiner: &Joiner, reason: &str) {
     // only for a peer it was actually holding, so a socket that upgraded and
     // said nothing produces no phantom departure.
     record.detach(&joiner.id, reason);
+}
+
+/// Why a write failed, as a reason the host half can render.
+///
+/// A peer that stopped reading is told apart from one that hung up, because
+/// they are different operator problems: the second is somebody walking out of
+/// range, the first is a link that has stopped draining and would otherwise
+/// have held this thread inside `send` for as long as the OS allowed. Both end
+/// the same way — detached — which is the [`Enqueued::Overflowed`] path's
+/// answer to the same question.
+fn write_reason(e: &tungstenite::Error) -> &'static str {
+    match e {
+        tungstenite::Error::Io(io)
+            if matches!(
+                io.kind(),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+            ) =>
+        {
+            "write-timeout"
+        }
+        _ => "closed",
+    }
 }
 
 /// Queue one frame for a joiner, wherever it currently belongs.
@@ -792,31 +1304,31 @@ fn on_client_frame(record: &Arc<Record>, joiner: &mut Joiner, text: &str) {
             if charge_lookup(record, joiner, "resolve") {
                 return;
             }
-            match record
-                .table
-                .resolve(code_of(&frame), asked_namespace(&frame), &record.code)
-            {
-                Ok(()) => reply(
-                    joiner,
-                    &RendezvousFrame {
-                        namespace: Some(record.code.namespace.clone()),
-                        admission: Some("open".to_string()),
-                        ..RendezvousFrame::new("resolved")
-                    },
-                ),
-                Err(reason) => fail(joiner, "resolve", reason),
+            let verdict =
+                record
+                    .table
+                    .resolve(code_of(&frame), asked_namespace(&frame), &record.code);
+            if !settle_lookup(record, joiner, "resolve", verdict) {
+                return;
             }
+            reply(
+                joiner,
+                &RendezvousFrame {
+                    namespace: Some(record.code.namespace.clone()),
+                    admission: Some("open".to_string()),
+                    ..RendezvousFrame::new("resolved")
+                },
+            );
         }
         "join" => {
             if charge_lookup(record, joiner, "join") {
                 return;
             }
-            if let Err(reason) =
+            let verdict =
                 record
                     .table
-                    .resolve(code_of(&frame), asked_namespace(&frame), &record.code)
-            {
-                fail(joiner, "join", reason);
+                    .resolve(code_of(&frame), asked_namespace(&frame), &record.code);
+            if !settle_lookup(record, joiner, "join", verdict) {
                 return;
             }
             joiner.joined = true;
@@ -944,8 +1456,15 @@ fn asked_namespace(frame: &RendezvousFrame) -> &'static str {
 }
 
 /// Charge one lookup against the authored per-connection cap. Returns true when
-/// the connection is done — the suffix space is small and codes are private, so
-/// an unbounded socket could walk the namespace.
+/// the connection is done.
+///
+/// This is the FIRST of three bounds and the weakest, because it is charged to
+/// a socket and a socket is the thing a guesser throws away: sixty attempts,
+/// close, dial again. What actually bounds guessing is [`settle_lookup`] below,
+/// against budgets a reconnect cannot shed. This one stays because it is still
+/// the cheapest way to end a single abusive connection, and because it is the
+/// bound the worker applies to the same verb (`registry.js`'s `chargeLookup`)
+/// — a phone must not be able to tell the two services apart.
 fn charge_lookup(record: &Arc<Record>, joiner: &mut Joiner, request: &str) -> bool {
     joiner.lookups += 1;
     if joiner.lookups > record.table.limits.max_lookups_per_connection {
@@ -954,6 +1473,41 @@ fn charge_lookup(record: &Arc<Record>, joiner: &mut Joiner, request: &str) -> bo
         return true;
     }
     false
+}
+
+/// Answer one lookup under the cross-connection budgets. `true` when the code
+/// was this host's and the caller may go on.
+///
+/// Three things happen here and the order matters. A WRONG answer is charged to
+/// the source's failed-guess bucket and to the global window; the delay this
+/// answer owes is then read from the global breaker — after the charge, so a
+/// flood pays for itself immediately; and a source that has run its bucket dry
+/// gets `too-many-attempts`, which is a SOFT refusal: the bucket refills on a
+/// clock, the client renders it as a sentence in front of the entry field
+/// rather than a dead end, and the crew member who fumbled twice more than the
+/// rest of the room is joining again a few seconds later. Nothing here is ever
+/// a permanent ban, because a whole crew can share one address.
+fn settle_lookup(
+    record: &Arc<Record>,
+    joiner: &mut Joiner,
+    request: &str,
+    verdict: Result<(), crate::native_host::join_codes::CodeRefusal>,
+) -> bool {
+    let refusal = verdict.err();
+    let starved = refusal.is_some() && record.admissions.charge_failure(joiner.source);
+    joiner.throttle = record.admissions.answer_delay();
+    if starved {
+        fail(joiner, request, "too-many-attempts");
+        joiner.cut = true;
+        return false;
+    }
+    match refusal {
+        Some(reason) => {
+            fail(joiner, request, reason);
+            false
+        }
+        None => true,
+    }
 }
 
 #[cfg(test)]

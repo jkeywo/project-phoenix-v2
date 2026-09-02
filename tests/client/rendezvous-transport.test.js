@@ -368,10 +368,10 @@ describe('which route a client page load is on', () => {
 // ── The tracer ──────────────────────────────────────────────────────────────
 
 describe('typed join', () => {
-  it('issues a five-letter code to the host', async () => {
+  it('issues a code of the authored length to the host', async () => {
     const world = makeWorld();
     const { code } = await hostOn(world);
-    expect(code.suffix).toHaveLength(5);
+    expect(code.suffix).toHaveLength(DATA.suffix.length);
     expect(code.namespace).toBe(NAMESPACE_CLIENT);
   });
 
@@ -480,7 +480,7 @@ describe('distinct failures', () => {
   it('says unknown for a suffix nobody holds', async () => {
     const world = makeWorld();
     const { factories } = await hostOn(world);
-    expect(await errorsFor('ZZZZZ', world, factories)).toContain('unknown');
+    expect(await errorsFor('ZZZZZZZZ', world, factories)).toContain('unknown');
   });
 
   it('says wrong-type for a code minted in the server namespace', async () => {
@@ -509,7 +509,7 @@ describe('distinct failures', () => {
     const world = makeWorld();
     const { factories } = await hostOn(world);
     const sent = vi.fn();
-    expect(await errorsFor('ADMIN', world, factories)).toContain('denied');
+    expect(await errorsFor('ADMINXYZ', world, factories)).toContain('denied');
     expect(sent).not.toHaveBeenCalled();
   });
 });
@@ -778,7 +778,7 @@ describe('a joiner that fails cleans up after itself', () => {
     const joiner = createRendezvousJoiner({
       base: 'https://rendezvous.test',
       data: DATA,
-      code: 'ZZZZZ',
+      code: 'ZZZZZZZZ',
       factories,
     });
     await settle();

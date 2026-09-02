@@ -14,6 +14,12 @@ use super::*;
 
 /// A record with no sockets, plus the host's end of its frame queue.
 fn service() -> (Arc<Record>, Receiver<String>) {
+    budgeted_service(AdmissionBudgets::default())
+}
+
+/// The same, with the transport-plane budgets named — the seam the rate-limit
+/// tests drive so that a bucket empties in one call instead of in a minute.
+fn budgeted_service(budgets: AdmissionBudgets) -> (Arc<Record>, Receiver<String>) {
     let table = JoinCodeTable::read(std::path::Path::new("assets/join/join-codes.toml"))
         .expect("the authored table is checked in");
     let code = table
@@ -24,7 +30,8 @@ fn service() -> (Arc<Record>, Receiver<String>) {
         table,
         code,
         to_host: Mutex::new(tx),
-        sockets: AtomicUsize::new(0),
+        joined: AtomicUsize::new(0),
+        admissions: Admissions::new(budgets),
         peers: Mutex::new(HashMap::new()),
         next_peer: AtomicU64::new(1),
         open: AtomicBool::new(true),
@@ -33,14 +40,39 @@ fn service() -> (Arc<Record>, Receiver<String>) {
 }
 
 fn joiner(record: &Arc<Record>) -> Joiner {
+    from_source(record, None)
+}
+
+/// A joiner that arrived from `source`, for the budgets a reconnect cannot
+/// shed. `None` is a connection with no socket under it, which is what every
+/// protocol test here is.
+fn from_source(record: &Arc<Record>, source: Option<IpAddr>) -> Joiner {
     Joiner {
         id: record.mint_peer_id(),
         joined: false,
         outbox: None,
         lookups: 0,
+        source,
+        throttle: Duration::ZERO,
         pending: Vec::new(),
         cut: false,
     }
+}
+
+fn ip(text: &str) -> Option<IpAddr> {
+    Some(text.parse().expect("a test address"))
+}
+
+/// One wrong guess from `source`, as a phone's `join` frame would carry it.
+fn guess(record: &Arc<Record>, j: &mut Joiner) {
+    send_client(
+        record,
+        j,
+        &RendezvousFrame {
+            code: Some(CodeField::Typed("XYZABCDE".to_string())),
+            ..client("join")
+        },
+    );
 }
 
 /// Everything the joiner has been told since the last look.
@@ -90,7 +122,7 @@ fn the_service_opens_with_the_frame_that_makes_a_host_register() {
     let frame = decode_rendezvous_frame(&first[0]).unwrap();
     assert_eq!(frame.kind, "ready");
     assert_eq!(frame.v, RENDEZVOUS_PROTOCOL);
-    assert_eq!(code.suffix.chars().count(), 5);
+    assert_eq!(code.suffix.chars().count(), 8);
     assert!(service.is_open());
 }
 
@@ -135,9 +167,9 @@ fn a_joiner_with_the_right_code_is_told_the_host_answers_only_on_the_relay() {
 }
 
 #[test]
-fn a_bare_five_letter_suffix_joins_exactly_as_a_scanned_code_does() {
+fn a_bare_suffix_joins_exactly_as_a_scanned_code_does() {
     // Two routes into one record: a QR sends the structured code, a guest
-    // reading the viewscreen types five letters.
+    // reading the viewscreen types the letters.
     let (record, _rx) = service();
     let mut j = joiner(&record);
     send_client(
@@ -162,7 +194,7 @@ fn the_refusals_a_phone_gets_are_the_ones_the_worker_would_have_given() {
         &record,
         &mut j,
         &RendezvousFrame {
-            code: Some(CodeField::Typed("XYZAB".to_string())),
+            code: Some(CodeField::Typed("XYZABCDE".to_string())),
             ..client("join")
         },
     );
@@ -186,30 +218,21 @@ fn the_refusals_a_phone_gets_are_the_ones_the_worker_would_have_given() {
 
 #[test]
 fn a_socket_may_not_walk_the_suffix_space() {
-    // The suffix space is 25^5 and codes are private, so an unbounded socket
-    // could try every one of them. The authored per-connection cap is what
-    // stops it, and it keeps refusing afterwards.
-    let (record, _rx) = service();
+    // The authored per-connection cap, which ends ONE abusive connection. It
+    // is charged to a socket, so it is not by itself a rate limit — the
+    // budgets that survive a reconnect are asserted below.
+    let (record, _rx) = budgeted_service(AdmissionBudgets {
+        // Big enough that this test measures the per-CONNECTION cap and only
+        // that: the per-source bucket has its own test.
+        guess_burst: u32::MAX,
+        ..AdmissionBudgets::default()
+    });
     let mut j = joiner(&record);
     for _ in 0..record.table.limits.max_lookups_per_connection {
-        send_client(
-            &record,
-            &mut j,
-            &RendezvousFrame {
-                code: Some(CodeField::Typed("XYZAB".to_string())),
-                ..client("join")
-            },
-        );
+        guess(&record, &mut j);
     }
     told(&mut j);
-    send_client(
-        &record,
-        &mut j,
-        &RendezvousFrame {
-            code: Some(CodeField::Typed("XYZAB".to_string())),
-            ..client("join")
-        },
-    );
+    guess(&record, &mut j);
     assert_eq!(told(&mut j)[0].reason.as_deref(), Some("too-many-attempts"));
     assert!(j.cut);
 }
@@ -510,5 +533,247 @@ fn closing_the_service_shuts_every_joiner_and_reports_the_link_down() {
     assert!(
         outbox.is_closed(),
         "each joiner's thread notices and closes"
+    );
+}
+
+// ── The budgets a reconnect cannot shed ─────────────────────────────────────
+
+#[test]
+fn a_wrong_guess_budget_outlives_the_connection_that_spent_it() {
+    // THE regression. `max_lookups_per_connection` is charged to a `Joiner`,
+    // and a `Joiner` is exactly what a guesser discards: sixty guesses, close,
+    // dial again — measured at ~2,340 wrong guesses a second. The per-source
+    // bucket lives on the RECORD, so the guess past the budget is refused
+    // however many sockets the ones before it arrived on.
+    let (record, _rx) = budgeted_service(AdmissionBudgets {
+        guess_burst: 3,
+        // Long enough that nothing refills during this test: this one asserts
+        // the bucket empties, the next asserts it fills again.
+        guess_refill: Duration::from_secs(3600),
+        ..AdmissionBudgets::default()
+    });
+    let hostile = ip("198.51.100.7");
+    for attempt in 0..3 {
+        // A FRESH connection every time, which is the whole point.
+        let mut j = from_source(&record, hostile);
+        guess(&record, &mut j);
+        assert_eq!(
+            told(&mut j)[0].reason.as_deref(),
+            Some("unknown"),
+            "guess {attempt} is inside the budget"
+        );
+        assert!(!j.cut, "and the connection is not yet cut");
+    }
+    let mut j = from_source(&record, hostile);
+    guess(&record, &mut j);
+    assert_eq!(
+        told(&mut j)[0].reason.as_deref(),
+        Some("too-many-attempts"),
+        "past the budget, on a connection that had itself guessed only once"
+    );
+    assert!(j.cut);
+}
+
+#[test]
+fn a_starved_source_is_refused_softly_and_is_guessing_again_a_moment_later() {
+    // Never a ban. A whole crew can share one address — a phone hotspot, a
+    // venue router, a port-forward — so a lockout that did not lift would be a
+    // self-inflicted outage waiting for one clumsy typist.
+    let (record, _rx) = budgeted_service(AdmissionBudgets {
+        guess_burst: 1,
+        guess_refill: Duration::from_millis(20),
+        ..AdmissionBudgets::default()
+    });
+    let crew = ip("192.168.1.44");
+    for _ in 0..2 {
+        let mut j = from_source(&record, crew);
+        guess(&record, &mut j);
+        told(&mut j);
+    }
+    let mut j = from_source(&record, crew);
+    guess(&record, &mut j);
+    assert_eq!(told(&mut j)[0].reason.as_deref(), Some("too-many-attempts"));
+
+    std::thread::sleep(Duration::from_millis(120));
+    let mut j = from_source(&record, crew);
+    guess(&record, &mut j);
+    assert_eq!(
+        told(&mut j)[0].reason.as_deref(),
+        Some("unknown"),
+        "the bucket refilled on a clock, with nobody having to ask"
+    );
+}
+
+#[test]
+fn a_right_code_costs_nothing_so_the_crew_joins_through_a_guessers_noise() {
+    // The property the soft limits exist for, at the sharpest angle: the
+    // guesser and the crew member are the SAME address — one NAT, or a hostile
+    // page open in a crew member's own browser, which is the case the
+    // no-Origin decision leaves standing. Only FAILED lookups are charged, so
+    // a guest who types the code correctly never touches the emptied budget.
+    let (record, _rx) = budgeted_service(AdmissionBudgets {
+        guess_burst: 2,
+        guess_refill: Duration::from_secs(3600),
+        ..AdmissionBudgets::default()
+    });
+    let shared = ip("203.0.113.9");
+    for _ in 0..6 {
+        let mut j = from_source(&record, shared);
+        guess(&record, &mut j);
+        told(&mut j);
+    }
+    let mut crew = from_source(&record, shared);
+    send_client(
+        &record,
+        &mut crew,
+        &RendezvousFrame {
+            code: Some(CodeField::Typed(record.code.full.clone())),
+            ..client("join")
+        },
+    );
+    let seen = told(&mut crew);
+    assert_eq!(seen[0].kind, "joined", "got {seen:?}");
+    assert!(!crew.cut);
+}
+
+#[test]
+fn one_sources_exhausted_budget_is_not_another_sources_problem() {
+    let (record, _rx) = budgeted_service(AdmissionBudgets {
+        guess_burst: 1,
+        guess_refill: Duration::from_secs(3600),
+        ..AdmissionBudgets::default()
+    });
+    for _ in 0..3 {
+        let mut j = from_source(&record, ip("198.51.100.7"));
+        guess(&record, &mut j);
+        told(&mut j);
+    }
+    let mut neighbour = from_source(&record, ip("192.168.1.50"));
+    guess(&record, &mut neighbour);
+    assert_eq!(
+        told(&mut neighbour)[0].reason.as_deref(),
+        Some("unknown"),
+        "a budget is per source, not a service-wide door"
+    );
+}
+
+#[test]
+fn the_breaker_slows_every_lookup_answer_once_the_service_is_being_guessed_at() {
+    // The layer that covers what a per-source budget cannot: a guesser spread
+    // across addresses, or spoofing them. The delay is charged to the ANSWER,
+    // which is the guesser's own thread, and it is capped low enough that a
+    // legitimate guest caught in the middle of one waits once and gets in.
+    let budgets = AdmissionBudgets {
+        guess_burst: u32::MAX,
+        breaker_free: 2,
+        breaker_ramp: 2,
+        breaker_step: Duration::from_millis(50),
+        breaker_max: Duration::from_millis(150),
+        ..AdmissionBudgets::default()
+    };
+    let (record, _rx) = budgeted_service(budgets.clone());
+    let mut seen: Vec<Duration> = Vec::new();
+    for n in 0..12 {
+        // Every guess from its own address, so it is not the per-source bucket
+        // being measured here.
+        let mut j = from_source(&record, ip(&format!("198.51.100.{n}")));
+        guess(&record, &mut j);
+        told(&mut j);
+        seen.push(j.throttle);
+    }
+    assert_eq!(
+        seen[0],
+        Duration::ZERO,
+        "nobody waits for the first guesses"
+    );
+    assert_eq!(seen[1], Duration::ZERO);
+    assert!(seen[2] > Duration::ZERO, "the ramp starts: {seen:?}");
+    assert!(seen[3] >= seen[2], "and it ramps: {seen:?}");
+    assert_eq!(
+        *seen.last().unwrap(),
+        budgets.breaker_max,
+        "…to a stated ceiling, not to a hang: {seen:?}"
+    );
+
+    // …and a CORRECT code is answered on the same clock. Answering a right
+    // code faster than a wrong one during an attack would be a timing oracle
+    // over the very keyspace the delay is protecting.
+    let mut crew = from_source(&record, ip("192.168.1.60"));
+    send_client(
+        &record,
+        &mut crew,
+        &RendezvousFrame {
+            code: Some(CodeField::Typed(record.code.full.clone())),
+            ..client("join")
+        },
+    );
+    assert_eq!(told(&mut crew)[0].kind, "joined");
+    assert_eq!(crew.throttle, budgets.breaker_max);
+}
+
+#[test]
+fn silence_has_its_own_budget_and_cannot_spend_the_rooms_places() {
+    // The secondary finding: un-joined sockets were counted against the
+    // authored `max_peers_per_record`, so one device holding thirty-two silent
+    // sockets refused the crew standing in the room with `join-sockets-full`.
+    let (record, _rx) = budgeted_service(AdmissionBudgets {
+        unjoined_per_source: 2,
+        unjoined_total: 3,
+        ..AdmissionBudgets::default()
+    });
+    let hoarder = ip("198.51.100.7");
+    assert!(record.admissions.take_socket(hoarder).is_ok());
+    assert!(record.admissions.take_socket(hoarder).is_ok());
+    assert_eq!(
+        record.admissions.take_socket(hoarder),
+        Err("join-sockets-busy"),
+        "one source cannot hold every silent slot"
+    );
+    // …and the crew, on another address, still gets in.
+    assert!(record.admissions.take_socket(ip("192.168.1.70")).is_ok());
+    assert_eq!(
+        record.admissions.take_socket(ip("192.168.1.71")),
+        Err("join-sockets-full"),
+        "the global bound on silence is its own number, not the crew's"
+    );
+    // A slot frees the instant its socket closes: nothing here is a ban.
+    record.admissions.release_socket(hoarder);
+    assert!(record.admissions.take_socket(ip("192.168.1.71")).is_ok());
+
+    // And the record's own crew cap is untouched by any of it, which is the
+    // whole point of the split.
+    assert_eq!(record.joined.load(Ordering::Relaxed), 0);
+    assert!(record.table.limits.max_peers_per_record >= 32);
+}
+
+#[test]
+fn the_source_table_is_bounded_and_the_breaker_carries_what_it_cannot_track() {
+    // A per-source table is memory a stranger can spend, so it is swept of
+    // settled sources rather than grown. What a flood of addresses meets is
+    // the global breaker, which is one of the reasons that layer exists.
+    let (record, _rx) = budgeted_service(AdmissionBudgets {
+        guess_burst: 0,
+        guess_refill: Duration::from_millis(1),
+        tracked_sources: 8,
+        breaker_free: 4,
+        breaker_ramp: 4,
+        breaker_step: Duration::from_millis(1),
+        breaker_max: Duration::from_millis(4),
+        ..AdmissionBudgets::default()
+    });
+    for n in 0..64 {
+        let mut j = from_source(&record, ip(&format!("198.51.100.{n}")));
+        guess(&record, &mut j);
+        told(&mut j);
+    }
+    assert!(
+        record.admissions.sources.lock().unwrap().len() <= 8,
+        "the table stays at its bound however many addresses arrive"
+    );
+    let mut j = from_source(&record, ip("192.168.1.80"));
+    guess(&record, &mut j);
+    assert!(
+        j.throttle > Duration::ZERO,
+        "and the flood is answered by the breaker instead"
     );
 }

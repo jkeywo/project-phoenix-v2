@@ -187,7 +187,7 @@ impl JoinCodeTable {
     ///
     /// A table this build does not implement is an error rather than a partial
     /// read, the same answer `checkJoinCodeFormat` gives: a host that minted a
-    /// code from half a schema would print five letters no phone can resolve.
+    /// code from half a schema would print letters no phone can resolve.
     pub fn read(path: &std::path::Path) -> Result<Self, String> {
         let text = std::fs::read_to_string(path)
             .map_err(|e| format!("cannot read the join-code table {}: {e}", path.display()))?;
@@ -239,8 +239,23 @@ impl JoinCodeTable {
             .deny
             .iter()
             .map(|entry| table.canonicalise(&entry.word))
+            // An empty entry would read as "every code is denied", which is a
+            // typo in the table rather than an instruction.
+            .filter(|word| !word.is_empty())
             .collect();
         Ok(table)
+    }
+
+    /// Does a canonical suffix READ as one of the denied words?
+    ///
+    /// Containment, not equality — `readsAsDenied` in `gui/join-code.js`. The
+    /// deny-list exists so that a code is never a slur or a misleading
+    /// instruction, and a suffix longer than the words on the list carries one
+    /// just as plainly inside it as it used to as the whole of it. (While the
+    /// suffix was the same length as every entry the two rules coincided, so
+    /// nothing an entry means has changed.)
+    fn reads_as_denied(&self, canonical: &str) -> bool {
+        self.denied.iter().any(|word| canonical.contains(word))
     }
 
     /// This build's release GUID — what a minted code's middle part carries.
@@ -303,7 +318,7 @@ impl JoinCodeTable {
         if suffix.chars().any(|ch| !self.alphabet.contains(&ch)) {
             return Err("charset");
         }
-        if self.denied.contains(&suffix) {
+        if self.reads_as_denied(&suffix) {
             return Err("denied");
         }
         Ok(suffix)
@@ -323,7 +338,7 @@ impl JoinCodeTable {
     /// replay depends on.
     ///
     /// `None` only when every attempt landed on a denied word, which for a
-    /// 25^5 space and a deny-list of tens of entries means a broken `draw`.
+    /// 25^8 space and a deny-list of tens of entries means a broken `draw`.
     pub fn mint_suffix(&self, mut draw: impl FnMut(usize) -> usize) -> Option<String> {
         // The same ceiling `mintSuffix` uses, and for the same reason: a draw
         // that keeps landing on denied words must end in an answer rather than
@@ -333,7 +348,7 @@ impl JoinCodeTable {
             let suffix: String = (0..self.suffix_length)
                 .map(|_| self.alphabet[draw(self.alphabet.len()) % self.alphabet.len()])
                 .collect();
-            if self.denied.contains(&suffix) {
+            if self.reads_as_denied(&suffix) {
                 continue;
             }
             return Some(suffix);
@@ -387,7 +402,7 @@ impl JoinCodeTable {
         }
         // The SHAPE is decided before any canonicalisation, because `_` is both
         // the separator and an authored strip character: `QU_ARK` is a player
-        // spacing out five letters, while `<guid>_<guid>_QUARK` is a pasted
+        // spacing out a suffix, while `<guid>_<guid>_QUARKING` is a pasted
         // identifier, and folding first would report the former as malformed.
         let parts: Vec<&str> = fragment.split(PART_SEPARATOR).map(str::trim).collect();
         let structured = parts.len() == 3 && is_code_head(parts[0]) && is_code_head(parts[1]);
@@ -421,7 +436,7 @@ impl JoinCodeTable {
             return Ok(());
         }
         if same_suffix && !same_project {
-            // The same five letters registered under the other typed namespace:
+            // The same letters registered under the other typed namespace:
             // the operator typed a fleet code into the crew field, or the
             // reverse.
             return Err("wrong-type");
@@ -436,8 +451,15 @@ impl JoinCodeTable {
 /// Is this part of a split input one of a full code's two GUID heads?
 ///
 /// `CODE_HEAD` in `gui/join-code.js`, and deliberately as loose: hosts and tests
-/// do register identifier-shaped versions that are not canonical GUIDs, but
-/// nothing a five-letter code can be broken into is ever this long.
+/// do register identifier-shaped versions that are not canonical GUIDs
+/// (`release-1` is the shortest one in the project, at nine characters).
+///
+/// The floor is NINE, and it is coupled to the authored `suffix.length`: it
+/// must stay at least one longer than a whole suffix, or the letters a player
+/// typed would themselves read as an identifier head and a punctuated code
+/// would be reported `malformed`. Raising the suffix past eight means raising
+/// this, in both readers, and `a_head_is_told_apart_from_a_typed_suffix` is
+/// where that gets caught.
 fn is_code_head(part: &str) -> bool {
     let mut chars = part.chars();
     // `^[0-9a-z]` under the `i` flag: any ASCII letter or digit.
@@ -445,15 +467,15 @@ fn is_code_head(part: &str) -> bool {
         Some(first) if first.is_ascii_alphanumeric() => {}
         _ => return false,
     }
-    // `[0-9a-z-]{7,}$`, i.e. at least eight characters in total.
+    // `[0-9a-z-]{8,}$`, i.e. at least nine characters in total.
     let rest = chars.as_str();
-    rest.len() >= 7 && rest.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+    rest.len() >= 8 && rest.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 /// A `draw` for [`JoinCodeTable::mint_suffix`] backed by the OS entropy pool.
 ///
 /// The join code is the one secret a LAN game has — anybody who can reach the
-/// delivery port and guess five letters is in the mission — so it is drawn from
+/// delivery port and guesses the code is in the mission — so it is drawn from
 /// `rand`'s OS-seeded generator rather than from a clock.
 ///
 /// `rand::rng` is the disallowed method the determinism lint (#903/#897) exists
@@ -510,20 +532,23 @@ mod tests {
 
     #[test]
     fn a_denied_word_is_refused_in_every_confusable_spelling() {
+        // Containment, because the suffix is longer than the words on the list:
+        // a code is refused for READING as one of them wherever it does.
         let t = table();
-        assert_eq!(t.validate_suffix("ADMIN"), Err("denied"));
-        assert_eq!(t.validate_suffix("ADM1N"), Err("denied"));
+        assert_eq!(t.validate_suffix("ADMINXYZ"), Err("denied"));
+        assert_eq!(t.validate_suffix("XYZADMIN"), Err("denied"));
+        assert_eq!(t.validate_suffix("XYADM1NZ"), Err("denied"));
         assert_eq!(t.validate_suffix(""), Err("empty"));
         assert_eq!(t.validate_suffix("ABC"), Err("length"));
-        assert_eq!(t.validate_suffix("ABC$E"), Err("charset"));
-        assert_eq!(t.validate_suffix("quark"), Ok("QUARK".to_string()));
+        assert_eq!(t.validate_suffix("ABCDEFG$"), Err("charset"));
+        assert_eq!(t.validate_suffix("quarking"), Ok("QUARKING".to_string()));
     }
 
     #[test]
     fn a_minted_code_is_one_the_clients_own_parser_would_accept() {
         // Composition is `PROJECT_VERSION_SUFFIX` and nothing else; the parts
         // are the authored GUIDs. Asserted here because a code that does not
-        // round-trip through `parseJoinCode` is five letters nobody can use.
+        // round-trip through `parseJoinCode` is a code nobody can use.
         let t = table();
         let mut n = 0;
         let code = t
@@ -532,21 +557,36 @@ mod tests {
                 n % len
             })
             .expect("a code is mintable");
-        assert_eq!(code.suffix.chars().count(), 5);
+        assert_eq!(
+            code.suffix.chars().count(),
+            8,
+            "the authored length, and 25^8 ≈ 1.5e11 is the whole defence"
+        );
         assert_eq!(code.namespace, NAMESPACE_CLIENT);
         assert_eq!(
             code.full,
             format!("{}_{}_{}", code.project, code.version, code.suffix)
         );
-        assert!(!t.denied.contains(&code.suffix), "never a denied word");
+        assert!(
+            !t.reads_as_denied(&code.suffix),
+            "never reads as a denied word"
+        );
     }
 
     #[test]
     fn the_mint_never_draws_a_denied_word_even_when_the_draw_insists() {
-        // A `draw` pinned to the letters of a deny-listed word must not produce
-        // it — `mintSuffix`'s `continue`, and the reason the ceiling exists.
+        // A `draw` pinned to a whole suffix that READS as a deny-listed word
+        // must not produce it — `mintSuffix`'s `continue`, and the reason the
+        // ceiling exists. The scripted word is exactly one suffix long, so
+        // every one of the 64 attempts draws the same denied spelling rather
+        // than a rotation of it that happens to be clean.
         let t = table();
-        let denied: Vec<char> = "ADMIN".chars().collect();
+        let denied: Vec<char> = "ADMINXYZ".chars().collect();
+        assert_eq!(
+            denied.len(),
+            t.suffix_length,
+            "one whole suffix per attempt"
+        );
         let mut i = 0;
         let minted = t.mint_suffix(|_| {
             let ch = denied[i % denied.len()];
@@ -555,7 +595,7 @@ mod tests {
         });
         assert!(
             minted.is_none(),
-            "64 denied draws produce no code, not ADMIN"
+            "64 denied draws produce no code, not ADMINXYZ"
         );
     }
 
@@ -564,9 +604,9 @@ mod tests {
             full: t.compose(
                 t.project_for(NAMESPACE_CLIENT).unwrap(),
                 t.version(),
-                "QUARK",
+                "QUARKING",
             ),
-            suffix: "QUARK".to_string(),
+            suffix: "QUARKING".to_string(),
             project: t.project_for(NAMESPACE_CLIENT).unwrap().to_string(),
             version: t.version().to_string(),
             namespace: NAMESPACE_CLIENT.to_string(),
@@ -576,14 +616,14 @@ mod tests {
     #[test]
     fn the_full_code_a_qr_carries_resolves_and_so_does_the_bare_suffix() {
         // The two routes into the same record: a scanned QR sends the whole
-        // structured code, and a guest reading the viewscreen types five
+        // structured code, and a guest reading the viewscreen types the
         // letters. Both must land on the same answer or half the room cannot
         // join.
         let t = table();
         let rec = record(&t);
         assert_eq!(t.resolve(&rec.full, NAMESPACE_CLIENT, &rec), Ok(()));
-        assert_eq!(t.resolve("QUARK", NAMESPACE_CLIENT, &rec), Ok(()));
-        assert_eq!(t.resolve("qu-ark", NAMESPACE_CLIENT, &rec), Ok(()));
+        assert_eq!(t.resolve("QUARKING", NAMESPACE_CLIENT, &rec), Ok(()));
+        assert_eq!(t.resolve("qu-ark ing", NAMESPACE_CLIENT, &rec), Ok(()));
         assert_eq!(
             t.resolve(
                 &format!("http://host/client/index.html#{}", rec.full),
@@ -599,14 +639,17 @@ mod tests {
     fn the_three_typed_refusals_stay_three_answers() {
         // What the registry's `lookup` keeps apart, kept apart here: they are
         // three different sentences on a phone, and collapsing them sends a
-        // guest back to re-type five letters that were already right.
+        // guest back to re-type a code that was already right.
         let t = table();
         let rec = record(&t);
-        assert_eq!(t.resolve("XYZAB", NAMESPACE_CLIENT, &rec), Err("unknown"));
+        assert_eq!(
+            t.resolve("XYZABCDE", NAMESPACE_CLIENT, &rec),
+            Err("unknown")
+        );
         let other_release = t.compose(
             &rec.project,
             "00000000-0000-4000-8000-000000000000",
-            "QUARK",
+            "QUARKING",
         );
         assert_eq!(
             t.resolve(&other_release, NAMESPACE_CLIENT, &rec),
@@ -615,7 +658,7 @@ mod tests {
         let fleet = t.compose(
             t.project_for(NAMESPACE_SERVER).unwrap(),
             t.version(),
-            "QUARK",
+            "QUARKING",
         );
         assert_eq!(t.resolve(&fleet, NAMESPACE_CLIENT, &rec), Err("wrong-type"));
         // A phone asking in the fleet namespace for this crew record is the
@@ -659,12 +702,18 @@ mod tests {
     }
 
     #[test]
-    fn a_head_is_told_apart_from_a_player_spacing_out_five_letters() {
+    fn a_head_is_told_apart_from_a_typed_suffix() {
         assert!(is_code_head("2f6b0a11-9c4e-4d7a-8f31-5b90c2d47e18"));
         assert!(is_code_head("release-1"));
         assert!(!is_code_head("QU"));
         assert!(!is_code_head("ARK"));
         assert!(!is_code_head(""));
         assert!(!is_code_head("has space"));
+        // The coupling to the authored length: a WHOLE suffix must never read
+        // as an identifier head, or `QUARKING_` would be reported malformed
+        // instead of resolving. Raising `suffix.length` past this is what this
+        // assertion is here to catch.
+        let t = table();
+        assert!(!is_code_head(&"A".repeat(t.suffix_length)));
     }
 }

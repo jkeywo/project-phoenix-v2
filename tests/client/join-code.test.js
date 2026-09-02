@@ -44,8 +44,15 @@ const DATA = JSON.parse(
 setJoinCodeData(DATA);
 
 describe('authored format data', () => {
-  it('mints five letters from an alphabet that excludes every normalised-away letter', () => {
-    expect(DATA.suffix.length).toBe(5);
+  it('mints eight letters from an alphabet that excludes every normalised-away letter', () => {
+    // EIGHT, and the number is the scheme's whole defence rather than a taste:
+    // the code is the only secret in front of a game (the join stamp is
+    // public), and five letters over this 25-letter alphabet is 25^5 ≈ 9.77e6
+    // — 23.2 bits — which a host answering ~2,340 wrong guesses a second walks
+    // in about 35 minutes. 25^8 ≈ 1.526e11 (37.15 bits) is ~377 days at that
+    // same rate, before any attempt-limiting. See the [suffix] note in
+    // assets/join/join-codes.toml.
+    expect(DATA.suffix.length).toBe(8);
     for (const from of Object.keys(DATA.suffix.normalise)) {
       expect(DATA.suffix.alphabet).not.toContain(from);
     }
@@ -68,10 +75,15 @@ describe('authored format data', () => {
     expect(typeof versionGuid()).toBe('string');
   });
 
-  it('authors every denied word so it canonicalises to a mintable-length suffix', () => {
+  it('authors every denied word short enough to appear inside a minted suffix', () => {
+    // A word is matched ANYWHERE inside a canonicalised suffix, so an entry
+    // longer than a whole suffix could never match and would be a row that
+    // silently does nothing.
     for (const entry of DATA.deny) {
       expect(entry.reason, `deny entry ${entry.word} needs a reason`).toBeTruthy();
-      expect(canonicaliseSuffix(entry.word), entry.word).toHaveLength(DATA.suffix.length);
+      const canonical = canonicaliseSuffix(entry.word);
+      expect(canonical.length, entry.word).toBeGreaterThan(0);
+      expect(canonical.length, entry.word).toBeLessThanOrEqual(DATA.suffix.length);
     }
   });
 
@@ -113,33 +125,40 @@ describe('canonicalisation', () => {
 });
 
 describe('suffix validation', () => {
-  it('accepts five canonical letters', () => {
-    expect(validateSuffix('quark')).toEqual({ ok: true, suffix: 'QUARK' });
+  it('accepts eight canonical letters', () => {
+    expect(validateSuffix('quarking')).toEqual({ ok: true, suffix: 'QUARKING' });
   });
 
   it('accepts input that only becomes valid after normalisation', () => {
-    expect(validateSuffix('b01ld')).toEqual({ ok: true, suffix: 'BOIID' });
+    expect(validateSuffix('b01ldest')).toEqual({ ok: true, suffix: 'BOIIDEST' });
   });
 
   it('separates empty, wrong-length and out-of-alphabet input', () => {
     expect(validateSuffix('')).toMatchObject({ ok: false, reason: 'empty' });
-    expect(validateSuffix('QUAR')).toMatchObject({ ok: false, reason: 'length' });
-    expect(validateSuffix('QUARKS')).toMatchObject({ ok: false, reason: 'length' });
-    expect(validateSuffix('QU4RK')).toMatchObject({ ok: false, reason: 'charset' });
+    expect(validateSuffix('QUARKIN')).toMatchObject({ ok: false, reason: 'length' });
+    expect(validateSuffix('QUARKINGS')).toMatchObject({ ok: false, reason: 'length' });
+    expect(validateSuffix('QU4RKING')).toMatchObject({ ok: false, reason: 'charset' });
   });
 
-  it('refuses the authored deny-list, in every spelling that reaches it', () => {
+  it('refuses the authored deny-list wherever it appears inside a suffix', () => {
     const denied = [...deniedSuffixes()][0];
-    expect(validateSuffix(denied)).toMatchObject({ ok: false, reason: 'denied' });
-    expect(validateSuffix(denied.toLowerCase())).toMatchObject({ ok: false, reason: 'denied' });
-    expect(isDenied('admin')).toBe(true);
+    const padded = (word) => (word + 'XYZWVUTS').slice(0, DATA.suffix.length);
+    expect(validateSuffix(padded(denied))).toMatchObject({ ok: false, reason: 'denied' });
+    expect(validateSuffix(padded(denied).toLowerCase()))
+      .toMatchObject({ ok: false, reason: 'denied' });
+    // A word buried in the MIDDLE is the case exact matching used to miss, and
+    // the reason the rule is containment now the suffix is longer than the
+    // list's words: a code is refused for READING as one of them.
+    expect(isDenied('XADMINYZ')).toBe(true);
+    expect(isDenied('adminxyz')).toBe(true);
+    expect(isDenied('xyzwadmin')).toBe(true);
     // Authored with an L, stored canonically with an I: both spellings refuse.
-    expect(isDenied('LOGIN')).toBe(true);
-    expect(isDenied('IOGIN')).toBe(true);
+    expect(isDenied('LOGINXYZ')).toBe(true);
+    expect(isDenied('IOGINXYZ')).toBe(true);
   });
 
   it('does not refuse an ordinary code', () => {
-    expect(isDenied('QUARK')).toBe(false);
+    expect(isDenied('QUARKING')).toBe(false);
   });
 });
 
@@ -148,25 +167,25 @@ describe('full join identifiers', () => {
   const server = projectGuidFor(NAMESPACE_SERVER);
 
   it('composes PROJECT_VERSION_SUFFIX from local context when only a suffix is typed', () => {
-    const built = joinCodeForSuffix('quark', NAMESPACE_CLIENT);
-    expect(built).toMatchObject({ ok: true, suffix: 'QUARK', namespace: NAMESPACE_CLIENT });
-    expect(built.full).toBe(`${client}_${versionGuid()}_QUARK`);
+    const built = joinCodeForSuffix('quarking', NAMESPACE_CLIENT);
+    expect(built).toMatchObject({ ok: true, suffix: 'QUARKING', namespace: NAMESPACE_CLIENT });
+    expect(built.full).toBe(`${client}_${versionGuid()}_QUARKING`);
   });
 
   it('round-trips a composed code back to its three parts', () => {
-    const full = composeJoinCode({ project: server, version: versionGuid(), suffix: 'QUARK' });
+    const full = composeJoinCode({ project: server, version: versionGuid(), suffix: 'QUARKING' });
     const parsed = parseJoinCode(full, NAMESPACE_CLIENT);
     expect(parsed).toMatchObject({
       ok: true,
       typed: 'full',
       project: server,
-      suffix: 'QUARK',
+      suffix: 'QUARKING',
       namespace: NAMESPACE_SERVER,
     });
   });
 
   it('reads a bare suffix as the page-supplied namespace', () => {
-    expect(parseJoinCode('quark', NAMESPACE_CLIENT)).toMatchObject({
+    expect(parseJoinCode('quarking', NAMESPACE_CLIENT)).toMatchObject({
       ok: true,
       typed: 'suffix',
       namespace: NAMESPACE_CLIENT,
@@ -175,62 +194,64 @@ describe('full join identifiers', () => {
   });
 
   it('reads a QR link by taking the code out of the URL fragment', () => {
-    const full = `${client}_${versionGuid()}_QUARK`;
+    const full = `${client}_${versionGuid()}_QUARKING`;
     const parsed = parseJoinCode(`https://example.test/client/index.html#${full}`, NAMESPACE_CLIENT);
-    expect(parsed).toMatchObject({ ok: true, typed: 'full', suffix: 'QUARK', project: client });
+    expect(parsed).toMatchObject({ ok: true, typed: 'full', suffix: 'QUARKING', project: client });
   });
 
   it('reaches the identical identifier from typed suffix, pasted code and QR link', () => {
-    const typed = parseJoinCode('quark', NAMESPACE_CLIENT);
-    const pasted = parseJoinCode(`${client}_${versionGuid()}_quark`, NAMESPACE_CLIENT);
-    const scanned = parseJoinCode(`https://x.test/client/#${client}_${versionGuid()}_QUARK`, NAMESPACE_CLIENT);
+    const typed = parseJoinCode('quarking', NAMESPACE_CLIENT);
+    const pasted = parseJoinCode(`${client}_${versionGuid()}_quarking`, NAMESPACE_CLIENT);
+    const scanned = parseJoinCode(`https://x.test/client/#${client}_${versionGuid()}_QUARKING`, NAMESPACE_CLIENT);
     expect(pasted.full).toBe(typed.full);
     expect(scanned.full).toBe(typed.full);
   });
 
   it('names an unrecognised project GUID rather than retyping it', () => {
-    const parsed = parseJoinCode(`not-a-known-project_${versionGuid()}_QUARK`, NAMESPACE_CLIENT);
+    const parsed = parseJoinCode(`not-a-known-project_${versionGuid()}_QUARKING`, NAMESPACE_CLIENT);
     expect(parsed).toMatchObject({ ok: false, reason: 'unknown-project' });
   });
 
   it('rejects a code with the wrong number of parts', () => {
-    expect(parseJoinCode(`${client}_QUARK`, NAMESPACE_CLIENT)).toMatchObject({
+    expect(parseJoinCode(`${client}_QUARKING`, NAMESPACE_CLIENT)).toMatchObject({
       ok: false,
       reason: 'malformed',
     });
   });
 
-  it('reads five letters a player punctuated, even with the part separator in them', () => {
+  it('reads a suffix a player punctuated, even with the part separator in it', () => {
     // `_` is BOTH the separator inside a full code and an authored strip
-    // character, because a guest reading five letters aloud writes them
-    // apart. Splitting before deciding the shape reported this as "not
-    // readable", which is a lie about input the scheme accepts.
-    for (const typed of ['QU_ARK', 'qu_ark', 'Q_U_A_R_K', ' q-u a_r k ', 'QU ARK']) {
+    // character, because a guest reading a code aloud writes it apart.
+    // Splitting before deciding the shape reported this as "not readable",
+    // which is a lie about input the scheme accepts.
+    for (const typed of [
+      'QU_ARKING', 'qu_arking', 'Q_U_A_R_K_I_N_G', ' q-u a_r k-i n_g ', 'QUAR KING',
+    ]) {
       expect(parseJoinCode(typed, NAMESPACE_CLIENT), typed).toMatchObject({
         ok: true,
         typed: 'suffix',
-        suffix: 'QUARK',
+        suffix: 'QUARKING',
       });
     }
   });
 
   it('keeps a punctuated suffix failure specific rather than calling it malformed', () => {
-    expect(parseJoinCode('AD_MIN', NAMESPACE_CLIENT)).toMatchObject({ reason: 'denied' });
-    expect(parseJoinCode('QU-AR', NAMESPACE_CLIENT)).toMatchObject({ reason: 'length' });
+    expect(parseJoinCode('AD_MINXYZ', NAMESPACE_CLIENT)).toMatchObject({ reason: 'denied' });
+    expect(parseJoinCode('QU-ARKIN', NAMESPACE_CLIENT)).toMatchObject({ reason: 'length' });
   });
 
   it('reads a full code that was retyped with spaces around the separators', () => {
-    const full = `${client} _ ${versionGuid()} _ QUARK`;
+    const full = `${client} _ ${versionGuid()} _ QUARKING`;
     expect(parseJoinCode(full, NAMESPACE_CLIENT)).toMatchObject({
       ok: true,
       typed: 'full',
       project: client,
-      suffix: 'QUARK',
+      suffix: 'QUARKING',
     });
   });
 
   it('refuses a denied suffix even inside a well-formed full code', () => {
-    expect(parseJoinCode(`${client}_${versionGuid()}_ADMIN`, NAMESPACE_CLIENT)).toMatchObject({
+    expect(parseJoinCode(`${client}_${versionGuid()}_ADMINXYZ`, NAMESPACE_CLIENT)).toMatchObject({
       ok: false,
       reason: 'denied',
     });
@@ -256,22 +277,24 @@ describe('minting', () => {
     // written that way asserts nothing about the branch it is named for.
     const a = DATA.suffix.alphabet;
     const draws = (word) => [...word].map((c) => a.indexOf(c));
-    const script = [...draws('QUARK'), ...draws('MOIST')];
+    const script = [...draws('QUARKING'), ...draws('MOISTURE')];
     let i = 0;
-    const taken = new Set(['QUARK']);
+    const taken = new Set(['QUARKING']);
     const minted = mintSuffix(DATA, (s) => taken.has(s), () => script[i++]);
-    expect(minted).toEqual({ ok: true, suffix: 'MOIST' });
+    expect(minted).toEqual({ ok: true, suffix: 'MOISTURE' });
     expect(i, 'the collision was never drawn, so the retry never ran')
       .toBe(script.length);
   });
 
-  it('never mints a denied word', () => {
-    // Force the draw onto 'ADMIN', then let it fall through to the next draw.
+  it('never mints a suffix that reads as a denied word', () => {
+    // Force the first whole draw onto a suffix CONTAINING 'ADMIN', then let it
+    // fall through to the next one — which is the branch that matters now the
+    // rule is containment rather than equality.
     const a = DATA.suffix.alphabet;
-    const admin = [...'ADMIN'].map((c) => a.indexOf(c));
-    const quark = [...'QUARK'].map((c) => a.indexOf(c));
+    const admin = [...'ADMINXYZ'].map((c) => a.indexOf(c));
+    const quark = [...'QUARKING'].map((c) => a.indexOf(c));
     const minted = mintSuffix(DATA, () => false, seq([...admin, ...quark]));
-    expect(minted).toEqual({ ok: true, suffix: 'QUARK' });
+    expect(minted).toEqual({ ok: true, suffix: 'QUARKING' });
   });
 
   it('gives up with a reason rather than looping on a saturated namespace', () => {

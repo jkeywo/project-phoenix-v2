@@ -452,7 +452,7 @@ describe('typed-code refusal', () => {
     const stray = composeJoinCode({
       project: '00000000-0000-4000-8000-000000000000',
       version: versionGuid(DATA),
-      suffix: 'QUARK',
+      suffix: 'QUARKING',
     });
     const two = await memberOn(world, factories, stray);
     expect(two.refusals.map((r) => r.reason)).toContain('unknown-project');

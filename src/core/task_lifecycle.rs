@@ -395,6 +395,7 @@ pub enum TaskLifecycleRequest {
 pub struct TaskLifecycles {
     active: BTreeMap<TaskSlot, TaskActivation>,
     next_ordinal: BTreeMap<TaskSlot, u32>,
+    last_terminal: BTreeMap<TaskSlot, (Option<String>, TaskTerminalReason)>,
 }
 
 impl TaskLifecycles {
@@ -459,6 +460,64 @@ impl TaskLifecycles {
     /// new key.
     pub fn take_all(&mut self) -> Vec<TaskActivation> {
         std::mem::take(&mut self.active).into_values().collect()
+    }
+
+    /// Remember the terminal moment just recorded for `slot`, so an identical
+    /// repeat of it can be recognised as a poll rather than as a fresh beat.
+    ///
+    /// Called for EVERY terminal the emitter writes, including the ones a sweep
+    /// produces: what the rule below compares against is "the last thing this
+    /// slot was seen to do", not "the last thing a workflow reported".
+    pub fn record_terminal(
+        &mut self,
+        slot: &TaskSlot,
+        target: Option<&str>,
+        reason: TaskTerminalReason,
+    ) {
+        self.last_terminal
+            .insert(slot.clone(), (target.map(str::to_string), reason));
+    }
+
+    /// Whether an INSTANTANEOUS activation of `slot` against `target`, ending
+    /// for `reason`, would repeat exactly the last terminal this slot recorded.
+    ///
+    /// # Why this exists
+    ///
+    /// An AI host that serves a standing objective re-issues its request on
+    /// every authored snapshot while the objective stays unsatisfied — the
+    /// Sensors host's Scan is the shipped example, and it says so at
+    /// `crate::ship::sensors::ai_sensors_target_selection`. A scan that cannot
+    /// reach its subject is therefore refused again on every cadence, forever,
+    /// and each refusal is a whole start-and-terminal pair. Unfiltered, a single
+    /// standing out-of-range order is a *rate* rather than a beat — the exact
+    /// firehose [`crate::core::narrative::NarrativeKind::in_timeline_stream`]
+    /// exists to keep out of the timeline — and it is unbounded in the report,
+    /// the counts and the ndjson stream alike.
+    ///
+    /// # What it deliberately does NOT coalesce
+    ///
+    /// * Anything whose class is not [`TaskOutcome::Failed`]. A completion is
+    ///   work that happened and a cancellation is a decision somebody made;
+    ///   both are beats however often they recur.
+    /// * A repeat whose subject or reason CHANGED. "Out of range, then out of
+    ///   range" is one unchanged fact; "out of range, then unpowered" is two.
+    /// * A task that spanned ticks. Only an activation that began and ended
+    ///   inside one tick can be a poll — a hold that ran for a while and failed
+    ///   is a real ending even if the previous hold failed the same way.
+    pub fn repeats_last_failure(
+        &self,
+        slot: &TaskSlot,
+        target: Option<&str>,
+        reason: TaskTerminalReason,
+    ) -> bool {
+        if reason.outcome() != TaskOutcome::Failed {
+            return false;
+        }
+        self.last_terminal
+            .get(slot)
+            .is_some_and(|(last_target, last_reason)| {
+                *last_reason == reason && last_target.as_deref() == target
+            })
     }
 }
 
@@ -693,6 +752,57 @@ mod tests {
             end.detail.get("duration_ticks"),
             Some(&NarrativeValue::Int(60))
         );
+    }
+
+    /// The poll rule: an unchanged FAILURE repeats, and nothing else does.
+    #[test]
+    fn only_an_unchanged_failure_counts_as_a_repeat() {
+        let mut registry = TaskLifecycles::default();
+        let scan = TaskSlot::new("uuid-tender", "sensors", TASK_VERB_SCAN);
+        assert!(
+            !registry.repeats_last_failure(
+                &scan,
+                Some("uuid-hulk"),
+                TaskTerminalReason::OutOfRange
+            ),
+            "a slot that has never ended anything cannot be repeating itself"
+        );
+
+        registry.record_terminal(&scan, Some("uuid-hulk"), TaskTerminalReason::OutOfRange);
+        assert!(registry.repeats_last_failure(
+            &scan,
+            Some("uuid-hulk"),
+            TaskTerminalReason::OutOfRange
+        ));
+        // A different subject, a different reason, or a different slot are all
+        // different facts.
+        assert!(!registry.repeats_last_failure(
+            &scan,
+            Some("uuid-depot"),
+            TaskTerminalReason::OutOfRange
+        ));
+        assert!(!registry.repeats_last_failure(
+            &scan,
+            Some("uuid-hulk"),
+            TaskTerminalReason::Unpowered
+        ));
+        assert!(!registry.repeats_last_failure(
+            &slot(),
+            Some("uuid-hulk"),
+            TaskTerminalReason::OutOfRange
+        ));
+
+        // Only the FAILED class coalesces: a completion is work that happened
+        // and a cancellation is a decision somebody made, however often either
+        // recurs.
+        for reason in TaskTerminalReason::ALL {
+            registry.record_terminal(&scan, Some("uuid-hulk"), reason);
+            assert_eq!(
+                registry.repeats_last_failure(&scan, Some("uuid-hulk"), reason),
+                reason.outcome() == TaskOutcome::Failed,
+                "{reason:?}"
+            );
+        }
     }
 
     /// A task with no subject encodes a fixed five-field key rather than a

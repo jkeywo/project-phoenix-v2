@@ -499,6 +499,9 @@ pub fn operate_tractor_ai(
 /// lock; on any refusal `engaged` and `coupled_target` both clear and the reason
 /// is retained for the console. An idle (`!engaged`) beam is left untouched, so
 /// its retained refusal persists until the operator acts again.
+///
+/// A lock that MOVES under a live hold re-couples the beam, and closes one task
+/// activation and opens another (issue #1341) — see the success arm.
 pub fn tick_tractor(
     mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
     mut set: ParamSet<(
@@ -594,6 +597,33 @@ pub fn tick_tractor(
             row.disabled,
         ) {
             Ok(()) => {
+                // The ship's one lock can MOVE under a live hold: Tactical is a
+                // separate station and `ai_target_selection` re-evaluates locks
+                // on its own, so re-designating while Engineering holds the beam
+                // is ordinary play. The beam simply re-couples — but the
+                // ACTIVATION cannot follow it, because its subject is half of
+                // its key (issue #1341). So the hold of the old hull ENDS, its
+                // lock having gone elsewhere, and a fresh hold of the new one
+                // begins; otherwise the timeline would go on naming the hull the
+                // beam let go of, and the new subject would never get a start.
+                if beam.coupled_target.is_some() && beam.coupled_target != row.lock {
+                    push_lifecycle(
+                        lifecycle.as_deref_mut(),
+                        row.uuid.as_ref(),
+                        TaskLifecycleRequest::End {
+                            slot: hold_slot(row.uuid.as_ref()),
+                            reason: TaskTerminalReason::TargetLost,
+                        },
+                    );
+                    push_lifecycle(
+                        lifecycle.as_deref_mut(),
+                        row.uuid.as_ref(),
+                        TaskLifecycleRequest::Start {
+                            slot: hold_slot(row.uuid.as_ref()),
+                            target: row.lock.clone(),
+                        },
+                    );
+                }
                 beam.coupled_target = row.lock.clone();
                 beam.last_refusal = None;
             }

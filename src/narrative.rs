@@ -464,7 +464,7 @@ pub fn clear_active_computer_message(mut active: ResMut<ActiveComputerMessage>) 
 /// those four decisions here means a later mechanic (#1345, #1346, #1348, #1350)
 /// reports the same two facts and inherits all four.
 ///
-/// # The four decisions
+/// # The five decisions
 ///
 /// 1. **Ordinal.** [`TaskLifecycles::begin`] mints it per slot, so a repeat of
 ///    the same work is a new key rather than a second event on the old one.
@@ -486,6 +486,15 @@ pub fn clear_active_computer_message(mut active: ResMut<ActiveComputerMessage>) 
 ///    caused, on the same tick, and have the timeline record the truer of the
 ///    two — the first one through the queue, which is the AI host, because it is
 ///    ordered before the command handler.
+/// 5. **A poll is not a beat.** An AI host serving a standing objective
+///    re-issues its request every authored snapshot until the objective is
+///    satisfied — the Sensors host's Scan says so in as many words — so an order
+///    that can never be fulfilled is refused again on every cadence. An
+///    instantaneous activation that repeats, exactly, the failure its slot last
+///    recorded is dropped whole (see [`TaskLifecycles::repeats_last_failure`]),
+///    so a standing unfulfillable order costs the timeline one pair of beats
+///    rather than a rate. The moment anything about it changes — the subject,
+///    the reason, or the fact that it now works — it is a beat again.
 ///
 /// # Determinism
 ///
@@ -524,18 +533,41 @@ pub fn emit_task_lifecycle_narrative(
     // order stays the order the tick produced it in. See the determinism note.
     batch.sort_by(|a, b| slot_of(a).cmp(slot_of(b)));
 
-    for request in batch {
+    let mut index = 0usize;
+    while index < batch.len() {
+        let request = batch[index].clone();
+        index += 1;
         match request {
             TaskLifecycleRequest::Start { slot, target } => {
+                // An INSTANTANEOUS activation — a start and its own terminal,
+                // adjacent on one slot, both minted by this tick — that repeats
+                // the failure the slot last recorded is a poll, not a beat.
+                // Neither half is written and the ordinal is not spent, so a
+                // standing unfulfillable order costs the timeline one pair and
+                // then nothing. See `TaskLifecycles::repeats_last_failure`.
+                if let Some(TaskLifecycleRequest::End {
+                    slot: next_slot,
+                    reason,
+                }) = batch.get(index)
+                {
+                    if *next_slot == slot
+                        && lifecycles.repeats_last_failure(&slot, target.as_deref(), *reason)
+                    {
+                        index += 1;
+                        continue;
+                    }
+                }
                 // A start on a slot that already holds one closes the old
                 // activation first, so the restart is visible as a restart and
                 // the replaced key still gets its single terminal event.
                 if let Some(previous) = lifecycles.end(&slot) {
-                    out.write(terminal_event(
+                    write_terminal(
+                        &mut out,
+                        &mut lifecycles,
                         &previous,
                         TaskTerminalReason::Restarted,
                         now,
-                    ));
+                    );
                 }
                 let station = station_for(&operators, &slot);
                 let activation = lifecycles.begin(slot, target, station, now);
@@ -552,7 +584,7 @@ pub fn emit_task_lifecycle_narrative(
                 } else {
                     reason
                 };
-                out.write(terminal_event(&activation, reason, now));
+                write_terminal(&mut out, &mut lifecycles, &activation, reason, now);
             }
         }
     }
@@ -566,11 +598,13 @@ pub fn emit_task_lifecycle_narrative(
         .collect();
     for slot in vanished {
         if let Some(activation) = lifecycles.end(&slot) {
-            out.write(terminal_event(
+            write_terminal(
+                &mut out,
+                &mut lifecycles,
                 &activation,
                 TaskTerminalReason::TargetDestroyed,
                 now,
-            ));
+            );
         }
     }
 
@@ -580,13 +614,35 @@ pub fn emit_task_lifecycle_narrative(
     // further tick runs for this system to observe anything on.
     if mission_over {
         for activation in lifecycles.take_all() {
-            out.write(terminal_event(
+            write_terminal(
+                &mut out,
+                &mut lifecycles,
                 &activation,
                 TaskTerminalReason::MissionEnded,
                 now,
-            ));
+            );
         }
     }
+}
+
+/// Write one terminal beat and remember it on its slot.
+///
+/// Every terminal goes through here rather than through [`terminal_event`]
+/// directly, so the "what did this slot last do" the coalescing rule reads is
+/// the whole truth about the slot and not just the half some workflow reported.
+fn write_terminal(
+    out: &mut MessageWriter<NarrativeEvent>,
+    lifecycles: &mut TaskLifecycles,
+    activation: &TaskActivation,
+    reason: TaskTerminalReason,
+    now: u64,
+) {
+    lifecycles.record_terminal(
+        &activation.key.slot,
+        activation.key.target.as_deref(),
+        reason,
+    );
+    out.write(terminal_event(activation, reason, now));
 }
 
 /// The slot a queued request addresses — the sort key that makes the batch
@@ -1381,6 +1437,130 @@ mod tests {
         // has nothing left to close.
         app.update();
         assert!(drain(&mut app).is_empty());
+    }
+
+    /// The mission ending under a live task closes it, exactly once — the
+    /// GameOver half of AC2, which the headless report boundary does NOT cover
+    /// (that is the max-ticks half, `headless::report::finalize_task_lifecycles`).
+    ///
+    /// This branch is the live one on any host that keeps ticking after the run
+    /// is decided, so it also has to leave the registry empty: a second tick in
+    /// GameOver must not close the same activation again.
+    #[test]
+    fn the_mission_ending_closes_every_live_task_once() {
+        let mut app = lifecycle_app();
+        app.insert_resource(State::new(GamePhase::InProgress));
+        let scan_slot = TaskSlot::new(OPERATOR, "sensors", TASK_VERB_SCAN);
+        push(&mut app, start(hold_slot(), SUBJECT));
+        push(&mut app, start(scan_slot, SUBJECT));
+        app.update();
+        assert_eq!(drain(&mut app).len(), 2);
+        assert_eq!(app.world().resource::<TaskLifecycles>().len(), 2);
+
+        // The run is decided, and the schedule keeps running under it.
+        app.insert_resource(State::new(GamePhase::GameOver));
+        app.update();
+        let events = drain(&mut app);
+        assert_eq!(
+            events.len(),
+            2,
+            "both live tasks end when the mission does: {events:?}"
+        );
+        for event in &events {
+            assert_eq!(event.kind, NarrativeKind::TaskInterrupted);
+            assert_eq!(reason_of(event), "mission_ended");
+        }
+        // Slot order, never the order they were opened in.
+        assert_eq!(
+            events
+                .iter()
+                .map(|e| e.source.system.as_deref().unwrap_or(""))
+                .collect::<Vec<_>>(),
+            vec!["sensors", "tractor"]
+        );
+        assert!(
+            app.world().resource::<TaskLifecycles>().is_empty(),
+            "the sweep must empty the registry, or the task's own terminal is \
+             swallowed by the dedupe while the sim keeps ticking"
+        );
+
+        // …and a second tick under GameOver adds nothing.
+        app.update();
+        assert!(drain(&mut app).is_empty());
+    }
+
+    /// A standing order that can never be fulfilled is a POLL, not a beat: the
+    /// Sensors AI host re-issues its `ScanTarget` on every authored snapshot
+    /// while its objective stays unsatisfied, so an out-of-range Scan would
+    /// otherwise mint a whole activation per cadence, unbounded, into the
+    /// report, the counts and the ndjson stream.
+    #[test]
+    fn a_repeated_identical_failure_is_recorded_once() {
+        let mut app = lifecycle_app();
+        let scan_slot = TaskSlot::new(OPERATOR, "sensors", TASK_VERB_SCAN);
+        let mut events = Vec::new();
+        for _ in 0..200 {
+            push(&mut app, start(scan_slot.clone(), SUBJECT));
+            push(
+                &mut app,
+                end(scan_slot.clone(), TaskTerminalReason::OutOfRange),
+            );
+            app.update();
+            events.extend(drain(&mut app));
+        }
+        assert_eq!(
+            events.len(),
+            2,
+            "200 cadences of one unchanged refusal are one beat: {events:?}"
+        );
+        assert_eq!(events[0].kind, NarrativeKind::TaskStarted);
+        assert_eq!(reason_of(&events[1]), "out_of_range");
+        // The suppressed repeats did not spend ordinals either, so the key the
+        // reader sees is the first activation's and nothing counts in the dark.
+        assert!(events[0].id.ends_with("#0"), "{:?}", events[0].id);
+    }
+
+    /// …but only while nothing about it changes. A different subject, a
+    /// different reason, or the work starting to succeed are all beats again —
+    /// and a task that spanned ticks is never a poll, however its predecessor
+    /// ended.
+    #[test]
+    fn a_changed_or_spanning_task_is_still_a_beat() {
+        let mut app = lifecycle_app();
+        let scan_slot = TaskSlot::new(OPERATOR, "sensors", TASK_VERB_SCAN);
+        let refuse = |app: &mut App, target: &str, reason| {
+            push(app, start(scan_slot.clone(), target));
+            push(app, end(scan_slot.clone(), reason));
+            app.update();
+        };
+
+        refuse(&mut app, SUBJECT, TaskTerminalReason::OutOfRange);
+        assert_eq!(drain(&mut app).len(), 2, "the first refusal is a beat");
+        refuse(&mut app, SUBJECT, TaskTerminalReason::OutOfRange);
+        assert!(drain(&mut app).is_empty(), "the unchanged repeat is not");
+
+        // A different subject.
+        refuse(&mut app, OPERATOR, TaskTerminalReason::OutOfRange);
+        assert_eq!(drain(&mut app).len(), 2);
+        // A different reason for the same subject.
+        refuse(&mut app, SUBJECT, TaskTerminalReason::Unpowered);
+        assert_eq!(drain(&mut app).len(), 2);
+        // The work succeeding is never coalesced, however often it recurs.
+        refuse(&mut app, SUBJECT, TaskTerminalReason::Completed);
+        assert_eq!(drain(&mut app).len(), 2);
+        refuse(&mut app, SUBJECT, TaskTerminalReason::Completed);
+        assert_eq!(drain(&mut app).len(), 2);
+
+        // And a task that spanned ticks is a real activation ending, even when
+        // the last thing this slot recorded was the identical failure.
+        refuse(&mut app, SUBJECT, TaskTerminalReason::OutOfRange);
+        drain(&mut app);
+        push(&mut app, start(scan_slot.clone(), SUBJECT));
+        app.update();
+        assert_eq!(drain(&mut app).len(), 1, "the start of a spanning task");
+        push(&mut app, end(scan_slot, TaskTerminalReason::OutOfRange));
+        app.update();
+        assert_eq!(drain(&mut app).len(), 1, "and its own terminal");
     }
 
     /// A quiet tick with nothing running writes nothing — the emitter must not

@@ -553,6 +553,111 @@ fn repeated_and_simultaneous_activations_keep_separate_keys() {
     );
 }
 
+/// **AC1**, the case a single ship-wide lock makes ordinary: the subject is HALF
+/// of a hold's key, so a lock that moves under a live beam cannot silently
+/// re-point the activation.
+///
+/// Tactical is a separate station from Engineering, and `ai_target_selection`
+/// re-evaluates locks on its own, so re-designating while the beam holds is
+/// ordinary play. The beam re-couples — but the hold of the old hull has ended,
+/// and the hold of the new one has begun, or the timeline would go on naming a
+/// hull the beam let go of while the new subject never got a start at all.
+#[test]
+fn retargeting_under_a_live_hold_closes_one_task_and_opens_another() {
+    let args = probe_args(ReportFormat::Json);
+    let mut app = build_headless_app(&args).expect("probe_task_lifecycle world should build");
+    run(&mut app, 60);
+    let operator = operator_uuid(&mut app);
+    let derelict = uuid_named(&mut app, DERELICT);
+    let depot = uuid_named(&mut app, DEPOT);
+
+    set_lock(&mut app, &derelict);
+    tractor(&mut app, SystemControlPayload::EngageTractor);
+    run(&mut app, 4);
+    // Tactical re-designates while Engineering still holds the beam. Both hulls
+    // are inside the tender's authored reach, so the beam simply re-couples.
+    set_lock(&mut app, &depot);
+    run(&mut app, 4);
+    tractor(&mut app, SystemControlPayload::ReleaseTractor);
+
+    let report = build_report(&mut app, &args, 0.0);
+    let first = format!("{operator}/tractor/tractor_hold/{derelict}#0");
+    let second = format!("{operator}/tractor/tractor_hold/{depot}#1");
+    let holds: Vec<(&str, String, String)> = lifecycle_rows(&report)
+        .into_iter()
+        .filter(|(_, _, key, _)| key.contains("/tractor_hold/"))
+        .map(|(_, kind, key, reason)| (kind, key, reason))
+        .collect();
+    assert_eq!(
+        holds,
+        vec![
+            ("task_started", first.clone(), String::new()),
+            ("task_interrupted", first, "target_lost".to_string()),
+            ("task_started", second.clone(), String::new()),
+            ("task_cancelled", second, "released".to_string()),
+        ],
+        "a re-designation mid-hold is one hold ending and another beginning"
+    );
+}
+
+/// A standing order that can never be fulfilled is a POLL, not a beat.
+///
+/// The Sensors AI host deliberately re-issues its `ScanTarget` on every authored
+/// snapshot while its Scan objective stays unsatisfied — it says so in as many
+/// words, because `science::server::tick_scans` is the sole applier of
+/// capability and range refusals. Repeating the request here through the same
+/// admitted-command path is exactly what that retry produces, and an unchanged
+/// refusal must cost the timeline one pair of beats rather than a pair per
+/// cadence — in the report, the counts and the ndjson stream alike.
+#[test]
+fn a_standing_unfulfillable_scan_stays_bounded() {
+    use project_phoenix::headless::report::RunTelemetry;
+
+    let args = probe_args(ReportFormat::Ndjson);
+    let mut app = build_headless_app(&args).expect("probe_task_lifecycle world should build");
+    run(&mut app, 60);
+    for _ in 0..25 {
+        ask_for_scan(&mut app, PHANTOM);
+    }
+
+    let report = build_report(&mut app, &args, 0.0);
+    let rows = lifecycle_rows(&report);
+    assert_eq!(
+        rows.len(),
+        2,
+        "25 cadences of one unchanged refusal are one activation: {rows:?}"
+    );
+    assert_eq!(rows[0].1, "task_started");
+    assert_eq!(rows[1].1, "task_failed");
+    assert_eq!(rows[1].3, "no_such_target");
+    assert_eq!(
+        count(&report, "task_failed"),
+        1,
+        "the counts must not grow with the cadence: {:?}",
+        report.narrative.counts_by_kind
+    );
+
+    let streamed = app
+        .world()
+        .resource::<RunTelemetry>()
+        .stream
+        .iter()
+        .filter(|l| l.contains("\"narrative\":"))
+        .count();
+    assert_eq!(
+        streamed, 2,
+        "the ndjson stream is the surface that would flood first"
+    );
+
+    // …and the moment the request CHANGES, it is a beat again: a reading that
+    // comes back is never coalesced away.
+    let depot = uuid_named(&mut app, DEPOT);
+    ask_for_scan(&mut app, &depot);
+    let report = build_report(&mut app, &args, 0.0);
+    assert_eq!(count(&report, "task_completed"), 1);
+    assert_eq!(lifecycle_rows(&report).len(), 4);
+}
+
 /// **AC4**, first half: the timeline is a pure function of the seeded run.
 #[test]
 fn identical_seeds_produce_equivalent_task_timelines() {

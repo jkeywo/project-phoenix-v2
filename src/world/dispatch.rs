@@ -238,6 +238,24 @@ pub enum ActionCmd {
         entity: String,
         outcome: crate::core::narrative::NarrativeKind,
     },
+    /// Show a timed ship's-computer message on the Viewscreen (issue #1342).
+    ///
+    /// Fully resolved and validated at the script boundary before it ever
+    /// reaches here: `severity` is already parsed
+    /// ([`crate::core::computer_message::ComputerMessageSeverity::parse`])
+    /// and `duration_secs` already checked positive
+    /// (`world::script::effects::register_effects`'s `show_message` host fn).
+    /// The applier does no name resolution at all — `station` is an authored
+    /// Station id, not an entity name — so it only buffers this onto the
+    /// computer-message effect queue for
+    /// `crate::narrative::tick_computer_message` to apply.
+    ShowComputerMessage {
+        id: String,
+        text: String,
+        severity: crate::core::computer_message::ComputerMessageSeverity,
+        duration_secs: i64,
+        station: Option<crate::core::messages::StationId>,
+    },
     /// Mark an objective complete. A no-op for unknown / non-Active ids.
     CompleteObjective { id: String },
     /// Re-arm the trigger(s) with the given authored id (issue #751).

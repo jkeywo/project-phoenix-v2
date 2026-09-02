@@ -1,6 +1,9 @@
 pub mod balance;
 pub mod broadcast;
 pub mod codec;
+/// The ship's-computer message vocabulary and authoritative state machine
+/// (issue #1342, PRD #1337).
+pub mod computer_message;
 pub mod debug_surface;
 pub mod messages;
 /// The authored mission-timeline event vocabulary (issue #1338, PRD #1337).

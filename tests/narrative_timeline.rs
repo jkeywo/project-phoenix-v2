@@ -274,6 +274,8 @@ fn routine_simulation_never_reaches_the_timeline() {
         "marked_entity_spawned",
         "marked_entity_rescued",
         "marked_entity_destroyed",
+        "computer_message_posted",
+        "computer_message_cleared",
     ]
     .into_iter()
     .collect();
@@ -301,6 +303,129 @@ fn routine_simulation_never_reaches_the_timeline() {
         "a no-combat probe produced {} timeline events — something is inferring \
          story from routine simulation",
         report.narrative.events.len()
+    );
+}
+
+/// The ship's-computer message's full lifecycle (issue #1342), through the
+/// real script boundary: `debris_notice` (t=1, 2s) EXPIRES on its own,
+/// `charge_ready` (t=4, 10s, Station "tactical") is SUPERSEDED by
+/// `wreck_cleared` at t=8 rather than expiring — proving "a new message
+/// supersedes it immediately" — and `wreck_cleared` itself is simply SHOWN
+/// and outlives the run.
+#[test]
+fn the_ships_computer_message_lifecycle_reaches_the_run_report() {
+    let (report, _) = probe_run(ReportFormat::Json);
+
+    assert_eq!(
+        ids(&report, "computer_message_posted"),
+        vec![
+            "debris_notice".to_string(),
+            "charge_ready".to_string(),
+            "wreck_cleared".to_string(),
+        ],
+        "all three messages must be shown, in authored order: {:?}",
+        report.narrative.counts_by_kind
+    );
+
+    let cleared: Vec<&project_phoenix::core::narrative::StampedNarrativeEvent> = report
+        .narrative
+        .events
+        .iter()
+        .filter(|e| e.event.kind.as_str() == "computer_message_cleared")
+        .collect();
+    assert_eq!(
+        cleared.len(),
+        2,
+        "debris_notice expires and charge_ready is superseded — two clears, \
+         not three: wreck_cleared outlives the run: {:?}",
+        report.narrative.counts_by_kind
+    );
+
+    let expired = cleared
+        .iter()
+        .find(|e| e.event.id == "debris_notice")
+        .expect("debris_notice's short duration must expire it");
+    assert_eq!(
+        expired.event.detail.get("reason"),
+        Some(&project_phoenix::core::narrative::NarrativeValue::Text(
+            "expired".into()
+        ))
+    );
+
+    let superseded = cleared
+        .iter()
+        .find(|e| e.event.id == "charge_ready")
+        .expect("charge_ready must be superseded by wreck_cleared, not expire");
+    assert_eq!(
+        superseded.event.detail.get("reason"),
+        Some(&project_phoenix::core::narrative::NarrativeValue::Text(
+            "superseded".into()
+        ))
+    );
+    assert_eq!(
+        superseded.event.detail.get("superseded_by"),
+        Some(&project_phoenix::core::narrative::NarrativeValue::Text(
+            "wreck_cleared".into()
+        ))
+    );
+
+    // The shown event's own detail: String Id text, severity, duration, and
+    // the optional Station cue — never localized prose.
+    let charge_ready = report
+        .narrative
+        .events
+        .iter()
+        .find(|e| {
+            e.event.kind.as_str() == "computer_message_posted" && e.event.id == "charge_ready"
+        })
+        .expect("checked above");
+    assert_eq!(
+        charge_ready.event.detail.get("text"),
+        Some(&project_phoenix::core::narrative::NarrativeValue::Text(
+            "world.probe_narrative.computer_message.charge".into()
+        ))
+    );
+    assert_eq!(
+        charge_ready.event.detail.get("severity"),
+        Some(&project_phoenix::core::narrative::NarrativeValue::Text(
+            "critical".into()
+        ))
+    );
+    assert_eq!(
+        charge_ready.event.detail.get("duration_secs"),
+        Some(&project_phoenix::core::narrative::NarrativeValue::Int(10))
+    );
+    assert_eq!(
+        charge_ready.event.detail.get("station"),
+        Some(&project_phoenix::core::narrative::NarrativeValue::Text(
+            "tactical".into()
+        ))
+    );
+
+    // Ordering: shown before its own clear, and the supersession happens
+    // strictly after charge_ready was shown.
+    let shown_charge_ready = charge_ready.seq;
+    assert!(superseded.seq > shown_charge_ready);
+    let shown_debris = report
+        .narrative
+        .events
+        .iter()
+        .find(|e| {
+            e.event.kind.as_str() == "computer_message_posted" && e.event.id == "debris_notice"
+        })
+        .expect("checked above")
+        .seq;
+    assert!(expired.seq > shown_debris);
+
+    // Localized English must never enter the timeline — only the String Id.
+    let json = report.to_json();
+    assert!(
+        json.contains("\"world.probe_narrative.computer_message.charge\""),
+        "the message's strings.csv id must pass through verbatim:\n{json}"
+    );
+    assert!(
+        !json.contains("Tactical charge nearing safety threshold"),
+        "localized English must never enter the timeline:\n{json}"
     );
 }
 

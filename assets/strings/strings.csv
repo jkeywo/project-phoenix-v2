@@ -972,6 +972,11 @@ server.hud_heading,Viewscreen HUD nav readout. {deg} is the 3-digit heading,HEAD
 server.hud_hull,Viewscreen HUD hull readout. {pct} is hull percent,HULL {pct}
 server.hud_weapons_hot,Viewscreen HUD tactical slot while the ship is at red alert,[WEAPONS HOT]
 server.hud_clear,Viewscreen HUD tactical slot while the ship is not at red alert,[CLEAR]
+server.computer_message.label,Viewscreen ship's-computer message banner — source label above the message text,SHIP'S COMPUTER
+server.computer_message.severity.info,Viewscreen ship's-computer message banner — severity word,Info
+server.computer_message.severity.advisory,Viewscreen ship's-computer message banner — severity word,Advisory
+server.computer_message.severity.warning,Viewscreen ship's-computer message banner — severity word,Warning
+server.computer_message.severity.critical,Viewscreen ship's-computer message banner — severity word,Critical
 server.unknown_scenario,Host lobby title when the selected scenario carries no title of its own,[Unknown Scenario]
 server.complexity_low,Host lobby station card — complexity pill for a Low-complexity console preset,[LOW]
 server.complexity_normal,Host lobby station card — complexity pill for any other console preset,[NORMAL]
@@ -1149,6 +1154,9 @@ world.probe_narrative.objective.log_the_wreck,assets/worlds/probe_narrative.toml
 world.probe_narrative.objective.sound_off,assets/worlds/probe_narrative.toml → add_objective text,[Sound off]
 world.probe_narrative.comms.lyra_hails,assets/worlds/probe_narrative.toml → comms node message,[Lyra Ascending: we are still on the ladder. Are you receiving?]
 world.probe_narrative.comms.stand_by,assets/worlds/probe_narrative.toml → comms response text,[Receiving you. Stand by.]
+world.probe_narrative.computer_message.debris,assets/worlds/probe_narrative.toml → show_message text (issue #1342),[Debris field detected on approach.]
+world.probe_narrative.computer_message.charge,assets/worlds/probe_narrative.toml → show_message text (issue #1342),[Tactical charge nearing safety threshold.]
+world.probe_narrative.computer_message.wreck_cleared,assets/worlds/probe_narrative.toml → show_message text (issue #1342),[Derelict cleared from the approach lane.]
 system_hull.power_reactor.display_name,Shared hull component display name — the ship's reactor. Shared by every hull carrying that component,Power Reactor
 system_hull.power_battery.display_name,Shared hull component display name — the ship's battery. Shared by every hull carrying that component,Power Battery
 system_hull.core.display_name,Shared hull component display name — the ship's core. Shared by every hull carrying that component,Core

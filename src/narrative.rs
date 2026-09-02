@@ -60,6 +60,7 @@ use bevy::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::balance::BalanceEvent;
+use crate::core::computer_message::{ActiveComputerMessage, ComputerMessageRequest};
 use crate::core::messages::ObjectiveStatus;
 use crate::core::narrative::{
     NarrativeActor, NarrativeEvent, NarrativeKind, NarrativeMark, NarrativeRequest, NarrativeValue,
@@ -67,7 +68,10 @@ use crate::core::narrative::{
 use crate::effect_queue::EffectQueue;
 use crate::entities::spawner::EntityUuid;
 use crate::objectives::{ObjectiveTransition, ObjectiveTransitionKind};
+use crate::sim_tick::SimTick;
+use crate::world::config::WorldConfig;
 use crate::world::deadlines::DeadlineState;
+use crate::world::script::schedule::SchedClock;
 use crate::world::server::{ObjectiveManagerRes, WorldContentRuntime};
 
 /// The narrative kind an objective's status maps to when it is first seen, or
@@ -367,6 +371,75 @@ pub fn emit_authored_and_marked_entity_narrative(
             }
         }
     }
+}
+
+/// Apply this tick's `show_message(..)` requests to the authoritative
+/// [`ActiveComputerMessage`], check its simulation-time expiry, and emit the
+/// `shown`/`superseded`/`expired` narrative trio (issue #1342).
+///
+/// One system for the whole state machine, for the same reason
+/// [`emit_authored_and_marked_entity_narrative`] combines its three inputs:
+/// deciding whether a `show` superseded a prior message needs the resource's
+/// state at the moment it changes, and only the system holding the `ResMut`
+/// can report that honestly. The queue is drained in full
+/// (`std::mem::take`), front to back, so a scenario that (mis)authors two
+/// `show_message` calls in one tick still produces a coherent
+/// shown/superseded pair for each.
+///
+/// Expiry is checked AFTER the queue drains, on whatever is `current` once
+/// every request this tick has applied — so a message shown this same tick
+/// can never be reported expired on the tick it was shown (its `expires_tick`
+/// is always at least one tick out; see
+/// [`crate::core::computer_message::ActiveComputerMessage::show`]).
+pub fn tick_computer_message(
+    mut active: ResMut<ActiveComputerMessage>,
+    queue: Option<ResMut<EffectQueue<ComputerMessageRequest>>>,
+    sim_tick: Res<SimTick>,
+    world_config: Option<Res<WorldConfig>>,
+    mut out: MessageWriter<NarrativeEvent>,
+) {
+    let now_tick = sim_tick.0;
+    let tick_hz = world_config
+        .as_deref()
+        .map_or(SchedClock::ZERO.tick_hz, |wc| wc.global.sim_tick_hz);
+
+    if let Some(mut queue) = queue {
+        if !queue.0.is_empty() {
+            for request in std::mem::take(&mut queue.0) {
+                let new_id = request.id.clone();
+                if let Some(superseded) = active.show(&request, now_tick, tick_hz) {
+                    out.write(
+                        NarrativeEvent::new(NarrativeKind::ComputerMessageCleared, superseded.id)
+                            .text("reason", "superseded")
+                            .text("superseded_by", new_id.clone()),
+                    );
+                }
+                let mut event = NarrativeEvent::new(NarrativeKind::ComputerMessagePosted, new_id)
+                    .text("text", request.text)
+                    .text("severity", request.severity.as_str())
+                    .detail("duration_secs", NarrativeValue::Int(request.duration_secs));
+                if let Some(station) = &request.station {
+                    event = event.text("station", station.0.clone());
+                }
+                out.write(event);
+            }
+        }
+    }
+
+    if let Some(expired_id) = active.expire_if_due(now_tick) {
+        out.write(
+            NarrativeEvent::new(NarrativeKind::ComputerMessageCleared, expired_id)
+                .text("reason", "expired"),
+        );
+    }
+}
+
+/// Unconditionally clear the active ship's-computer message. Registered on
+/// `OnEnter(GamePhase::GameOver)` and `OnEnter(GamePhase::Lobby)` (issue
+/// #1342): the two transitions the issue names, neither of which is itself a
+/// narrative beat (see [`ActiveComputerMessage::clear`]'s doc for why).
+pub fn clear_active_computer_message(mut active: ResMut<ActiveComputerMessage>) {
+    active.clear();
 }
 
 #[cfg(test)]
@@ -898,5 +971,201 @@ mod tests {
             Some("uuid-raider"),
             "the surviving death is the combat one, which carries killer credit"
         );
+    }
+
+    // ── The ship's-computer message (issue #1342) ─────────────────────────
+
+    use crate::core::computer_message::ComputerMessageSeverity;
+    use crate::core::messages::StationId;
+
+    /// A bare app carrying just what `tick_computer_message` needs — no
+    /// `WorldConfig`, so tick_hz falls back to `SchedClock::ZERO`'s 60 Hz.
+    fn computer_message_app() -> App {
+        let mut app = App::new();
+        app.add_message::<NarrativeEvent>()
+            .init_resource::<ActiveComputerMessage>()
+            .init_resource::<EffectQueue<ComputerMessageRequest>>()
+            .init_resource::<SimTick>();
+        app.add_systems(Update, tick_computer_message);
+        app
+    }
+
+    fn push_request(app: &mut App, req: ComputerMessageRequest) {
+        app.world_mut()
+            .resource_mut::<EffectQueue<ComputerMessageRequest>>()
+            .0
+            .push(req);
+    }
+
+    fn request(id: &str, secs: i64) -> ComputerMessageRequest {
+        ComputerMessageRequest {
+            id: id.into(),
+            text: "world.probe.computer_message.text".into(),
+            severity: ComputerMessageSeverity::Advisory,
+            duration_secs: secs,
+            station: None,
+        }
+    }
+
+    fn set_tick(app: &mut App, tick: u64) {
+        app.world_mut().resource_mut::<SimTick>().0 = tick;
+    }
+
+    /// Showing the first message emits exactly one `shown` beat, carrying the
+    /// String Id, severity and duration verbatim.
+    #[test]
+    fn showing_a_message_emits_one_posted_event() {
+        let mut app = computer_message_app();
+        push_request(&mut app, request("hail_debris", 10));
+        app.update();
+        let events = drain(&mut app);
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert_eq!(events[0].kind, NarrativeKind::ComputerMessagePosted);
+        assert_eq!(events[0].id, "hail_debris");
+        assert_eq!(
+            events[0].detail.get("text"),
+            Some(&NarrativeValue::Text(
+                "world.probe.computer_message.text".into()
+            ))
+        );
+        assert_eq!(
+            events[0].detail.get("severity"),
+            Some(&NarrativeValue::Text("advisory".into()))
+        );
+        assert_eq!(
+            events[0].detail.get("duration_secs"),
+            Some(&NarrativeValue::Int(10))
+        );
+        assert!(
+            app.world()
+                .resource::<ActiveComputerMessage>()
+                .current
+                .is_some(),
+            "the state is now authoritatively showing something"
+        );
+    }
+
+    /// A second message supersedes the first, in one tick: the superseded
+    /// event names the OLD id and the reason, and the posted event follows it
+    /// for the NEW id — both in one tick, in that order.
+    #[test]
+    fn a_second_message_supersedes_the_first_in_the_same_tick() {
+        let mut app = computer_message_app();
+        push_request(&mut app, request("first", 100));
+        app.update();
+        drain(&mut app);
+
+        push_request(&mut app, request("second", 5));
+        app.update();
+        let events = drain(&mut app);
+        assert_eq!(events.len(), 2, "{events:?}");
+        assert_eq!(events[0].kind, NarrativeKind::ComputerMessageCleared);
+        assert_eq!(events[0].id, "first");
+        assert_eq!(
+            events[0].detail.get("reason"),
+            Some(&NarrativeValue::Text("superseded".into()))
+        );
+        assert_eq!(
+            events[0].detail.get("superseded_by"),
+            Some(&NarrativeValue::Text("second".into()))
+        );
+        assert_eq!(events[1].kind, NarrativeKind::ComputerMessagePosted);
+        assert_eq!(events[1].id, "second");
+    }
+
+    /// Expiry is measured in simulation ticks: nothing is reported before the
+    /// due tick, and exactly one `expired` event fires on it.
+    #[test]
+    fn expiry_reports_once_on_its_due_tick() {
+        let mut app = computer_message_app();
+        push_request(&mut app, request("hail_debris", 10));
+        app.update();
+        drain(&mut app);
+
+        // One tick early: nothing.
+        set_tick(&mut app, 599);
+        app.update();
+        assert!(drain(&mut app).is_empty());
+
+        // Due: exactly one expired event.
+        set_tick(&mut app, 600);
+        app.update();
+        let events = drain(&mut app);
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert_eq!(events[0].kind, NarrativeKind::ComputerMessageCleared);
+        assert_eq!(events[0].id, "hail_debris");
+        assert_eq!(
+            events[0].detail.get("reason"),
+            Some(&NarrativeValue::Text("expired".into()))
+        );
+        assert!(app
+            .world()
+            .resource::<ActiveComputerMessage>()
+            .current
+            .is_none());
+
+        // And it does not re-report on a later tick.
+        set_tick(&mut app, 700);
+        app.update();
+        assert!(drain(&mut app).is_empty(), "expiry must report once");
+    }
+
+    /// The optional Station cue rides the posted event's detail.
+    #[test]
+    fn a_station_cue_rides_the_posted_event() {
+        let mut app = computer_message_app();
+        push_request(
+            &mut app,
+            ComputerMessageRequest {
+                id: "charge_ready".into(),
+                text: "world.probe.computer_message.charge".into(),
+                severity: ComputerMessageSeverity::Critical,
+                duration_secs: 8,
+                station: Some(StationId("tactical".into())),
+            },
+        );
+        app.update();
+        let events = drain(&mut app);
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert_eq!(
+            events[0].detail.get("station"),
+            Some(&NarrativeValue::Text("tactical".into()))
+        );
+        assert_eq!(
+            events[0].detail.get("severity"),
+            Some(&NarrativeValue::Text("critical".into()))
+        );
+    }
+
+    /// A tick with no queued request and nothing due is silent.
+    #[test]
+    fn a_quiet_tick_emits_nothing() {
+        let mut app = computer_message_app();
+        app.update();
+        assert!(drain(&mut app).is_empty());
+    }
+
+    /// `clear_active_computer_message` empties the state unconditionally and
+    /// is not itself a narrative beat. Modelled on its real registration —
+    /// `OnEnter(GamePhase::GameOver)` / `OnEnter(GamePhase::Lobby)` — rather
+    /// than chained onto `tick_computer_message`'s own per-tick schedule,
+    /// which would clear a message on the very tick it was shown.
+    #[test]
+    fn clear_active_computer_message_empties_state_silently() {
+        let mut active = ActiveComputerMessage::default();
+        active.show(&request("mission_wrap", 30), 0, 60.0);
+        assert!(active.current.is_some());
+
+        let mut app = App::new();
+        app.add_message::<NarrativeEvent>().insert_resource(active);
+        app.add_systems(Update, clear_active_computer_message);
+        app.update();
+
+        assert!(drain(&mut app).is_empty(), "clearing is not itself a beat");
+        assert!(app
+            .world()
+            .resource::<ActiveComputerMessage>()
+            .current
+            .is_none());
     }
 }

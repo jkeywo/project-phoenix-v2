@@ -360,6 +360,73 @@ pub(crate) fn register_effects(engine: &mut HostRegistry) {
     );
     host_fn!(
         engine,
+        "show_message",
+        receiver = "effects",
+        category = "effect",
+        params = ["id", "text", "severity", "duration_secs"],
+        summary = "Show a timed ship's-computer message on the Viewscreen: \
+                   severity is info, advisory, warning or critical, and \
+                   duration_secs must be positive.",
+        |sink: &mut EffectSink,
+         id: ImmutableString,
+         text: ImmutableString,
+         severity: ImmutableString,
+         duration_secs: i64|
+         -> Result<(), Box<EvalAltResult>> {
+            // Issue #1342. Validated at the boundary, exactly as
+            // `narrative_outcome`'s outcome word is: an unknown severity or a
+            // non-positive duration raises HERE, discarding this call's
+            // effects (settled decision 10), rather than reaching the
+            // authoritative `ActiveComputerMessage` as a silently different
+            // message.
+            let severity = crate::core::computer_message::ComputerMessageSeverity::parse(&severity)
+                .map_err(raise)?;
+            if duration_secs <= 0 {
+                return Err(raise(format!(
+                    "show_message(\"{id}\"): duration_secs must be positive, got {duration_secs}"
+                )));
+            }
+            sink.push(ActionCmd::ShowComputerMessage {
+                id: id.to_string(),
+                text: text.to_string(),
+                severity,
+                duration_secs,
+                station: None,
+            });
+            Ok(())
+        },
+    );
+    // The Station-cue overload is not a separate editor entry — one
+    // descriptor per callable name — so a bare registration, mirroring
+    // `game_over`'s outcome-declaring overload below.
+    engine.register_fn(
+        "show_message",
+        |sink: &mut EffectSink,
+         id: ImmutableString,
+         text: ImmutableString,
+         severity: ImmutableString,
+         duration_secs: i64,
+         station: ImmutableString|
+         -> Result<(), Box<EvalAltResult>> {
+            let severity = crate::core::computer_message::ComputerMessageSeverity::parse(&severity)
+                .map_err(raise)?;
+            if duration_secs <= 0 {
+                return Err(raise(format!(
+                    "show_message(\"{id}\"): duration_secs must be positive, got {duration_secs}"
+                )));
+            }
+            sink.push(ActionCmd::ShowComputerMessage {
+                id: id.to_string(),
+                text: text.to_string(),
+                severity,
+                duration_secs,
+                station: Some(crate::core::messages::StationId(station.to_string())),
+            });
+            Ok(())
+        },
+    );
+    host_fn!(
+        engine,
         "reset_trigger",
         receiver = "effects",
         category = "effect",
@@ -1510,6 +1577,131 @@ mod tests {
                 enemy: "Federation".to_string(),
             })]
         );
+    }
+
+    // ── show_message (issue #1342) ────────────────────────────────────────────
+
+    #[test]
+    fn show_message_drains_to_action_cmd() {
+        let cmds = run(
+            r#"fn on_x(ctx) {
+                ctx.effects.show_message("hail_debris", "world.probe.computer_message.text", "advisory", 10);
+            }"#,
+            "on_x",
+        );
+        assert_eq!(
+            cmds,
+            vec![ActionCmd::ShowComputerMessage {
+                id: "hail_debris".to_string(),
+                text: "world.probe.computer_message.text".to_string(),
+                severity: crate::core::computer_message::ComputerMessageSeverity::Advisory,
+                duration_secs: 10,
+                station: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn show_message_accepts_an_optional_station_cue() {
+        let cmds = run(
+            r#"fn on_x(ctx) {
+                ctx.effects.show_message("charge_ready", "world.probe.computer_message.charge", "critical", 8, "tactical");
+            }"#,
+            "on_x",
+        );
+        assert_eq!(
+            cmds,
+            vec![ActionCmd::ShowComputerMessage {
+                id: "charge_ready".to_string(),
+                text: "world.probe.computer_message.charge".to_string(),
+                severity: crate::core::computer_message::ComputerMessageSeverity::Critical,
+                duration_secs: 8,
+                station: Some(crate::core::messages::StationId("tactical".to_string())),
+            }]
+        );
+    }
+
+    /// Every severity word parses, case-insensitively — the same boundary
+    /// `ComputerMessageSeverity::parse` unit-tests directly, proven here
+    /// through the real host fn.
+    #[test]
+    fn show_message_accepts_every_severity() {
+        for (word, expected) in [
+            (
+                "info",
+                crate::core::computer_message::ComputerMessageSeverity::Info,
+            ),
+            (
+                "ADVISORY",
+                crate::core::computer_message::ComputerMessageSeverity::Advisory,
+            ),
+            (
+                "Warning",
+                crate::core::computer_message::ComputerMessageSeverity::Warning,
+            ),
+            (
+                "critical",
+                crate::core::computer_message::ComputerMessageSeverity::Critical,
+            ),
+        ] {
+            let cmds = run(
+                &format!(
+                    r#"fn on_x(ctx) {{ ctx.effects.show_message("id", "text.id", "{word}", 5); }}"#
+                ),
+                "on_x",
+            );
+            match &cmds[0] {
+                ActionCmd::ShowComputerMessage { severity, .. } => {
+                    assert_eq!(*severity, expected, "word {word:?}")
+                }
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+    }
+
+    /// An unknown severity raises at the script boundary — discarding the
+    /// call's effects (settled decision 10) — exactly as `narrative_outcome`'s
+    /// outcome word does.
+    #[test]
+    fn show_message_rejects_an_unknown_severity() {
+        let err = run_result(
+            r#"fn on_x(ctx) { ctx.effects.show_message("id", "text.id", "urgent", 5); }"#,
+            "on_x",
+        )
+        .expect_err("an unknown severity must raise");
+        assert!(err.to_string().contains("severity"), "{err}");
+    }
+
+    /// A non-positive duration raises too — "positive simulation-time
+    /// duration" is AC1's own wording.
+    #[test]
+    fn show_message_rejects_a_non_positive_duration() {
+        for bad in [0, -5] {
+            let err = run_result(
+                &format!(
+                    r#"fn on_x(ctx) {{ ctx.effects.show_message("id", "text.id", "info", {bad}); }}"#
+                ),
+                "on_x",
+            )
+            .expect_err("a non-positive duration must raise");
+            assert!(err.to_string().contains("duration_secs"), "{err}");
+        }
+    }
+
+    /// A validation failure discards the WHOLE call's effects — the buffer
+    /// carries nothing from an earlier effect in the same handler either
+    /// (settled decision 10, same contract every other validated verb here
+    /// holds).
+    #[test]
+    fn show_message_failure_discards_earlier_effects_in_the_same_call() {
+        let result = run_result(
+            r#"fn on_x(ctx) {
+                ctx.effects.narrative_beat("before");
+                ctx.effects.show_message("id", "text.id", "not-a-severity", 5);
+            }"#,
+            "on_x",
+        );
+        assert!(result.is_err());
     }
 
     // ── destroy_entity (issue #1033) ─────────────────────────────────────────

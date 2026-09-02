@@ -4104,6 +4104,7 @@ fn encode_hud_state_round_trips() {
         engine_thrust: 0.0,
         phaser_firing: true,
         game_over_message: None,
+        computer_message: None,
     };
     let json = encode_hud_state(&state).expect("encode hud");
     let decoded: ViewscreenHudState = serde_json::from_str(&json).unwrap();
@@ -4120,12 +4121,56 @@ fn encode_hud_state_emits_snake_case_fields() {
         engine_thrust: 0.0,
         phaser_firing: false,
         game_over_message: None,
+        computer_message: None,
     };
     let json = encode_hud_state(&state).expect("encode hud");
     assert!(json.contains("\"heading\":0"), "got: {json}");
     assert!(json.contains("\"hull_pct\":100"), "got: {json}");
     assert!(json.contains("\"condition\":\"NOMINAL\""), "got: {json}");
     assert!(json.contains("\"red_alert\":false"), "got: {json}");
+}
+
+#[test]
+fn encode_hud_state_carries_the_computer_message_when_present() {
+    use crate::core::messages::ComputerMessageWire;
+    let state = ViewscreenHudState {
+        heading: 0,
+        hull_pct: 100,
+        condition: "NOMINAL".into(),
+        red_alert: false,
+        engine_thrust: 0.0,
+        phaser_firing: false,
+        game_over_message: None,
+        computer_message: Some(ComputerMessageWire {
+            id: "hail_debris".into(),
+            text: "world.probe.computer_message.text".into(),
+            severity: "advisory".into(),
+            station: Some("tactical".into()),
+        }),
+    };
+    let json = encode_hud_state(&state).expect("encode hud");
+    assert!(json.contains("\"computer_message\":{"), "got: {json}");
+    let decoded: ViewscreenHudState = serde_json::from_str(&json).unwrap();
+    assert_eq!(state, decoded);
+}
+
+#[test]
+fn encode_hud_state_omits_absent_computer_message() {
+    let state = ViewscreenHudState {
+        heading: 0,
+        hull_pct: 100,
+        condition: "NOMINAL".into(),
+        red_alert: false,
+        engine_thrust: 0.0,
+        phaser_firing: false,
+        game_over_message: None,
+        computer_message: None,
+    };
+    let json = encode_hud_state(&state).expect("encode hud");
+    assert!(
+        !json.contains("computer_message"),
+        "absent field must not appear at all: {json}"
+    );
 }
 
 // ── SystemBlackboard tag-shape tests (not envelope round-trips) ────────

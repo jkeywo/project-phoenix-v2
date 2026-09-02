@@ -11,15 +11,19 @@
 #
 #   t=1   `post` runs. Two objectives are posted (one mandatory, one not), a
 #         THIRD is posted and completed in the same tick, the opening beat
-#         fires, and Lyra Ascending hails the crew.
+#         fires, Lyra Ascending hails the crew, and the ship's computer shows
+#         a short `info` message (issue #1342) that outlives no one else's
+#         business — it expires on its own two seconds later.
 #   t=4   `resolve` runs. The mandatory objective completes, the optional one
 #         fails, and the author declares Lyra rescued — an outcome no amount of
 #         simulation could have inferred, which is why it is authorable at all.
+#         The ship's computer shows a second, `critical`, Station-cued message.
 #   t=6   `window_opens` fires. Its handler records the beat that says the
 #         deadline mattered.
 #   t=8   `clear_the_wreck` runs. The derelict — marked, and with no authored
 #         outcome — is removed with `destroy_entity`, and Lyra, already
-#         declared rescued, is removed too.
+#         declared rescued, is removed too. A THIRD computer message supersedes
+#         the still-active t=4 message immediately.
 #
 # Every one of those reaches the headless run report's `narrative` field and,
 # under `--format ndjson`, the inline stream — plus `marked_entity_spawned` for
@@ -39,6 +43,13 @@
 #
 # Without that pair, a scenario could remove a marked hull and leave it in the
 # timeline with a spawn and no fate at all.
+#
+# THE THREE SHOW_MESSAGE CALLS (issue #1342) exercise all three ship's-computer
+# lifecycle events on one authoritative "latest only" message: `debris_notice`
+# (t=1, 2s duration) EXPIRES on its own before `resolve` ever runs; `charge_ready`
+# (t=4, 10s duration, Station "tactical") is still active when `clear_the_wreck`
+# shows a third message at t=8, so it is SUPERSEDED rather than expiring; the
+# third message is simply SHOWN and outlives the run.
 #
 # THE PLAYER HULL IS A COURIER, not the destroyer the other probes fly, and the
 # reason is `[comms_console.ai]`: a headless run has no human on Comms, so the
@@ -124,6 +135,14 @@ fn post(ctx) {
     });
     ctx.effects.complete_objective("sound_off");
     ctx.effects.narrative_beat("probe_opening");
+    // issue #1342: a short-lived message that expires on its own, well before
+    // `resolve` ever runs.
+    ctx.effects.show_message(
+        "debris_notice",
+        "world.probe_narrative.computer_message.debris",
+        "info",
+        2,
+    );
     ctx.effects.open_comms(#{
         from: "world.probe_narrative.entity.lyra.name",
         node_fn: "lyra_hails",
@@ -151,6 +170,16 @@ fn resolve(ctx) {
     ctx.effects.complete_objective("hold_the_channel");
     ctx.effects.fail_objective("log_the_wreck");
     ctx.effects.narrative_outcome("world.probe_narrative.entity.lyra.name", "rescued");
+    // issue #1342: a long-lived, Station-cued message — still active four
+    // seconds later, at t=8, so `clear_the_wreck` supersedes it rather than
+    // its expiring on its own.
+    ctx.effects.show_message(
+        "charge_ready",
+        "world.probe_narrative.computer_message.charge",
+        "critical",
+        10,
+        "tactical",
+    );
 }
 
 fn on_window_opens(ctx) {
@@ -162,5 +191,14 @@ fn on_window_opens(ctx) {
 fn clear_the_wreck(ctx) {
     ctx.effects.destroy_entity("world.probe_narrative.entity.wreck.name");
     ctx.effects.destroy_entity("world.probe_narrative.entity.lyra.name");
+    // issue #1342: supersedes "charge_ready", which is still active. A long
+    // duration so it genuinely outlives the probe's run window rather than
+    // expiring in turn.
+    ctx.effects.show_message(
+        "wreck_cleared",
+        "world.probe_narrative.computer_message.wreck_cleared",
+        "advisory",
+        300,
+    );
 }
 """

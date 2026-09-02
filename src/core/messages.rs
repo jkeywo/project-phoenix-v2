@@ -3448,6 +3448,36 @@ pub struct ViewscreenHudState {
     /// `localiseTree` client-side. `None` while in progress.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub game_over_message: Option<String>,
+    /// The active ship's-computer message, if any (issue #1342). Rides the
+    /// existing `"hud"` channel rather than a dedicated one — this struct is
+    /// already "everything the border/status-strip needs", and the banner is
+    /// exactly one more thing on the Viewscreen overlay. `None` clears the
+    /// banner: superseded, expired, or a mission/lobby transition all produce
+    /// a HUD push with this field absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub computer_message: Option<ComputerMessageWire>,
+}
+
+/// The active ship's-computer message's Viewscreen-facing half (issue #1342).
+///
+/// Every text-shaped field is a `strings.csv` id, never localized prose
+/// (AGENTS.md rule 11) — `window.__updateHud` resolves `text` (and `station`,
+/// if present) through `localiseHostPayload`/`t()`, exactly as
+/// `game_over_message` already does. `severity` is the bare wire word
+/// ([`crate::core::computer_message::ComputerMessageSeverity::as_str`]); the
+/// client maps it to a CSS class and (for `station`) an optional badge.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ComputerMessageWire {
+    /// The author's own stable id — presentation only, never rendered.
+    pub id: String,
+    /// `strings.csv` id for the message body.
+    pub text: String,
+    /// `"info"` / `"advisory"` / `"warning"` / `"critical"`.
+    pub severity: String,
+    /// Station id for the optional badge (`"tactical"`, `"helm"`, …), if the
+    /// scenario authored one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub station: Option<String>,
 }
 
 /// A single radar blip on the Tactical console radar.

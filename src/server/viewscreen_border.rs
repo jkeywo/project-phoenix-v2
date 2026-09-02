@@ -28,8 +28,10 @@ use rand::Rng;
 
 use crate::console_bridge::{HudStateChanged, LobbyStateChanged};
 use crate::core::codec;
+use crate::core::computer_message::ActiveComputerMessage;
 use crate::core::messages::{
-    GamePhase, LobbyStatePayload, Player, ServerMessage, StationPayload, ViewscreenHudState,
+    ComputerMessageWire, GamePhase, LobbyStatePayload, Player, ServerMessage, StationPayload,
+    ViewscreenHudState,
 };
 use crate::lobby::stations_config::ShipStations;
 use crate::lobby::{CountdownTimer, OutboundMessage, Sessions, WorldResource};
@@ -629,6 +631,7 @@ fn spawn_hud_state_entity(mut commands: Commands) {
         engine_thrust: 0.0,
         phaser_firing: false,
         game_over_message: None,
+        computer_message: None,
     }));
 }
 
@@ -643,6 +646,12 @@ fn compute_hud_state(
     phaser_firing: bool,
     phase: &GamePhase,
     game_over_reason: Option<&GameOverReason>,
+    // The active ship's-computer message, already reduced to its wire shape
+    // (issue #1342). `None` clears the banner. Taken as an owned value rather
+    // than the live resource so this stays a pure fn callable from a unit
+    // test with no ECS at all — the same reason every other parameter here is
+    // a plain value, not a `Query`/`Res`.
+    computer_message: Option<ComputerMessageWire>,
 ) -> ViewscreenHudState {
     let alert = red_alert;
     let hull_pct = if hull_max > 0.0 {
@@ -675,6 +684,22 @@ fn compute_hud_state(
         engine_thrust,
         phaser_firing,
         game_over_message,
+        computer_message,
+    }
+}
+
+/// Reduce the authoritative [`crate::core::computer_message::ComputerMessageState`]
+/// to its Viewscreen wire shape (issue #1342). `text` and `station` stay
+/// `strings.csv`/authored ids — the HUD channel resolves `text` through
+/// `localiseHostPayload`/`t()` exactly as `game_over_message` already does.
+fn to_computer_message_wire(
+    state: &crate::core::computer_message::ComputerMessageState,
+) -> ComputerMessageWire {
+    ComputerMessageWire {
+        id: state.id.clone(),
+        text: state.text.clone(),
+        severity: state.severity.as_str().to_string(),
+        station: state.station.as_ref().map(|s| s.0.clone()),
     }
 }
 
@@ -689,6 +714,7 @@ fn recompute_hud_state(
     physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
     last_input_q: Query<&crate::ship_plugin::LastHelmInput, With<crate::server_app::LocalShip>>,
     beam_q: Query<&crate::console::weapons::ActiveBeam, With<crate::server_app::LocalShip>>,
+    computer_message: Option<Res<ActiveComputerMessage>>,
     mut hud_q: Query<&mut ViewscreenHud>,
 ) {
     let Some(phase) = phase else { return };
@@ -707,6 +733,10 @@ fn recompute_hud_state(
     // the HUD's "phasers are firing" hum is a ship-level state, not a per-bank
     // one, so two live broadsides read the same as one.
     let phaser_firing = beam_q.single().map(|b| b.is_firing()).unwrap_or(false);
+    let computer_message_wire = computer_message
+        .as_deref()
+        .and_then(|m| m.current.as_ref())
+        .map(to_computer_message_wire);
     let next = compute_hud_state(
         red_alert,
         &physics,
@@ -716,6 +746,7 @@ fn recompute_hud_state(
         phaser_firing,
         phase.get(),
         game_over_reason.as_deref(),
+        computer_message_wire,
     );
     for mut hud in hud_q.iter_mut() {
         if hud.0 != next {
@@ -740,7 +771,10 @@ fn push_game_over_hud_state(
         .map(|h| (h.0.total_current(), h.0.total_max()))
         .unwrap_or((100.0, 100.0));
     // Engine thrust and phaser fire are both forced off at game over so the
-    // looping SFX stop with the sim.
+    // looping SFX stop with the sim. The computer-message banner is forced
+    // off too (issue #1342 AC2: mission end clears it) — this push does not
+    // wait on `clear_active_computer_message`'s own `ResMut` to land first,
+    // it simply never shows one on the final HUD state.
     let next = compute_hud_state(
         red_alert,
         &physics,
@@ -750,6 +784,7 @@ fn push_game_over_hud_state(
         false,
         &GamePhase::GameOver,
         game_over_reason.as_deref(),
+        None,
     );
     for mut hud in hud_q.iter_mut() {
         hud.0 = next.clone();
@@ -946,6 +981,7 @@ mod tests {
             false,
             &GamePhase::InProgress,
             None,
+            None,
         );
         assert_eq!(state.heading, 0);
         assert_eq!(state.hull_pct, 100);
@@ -973,6 +1009,7 @@ mod tests {
             true,
             &GamePhase::InProgress,
             None,
+            None,
         );
         assert_eq!(state.heading, 90);
         assert_eq!(state.hull_pct, 50);
@@ -993,6 +1030,7 @@ mod tests {
             0.5,
             false,
             &GamePhase::InProgress,
+            None,
             None,
         );
         assert_eq!(state.engine_thrust, 0.5);
@@ -1015,6 +1053,7 @@ mod tests {
             false,
             &GamePhase::GameOver,
             Some(&reason),
+            None,
         );
         assert_eq!(
             state.game_over_message.as_deref(),
@@ -1036,11 +1075,76 @@ mod tests {
             false,
             &GamePhase::GameOver,
             Some(&reason),
+            None,
         );
         assert_eq!(
             state.game_over_message.as_deref(),
             Some("VICTORY: All enemies eliminated.")
         );
+    }
+
+    // ── computer_message passthrough (issue #1342) ────────────────────
+
+    #[test]
+    fn compute_hud_state_carries_the_active_computer_message() {
+        let physics = ShipPhysics::default();
+        let msg = ComputerMessageWire {
+            id: "hail_debris".into(),
+            text: "world.probe.computer_message.text".into(),
+            severity: "advisory".into(),
+            station: Some("tactical".into()),
+        };
+        let state = compute_hud_state(
+            false,
+            &physics,
+            100.0,
+            100.0,
+            0.0,
+            false,
+            &GamePhase::InProgress,
+            None,
+            Some(msg.clone()),
+        );
+        assert_eq!(state.computer_message, Some(msg));
+    }
+
+    #[test]
+    fn to_computer_message_wire_reduces_the_authoritative_state() {
+        use crate::core::computer_message::{ComputerMessageSeverity, ComputerMessageState};
+        use crate::core::messages::StationId;
+        let state = ComputerMessageState {
+            id: "charge_ready".into(),
+            text: "world.probe.computer_message.charge".into(),
+            severity: ComputerMessageSeverity::Critical,
+            station: Some(StationId("tactical".into())),
+            shown_tick: 0,
+            expires_tick: 480,
+        };
+        let wire = to_computer_message_wire(&state);
+        assert_eq!(wire.id, "charge_ready");
+        assert_eq!(wire.text, "world.probe.computer_message.charge");
+        assert_eq!(wire.severity, "critical");
+        assert_eq!(wire.station.as_deref(), Some("tactical"));
+    }
+
+    #[test]
+    fn game_over_hud_push_never_carries_a_computer_message() {
+        // AC2: mission end clears the banner. The final push forces `None`
+        // regardless of what the resource holds, rather than racing
+        // `clear_active_computer_message`'s own `OnEnter` system.
+        let physics = ShipPhysics::default();
+        let state = compute_hud_state(
+            false,
+            &physics,
+            0.0,
+            100.0,
+            0.0,
+            false,
+            &GamePhase::GameOver,
+            None,
+            None,
+        );
+        assert!(state.computer_message.is_none());
     }
 
     // ── yaw_to_compass_bearing ───────────────────────────────────────

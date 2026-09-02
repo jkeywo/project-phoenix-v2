@@ -109,11 +109,17 @@ pub enum NarrativeKind {
     MarkedEntityRescued,
     /// A marked entity was left behind. Authored.
     MarkedEntityAbandoned,
-    /// The ship's computer posted a message. **No emitter yet** — the
-    /// computer-message system is a later slice of PRD #1337.
+    /// The ship's computer showed a timed message (issue #1342). `id` is the
+    /// scenario's own stable message id; `detail` carries the message's
+    /// `text` String Id, `severity`, `duration_secs`, and an optional
+    /// `station`. Emitted by `crate::narrative::tick_computer_message`.
     ComputerMessagePosted,
-    /// A posted computer message was acknowledged or retired. **No emitter
-    /// yet**, same slice as [`Self::ComputerMessagePosted`].
+    /// The active computer message stopped showing — superseded by a newer
+    /// one or expired on simulation time (issue #1342). `id` is the message
+    /// that stopped; `detail["reason"]` is `"superseded"` (plus
+    /// `detail["superseded_by"]`, the new message's id) or `"expired"`. A
+    /// mission-end or lobby-return clear is NOT one of these — see
+    /// `crate::core::computer_message::ActiveComputerMessage::clear`.
     ComputerMessageCleared,
     /// One row of the structured post-mission report moved. **No emitter yet**
     /// — the scored report is a later slice of PRD #1337. Deliberately kept

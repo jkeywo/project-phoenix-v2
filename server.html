@@ -480,6 +480,47 @@
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
 
+    /* ── Ship's-computer message banner (issue #1342) ────────────────────
+       Top-centre, below the existing cap-top frame (56px tall) and clear of
+       the bottom status strip and #game-over-overlay. z-index 6: above the
+       border pieces (5), below the frame's own overlay (15). */
+    .vs-computer-message {
+      position: absolute;
+      top: 64px; left: 50%; transform: translateX(-50%);
+      z-index: 6;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      max-width: min(560px, 70vw);
+      padding: 7px 20px;
+      background: rgba(6, 12, 16, 0.78);
+      border: 1px solid var(--vs-signal);
+      border-radius: 2px;
+      pointer-events: none;
+      text-align: center;
+    }
+    .vs-computer-message.shown { display: flex; }
+    .vs-computer-message-source {
+      font-family: "Chakra Petch", system-ui, sans-serif;
+      font-size: 8px; font-weight: 600;
+      letter-spacing: 0.26em;
+      text-transform: uppercase;
+      color: var(--vs-text);
+    }
+    .vs-computer-message-text {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 12px; line-height: 1.45;
+      color: var(--vs-signal);
+    }
+    /* Severity treatment — border + text tint, one word per severity. */
+    .vs-computer-message.sev-advisory { border-color: #d8c85f; }
+    .vs-computer-message.sev-advisory .vs-computer-message-text { color: #d8c85f; }
+    .vs-computer-message.sev-warning { border-color: #ff9a3d; }
+    .vs-computer-message.sev-warning .vs-computer-message-text { color: #ff9a3d; }
+    .vs-computer-message.sev-critical { border-color: var(--vs-alert); }
+    .vs-computer-message.sev-critical .vs-computer-message-text { color: var(--vs-alert); }
+
     /* ── AI chatter widget (bottom-left) ──────────────────────── */
     #chatter-container {
       position: absolute;
@@ -1130,6 +1171,12 @@
         <div class="vs-piece vs-cap bottom"></div>
         <!-- Ship designation (top-centre, above cap) -->
         <div class="vs-designation" id="hud-designation" data-i18n="server.hud_designation">PHOENIX</div>
+        <!-- Ship's-computer message banner (issue #1342): shown/hidden and
+             styled by severity from window.__updateHud's s.computer_message. -->
+        <div class="vs-computer-message" id="hud-computer-message">
+          <div class="vs-computer-message-source"><span data-i18n="server.computer_message.label">SHIP'S COMPUTER</span><span id="hud-computer-message-station"></span></div>
+          <div class="vs-computer-message-text" id="hud-computer-message-text"></div>
+        </div>
         <!-- 4-slot status strip (bottom-centre, inside cap-bottom) -->
         <div class="vs-status-strip">
           <div class="vs-status-slot"><div class="vs-slot-label" data-i18n="server.hud_nav">Nav</div><div class="vs-slot-value" id="v-nav">—</div></div>
@@ -1665,6 +1712,31 @@
     if (s.ship_name) {
       const desig = document.getElementById('hud-designation');
       if (desig) desig.textContent = s.ship_name;
+    }
+    // ── Ship's-computer message banner (issue #1342) ────────────────────────
+    // `s.computer_message.text` has already crossed localiseTree() in the
+    // host-channel dispatcher (issue #949) — it is the resolved display
+    // string here, exactly like `game_over_message` below, because both ride
+    // the same "hud" channel payload. `severity` and `station` are bare wire
+    // words (never string ids themselves) and are resolved with t() here.
+    const cmBanner  = document.getElementById('hud-computer-message');
+    const cmText    = document.getElementById('hud-computer-message-text');
+    const cmStation = document.getElementById('hud-computer-message-station');
+    if (cmBanner && cmText) {
+      const cm = s.computer_message;
+      if (cm) {
+        cmText.textContent = cm.text;
+        cmBanner.className = 'vs-computer-message shown sev-' + cm.severity;
+        if (cmStation) {
+          cmStation.textContent = cm.station
+            ? (' · ' + t('station.' + cm.station + '.name'))
+            : '';
+        }
+      } else {
+        cmBanner.className = 'vs-computer-message';
+        cmText.textContent = '';
+        if (cmStation) cmStation.textContent = '';
+      }
     }
     // ── Game-over overlay ───────────────────────────────────────────────────
     // The message is the scenario's `[[trigger.action]] message`, authored as a

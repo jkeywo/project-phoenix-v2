@@ -2996,6 +2996,11 @@ pub(crate) struct EffectQueuesOut<'a> {
     /// `DestroyEntity` leaves behind, on their way to
     /// `Messages<NarrativeEvent>`.
     pub narrative: &'a mut Vec<crate::core::narrative::NarrativeRequest>,
+    /// Drained by `crate::narrative::tick_computer_message` (issue #1342): a
+    /// scenario's `ctx.effects.show_message(..)`, already validated at the
+    /// script boundary, on its way to becoming the authoritative
+    /// `ActiveComputerMessage` and a `shown`/`superseded` narrative pair.
+    pub computer_message: &'a mut Vec<crate::core::computer_message::ComputerMessageRequest>,
 }
 
 /// The per-owner [`EffectQueue`] resources an effect-applying SYSTEM needs,
@@ -3017,15 +3022,19 @@ pub(crate) struct EffectQueues<'w, 's> {
     civilian_orders: Option<ResMut<'w, EffectQueue<crate::civilian::PendingCivilianOrder>>>,
     weapons_holds: Option<ResMut<'w, EffectQueue<(String, bool)>>>,
     narrative: Option<ResMut<'w, EffectQueue<crate::core::narrative::NarrativeRequest>>>,
+    computer_message:
+        Option<ResMut<'w, EffectQueue<crate::core::computer_message::ComputerMessageRequest>>>,
     condition_fallback: Local<'s, Vec<crate::infrastructure::ConditionAdjustment>>,
     capacity_fallback: Local<'s, Vec<crate::infrastructure::CapacityAdjustment>>,
     civilian_orders_fallback: Local<'s, Vec<crate::civilian::PendingCivilianOrder>>,
     weapons_holds_fallback: Local<'s, Vec<(String, bool)>>,
     narrative_fallback: Local<'s, Vec<crate::core::narrative::NarrativeRequest>>,
+    computer_message_fallback:
+        Local<'s, Vec<crate::core::computer_message::ComputerMessageRequest>>,
 }
 
 impl EffectQueues<'_, '_> {
-    /// Borrow the four queues as an [`EffectQueuesOut`] to lend to the applier,
+    /// Borrow the queues as an [`EffectQueuesOut`] to lend to the applier,
     /// falling back to the per-queue `Local` sink when the resource is absent.
     pub(crate) fn out(&mut self) -> EffectQueuesOut<'_> {
         EffectQueuesOut {
@@ -3048,6 +3057,10 @@ impl EffectQueues<'_, '_> {
             narrative: match &mut self.narrative {
                 Some(q) => &mut q.0,
                 None => &mut self.narrative_fallback,
+            },
+            computer_message: match &mut self.computer_message {
+                Some(q) => &mut q.0,
+                None => &mut self.computer_message_fallback,
             },
         }
     }
@@ -3228,6 +3241,31 @@ pub(crate) fn apply_dispatch_result(
                         id: entity,
                         entity_uuid,
                     });
+            }
+
+            // Buffered exactly like the two arms above, and for the same
+            // reason: no name resolution needed (a Station id is not an
+            // entity name), and the applier holds no message writer to log
+            // the shown/superseded pair itself.
+            // `crate::narrative::tick_computer_message` turns this into the
+            // authoritative `ActiveComputerMessage` state and its narrative
+            // events on the same tick.
+            ActionCmd::ShowComputerMessage {
+                id,
+                text,
+                severity,
+                duration_secs,
+                station,
+            } => {
+                effects.computer_message.push(
+                    crate::core::computer_message::ComputerMessageRequest {
+                        id,
+                        text,
+                        severity,
+                        duration_secs,
+                        station,
+                    },
+                );
             }
 
             ActionCmd::ApplyModifier {

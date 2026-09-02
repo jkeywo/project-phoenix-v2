@@ -70,3 +70,31 @@ entities:
       owner_role: viewscreen-requester
       protected: true
       must_not_be: [given an additional default-camera control]
+
+  - mechanic: ships-computer-message
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Ship's-Computer Message
+      summary: A scenario shows one timed, severity-styled message from the ship's computer as a top-centre Viewscreen banner — a stable id, a localized text String Id, a severity (info/advisory/warning/critical), a positive simulation-time duration, and an optional Station cue. Only the latest message is ever active; a new one supersedes whatever is showing immediately, with no queue and no resumption of a superseded message once the newer one is gone.
+      rationale:
+        - "Viewscreen-only and presentation-only by design (issue #1342): the message never reaches phone consoles, never replaces a persistent Objective, and never feeds AI — it rides the same 'hud' host channel as the border/status-strip readout, which phone consoles do not subscribe to."
+        - "Pause freezes the countdown for free: expiry is a SimTick comparison, and SimTick does not advance while the simulation is paused — no separate pause-aware timer to keep in sync."
+        - "Falling Skyway uses this sparingly per the approved plan: debris assessment/interception, civilian discovery/transport availability, charge safety, and operation completion — not a running commentary."
+    game_design:
+      architecture_links: [narrative-event-emitter]
+      participating_roles: [viewscreen-requester]
+      resolution: host-authoritative
+      outputs: [ships-computer-message-information]
+
+  - information: ships-computer-message-information
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Ship's-Computer Message Information
+      summary: The bridge's shared Viewscreen shows the active computer message's localized text, severity treatment, and optional Station badge below the existing frame, without obscuring the bottom status strip or the mission-report overlay.
+    game_design:
+      enforcement_links: [narrative-event-emitter]
+      visibility: team-visible
+      permitted_viewers: [viewscreen-requester]
+      architectural_enforcement: [ActiveComputerMessage records the one authoritative current message; ComputerMessageWire rides the existing HUD channel to the Viewscreen overlay only]

@@ -348,6 +348,24 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 StateClass::Presentation,
                 "narrative-event-stream",
             )
+            // The `show_message(..)` request queue (issue #1342): pushed by the
+            // shared dispatch applier, drained in full every tick by
+            // `narrative::tick_computer_message` — the same `ClearedAtFold`
+            // contract every other `EffectQueue<T>` carries.
+            .declare_state::<
+                crate::effect_queue::EffectQueue<
+                    crate::core::computer_message::ComputerMessageRequest,
+                >,
+            >(StateClass::ClearedAtFold, "digest-exclusion-classes")
+            // Presentation: the authoritative "one message at a time" state
+            // (issue #1342). Viewscreen-only and presentation-only by the
+            // issue's own contract — nothing in the fixed tick branches on a
+            // message's text or severity, and neither `sim_digest` nor
+            // `snapshot` walks it.
+            .declare_state::<crate::core::computer_message::ActiveComputerMessage>(
+                StateClass::Presentation,
+                "computer-message-state",
+            )
             // Presentation: the host per-Station attention surface (issue #1101);
             // it drives which tab asks for attention, never what the tick computes.
             .declare_state::<StationImportanceRes>(
@@ -816,6 +834,17 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         .init_resource::<
             crate::effect_queue::EffectQueue<crate::core::narrative::NarrativeRequest>,
         >()
+        // The ship's-computer message state and its request queue (issue
+        // #1342). Registered unconditionally for the same reason the
+        // narrative queue above is: the emitter runs on every target, and
+        // only the headless collection of its narrative events is
+        // conditional.
+        .init_resource::<crate::core::computer_message::ActiveComputerMessage>()
+        .init_resource::<
+            crate::effect_queue::EffectQueue<
+                crate::core::computer_message::ComputerMessageRequest,
+            >,
+        >()
         .init_resource::<CaptainPriorityBoost>()
         // The sim's one source of randomness. `init_resource` draws an OS seed, so
         // an unconfigured app (browser host, unit tests) behaves as it always did;
@@ -906,9 +935,28 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             (
                 crate::narrative::emit_scenario_narrative,
                 crate::narrative::emit_authored_and_marked_entity_narrative,
+                // The ship's-computer message (issue #1342): applies this
+                // tick's `show_message(..)` requests, checks the active
+                // message's simulation-time expiry, and emits the
+                // shown/superseded/expired narrative trio. Chained after the
+                // other two so a message authored by the SAME trigger that
+                // also posts a beat this tick reports in a stable order.
+                crate::narrative::tick_computer_message,
             )
                 .chain()
                 .after(crate::sim_sets::SimSet::Broadcast),
+        )
+        // Clear the active ship's-computer message on the two transitions the
+        // issue names: mission end and a return to the lobby. Not a narrative
+        // beat — the shown/superseded/expired trio is the whole of AC5,
+        // and this is neither.
+        .add_systems(
+            OnEnter(GamePhase::GameOver),
+            crate::narrative::clear_active_computer_message,
+        )
+        .add_systems(
+            OnEnter(GamePhase::Lobby),
+            crate::narrative::clear_active_computer_message,
         )
         .insert_resource(GameOverReason(None, None))
         .add_systems(

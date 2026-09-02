@@ -472,6 +472,87 @@ mod tests {
     }
 
     #[test]
+    fn three_legs_fold_into_one_link_and_each_reports_its_own_departures() {
+        // What `phoenix-host` builds since issue #1353: local panes, the direct
+        // LAN accept leg and the cloud relay, folded through `Box<dyn>` into the
+        // one `NativeTransportLink` resource. Two claims worth pinning: every
+        // leg's events reach the simulation (a fold that dropped one would leave
+        // a whole crew silently unable to act), and a `Disconnected` carries the
+        // token of whoever's socket actually died — the legs keep separate
+        // connection tables, so a departure on one must not be attributed to a
+        // peer on another.
+        let panes = LoopbackHandle::default();
+        let direct = LoopbackHandle::default();
+        let relay = LoopbackHandle::default();
+
+        let mut app = App::new();
+        app.add_message::<InboundMessage>()
+            .add_message::<OutboundMessage>()
+            .add_message::<PlayerDisconnected>()
+            .add_plugins(NativeTransportPlugin);
+        let mut composed: Option<Box<dyn NativeTransport>> = None;
+        for leg in [
+            Box::new(panes.transport()) as Box<dyn NativeTransport>,
+            Box::new(direct.transport()),
+            Box::new(relay.transport()),
+        ] {
+            composed = Some(match composed {
+                Some(existing) => Box::new(PairedTransport::new(existing, leg)),
+                None => leg,
+            });
+        }
+        app.insert_resource(NativeTransportLink(composed.expect("three legs")));
+
+        for (handle, token) in [
+            (&panes, "pane-token"),
+            (&direct, "lan-token"),
+            (&relay, "cloud-token"),
+        ] {
+            handle.send(
+                token,
+                ClientMessage::Identify {
+                    token: token.to_string(),
+                    name: "Ada".to_string(),
+                },
+            );
+        }
+        direct.disconnect("lan-token");
+        app.update();
+
+        assert_eq!(
+            inbound_tokens(&mut app),
+            vec![
+                "pane-token".to_string(),
+                "lan-token".to_string(),
+                "cloud-token".to_string()
+            ],
+            "every leg's traffic reaches the simulation, in leg order"
+        );
+        let messages = app
+            .world()
+            .resource::<bevy::ecs::message::Messages<PlayerDisconnected>>();
+        let mut cursor = messages.get_cursor();
+        let gone: Vec<String> = cursor.read(messages).map(|m| m.token.clone()).collect();
+        assert_eq!(
+            gone,
+            vec!["lan-token".to_string()],
+            "only the leg whose socket died reports a departure"
+        );
+
+        // …and one outbound message is offered to all three, so each decides for
+        // itself whether the resolved `Target` names anyone it is carrying.
+        app.world_mut().write_message(OutboundMessage {
+            target: Target::All,
+            msg: ServerMessage::GameStarted,
+            delivery: DeliveryClass::Reliable,
+        });
+        app.update();
+        for handle in [&panes, &direct, &relay] {
+            assert_eq!(handle.drain_outbound().len(), 1);
+        }
+    }
+
+    #[test]
     fn a_host_with_no_transport_still_drains_its_outbox() {
         let mut app = App::new();
         app.add_message::<InboundMessage>()

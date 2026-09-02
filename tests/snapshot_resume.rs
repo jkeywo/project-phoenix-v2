@@ -3867,6 +3867,101 @@ fn a_restored_game_over_reruns_its_entry_effects() {
     );
 }
 
+/// Issue #1344: the post-mission report survives a capture/restore, rows and
+/// order and hidden scores intact.
+///
+/// It has to. `MissionReport` is authoritative state a scenario SCRIPT writes
+/// over the course of a mission, and the rows written before a snapshot are
+/// facts about what the crew did — a resume that came back with an empty report
+/// would have silently un-rescued the hauler. The order is content too, so this
+/// pins the sequence and not just the set.
+#[test]
+fn a_restored_run_keeps_its_post_mission_report() {
+    use project_phoenix::core::report::{MissionReport, ReportRow, ReportRowState};
+
+    let row = |id: &str, state: ReportRowState, score: i32| ReportRow {
+        id: id.to_string(),
+        heading_id: format!("world.probe.report.{id}.heading"),
+        outcome_id: format!("world.probe.report.{id}.{}", state.as_str()),
+        state,
+        score,
+    };
+
+    let mut live = duel();
+    step(&mut live, CAPTURE_AT);
+    {
+        let mut report = live.world_mut().resource_mut::<MissionReport>();
+        report.set_row(row("lyra", ReportRowState::Saved, 6));
+        report.set_row(row("traffic", ReportRowState::Partial, -2));
+    }
+
+    let payload = capture(live.world());
+    assert_eq!(
+        payload
+            .mission_report
+            .iter()
+            .map(|r| r.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["lyra", "traffic"],
+        "the capture records the rows in authored order"
+    );
+
+    let mut resumed = boot_to_restore_point(&args(DUEL, ("cruiser", "destroyer")), &payload);
+    assert!(
+        resumed.world().resource::<MissionReport>().is_empty(),
+        "the fresh app has recorded nothing of its own yet"
+    );
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+
+    let restored = resumed.world().resource::<MissionReport>();
+    assert_eq!(restored.rows().len(), 2);
+    assert_eq!(restored.rows()[0].id, "lyra");
+    assert_eq!(restored.rows()[0].state, ReportRowState::Saved);
+    assert_eq!(restored.rows()[0].score, 6);
+    assert_eq!(
+        restored.rows()[0].heading_id,
+        "world.probe.report.lyra.heading"
+    );
+    assert_eq!(restored.rows()[1].id, "traffic");
+    assert_eq!(restored.rows()[1].state, ReportRowState::Partial);
+    // The hidden total is a fold of the restored rows, so it comes back too.
+    assert_eq!(restored.total(), 4);
+}
+
+/// The empty half, which is the one a stale resource would break: restoring a
+/// capture taken BEFORE any row was written must clear a report the resuming
+/// world had recorded on its own, not leave it standing.
+#[test]
+fn a_restore_clears_a_report_the_captured_tick_did_not_have() {
+    use project_phoenix::core::report::{MissionReport, ReportRow, ReportRowState};
+
+    let mut live = duel();
+    step(&mut live, CAPTURE_AT);
+    let payload = capture(live.world());
+    assert!(payload.mission_report.is_empty());
+
+    let mut resumed = boot_to_restore_point(&args(DUEL, ("cruiser", "destroyer")), &payload);
+    resumed
+        .world_mut()
+        .resource_mut::<MissionReport>()
+        .set_row(ReportRow {
+            id: "ghost".into(),
+            heading_id: "world.probe.report.ghost.heading".into(),
+            outcome_id: "world.probe.report.ghost.lost".into(),
+            state: ReportRowState::Lost,
+            score: -3,
+        });
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    assert!(
+        resumed.world().resource::<MissionReport>().is_empty(),
+        "the restored tick had recorded nothing, so neither should the resumed world"
+    );
+}
+
 /// The other half of #934's fix: a save button is a no-op outside a run, and
 /// says so, rather than recording a `Lobby`/`Loading` phase a restore would
 /// have nothing meaningful to re-enter.

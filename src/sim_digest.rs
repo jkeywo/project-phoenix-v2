@@ -50,7 +50,9 @@
 //! #907), the identity analogue of the same thing, so a divergent *spawn
 //! count* is caught the tick it happens rather than on the tick the next id is
 //! minted; `GamePhase`; `GameOverReason` (both the reason string
-//! and the `Outcome`); `CaptainPriorityBoost`'s every `(scope, objective)` pair
+//! and the `Outcome`); `MissionReport`'s every row in authored order, all five
+//! fields including the hidden score (issue #1344);
+//! `CaptainPriorityBoost`'s every `(scope, objective)` pair
 //! in sorted key order; and the `WorldResource` projection described below.
 //!
 //! **Folded (`EntityUuid` namespace, in `FoldKey` order):** every entity
@@ -526,6 +528,27 @@ fn fold_run_scope(world: &World, mut acc: u64) -> u64 {
             fold_str(acc, outcome.map_or("\u{0}none", |o| o.as_str()))
         }
         None => fold_str(acc, "game-over-reason:absent"),
+    };
+
+    // The structured post-mission report (issue #1344). Every field of every
+    // row, in the report's own authored order — never sorted, because the ORDER
+    // is authored content: two instances that agree on the rows but disagree on
+    // their order would show two different reports and must not share a digest.
+    // The hidden score folds like everything else; it is authoritative state
+    // that merely never reaches a player.
+    acc = match world.get_resource::<crate::core::report::MissionReport>() {
+        Some(report) => {
+            let mut acc = fold_u64(acc, report.rows().len() as u64);
+            for row in report.rows() {
+                acc = fold_str(acc, &row.id);
+                acc = fold_str(acc, &row.heading_id);
+                acc = fold_str(acc, &row.outcome_id);
+                acc = fold_str(acc, row.state.as_str());
+                acc = fold_i64(acc, i64::from(row.score));
+            }
+            acc
+        }
+        None => fold_str(acc, "mission-report:absent"),
     };
 
     // Sorted by scope key, never HashMap iteration order. `boosts_sorted`

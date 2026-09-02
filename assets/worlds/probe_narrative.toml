@@ -17,20 +17,32 @@
 #   t=4   `resolve` runs. The mandatory objective completes, the optional one
 #         fails, and the author declares Lyra rescued — an outcome no amount of
 #         simulation could have inferred, which is why it is authorable at all.
-#         The ship's computer shows a second, `critical`, Station-cued message.
+#         The ship's computer shows a second, `critical`, Station-cued message,
+#         and the mission's ONE post-mission report row (issue #1344) is
+#         written on the tick her fate is decided rather than at the ending.
+#   t=5   The scheduled restatement re-writes that row identically. Nothing
+#         moved, so it produces NO second `report_row_updated` beat — the rate
+#         guard is the whole reason the row is re-stated here.
 #   t=6   `window_opens` fires. Its handler records the beat that says the
 #         deadline mattered.
 #   t=8   `clear_the_wreck` runs. The derelict — marked, and with no authored
 #         outcome — is removed with `destroy_entity`, and Lyra, already
 #         declared rescued, is removed too. A THIRD computer message supersedes
 #         the still-active t=4 message immediately.
+#   t=10  `close_the_probe` runs. The run ends, DECLARED a defeat and still
+#         report-bearing: `reported` outranks the declaration, the report is
+#         finalized (one `report_finalized` beat, and the last word the
+#         timeline says), and the ending clears the still-active t=8 computer
+#         message — deliberately NOT a beat, because the shown / superseded /
+#         expired trio does not include a mission-end clear.
 #
 # Every one of those reaches the headless run report's `narrative` field and,
-# under `--format ndjson`, the inline stream — plus `marked_entity_spawned` for
-# each marked hull on the tick it enters the world, and `comms_opened` on the
-# tick Lyra's hail lands. The unmarked player hull produces no entity beat at
-# all: marking is the gate, and this world proves it by leaving the player
-# unmarked.
+# under `--format ndjson`, the inline stream — except `report_row_updated`,
+# which is folded but never streamed because a re-scored row is a rate — plus
+# `marked_entity_spawned` for each marked hull on the tick it enters the world,
+# and `comms_opened` on the tick Lyra's hail lands. The unmarked player hull
+# produces no entity beat at all: marking is the gate, and this world proves it
+# by leaving the player unmarked.
 #
 # THE TWO REMOVALS AT t=8 ARE THE POINT OF THE DERELICT. A scripted
 # `destroy_entity` writes no combat event — an authorial removal is not a kill,
@@ -49,7 +61,9 @@
 # (t=1, 2s duration) EXPIRES on its own before `resolve` ever runs; `charge_ready`
 # (t=4, 10s duration, Station "tactical") is still active when `clear_the_wreck`
 # shows a third message at t=8, so it is SUPERSEDED rather than expiring; the
-# third message is simply SHOWN and outlives the run.
+# third message is simply SHOWN, outlives its own 300s duration, and is cleared
+# without a beat when the mission ends at t=10. So the timeline carries three
+# `computer_message_posted` and exactly TWO `computer_message_cleared`.
 #
 # THE PLAYER HULL IS A COURIER, not the destroyer the other probes fly, and the
 # reason is `[comms_console.ai]`: a headless run has no human on Comms, so the
@@ -111,6 +125,7 @@ setup = """
 on_timer(1, "post");
 on_timer(4, "resolve");
 on_timer(8, "clear_the_wreck");
+on_timer(10, "close_the_probe");
 on_deadline("window_opens", "on_window_opens");
 
 // The opening. Two objectives, one authored beat, one hail.
@@ -180,6 +195,28 @@ fn resolve(ctx) {
         10,
         "tactical",
     );
+    // The post-mission report row (issue #1344), written on the tick her fate
+    // is decided rather than at the ending — which is what makes an
+    // inapplicable row an ABSENT row rather than an invented one.
+    ctx.effects.report_row(#{
+        id: "lyra",
+        heading: "world.probe_narrative.report.lyra.heading",
+        outcome: "world.probe_narrative.report.lyra.saved",
+        state: "saved",
+        score: 6,
+    });
+    // Re-stated identically on the next tick. Nothing moved, so the timeline
+    // must carry ONE report_row_updated beat and not two — the rate guard the
+    // ndjson stream policy exists for.
+    ctx.schedule.after(1, |ctx| {
+        ctx.effects.report_row(#{
+            id: "lyra",
+            heading: "world.probe_narrative.report.lyra.heading",
+            outcome: "world.probe_narrative.report.lyra.saved",
+            state: "saved",
+            score: 6,
+        });
+    });
 }
 
 fn on_window_opens(ctx) {
@@ -200,5 +237,12 @@ fn clear_the_wreck(ctx) {
         "advisory",
         300,
     );
+}
+
+// The ending, DECLARED a defeat and still report-bearing (issue #1344). The
+// declaration is deliberate: the run classifies `reported`, not `defeat`, and
+// the flag it outranks is still latched, still folded and still on the wire.
+fn close_the_probe(ctx) {
+    ctx.effects.game_over("world.probe_narrative.game_over.closed", "defeat");
 }
 """

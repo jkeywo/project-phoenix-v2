@@ -463,9 +463,9 @@ pub(crate) struct WorldSetupBroadcast {
     sent: bool,
 }
 
-/// Broadcast `GameOver { reason, outcome }` to all players when the game enters
-/// the GameOver phase. Reads both halves of the `GameOverReason` resource and
-/// resets the REASON to `None` after broadcast.
+/// Broadcast `GameOver { reason, outcome, report }` to all players when the
+/// game enters the GameOver phase. Reads both halves of the `GameOverReason`
+/// resource and resets the REASON to `None` after broadcast.
 ///
 /// Only the reason is taken. `.1` is read and left in place, for two separate
 /// reasons that happen to agree: the headless exit report reads it after the
@@ -473,13 +473,63 @@ pub(crate) struct WorldSetupBroadcast {
 /// `state_digest` folds BOTH halves — clearing the outcome here would move
 /// every digest of a run that reaches `GameOver` inside its window, for no
 /// gain. `Outcome` is `Copy`, so reading it needs no mutation at all.
+///
+/// The post-mission report (issue #1344) is read the same way and likewise left
+/// in place: it is authoritative state the digest folds and the headless report
+/// reads after the run. What goes on the wire is the SCORE-FREE projection —
+/// see [`crate::core::messages::GameOverReportRow`] for why the number stops
+/// here.
+///
+/// This is also where [`crate::core::narrative::NarrativeKind::ReportFinalized`]
+/// is emitted, and only
+/// when the report has rows: an ending that authored none is not a
+/// report-bearing ending, and beating "finalized" over an empty report would
+/// tell an after-action reader a report existed. `OnEnter` runs before the
+/// telemetry collectors in `Last` on the same frame, so the beat is stamped
+/// with the tick the run ended on.
 pub(crate) fn on_game_over_enter(
     mut game_over_reason: ResMut<GameOverReason>,
+    mission_report: Option<Res<crate::core::report::MissionReport>>,
     mut outbox: ResMut<SimOutbox>,
+    mut narrative: MessageWriter<crate::core::narrative::NarrativeEvent>,
 ) {
     let outcome = game_over_reason.1.map(|o| o.as_str().to_string());
     let reason = game_over_reason.0.take().unwrap_or_default();
-    outbox.push_reliable((Target::All, ServerMessage::GameOver { reason, outcome }));
+
+    // Score-free by construction: the wire row has no field to put one in.
+    let report: Vec<crate::core::messages::GameOverReportRow> = mission_report
+        .as_deref()
+        .map(|report| {
+            report
+                .rows()
+                .iter()
+                .map(|row| crate::core::messages::GameOverReportRow {
+                    id: row.id.clone(),
+                    heading: row.heading_id.clone(),
+                    outcome: row.outcome_id.clone(),
+                    state: row.state.as_str().to_string(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if let Some(mission_report) = mission_report.as_deref() {
+        if !mission_report.is_empty() {
+            narrative.write(crate::mission_report::finalized_event(
+                &reason,
+                mission_report,
+            ));
+        }
+    }
+
+    outbox.push_reliable((
+        Target::All,
+        ServerMessage::GameOver {
+            reason,
+            outcome,
+            report,
+        },
+    ));
 }
 
 /// Reset all change-detection caches when entering InProgress so the first

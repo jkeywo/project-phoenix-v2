@@ -578,6 +578,14 @@ pub fn build_report(app: &mut App, args: &HeadlessArgs, wall_seconds: f64) -> Ru
     // site, whatever a scenario declared, or `None` for an undeclared scripted
     // end (the classifier defaults that to victory).
     let outcome_flag = game_over_res.1;
+    // The structured post-mission report (issue #1344), read off the resource
+    // after the run exactly as the outcome flag is. Cloned rather than borrowed
+    // because `build_outcome_report` below takes `&mut App`.
+    let mission_report = app
+        .world()
+        .get_resource::<crate::core::report::MissionReport>()
+        .cloned()
+        .unwrap_or_default();
     let entity_count = app.world().entities().len() as usize;
 
     // Closing-window landed-damage rates per attacker uuid, and a snapshot of
@@ -625,6 +633,7 @@ pub fn build_report(app: &mut App, args: &HeadlessArgs, wall_seconds: f64) -> Ru
         &damage_by_ship,
         &closing_rates,
         &entity_factions,
+        mission_report,
     );
 
     // The AI doctrine-pool surface (issue #1149): a one-shot read-only projection
@@ -787,6 +796,10 @@ fn build_outcome_report(
     damage_by_ship: &BTreeMap<String, DamageLedger>,
     closing_rates: &BTreeMap<String, f32>,
     entity_factions: &BTreeMap<String, String>,
+    // The run's post-mission report (issue #1344), read off `MissionReport` by
+    // the caller. Moved through to `classify`, which reclassifies a
+    // report-bearing ending as `reported` and carries the rows onto the result.
+    mission_report: crate::core::report::MissionReport,
 ) -> OutcomeReport {
     use uuid::Uuid;
 
@@ -877,7 +890,7 @@ fn build_outcome_report(
 
     let player = SideMargins::new(p_hull, p_hull_max, p_dealt, p_taken, p_closing);
     let enemy = SideMargins::new(e_hull, e_hull_max, e_dealt, e_taken, e_closing);
-    classify(is_game_over, outcome_flag, player, enemy)
+    classify(is_game_over, outcome_flag, player, enemy, mission_report)
 }
 
 impl RunReport {
@@ -973,6 +986,7 @@ mod tests {
                 None,
                 SideMargins::new(90.0, 100.0, 200.0, 40.0, 3.0),
                 SideMargins::new(0.0, 100.0, 40.0, 200.0, 1.0),
+                crate::core::report::MissionReport::default(),
             ),
             ai_doctrine: String::new(),
             station_activity: StationActivityPayload::default(),
@@ -1022,6 +1036,7 @@ mod tests {
                 Some(crate::core::balance::Outcome::Defeat),
                 SideMargins::default(),
                 SideMargins::default(),
+                crate::core::report::MissionReport::default(),
             ),
             ai_doctrine: String::new(),
             station_activity: StationActivityPayload::default(),
@@ -1083,6 +1098,7 @@ mod tests {
                 None,
                 SideMargins::default(),
                 SideMargins::default(),
+                crate::core::report::MissionReport::default(),
             ),
             ai_doctrine: String::new(),
             station_activity: StationActivityPayload::default(),
@@ -1151,6 +1167,7 @@ mod tests {
                 None,
                 SideMargins::default(),
                 SideMargins::default(),
+                crate::core::report::MissionReport::default(),
             ),
             ai_doctrine: String::new(),
             station_activity: payload,
@@ -1228,6 +1245,7 @@ mod tests {
                 None,
                 SideMargins::default(),
                 SideMargins::default(),
+                crate::core::report::MissionReport::default(),
             ),
             ai_doctrine: String::new(),
             station_activity: StationActivityPayload::default(),
@@ -1287,6 +1305,7 @@ mod tests {
                 None,
                 SideMargins::default(),
                 SideMargins::default(),
+                crate::core::report::MissionReport::default(),
             ),
             ai_doctrine: String::new(),
             station_activity: StationActivityPayload::default(),
@@ -1329,6 +1348,7 @@ mod tests {
                 None,
                 SideMargins::default(),
                 SideMargins::default(),
+                crate::core::report::MissionReport::default(),
             ),
             ai_doctrine: String::new(),
             station_activity: StationActivityPayload::default(),

@@ -73,9 +73,9 @@ use crate::core::task_lifecycle::{
 use crate::effect_queue::EffectQueue;
 use crate::entities::spawner::EntityUuid;
 use crate::objectives::{ObjectiveTransition, ObjectiveTransitionKind};
+use crate::ship::components::{HumanSeekingHosts, ShipConfigComponent};
 use crate::sim_tick::SimTick;
 use crate::world::config::WorldConfig;
-use crate::ship::components::{HumanSeekingHosts, ShipConfigComponent};
 use crate::world::deadlines::DeadlineState;
 use crate::world::script::schedule::SchedClock;
 use crate::world::server::{ObjectiveManagerRes, WorldContentRuntime};

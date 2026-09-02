@@ -243,6 +243,10 @@ mod tests {
         // a scenario author can do, so they belong in the autocomplete set.
         ("effects", "narrative_beat", &["id"]),
         ("effects", "narrative_outcome", &["entity", "outcome"]),
+        // The post-mission report (issue #1344). Exposed for the same reason:
+        // deciding what a mission was ABOUT, and what each of those things
+        // ended in, is the author's judgement and nobody else's.
+        ("effects", "report_row", &["spec"]),
         ("effects", "reset_trigger", &["id"]),
         ("effects", "load_world", &["path"]),
         ("effects", "unload_world", &["path"]),

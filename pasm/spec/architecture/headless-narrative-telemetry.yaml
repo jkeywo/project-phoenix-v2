@@ -142,3 +142,49 @@ entities:
       paths: [src/core/task_lifecycle.rs]
       symbols: [TaskLifecycles, TaskActivation, TaskKey, TaskSlot]
       tests: [cargo test]
+
+  - state: post-mission-report-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Post-Mission Report State
+      summary: The MissionReport accumulator a scenario writes over the course of a run — an ordered list of report rows, each carrying a stable authored id, a localized heading and outcome String Id, a semantic ReportRowState, and a hidden signed diagnostic score.
+      rationale:
+        - "It exists because an ending used to be one word. A mission that saved the stricken hauler and lost the traffic had to pick victory or defeat, which is a verdict with the reasoning thrown away. A report is the reasoning: one row per thing the mission was about, in the order the author put them in."
+        - "AUTHORITATIVE, not presentation — the opposite call from NarrativeMark. A scenario SCRIPT writes it (ctx.effects.report_row), so two instances on the same seed must hold the same rows in the same order or they have diverged. sim_digest folds every field of every row including the hidden score, and snapshot captures and restores them, so a resumed run cannot silently un-rescue the hauler. Classified Folded and not DeferredFold because the fold really does walk every field."
+        - "Order is CONTENT, so the rows live in a Vec in authored write order and the fold walks them in that order rather than sorting. Two instances that agree on the rows but disagree on their order would show two different reports and must not share a digest."
+        - "A row that was never written is OMITTED, never written as unresolved. A run that ends catastrophically before Lyra's fate is decided reports no Lyra row at all: the mission never reached the point where the question had an answer, and inventing one would be the report lying about what the crew did. A report with NO rows is not a report — the ending falls back to its declared victory/defeat framing, which is what keeps every scenario that has not opted in exactly as it was."
+        - "The signed score is the reason the player projection is a SEPARATE shape. Design wants a diagnostic number; players want an account of what happened to the people they were sent to help, and a crew reading 'Lyra Ascending: saved (+6)' is reading a coupon. ServerMessage::GameOver's GameOverReportRow and ViewscreenHudState's game_over_report have no score field at all, so the split is a compile-time guarantee rather than a filter somebody has to remember; the headless OutcomeReport JSON carries the scores and the total."
+    architecture:
+      classification: authoritative
+      owner: post-mission-report-accumulator
+      writers: [post-mission-report-accumulator]
+      readers: [narrative-timeline-projector, game-over-broadcast, viewscreen-hud]
+    implementation:
+      status: declared
+      paths: [src/core/report.rs, src/sim_digest.rs, src/snapshot.rs, src/server_app/registration.rs]
+      symbols: [MissionReport, ReportRow, ReportRowState, SnapshotReportRow, GameOverReportRow]
+      tests: [cargo test, tests/narrative_timeline.rs, tests/snapshot_resume.rs]
+
+  - component: post-mission-report-accumulator
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Post-Mission Report Accumulator
+      summary: The single system that drains the script boundary's report-row queue into MissionReport in queue order, beating each row that ACTUALLY moved onto the narrative timeline as report_row_updated, and the game-over broadcast that finalizes the report and publishes its score-free player projection.
+      rationale:
+        - "One writer, and it is not the applier. ctx.effects.report_row resolves at the script boundary, but apply_dispatch_result is lent plain &mut Vec sinks and holds no resources, so a row rides the #1223 effect-queue pattern exactly as an authored narrative beat does: ActionCmd::SetReportRow onto EffectQueue<ReportRow>, drained by apply_report_rows. Having exactly one writer is what makes the ordering promise a property of the type rather than of every caller remembering it."
+        - "A beat only on a real change. A scenario may re-state a row every tick — a running count re-scored as a window moves — and that is a RATE, not a beat. MissionReport::set_row reports whether anything moved, so an identical restatement produces nothing; NarrativeKind::in_timeline_stream additionally holds report_row_updated out of the ndjson flow, so even a genuinely churning row reaches the folded timeline without flooding a reader's scrollback. report_finalized happens once and is streamed."
+        - "Finalization lives at OnEnter(GameOver) beside the broadcast, and fires only when the report has rows: beating 'finalized' over an empty report would tell an after-action reader a report existed. OnEnter runs before the telemetry collectors in Last on the same frame, so the beat is stamped with the tick the run ended on."
+        - "RunOutcome::Reported OUTRANKS victory and defeat in classify() rather than sitting beside them. A run that pulls Lyra clear and then loses the skyway is a declared defeat AND a report holding a saved row; framing it as DEFEAT throws the row away, which is the exact failure the report exists to fix. The declared Outcome is not lost — still latched on GameOverReason, still folded, still on the wire — it simply stops being the frame, on the phone and on the Viewscreen alike."
+    architecture:
+      kind: effect-applier
+      authority: authoritative
+      reads: [narrative-event-stream]
+      produces: [post-mission-report-state, narrative-event-stream]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/mission_report.rs, src/world/dispatch.rs, src/world/server.rs, src/world/script/effects.rs, src/server_app/broadcast_publish.rs, src/server/viewscreen_border.rs, src/core/balance.rs, gui/game-over-view.js, gui/lobby-state.js]
+      symbols: [apply_report_rows, finalized_event, SetReportRow, report_row, on_game_over_enter, RunOutcome, classify, gameOverView]
+      tests: [cargo test, tests/narrative_timeline.rs, tests/client/game-over-view.test.js]

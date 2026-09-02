@@ -1142,9 +1142,13 @@
       <!-- Bevy renders into the canvas that DefaultPlugins creates at startup -->
       <canvas id="canvas"></canvas>
 
-      <!-- Game-over overlay: shown when GamePhase::GameOver via __updateHud. -->
+      <!-- Game-over overlay: shown when GamePhase::GameOver via __updateHud.
+           When the scenario authored a post-mission report (issue #1344) its
+           rows render under the closing message, in the author's order, with no
+           score, total or grade — the HUD payload carries none. -->
       <div id="game-over-overlay" style="display:none;position:absolute;inset:0;z-index:85;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.88);color:#cde;font-family:'Chakra Petch',monospace;text-align:center;padding:32px;">
         <div id="game-over-message" style="font-size:clamp(0.95rem,2.5vw,1.15rem);white-space:pre-wrap;line-height:1.7;max-width:64ch;letter-spacing:0.03em;"></div>
+        <dl id="game-over-report" style="display:none;grid-template-columns:minmax(0,auto) minmax(0,1fr);gap:10px 24px;margin:28px 0 0;padding:0;max-width:64ch;text-align:left;font-size:clamp(0.85rem,2vw,1rem);"></dl>
         <button id="return-to-lobby-btn" style="margin-top:32px;padding:12px 32px;font-family:'Chakra Petch',monospace;font-size:1rem;letter-spacing:0.08em;text-transform:uppercase;color:#cde;background:rgba(140,180,220,0.12);border:1px solid #8ac;border-radius:2px;cursor:pointer;" data-i18n="client.return_to_lobby">Return to Lobby</button>
       </div>
 
@@ -1774,6 +1778,29 @@
       } else {
         goOverlay.style.display = 'none';
       }
+    }
+    // ── Post-mission report rows (issue #1344) ─────────────────────────────
+    // The same rows a phone renders, in the same order, arriving already
+    // localised through localiseHostPayload like every other id in this
+    // payload. `state` is a machine label and drives the accent only; there is
+    // no score in the payload to leak, by construction.
+    const goReport = document.getElementById('game-over-report');
+    if (goReport) {
+      const rows = Array.isArray(s.game_over_report) ? s.game_over_report : [];
+      goReport.replaceChildren();
+      const accent = { saved: '#7ad48f', lost: '#e8705a', partial: '#e0c060', neutral: '#8a98c4' };
+      for (const row of rows) {
+        if (!row || typeof row !== 'object') continue;
+        const dt = document.createElement('dt');
+        dt.textContent = row.heading != null ? String(row.heading) : '';
+        dt.style.cssText = 'letter-spacing:0.18em;text-transform:uppercase;white-space:nowrap;color:'
+          + (accent[row.state] || '#8a98c4') + ';';
+        const dd = document.createElement('dd');
+        dd.textContent = row.outcome != null ? String(row.outcome) : '';
+        dd.style.cssText = 'margin:0;line-height:1.6;color:#cde;';
+        goReport.append(dt, dd);
+      }
+      goReport.style.display = rows.length ? 'grid' : 'none';
     }
   };
 

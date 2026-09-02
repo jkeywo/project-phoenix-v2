@@ -101,6 +101,11 @@ pub mod lobby;
 /// no socket — a transport fills its inbox and drains its outbox — so every
 /// decision it makes is testable on native with no networking at all.
 pub mod lockstep;
+/// The post-mission report accumulator (issue #1344, PRD #1337): the one system
+/// that drains the script boundary's report-row queue into
+/// `core::report::MissionReport` and beats each real change onto the narrative
+/// timeline.
+pub mod mission_report;
 pub mod modifiers;
 /// The authored mission-timeline emitters (issue #1338, PRD #1337): the systems
 /// that turn Objective / deadline / beat / Comms / marked-entity transitions

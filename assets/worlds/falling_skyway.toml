@@ -1672,10 +1672,16 @@ hold_secs = 30
 #                        `skyway_lyra_under_control` is DOWN from her first tick
 #                        and its rise is an event. The crew do not need telling
 #                        she is in trouble; the panel says so.
+#
+# `narrative = true` (issue #1338) marks her for the mission timeline. She is
+# the one hull in this act whose ARRIVAL and FATE are both story: the timeline
+# records her spawn, and `on_lyra_recovered` / `on_lyra_clear_due` state her
+# outcome outright rather than letting the engine infer one from a despawn.
 [[entity]]
 template_path = "assets/entities/ship_civilian_hauler.toml"
 id = "lyra_ascending"
 name = "world.falling_skyway.entity.lyra_ascending.name"
+narrative = true
 transform = { anchor = "lyra_drift" }
 
 [entity.overrides]
@@ -3241,6 +3247,30 @@ fn on_lyra_recovered(ctx) {
     // a later act reads a fact rather than an absence.
     ctx.flags.skyway_lyra_recovered = 1;
     ctx.flags.increment("a2_lyra_recovered", 1);
+    // The story's own record of her fate (issue #1338). Authored rather than
+    // inferred, and it also settles the case where a later act removes her hull
+    // for tidiness: a marked entity that already has an outcome never has a
+    // death invented for it.
+    ctx.effects.narrative_outcome("world.falling_skyway.entity.lyra_ascending.name", "rescued");
+    // The post-mission report row (issue #1344). She is the first complete row
+    // this mission writes, and she is deliberately not the mission's RESULT: +6
+    // is enough to be felt beside the other rows the report will grow, and not
+    // enough to be the whole verdict. Players never see the number.
+    lyra_report_row(ctx, "world.falling_skyway.report.lyra.saved", "saved", 6);
+}
+
+// Both fates write the SAME row id, so whichever happens updates one row in
+// place. Two ids would let a run that recovered her and then lost her hull
+// report her twice, in two moods, which is exactly the report lying about what
+// the crew did.
+fn lyra_report_row(ctx, outcome_id, state, score) {
+    ctx.effects.report_row(#{
+        id: "lyra",
+        heading: "world.falling_skyway.report.lyra.heading",
+        outcome: outcome_id,
+        state: state,
+        score: score,
+    });
 }
 
 // The rescue's clock. If she is not under control by now the second band has
@@ -3249,6 +3279,15 @@ fn on_lyra_recovered(ctx) {
 fn on_lyra_clear_due(ctx) {
     if ctx.flags.a2_lyra_recovered == 0 {
         ctx.effects.fail_objective("obj-a2-rescue");
+        // The report row lands HERE and not in `on_lyra_lost`, because this is
+        // the tick her fate is decided. `on_lyra_lost` chains off the removal,
+        // and a removal that the collision ending or a later act performs for
+        // its own reasons must not be able to write a loss row for a hauler the
+        // crew had already pulled clear.
+        lyra_report_row(ctx, "world.falling_skyway.report.lyra.lost", "lost", -6);
+        // The destroy stays the physical fact and the timeline's death beat: the
+        // band really did take her, so `marked_entity_destroyed` is the honest
+        // outcome and no authored one is recorded to suppress it.
         ctx.effects.destroy_entity("world.falling_skyway.entity.lyra_ascending.name");
     }
     // The approach beat closes with the window it belonged to. Completed rather

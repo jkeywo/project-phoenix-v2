@@ -340,6 +340,16 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             .declare_state::<
                 crate::effect_queue::EffectQueue<crate::core::narrative::NarrativeRequest>,
             >(StateClass::ClearedAtFold, "digest-exclusion-classes")
+            // The post-mission report-row queue (issue #1344): same shape and
+            // same contract as the narrative queue above — pushed by the shared
+            // dispatch applier, drained in full every tick by
+            // `mission_report::apply_report_rows`, so it is empty at every
+            // fold/snapshot boundary. The REPORT it drains into is authoritative
+            // and declared `Folded` below; the queue between them is not.
+            .declare_state::<crate::effect_queue::EffectQueue<crate::core::report::ReportRow>>(
+                StateClass::ClearedAtFold,
+                "digest-exclusion-classes",
+            )
             // Presentation: the authored narrative mark (issue #1338). Scenario
             // data that decides only what the after-action timeline SHOWS —
             // nothing in the fixed tick branches on it, and neither
@@ -471,6 +481,17 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             )
             .declare_state::<GamePhase>(StateClass::Folded, "game-phase-state")
             .declare_state::<GameOverReason>(StateClass::Folded, "game-over-reason-state")
+            // The structured post-mission report (issue #1344). Authoritative,
+            // not presentation: a scenario SCRIPT writes it, so two instances on
+            // the same seed must hold the same rows in the same order or they
+            // have diverged. `Folded` and not `DeferredFold` because
+            // `fold_run_scope` walks EVERY field of every row — id, both String
+            // Ids, the state label and the hidden score — and `snapshot` captures
+            // and restores all of them.
+            .declare_state::<crate::core::report::MissionReport>(
+                StateClass::Folded,
+                "post-mission-report-state",
+            )
             .declare_state::<CaptainPriorityBoost>(
                 StateClass::Folded,
                 "captain-objective-priority-state",
@@ -869,6 +890,13 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             crate::effect_queue::EffectQueue<crate::core::task_lifecycle::TaskLifecycleRequest>,
         >()
         .init_resource::<crate::core::task_lifecycle::TaskLifecycles>()
+        // The post-mission report (issue #1344) and the script-boundary queue
+        // that feeds it. `insert_resource` of the default rather than
+        // `init_resource` for the report itself, matching `GameOverReason`
+        // below: a run starts with no rows, and that is a stated fact rather
+        // than a type default nobody wrote down.
+        .init_resource::<crate::effect_queue::EffectQueue<crate::core::report::ReportRow>>()
+        .insert_resource(crate::core::report::MissionReport::default())
         .init_resource::<CaptainPriorityBoost>()
         // The sim's one source of randomness. `init_resource` draws an OS seed, so
         // an unconfigured app (browser host, unit tests) behaves as it always did;
@@ -966,10 +994,16 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 // other two so a message authored by the SAME trigger that
                 // also posts a beat this tick reports in a stable order.
                 crate::narrative::tick_computer_message,
-                // Last of the three (issue #1341): a task's terminal beat reads
-                // as the consequence of the tick, so it sequences after the
-                // Objective, deadline and entity beats that share it.
+                // Last of the narrative emitters (issue #1341): a task's
+                // terminal beat reads as the consequence of the tick, so it
+                // sequences after the Objective, deadline and entity beats that
+                // share it.
                 crate::narrative::emit_task_lifecycle_narrative,
+                // The report accumulator (issue #1344) joins the same chain, and
+                // last of all: a row a script wrote this tick lands after the
+                // beats that caused it, so an after-action reading sees the
+                // story move before it sees the report move.
+                crate::mission_report::apply_report_rows,
             )
                 .chain()
                 .after(crate::sim_sets::SimSet::Broadcast),

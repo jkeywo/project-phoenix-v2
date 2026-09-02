@@ -11014,6 +11014,41 @@ fn a_storm_band_is_survivable_to_cross_and_fatal_to_live_in() {
 // ── Falling Skyway, Act 2: the storm and the rescue (issue #1037) ────────────
 
 const SKYWAY_LYRA: &str = "world.falling_skyway.entity.lyra_ascending.name";
+
+/// Assert that Falling Skyway's post-mission report holds exactly one Lyra row,
+/// with the outcome String Id, semantic state and hidden score this fate should
+/// have written (issue #1344).
+///
+/// The row is checked on `MissionReport` rather than on the wire because that is
+/// where the SCORE lives: the player projection has no field for it, by design,
+/// so the only place the `+6`/`-6` can be pinned is the authoritative resource
+/// the headless report reads.
+fn assert_lyra_report_row(app: &bevy::prelude::App, outcome_id: &str, state: &str, score: i32) {
+    let report = app
+        .world()
+        .resource::<project_phoenix::core::report::MissionReport>();
+    let rows: Vec<&project_phoenix::core::report::ReportRow> = report
+        .rows()
+        .iter()
+        .filter(|row| row.id == "lyra")
+        .collect();
+    assert_eq!(
+        rows.len(),
+        1,
+        "exactly one Lyra row, whichever way her fate went: {:?}",
+        report.rows()
+    );
+    assert_eq!(
+        rows[0].heading_id, "world.falling_skyway.report.lyra.heading",
+        "the heading is a String Id, so the report localizes at the surface"
+    );
+    assert_eq!(rows[0].outcome_id, outcome_id);
+    assert_eq!(rows[0].state.as_str(), state);
+    assert_eq!(
+        rows[0].score, score,
+        "the hidden diagnostic score, which no player surface ever receives"
+    );
+}
 /// The three craft the sweep schedule actually moves. `shuttle_wick` works the
 /// depot ladder east of the corridor and is deliberately left alone.
 const SKYWAY_CORRIDOR_TRAFFIC: [&str; 3] = [
@@ -11699,6 +11734,10 @@ fn falling_skyway_backfill_orders_traffic_clear_of_all_three_bands() {
         "the campaign state is WRITTEN. Exactly one of lost/recovered is always set, so \
          a later act reads a fact rather than an absence."
     );
+    // ── Issue #1344: the loss is a complete post-mission report row ──
+    // Written on the tick her fate was decided, not at the ending, so it is
+    // already there whatever kind of ending this run goes on to reach.
+    assert_lyra_report_row(&app, "world.falling_skyway.report.lyra.lost", "lost", -6);
     assert_eq!(
         (flags.counter("act"), flags.counter("act2_complete")),
         (3, 1),
@@ -11879,6 +11918,9 @@ fn falling_skyway_act_2_rescue_lands_when_the_crew_start_before_the_band() {
         "exactly one of the two campaign flags is written, and it is the other one this \
          time"
     );
+    // ── Issue #1344: the rescue is the same row, the other way up ──
+    // One row id for both fates, so a run cannot report her twice in two moods.
+    assert_lyra_report_row(&app, "world.falling_skyway.report.lyra.saved", "saved", 6);
 }
 
 /// **Issue #1135 — pre-emption memory, rescue side.** Lyra exists and is

@@ -427,6 +427,28 @@ pub(crate) fn register_effects(engine: &mut HostRegistry) {
     );
     host_fn!(
         engine,
+        "report_row",
+        receiver = "effects",
+        category = "effect",
+        params = ["spec"],
+        summary = "Write one post-mission report row: `#{id, heading, outcome, state, \
+                   score?}`. `state` is saved, lost, partial or neutral; `score` is the \
+                   hidden signed diagnostic value players never see. Writing the same \
+                   `id` again updates the row in place.",
+        |sink: &mut EffectSink, spec: Map| -> Result<(), Box<EvalAltResult>> {
+            // Issue #1344. A map rather than five positional arguments: the row
+            // is a record, and a five-string call is a row four of whose fields
+            // can be swapped without anything noticing. Every required key is
+            // checked here so a malformed row raises at the boundary —
+            // discarding this call's effects (settled decision 10) — rather than
+            // reaching a player surface half-built.
+            let row = report_row(&spec).map_err(raise)?;
+            sink.push(ActionCmd::SetReportRow(row));
+            Ok(())
+        },
+    );
+    host_fn!(
+        engine,
         "reset_trigger",
         receiver = "effects",
         category = "effect",
@@ -1279,6 +1301,66 @@ pub(super) fn destroy_entity_action(entity: &str) -> Result<TriggerAction, Strin
     parse_action_entry(&raw)
 }
 
+/// Build a [`ReportRow`](crate::core::report::ReportRow) from a `report_row`
+/// script map (issue #1344).
+///
+/// ```rhai
+/// ctx.effects.report_row(#{
+///     id: "lyra",                                            // required: stable row id
+///     heading: "world.x.report.lyra.heading",                // required: String Id
+///     outcome: "world.x.report.lyra.saved",                  // required: String Id
+///     state: "saved",                                        // required: saved|lost|partial|neutral
+///     score: 6,                                              // optional, default 0
+/// });
+/// ```
+///
+/// All four text keys are REQUIRED and every one of them raises when missing,
+/// unlike `open_comms`'s optional metadata: a row with no heading or no outcome
+/// id renders as a blank line on the crew's screen, which is worse than the
+/// call failing loudly. `score` is optional and defaults to 0 — a row that is
+/// purely a statement of fact, with no diagnostic weight, should not have to
+/// spell out a zero.
+///
+/// `state` is validated through
+/// [`ReportRowState::parse`](crate::core::report::ReportRowState::parse), the
+/// same parser the vocabulary defines, exactly as `narrative_outcome`'s word
+/// and `game_over`'s outcome are.
+fn report_row(spec: &Map) -> Result<crate::core::report::ReportRow, String> {
+    let id = map_str(spec, "id")
+        .ok_or_else(|| "report_row requires a string `id` (the stable row id)".to_string())?;
+    let heading_id = map_str(spec, "heading").ok_or_else(|| {
+        "report_row requires a string `heading` (the row's heading String Id)".to_string()
+    })?;
+    let outcome_id = map_str(spec, "outcome").ok_or_else(|| {
+        "report_row requires a string `outcome` (the row's outcome String Id)".to_string()
+    })?;
+    let state = map_str(spec, "state")
+        .ok_or_else(|| "report_row requires a string `state`".to_string())
+        .and_then(|s| {
+            crate::core::report::ReportRowState::parse(&s).map_err(|e| format!("report_row: {e}"))
+        })?;
+    // `no_float`: a score is whole by construction, so this is an INT and there
+    // is no `flt("…")` route — a fractional diagnostic score would be a number
+    // nobody could total in their head, which is the only thing it is for.
+    let score = match spec.get("score") {
+        Some(d) => {
+            let raw = d
+                .as_int()
+                .map_err(|_| "report_row `score` must be a whole number".to_string())?;
+            i32::try_from(raw)
+                .map_err(|_| format!("report_row `score` is out of range for an i32: {raw}"))?
+        }
+        None => 0,
+    };
+    Ok(crate::core::report::ReportRow {
+        id,
+        heading_id,
+        outcome_id,
+        state,
+        score,
+    })
+}
+
 /// Build an [`OpenCommsRequest`] from an `open_comms` script map.
 ///
 /// ```rhai
@@ -1556,6 +1638,144 @@ mod tests {
         )
         .expect_err("an unknown outcome must raise");
         assert!(err.to_string().contains("outcome"), "{err}");
+    }
+
+    // ── report_row (issue #1344) ─────────────────────────────────────────────
+
+    /// The whole row reaches the queue as a RESOLVED command: nothing about a
+    /// report row needs name resolution, so it buffers as a `Cmd` and not an
+    /// `Action` — the opposite claim `destroy_entity_buffers_an_action_not_a_
+    /// resolved_command` makes about its own verb, and for the same reason:
+    /// which buffer a verb lands in IS its architecture.
+    #[test]
+    fn report_row_buffers_the_whole_row_as_a_resolved_command() {
+        let cmds = run(
+            r#"fn f(ctx) {
+                ctx.effects.report_row(#{
+                    id: "lyra",
+                    heading: "world.x.report.lyra.heading",
+                    outcome: "world.x.report.lyra.saved",
+                    state: "saved",
+                    score: 6,
+                });
+            }"#,
+            "f",
+        );
+        assert_eq!(
+            cmds,
+            vec![ActionCmd::SetReportRow(crate::core::report::ReportRow {
+                id: "lyra".to_string(),
+                heading_id: "world.x.report.lyra.heading".to_string(),
+                outcome_id: "world.x.report.lyra.saved".to_string(),
+                state: crate::core::report::ReportRowState::Saved,
+                score: 6,
+            })]
+        );
+    }
+
+    /// A negative score is the whole point of a SIGNED diagnostic — Lyra lost is
+    /// `-6` — so the int route must carry the sign through unchanged.
+    #[test]
+    fn report_row_carries_a_negative_score() {
+        let cmds = run(
+            r#"fn f(ctx) {
+                ctx.effects.report_row(#{
+                    id: "lyra", heading: "h", outcome: "o", state: "lost", score: -6,
+                });
+            }"#,
+            "f",
+        );
+        match &cmds[0] {
+            ActionCmd::SetReportRow(row) => {
+                assert_eq!(row.score, -6);
+                assert_eq!(row.state, crate::core::report::ReportRowState::Lost);
+            }
+            other => panic!("expected SetReportRow, got {other:?}"),
+        }
+    }
+
+    /// `score` is the one optional key: a row that is purely a statement of
+    /// fact should not have to spell out a zero.
+    #[test]
+    fn report_row_defaults_its_score_to_zero() {
+        let cmds = run(
+            r#"fn f(ctx) {
+                ctx.effects.report_row(#{
+                    id: "records", heading: "h", outcome: "o", state: "neutral",
+                });
+            }"#,
+            "f",
+        );
+        match &cmds[0] {
+            ActionCmd::SetReportRow(row) => assert_eq!(row.score, 0),
+            other => panic!("expected SetReportRow, got {other:?}"),
+        }
+    }
+
+    /// A bad state word raises at the boundary — discarding the call's effects
+    /// (settled decision 10) — through the SAME parser the vocabulary defines,
+    /// exactly as a bad `narrative_outcome` word does.
+    #[test]
+    fn report_row_rejects_an_unknown_state() {
+        let err = run_result(
+            r#"fn f(ctx) {
+                ctx.effects.report_row(#{
+                    id: "lyra", heading: "h", outcome: "o", state: "rescued",
+                });
+            }"#,
+            "f",
+        )
+        .expect_err("an unknown state must raise");
+        assert!(err.to_string().contains("state"), "{err}");
+    }
+
+    /// Every text key is required. A row missing its heading or its outcome id
+    /// renders as a blank line on the crew's screen, which is worse than the
+    /// call failing loudly.
+    #[test]
+    fn report_row_requires_every_text_key() {
+        for (missing, source) in [
+            (
+                "id",
+                r#"fn f(ctx) { ctx.effects.report_row(#{ heading: "h", outcome: "o", state: "saved" }); }"#,
+            ),
+            (
+                "heading",
+                r#"fn f(ctx) { ctx.effects.report_row(#{ id: "r", outcome: "o", state: "saved" }); }"#,
+            ),
+            (
+                "outcome",
+                r#"fn f(ctx) { ctx.effects.report_row(#{ id: "r", heading: "h", state: "saved" }); }"#,
+            ),
+            (
+                "state",
+                r#"fn f(ctx) { ctx.effects.report_row(#{ id: "r", heading: "h", outcome: "o" }); }"#,
+            ),
+        ] {
+            let err = run_result(source, "f")
+                .err()
+                .unwrap_or_else(|| panic!("a row missing `{missing}` must raise"));
+            assert!(
+                err.to_string().contains(missing),
+                "the error must name the missing key `{missing}`: {err}"
+            );
+        }
+    }
+
+    /// The failure policy, stated where it can fail: a raised `report_row`
+    /// discards the WHOLE call's buffer, so a half-built row can never reach a
+    /// player surface beside the effects that were meant to accompany it.
+    #[test]
+    fn a_bad_report_row_discards_the_calls_other_effects() {
+        let err = run_result(
+            r#"fn f(ctx) {
+                ctx.effects.narrative_beat("before");
+                ctx.effects.report_row(#{ id: "r", heading: "h", outcome: "o", state: "nope" });
+            }"#,
+            "f",
+        )
+        .expect_err("an unknown state must raise");
+        assert!(err.to_string().contains("state"), "{err}");
     }
 
     /// `add_faction_enemy(f, e)` buffers the DECLARATIVE `AddFactionEnemy` (faction

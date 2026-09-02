@@ -2965,6 +2965,31 @@ pub struct ScenarioCatalogWire {
     pub ships: Vec<crate::world::config::AvailableShipEntry>,
 }
 
+/// One row of the post-mission report as it travels to a player surface
+/// (issue #1344) — the Viewscreen and the phone render the same rows through
+/// the same `gui/game-over-view.js`.
+///
+/// The **player-safe** projection of [`crate::core::report::ReportRow`]: the
+/// authored row id, the two `strings.csv` ids the surface localizes, and the
+/// semantic state it styles on. The row's signed diagnostic **score is not
+/// here and must never be added** — it is design's number, not the crew's, and
+/// the headless report is where it belongs. Nor is there a total, a grade, or a
+/// win/loss label anywhere in this shape: a report row says what became of the
+/// thing it names, and nothing else.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GameOverReportRow {
+    /// The author's stable row id — machine identity, never displayed.
+    pub id: String,
+    /// `strings.csv` id for what the row is about.
+    pub heading: String,
+    /// `strings.csv` id for how it ended.
+    pub outcome: String,
+    /// [`crate::core::report::ReportRowState::as_str`] — `"saved"`, `"lost"`,
+    /// `"partial"` or `"neutral"`. A label rather than the enum, for the same
+    /// reason `GameOver::outcome` is one.
+    pub state: String,
+}
+
 /// `ServerMessageDiscriminants` (from `strum::EnumDiscriminants`) is a
 /// fieldless companion enum that automatically stays in sync with the
 /// variant list below — used by the codec's table-driven round-trip harness
@@ -3301,6 +3326,25 @@ pub enum ServerMessage {
         /// key the client has to test for twice.
         #[serde(default)]
         outcome: Option<String>,
+        /// The structured post-mission report (issue #1344), in authored row
+        /// order, or empty when the scenario authored none.
+        ///
+        /// When it is non-empty the client frames the ending with the ROWS
+        /// instead of the victory/defeat headline — `outcome` above still
+        /// travels, and is still the authored truth about the ending, it simply
+        /// stops being the frame. See `gui/game-over-view.js`.
+        ///
+        /// Deliberately score-free. `crate::core::report::ReportRow` carries a
+        /// signed diagnostic score and this projection drops it: the number is
+        /// for design, and putting it on a player's screen would turn a rescue
+        /// into a coupon. Headless output carries the scores and the total; the
+        /// wire never does.
+        ///
+        /// `#[serde(default)]` so a peer sending the pre-#1344 shape decodes as
+        /// an empty report. Always WRITTEN, no `skip_serializing_if`, for the
+        /// same reason `outcome` is.
+        #[serde(default)]
+        report: Vec<GameOverReportRow>,
     },
     /// Broadcast when all players return to the lobby from the GameOver screen.
     /// Clients should switch back to the lobby panel. Station claims and ready
@@ -3456,6 +3500,19 @@ pub struct ViewscreenHudState {
     /// a HUD push with this field absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub computer_message: Option<ComputerMessageWire>,
+    /// The structured post-mission report (issue #1344), in authored row order,
+    /// set only while the game has ended and only when the scenario authored
+    /// one. The SAME [`GameOverReportRow`] the phone receives on
+    /// `ServerMessage::GameOver`: the Viewscreen and a console must not be able
+    /// to disagree about what the mission came away with, and one shape is how
+    /// that is guaranteed rather than promised.
+    ///
+    /// Both text fields are `strings.csv` ids, which the host channel's
+    /// `localiseTree` boundary resolves like every other id in this payload;
+    /// `state` is a machine label and passes through untouched. There is no
+    /// score here for the same reason there is none on the wire row.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub game_over_report: Vec<GameOverReportRow>,
 }
 
 /// The active ship's-computer message's Viewscreen-facing half (issue #1342).

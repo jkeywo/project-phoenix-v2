@@ -1147,6 +1147,9 @@ world.probe_deadlines.deadline.first_warning.label,assets/worlds/probe_deadlines
 world.probe_narrative.global.title,assets/worlds/probe_narrative.toml → [global] title,[Narrative timeline probe]
 world.probe_narrative.global.description,assets/worlds/probe_narrative.toml → [global] description,[A probe world that authors one of every mission-timeline beat (issue #1338).]
 world.probe_narrative.entity.lyra.name,assets/worlds/probe_narrative.toml → [[entity]] name,[Lyra Ascending]
+world.probe_narrative.report.lyra.heading,"Post-mission report row heading in the #1344 probe world",[Lyra Ascending]
+world.probe_narrative.report.lyra.saved,"Post-mission report row outcome in the #1344 probe world — the crew answered and she came through",[Answered and came through.]
+world.probe_narrative.game_over.closed,"Ending reason for the #1344 probe world — declared a defeat, and still report-bearing",[The probe window closed.]
 world.probe_narrative.entity.wreck.name,assets/worlds/probe_narrative.toml → [[entity]] name,[Derelict hauler]
 world.probe_narrative.deadline.window_opens.label,assets/worlds/probe_narrative.toml → [deadline] label,[Transfer window opens]
 world.probe_narrative.objective.hold_the_channel,assets/worlds/probe_narrative.toml → add_objective text,[Hold the channel open]
@@ -1361,6 +1364,9 @@ world.falling_skyway.comms.lark_holding,Dialogue body — Hauler Lark acknowledg
 world.falling_skyway.comms.lark_collision_report,Dialogue body — Hauler Lark announces entry immediately before the committed corridor collision,"[Destroyer, Lark. No scan-backed stop received. We are entering the corridor now—stand by—]"
 world.falling_skyway.game_over.lark_collision,Defeat reason — uncontrolled Hauler Lark physically destroys the Falling Skyway,"[Hauler Lark struck Skyway Meridian in the uncontrolled corridor. The structure is lost.]"
 world.falling_skyway.game_over.mission_complete,Victory reason — the Falling Skyway episode reaches its authored resolution,"[The transfer window has closed and the Falling Skyway record is complete.]"
+world.falling_skyway.report.lyra.heading,"Post-mission report row heading (issue #1344) — names the stricken hauler the rescue was about, so the row reads as a person's ship and not a scenario flag",[Lyra Ascending]
+world.falling_skyway.report.lyra.saved,"Post-mission report row outcome — Lyra was under control before the second radiation band closed over the lane",[Pulled clear of the lane before the band closed.]
+world.falling_skyway.report.lyra.lost,"Post-mission report row outcome — Lyra was still adrift when the deadline ran out and the second band took her",[Still adrift when the band closed. She was lost.]
 world.probe_evidence.entity.skyway_hook.name,"assets/worlds/probe_evidence.toml -> [[entity]] name","[Skyway Hook]"
 world.probe_evidence.entity.line_foreman.name,"assets/worlds/probe_evidence.toml -> [[entity]] name","[Line Foreman]"
 world.probe_evidence.capacity.berths.label,"Crew-facing label for the berths capacity in the #1031 probe world","[Berths]"
@@ -1673,6 +1679,7 @@ client.pick_taken,"Phone scenario/ship picker — shown when another phone's pic
 client.game_over_victory,Game-over overlay headline when the run ended in the scenario's victory condition,[VICTORY]
 client.game_over_defeat,Game-over overlay headline when the run ended in defeat — the scenario's loss condition or the hull reaching zero,[DEFEAT]
 client.game_over_ended,Game-over overlay headline when the run ended without a declared win or loss,[ENGAGEMENT ENDED]
+client.game_over_reported,"Game-over overlay headline when the scenario authored a post-mission report (issue #1344). It replaces the victory/defeat headline entirely: the rows below it are the result, and a win/loss word above them would be a verdict the report exists to refuse",[MISSION REPORT]
 client.link_connecting,Console banner before the first state arrives from the host — an empty console is loading rather than broken,[Linking to the ship…]
 client.link_dead,Console banner headline while the link to the host is down. The console behind it is dimmed and stops accepting commands,[LINK LOST]
 server.qr_caption,Host viewscreen join panel — caption above the QR code telling guests what scanning it does,[Scan to join the crew]

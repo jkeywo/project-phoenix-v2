@@ -3001,6 +3001,10 @@ pub(crate) struct EffectQueuesOut<'a> {
     /// script boundary, on its way to becoming the authoritative
     /// `ActiveComputerMessage` and a `shown`/`superseded` narrative pair.
     pub computer_message: &'a mut Vec<crate::core::computer_message::ComputerMessageRequest>,
+    /// Drained by `crate::mission_report::apply_report_rows` (issue #1344): the
+    /// post-mission report rows a script wrote this tick, on their way to the
+    /// `MissionReport` accumulator.
+    pub report_rows: &'a mut Vec<crate::core::report::ReportRow>,
 }
 
 /// The per-owner [`EffectQueue`] resources an effect-applying SYSTEM needs,
@@ -3024,6 +3028,7 @@ pub(crate) struct EffectQueues<'w, 's> {
     narrative: Option<ResMut<'w, EffectQueue<crate::core::narrative::NarrativeRequest>>>,
     computer_message:
         Option<ResMut<'w, EffectQueue<crate::core::computer_message::ComputerMessageRequest>>>,
+    report_rows: Option<ResMut<'w, EffectQueue<crate::core::report::ReportRow>>>,
     condition_fallback: Local<'s, Vec<crate::infrastructure::ConditionAdjustment>>,
     capacity_fallback: Local<'s, Vec<crate::infrastructure::CapacityAdjustment>>,
     civilian_orders_fallback: Local<'s, Vec<crate::civilian::PendingCivilianOrder>>,
@@ -3031,10 +3036,11 @@ pub(crate) struct EffectQueues<'w, 's> {
     narrative_fallback: Local<'s, Vec<crate::core::narrative::NarrativeRequest>>,
     computer_message_fallback:
         Local<'s, Vec<crate::core::computer_message::ComputerMessageRequest>>,
+    report_rows_fallback: Local<'s, Vec<crate::core::report::ReportRow>>,
 }
 
 impl EffectQueues<'_, '_> {
-    /// Borrow the queues as an [`EffectQueuesOut`] to lend to the applier,
+    /// Borrow every queue as an [`EffectQueuesOut`] to lend to the applier,
     /// falling back to the per-queue `Local` sink when the resource is absent.
     pub(crate) fn out(&mut self) -> EffectQueuesOut<'_> {
         EffectQueuesOut {
@@ -3061,6 +3067,10 @@ impl EffectQueues<'_, '_> {
             computer_message: match &mut self.computer_message {
                 Some(q) => &mut q.0,
                 None => &mut self.computer_message_fallback,
+            },
+            report_rows: match &mut self.report_rows {
+                Some(q) => &mut q.0,
+                None => &mut self.report_rows_fallback,
             },
         }
     }
@@ -3354,6 +3364,13 @@ pub(crate) fn apply_dispatch_result(
                     continue;
                 };
                 mods.remove_int(&world_modifier_source(tag), &slot);
+            }
+
+            // Buffered, never written here: the applier holds no resources
+            // (issue #1223). `mission_report::apply_report_rows` drains the
+            // queue into `MissionReport` in queue order on the same tick.
+            ActionCmd::SetReportRow(row) => {
+                effects.report_rows.push(row);
             }
 
             // Always applied before `SetNextState` below —

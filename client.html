@@ -527,12 +527,60 @@
     #game-over-overlay[data-outcome="ended"] .game-over-headline {
       color: var(--ink); border-bottom-color: var(--edge-strong);
     }
+    /* A reported ending wears the neutral accent on purpose (issue #1344): the
+       rows below are the result, and tinting the headline green or red would
+       reintroduce exactly the win/loss verdict the report exists to replace. */
+    #game-over-overlay[data-outcome="reported"] .game-over-headline {
+      color: var(--ink); border-bottom-color: var(--edge-strong);
+    }
     #game-over-overlay .game-over-message {
       font-size: var(--text-lg);
       white-space: pre-wrap;
       line-height: 1.7;
       max-width: 64ch;
       letter-spacing: 0.03em;
+    }
+    /* The post-mission report (issue #1344): heading on the left, outcome on
+       the right, one grid row per report row, in the author's order. No score
+       column, no total row and no grade — the wire carries none of them. */
+    #game-over-overlay .game-over-report {
+      display: none;
+      grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+      gap: 10px 24px;
+      margin: 28px 0 0;
+      padding: 0;
+      max-width: 64ch;
+      text-align: left;
+    }
+    #game-over-overlay .game-over-report dt {
+      font-size: var(--text-md);
+      letter-spacing: var(--tracking-wide);
+      text-transform: uppercase;
+      color: var(--ink-dim);
+      white-space: nowrap;
+    }
+    #game-over-overlay .game-over-report dd {
+      margin: 0;
+      font-size: var(--text-md);
+      line-height: 1.6;
+      color: var(--ink);
+    }
+    /* The row's semantic state is the ONLY thing that varies per row, and it
+       varies by accent alone: every row gets identical weight and layout, so
+       none of them reads as the "real" result. */
+    #game-over-overlay .game-over-report dt[data-state="saved"] { color: var(--loaded); }
+    #game-over-overlay .game-over-report dt[data-state="lost"] { color: var(--fire); }
+    #game-over-overlay .game-over-report dt[data-state="partial"] { color: var(--gold); }
+    #game-over-overlay .game-over-report dt[data-state="neutral"] { color: var(--ink-dim); }
+    @media (max-width: 600px) {
+      /* On a phone the two columns stack: the same rows, the same order, and
+         the heading still reads as the label of the line under it. */
+      #game-over-overlay .game-over-report {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 4px;
+      }
+      #game-over-overlay .game-over-report dt { white-space: normal; }
+      #game-over-overlay .game-over-report dt + dd { margin-bottom: 12px; }
     }
     #game-over-overlay .game-over-return-btn {
       margin-top: 32px;
@@ -1249,11 +1297,15 @@
   </div>
 
   <!-- Game-over overlay: shown when GamePhase::GameOver. Displays either
-       "Ship Destroyed" (hull death) or the scenario's game_over message. -->
+       "Ship Destroyed" (hull death) or the scenario's game_over message, and —
+       when the scenario authored one (issue #1344) — the post-mission report
+       rows underneath it, in the order the author wrote them. The rows carry no
+       score, no total and no grade: see gui/game-over-view.js. -->
   <div id="game-over-overlay">
     <div class="game-over-scenario" id="game-over-scenario"></div>
     <div class="game-over-headline" id="game-over-headline"></div>
     <div class="game-over-message" id="game-over-message"></div>
+    <dl class="game-over-report" id="game-over-report"></dl>
     <button id="return-to-lobby-btn" class="game-over-return-btn" data-i18n="client.return_to_lobby">Return to Lobby</button>
   </div>
 
@@ -1975,6 +2027,10 @@
           // ending that declared no side, which the view frames as ENDED.
           outcome: ls ? ls.gameOverOutcome : null,
           scenarioTitle: ls ? ls.scenarioTitle : '',
+          // The post-mission report (issue #1344). Empty for every scenario
+          // that has not authored one, which is what keeps their endings
+          // exactly as they were.
+          report: ls ? ls.gameOverReport : [],
         });
         if (gv.visible) {
           gameOverEl.dataset.outcome = gv.outcome;
@@ -1983,6 +2039,27 @@
           const headlineEl = document.getElementById('game-over-headline');
           if (headlineEl) headlineEl.textContent = t(gv.headlineId);
           gameOverMsgEl.textContent = gv.bodyId ? t(gv.bodyId) : wireText(gv.bodyText);
+          // The report rows, in the author's order. Rebuilt rather than diffed:
+          // this runs once, on an overlay that has just appeared. Every string
+          // goes through `t()` — the wire carries ids, never prose — and the
+          // row's state rides a data attribute so the accent is CSS's decision
+          // and not a second vocabulary in here.
+          const reportEl = document.getElementById('game-over-report');
+          if (reportEl) {
+            reportEl.replaceChildren();
+            for (const row of gv.rows) {
+              const heading = document.createElement('dt');
+              heading.textContent = t(row.headingId);
+              const outcome = document.createElement('dd');
+              outcome.textContent = t(row.outcomeId);
+              if (row.state) {
+                heading.dataset.state = row.state;
+                outcome.dataset.state = row.state;
+              }
+              reportEl.append(heading, outcome);
+            }
+            reportEl.style.display = gv.rows.length ? 'grid' : 'none';
+          }
           gameOverEl.style.display = 'flex';
         } else {
           gameOverEl.style.display = 'none';

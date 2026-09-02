@@ -697,6 +697,7 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
             ServerMessage::GameOver {
                 reason: "server.game_over.ship_destroyed".into(),
                 outcome: Some("defeat".into()),
+                report: Vec::new(),
             },
         ),
         (
@@ -1750,13 +1751,15 @@ fn an_objective_without_the_params_key_still_decodes() {
 // ── GameOver carries the authored outcome (PRD #1023 module 4) ────────
 
 /// The whole surface of the message the game-over screen reads. `outcome`
-/// is written even when it is `null`, so the client tests one shape.
+/// and `report` are written even when they are empty, so the client tests
+/// one shape.
 #[test]
-fn game_over_wire_keys_are_reason_and_outcome() {
+fn game_over_wire_keys_are_reason_outcome_and_report() {
     let encoded = JsonCodec
         .encode_server(&ServerMessage::GameOver {
             reason: "world.falling_skyway.ending.held".into(),
             outcome: Some("victory".into()),
+            report: Vec::new(),
         })
         .unwrap();
     let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
@@ -1767,10 +1770,12 @@ fn game_over_wire_keys_are_reason_and_outcome() {
             .keys()
             .map(String::as_str)
             .collect::<std::collections::BTreeSet<&str>>(),
-        std::collections::BTreeSet::from(["reason", "outcome"]),
-        "the ending's whole surface: what happened, and which side it was"
+        std::collections::BTreeSet::from(["reason", "outcome", "report"]),
+        "the ending's whole surface: what happened, which side it was, and \
+         the report rows if it authored any"
     );
     assert_eq!(value["data"]["outcome"], "victory");
+    assert!(value["data"]["report"].as_array().unwrap().is_empty());
 
     // Still written when there is no declared side, because a key that
     // came and went would make absence and defeat look alike to a client
@@ -1779,6 +1784,7 @@ fn game_over_wire_keys_are_reason_and_outcome() {
         .encode_server(&ServerMessage::GameOver {
             reason: "r".into(),
             outcome: None,
+            report: Vec::new(),
         })
         .unwrap();
     let value: serde_json::Value = serde_json::from_str(&undeclared).unwrap();
@@ -1794,6 +1800,7 @@ fn game_over_outcome_round_trips_and_defaults_when_absent() {
             ServerMessage::GameOver {
                 reason: "server.game_over.ship_destroyed".into(),
                 outcome: outcome.clone(),
+                report: Vec::new(),
             },
         );
     }
@@ -1802,12 +1809,88 @@ fn game_over_outcome_round_trips_and_defaults_when_absent() {
     // undeclared ending rather than failing the message.
     let legacy = r#"{"type":"GameOver","data":{"reason":"Ship destroyed"}}"#;
     match JsonCodec.decode_server(legacy).unwrap() {
-        ServerMessage::GameOver { reason, outcome } => {
+        ServerMessage::GameOver {
+            reason,
+            outcome,
+            report,
+        } => {
             assert_eq!(reason, "Ship destroyed");
             assert_eq!(outcome, None);
+            assert!(report.is_empty(), "a pre-#1344 peer authored no report");
         }
         other => panic!("expected GameOver, got {other:?}"),
     }
+}
+
+// ── The report rides GameOver, score-free (issue #1344) ───────────────
+
+/// Every row field a player surface needs, and nothing a player must not
+/// see. The `score` on `core::report::ReportRow` has no home in this shape
+/// at all — a compile-time absence, not a runtime filter — and this pins the
+/// key set so adding one would have to be a deliberate act.
+#[test]
+fn game_over_report_rows_carry_ids_and_state_but_never_a_score() {
+    let encoded = JsonCodec
+        .encode_server(&ServerMessage::GameOver {
+            reason: "world.falling_skyway.game_over.mission_complete".into(),
+            outcome: Some("victory".into()),
+            report: vec![crate::core::messages::GameOverReportRow {
+                id: "lyra".into(),
+                heading: "world.falling_skyway.report.lyra.heading".into(),
+                outcome: "world.falling_skyway.report.lyra.saved".into(),
+                state: "saved".into(),
+            }],
+        })
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+    let rows = value["data"]["report"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<&str>>(),
+        std::collections::BTreeSet::from(["id", "heading", "outcome", "state"]),
+        "a player-facing row names the thing and its fate: no score, no \
+         total, no grade"
+    );
+    assert_eq!(rows[0]["state"], "saved");
+    assert_eq!(
+        rows[0]["heading"],
+        "world.falling_skyway.report.lyra.heading"
+    );
+    assert!(
+        !encoded.contains("score"),
+        "score must never reach the wire"
+    );
+}
+
+#[test]
+fn game_over_report_rows_round_trip_in_authored_order() {
+    let rows = vec![
+        crate::core::messages::GameOverReportRow {
+            id: "lyra".into(),
+            heading: "world.falling_skyway.report.lyra.heading".into(),
+            outcome: "world.falling_skyway.report.lyra.lost".into(),
+            state: "lost".into(),
+        },
+        crate::core::messages::GameOverReportRow {
+            id: "traffic".into(),
+            heading: "world.falling_skyway.report.traffic.heading".into(),
+            outcome: "world.falling_skyway.report.traffic.partial".into(),
+            state: "partial".into(),
+        },
+    ];
+    assert_server_roundtrip(
+        &JsonCodec,
+        ServerMessage::GameOver {
+            reason: "world.falling_skyway.game_over.lark_collision".into(),
+            outcome: Some("defeat".into()),
+            report: rows,
+        },
+    );
 }
 
 // ── Human-seeking hosts on the wire (issue #984) ──────────────────────
@@ -4105,6 +4188,7 @@ fn encode_hud_state_round_trips() {
         phaser_firing: true,
         game_over_message: None,
         computer_message: None,
+        game_over_report: Vec::new(),
     };
     let json = encode_hud_state(&state).expect("encode hud");
     let decoded: ViewscreenHudState = serde_json::from_str(&json).unwrap();
@@ -4122,6 +4206,7 @@ fn encode_hud_state_emits_snake_case_fields() {
         phaser_firing: false,
         game_over_message: None,
         computer_message: None,
+        game_over_report: Vec::new(),
     };
     let json = encode_hud_state(&state).expect("encode hud");
     assert!(json.contains("\"heading\":0"), "got: {json}");
@@ -4147,6 +4232,7 @@ fn encode_hud_state_carries_the_computer_message_when_present() {
             severity: "advisory".into(),
             station: Some("tactical".into()),
         }),
+        game_over_report: Vec::new(),
     };
     let json = encode_hud_state(&state).expect("encode hud");
     assert!(json.contains("\"computer_message\":{"), "got: {json}");
@@ -4165,6 +4251,7 @@ fn encode_hud_state_omits_absent_computer_message() {
         phaser_firing: false,
         game_over_message: None,
         computer_message: None,
+        game_over_report: Vec::new(),
     };
     let json = encode_hud_state(&state).expect("encode hud");
     assert!(

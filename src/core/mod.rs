@@ -10,6 +10,9 @@ pub mod messages;
 pub mod narrative;
 /// The rendezvous service's frame vocabulary, for the native host (issue #1113).
 pub mod rendezvous;
+/// The structured post-mission report vocabulary and accumulator (issue #1344,
+/// PRD #1337).
+pub mod report;
 /// The continuous-task lifecycle vocabulary — one start, exactly one terminal
 /// (issue #1341, PRD #1337).
 pub mod task_lifecycle;

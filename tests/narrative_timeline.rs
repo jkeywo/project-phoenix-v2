@@ -276,6 +276,10 @@ fn routine_simulation_never_reaches_the_timeline() {
         "marked_entity_destroyed",
         "computer_message_posted",
         "computer_message_cleared",
+        // The post-mission report (issue #1344): one row, and the finalized
+        // beat the report-bearing ending writes.
+        "report_row_updated",
+        "report_finalized",
     ]
     .into_iter()
     .collect();
@@ -636,5 +640,119 @@ fn the_ndjson_stream_carries_the_same_beats() {
         lines.len(),
         streamable,
         "the ndjson stream and the report's timeline must agree"
+    );
+
+    // Issue #1344's stream policy, proved on a real run: a re-scored report row
+    // is a RATE, so `report_row_updated` is folded but never streamed, while the
+    // finalized beat — which happens once — is both.
+    assert!(
+        !lines
+            .iter()
+            .any(|l| l.contains("\"kind\":\"report_row_updated\"")),
+        "a re-scored report row must stay out of the ndjson stream:\n{}",
+        lines.join("\n")
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains("\"kind\":\"report_finalized\"")),
+        "the finalized beat happens once and belongs in the stream:\n{}",
+        lines.join("\n")
+    );
+    assert_eq!(
+        count(&report, "report_row_updated"),
+        1,
+        "the folded timeline still sees the row move: {:?}",
+        report.narrative.counts_by_kind
+    );
+}
+
+// ── The post-mission report, end to end (issue #1344) ──────────────────────
+
+/// AC1 and AC4 on a whole seeded run: the probe world writes one row and then
+/// declares a DEFEAT, and the report-bearing ending outranks it — the run
+/// classifies `reported`, carries the row's String Ids in authored order, and
+/// carries the hidden score and a total equal to the visible rows' scores.
+#[test]
+fn a_report_bearing_ending_classifies_as_reported_and_carries_its_rows() {
+    use project_phoenix::core::balance::RunOutcome;
+    use project_phoenix::core::report::ReportRowState;
+
+    let (report, _) = probe_run(ReportFormat::Json);
+
+    assert_eq!(
+        report.outcome_report.outcome,
+        RunOutcome::Reported,
+        "a declared defeat that carries a report is reported, not a defeat"
+    );
+
+    let rows = report.outcome_report.report.rows();
+    assert_eq!(rows.len(), 1, "one authored row: {rows:?}");
+    assert_eq!(rows[0].id, "lyra");
+    // String Ids, never prose — the same rule the timeline follows.
+    assert_eq!(
+        rows[0].heading_id,
+        "world.probe_narrative.report.lyra.heading"
+    );
+    assert_eq!(
+        rows[0].outcome_id,
+        "world.probe_narrative.report.lyra.saved"
+    );
+    assert_eq!(rows[0].state, ReportRowState::Saved);
+
+    // AC4: the signed score, and a total equal to the visible rows' scores.
+    assert_eq!(rows[0].score, 6);
+    assert_eq!(report.outcome_report.report.total(), 6);
+
+    // The declared outcome is not lost — it stopped being the frame, which is
+    // not the same thing. It is still latched for anything that wants it.
+    let json = report.to_json();
+    let parsed: serde_json::Value =
+        serde_json::from_str(&json).unwrap_or_else(|e| panic!("run report is not valid JSON: {e}"));
+    assert_eq!(parsed["outcome"], "reported");
+    assert_eq!(parsed["report"]["rows"][0]["state"], "saved");
+    assert_eq!(parsed["report"]["rows"][0]["score"], 6);
+    assert_eq!(parsed["report"]["total"], 6);
+    // The run really did reach the scripted ending — the reason string itself is
+    // TAKEN by the broadcast (it is per-ending display text and the next round
+    // must not inherit it), so the phase is what proves it here.
+    assert_eq!(parsed["final_phase"], "GameOver");
+}
+
+/// The finalized beat names the ending it closed and carries the shape of the
+/// report — the count and the hidden total — so an after-action reader can
+/// check the rows it went on to read against what the run said it wrote.
+#[test]
+fn the_finalized_beat_names_the_ending_and_the_totals() {
+    use project_phoenix::core::narrative::NarrativeValue;
+
+    let (report, _) = probe_run(ReportFormat::Json);
+    let finalized: Vec<_> = report
+        .narrative
+        .events
+        .iter()
+        .filter(|e| e.event.kind.as_str() == "report_finalized")
+        .collect();
+    assert_eq!(finalized.len(), 1, "finalized fires exactly once");
+    assert_eq!(
+        finalized[0].event.id,
+        "world.probe_narrative.game_over.closed"
+    );
+    assert_eq!(
+        finalized[0].event.detail.get("rows"),
+        Some(&NarrativeValue::Int(1))
+    );
+    assert_eq!(
+        finalized[0].event.detail.get("total"),
+        Some(&NarrativeValue::Int(6))
+    );
+    // It is the LAST thing the timeline says, because the mission is over.
+    assert_eq!(
+        report
+            .narrative
+            .events
+            .last()
+            .map(|e| e.event.kind.as_str()),
+        Some("report_finalized")
     );
 }

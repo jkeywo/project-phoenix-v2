@@ -6680,6 +6680,9 @@ fn game_over_broadcasts_the_latched_outcome() {
 
     let mut world = World::new();
     world.init_resource::<SimOutbox>();
+    // The `ReportFinalized` beat's writer (issue #1344). Present but unused on
+    // an ending that authored no report, which is this test's case.
+    world.init_resource::<bevy::ecs::message::Messages<crate::core::narrative::NarrativeEvent>>();
     world.insert_resource(GameOverReason(
         Some("world.falling_skyway.ending.held".into()),
         Some(crate::core::balance::Outcome::Victory),
@@ -6690,9 +6693,17 @@ fn game_over_broadcasts_the_latched_outcome() {
     let outbox = world.resource::<SimOutbox>();
     assert_eq!(outbox.len(), 1);
     match outbox.iter().next().map(|(_, message)| message) {
-        Some(ServerMessage::GameOver { reason, outcome }) => {
+        Some(ServerMessage::GameOver {
+            reason,
+            outcome,
+            report,
+        }) => {
             assert_eq!(reason, "world.falling_skyway.ending.held");
             assert_eq!(outcome.as_deref(), Some("victory"));
+            assert!(
+                report.is_empty(),
+                "a scenario that authored no report publishes none"
+            );
         }
         other => panic!("expected GameOver, got {other:?}"),
     }
@@ -6721,6 +6732,7 @@ fn game_over_publishes_no_outcome_when_none_was_declared() {
 
     let mut world = World::new();
     world.init_resource::<SimOutbox>();
+    world.init_resource::<bevy::ecs::message::Messages<crate::core::narrative::NarrativeEvent>>();
     world.insert_resource(GameOverReason(None, None));
 
     world.run_system_once(on_game_over_enter).unwrap();
@@ -6731,12 +6743,134 @@ fn game_over_publishes_no_outcome_when_none_was_declared() {
         .next()
         .map(|(_, message)| message)
     {
-        Some(ServerMessage::GameOver { reason, outcome }) => {
+        Some(ServerMessage::GameOver {
+            reason,
+            outcome,
+            report,
+        }) => {
             assert_eq!(reason, "");
             assert_eq!(*outcome, None);
+            assert!(report.is_empty());
         }
         other => panic!("expected GameOver, got {other:?}"),
     };
+}
+
+// ── The post-mission report on the ending broadcast (issue #1344) ─────────
+
+/// AC1 and AC3 at the broadcast seam: a report-bearing ending publishes its
+/// rows, in authored order, with the two String Ids and the semantic state
+/// the surface needs — and WITHOUT the hidden score, which stays on the
+/// resource for the headless report to read.
+#[test]
+fn game_over_publishes_the_report_rows_without_their_scores() {
+    use crate::core::report::{MissionReport, ReportRow, ReportRowState};
+    use bevy::ecs::system::RunSystemOnce;
+
+    let mut world = World::new();
+    world.init_resource::<SimOutbox>();
+    world.init_resource::<bevy::ecs::message::Messages<crate::core::narrative::NarrativeEvent>>();
+    world.insert_resource(GameOverReason(
+        Some("world.falling_skyway.game_over.lark_collision".into()),
+        Some(crate::core::balance::Outcome::Defeat),
+    ));
+    let mut report = MissionReport::default();
+    report.set_row(ReportRow {
+        id: "lyra".into(),
+        heading_id: "world.falling_skyway.report.lyra.heading".into(),
+        outcome_id: "world.falling_skyway.report.lyra.saved".into(),
+        state: ReportRowState::Saved,
+        score: 6,
+    });
+    world.insert_resource(report);
+
+    world.run_system_once(on_game_over_enter).unwrap();
+
+    match world
+        .resource::<SimOutbox>()
+        .iter()
+        .next()
+        .map(|(_, message)| message)
+    {
+        Some(ServerMessage::GameOver {
+            outcome, report, ..
+        }) => {
+            // The declared side still travels — it is the authored truth about
+            // the ending. It simply stops being the frame the client draws.
+            assert_eq!(outcome.as_deref(), Some("defeat"));
+            assert_eq!(report.len(), 1);
+            assert_eq!(report[0].id, "lyra");
+            assert_eq!(
+                report[0].heading,
+                "world.falling_skyway.report.lyra.heading"
+            );
+            assert_eq!(report[0].outcome, "world.falling_skyway.report.lyra.saved");
+            assert_eq!(report[0].state, "saved");
+        }
+        other => panic!("expected GameOver, got {other:?}"),
+    };
+
+    // The score stayed behind, on the authoritative resource the headless
+    // report reads after the run.
+    assert_eq!(
+        world
+            .resource::<crate::core::report::MissionReport>()
+            .total(),
+        6
+    );
+}
+
+/// The finalized beat fires once for a report-bearing ending, and not at all
+/// for an ending that authored no report — "finalized" over an empty report
+/// would tell an after-action reader a report existed.
+#[test]
+fn game_over_beats_report_finalized_only_when_there_are_rows() {
+    use crate::core::narrative::{NarrativeEvent, NarrativeKind, NarrativeValue};
+    use crate::core::report::{MissionReport, ReportRow, ReportRowState};
+    use bevy::ecs::system::RunSystemOnce;
+
+    let finalized = |report: MissionReport| -> Vec<NarrativeEvent> {
+        let mut world = World::new();
+        world.init_resource::<SimOutbox>();
+        world.init_resource::<bevy::ecs::message::Messages<NarrativeEvent>>();
+        world.insert_resource(GameOverReason(
+            Some("world.falling_skyway.game_over.mission_complete".into()),
+            Some(crate::core::balance::Outcome::Victory),
+        ));
+        world.insert_resource(report);
+        world.run_system_once(on_game_over_enter).unwrap();
+        world
+            .resource_mut::<bevy::ecs::message::Messages<NarrativeEvent>>()
+            .drain()
+            .collect()
+    };
+
+    assert!(
+        finalized(MissionReport::default()).is_empty(),
+        "an ending with no report authors no finalized beat"
+    );
+
+    let mut report = MissionReport::default();
+    report.set_row(ReportRow {
+        id: "lyra".into(),
+        heading_id: "world.falling_skyway.report.lyra.heading".into(),
+        outcome_id: "world.falling_skyway.report.lyra.lost".into(),
+        state: ReportRowState::Lost,
+        score: -6,
+    });
+    let events = finalized(report);
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].kind, NarrativeKind::ReportFinalized);
+    assert_eq!(
+        events[0].id,
+        "world.falling_skyway.game_over.mission_complete"
+    );
+    assert_eq!(events[0].detail.get("rows"), Some(&NarrativeValue::Int(1)));
+    // The timeline is a diagnostic surface, so the hidden total is on it.
+    assert_eq!(
+        events[0].detail.get("total"),
+        Some(&NarrativeValue::Int(-6))
+    );
 }
 
 // ── The narrative mark on the GameStart spawn path (issue #1338) ──────────

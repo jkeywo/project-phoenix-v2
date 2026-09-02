@@ -161,3 +161,180 @@ describe('gameOverView — fed from the wire', () => {
     expect(gameOverView({ phase: s.phase, outcome: s.gameOverOutcome }).visible).toBe(false);
   });
 });
+
+// ── The post-mission report (issue #1344) ──────────────────────────────────
+
+/**
+ * A mission that saved the stricken hauler and lost the skyway is not
+ * describable in one word, so a report-bearing ending stops trying: the rows
+ * become the result and the win/loss frame steps aside.
+ */
+const lyraSaved = {
+  id: 'lyra',
+  heading: 'world.falling_skyway.report.lyra.heading',
+  outcome: 'world.falling_skyway.report.lyra.saved',
+  state: 'saved',
+};
+const lyraLost = {
+  id: 'lyra',
+  heading: 'world.falling_skyway.report.lyra.heading',
+  outcome: 'world.falling_skyway.report.lyra.lost',
+  state: 'lost',
+};
+const trafficPartial = {
+  id: 'traffic',
+  heading: 'world.falling_skyway.report.traffic.heading',
+  outcome: 'world.falling_skyway.report.traffic.partial',
+  state: 'partial',
+};
+
+describe('gameOverView — a report-bearing ending', () => {
+  it('is classified reported and headlined as a report, not a verdict', () => {
+    const vm = gameOverView({ phase: 'GameOver', report: [lyraSaved] });
+    expect(vm.outcome).toBe('reported');
+    expect(vm.headlineId).toBe('client.game_over_reported');
+  });
+
+  // AC2's catastrophic half. The Lark took the skyway down and the server
+  // declared a defeat; the crew still pulled Lyra clear, and the ending has to
+  // say so.
+  it('outranks a declared defeat and a hull death alike', () => {
+    expect(
+      gameOverView({ phase: 'GameOver', outcome: 'defeat', report: [lyraSaved] }).outcome,
+    ).toBe('reported');
+    expect(
+      gameOverView({ phase: 'GameOver', shipDestroyed: true, report: [lyraSaved] }).outcome,
+    ).toBe('reported');
+    expect(
+      gameOverView({ phase: 'GameOver', outcome: 'victory', report: [lyraLost] }).outcome,
+    ).toBe('reported');
+  });
+
+  it('preserves the authored row order', () => {
+    const vm = gameOverView({ phase: 'GameOver', report: [lyraSaved, trafficPartial] });
+    expect(vm.rows.map((r) => r.id)).toEqual(['lyra', 'traffic']);
+  });
+
+  it('hands the caller String Ids to resolve, never prose', () => {
+    const [row] = gameOverView({ phase: 'GameOver', report: [lyraSaved] }).rows;
+    expect(row.headingId).toBe('world.falling_skyway.report.lyra.heading');
+    expect(row.outcomeId).toBe('world.falling_skyway.report.lyra.saved');
+    expect(row.state).toBe('saved');
+  });
+
+  // AC3, stated where it can fail. The server keeps a signed score per row and
+  // a hidden total; neither has any business on a crew's screen, and neither
+  // has a field to arrive in.
+  it('exposes no score, total, grade or win/loss label', () => {
+    const vm = gameOverView({
+      phase: 'GameOver',
+      outcome: 'defeat',
+      report: [{ ...lyraSaved, score: 6 }, { ...trafficPartial, score: -4 }],
+    });
+    const serialised = JSON.stringify(vm);
+    expect(serialised).not.toContain('score');
+    expect(serialised).not.toContain('total');
+    expect(serialised).not.toContain('grade');
+    for (const row of vm.rows) {
+      expect(Object.keys(row).sort()).toEqual(['headingId', 'id', 'outcomeId', 'state']);
+    }
+    // And the frame itself carries no verdict word.
+    expect(vm.headlineId).not.toBe('client.game_over_defeat');
+    expect(vm.headlineId).not.toBe('client.game_over_victory');
+  });
+
+  it("keeps the world's own closing prose beside the rows", () => {
+    const vm = gameOverView({
+      phase: 'GameOver',
+      reason: 'The transfer window has closed.',
+      report: [lyraSaved],
+    });
+    expect(vm.bodyText).toBe('The transfer window has closed.');
+    expect(vm.rows).toHaveLength(1);
+  });
+});
+
+describe('gameOverView — what is NOT a report', () => {
+  // AC5. Every scenario that has not authored a report keeps the ending it
+  // always had, and the three shapes an absent report can arrive in all mean
+  // the same thing.
+  it('leaves an unreported ending exactly as it was', () => {
+    for (const report of [undefined, [], null, 'nonsense']) {
+      expect(gameOverView({ phase: 'GameOver', outcome: 'victory', report }).outcome)
+        .toBe('victory');
+      expect(gameOverView({ phase: 'GameOver', shipDestroyed: true, report }).outcome)
+        .toBe('defeat');
+      expect(gameOverView({ phase: 'GameOver', report }).outcome).toBe('ended');
+      expect(gameOverView({ phase: 'GameOver', report }).rows).toEqual([]);
+    }
+  });
+
+  // A row missing either String Id would render as a blank line, which says
+  // less than not showing the row.
+  it('drops a row that could not render', () => {
+    const vm = gameOverView({
+      phase: 'GameOver',
+      report: [{ id: 'a', heading: 'h.a', state: 'saved' }, { id: 'b', outcome: 'o.b' }, null],
+    });
+    expect(vm.rows).toEqual([]);
+    expect(vm.outcome).toBe('ended');
+  });
+
+  // An unknown state still says what happened through its two ids; only the
+  // accent is withheld, so a surface styling on it falls back to neutral.
+  it('keeps a row whose state it does not recognise, unstyled', () => {
+    const vm = gameOverView({
+      phase: 'GameOver',
+      report: [{ ...lyraSaved, state: 'triumphant' }],
+    });
+    expect(vm.rows).toHaveLength(1);
+    expect(vm.rows[0].state).toBe('');
+    expect(vm.outcome).toBe('reported');
+  });
+});
+
+// ── End to end: the wire message → lobby-state → the reported ending ───────
+
+describe('gameOverView — the report, fed from the wire', () => {
+  const view = (msg) => {
+    const s = new LobbyState();
+    s.apply(msg);
+    return gameOverView({
+      phase: s.phase,
+      reason: s.gameOverReason,
+      outcome: s.gameOverOutcome,
+      report: s.gameOverReport,
+      scenarioTitle: 'Falling Skyway',
+    });
+  };
+
+  it('lights up the report frame from a real GameOver message', () => {
+    const vm = view({
+      type: 'GameOver',
+      data: {
+        reason: 'world.falling_skyway.game_over.lark_collision',
+        outcome: 'defeat',
+        report: [lyraSaved],
+      },
+    });
+    expect(vm.visible).toBe(true);
+    expect(vm.outcome).toBe('reported');
+    expect(vm.rows).toHaveLength(1);
+    expect(vm.scenarioName).toBe('Falling Skyway');
+  });
+
+  // A host still sending the pre-#1344 shape.
+  it('stays with the declared frame when the message carries no report field', () => {
+    const vm = view({ type: 'GameOver', data: { reason: 'r', outcome: 'victory' } });
+    expect(vm.outcome).toBe('victory');
+    expect(vm.rows).toEqual([]);
+  });
+
+  it('clears the report on the way back to the lobby', () => {
+    const s = new LobbyState();
+    s.apply({ type: 'GameOver', data: { reason: 'r', outcome: 'defeat', report: [lyraLost] } });
+    expect(s.gameOverReport).toHaveLength(1);
+    s.apply({ type: 'ReturnedToLobby' });
+    expect(s.gameOverReport).toEqual([]);
+  });
+});

@@ -2265,6 +2265,24 @@ fn reduce_dialogue_node(message_id: &str, dialogue: &ActiveDialogue) -> Dialogue
     }
 }
 
+/// One captured post-mission report row (issue #1344).
+///
+/// A stored mirror of [`crate::core::report::ReportRow`] rather than the type
+/// itself, for the same reason `game_over` stores its outcome as a LABEL: the
+/// live type carries a `ReportRowState` enum, and deriving `Serialize` on it
+/// would make that enum's variant order pinned save-file surface for no gain.
+/// `state` is [`crate::core::report::ReportRowState::as_str`], which is already
+/// this project's report vocabulary, and an unrecognised label on restore drops
+/// the row rather than guessing at a fate.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SnapshotReportRow {
+    pub id: String,
+    pub heading: String,
+    pub outcome: String,
+    pub state: String,
+    pub score: i32,
+}
+
 /// Captured authoritative world state: everything issue #894's record says a
 /// divergence is defined over, at one tick.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -2290,6 +2308,13 @@ pub struct PhoenixSnapshot {
     /// enum's variant order becomes stored surface.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub game_over: Option<(Option<String>, Option<String>)>,
+    /// The structured post-mission report's rows, in authored order (issue
+    /// #1344). Order is content here, not presentation — see `MissionReport` —
+    /// so it is stored as a `Vec` and restored verbatim. Empty for a run that
+    /// authored no report, which is the overwhelming majority, hence
+    /// `skip_serializing_if`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mission_report: Vec<SnapshotReportRow>,
     /// `(scope, objective)` pairs in sorted key order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub captain_boosts: Vec<(String, String)>,
@@ -2420,6 +2445,22 @@ pub fn capture(world: &World) -> PhoenixSnapshot {
         game_over: world
             .get_resource::<GameOverReason>()
             .map(|reason| (reason.0.clone(), reason.1.map(|o| o.as_str().to_string()))),
+        mission_report: world
+            .get_resource::<crate::core::report::MissionReport>()
+            .map(|report| {
+                report
+                    .rows()
+                    .iter()
+                    .map(|row| SnapshotReportRow {
+                        id: row.id.clone(),
+                        heading: row.heading_id.clone(),
+                        outcome: row.outcome_id.clone(),
+                        state: row.state.as_str().to_string(),
+                        score: row.score,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
         ai_world: world
             .get_resource::<crate::ai::server::WorldSnapshot>()
             .map(|snapshot| snapshot.entities.clone()),
@@ -5081,6 +5122,31 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
             .as_deref()
             .and_then(|label| crate::core::balance::Outcome::parse(label).ok());
         world.insert_resource(GameOverReason(reason, outcome));
+    }
+
+    // The post-mission report (issue #1344). Written unconditionally, unlike
+    // the blocks either side of it: an EMPTY report is a real state — "this run
+    // has recorded nothing yet" — and leaving a stale resource in place when
+    // resuming into it would resurrect rows the captured tick did not have.
+    // Order is restored verbatim, because order is content here.
+    {
+        let rows = snapshot
+            .mission_report
+            .iter()
+            .filter_map(|row| {
+                // An unrecognised state label drops the row rather than guessing
+                // a fate — the same refusal `Outcome::parse` makes just above.
+                let state = crate::core::report::ReportRowState::parse(&row.state).ok()?;
+                Some(crate::core::report::ReportRow {
+                    id: row.id.clone(),
+                    heading_id: row.heading.clone(),
+                    outcome_id: row.outcome.clone(),
+                    state,
+                    score: row.score,
+                })
+            })
+            .collect();
+        world.insert_resource(crate::core::report::MissionReport::from_rows(rows));
     }
 
     if !snapshot.captain_boosts.is_empty() {

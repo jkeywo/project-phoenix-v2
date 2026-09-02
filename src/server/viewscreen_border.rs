@@ -632,6 +632,7 @@ fn spawn_hud_state_entity(mut commands: Commands) {
         phaser_firing: false,
         game_over_message: None,
         computer_message: None,
+        game_over_report: Vec::new(),
     }));
 }
 
@@ -652,6 +653,10 @@ fn compute_hud_state(
     // test with no ECS at all — the same reason every other parameter here is
     // a plain value, not a `Query`/`Res`.
     computer_message: Option<ComputerMessageWire>,
+    // The post-mission report (issue #1344). Read here rather than composed:
+    // the rows are already the score-free player projection, and the Viewscreen
+    // renders exactly what a phone does.
+    mission_report: Option<&crate::core::report::MissionReport>,
 ) -> ViewscreenHudState {
     let alert = red_alert;
     let hull_pct = if hull_max > 0.0 {
@@ -669,6 +674,27 @@ fn compute_hud_state(
             .and_then(|r| r.0.clone())
             .unwrap_or_default()
     });
+    // Empty until the game ends, and empty afterwards too for a scenario that
+    // authored no report — which is what keeps every other world's Viewscreen
+    // ending exactly as it was.
+    let game_over_report = if *phase == GamePhase::GameOver {
+        mission_report
+            .map(|report| {
+                report
+                    .rows()
+                    .iter()
+                    .map(|row| crate::core::messages::GameOverReportRow {
+                        id: row.id.clone(),
+                        heading: row.heading_id.clone(),
+                        outcome: row.outcome_id.clone(),
+                        state: row.state.as_str().to_string(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
     ViewscreenHudState {
         heading: yaw_to_compass_bearing(physics.yaw),
         hull_pct: hull_pct.round() as i32,
@@ -685,6 +711,7 @@ fn compute_hud_state(
         phaser_firing,
         game_over_message,
         computer_message,
+        game_over_report,
     }
 }
 
@@ -711,6 +738,7 @@ fn recompute_hud_state(
     hull_q: Query<&crate::entities::spawner::EntitySystemHull, With<crate::server_app::LocalShip>>,
     phase: Option<Res<State<GamePhase>>>,
     game_over_reason: Option<Res<GameOverReason>>,
+    mission_report: Option<Res<crate::core::report::MissionReport>>,
     physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
     last_input_q: Query<&crate::ship_plugin::LastHelmInput, With<crate::server_app::LocalShip>>,
     beam_q: Query<&crate::console::weapons::ActiveBeam, With<crate::server_app::LocalShip>>,
@@ -747,6 +775,7 @@ fn recompute_hud_state(
         phase.get(),
         game_over_reason.as_deref(),
         computer_message_wire,
+        mission_report.as_deref(),
     );
     for mut hud in hud_q.iter_mut() {
         if hud.0 != next {
@@ -760,6 +789,7 @@ fn push_game_over_hud_state(
     red_alert_q: Query<&crate::ship::state::ShipRedAlert, With<crate::server_app::LocalShip>>,
     hull_q: Query<&crate::entities::spawner::EntitySystemHull, With<crate::server_app::LocalShip>>,
     game_over_reason: Option<Res<GameOverReason>>,
+    mission_report: Option<Res<crate::core::report::MissionReport>>,
     physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
     mut hud_q: Query<&mut ViewscreenHud>,
     mut writer: MessageWriter<HudStateChanged>,
@@ -774,7 +804,9 @@ fn push_game_over_hud_state(
     // looping SFX stop with the sim. The computer-message banner is forced
     // off too (issue #1342 AC2: mission end clears it) — this push does not
     // wait on `clear_active_computer_message`'s own `ResMut` to land first,
-    // it simply never shows one on the final HUD state.
+    // it simply never shows one on the final HUD state. The post-mission
+    // report (issue #1344) is the opposite case and is read live: the ending
+    // is exactly when the rows have to be on screen.
     let next = compute_hud_state(
         red_alert,
         &physics,
@@ -785,6 +817,7 @@ fn push_game_over_hud_state(
         &GamePhase::GameOver,
         game_over_reason.as_deref(),
         None,
+        mission_report.as_deref(),
     );
     for mut hud in hud_q.iter_mut() {
         hud.0 = next.clone();
@@ -982,6 +1015,7 @@ mod tests {
             &GamePhase::InProgress,
             None,
             None,
+            None,
         );
         assert_eq!(state.heading, 0);
         assert_eq!(state.hull_pct, 100);
@@ -1010,6 +1044,7 @@ mod tests {
             &GamePhase::InProgress,
             None,
             None,
+            None,
         );
         assert_eq!(state.heading, 90);
         assert_eq!(state.hull_pct, 50);
@@ -1030,6 +1065,7 @@ mod tests {
             0.5,
             false,
             &GamePhase::InProgress,
+            None,
             None,
             None,
         );
@@ -1054,7 +1090,97 @@ mod tests {
             &GamePhase::GameOver,
             Some(&reason),
             None,
+            None,
         );
+        assert_eq!(
+            state.game_over_message.as_deref(),
+            Some("server.game_over.ship_destroyed")
+        );
+    }
+
+    /// Issue #1344: the Viewscreen shows the SAME rows a phone does, in the
+    /// same order, and carries no score for the same reason the phone's wire
+    /// row has no field to put one in.
+    #[test]
+    fn compute_hud_state_carries_the_post_mission_report_at_game_over() {
+        use crate::core::report::{MissionReport, ReportRow, ReportRowState};
+        use crate::server_app::GameOverReason;
+
+        let physics = ShipPhysics::default();
+        let reason = GameOverReason(
+            Some("world.falling_skyway.game_over.lark_collision".into()),
+            Some(crate::core::balance::Outcome::Defeat),
+        );
+        let mut report = MissionReport::default();
+        report.set_row(ReportRow {
+            id: "lyra".into(),
+            heading_id: "world.falling_skyway.report.lyra.heading".into(),
+            outcome_id: "world.falling_skyway.report.lyra.saved".into(),
+            state: ReportRowState::Saved,
+            score: 6,
+        });
+
+        // While the mission runs there is nothing to report on yet, even though
+        // the row is already written.
+        let live = compute_hud_state(
+            false,
+            &physics,
+            80.0,
+            100.0,
+            0.0,
+            false,
+            &GamePhase::InProgress,
+            Some(&reason),
+            None,
+            Some(&report),
+        );
+        assert!(live.game_over_report.is_empty());
+
+        let ended = compute_hud_state(
+            false,
+            &physics,
+            80.0,
+            100.0,
+            0.0,
+            false,
+            &GamePhase::GameOver,
+            Some(&reason),
+            None,
+            Some(&report),
+        );
+        assert_eq!(ended.game_over_report.len(), 1);
+        assert_eq!(ended.game_over_report[0].id, "lyra");
+        assert_eq!(
+            ended.game_over_report[0].heading,
+            "world.falling_skyway.report.lyra.heading"
+        );
+        assert_eq!(ended.game_over_report[0].state, "saved");
+        // Every text field is a String Id the host channel localises; Rust
+        // composes no English on this surface.
+        assert!(ended.game_over_report[0]
+            .outcome
+            .starts_with("world.falling_skyway.report."));
+    }
+
+    /// A scenario that authored no report ends exactly as it always did.
+    #[test]
+    fn compute_hud_state_reports_nothing_for_a_scenario_without_a_report() {
+        use crate::server_app::GameOverReason;
+        let physics = ShipPhysics::default();
+        let reason = GameOverReason(Some("server.game_over.ship_destroyed".into()), None);
+        let state = compute_hud_state(
+            false,
+            &physics,
+            0.0,
+            100.0,
+            0.0,
+            false,
+            &GamePhase::GameOver,
+            Some(&reason),
+            None,
+            Some(&crate::core::report::MissionReport::default()),
+        );
+        assert!(state.game_over_report.is_empty());
         assert_eq!(
             state.game_over_message.as_deref(),
             Some("server.game_over.ship_destroyed")
@@ -1075,6 +1201,7 @@ mod tests {
             false,
             &GamePhase::GameOver,
             Some(&reason),
+            None,
             None,
         );
         assert_eq!(
@@ -1104,6 +1231,7 @@ mod tests {
             &GamePhase::InProgress,
             None,
             Some(msg.clone()),
+            None,
         );
         assert_eq!(state.computer_message, Some(msg));
     }
@@ -1141,6 +1269,7 @@ mod tests {
             0.0,
             false,
             &GamePhase::GameOver,
+            None,
             None,
             None,
         );

@@ -408,6 +408,21 @@ pub enum ActionCmd {
         reason: String,
         outcome: Option<crate::core::balance::Outcome>,
     },
+    /// Write one row of the structured post-mission report (issue #1344).
+    ///
+    /// Buffered onto `EffectQueue<ReportRow>` by the applier and drained by
+    /// [`crate::mission_report::apply_report_rows`], for the reason every #1223
+    /// effect is: the applier holds no resources and no message writers.
+    ///
+    /// Writing the same row `id` again UPDATES it in place, so a scenario can
+    /// re-state a row as the mission moves without the report growing; a row
+    /// never written is simply absent from the report, which is how a
+    /// genuinely inapplicable row is omitted rather than invented.
+    ///
+    /// The state word is already validated at the script boundary
+    /// ([`crate::core::report::ReportRowState::parse`]), so a typo raises there
+    /// rather than reaching this queue as a row nothing can style.
+    SetReportRow(crate::core::report::ReportRow),
     /// Queue a game-phase transition.
     SetNextState { phase: GamePhase },
     /// Additively load a sub-world. `loader_path` is the layer that issued the

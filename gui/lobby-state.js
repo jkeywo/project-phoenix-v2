@@ -79,6 +79,12 @@ export class LobbyState {
      *  change with no client work; gui/game-over-view.js documents the
      *  fallback the overlay uses meanwhile. */
     this.gameOverOutcome = null;
+    /** The structured post-mission report for the run that just ended (issue
+     *  #1344): an array of `{ id, heading, outcome, state }` in the order the
+     *  scenario authored them, empty when it authored none. Both text fields
+     *  are `strings.csv` ids; there is no score here and there is none on the
+     *  wire either — see gui/game-over-view.js. */
+    this.gameOverReport = [];
     this.scenarioTitle = '';
     this.scenarioBody = '';
     /** Remaining seconds in the pre-game countdown, 0 when not counting. */
@@ -332,6 +338,9 @@ export class LobbyState {
         this.phase = 'GameOver';
         this.gameOverReason = d.reason != null ? d.reason : '';
         this.gameOverOutcome = d.outcome != null ? d.outcome : null;
+        // A pre-#1344 host sends no `report` key at all; an empty array is the
+        // same answer as "this scenario authored none", so both land here.
+        this.gameOverReport = Array.isArray(d.report) ? d.report : [];
         changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
         changes.effects.push({ effect: REDUCER_EFFECTS.REQUEST_RENDER });
         break;
@@ -339,6 +348,7 @@ export class LobbyState {
         this.phase = 'Lobby';
         this.gameOverReason = null;
         this.gameOverOutcome = null;
+        this.gameOverReport = [];
         this.countdownSecs = 0;
         this.waitingForScenario = true;
         changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);

@@ -121,12 +121,21 @@ pub enum NarrativeKind {
     /// mission-end or lobby-return clear is NOT one of these — see
     /// `crate::core::computer_message::ActiveComputerMessage::clear`.
     ComputerMessageCleared,
-    /// One row of the structured post-mission report moved. **No emitter yet**
-    /// — the scored report is a later slice of PRD #1337. Deliberately kept
-    /// OUT of the ndjson timeline stream (see [`Self::in_timeline_stream`]).
+    /// One row of the structured post-mission report moved (issue #1344).
+    /// `id` is the authored row id; `detail` carries the row's heading and
+    /// outcome String Ids, its [`crate::core::report::ReportRowState`] label
+    /// and its hidden score. Emitted by
+    /// [`crate::mission_report::apply_report_rows`] only when the row ACTUALLY
+    /// changed — a scenario re-stating an unchanged row produces nothing.
+    /// Deliberately kept OUT of the ndjson timeline stream (see
+    /// [`Self::in_timeline_stream`]).
     ReportRowUpdated,
-    /// The post-mission report was finalized. **No emitter yet**, same slice as
-    /// [`Self::ReportRowUpdated`].
+    /// The post-mission report was finalized (issue #1344) — the run reached
+    /// `GamePhase::GameOver` holding at least one row, so the ending is
+    /// report-bearing. `id` is the run's game-over reason String Id; `detail`
+    /// carries the row count and the hidden total. Emitted once, from
+    /// `server_app::broadcast_publish::on_game_over_enter`, and never for an
+    /// ending that authored no report — an empty report is not a report.
     ReportFinalized,
     /// A continuous task began (issue #1341). `id` is the activation's
     /// deterministic [`crate::core::task_lifecycle::TaskKey`]; `source` names
@@ -269,7 +278,7 @@ impl NarrativeKind {
     /// The narrative stream is already authored-only, so unlike
     /// [`crate::core::balance::BalanceEvent::in_timeline_stream`] this is not
     /// holding back a per-tick flood today. It exists from day one anyway, and
-    /// with one real member, because the flood this surface WILL see is
+    /// with one real member, because the flood this surface sees is
     /// [`Self::ReportRowUpdated`]: a scored report row is re-scored as the
     /// mission moves, which is a *rate*, not a beat. Its final value is what an
     /// after-action reading wants, and that arrives in

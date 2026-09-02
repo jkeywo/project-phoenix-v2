@@ -1939,7 +1939,8 @@ fn firing_beam_retains_captured_target_when_combat_lock_changes() {
     ));
     start_game_with_weapons(&mut app);
 
-    // Lock t1 and open fire on the port bank.
+    // Lock t1 and open fire on the port bank. The consumer, not routing, is
+    // what acknowledges the press once it has actually opened the beam.
     push(
         &mut app,
         "weapons",
@@ -1952,13 +1953,23 @@ fn firing_beam_retains_captured_target_when_combat_lock_changes() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::ControlSystem {
+        ClientMessage::ControlSystemCorrelated {
+            correlation: ActionCorrelationId::new("phaser-opened").unwrap(),
             target: SystemId("phaser-port".into()),
             payload: SystemControlPayload::FirePhaser,
         },
     );
-    let _ = tick(&mut app);
+    let opened = tick(&mut app);
     assert_eq!(get_active_beam_target(&mut app).as_deref(), Some("t1"));
+    assert!(opened.iter().any(|message| {
+        matches!(
+            (&message.target, &message.msg),
+            (
+                Target::Token(token),
+                ServerMessage::ActionFeedback { correlation, outcome: ActionFeedbackOutcome::Applied }
+            ) if token == "weapons" && correlation.as_str() == "phaser-opened"
+        )
+    }), "the phaser consumer must acknowledge only after it opens the beam");
 
     // Change the combat lock to t2 mid-attack (does NOT reset remaining_secs
     // or cooldown — the beam is still live and burning down its duration), and
@@ -1975,7 +1986,8 @@ fn firing_beam_retains_captured_target_when_combat_lock_changes() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::ControlSystem {
+        ClientMessage::ControlSystemCorrelated {
+            correlation: ActionCorrelationId::new("phaser-active").unwrap(),
             target: SystemId("phaser-port".into()),
             payload: SystemControlPayload::FirePhaser,
         },
@@ -1985,6 +1997,15 @@ fn firing_beam_retains_captured_target_when_combat_lock_changes() {
     for _ in 0..3 {
         all_out.extend(tick(&mut app));
     }
+    assert!(all_out.iter().any(|message| {
+        matches!(
+            (&message.target, &message.msg),
+            (
+                Target::Token(token),
+                ServerMessage::ActionFeedback { correlation, outcome: ActionFeedbackOutcome::Refused }
+            ) if token == "weapons" && correlation.as_str() == "phaser-active"
+        )
+    }), "an active phaser bank must refuse a second press at its owning consumer");
 
     // The live selection has moved to t2 ...
     assert_eq!(get_weapons_target(&mut app).as_deref(), Some("t2"));
@@ -2161,7 +2182,8 @@ fn tactical_player_can_fire_torpedo_broadcasts_torpedo_launched() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::ControlSystem {
+        ClientMessage::ControlSystemCorrelated {
+            correlation: ActionCorrelationId::new("torpedo-fired").unwrap(),
             target: SystemId("torpedo-tube-fore-port".into()),
             payload: SystemControlPayload::FireTorpedo { target_uuid: None },
         },
@@ -2174,6 +2196,15 @@ fn tactical_player_can_fire_torpedo_broadcasts_torpedo_launched() {
         ),
         "expected TorpedoLaunched broadcast after Tactical fires torpedo"
     );
+    assert!(out.iter().any(|message| {
+        matches!(
+            (&message.target, &message.msg),
+            (
+                Target::Token(token),
+                ServerMessage::ActionFeedback { correlation, outcome: ActionFeedbackOutcome::Applied }
+            ) if token == "weapons" && correlation.as_str() == "torpedo-fired"
+        )
+    }), "the tube consumer must acknowledge a torpedo only after launch succeeds");
 }
 
 /// Regression test for PRD #597 gap-3: an NPC ship spawned with a
@@ -8536,6 +8567,7 @@ fn handle_set_target_rejects_a_vertically_unreachable_operate_target() {
                 uuid: derelict_uuid,
             },
             response_token: None,
+            feedback_correlation: None,
         });
 
     app.world_mut()
@@ -8578,6 +8610,7 @@ fn handle_set_target_retains_the_exact_coupled_operate_target_beyond_all_reach()
                 uuid: derelict_uuid.clone(),
             },
             response_token: None,
+            feedback_correlation: None,
         });
 
     app.world_mut()
@@ -8622,6 +8655,7 @@ fn handle_set_target_rejects_stale_tractor_coupling_for_field_repair() {
                 uuid: derelict_uuid,
             },
             response_token: None,
+            feedback_correlation: None,
         });
 
     app.world_mut()
@@ -10553,6 +10587,7 @@ fn handle_fire_torpedo_launches_from_admitted_command() {
                 target_uuid: Some("target-uuid".into()),
             },
             response_token: None,
+            feedback_correlation: None,
         });
 
     app.world_mut()
@@ -10642,6 +10677,7 @@ fn handle_fire_torpedo_patterned_launch_resolves_barrel_origin() {
                 target: SystemId("torpedo-tube-fore-centre".into()),
                 payload: SystemControlPayload::FireTorpedo { target_uuid: None },
                 response_token: None,
+                feedback_correlation: None,
             }]),
             crate::server_app::ShipSystemBlackboards::default(),
             bevy::prelude::Transform::default(),
@@ -11098,18 +11134,28 @@ fn human_set_torpedo_volley_target_reaches_the_local_ship_tube() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::ControlSystem {
+        ClientMessage::ControlSystemCorrelated {
+            correlation: ActionCorrelationId::new("torpedo-volley-applied").unwrap(),
             target: SystemId("torpedo-tube-fore-port".into()),
             payload: SystemControlPayload::SetTorpedoVolleyTarget { count: 1 },
         },
     );
-    tick(&mut app);
+    let out = tick(&mut app);
 
     assert_eq!(
         local_tube_target_count(&mut app, "fore_port"),
         1,
         "an admitted human volley order must set the tube's target_count"
     );
+    assert!(out.iter().any(|message| {
+        matches!(
+            (&message.target, &message.msg),
+            (
+                Target::Token(token),
+                ServerMessage::ActionFeedback { correlation, outcome: ActionFeedbackOutcome::Applied }
+            ) if token == "weapons" && correlation.as_str() == "torpedo-volley-applied"
+        )
+    }), "the tube consumer must acknowledge a volley order it actually applied");
 }
 
 /// A torpedo that kills the *player's* ship must end the run, exactly as a beam
@@ -11223,18 +11269,28 @@ fn set_torpedo_volley_target_refused_when_tube_fine_system_offline() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::ControlSystem {
+        ClientMessage::ControlSystemCorrelated {
+            correlation: ActionCorrelationId::new("torpedo-volley-offline").unwrap(),
             target: SystemId("torpedo-tube-fore-port".into()),
             payload: SystemControlPayload::SetTorpedoVolleyTarget { count: 1 },
         },
     );
-    tick(&mut app);
+    let out = tick(&mut app);
 
     assert_eq!(
         local_tube_target_count(&mut app, "fore_port"),
         0,
         "an offline tube must refuse volley orders from any origin"
     );
+    assert!(out.iter().any(|message| {
+        matches!(
+            (&message.target, &message.msg),
+            (
+                Target::Token(token),
+                ServerMessage::ActionFeedback { correlation, outcome: ActionFeedbackOutcome::Refused }
+            ) if token == "weapons" && correlation.as_str() == "torpedo-volley-offline"
+        )
+    }), "the tube consumer must refuse an offline volley order to its origin");
 }
 
 #[test]
@@ -11714,6 +11770,7 @@ fn conservation_fixture(
                 target_uuid: Some("target-uuid".into()),
             },
             response_token: None,
+            feedback_correlation: None,
         });
     (app, ship)
 }
@@ -12489,7 +12546,8 @@ fn fire_torpedo_refused_when_tube_fine_system_offline() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::ControlSystem {
+        ClientMessage::ControlSystemCorrelated {
+            correlation: ActionCorrelationId::new("torpedo-tube-offline").unwrap(),
             target: SystemId("torpedo-tube-fore-port".into()),
             payload: SystemControlPayload::FireTorpedo { target_uuid: None },
         },
@@ -12500,6 +12558,15 @@ fn fire_torpedo_refused_when_tube_fine_system_offline() {
             .any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
         "disabled tube fine system must block its fire"
     );
+    assert!(out.iter().any(|message| {
+        matches!(
+            (&message.target, &message.msg),
+            (
+                Target::Token(token),
+                ServerMessage::ActionFeedback { correlation, outcome: ActionFeedbackOutcome::Refused }
+            ) if token == "weapons" && correlation.as_str() == "torpedo-tube-offline"
+        )
+    }), "the fire consumer must refuse an offline tube without spending its loaded round");
 }
 
 // ── The lock's own gate is the radar (issue #887) ─────────────────────
@@ -14467,7 +14534,7 @@ fn tick_blaster_auto_fire_skips_when_target_out_of_range() {
 /// per-ship `AdmittedCommands`, not raw `InboundMessage`s, so this injects the
 /// admitted command directly (the shape admission produces from either origin).
 #[test]
-fn handle_fire_blaster_consumes_admitted_charge_start() {
+fn handle_fire_blaster_reports_the_actual_charge_consumer_outcome() {
     use crate::entities::spawner::EntityUuid;
 
     let mut app = test_app();
@@ -14498,7 +14565,8 @@ fn handle_fire_blaster_consumes_admitted_charge_start() {
     admitted.0.push(crate::core::messages::AdmittedCommand {
         target: crate::ship::system_registry::blaster_bank_system_id("fore").unwrap(),
         payload: SystemControlPayload::ChargeBlasterStart,
-        response_token: None,
+        response_token: Some("tactical-holder".into()),
+        feedback_correlation: Some(ActionCorrelationId::new("blaster-accepted").unwrap()),
     });
     let npc_entity = app
         .world_mut()
@@ -14547,7 +14615,7 @@ fn handle_fire_blaster_consumes_admitted_charge_start() {
         Transform::from_xyz(0.0, 0.0, -10.0),
     ));
 
-    app.update();
+    let accepted = tick(&mut app);
 
     let blaster_res = app
         .world()
@@ -14559,6 +14627,39 @@ fn handle_fire_blaster_consumes_admitted_charge_start() {
         blaster_res.0[0].volley.on_cooldown,
         "handle_fire_blaster must consume the admitted ChargeBlasterStart and fire"
     );
+    assert!(accepted.iter().any(|message| {
+        matches!(
+            (&message.target, &message.msg),
+            (
+                Target::Token(token),
+                ServerMessage::ActionFeedback { correlation, outcome: ActionFeedbackOutcome::Applied }
+            ) if token == "tactical-holder" && correlation.as_str() == "blaster-accepted"
+        )
+    }), "the owning blaster consumer must acknowledge a charge it actually accepted");
+
+    // The bank is now genuinely cooling down. Re-submit the same action through
+    // the consumer and require a refusal, rather than treating routed input as
+    // success before `request_charge_start` has had a chance to reject it.
+    app.world_mut()
+        .get_mut::<crate::core::messages::AdmittedCommands>(npc_entity)
+        .unwrap()
+        .0
+        .push(crate::core::messages::AdmittedCommand {
+            target: crate::ship::system_registry::blaster_bank_system_id("fore").unwrap(),
+            payload: SystemControlPayload::ChargeBlasterStart,
+            response_token: Some("tactical-holder".into()),
+            feedback_correlation: Some(ActionCorrelationId::new("blaster-cooling").unwrap()),
+        });
+    let refused = tick(&mut app);
+    assert!(refused.iter().any(|message| {
+        matches!(
+            (&message.target, &message.msg),
+            (
+                Target::Token(token),
+                ServerMessage::ActionFeedback { correlation, outcome: ActionFeedbackOutcome::Refused }
+            ) if token == "tactical-holder" && correlation.as_str() == "blaster-cooling"
+        )
+    }), "a cooling bank must refuse the same action at its owning consumer");
 }
 
 /// The blaster twin of `set_torpedo_volley_target_accepts_a_hyphenated_tube_id`.
@@ -14605,6 +14706,7 @@ fn handle_fire_blaster_accepts_an_underscore_authored_bank_id() {
         target: crate::ship::system_registry::blaster_bank_system_id("fore_port").unwrap(),
         payload: SystemControlPayload::ChargeBlasterStart,
         response_token: None,
+        feedback_correlation: None,
     });
     let npc_entity = app
         .world_mut()
@@ -15085,6 +15187,7 @@ fn phaser_human_admitted_fire_matches_ai_policy_output() {
         target: crate::ship::system_registry::phaser_bank_system_id("fore").unwrap(),
         payload: crate::core::messages::SystemControlPayload::FirePhaser,
         response_token: None,
+        feedback_correlation: None,
     });
     let npc = app
         .world_mut()
@@ -15734,6 +15837,7 @@ fn spawn_player_hull_firing_all_banks_at(
             target: bank_system,
             payload: SystemControlPayload::FirePhaser,
             response_token: None,
+            feedback_correlation: None,
         });
     }
 

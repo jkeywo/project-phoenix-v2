@@ -261,6 +261,7 @@ fn set_admitted(app: &mut App, ship: Entity, station: &str, stance: &str) {
             stance: stance.into(),
         },
         response_token: None,
+        feedback_correlation: None,
     });
 }
 

@@ -660,6 +660,7 @@ fn republish_loaded_world(world: &mut World) {
         &stations,
         &ship_config,
         &station_ratings,
+        world.resource::<crate::gm_roster::GmRoster>().operators(),
     );
 
     let mut outbox = world.resource_mut::<LobbyOutbox>();

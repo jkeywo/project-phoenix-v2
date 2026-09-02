@@ -12,6 +12,7 @@ import { mountEntityMode } from './entity-mode-view.js';
 import { mountDefinitionsMode } from './definitions-mode-view.js';
 import { mountModelsMode } from './models-mode-view.js';
 import { mountModMode } from './mod-mode-view.js';
+import { installModActionKeyboard } from './mod-actions.js';
 import { RigIndex } from './marker-validate.js';
 import { parseRigToml, wireRigIndexToSaves } from './models-rig.js';
 import { resolveEntityConfigFromText, resolveEntityConfig } from './entity-cache.js';
@@ -172,13 +173,14 @@ async function init() {
   // as a save would; resolves composed hulls so fragment members are carried.
   const modHost = document.getElementById('mod-mode-root');
   if (modHost) {
-    mountModMode({
+    const modModeView = mountModMode({
       host: modHost,
       modeShell,
       io: { readFile, listDirectory },
       rigIndex,
       resolveEntityConfig,
     });
+    installModActionKeyboard({ target: document, modeShell, modActions: modModeView });
   }
 
   // Make the persisted root handle available for FSA reads/writes.

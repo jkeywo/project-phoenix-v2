@@ -3,6 +3,7 @@ import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { complianceLabel, formatLeg, orderActionArgs } from '../../gui/components/ph-civilian-traffic.js';
 import '../../gui/components/ph-civilian-traffic.js';
+import { NAVIGATION_CIVILIAN_ORDER_ACTION_ID } from '../../gui/stations/navigation-actions.js';
 
 function setup() {
   document.body.innerHTML = '<ph-civilian-traffic id="test-panel"></ph-civilian-traffic>';
@@ -37,7 +38,10 @@ const HAULER = {
 
 describe('PhCivilianTraffic', () => {
   beforeEach(() => { document.body.innerHTML = ''; });
-  afterEach(() => { document.body.innerHTML = ''; });
+  afterEach(() => {
+    document.body.innerHTML = '';
+    delete window.activateSemanticAction;
+  });
 
   it('is defined and registered as a custom element', () => {
     expect(customElements.get('ph-civilian-traffic')).toBeDefined();
@@ -84,6 +88,36 @@ describe('PhCivilianTraffic', () => {
       verb: 'divert',
       route: 'storm_shelter_run',
     });
+  });
+
+  it('routes the visible order through its Navigation semantic identity', () => {
+    window.activateSemanticAction = vi.fn(() => ({ claimed: true, handled: true }));
+    const el = setup();
+    el.sendAction = vi.fn();
+    el.state = { civilians: [HAULER], auto: false };
+
+    el.shadowRoot.querySelector('button[data-order-id="storm_shelter"]').click();
+
+    expect(window.activateSemanticAction).toHaveBeenCalledWith(
+      NAVIGATION_CIVILIAN_ORDER_ACTION_ID,
+      expect.objectContaining({
+        context: 'navigation',
+        source: 'control',
+        surface: el,
+        detail: {
+          target: HAULER.uuid,
+          verb: 'divert',
+          route: 'storm_shelter_run',
+        },
+      }),
+    );
+    expect(el.sendAction).not.toHaveBeenCalled();
+  });
+
+  it('disables every visible civilian order while Navigation is Auto', () => {
+    const el = setup();
+    el.state = { civilians: [HAULER], auto: true };
+    expect(el.shadowRoot.querySelector('button[data-order-id="storm_shelter"]').disabled).toBe(true);
   });
 
   // The distinction the whole panel exists for: a craft that said no and

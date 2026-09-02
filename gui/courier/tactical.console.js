@@ -9,6 +9,33 @@
  */
 import { makeTacticalRender } from '../stations/tactical-console.js';
 import { familyView } from '../console-payload.js';
+import {
+  HELM_BOOST_ACTION_ID,
+  HELM_IMPULSE_ACTION_ID,
+  HELM_LATERAL_ACTION_ID,
+  HELM_STEERING_ACTION_ID,
+  HELM_THRUST_ACTION_ID,
+} from '../stations/helm-actions.js';
+
+const COURIER_HELM_ACTION_CONTROLS = Object.freeze({
+  [HELM_THRUST_ACTION_ID]: '#helm',
+  [HELM_STEERING_ACTION_ID]: '#helm',
+  [HELM_LATERAL_ACTION_ID]: '#lateral',
+  [HELM_IMPULSE_ACTION_ID]: '#impulse',
+  [HELM_BOOST_ACTION_ID]: '#boost',
+});
+
+/** The Courier exposes only the Helm actions with controls in this document. */
+export function supportsCourierTacticalAction(
+  actionId,
+  context,
+  doc = (typeof document !== 'undefined' ? document : null),
+) {
+  if (String(context || '').toLowerCase() !== 'helm') return true;
+  const selector = COURIER_HELM_ACTION_CONTROLS[actionId];
+  return !!selector && !!doc && typeof doc.querySelector === 'function'
+    && !!doc.querySelector(selector);
+}
 
 export const renderStation = makeTacticalRender({
   weaponsView: (s) => familyView(s, 'tactical'),

@@ -785,6 +785,7 @@ fn a_peer_may_not_drive_a_ship_its_slot_does_not_fly() {
                 target: SystemId("helm-steering".into()),
                 payload: steer(0.5),
             }],
+            start_grant: None,
         })
     };
     hosts[0].deliver(&[forge(&slot_one_hull, 0), forge("npc-no-slot-flies-this", 1)]);

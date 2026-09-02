@@ -1,10 +1,13 @@
-import { observeGamepadButton, GAMEPAD_BUTTON } from '../gamepad-button.js';
 // strings-boot first: its top-level await delays this module's evaluation —
 // and therefore this element's registration and upgrade — until the string
 // table is loaded, so the constructor's template t() calls never see an
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import {
+  HELM_ACTION_CONTEXT,
+  HELM_BOOST_ACTION_ID,
+} from '../stations/helm-actions.js';
 import { PhElement, phDefine } from './ph-element.js';
 
 export class PhBoostBtn extends PhElement {
@@ -13,8 +16,6 @@ export class PhBoostBtn extends PhElement {
   // first one engages and once when the last one lets go — releasing one
   // source never cuts boost while another is still held.
   #holds = new Set();
-  #stopGamepad = null;
-
   template() {
     return `
   <style>
@@ -88,47 +89,14 @@ export class PhBoostBtn extends PhElement {
     });
     btn.addEventListener('blur', () => this.#release('enter'));
 
-    // Hold Shift or gamepad A to boost, mirroring the on-screen hold.
-    if (typeof document !== 'undefined') {
-      document.addEventListener('keydown', this.#onKeyDown);
-      document.addEventListener('keyup', this.#onKeyUp);
-    }
-    // A focus loss eats the keyup, so drop the key hold rather than boost on
-    // forever with the battery draining behind a hidden tab.
-    if (typeof window !== 'undefined') window.addEventListener('blur', this.#onBlur);
-    this.#stopGamepad = observeGamepadButton(GAMEPAD_BUTTON.A, (pressed) => {
-      if (pressed) this.#hold('gamepad'); else this.#release('gamepad');
-    });
+    // Shift and gamepad A are matched by the parent semantic input runtime.
+    // This component owns only its pointer and focused-button hold sources.
   }
 
   disconnectedCallback() {
-    if (typeof document !== 'undefined') {
-      document.removeEventListener('keydown', this.#onKeyDown);
-      document.removeEventListener('keyup', this.#onKeyUp);
-    }
-    if (typeof window !== 'undefined') window.removeEventListener('blur', this.#onBlur);
-    // Stopping the observer reports a held pad button as released, which
-    // clears the 'gamepad' hold through the callback above.
-    if (this.#stopGamepad) { this.#stopGamepad(); this.#stopGamepad = null; }
     this.#release('pointer');
-    this.#release('key');
     this.#release('enter');
   }
-
-  #onKeyDown = (e) => {
-    const tag = e.target && e.target.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-    if (e.code !== 'ShiftLeft' && e.code !== 'ShiftRight') return;
-    e.preventDefault();
-    this.#hold('key');
-  };
-
-  #onKeyUp = (e) => {
-    if (e.code !== 'ShiftLeft' && e.code !== 'ShiftRight') return;
-    this.#release('key');
-  };
-
-  #onBlur = () => this.#release('key');
 
   /**
    * Engage boost from `source`. Returns false when the press was rejected
@@ -137,17 +105,31 @@ export class PhBoostBtn extends PhElement {
   #hold(source) {
     if (this.#holds.has(source)) return true;
     const btn = this.shadowRoot.getElementById('btn');
-    if (this.#holds.size === 0 && (!this.sendAction || btn.disabled)) return false;
     const wasIdle = this.#holds.size === 0;
+    if (wasIdle) {
+      const activate = typeof window !== 'undefined' && window.activateSemanticAction;
+      if (btn.disabled || typeof activate !== 'function') return false;
+      const result = activate(HELM_BOOST_ACTION_ID, {
+        context: HELM_ACTION_CONTEXT,
+        source: 'control', detail: { holdSource: 'boost-button' }, pressed: true,
+      });
+      if (!result || result.handled !== true) return false;
+    }
     this.#holds.add(source);
-    if (wasIdle && this.sendAction) this.sendAction('set_boost', { active: true });
     return true;
   }
 
   /** Release `source`; sends the stop only once the last source lets go. */
   #release(source) {
     if (!this.#holds.delete(source)) return;
-    if (this.#holds.size === 0 && this.sendAction) this.sendAction('set_boost', { active: false });
+    if (this.#holds.size !== 0) return;
+    const activate = typeof window !== 'undefined' && window.activateSemanticAction;
+    if (typeof activate === 'function') {
+      activate(HELM_BOOST_ACTION_ID, {
+        context: HELM_ACTION_CONTEXT,
+        source: 'control', detail: { holdSource: 'boost-button' }, pressed: false,
+      });
+    }
   }
 
   render(state) {

@@ -11,10 +11,9 @@
  *
  * The Dock button toggles dock/undock through the action map — human and AI
  * issue the SAME admitted command, this control just picks which. The click
- * handler lives in `helm.html` (it calls `sendAction`, which only exists
- * after `initConsole` runs) and reads the "which one" plus the authored Dock
- * SystemId off the button's own render-refreshed state — never a second id
- * inference in the action map (the #1235 chunk-1 tractor-button precedent).
+ * handler lives in `helm.html` and activates `helm.dock`; its adapter reads
+ * the latest authoritative dock view and authored SystemId, so the variant
+ * neither duplicates the verb decision nor dispatches stale rendered state.
  */
 import { makeHelmRender } from '../stations/helm-console.js';
 

@@ -1,8 +1,8 @@
 ---
 title: Server HTML Lobby UI
 type: concept
-tags: [lobby, server, html, ui, bridge, responsive, accessibility, reduced-motion, native]
-sources: [server.html, gui/host-lobby-view.js, gui/host-lobby-render.js, gui/host-lobby.css, gui/host-qr.js, gui/host-qr.css, gui/join-url.js, src/server/viewscreen_border.rs, src/console_bridge.rs, src/server/bridge.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/join.rs]
+tags: [lobby, server, html, ui, bridge, responsive, accessibility, reduced-motion, native, gm]
+sources: [server.html, client.html, gui/host-lobby-view.js, gui/host-lobby-render.js, gui/host-lobby.css, gui/host-qr.js, gui/host-qr.css, gui/join-url.js, gui/lobby-view.js, gui/lobby-state.js, gui/fleet-session.js, src/server/viewscreen_border.rs, src/console_bridge.rs, src/server/bridge.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/join.rs, src/lockstep/mod.rs, src/core/messages.rs, src/gm_roster.rs, src/lobby/start_policy.rs]
 updated: 2026-09-01
 ---
 
@@ -40,8 +40,11 @@ This is a **one-way state-push channel** that runs in parallel to the regular [M
 | `scenario_body` | `String` | Header subtitle. |
 | `crew_count` | `u32` | Currently filled claimable Stations. |
 | `max_players` | `u32` | Number of claimable seats on the active ship. |
+| `readiness` | `ReadinessTally` | Connected non-Spectator crew and its ready subset; Station choice is irrelevant. |
+| `presentation_ready` | `bool` | The renderer's required assets have reached a terminal preload state; rendererless/headless peers report ready. |
 | `stations` | `Vec<StationPayload>` | One entry per claimable, non-auxiliary station. |
 | `spectators` | `Vec<String>` | Names holding the explicit Spectator role. |
+| `gms` | `Vec<GmOperator>` | Equal GM rows (`id`, `name`, `connected`, `ready`), separate from every crew and Station count. |
 | `all_stations_filled` | `bool` | Flips ready badge to `READY TO LAUNCH`. |
 
 `StationPayload`: `name`, `short_code`, `rank`, `holder_name?`, `is_mine`, `preset_names`.
@@ -66,6 +69,8 @@ The grid is sized directly from the claimable roster. It creates no padding or r
         │   ├── #station-grid.lobby-grid        /* auto-fit minmax(220, 360)     */
         │   │   └── .station-card[.claimed]     /* one per claimable Station     */
         └── .lobby-rail                          /* aside; rail right or below   */
+            ├── #lobby-gm-group[role=region]
+            │   └── #lobby-gm-list              /* equal GM presence            */
             ├── .lobby-rail-label
             ├── #lobby-spectator-list.lobby-rail-section
             │   └── .spectator-pill[.waiting]   /* one per connected/waiting     */
@@ -105,8 +110,12 @@ A scroll fallback (`overflow-y: auto` on `#station-grid`) handles rosters that d
 The lobby cards, rail and responsive layout are DOM owned by
 `gui/host-lobby-render.js` + `gui/host-lobby.css` over `gui/host-lobby-view.js`;
 the join panel is `gui/host-qr.js` + `gui/host-qr.css` over the same view
-model's `qrOverlayAction` (issue #1329). Bevy publishes data but does not build
-a lobby UI tree — on either surface.
+model's `qrOverlayAction` (issue #1329). The Game Master group is `server.html`'s
+own projection over that view model, rendered as a sibling region rather than
+folded into the Station list; the crew page receives the same public GM
+projection in `Welcome` and `GmRosterChanged`, and `gui/lobby-view.js` renders
+it likewise. Bevy publishes data but does not build a lobby UI tree — on either
+surface.
 
 ## The join panel
 
@@ -129,6 +138,29 @@ The encoder is **vendored** (`gui/vendor/qrcode.js`, `qrcode@1.5.1`'s browser
 build, MIT) and served by whichever process serves the page. It used to be a
 `cdn.jsdelivr.net` `<script>`, which made the join code depend on the room
 having internet — untenable for a native host on a bridge machine.
+
+## Game Master presence and fleet start
+
+An admitted GM also receives a labelled Ready/Unready control and a separate
+Force Start control. Both readiness and refusal states use text, not colour
+alone. Force Start reports its attributed applied/no-op/refused result and
+cannot replace a failed content-validation message with a generic launch
+success. The browser publishes validation only after the exact selected hull's
+Station map, the complete pre-`wasm_init` boot/compatibility path, and the local
+renderer's terminal presentation-preload state succeed. The mesh owner includes
+that final presentation gate before emitting the immutable grant; managed peers
+then enter `InProgress` directly instead of re-reading frame-paced preload state
+after grant delivery.
+
+The browser-to-Rust roster seam is asynchronous. `wasm_join_fleet` returns a
+generation, and the page does not publish the frozen topology, release a grant,
+or flush its bounded pre-adoption frame FIFO until
+`wasm_fleet_join_status` accepts that exact generation. Managed/validation
+projections retry through a bounded queue, coalescing only consecutive absolute
+samples. Leave uses the same acknowledgement: the settings control disables
+while pending, but the fleet transport and roster remain live until Rust accepts
+the fresh-Lobby teardown. A late refusal leaves the live fleet on screen and
+reports the machine reason instead of silently turning it into a solo host.
 
 ## Viewscreen reduced motion
 

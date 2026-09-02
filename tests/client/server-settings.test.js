@@ -10,7 +10,7 @@
 // the module only toggles, so the test drives the module against it rather
 // than against a hand-written stand-in that could drift.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,6 +25,20 @@ import {
 } from '../../gui/server-settings.js';
 import { isDemoBuild, setBuildFlags, demoFromMeta } from '../../gui/build-flags.js';
 import { CLIENT_DEBUG_FLAGS } from '../../gui/settings-panel.js';
+import {
+  ACTION_FEEDBACK_STATE,
+  ActionFeedbackLifecycle,
+  emitActionFeedbackTransition,
+} from '../../gui/action-feedback.js';
+import {
+  HOST_QR_CODE_ACTION_ID,
+  createHostActionRegistry,
+} from '../../gui/host-actions.js';
+import {
+  GM_PAUSE_ACTION_ID,
+  GM_RESUME_ACTION_ID,
+} from '../../gui/gm-session-actions.js';
+import { createGmSessionControls } from '../../gui/gm-session-controls.js';
 
 const SERVER_HTML = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -154,6 +168,28 @@ function mount(opts = {}) {
 const $ = (sel) => document.querySelector(sel);
 const control = (id) => document.querySelector(`[data-control="${id}"]`);
 
+function pressKey(code, key = code) {
+  const event = new KeyboardEvent('keydown', {
+    code, key, bubbles: true, cancelable: true,
+  });
+  document.body.dispatchEvent(event);
+  return event;
+}
+
+function standardPad(pressed = []) {
+  return {
+    id: 'test-standard-pad',
+    index: 0,
+    connected: true,
+    mapping: 'standard',
+    buttons: Array.from({ length: 16 }, (_, index) => ({
+      pressed: pressed.includes(index),
+      value: pressed.includes(index) ? 1 : 0,
+    })),
+    axes: [0, 0, 0, 0],
+  };
+}
+
 let mounted = null;
 
 beforeEach(() => {
@@ -193,12 +229,14 @@ describe('selectOutput', () => {
 });
 
 describe('visibleTabs', () => {
-  it('a dev build shows all three tabs, Debug last', () => {
-    expect(visibleTabs(false).map((tab) => tab.id)).toEqual(['audio', 'gameplay', 'debug']);
+  it('a dev build shows all four tabs, Debug last', () => {
+    expect(visibleTabs(false).map((tab) => tab.id))
+      .toEqual(['audio', 'gameplay', 'controls', 'debug']);
   });
 
   it('the demo build drops the gated Debug/Cheat tab and keeps the rest', () => {
-    expect(visibleTabs(true).map((tab) => tab.id)).toEqual(['audio', 'gameplay']);
+    expect(visibleTabs(true).map((tab) => tab.id))
+      .toEqual(['audio', 'gameplay', 'controls']);
   });
 });
 
@@ -212,15 +250,17 @@ describe('the settings cog', () => {
     expect(mounted.isOpen()).toBe(false);
   });
 
-  it('clicking the cog opens a panel with the three tabs', () => {
+  it('clicking the cog opens a panel with the four tabs', () => {
     ({ menu: mounted } = mount());
     $('#server-settings-btn').click();
     expect(mounted.isOpen()).toBe(true);
     const tabs = [...document.querySelectorAll('.server-settings-tab')];
-    expect(tabs.map((el) => el.getAttribute('data-tab'))).toEqual(['audio', 'gameplay', 'debug']);
+    expect(tabs.map((el) => el.getAttribute('data-tab')))
+      .toEqual(['audio', 'gameplay', 'controls', 'debug']);
     expect(tabs.map((el) => el.textContent)).toEqual([
       t('settings.tab.audio'),
       t('settings.tab.gameplay'),
+      t('settings.tab.controls'),
       t('settings.tab.debug'),
     ]);
   });
@@ -436,14 +476,217 @@ describe('the Gameplay tab', () => {
   });
 });
 
+// ── Shared host semantic input + feedback (issue #1281) ────────────────────
+
+describe('the host QR semantic action', () => {
+  it('runs the visible control through Pressed, Pending and Applied exactly once', () => {
+    const transitions = [];
+    window.addEventListener('phoenix-action-feedback', (event) => {
+      if (event.detail.actionId === HOST_QR_CODE_ACTION_ID) transitions.push(event.detail);
+    });
+    let bindings;
+    ({ menu: mounted, bindings } = mount());
+    mounted.open();
+    mounted.selectTab('gameplay');
+
+    control('qr-code').click();
+
+    expect(bindings.calls.filter(([name]) => name === '__hostToggleQrCode'))
+      .toEqual([['__hostToggleQrCode']]);
+    expect(transitions.map(({ state }) => state)).toEqual([
+      ACTION_FEEDBACK_STATE.PRESSED,
+      ACTION_FEEDBACK_STATE.PENDING,
+      ACTION_FEEDBACK_STATE.APPLIED,
+    ]);
+    expect(new Set(transitions.map(({ correlation }) => correlation)).size).toBe(1);
+    expect($('#host-action-feedback').getAttribute('role')).toBe('status');
+    expect($('#host-action-feedback').getAttribute('aria-live')).toBe('polite');
+    expect($('#host-action-feedback').dataset.state).toBe(ACTION_FEEDBACK_STATE.APPLIED);
+    expect($('#host-action-feedback').textContent).toBe(t(
+      'semantic_action.host.qr_code.feedback',
+      { status: t('action_feedback.applied') },
+    ));
+  });
+
+  it('keeps the final live result outside the Settings modal', () => {
+    ({ menu: mounted } = mount());
+    mounted.open();
+    mounted.selectTab('gameplay');
+    control('qr-code').click();
+    mounted.close();
+
+    expect(mounted.isOpen()).toBe(false);
+    expect($('#host-action-feedback').textContent).toContain(t('action_feedback.applied'));
+    expect($('#host-action-feedback').closest('#server-settings-overlay')).toBeNull();
+  });
+
+  it('dispatches the default KeyQ binding while Settings is closed', () => {
+    let bindings;
+    ({ menu: mounted, bindings } = mount());
+    const legacy = vi.fn();
+    document.body.addEventListener('keydown', legacy);
+
+    const event = pressKey('KeyQ', 'q');
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(legacy).not.toHaveBeenCalled();
+    expect(bindings.calls.filter(([name]) => name === '__hostToggleQrCode'))
+      .toEqual([['__hostToggleQrCode']]);
+    expect(bindings.state.qr).toBe(true);
+    expect($('#host-action-feedback').dataset.state).toBe(ACTION_FEEDBACK_STATE.APPLIED);
+
+    mounted.open();
+    mounted.selectTab('gameplay');
+    expect(control('qr-code').getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('remaps the first slot and uses it with Settings closed', () => {
+    let bindings;
+    ({ menu: mounted, bindings } = mount());
+    mounted.open();
+    mounted.selectTab('controls');
+    const capture = control('semantic-binding-host.qr-code-0');
+    capture.focus();
+    capture.dispatchEvent(new KeyboardEvent('keydown', {
+      code: 'KeyY', key: 'y', bubbles: true, cancelable: true,
+    }));
+    mounted.close();
+    bindings.calls.length = 0;
+
+    expect(pressKey('KeyQ', 'q').defaultPrevented).toBe(false);
+    expect(bindings.calls).toEqual([]);
+    expect(pressKey('KeyY', 'y').defaultPrevented).toBe(true);
+    expect(bindings.calls).toEqual([['__hostToggleQrCode']]);
+    expect(bindings.state.qr).toBe(true);
+  });
+
+  it('paints persistent on/off and aria-pressed only from host readback', () => {
+    const transitions = [];
+    window.addEventListener('phoenix-action-feedback', (event) => transitions.push(event.detail));
+    let bindings;
+    ({ menu: mounted, bindings } = mount());
+    mounted.open();
+    mounted.selectTab('gameplay');
+
+    bindings.state.qr = true;
+    mounted.refresh();
+    expect(control('qr-code').getAttribute('aria-pressed')).toBe('true');
+    bindings.state.qr = false;
+    mounted.refresh();
+    expect(control('qr-code').getAttribute('aria-pressed')).toBe('false');
+    expect(bindings.calls.filter(([name]) => name === '__hostToggleQrCode')).toEqual([]);
+    expect(transitions).toEqual([]);
+    expect($('#host-action-feedback').textContent).toBe('');
+  });
+
+  it('keeps Controls and its host action in the demo build', () => {
+    ({ menu: mounted } = mount({ isDemo: () => true }));
+    mounted.open();
+    mounted.selectTab('controls');
+    expect(control('semantic-binding-host.qr-code-0')).not.toBeNull();
+    expect(control('semantic-binding-host.qr-code-1')).not.toBeNull();
+    expect(control('godmode')).toBeNull();
+  });
+
+  it('shares GM bindings, conflict replacement, keyboard dispatch and gamepad runtime', () => {
+    document.body.insertAdjacentHTML('beforeend', `
+      <section id="gm-session-controls">
+        <h2 id="gm-session-heading"></h2>
+        <button id="gm-session-pause"></button>
+        <button id="gm-session-resume"></button>
+        <p id="gm-session-state"></p>
+        <p id="gm-session-feedback"></p>
+        <ol id="gm-session-log"></ol>
+      </section>
+    `);
+    const correlations = ['gm-keyboard', 'gm-gamepad'];
+    const actionFeedback = new ActionFeedbackLifecycle({
+      correlation: () => correlations.shift(),
+      onTransition: (value) => emitActionFeedbackTransition(window, value),
+    });
+    const bindings = makeBindings();
+    const hostActions = createHostActionRegistry({
+      actionFeedback,
+      toggleQrCode: bindings.__hostToggleQrCode,
+    });
+    const submitSessionPaused = vi.fn(() => true);
+    const gmControls = createGmSessionControls({
+      doc: document,
+      win: window,
+      t,
+      actions: hostActions,
+      actionFeedback,
+      submitSessionPaused,
+      getOperator: () => ({ id: 'gm-a', name: 'Alex' }),
+    });
+    let pads = [standardPad()];
+    Object.assign(bindings, {
+      __hostSemanticActions: hostActions,
+      __hostActionFeedback: actionFeedback,
+      __hostLocalGm: () => ({ id: 'gm-a', name: 'Alex' }),
+      navigator: { getGamepads: () => pads },
+    });
+    ({ menu: mounted } = mount({ bindings }));
+    mounted.gamepad.poll(pads);
+    mounted.open();
+    mounted.selectTab('controls');
+
+    expect(control(`semantic-binding-${GM_PAUSE_ACTION_ID}-0`)).not.toBeNull();
+    expect(control(`semantic-binding-${GM_PAUSE_ACTION_ID}-1`)).not.toBeNull();
+    expect(control(`semantic-binding-${GM_RESUME_ACTION_ID}-0`)).not.toBeNull();
+    const sharedProfile = mounted.semanticActions.bindingProfile();
+    expect(sharedProfile[GM_PAUSE_ACTION_ID]).toHaveLength(2);
+    expect(mounted.semanticActions.validateProfile({
+      bindings: sharedProfile,
+      tuning: mounted.semanticActions.tuningProfile(),
+    })).toMatchObject({ status: 'valid' });
+    expect(control('semantic-gamepad-select')).not.toBeNull();
+
+    // QR and GM share the active GM context, so the remapper detects rather
+    // than silently accepting a competing host-page chord.
+    const pauseCapture = control(`semantic-binding-${GM_PAUSE_ACTION_ID}-0`);
+    pauseCapture.focus();
+    pauseCapture.dispatchEvent(new KeyboardEvent('keydown', {
+      code: 'KeyQ', key: 'q', bubbles: true, cancelable: true,
+    }));
+    expect(control('semantic-binding-conflict-replace')).not.toBeNull();
+    control('semantic-binding-conflict-cancel').click();
+
+    mounted.semanticActions.setBinding(GM_PAUSE_ACTION_ID, 0, {
+      type: 'keyboard', code: 'KeyY',
+    });
+    mounted.semanticActions.setBinding(GM_PAUSE_ACTION_ID, 1, {
+      type: 'gamepad', input: 'button', control: 'face-bottom',
+    });
+    mounted.close();
+    expect(pressKey('KeyY', 'y').defaultPrevented).toBe(true);
+    expect(submitSessionPaused).toHaveBeenNthCalledWith(1, true, 'gm-keyboard');
+
+    mounted.gamepad.select(0);
+    mounted.gamepad.poll(pads); // explicit neutral gate
+    pads = [standardPad([0])];
+    mounted.gamepad.poll(pads);
+    expect(submitSessionPaused).toHaveBeenNthCalledWith(2, true, 'gm-gamepad');
+
+    gmControls.destroy();
+  });
+});
+
 // ── Fleet (issue #1114) ─────────────────────────────────────────────────────
 
 describe('the Fleet section', () => {
   /** Bindings carrying a mutable fleet state the module reads back. */
   function fleetBindings(initial = { open: false }) {
     let fleet = { open: false, owner: false, admission: null, frozen: false, ...initial };
+    let role = initial.role === 'gm' ? 'gm' : 'ship';
     const bindings = makeBindings({
       __hostFleetState: () => fleet,
+      __hostFleetRole: () => role,
+      __hostSetFleetRole: (next) => {
+        bindings.calls.push(['__hostSetFleetRole', next]);
+        if (!fleet.open && (next === 'ship' || next === 'gm')) role = next;
+        return role === next;
+      },
       __hostFleetOpen: () => {
         bindings.calls.push(['__hostFleetOpen']);
         fleet = { open: true, owner: true, admission: 'open', frozen: false };
@@ -493,6 +736,23 @@ describe('the Fleet section', () => {
     expect(visible('fleet-admission')).toBe(false);
   });
 
+  it('defaults to a player ship and lets the privileged host choose GM before joining', () => {
+    const bindings = fleetBindings();
+    openFleetTab(bindings);
+    expect(control('fleet-role-group').getAttribute('role')).toBe('group');
+    expect(control('fleet-role-group').getAttribute('aria-label')).toBe(t('settings.fleet.role_heading'));
+    expect(control('fleet-role-ship').getAttribute('aria-pressed')).toBe('true');
+    expect(control('fleet-role-gm').getAttribute('aria-pressed')).toBe('false');
+
+    control('fleet-role-gm').click();
+    expect(bindings.calls).toContainEqual(['__hostSetFleetRole', 'gm']);
+    expect(control('fleet-role-ship').getAttribute('aria-pressed')).toBe('false');
+    expect(control('fleet-role-gm').getAttribute('aria-pressed')).toBe('true');
+
+    control('fleet-open').click();
+    expect(visible('fleet-role-group')).toBe(false);
+  });
+
   it('opening a fleet swaps to the lead\'s controls', () => {
     const bindings = fleetBindings();
     openFleetTab(bindings);
@@ -530,6 +790,22 @@ describe('the Fleet section', () => {
 
     expect(visible('fleet-admission')).toBe(true);
     expect(control('fleet-admission').disabled).toBe(true);
+  });
+
+  it('keeps Leave visible but disables it outside the fresh Lobby', () => {
+    const bindings = fleetBindings({
+      open: true,
+      owner: true,
+      admission: 'closed',
+      frozen: true,
+      canLeave: false,
+    });
+    openFleetTab(bindings);
+
+    expect(visible('fleet-leave')).toBe(true);
+    expect(control('fleet-leave').disabled).toBe(true);
+    control('fleet-leave').click();
+    expect(bindings.calls.map((c) => c[0])).not.toContain('__hostFleetLeave');
   });
 
   it('joins with the letters typed into the field, and not with an empty one', () => {
@@ -603,10 +879,19 @@ describe('the Fleet section', () => {
     for (const name of [
       '__hostFleetState', '__hostFleetOpen', '__hostFleetJoin',
       '__hostFleetSetAdmission', '__hostFleetLeave', '__hostFleetCodeLimit',
-      '__hostFleetRotate',
+      '__hostFleetRotate', '__hostFleetRole', '__hostSetFleetRole',
     ]) {
       expect(SRC, name).toContain(`window.${name}`);
     }
+  });
+
+  it('threads the selected role and private GM reconnect capability through the host-only mesh seam', () => {
+    expect(SRC).toContain('role: fleetRole');
+    expect(SRC).toContain('reconnectCredential: priorIdentity ? priorIdentity.reconnectCredential : null');
+    expect(SRC).toContain('onIdentity: (identity) =>');
+    expect(SRC).toContain('rememberGmIdentity(code, identity)');
+    expect(SRC).toContain('window.wasm_set_gm_roster(JSON.stringify(gms))');
+    expect(SRC).not.toContain('ClientMessage::SetFleetRole');
   });
 
   // ── Rotating the fleet code (issue #1115) ─────────────────────────────────
@@ -704,13 +989,13 @@ describe('the Join Code section', () => {
 // ── Demo gate (AC5) ──────────────────────────────────────────────────────
 
 describe('the demo build gate', () => {
-  it('drops the Debug/Cheat tab entirely, keeping Audio and Gameplay', () => {
+  it('drops Debug/Cheat while keeping Audio, Gameplay and Controls', () => {
     ({ menu: mounted } = mount({ isDemo: () => true }));
     mounted.open();
 
     const tabs = [...document.querySelectorAll('.server-settings-tab')]
       .map((el) => el.getAttribute('data-tab'));
-    expect(tabs).toEqual(['audio', 'gameplay']);
+    expect(tabs).toEqual(['audio', 'gameplay', 'controls']);
     expect(control('godmode')).toBeNull();
     expect(control('instagib')).toBeNull();
     expect(control('modifiers')).toBeNull();

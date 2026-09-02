@@ -8,7 +8,8 @@ use bevy::prelude::*;
 
 use super::shared::{system_is_registered, TorpedoTargetSnapshot};
 use super::{
-    AsteroidDestroyedVfx, ShipDestroyedVfx, TacticalRadarSelection, DEFAULT_SHIP_EXPLOSION_RADIUS,
+    AsteroidDestroyedVfx, ShipDestroyedVfx, TacticalRadarSelection, WeaponActionRefusal,
+    WeaponActionResult, DEFAULT_SHIP_EXPLOSION_RADIUS,
 };
 use crate::core::messages::{
     AdmittedCommands, InterSystemMsg, InterSystemPayload, InterSystemQueue, ServerMessage,
@@ -451,11 +452,26 @@ pub(crate) fn handle_set_torpedo_volley_target(
         ),
         With<crate::server_app::Ship>,
     >,
+    mut outbound: Option<
+        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
+    >,
 ) {
     for (control_sources, admitted, torpedo_sys_comp) in ship_query.iter_mut() {
         // The ship's own component, never the global Resource (issue #738).
         let mut torpedo_sys_comp = torpedo_sys_comp;
         let Some(torpedo_sys) = torpedo_sys_comp.as_deref_mut().map(|c| &mut c.0) else {
+            for cmd in admitted.0.iter().filter(|cmd| {
+                matches!(
+                    cmd.payload,
+                    SystemControlPayload::SetTorpedoVolleyTarget { .. }
+                )
+            }) {
+                super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::MissingTorpedoSystem),
+                );
+            }
             continue;
         };
         let torpedo_sys: &mut TorpedoSystem = torpedo_sys;
@@ -484,6 +500,11 @@ pub(crate) fn handle_set_torpedo_volley_target(
                 })
                 .map(|t| t.id.clone())
             else {
+                super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::UnknownMount),
+                );
                 continue;
             };
             // Gate on the tube's own fine-system policy (default-source policy
@@ -500,9 +521,22 @@ pub(crate) fn handle_set_torpedo_volley_target(
                 )
             };
             if !tube_policy.accept_human_input && !tube_policy.operate_ai {
+                super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::Offline),
+                );
                 continue;
             }
-            torpedo_sys.set_volley_target(&tube_id, *count);
+            super::finish_action_feedback(
+                cmd,
+                &mut outbound,
+                if torpedo_sys.set_volley_target(&tube_id, *count) {
+                    WeaponActionResult::Applied
+                } else {
+                    WeaponActionResult::Refused(WeaponActionRefusal::UnknownMount)
+                },
+            );
         }
     }
 }
@@ -571,6 +605,9 @@ pub(crate) fn handle_fire_torpedo(
     // runs this host must register it (`register_ai_host_env`) or fail loudly at
     // schedule build, so a bare `App` cannot silently diverge from production.
     ai_env: crate::ai::host::AiHostEnv,
+    mut outbound: Option<
+        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
+    >,
 ) {
     for (
         control_sources,
@@ -663,6 +700,11 @@ pub(crate) fn handle_fire_torpedo(
                 })
                 .map(|t| t.id.clone())
             else {
+                super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::UnknownMount),
+                );
                 continue;
             };
 
@@ -678,6 +720,11 @@ pub(crate) fn handle_fire_torpedo(
                 )
             };
             if !tube_policy.accept_human_input && !tube_policy.operate_ai {
+                super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::Offline),
+                );
                 continue;
             }
 
@@ -691,6 +738,11 @@ pub(crate) fn handle_fire_torpedo(
             if magazine_declared {
                 let magazine_policy = control_sources.0.policy_for(&magazine_id);
                 if !magazine_policy.accept_human_input && !magazine_policy.operate_ai {
+                    super::finish_action_feedback(
+                        cmd,
+                        &mut outbound,
+                        WeaponActionResult::Refused(WeaponActionRefusal::MagazineOffline),
+                    );
                     continue;
                 }
             }
@@ -701,6 +753,11 @@ pub(crate) fn handle_fire_torpedo(
             // unloading the tube, so the same decision is offered again next
             // tick and a shot held for wave 6 is still a shot.
             if conservation_holds {
+                super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::ConservationHold),
+                );
                 continue;
             }
 
@@ -766,6 +823,7 @@ pub(crate) fn handle_fire_torpedo(
                     uuid: launched_uuid,
                     ..
                 } => {
+                    super::finish_action_feedback(cmd, &mut outbound, WeaponActionResult::Applied);
                     any_fired = true;
                     // The immediate torpedo's real spawn origin (barrel marker
                     // or ship centre) so the broadcast matches the sim. Burst
@@ -796,9 +854,21 @@ pub(crate) fn handle_fire_torpedo(
                         },
                     ));
                 }
-                LaunchResult::TubeNotLoaded
-                | LaunchResult::NoTorpedoes
-                | LaunchResult::UnknownTube => {}
+                LaunchResult::TubeNotLoaded => super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::TubeNotLoaded),
+                ),
+                LaunchResult::NoTorpedoes => super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::NoTorpedoes),
+                ),
+                LaunchResult::UnknownTube => super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::UnknownMount),
+                ),
             }
         }
 

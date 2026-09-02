@@ -44,9 +44,9 @@ export const LATERAL_THRUST_SYSTEM_ID = 'helm-lateral-thrust';
  * @param {((type: string, data?: object) => void)} [send] explicit transport
  * @returns {object|null} the envelope that was sent, or null when offline.
  */
-export function sendThrust(value, send) {
+export function sendThrust(value, send, target = HELM_THRUST_SYSTEM_ID) {
   return sendControlSystem(
-    HELM_THRUST_SYSTEM_ID,
+    target,
     { type: 'SetThrust', data: { value: value || 0 } },
     send,
   );
@@ -59,9 +59,9 @@ export function sendThrust(value, send) {
  * @param {((type: string, data?: object) => void)} [send] explicit transport
  * @returns {object|null} the envelope that was sent, or null when offline.
  */
-export function sendSteering(value, send) {
+export function sendSteering(value, send, target = HELM_STEERING_SYSTEM_ID) {
   return sendControlSystem(
-    HELM_STEERING_SYSTEM_ID,
+    target,
     { type: 'SetSteering', data: { value: value || 0 } },
     send,
   );
@@ -77,9 +77,9 @@ export function sendSteering(value, send) {
  * @param {number} steering normalized yaw `[-1, 1]`
  * @param {((type: string, data?: object) => void)} [send] explicit transport
  */
-export function sendHelmInput(thrust, steering, send) {
-  sendThrust(thrust, send);
-  sendSteering(steering, send);
+export function sendHelmInput(thrust, steering, send, owners = {}) {
+  sendThrust(thrust, send, owners.thrustSystemId || HELM_THRUST_SYSTEM_ID);
+  sendSteering(steering, send, owners.steeringSystemId || HELM_STEERING_SYSTEM_ID);
 }
 
 /**
@@ -90,9 +90,9 @@ export function sendHelmInput(thrust, steering, send) {
  * @param {((type: string, data?: object) => void)} [send] explicit transport
  * @returns {object|null} the envelope that was sent, or null when offline.
  */
-export function sendLateralThrust(lateral, send) {
+export function sendLateralThrust(lateral, send, target = LATERAL_THRUST_SYSTEM_ID) {
   return sendControlSystem(
-    LATERAL_THRUST_SYSTEM_ID,
+    target,
     { type: 'LateralThrustInput', data: { lateral: lateral || 0 } },
     send,
   );
@@ -104,8 +104,8 @@ export function sendLateralThrust(lateral, send) {
  * @param {((type: string, data?: object) => void)} [send] explicit transport
  * @returns {object|null} the envelope that was sent, or null when offline.
  */
-export function startImpulseCharge(send) {
-  return sendControlSystem(HELM_IMPULSE_SYSTEM_ID, { type: 'StartImpulseCharge' }, send);
+export function startImpulseCharge(send, target = HELM_IMPULSE_SYSTEM_ID) {
+  return sendControlSystem(target, { type: 'StartImpulseCharge' }, send);
 }
 
 /**
@@ -114,8 +114,8 @@ export function startImpulseCharge(send) {
  * @param {((type: string, data?: object) => void)} [send] explicit transport
  * @returns {object|null} the envelope that was sent, or null when offline.
  */
-export function cancelImpulse(send) {
-  return sendControlSystem(HELM_IMPULSE_SYSTEM_ID, { type: 'CancelImpulse' }, send);
+export function cancelImpulse(send, target = HELM_IMPULSE_SYSTEM_ID) {
+  return sendControlSystem(target, { type: 'CancelImpulse' }, send);
 }
 
 /**
@@ -124,8 +124,8 @@ export function cancelImpulse(send) {
  * @param {((type: string, data?: object) => void)} [send] explicit transport
  * @returns {object|null} the envelope that was sent, or null when offline.
  */
-export function toggleBoost(send) {
-  return sendControlSystem(HELM_BOOST_SYSTEM_ID, { type: 'ToggleBoost' }, send);
+export function toggleBoost(send, target = HELM_BOOST_SYSTEM_ID) {
+  return sendControlSystem(target, { type: 'ToggleBoost' }, send);
 }
 
 /**
@@ -135,9 +135,9 @@ export function toggleBoost(send) {
  * @param {((type: string, data?: object) => void)} [send] explicit transport
  * @returns {object|null} the envelope that was sent, or null when offline.
  */
-export function setBoost(active, send) {
+export function setBoost(active, send, target = HELM_BOOST_SYSTEM_ID) {
   return sendControlSystem(
-    HELM_BOOST_SYSTEM_ID,
+    target,
     { type: 'SetBoost', data: { active: !!active } },
     send,
   );

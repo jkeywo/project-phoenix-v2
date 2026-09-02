@@ -4,9 +4,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import '../../gui/components/ph-comms-hail-list.js';
 
 function setup(opts) {
-  const sendAction = opts && opts.sendAction;
-  if (sendAction) {
-    window.sendAction = sendAction;
+  const activateSemanticAction = opts && opts.activateSemanticAction;
+  if (activateSemanticAction) {
+    window.activateSemanticAction = activateSemanticAction;
   }
   document.body.innerHTML = '<ph-comms-hail-list id="test-el"></ph-comms-hail-list>';
   const el = document.getElementById('test-el');
@@ -21,12 +21,12 @@ function queryText(host, sel) {
 describe('PhCommsHailList', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
-    delete window.sendAction;
+    delete window.activateSemanticAction;
   });
 
   afterEach(() => {
     document.body.innerHTML = '';
-    delete window.sendAction;
+    delete window.activateSemanticAction;
   });
 
   it('is defined and registered as a custom element', () => {
@@ -151,21 +151,32 @@ describe('PhCommsHailList', () => {
     expect(preview.textContent).not.toContain('world.');
   });
 
-  it('clicking a message row calls sendAction with select_comms_message', () => {
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+  it('clicking a message row activates the shared selection identity', () => {
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
     el.state = {
       messages: [
         { id: 'msg-42', sender_name: 'Test', subject: 'Hello', is_read: false },
       ],
     };
     const row = el.shadowRoot.querySelector('.row');
+    expect(row.getAttribute('aria-selected')).toBe('false');
     row.click();
-    expect(sendAction).toHaveBeenCalledTimes(1);
-    expect(sendAction).toHaveBeenCalledWith('select_comms_message', { message_id: 'msg-42' });
+    expect(activateSemanticAction).toHaveBeenCalledTimes(1);
+    expect(activateSemanticAction).toHaveBeenCalledWith('comms.select-message', {
+      source: 'control', detail: { message_id: 'msg-42' },
+    });
+    expect(row.getAttribute('aria-selected')).toBe('false');
+    el.state = {
+      messages: [
+        { id: 'msg-42', sender_name: 'Test', subject: 'Hello', is_read: false },
+      ],
+      selected_message_id: 'msg-42',
+    };
+    expect(row.getAttribute('aria-selected')).toBe('true');
   });
 
-  it('does not throw when sendAction is not set and row is clicked', () => {
+  it('does not throw when the semantic activation seam is not set and row is clicked', () => {
     const { el } = setup();
     el.state = {
       messages: [

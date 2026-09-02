@@ -4,6 +4,11 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import {
+  CAPTAIN_ACTION_CONTEXT,
+  CAPTAIN_RED_ALERT_ACTION_ID,
+  CAPTAIN_WEAPONS_HOLD_ACTION_ID,
+} from '../stations/captain-actions.js';
 import { PhElement, phDefine } from './ph-element.js';
 
 export class PhRedAlert extends PhElement {
@@ -28,26 +33,50 @@ export class PhRedAlert extends PhElement {
     .hold-btn.held { background: var(--reloading-deep); border-color: var(--reloading); color: var(--reloading); }
     .hold-btn.held:hover:not(:disabled) { background: var(--reloading-deep); }
     .hold-btn:disabled { opacity: 0.4; cursor: default; }
+    .feedback-status { min-height: 1.2em; color: var(--ink); font-size: var(--text-xs); letter-spacing: 0.12em; text-transform: uppercase; }
+    .feedback-status[data-state="Refused"], .feedback-status[data-state="TimedOut"] { color: var(--fire); }
   </style>
   <div class="header">
     <span>${t('component.red_alert.title')}</span>
     <span class="auto-badge" id="auto-badge" style="display:none">${t('console.common.auto')}</span>
   </div>
   <button class="alert-btn standby" id="alert-btn">${t('component.red_alert.standby')}</button>
+  <span class="feedback-status" id="feedback-status" role="status" aria-live="polite" aria-atomic="true"></span>
   <button class="hold-btn free" id="hold-btn">${t('component.weapons_hold.free')}</button>
 `;
   }
 
   connectedCallback() {
     super.connectedCallback();
+    this._feedback = null;
+    this._feedbackByAction = new Map();
+    this._onFeedback = (event) => {
+      const value = event && event.detail;
+      if (!value
+          || ![CAPTAIN_RED_ALERT_ACTION_ID, CAPTAIN_WEAPONS_HOLD_ACTION_ID].includes(value.actionId)
+          || value.isCurrent === false) return;
+      if (value.cancelled || !value.statusId) {
+        this._feedbackByAction.delete(value.actionId);
+      } else {
+        this._feedbackByAction.set(value.actionId, value);
+      }
+      const current = [...this._feedbackByAction.values()];
+      this._feedback = current.slice().reverse()
+        .find((feedback) => feedback.state === 'Pending') || current.at(-1) || null;
+      this._renderFeedback();
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('phoenix-action-feedback', this._onFeedback);
+    }
     const btn = this.shadowRoot.getElementById('alert-btn');
     btn.addEventListener('click', () => {
-      if (this.sendAction && !btn.disabled) {
-        // Send the explicit desired state (issue #748): the opposite of what
-        // is currently displayed. Assigning (not toggling) on the host makes a
-        // stale / duplicated / retried command idempotent.
-        const currentlyActive = !!(this.state && this.state.active);
-        this.sendAction('set_red_alert', { active: !currentlyActive });
+      if (btn.disabled) return;
+      const activate = typeof window !== 'undefined' && window.activateSemanticAction;
+      if (typeof activate === 'function') {
+        activate(CAPTAIN_RED_ALERT_ACTION_ID, {
+          context: CAPTAIN_ACTION_CONTEXT,
+          source: 'control',
+        });
       }
     });
     // The weapons hold (issue #1041). Its own button beside the alert, not a
@@ -55,11 +84,42 @@ export class PhRedAlert extends PhElement {
     // stations with the guns cold.
     const holdBtn = this.shadowRoot.getElementById('hold-btn');
     holdBtn.addEventListener('click', () => {
-      if (this.sendAction && !holdBtn.disabled) {
-        const currentlyHeld = !!(this.state && this.state.hold);
-        this.sendAction('set_weapons_hold', { held: !currentlyHeld });
+      if (holdBtn.disabled) return;
+      const activate = typeof window !== 'undefined' && window.activateSemanticAction;
+      if (typeof activate === 'function') {
+        activate(CAPTAIN_WEAPONS_HOLD_ACTION_ID, {
+          context: CAPTAIN_ACTION_CONTEXT,
+          source: 'control',
+        });
       }
     });
+  }
+
+  disconnectedCallback() {
+    if (typeof window !== 'undefined' && this._onFeedback) {
+      window.removeEventListener('phoenix-action-feedback', this._onFeedback);
+    }
+    this._onFeedback = null;
+  }
+
+  _renderFeedback() {
+    const status = this.shadowRoot.getElementById('feedback-status');
+    const btn = this.shadowRoot.getElementById('alert-btn');
+    const holdBtn = this.shadowRoot.getElementById('hold-btn');
+    if (!status || !btn || !holdBtn) return;
+    const value = this._feedback;
+    status.textContent = value && value.statusId ? t(value.statusId) : '';
+    status.dataset.state = value && value.state ? value.state : '';
+    const redAlertFeedback = this._feedbackByAction
+      && this._feedbackByAction.get(CAPTAIN_RED_ALERT_ACTION_ID);
+    const weaponsHoldFeedback = this._feedbackByAction
+      && this._feedbackByAction.get(CAPTAIN_WEAPONS_HOLD_ACTION_ID);
+    if (redAlertFeedback && redAlertFeedback.state === 'Pending') {
+      btn.setAttribute('aria-busy', 'true');
+    } else btn.removeAttribute('aria-busy');
+    if (weaponsHoldFeedback && weaponsHoldFeedback.state === 'Pending') {
+      holdBtn.setAttribute('aria-busy', 'true');
+    } else holdBtn.removeAttribute('aria-busy');
   }
 
   render(state) {
@@ -72,6 +132,7 @@ export class PhRedAlert extends PhElement {
     btn.textContent = active ? t('component.red_alert.active') : t('component.red_alert.standby');
     btn.className = 'alert-btn' + (active ? ' active' : ' standby');
     btn.disabled = auto;
+    this._renderFeedback();
 
     // The hold reads off the same control source as the alert — one console
     // owns the ship's firing posture — so it greys out together with it.

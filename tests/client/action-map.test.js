@@ -8,7 +8,7 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 51 expected action keys', () => {
+  it('contains exactly the 53 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'cancel_impulse',
       'charge_blaster_cancel',
@@ -31,11 +31,13 @@ describe('ACTION_MAP', () => {
       'respond_to_message',
       'return_to_lobby',
       'scan_target',
-      'select_comms_message',
       'select_player_ship',
       'select_scenario',
       'set_boost',
       'set_helm',
+      'set_helm_lateral',
+      'set_helm_steering',
+      'set_helm_thrust',
       'set_lateral_thrust',
       'set_navigation_chart',
       'set_navigation_waypoint',
@@ -111,6 +113,24 @@ describe('dock / undock (issue #1159)', () => {
     ACTION_MAP.dock({ action: 'dock' }, send);
     ACTION_MAP.undock({ action: 'undock' }, send);
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it('preserves the authored Dock target in correlated semantic envelopes', () => {
+    const send = mkSend();
+    ACTION_MAP.dock({ target: 'dock', correlation: 'helm-dock-1' }, send);
+    ACTION_MAP.undock({ target: 'dock', correlation: 'helm-undock-1' }, send);
+    expect(send.mock.calls).toEqual([
+      ['ControlSystemCorrelated', {
+        correlation: 'helm-dock-1',
+        target: 'dock',
+        payload: { type: 'Dock' },
+      }],
+      ['ControlSystemCorrelated', {
+        correlation: 'helm-undock-1',
+        target: 'dock',
+        payload: { type: 'Undock' },
+      }],
+    ]);
   });
 });
 
@@ -220,11 +240,11 @@ describe('unload_tube', () => {
 });
 
 describe('set_target', () => {
-  it('calls mutate with weaponsTarget and send SetTarget with uuid', () => {
+  it('sends SetTarget with uuid without optimistically mutating gameplay state', () => {
     const send = mkSend();
     const mutate = mkMutate();
     ACTION_MAP.set_target({ action: 'set_target', uuid: 'abc' }, send, mutate);
-    expect(mutate).toHaveBeenCalledWith({ weaponsTarget: 'abc' });
+    expect(mutate).not.toHaveBeenCalled();
     expect(send).toHaveBeenCalledWith('ControlSystem', {
       target: 'tactical-radar',
       payload: { type: 'SetTarget', data: { uuid: 'abc' } },
@@ -258,10 +278,11 @@ describe('set_phaser_mode', () => {
 });
 
 describe('set_view', () => {
-  it('calls send ControlSystem viewscreen SetView with Camera kind and direction', () => {
+  it('calls send correlated viewscreen SetView with Camera kind and direction', () => {
     const send = mkSend();
-    ACTION_MAP.set_view({ action: 'set_view', direction: 'Aft' }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
+    ACTION_MAP.set_view({ action: 'set_view', direction: 'Aft', correlation: 'view-1' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'view-1',
       target: 'viewscreen',
       payload: { type: 'SetView', data: { mode: { kind: 'Camera', data: 'Aft' } } },
     });
@@ -275,19 +296,30 @@ describe('set_view', () => {
 
   it('sends non-camera view modes by kind', () => {
     const send = mkSend();
-    ACTION_MAP.set_view({ action: 'set_view', direction: 'SensorsRadar' }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
+    ACTION_MAP.set_view({ action: 'set_view', direction: 'SensorsRadar', correlation: 'view-2' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'view-2',
       target: 'viewscreen',
       payload: { type: 'SetView', data: { mode: { kind: 'SensorsRadar' } } },
+    });
+  });
+
+  it('preserves the legacy uncorrelated SetView route for non-Captain adapters', () => {
+    const send = mkSend();
+    ACTION_MAP.set_view({ action: 'set_view', direction: 'Aft' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'viewscreen',
+      payload: { type: 'SetView', data: { mode: { kind: 'Camera', data: 'Aft' } } },
     });
   });
 });
 
 describe('set_red_alert', () => {
-  it('sends ControlSystem with the explicit desired active=true state', () => {
+  it('sends correlated ControlSystem with the explicit desired active=true state', () => {
     const send = mkSend();
-    ACTION_MAP.set_red_alert({ action: 'set_red_alert', active: true }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
+    ACTION_MAP.set_red_alert({ action: 'set_red_alert', active: true, correlation: 'alert-1' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'alert-1',
       target: 'red-alert',
       payload: { type: 'SetRedAlert', data: { active: true } },
     });
@@ -296,8 +328,9 @@ describe('set_red_alert', () => {
 
   it('sends the explicit desired active=false state', () => {
     const send = mkSend();
-    ACTION_MAP.set_red_alert({ action: 'set_red_alert', active: false }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
+    ACTION_MAP.set_red_alert({ action: 'set_red_alert', active: false, correlation: 'alert-2' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'alert-2',
       target: 'red-alert',
       payload: { type: 'SetRedAlert', data: { active: false } },
     });
@@ -305,11 +338,18 @@ describe('set_red_alert', () => {
 
   it('coerces a missing active flag to false (never inverts)', () => {
     const send = mkSend();
-    ACTION_MAP.set_red_alert({ action: 'set_red_alert' }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
+    ACTION_MAP.set_red_alert({ action: 'set_red_alert', correlation: 'alert-3' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'alert-3',
       target: 'red-alert',
       payload: { type: 'SetRedAlert', data: { active: false } },
     });
+  });
+
+  it('does not create an untracked Red Alert command without a correlation', () => {
+    const send = mkSend();
+    ACTION_MAP.set_red_alert({ action: 'set_red_alert', active: true }, send);
+    expect(send).not.toHaveBeenCalled();
   });
 });
 
@@ -340,10 +380,11 @@ describe('set_station_stance (issue #1107)', () => {
 // and the same explicit-desired-state shape, so a stale or retried press
 // cannot invert the order.
 describe('set_weapons_hold', () => {
-  it('sends ControlSystem with the explicit desired held=true state', () => {
+  it('sends correlated ControlSystem with the explicit desired held=true state', () => {
     const send = mkSend();
-    ACTION_MAP.set_weapons_hold({ action: 'set_weapons_hold', held: true }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
+    ACTION_MAP.set_weapons_hold({ action: 'set_weapons_hold', held: true, correlation: 'hold-1' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'hold-1',
       target: 'red-alert',
       payload: { type: 'SetWeaponsHold', data: { held: true } },
     });
@@ -352,8 +393,9 @@ describe('set_weapons_hold', () => {
 
   it('sends the explicit desired held=false state', () => {
     const send = mkSend();
-    ACTION_MAP.set_weapons_hold({ action: 'set_weapons_hold', held: false }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
+    ACTION_MAP.set_weapons_hold({ action: 'set_weapons_hold', held: false, correlation: 'hold-2' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'hold-2',
       target: 'red-alert',
       payload: { type: 'SetWeaponsHold', data: { held: false } },
     });
@@ -361,11 +403,18 @@ describe('set_weapons_hold', () => {
 
   it('coerces a missing held flag to false (never inverts)', () => {
     const send = mkSend();
-    ACTION_MAP.set_weapons_hold({ action: 'set_weapons_hold' }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
+    ACTION_MAP.set_weapons_hold({ action: 'set_weapons_hold', correlation: 'hold-3' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'hold-3',
       target: 'red-alert',
       payload: { type: 'SetWeaponsHold', data: { held: false } },
     });
+  });
+
+  it('does not create an untracked Weapons Hold command without a correlation', () => {
+    const send = mkSend();
+    ACTION_MAP.set_weapons_hold({ action: 'set_weapons_hold', held: true }, send);
+    expect(send).not.toHaveBeenCalled();
   });
 });
 
@@ -415,11 +464,64 @@ describe('set_helm', () => {
   });
 });
 
+describe('set_helm_steering', () => {
+  it('sends only SetSteering through the existing fine-system route', () => {
+    const send = mkSend();
+    ACTION_MAP.set_helm_steering({ action: 'set_helm_steering', value: -0.4 }, send);
+    expect(send).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'helm-steering',
+      payload: { type: 'SetSteering', data: { value: -0.4 } },
+    });
+  });
+
+  it('refuses a missing or non-finite steering scalar', () => {
+    const send = mkSend();
+    ACTION_MAP.set_helm_steering({ value: Number.NaN }, send);
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe('semantic Helm thrust variants', () => {
+  it('keeps thrust and lateral thrust on their existing narrow routes', () => {
+    const send = mkSend();
+    ACTION_MAP.set_helm_thrust({ value: 0.75 }, send);
+    ACTION_MAP.set_helm_lateral({ value: -0.25 }, send);
+    expect(send.mock.calls).toEqual([
+      ['ControlSystem', {
+        target: 'helm-thrust',
+        payload: { type: 'SetThrust', data: { value: 0.75 } },
+      }],
+      ['ControlSystem', {
+        target: 'helm-lateral-thrust',
+        payload: { type: 'LateralThrustInput', data: { lateral: -0.25 } },
+      }],
+    ]);
+  });
+
+  it('refuses non-finite thrust values before transport', () => {
+    const send = mkSend();
+    ACTION_MAP.set_helm_thrust({ value: Number.NaN }, send);
+    ACTION_MAP.set_helm_lateral({ value: Number.POSITIVE_INFINITY }, send);
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
 describe('start_impulse_charge', () => {
   it('calls send StartImpulseCharge', () => {
     const send = mkSend();
     ACTION_MAP.start_impulse_charge({}, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'helm-impulse',
+      payload: { type: 'StartImpulseCharge' },
+    });
+  });
+
+  it('carries semantic correlation on the same impulse target', () => {
+    const send = mkSend();
+    ACTION_MAP.start_impulse_charge({ correlation: 'helm-impulse-1' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'helm-impulse-1',
       target: 'helm-impulse',
       payload: { type: 'StartImpulseCharge' },
     });
@@ -454,6 +556,24 @@ describe('set_boost', () => {
       payload: { type: 'SetBoost', data: { active: false } },
     });
   });
+
+  it('carries hold press and release correlations without changing SetBoost', () => {
+    const send = mkSend();
+    ACTION_MAP.set_boost({ active: true, correlation: 'helm-boost-on' }, send);
+    ACTION_MAP.set_boost({ active: false, correlation: 'helm-boost-off' }, send);
+    expect(send.mock.calls).toEqual([
+      ['ControlSystemCorrelated', {
+        correlation: 'helm-boost-on',
+        target: 'helm-boost',
+        payload: { type: 'SetBoost', data: { active: true } },
+      }],
+      ['ControlSystemCorrelated', {
+        correlation: 'helm-boost-off',
+        target: 'helm-boost',
+        payload: { type: 'SetBoost', data: { active: false } },
+      }],
+    ]);
+  });
 });
 
 describe('cancel_impulse', () => {
@@ -461,6 +581,16 @@ describe('cancel_impulse', () => {
     const send = mkSend();
     ACTION_MAP.cancel_impulse({}, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'helm-impulse',
+      payload: { type: 'CancelImpulse' },
+    });
+  });
+
+  it('carries semantic correlation without changing the legacy route', () => {
+    const send = mkSend();
+    ACTION_MAP.cancel_impulse({ correlation: 'cancel-impulse-1' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'cancel-impulse-1',
       target: 'helm-impulse',
       payload: { type: 'CancelImpulse' },
     });
@@ -475,6 +605,65 @@ describe('set_radar_view', () => {
       target: 'viewscreen',
       payload: { type: 'SetView', data: { mode: { kind: 'Radar' } } },
     });
+  });
+
+  it('carries semantic correlation on the existing viewscreen route', () => {
+    const send = mkSend();
+    ACTION_MAP.set_radar_view({ correlation: 'helm-view-1' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'helm-view-1',
+      target: 'viewscreen',
+      payload: { type: 'SetView', data: { mode: { kind: 'Radar' } } },
+    });
+  });
+});
+
+describe('authored Helm owner routing', () => {
+  it('targets arbitrary authored SystemIds for every Helm command family', () => {
+    const send = mkSend();
+    ACTION_MAP.helm_input({
+      thrust: 0.2,
+      steering: -0.3,
+      thrust_system_id: 'drive-array-port',
+      steering_system_id: 'yaw-ring-a',
+    }, send);
+    ACTION_MAP.set_helm_thrust({ value: 0.4, control_system_id: 'drive-array-starboard' }, send);
+    ACTION_MAP.set_helm_steering({ value: 0.5, control_system_id: 'yaw-ring-b' }, send);
+    ACTION_MAP.set_helm_lateral({ value: -1, control_system_id: 'translation-ring' }, send);
+    ACTION_MAP.start_impulse_charge({
+      control_system_id: 'jump-coil', correlation: 'impulse-start',
+    }, send);
+    ACTION_MAP.cancel_impulse({
+      control_system_id: 'jump-coil', correlation: 'impulse-cancel',
+    }, send);
+    ACTION_MAP.toggle_boost({ control_system_id: 'overburner' }, send);
+    ACTION_MAP.set_boost({
+      active: true, control_system_id: 'overburner', correlation: 'boost-on',
+    }, send);
+    ACTION_MAP.set_radar_view({
+      control_system_id: 'forward-display', correlation: 'radar',
+    }, send);
+    ACTION_MAP.dock({
+      target: 'legacy-dock', control_system_id: 'berthing-clamps', correlation: 'dock',
+    }, send);
+    ACTION_MAP.undock({
+      target: 'legacy-dock', control_system_id: 'berthing-clamps', correlation: 'undock',
+    }, send);
+
+    expect(send.mock.calls.map(([, envelope]) => envelope.target)).toEqual([
+      'drive-array-port',
+      'yaw-ring-a',
+      'drive-array-starboard',
+      'yaw-ring-b',
+      'translation-ring',
+      'jump-coil',
+      'jump-coil',
+      'overburner',
+      'overburner',
+      'forward-display',
+      'berthing-clamps',
+      'berthing-clamps',
+    ]);
   });
 });
 
@@ -603,11 +792,55 @@ describe('set_power', () => {
   });
 });
 
+describe('Engineering semantic owner identities', () => {
+  it('carries each authoritative control SystemId into the wire target', () => {
+    const cases = [
+      ['engage_tractor', { control_system_id: 'tractor-primary' }, 'tractor-primary', 'EngageTractor'],
+      ['release_tractor', { control_system_id: 'tractor-primary' }, 'tractor-primary', 'ReleaseTractor'],
+      ['start_transfer', { control_system_id: 'umbilical-port' }, 'umbilical-port', 'StartTransfer'],
+      ['stop_transfer', { control_system_id: 'umbilical-port' }, 'umbilical-port', 'StopTransfer'],
+      ['dispatch_external_repair', { control_system_id: 'repair-control' }, 'repair-control', 'DispatchExternalRepair'],
+      ['recall_external_repair', { control_system_id: 'repair-control' }, 'repair-control', 'RecallExternalRepair'],
+      ['set_power', {
+        control_system_id: 'reactor-main', target: 'helm', level: 3,
+      }, 'reactor-main', 'SetPowerGroupAllocation'],
+      ['dispatch_repair_team', {
+        control_system_id: 'repair-control', team_idx: 0, target: 'core',
+      }, 'repair-control', 'DispatchRepairTeam'],
+      ['set_repair_target_priority', {
+        control_system_id: 'repair-control', system_id: 'reactor-main',
+      }, 'repair-control', 'SetRepairTargetPriority'],
+    ];
+
+    for (const [name, action, target, payloadType] of cases) {
+      const send = mkSend();
+      ACTION_MAP[name]({ ...action, correlation: `owner-${name}` }, send);
+      expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', expect.objectContaining({
+        correlation: `owner-${name}`,
+        target,
+        payload: expect.objectContaining({ type: payloadType }),
+      }));
+    }
+  });
+});
+
 describe('set_shield_focus', () => {
   it('sends SetShieldArcFocus targeted at shield-arc-<arc_id> (issue #514)', () => {
     const send = mkSend();
     ACTION_MAP.set_shield_focus({ action: 'set_shield_focus', arc_id: 'fore', focused: true }, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'shield-arc-fore',
+      payload: { type: 'SetShieldArcFocus', data: { focused: true } },
+    });
+  });
+
+  it('carries semantic correlation to the selected authored arc', () => {
+    const send = mkSend();
+    ACTION_MAP.set_shield_focus({
+      action: 'set_shield_focus', arc_id: 'fore', focused: true, correlation: 'focus-1',
+    }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'focus-1',
       target: 'shield-arc-fore',
       payload: { type: 'SetShieldArcFocus', data: { focused: true } },
     });
@@ -639,12 +872,15 @@ describe('set_shield_focus', () => {
 });
 
 describe('set_sensors_target', () => {
-  it('calls mutate with sensorsTarget and send ControlSystem SetScienceTarget', () => {
+  it('sends correlated SetScienceTarget without painting an optimistic selection', () => {
     const send = mkSend();
     const mutate = mkMutate();
-    ACTION_MAP.set_sensors_target({ action: 'set_sensors_target', uuid: 'tgt-42' }, send, mutate);
-    expect(mutate).toHaveBeenCalledWith({ sensorsTarget: 'tgt-42' });
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
+    ACTION_MAP.set_sensors_target({
+      action: 'set_sensors_target', uuid: 'tgt-42', correlation: 'science-target-1',
+    }, send, mutate);
+    expect(mutate).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'science-target-1',
       target: 'sensors',
       payload: { type: 'SetScienceTarget', data: { uuid: 'tgt-42' } },
     });
@@ -655,6 +891,17 @@ describe('set_sensors_target', () => {
     const mutate = mkMutate();
     ACTION_MAP.set_sensors_target({ action: 'set_sensors_target' }, send, mutate);
     expect(send).not.toHaveBeenCalled();
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
+  it('retains the legacy uncorrelated route for non-semantic callers', () => {
+    const send = mkSend();
+    const mutate = mkMutate();
+    ACTION_MAP.set_sensors_target({ action: 'set_sensors_target', uuid: 'tgt-42' }, send, mutate);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'sensors',
+      payload: { type: 'SetScienceTarget', data: { uuid: 'tgt-42' } },
+    });
     expect(mutate).not.toHaveBeenCalled();
   });
 });
@@ -669,6 +916,16 @@ describe('hail', () => {
     });
   });
 
+  it('uses the additive correlated envelope for semantic hail feedback', () => {
+    const send = mkSend();
+    ACTION_MAP.hail({ target_uuid: 'npc-1', correlation: 'hail-1' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'hail-1',
+      target: 'comms',
+      payload: { type: 'Hail', data: { target_uuid: 'npc-1' } },
+    });
+  });
+
   it('does nothing when target_uuid is absent', () => {
     const send = mkSend();
     ACTION_MAP.hail({ action: 'hail' }, send);
@@ -676,19 +933,11 @@ describe('hail', () => {
   });
 });
 
-describe('select_comms_message', () => {
-  it('sends ControlSystem SelectCommsMessage targeting comms (issue #822)', () => {
+describe('retired select_comms_message route', () => {
+  it('cannot emit the unconsumed host command even for a forged legacy action', () => {
     const send = mkSend();
-    ACTION_MAP.select_comms_message({ action: 'select_comms_message', message_id: 'msg-42' }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
-      target: 'comms',
-      payload: { type: 'SelectCommsMessage', data: { message_id: 'msg-42' } },
-    });
-  });
-
-  it('does nothing when message_id is absent', () => {
-    const send = mkSend();
-    ACTION_MAP.select_comms_message({ action: 'select_comms_message' }, send);
+    expect(ACTION_MAP.select_comms_message).toBeUndefined();
+    dispatchConsoleAction({ action: 'select_comms_message', message_id: 'msg-42' }, send);
     expect(send).not.toHaveBeenCalled();
   });
 });
@@ -698,6 +947,18 @@ describe('respond_to_message', () => {
     const send = mkSend();
     ACTION_MAP.respond_to_message({ action: 'respond_to_message', message_id: 'msg-1', response_index: 2 }, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'comms',
+      payload: { type: 'RespondToMessage', data: { message_id: 'msg-1', response_index: 2 } },
+    });
+  });
+
+  it('preserves the exact message and index in the correlated response envelope', () => {
+    const send = mkSend();
+    ACTION_MAP.respond_to_message({
+      message_id: 'msg-1', response_index: 2, correlation: 'response-1',
+    }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'response-1',
       target: 'comms',
       payload: { type: 'RespondToMessage', data: { message_id: 'msg-1', response_index: 2 } },
     });
@@ -720,6 +981,14 @@ describe('clear_comms', () => {
     });
     expect(send).toHaveBeenCalledTimes(1);
   });
+
+  it('uses the additive correlated envelope for semantic clear feedback', () => {
+    const send = mkSend();
+    ACTION_MAP.clear_comms({ correlation: 'clear-1' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'clear-1', target: 'comms', payload: { type: 'ClearComms' },
+    });
+  });
 });
 
 describe('show_on_screen', () => {
@@ -727,6 +996,16 @@ describe('show_on_screen', () => {
     const send = mkSend();
     ACTION_MAP.show_on_screen({ action: 'show_on_screen', message_id: 'msg-7' }, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'comms',
+      payload: { type: 'ShowOnScreen', data: { message_id: 'msg-7' } },
+    });
+  });
+
+  it('uses the additive correlated envelope for semantic viewscreen feedback', () => {
+    const send = mkSend();
+    ACTION_MAP.show_on_screen({ message_id: 'msg-7', correlation: 'show-1' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'show-1',
       target: 'comms',
       payload: { type: 'ShowOnScreen', data: { message_id: 'msg-7' } },
     });
@@ -875,6 +1154,57 @@ describe('order_civilian', () => {
   });
 });
 
+describe('Navigation correlated semantic envelopes', () => {
+  it('preserves correlation for chart, free/anchored waypoint, clear and civilian order', () => {
+    const send = mkSend();
+    const correlation = 'navigation-occurrence-7';
+
+    ACTION_MAP.set_navigation_chart({ correlation }, send);
+    ACTION_MAP.set_navigation_waypoint({ x: 1, z: 2, correlation }, send);
+    ACTION_MAP.set_navigation_waypoint({
+      x: 3, z: 4, source_uuid: 'beacon-a', correlation,
+    }, send);
+    ACTION_MAP.clear_navigation_waypoint({ correlation }, send);
+    ACTION_MAP.order_civilian({
+      target: 'civilian-a', verb: 'hold', correlation,
+    }, send);
+
+    expect(send.mock.calls).toEqual([
+      ['ControlSystemCorrelated', {
+        correlation,
+        target: 'viewscreen',
+        payload: { type: 'SetView', data: { mode: { kind: 'NavigationChart' } } },
+      }],
+      ['ControlSystemCorrelated', {
+        correlation,
+        target: 'navigation',
+        payload: { type: 'SetNavigationWaypoint', data: { x: 1, z: 2 } },
+      }],
+      ['ControlSystemCorrelated', {
+        correlation,
+        target: 'navigation',
+        payload: {
+          type: 'SetNavigationWaypoint',
+          data: { x: 3, z: 4, source_uuid: 'beacon-a' },
+        },
+      }],
+      ['ControlSystemCorrelated', {
+        correlation,
+        target: 'navigation',
+        payload: { type: 'ClearNavigationWaypoint' },
+      }],
+      ['ControlSystemCorrelated', {
+        correlation,
+        target: 'navigation',
+        payload: {
+          type: 'OrderCivilian',
+          data: { target: 'civilian-a', order: { verb: 'hold' } },
+        },
+      }],
+    ]);
+  });
+});
+
 // ── return_to_lobby (issue #822 / #756) ───────────────────────────────────────
 // Host-page lobby actions route through the same action map as everything else;
 // each maps to its bare ClientMessage variant.
@@ -928,13 +1258,16 @@ describe('select_player_ship', () => {
 // ── The science scan (issue #1032) ────────────────────────────────────────────
 
 describe('scan_target', () => {
-  it('sends ScanTarget at the sensors system with the contact uuid', () => {
+  it('sends correlated ScanTarget at the sensors system with the contact uuid', () => {
     // The sensors system, not a scan one: the suite is the thing aboard the
     // ship that can be commanded and damaged, so a scan rides the same
     // station-tenure admission the science target selection already does.
     const send = mkSend();
-    ACTION_MAP.scan_target({ action: 'scan_target', uuid: 'depot-1' }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
+    ACTION_MAP.scan_target({
+      action: 'scan_target', uuid: 'depot-1', correlation: 'scan-1',
+    }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'scan-1',
       target: 'sensors',
       payload: { type: 'ScanTarget', data: { uuid: 'depot-1' } },
     });
@@ -945,18 +1278,36 @@ describe('scan_target', () => {
     ACTION_MAP.scan_target({ action: 'scan_target' }, send);
     expect(send).not.toHaveBeenCalled();
   });
+
+  it('retains the legacy uncorrelated transport for non-semantic callers', () => {
+    const send = mkSend();
+    ACTION_MAP.scan_target({ action: 'scan_target', uuid: 'depot-1' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'sensors',
+      payload: { type: 'ScanTarget', data: { uuid: 'depot-1' } },
+    });
+  });
 });
 
 // ── set_objective_priority (issue #675) ───────────────────────────────────────
 
 describe('set_objective_priority', () => {
-  it('sends ControlSystem SetObjectivePriority with id', () => {
+  it('sends correlated SetObjectivePriority with id', () => {
     const send = mkSend();
-    ACTION_MAP.set_objective_priority({ action: 'set_objective_priority', id: 'obj-1' }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
+    ACTION_MAP.set_objective_priority({
+      action: 'set_objective_priority', id: 'obj-1', correlation: 'objective-1',
+    }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'objective-1',
       target: 'captain',
       payload: { type: 'SetObjectivePriority', data: { id: 'obj-1' } },
     });
+  });
+
+  it('does not create an untracked Objective Priority command without a correlation', () => {
+    const send = mkSend();
+    ACTION_MAP.set_objective_priority({ action: 'set_objective_priority', id: 'obj-1' }, send);
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('does nothing when id is absent', () => {
@@ -971,8 +1322,9 @@ describe('set_objective_priority', () => {
 describe('dispatchConsoleAction', () => {
   it('routes a known action to its handler', () => {
     const send = mkSend();
-    dispatchConsoleAction({ action: 'set_red_alert', active: true }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
+    dispatchConsoleAction({ action: 'set_red_alert', active: true, correlation: 'alert-dispatch' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'alert-dispatch',
       target: 'red-alert',
       payload: { type: 'SetRedAlert', data: { active: true } },
     });
@@ -997,7 +1349,7 @@ describe('dispatchConsoleAction', () => {
 
   it('provides a no-op mutate when none is given', () => {
     const send = mkSend();
-    // set_sensors_target needs mutate; should not throw even if not provided
+    // Sensor selection has no optimistic patch and does not require mutate.
     expect(() => dispatchConsoleAction({ action: 'set_sensors_target', uuid: 'x' }, send)).not.toThrow();
     expect(send).toHaveBeenCalledWith('ControlSystem', {
       target: 'sensors',

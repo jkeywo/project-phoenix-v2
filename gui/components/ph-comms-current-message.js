@@ -6,6 +6,7 @@ import '../strings-boot.js';
 import { t } from '../strings.js';
 import { isLatestLiveCriticalMessage } from '../comms-state.js';
 import { PhElement, phDefine } from './ph-element.js';
+import { COMMS_RESPOND_ACTION_ID } from '../stations/comms-actions.js';
 
 /**
  * Normalise a wire response into `{ text, important, available }`.
@@ -225,8 +226,11 @@ export class PhCommsCurrentMessage extends PhElement {
     }
     // Non-important, or a confirmed important response: submit and disarm.
     this.#armedIdx = null;
-    if (this.sendAction) {
-      this.sendAction('respond_to_message', { message_id: tid, response_index: idx });
+    if (typeof window.activateSemanticAction === 'function') {
+      window.activateSemanticAction(COMMS_RESPOND_ACTION_ID, {
+        source: 'control',
+        detail: { message_id: tid, response_index: idx, confirmed: important },
+      });
     }
   }
 }

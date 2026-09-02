@@ -1,4 +1,5 @@
 use crate::core::messages::{Player, StationId};
+use crate::lobby::start_policy::ReadinessTally;
 use crate::ship::config::ShipConfig;
 
 #[derive(Debug)]
@@ -323,28 +324,33 @@ impl SessionManager {
         }
     }
 
-    /// True when every connected, non-spectator player is ready.
+    /// Count connected, non-spectator crew and the ready subset.
     ///
-    /// Spectators (issue #1105) are excluded from BOTH the readiness tally and
-    /// the "any humans present" guard: a spectator-only lobby must never
-    /// auto-start (returns false when no connected non-spectator exists), and a
-    /// sitting spectator can never hold up — or trip — mission start. This is
-    /// the single source of truth for start-readiness; every caller
-    /// (`handle_set_ready`, the disconnect re-checks, `tick_countdown`, the
-    /// host lobby HUD) reads it.
-    ///
-    /// Returns false when zero connected non-spectator players exist to prevent
-    /// auto-starting the game after the last crew client disconnects.
-    pub fn all_ready(&self) -> bool {
-        let crew: Vec<&Player> = self
+    /// Station ownership is irrelevant: a connected participant who has not
+    /// chosen a Station yet still belongs to collective readiness. Spectators
+    /// and disconnected rows do not.
+    pub fn readiness_tally(&self) -> ReadinessTally {
+        let connected = self
             .players
             .iter()
-            .filter(|p| p.connected && !p.spectator)
-            .collect();
-        if crew.is_empty() {
-            return false; // never auto-start with zero non-spectator humans
-        }
-        crew.iter().all(|p| p.ready)
+            .filter(|player| player.connected && !player.spectator)
+            .count() as u32;
+        let ready = self
+            .players
+            .iter()
+            .filter(|player| player.connected && !player.spectator && player.ready)
+            .count() as u32;
+        ReadinessTally { connected, ready }
+    }
+
+    /// True when every connected, non-spectator player is ready.
+    ///
+    /// Delegates to [`Self::readiness_tally`] so solo countdown, fleet
+    /// projection and the host lobby cannot drift on who counts. Returns false
+    /// at zero participants; GM-only start is a coordinated policy over the
+    /// separate GM roster and deliberately does not change this local answer.
+    pub fn all_ready(&self) -> bool {
+        self.readiness_tally().all_ready()
     }
 
     /// Reset all players' ready flags to false (e.g. when a new scenario loads).
@@ -742,6 +748,29 @@ mod tests {
         assert!(
             sm.all_ready(),
             "disconnected player should not block all_ready"
+        );
+    }
+
+    #[test]
+    fn readiness_tally_counts_stationless_crew_and_excludes_disconnected_rows() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.register("t2".into(), "Bob".into()).unwrap();
+        sm.register("t3".into(), "Casey".into()).unwrap();
+        sm.set_ready("t1", true);
+        sm.set_ready("t2", true);
+        sm.disconnect("t2");
+        sm.set_spectator("t3", true);
+
+        // t1 deliberately never selected a Station: presence, not seating,
+        // decides whether crew participates in collective readiness.
+        assert!(sm.station_for_token("t1").is_none());
+        assert_eq!(
+            sm.readiness_tally(),
+            ReadinessTally {
+                connected: 1,
+                ready: 1
+            }
         );
     }
 

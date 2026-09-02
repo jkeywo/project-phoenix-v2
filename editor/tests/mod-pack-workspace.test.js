@@ -7,7 +7,9 @@ import {
 } from '../mod-pack-workspace.js';
 import {
   exportModPack,
+  createStoreZip,
   readStoreZip,
+  readStoreZipArchive,
   buildManifestToml,
   parsePackManifest,
   MANIFEST_PATH,
@@ -120,12 +122,16 @@ describe('ModPackWorkspace members: add/remove/classify + base digest', () => {
 describe('ModPackWorkspace scenarios', () => {
   it('adds, lists, and removes scenario entries by id', () => {
     const ws = new ModPackWorkspace();
-    ws.addScenario({ id: 'default', world: WORLD_PATH, label: 'Default' });
+    const ships = ['assets/entities/alliance_destroyer.toml'];
+    ws.addScenario({ id: 'default', world: WORLD_PATH, label: 'Default', ships });
     ws.addScenario({ id: 'combat', world: 'assets/worlds/combat.toml' });
     expect(ws.getScenarios()).toEqual([
-      { id: 'default', world: WORLD_PATH, label: 'Default' },
+      { id: 'default', world: WORLD_PATH, label: 'Default', ships },
       { id: 'combat', world: 'assets/worlds/combat.toml' },
     ]);
+    const borrowed = ws.getScenarios();
+    borrowed[0].ships.push('assets/entities/mutated_outside_workspace.toml');
+    expect(ws.getScenarios()[0].ships).toEqual(ships);
     expect(ws.removeScenario('default')).toBe(true);
     expect(ws.getScenarios().map((s) => s.id)).toEqual(['combat']);
   });
@@ -225,11 +231,54 @@ describe('ModPackWorkspace.fromArchiveFiles round trip', () => {
     expect(member.baseDigest).toBe(digestText(WORLD_TEXT));
   });
 
+  it('edits one member while retaining its source archive, comments, and base provenance', () => {
+    const manifest = `# retained manifest note\n${buildManifestToml(
+      [{ id: 'default', world: WORLD_PATH }],
+      goodPack(),
+    )}`;
+    const sourceWorld = '# retained world note\r\n[global]\r\nsim_tick_hz = 60\r\n[anchors]\r\n';
+    const bytes = createStoreZip([
+      { path: MANIFEST_PATH, text: manifest },
+      { path: WORLD_PATH, text: sourceWorld },
+    ]);
+    const archive = readStoreZipArchive(bytes);
+    const ws = ModPackWorkspace.fromArchiveFiles(
+      archive.files,
+      { [WORLD_PATH]: sourceWorld },
+      archive.source,
+    );
+    const before = ws.getMember(WORLD_PATH);
+    const editedWorld = sourceWorld.replace('sim_tick_hz = 60', 'sim_tick_hz = 30');
+
+    expect(ws.setMemberText(WORLD_PATH, editedWorld)).toBe(true);
+    expect(ws.setMemberText('assets/worlds/missing.toml', 'x')).toBe(false);
+    expect(ws.getMember(WORLD_PATH)).toMatchObject({
+      text: editedWorld,
+      classification: before.classification,
+      baseDigest: before.baseDigest,
+    });
+    expect(ws.getSourceEntry(WORLD_PATH).text).toBe(sourceWorld);
+    expect(Array.from(ws.getSourceArchive().bytes)).toEqual(Array.from(bytes));
+
+    const result = exportModPack(ws.toExportInput());
+    expect(result.ok).toBe(true);
+    const exported = readStoreZip(result.zip);
+    expect(exported[MANIFEST_PATH]).toBe(manifest);
+    expect(exported[WORLD_PATH]).toBe(editedWorld);
+    expect(exported[WORLD_PATH]).toContain('# retained world note\r\n');
+  });
+
   it('parsePackManifest is the inverse of buildManifestToml (fixed point)', () => {
-    const scenarios = [{ id: 'default', world: WORLD_PATH, label: 'Default' }];
+    const scenarios = [{
+      id: 'default',
+      world: WORLD_PATH,
+      label: 'Default',
+      ships: ['assets/entities/alliance_destroyer.toml'],
+    }];
     const pack = goodPack({ author: 'A', description: 'D' });
     const toml = buildManifestToml(scenarios, pack);
     const parsed = parsePackManifest(toml);
+    expect(parsed.scenarios).toEqual(scenarios);
     expect(buildManifestToml(parsed.scenarios, parsed.pack)).toBe(toml);
   });
 });

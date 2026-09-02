@@ -1,6 +1,9 @@
 use super::*;
-use crate::core::messages::{CameraView, ClientMessage};
-use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Sessions};
+use crate::core::messages::{
+    ActionCorrelationId, ActionFeedbackOutcome, CameraView, ClientMessage, DeliveryClass,
+    ServerMessage,
+};
+use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Sessions, Target};
 use crate::server_app::LocalShip;
 use crate::server_app::Ship;
 use crate::ship::control_source::ControlSource;
@@ -122,6 +125,45 @@ fn push(app: &mut App, token: &str, msg: ClientMessage) {
             token: token.into(),
             msg,
         });
+}
+
+fn correlated_red_alert(correlation: &str, active: bool) -> ClientMessage {
+    correlated_command(
+        correlation,
+        crate::ship::system_registry::red_alert_system_id(),
+        SystemControlPayload::SetRedAlert { active },
+    )
+}
+
+fn correlated_command(
+    correlation: &str,
+    target: SystemId,
+    payload: SystemControlPayload,
+) -> ClientMessage {
+    ClientMessage::ControlSystemCorrelated {
+        correlation: ActionCorrelationId::new(correlation).expect("valid test correlation"),
+        target,
+        payload,
+    }
+}
+
+fn has_feedback(
+    messages: &[OutboundMessage],
+    token: &str,
+    correlation: &str,
+    outcome: ActionFeedbackOutcome,
+) -> bool {
+    messages.iter().any(|message| {
+        message.target == Target::Token(token.to_string())
+            && message.delivery == DeliveryClass::Reliable
+            && matches!(
+                &message.msg,
+                ServerMessage::ActionFeedback {
+                    correlation: actual,
+                    outcome: actual_outcome,
+                } if actual.as_str() == correlation && *actual_outcome == outcome
+            )
+    })
 }
 
 fn tick(app: &mut App) -> Vec<OutboundMessage> {
@@ -250,6 +292,204 @@ fn captain_set_red_alert_works() {
     );
     tick(&mut app);
     assert!(get_red_alert(&mut app));
+}
+
+#[test]
+fn correlated_red_alert_is_applied_by_the_authoritative_consumer() {
+    let mut app = test_app();
+    start_game(&mut app);
+
+    push(
+        &mut app,
+        "captain",
+        correlated_red_alert("captain-accepted", true),
+    );
+    let messages = tick(&mut app);
+
+    assert!(get_red_alert(&mut app));
+    assert!(has_feedback(
+        &messages,
+        "captain",
+        "captain-accepted",
+        ActionFeedbackOutcome::Applied,
+    ));
+}
+
+#[test]
+fn correlated_red_alert_idempotent_success_is_still_applied() {
+    let mut app = test_app();
+    start_game(&mut app);
+    set_red_alert(&mut app, true);
+
+    push(
+        &mut app,
+        "captain",
+        correlated_red_alert("captain-idempotent", true),
+    );
+    let messages = tick(&mut app);
+
+    assert!(get_red_alert(&mut app));
+    assert!(has_feedback(
+        &messages,
+        "captain",
+        "captain-idempotent",
+        ActionFeedbackOutcome::Applied,
+    ));
+}
+
+#[test]
+fn correlated_weapons_hold_is_applied_by_the_authoritative_consumer() {
+    let mut app = test_app();
+    start_game(&mut app);
+    push(
+        &mut app,
+        "captain",
+        correlated_command(
+            "hold-accepted",
+            crate::ship::system_registry::red_alert_system_id(),
+            SystemControlPayload::SetWeaponsHold { held: true },
+        ),
+    );
+    let messages = tick(&mut app);
+
+    assert!(get_weapons_hold(&mut app));
+    assert!(has_feedback(
+        &messages,
+        "captain",
+        "hold-accepted",
+        ActionFeedbackOutcome::Applied,
+    ));
+}
+
+#[test]
+fn correlated_view_is_applied_only_after_the_view_consumer_runs() {
+    let mut app = test_app();
+    start_game(&mut app);
+    push(
+        &mut app,
+        "captain",
+        correlated_command(
+            "view-accepted",
+            crate::ship::system_registry::viewscreen_system_id(),
+            SystemControlPayload::SetView {
+                mode: ViewMode::Camera(CameraView::new("camera_aft")),
+            },
+        ),
+    );
+    let messages = tick(&mut app);
+
+    assert_eq!(
+        get_view_mode(&mut app),
+        ViewMode::Camera(CameraView::new("camera_aft")),
+    );
+    assert!(has_feedback(
+        &messages,
+        "captain",
+        "view-accepted",
+        ActionFeedbackOutcome::Applied,
+    ));
+}
+
+#[test]
+fn correlated_objective_priority_is_applied_after_the_scoped_toggle() {
+    let mut app = test_app();
+    start_game(&mut app);
+    push(
+        &mut app,
+        "captain",
+        correlated_command(
+            "objective-accepted",
+            crate::ship::system_registry::captain_system_id(),
+            SystemControlPayload::SetObjectivePriority {
+                id: "destroy-hostiles".into(),
+            },
+        ),
+    );
+    let messages = tick(&mut app);
+
+    assert!(app
+        .world()
+        .resource::<crate::server_app::CaptainPriorityBoost>()
+        .contains_objective("destroy-hostiles"));
+    assert!(has_feedback(
+        &messages,
+        "captain",
+        "objective-accepted",
+        ActionFeedbackOutcome::Applied,
+    ));
+}
+
+#[test]
+fn correlated_red_alert_keeps_its_identity_across_command_delay() {
+    let mut app = test_app();
+    crate::sim_tick::register_sim_tick(&mut app);
+    start_game(&mut app);
+    app.insert_resource(crate::command_admission::CommandDelay(2));
+
+    push(
+        &mut app,
+        "captain",
+        correlated_red_alert("captain-delayed", true),
+    );
+    let accepted = tick(&mut app);
+    assert!(!get_red_alert(&mut app));
+    assert!(!has_feedback(
+        &accepted,
+        "captain",
+        "captain-delayed",
+        ActionFeedbackOutcome::Applied,
+    ));
+
+    let waiting = tick(&mut app);
+    assert!(!get_red_alert(&mut app));
+    assert!(!has_feedback(
+        &waiting,
+        "captain",
+        "captain-delayed",
+        ActionFeedbackOutcome::Applied,
+    ));
+
+    let applied = tick(&mut app);
+    assert!(get_red_alert(&mut app));
+    assert!(has_feedback(
+        &applied,
+        "captain",
+        "captain-delayed",
+        ActionFeedbackOutcome::Applied,
+    ));
+}
+
+#[test]
+fn correlated_red_alert_from_non_captain_is_refused_by_admission() {
+    let mut app = test_app();
+    start_game(&mut app);
+    push(
+        &mut app,
+        "crew",
+        ClientMessage::Identify {
+            token: "crew".into(),
+            name: "Bob".into(),
+        },
+    );
+    tick(&mut app);
+
+    push(&mut app, "crew", correlated_red_alert("crew-refused", true));
+    let messages = tick(&mut app);
+
+    assert!(!get_red_alert(&mut app));
+    assert!(has_feedback(
+        &messages,
+        "crew",
+        "crew-refused",
+        ActionFeedbackOutcome::Refused,
+    ));
+    assert!(!messages.iter().any(|message| matches!(
+        &message.msg,
+        ServerMessage::ActionFeedback {
+            outcome: ActionFeedbackOutcome::Applied,
+            ..
+        }
+    )));
 }
 
 /// Issue #1041 AC1: the hold is a state the captain sets, LAYERED on the
@@ -879,6 +1119,70 @@ fn viewscreen_channel_2_set_view_can_request_radar() {
 }
 
 #[test]
+fn arbitrary_authored_viewscreen_instance_is_admitted_and_applied() {
+    let mut app = test_app();
+    let viewscreen_id = SystemId("bridge-display".into());
+    let radar_id = SystemId("flight-scope".into());
+    {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ShipConfigComponent, With<LocalShip>>();
+        let mut config = q.single_mut(app.world_mut()).unwrap();
+        config
+            .0
+            .systems
+            .iter_mut()
+            .find(|system| system.kind == crate::ship::system_registry::VIEWSCREEN_KIND)
+            .expect("fixture has a viewscreen")
+            .id = viewscreen_id.clone();
+        config
+            .0
+            .systems
+            .iter_mut()
+            .find(|system| system.kind == crate::ship::system_registry::HELM_RADAR_KIND)
+            .expect("fixture has a Helm radar")
+            .id = radar_id.clone();
+    }
+    start_game(&mut app);
+    push(
+        &mut app,
+        "helm",
+        ClientMessage::Identify {
+            token: "helm".into(),
+            name: "Hoshi".into(),
+        },
+    );
+    tick(&mut app);
+    app.world_mut().resource_mut::<Sessions>().0.set_station(
+        "helm",
+        Some(crate::core::messages::StationId("helm".into())),
+    );
+
+    push(
+        &mut app,
+        "helm",
+        ClientMessage::ControlSystem {
+            target: viewscreen_id.clone(),
+            payload: SystemControlPayload::SetView {
+                mode: ViewMode::Radar,
+            },
+        },
+    );
+    tick(&mut app);
+
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&crate::ship::state::ShipViewMode, With<LocalShip>>();
+    let view = q.single(app.world()).unwrap();
+    assert_eq!(view.view_mode, ViewMode::Radar);
+    assert_eq!(view.viewscreen.resolved().owner, radar_id);
+
+    tick(&mut app);
+    let bb = captain_bb(&mut app);
+    assert_eq!(bb.viewscreen_system_id, viewscreen_id);
+}
+
+#[test]
 fn unauthorised_set_view_does_not_disturb_active_view() {
     // AC3 (issue #769): an unauthorised SetView is rejected at admission
     // and never reaches the arbiter, so the currently resolved view is
@@ -1103,6 +1407,40 @@ fn backfilled_captain_switches_to_cinematic_view() {
         ViewMode::Cinematic,
         "an AI-operated Captain seat (a backfilled captain) must switch to Cinematic"
     );
+}
+
+#[test]
+fn backfilled_authored_captain_emits_to_authored_viewscreen_instance() {
+    let mut app = test_app();
+    let captain_id = SystemId("bridge-command".into());
+    let viewscreen_id = SystemId("bridge-display".into());
+    {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ShipConfigComponent, With<LocalShip>>();
+        let mut config = q.single_mut(app.world_mut()).unwrap();
+        config
+            .0
+            .systems
+            .iter_mut()
+            .find(|system| system.kind == crate::ship::system_registry::CAPTAIN_KIND)
+            .expect("fixture has a Captain system")
+            .id = captain_id.clone();
+        config
+            .0
+            .systems
+            .iter_mut()
+            .find(|system| system.kind == crate::ship::system_registry::VIEWSCREEN_KIND)
+            .expect("fixture has a viewscreen")
+            .id = viewscreen_id.clone();
+    }
+    start_game(&mut app);
+    set_control_source(&mut app, captain_id, ControlSource::Ai);
+
+    tick(&mut app);
+
+    assert_eq!(get_view_mode(&mut app), ViewMode::Cinematic);
+    assert_eq!(captain_bb(&mut app).viewscreen_system_id, viewscreen_id);
 }
 
 #[test]

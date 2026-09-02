@@ -41,6 +41,21 @@
 // what it then behaves like. It also means the pane's own session token has
 // stopped being readable from `location.hash` by the time any page code runs.
 (function () {
+  // Operator-profile capability declaration (issue #1280). The pane still
+  // loads the ordinary client page and its one versioned profile; this tells
+  // that shared adapter which retained settings can be active here. Keyboard
+  // input is delivered by #1124's focused native input route. Ultralight has no
+  // Gamepad API sampling or vibration backend, so neither gets a second native
+  // route. The profile keeps both choices for later export to a capable browser.
+  window.PhoenixOperatorCapabilities = Object.freeze({
+    surface: 'native-pane',
+    keyboard: true,
+    gamepad: false,
+    vibration: false,
+    semanticCues: true,
+    accessibility: true,
+  });
+
   // ── requestAnimationFrame, off a timer ─────────────────────────────────────
   //
   // NOT a nicety, and not about smoothness. An offscreen Ultralight view

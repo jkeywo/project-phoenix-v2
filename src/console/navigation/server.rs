@@ -2,8 +2,8 @@ use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
 use crate::core::messages::{
-    AdmittedCommands, NavigationBlackboard, SystemBlackboard, SystemControlPayload, SystemId,
-    WaypointSnapshot,
+    ActionFeedbackOutcome, AdmittedCommand, AdmittedCommands, DeliveryClass, NavigationBlackboard,
+    ServerMessage, SystemBlackboard, SystemControlPayload, SystemId, WaypointSnapshot,
 };
 use crate::ship::system_registry::NAVIGATION_SYSTEM_ID;
 
@@ -376,10 +376,37 @@ impl NavClearanceIssueState {
     }
 }
 
+fn finish_waypoint_action_feedback(
+    cmd: &AdmittedCommand,
+    outbound: &mut Option<
+        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
+    >,
+    outcome: ActionFeedbackOutcome,
+) {
+    let (Some(correlation), Some(token), Some(messages)) = (
+        cmd.feedback_correlation.as_ref(),
+        cmd.response_token.as_ref(),
+        outbound.as_deref_mut(),
+    ) else {
+        return;
+    };
+    messages.write(crate::lobby::server::OutboundMessage {
+        target: crate::lobby::Target::Token(token.clone()),
+        msg: ServerMessage::ActionFeedback {
+            correlation: correlation.clone(),
+            outcome,
+        },
+        delivery: DeliveryClass::Reliable,
+    });
+}
+
 fn handle_navigation_waypoint(
     mut ship_query: Query<
         (&AdmittedCommands, &mut NavigationWaypoint),
         With<crate::server_app::Ship>,
+    >,
+    mut outbound: Option<
+        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
     >,
 ) {
     for (admitted, mut waypoint) in ship_query.iter_mut() {
@@ -393,12 +420,29 @@ fn handle_navigation_waypoint(
                     // `issue_navigate_to_clearance` — the same issuer the AI
                     // write path relies on (AGENTS.md rule 6).
                     waypoint.set(make_waypoint_mode(*x, *z, source_uuid.as_deref()));
+                    finish_waypoint_action_feedback(
+                        cmd,
+                        &mut outbound,
+                        ActionFeedbackOutcome::Applied,
+                    );
+                }
+                SystemControlPayload::SetNavigationWaypoint { .. } => {
+                    finish_waypoint_action_feedback(
+                        cmd,
+                        &mut outbound,
+                        ActionFeedbackOutcome::Refused,
+                    );
                 }
                 SystemControlPayload::ClearNavigationWaypoint => {
                     // Clearing needs no clearance message: the waypoint has no
                     // snapshot, so the Helm has nothing to follow either way —
                     // the same shape as the AI path's `waypoint.clear()`.
                     waypoint.clear();
+                    finish_waypoint_action_feedback(
+                        cmd,
+                        &mut outbound,
+                        ActionFeedbackOutcome::Applied,
+                    );
                 }
                 _ => {}
             }

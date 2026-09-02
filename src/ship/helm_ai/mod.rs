@@ -300,6 +300,15 @@ pub(crate) fn detect_reached_objective_completion(
                         msgs.write(crate::core::balance::BalanceEvent::ObjectiveCompleted {
                             objective_id: obj.snapshot.id.clone(),
                         });
+                        msgs.write(crate::core::balance::BalanceEvent::ObjectiveChanged {
+                            objective_id: obj.snapshot.id.clone(),
+                            status: crate::core::messages::ObjectiveStatus::Completed,
+                            targets: objectives
+                                .0
+                                .targets(&obj.snapshot.id)
+                                .unwrap_or_default()
+                                .to_vec(),
+                        });
                     }
                 }
             }

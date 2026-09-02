@@ -10,8 +10,10 @@
  * overrides it in BOTH directions — it can turn an effect on when the OS is
  * silent AND turn it back off when the OS asked for it (e.g. re-allow motion).
  *
- * The profile is CLIENT-LOCAL and stays that way. It lives in localStorage and
- * on the client-only `simState.accessibilityProfile` field, exactly like
+ * The profile is CLIENT-LOCAL and stays that way. Since issue #1279 its current
+ * persistence is the enclosing operator profile; the Accessibility-only key
+ * below remains the supported migration/old-shell fallback. Live state is on
+ * the client-only `simState.accessibilityProfile` field, exactly like
  * `tutorialProgress` — never a `ClientMessage`, never part of shared simulation
  * state, never sent to another player (issue #1102 AC5). `ClientSimState.reset()`
  * preserves the field, so it survives a Welcome / reconnect for free.
@@ -45,8 +47,7 @@
 // guarantee gui/tutorial-state.js relies on.
 import { simState } from './sim-state.js';
 
-/** Versioned localStorage key. Bump the `-vN` suffix whenever the record shape
- *  changes so a stale record is discarded, not misread. */
+/** Pre-#1279 Accessibility-only localStorage key, retained for migration. */
 export const ACCESSIBILITY_PROFILE_KEY = 'phoenix-accessibility-v1';
 
 /** The CSS custom property the text-scale effect drives on every `:root`. */
@@ -447,7 +448,7 @@ export function applyAccessibilityProfile(profile, opts = {}) {
   return effects;
 }
 
-// ── Persistence (storage-object-injected so tests need no browser) ───────────
+// ── Legacy persistence (migration/old-shell fallback) ────────────────────────
 
 /**
  * Load the profile from a localStorage-like object. Corrupted JSON, a missing
@@ -528,9 +529,15 @@ if (typeof window !== 'undefined') {
     sim.accessibilityProfile = normalizeAccessibilityProfile(
       profileWithPresentation(sim.accessibilityProfile, effect, value),
     );
-    let storage = null;
-    try { storage = window.localStorage; } catch (_) { /* privacy mode */ }
-    saveAccessibilityProfile(storage, sim.accessibilityProfile);
+    if (typeof window.persistOperatorProfile === 'function') {
+      window.persistOperatorProfile();
+    } else {
+      // The compatibility path is used by the standalone module tests and by
+      // an old cached shell that has not loaded operator-profile.js yet.
+      let storage = null;
+      try { storage = window.localStorage; } catch (_) { /* privacy mode */ }
+      saveAccessibilityProfile(storage, sim.accessibilityProfile);
+    }
     return window.applyAccessibilityProfile();
   };
 
@@ -546,9 +553,13 @@ if (typeof window !== 'undefined') {
     sim.accessibilityProfile = normalizeAccessibilityProfile(
       profileWithAssistance(sim.accessibilityProfile, funcId, value),
     );
-    let storage = null;
-    try { storage = window.localStorage; } catch (_) { /* privacy mode */ }
-    saveAccessibilityProfile(storage, sim.accessibilityProfile);
+    if (typeof window.persistOperatorProfile === 'function') {
+      window.persistOperatorProfile();
+    } else {
+      let storage = null;
+      try { storage = window.localStorage; } catch (_) { /* privacy mode */ }
+      saveAccessibilityProfile(storage, sim.accessibilityProfile);
+    }
     if (typeof window.onAccessibilityAssistanceChanged === 'function') {
       try { window.onAccessibilityAssistanceChanged(); } catch (_) { /* best-effort */ }
     }

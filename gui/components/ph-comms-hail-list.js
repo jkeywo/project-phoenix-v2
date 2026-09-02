@@ -12,6 +12,7 @@ import {
 } from '../comms-state.js';
 import { PhElement, phDefine } from './ph-element.js';
 import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
+import { COMMS_SELECT_MESSAGE_ACTION_ID } from '../stations/comms-actions.js';
 
 export class PhCommsHailList extends PhElement {
   #rowCache = new Map();
@@ -79,17 +80,15 @@ export class PhCommsHailList extends PhElement {
     syncRovingTabindex(this.#rovingItems());
   }
 
-  /** Paint aria-selected across the cached rows from the current selection. */
-  #reflectSelection() {
-    for (const [id, row] of this.#rowCache) {
-      row.setAttribute('aria-selected', String(id === this.#selectedId));
-    }
-  }
-
   render(state) {
     const s = state || {};
     const raw = Array.isArray(s.messages) ? s.messages : [];
     const list = this.shadowRoot.getElementById('list');
+    // Selection is projected by the shared Comms renderer. This component
+    // reflects it but never mutates it optimistically; pointer and bound input
+    // therefore converge on the same semantic adapter and one state owner.
+    this.#selectedId = typeof s.selected_message_id === 'string'
+      ? s.selected_message_id : null;
 
     const live = new Set(raw.map(h => h.id || ''));
     for (const [key, el] of this.#rowCache) {
@@ -116,12 +115,12 @@ export class PhCommsHailList extends PhElement {
         row.setAttribute('role', 'option');
         row.innerHTML = '<span class="dot"></span><span class="sender"></span><span class="preview"></span><span class="priority-cue"><span class="priority-shape" aria-hidden="true">◆</span><span class="priority-text"></span></span>';
         // Enter/Space (native to the button) and a pointer tap alike run this
-        // one handler, dispatching the SAME select_comms_message action.
+        // one handler, dispatching the SAME local semantic selection action.
         row.addEventListener('click', () => {
-          this.#selectedId = id;
-          this.#reflectSelection();
-          if (this.sendAction) {
-            this.sendAction('select_comms_message', { message_id: id });
+          if (typeof window.activateSemanticAction === 'function') {
+            window.activateSemanticAction(COMMS_SELECT_MESSAGE_ACTION_ID, {
+              source: 'control', detail: { message_id: id },
+            });
           }
         });
         this.#rowCache.set(id, row);

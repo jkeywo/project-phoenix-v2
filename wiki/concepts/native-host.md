@@ -1,8 +1,8 @@
 ---
 title: Native Host
 type: concept
-tags: [native, viewscreen, lobby, scenario-selection, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile, saved-layouts, media-devices, camera, microphone]
-sources: [src/native_host/mod.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs]
+tags: [native, viewscreen, lobby, scenario-selection, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile, saved-layouts, media-devices, camera, microphone, saves]
+sources: [src/native_host/mod.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/delivery/args.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs, src/save_slots_store.rs]
 updated: 2026-09-01
 ---
 
@@ -40,6 +40,7 @@ authoritative host with **no world**, waiting for a scenario to be picked. See
 | Process, argv, threading | `src/bin/phoenix_host.rs` |
 | Template preload | `src/entities/template_preload.rs` |
 | The one native manifest read + world resolver | `src/delivery/serve.rs` (`ManifestSource`) |
+| Private save Store and restore adapter | `src/save_slots_store.rs` |
 
 ## The boot profile
 
@@ -246,6 +247,18 @@ directory) and raw `std::fs` against the working directory, for world TOML,
 templates, Rhai scripts and rig sidecars. `pin_content_root` sets both from the
 one `--content-dir`, because pinning one and not the other half-loads content
 silently.
+
+The native process also installs a peer-private `vellum_save::FileStore`, by
+default under `.phoenix/saves` relative to its launch directory. Before any
+catalogue or resume read it claims that directory through a persistent,
+non-`.ron` lock sentinel held for the process lifetime; another native host
+pointed at the same directory is refused at startup and needs a distinct
+`--save-dir`, and shutdown releases the lock without deleting the sentinel. Its
+list, create, rename, export,
+confirmed-delete and startup-resume switches are
+documented under [Peer-Local Save Catalogues](./save-catalogues.md); resume
+builds a new App with the saved hull/fleet ship topology, deliberately without
+rejoining the old mesh, and is never a live World mutation.
 
 ## The transport seam
 
@@ -899,6 +912,31 @@ multi-touch behaviour — the box has one monitor and no touch — so those are 
 acceptance kit's, and the pure tests carry the logic. A Station window whose panes
 have all closed has its camera despawned; the window itself stays
 `bridge_display`'s to own.
+
+## Operator profiles in native panes (issue #1280)
+
+A pane consumes the same `project-phoenix/operator-profile` v1 JSON as a phone.
+`gui/operator-profile.js` remains the only schema, migration, persistence and
+export owner, and the page's existing `localStorage` path stays private because
+each Ultralight pane already runs in its own session. There is no native profile
+file and no setting crosses the simulation transport.
+
+`pane_boot.js` declares the small capability difference before the shared client
+modules load. Keyboard remains available through #1124's focused
+`input_routing` adapter, while Gamepad API sampling is unavailable; Accessibility
+continues through #1127's injected OS defaults and the page's existing
+`applyAccessibilityProfile`. Ultralight also has no vibration backend. The
+shared `gui/operator-surface-adapter.js` therefore distinguishes the retained
+portable profile from its active projection: bindings, tuning, Accessibility
+and semantic-cue choices apply normally, while a preferred gamepad slot or
+enabled vibration choice remains in JSON/local storage but is inactive and is
+reported explicitly in Settings. Exporting from the pane and importing into a
+capable browser restores those retained choices.
+
+Feedback preferences reach console iframes over the same private parent-to-iframe
+update seam as semantic bindings. They gate optional cue/vibration events only;
+the visual and accessible action status is always emitted. No native input,
+Accessibility or feedback route competes with the ordinary client page.
 
 ## Recovering a failed pane and a lost display (issue #1125)
 
@@ -1936,6 +1974,7 @@ its phones load the same public page the operator is on.
 | `tests/client/pane-scripts.test.js` | The two injected scripts, in jsdom, **driven through the real seam**: the boot script reads the identity out of the fragment, leaves a fragment `joinRouteFromLocation`/`parseJoinCode` accept (the literal is read out of `document.rs`, so the cross-language pin is checked), and caps the page's inbox; then the repository's own `createRendezvousJoiner` is run over the link's factories and asserted to produce the host-minted `Identify` on the page→host queue, to keep `JoinHandshake` off it, and to hand `onData` a `localiseTree`d message |
 | `tests/native_host_panes.rs` | A pane joins/claims/readies through the ordinary contracts; it is admitted for its own Station and refused another's by the real policy; it cannot read another pane's projection; a pane and a transport participant hold different Stations on the same running ship; a closed pane hands the lobby the disconnect a dropped phone would; and a pane's identity is in its URL, its document unenumerable, LAN-refused, and withdrawn on close. **#1125:** on a running ship, a view crash flips the seat to Backfill through the ordinary session path; no surviving pane inherits the failed pane's projection; recreating the pane reconnects on the same token and restores its held station out of Backfill with a Welcome; and a lost Station display disconnects its pane without recreating it |
 | `src/native_host/input_routing.rs` + `input_routing_tests.rs` | The pure input-routing model (issue #1124): coordinate transforms at scale 1.0/1.5/2.0 and at a non-zero monitor origin, the pane-boundary hit test (the shared seam belongs to one pane; side-by-side and stacked splits), mouse traversal across a boundary, per-window isolation, keyboard-focus cycling and the closed-focused-pane clear, seeded focus landing on the first *pane* (a lobby-surface-only ring seeds nothing, a mixed ring skips the surface at either end, and the surface is still reachable by Ctrl+Tab), and touch contact capture (pinned through drift, per-screen independence, duplicate-Started ignored, a closing pane releasing its contacts). All feature-agnostic, run by the ordinary `cargo test` |
+| `tests/client/operator-surface-adapter.test.js` + `pane-scripts.test.js` | One imported v1 operator profile applies identical Accessibility, bindings and tuning in browser/native projections; native capability gaps suppress active gamepad/vibration without changing re-exported JSON; and the pane declaration runs before the shared client modules. `src/native_host/panes/document.rs` separately pins that the real pane document keeps one profile owner and no replacement route. |
 | `tests/native_host_input.rs` | The pane input adapter builds a router over the real primary window's geometry and scale, resolves a synthetic point to the correct tiled pane, and runs its whole input + draw pipeline for many frames against a live Ultralight runtime without panic. `#[ignore]`d: needs the SDK, a real window and a GPU. Multi-monitor and multi-touch are the kit's — one monitor, no touch, on the dev box |
 | `tests/native_host_pane_ultralight.rs` | The real built `client/index.html` loads in a real Ultralight view over this process's own HTTP, joins on the identity it read from the fragment, paints, answers a real click + keystroke on `#name-input` with a `SetName`, then claims a Station and operates its console: the iframe mounts with `__updateConsole` installed and a click on the Captain's Red Alert button inside it produces the expected `ControlSystem`. A second test proves two panes' `localStorage` are separate. Both `#[ignore]`d: they need the SDK and a built bundle, which CI has neither of |
 

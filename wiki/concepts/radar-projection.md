@@ -1,23 +1,66 @@
 ---
 title: Radar Projection
 type: concept
-tags: [radar, helm, navigation, viewscreen, pure-iterator, shared]
-sources: [gui/console-state.js, gui/components/ph-scope-chrome.js, gui/battleship/navigation.html, gui/sim-state.js, gui/components/ph-radar.js, gui/components/ph-tactical-radar.js, gui/components/ph-navigation-map.js, client.html, src/gui/radar.rs, src/radar.rs, src/radar_config.rs, src/entities/tags.rs, src/console/weapons/blackboard.rs, CONTEXT.md]
-updated: 2026-08-27
+tags: [radar, helm, navigation, viewscreen, gm, map, inspector, pure-iterator, shared]
+sources: [gui/console-state.js, gui/components/ph-scope-chrome.js, gui/battleship/navigation.html, gui/sim-state.js, gui/host-channel.js, gui/gm-local-projection.js, gui/entity-inspector.js, gui/components/ph-radar.js, gui/components/ph-tactical-radar.js, gui/components/ph-navigation-map.js, client.html, server.html, src/gm_projection.rs, src/gui/radar.rs, src/radar.rs, src/radar_config.rs, src/entities/tags.rs, src/console/weapons/blackboard.rs, CONTEXT.md]
+updated: 2026-09-01
 ---
 
 # Radar Projection
 
-Radar projection has three explicit surfaces rather than one cross-target
+Radar/map projection has four explicit surfaces rather than one cross-target
 implementation:
 
 - phone consoles use the pure-JS `buildBlips()` family in
   `gui/console-state.js` over authoritative entity and blackboard snapshots;
 - the Bevy viewscreen uses `project_radar_entity` in `src/gui/radar.rs`;
+- the rendererless GM page projects deterministic semantic contacts and
+  geometry Regions through the local Host Channel and adapts them to
+  `ph-navigation-map` inspect mode;
 - `src/radar.rs` now owns only the pure ship-local phaser range/forward-arc
   readiness check used by the weapons server.
 
 The client remains pure JavaScript and does not call the Rust projection.
+
+## GM inspect mode
+
+`src/gm_projection.rs` builds one absolute, UUID-sorted and deduplicated view
+from the GM peer's local deterministic ECS. It classifies player/NPC ships,
+structures (including the canonical `structure` tag, Stations,
+infrastructure, and `StaticPointDefence`), hazards, inert Regions, asteroid
+fields, and named/selectable authored asteroids. Geometry entries carry their
+authored sphere, box, or torus footprint and become Regions rather than
+duplicate blips. Each asteroid field is one aggregate Region; ordinary
+lifecycle-streamed `Asteroid` rocks have no `EntityUuid` projection and never
+become contacts. Rows contain stable UUID/name, authoritative position,
+displayable faction, broad hull/infrastructure condition, narrowed authored
+radar appearance, and a current Tactical target only where applicable. Raw
+layer identity, components, and Region effect tuning stay private. The
+`gm_entity` Host Channel remains page-local; this is not an omniscient peer
+stream. Unlike presentation-oriented Host Channels, `gui/host-channel.js`
+deliberately does not run this strict DTO through recursive `localiseTree`.
+UUIDs, opaque authored values, and String Table display ids therefore reach the
+strict adapter unchanged; only the map and inspector resolve known display
+fields.
+
+`gui/gm-local-projection.js` strictly narrows that public DTO, partitions point
+contacts from geometry Regions, and feeds the existing world-fixed
+`ph-navigation-map`. Its `interaction: "inspect"` mode keeps pan/zoom and
+touch/keyboard UUID selection local, hides waypoint actions and the Navigation
+own-ship marker, and retains a selected UUID across absolute refreshes. Points
+win a geometric overlap before stable UUID tie-breaking; selectable Regions
+join keyboard order only in inspect mode. Removal clears selection, and a
+same-UUID reappearance remains unselected. Semantic glyph shapes, Region line
+patterns, a destroyed cross, and selection outlines are non-colour cues.
+Point contacts render their authored radar icon through the shared radar-icon
+path/cache convention, with their semantic kind shape as the deterministic
+fallback while artwork is absent, loading, or failed. Authored box yaw is
+applied to the Region fill, ordinary and selected outlines, and inverse-frame
+hit testing. Entity, faction, Region, and current-target String Table ids are
+resolved only where the map or `gui/entity-inspector.js` presents them; UUID
+identity remains unchanged. The inspector renders the corresponding minimal
+identity/status/target shell, hides the hull meter where it is inapplicable,
+and can follow a current-target UUID back to the same map selection.
 
 ## Shared radar artwork
 

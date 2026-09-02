@@ -44,11 +44,16 @@ use bevy::prelude::*;
 
 use project_phoenix::boot::NativeRenderSurface;
 use project_phoenix::core::messages::{ClientMessage, GamePhase, ServerMessage};
+use project_phoenix::entities::spawner::EntityUuid;
 use project_phoenix::entities::template_preload::TemplatePreload;
 use project_phoenix::lobby::handler::Target;
 use project_phoenix::native_host::transport::{LoopbackHandle, NativeTransportLink};
 use project_phoenix::native_host::{
     build_native_host_app, preload_content_templates, NativeHostConfig, NativeHostError,
+};
+use project_phoenix::save_slots_store::{
+    install_local_save_store, queue_named_manual_save_for_new_session,
+    stage_new_native_session_from_slot, NativeRestoreOutcome, SaveSlotService,
 };
 
 /// The flagship scenario, and the one the curated public catalogue publishes.
@@ -104,6 +109,19 @@ fn pump(app: &mut App, frames: u64) {
     }
 }
 
+fn local_ship_uuid(app: &mut App) -> String {
+    let mut query = app
+        .world_mut()
+        .query_filtered::<&EntityUuid, With<project_phoenix::server_app::LocalShip>>();
+    let uuids: Vec<_> = query.iter(app.world()).map(|uuid| uuid.0.clone()).collect();
+    assert_eq!(
+        uuids.len(),
+        1,
+        "a native host projects exactly one local ship"
+    );
+    uuids.into_iter().next().unwrap()
+}
+
 #[test]
 fn one_executable_loads_ordinary_phoenix_content_and_runs_the_mission() {
     // Acceptance criterion 1, at its most direct: the repository's own shipped
@@ -132,6 +150,113 @@ fn one_executable_loads_ordinary_phoenix_content_and_runs_the_mission() {
             > 0,
         "the fixed logical tick advanced"
     );
+}
+
+#[test]
+fn native_operator_save_boots_a_compatible_slot_into_a_new_app() {
+    let save_dir =
+        std::env::temp_dir().join(format!("phoenix-native-save-boot-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&save_dir);
+    let preload = preload();
+    const NON_DEFAULT_HULL: &str = "assets/entities/alliance_cruiser.toml";
+    let mut cfg = solo_config();
+    cfg.ship_path = Some(NON_DEFAULT_HULL.into());
+
+    let mut source =
+        build_native_host_app(&cfg, &preload).expect("the source native host assembles");
+    install_local_save_store(&mut source, vellum_save::FileStore::new(&save_dir));
+    let slot_id = queue_named_manual_save_for_new_session(source.world_mut(), "Operator save")
+        .expect("the native operator can reserve a named slot");
+    pump(&mut source, 120);
+    let source_versions =
+        project_phoenix::snapshot::versions(&project_phoenix::content_ledger::frozen_or_live());
+    let saved_run = source
+        .world()
+        .resource::<SaveSlotService>()
+        .load(&slot_id, &source_versions)
+        .expect("the deterministic capture reached this peer's FileStore");
+    let saved_snapshot = saved_run
+        .snapshot
+        .as_ref()
+        .expect("a manual save carries state");
+    let saved_tick = saved_snapshot.tick;
+    assert!(saved_tick > 0);
+    let source_uuid = local_ship_uuid(&mut source);
+    let boot = project_phoenix::snapshot::required_boot_identity(&saved_run)
+        .expect("a current native save carries its boot identity");
+    assert_eq!(boot.selected_ship, NON_DEFAULT_HULL);
+    assert!(
+        boot.game_start_entity_uuids
+            .iter()
+            .any(|row| row.entity_uuid == source_uuid),
+        "the exact non-default player-ship identity is part of the GameStart map"
+    );
+    let source_mint_tick = project_phoenix::world_id::WorldId::parse(&source_uuid)
+        .expect("a GameStart entity uses the deterministic mint")
+        .tick;
+
+    let mut resumed_cfg = solo_config();
+    resumed_cfg.ship_path = Some(NON_DEFAULT_HULL.into());
+    // Stay in Lobby long enough that an ordinary fresh GameStart mint would
+    // encode a different logical tick than the saved player ship.
+    resumed_cfg.solo = false;
+    resumed_cfg.seed = Some(SEED.wrapping_add(1));
+    let mut resumed = build_native_host_app(&resumed_cfg, &preload)
+        .expect("a distinct new native App assembles without re-entering the saved seed");
+    install_local_save_store(&mut resumed, vellum_save::FileStore::new(&save_dir));
+    let resumed_versions =
+        project_phoenix::snapshot::versions(&project_phoenix::content_ledger::frozen_or_live());
+    assert_eq!(
+        stage_new_native_session_from_slot(resumed.world_mut(), &slot_id, &resumed_versions, WORLD,),
+        Ok(saved_tick),
+        "the full Versions gate accepts the slot only after its own scenario loaded"
+    );
+    pump(&mut resumed, 24);
+    let delayed_start_tick = resumed
+        .world()
+        .resource::<project_phoenix::sim_tick::SimTick>()
+        .0;
+    assert!(
+        delayed_start_tick > source_mint_tick,
+        "the resumed GameStart must exercise a genuinely different bootstrap mint tick"
+    );
+    assert_eq!(
+        resumed.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::Lobby
+    );
+    resumed
+        .world_mut()
+        .resource_mut::<NextState<GamePhase>>()
+        .set(GamePhase::InProgress);
+    for _ in 0..240 {
+        resumed.update();
+    }
+
+    let outcome = resumed
+        .world_mut()
+        .resource_mut::<SaveSlotService>()
+        .pop_restore_outcome();
+    assert_eq!(
+        outcome,
+        Some(NativeRestoreOutcome::Applied { tick: saved_tick })
+    );
+    assert!(
+        resumed
+            .world()
+            .resource::<project_phoenix::sim_tick::SimTick>()
+            .0
+            >= saved_tick,
+        "the new App continued from the restored deterministic tick"
+    );
+    assert_eq!(
+        local_ship_uuid(&mut resumed),
+        source_uuid,
+        "the saved player-ship EntityUuid survives unequal bootstrap timing exactly"
+    );
+
+    drop(source);
+    drop(resumed);
+    let _ = std::fs::remove_dir_all(save_dir);
 }
 
 #[test]

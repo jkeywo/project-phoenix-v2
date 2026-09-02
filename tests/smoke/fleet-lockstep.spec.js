@@ -110,12 +110,25 @@ async function joinFleet(page, code) {
 async function joinLockstep(page, local) {
   return page.evaluate(({ local: slot, hull, delay, lead, member }) => window.__hostMeshJoin({
     local: slot,
+    owner: lead,
+    participants: [lead, member],
     delay,
     ships: [
       { host: lead, ship_path: hull, crew: [] },
       { host: member, ship_path: hull, crew: [] },
     ],
   }), { local, hull: HULL, delay: DELAY_TICKS, lead: SLOT_LEAD, member: SLOT_MEMBER });
+}
+
+/** One-player topology for testing the fresh-Lobby adoption lifecycle itself. */
+async function joinSoloLockstep(page) {
+  return page.evaluate(({ hull, delay, lead }) => window.__hostMeshJoin({
+    local: lead,
+    owner: lead,
+    participants: [lead],
+    delay,
+    ships: [{ host: lead, ship_path: hull, crew: [] }],
+  }), { hull: HULL, delay: DELAY_TICKS, lead: SLOT_LEAD });
 }
 
 const meshStatus = (page) => page.evaluate(() => window.__hostMeshStatus());
@@ -255,5 +268,34 @@ test.describe('two ship hosts hold one tick clock', () => {
       undefined,
       { timeout: 30_000 },
     );
+  });
+
+  test('a fresh-Lobby leave is acknowledged before teardown and permits a new topology', async ({ context }) => {
+    const page = await bootHost(context);
+    await openFleet(page);
+    expect(await joinSoloLockstep(page)).toBe('');
+    await waitForMesh(page, (s) => s && s.in_fleet, 'the first topology was not adopted');
+
+    const requested = await page.evaluate(() => {
+      const queued = window.__hostFleetLeave();
+      return { queued, state: window.__hostFleetState() };
+    });
+    expect(requested.queued).toBe(true);
+    expect(requested.state.open, 'the transport stays live until Rust accepts the leave').toBe(true);
+    expect(requested.state.canLeave, 'a duplicate leave is disabled while acknowledgement is pending')
+      .toBe(false);
+
+    await page.waitForFunction(() => {
+      const fleet = window.__hostFleetState();
+      const mesh = window.__hostMeshStatus();
+      return fleet && !fleet.open && mesh && !mesh.in_fleet;
+    }, undefined, { timeout: 30_000 });
+
+    await openFleet(page);
+    expect(await joinSoloLockstep(page)).toBe('');
+    await waitForMesh(page, (s) => s && s.in_fleet, 'the replacement topology was not adopted');
+    const replacement = await page.evaluate(() => window.__hostFleetState());
+    expect(replacement.open).toBe(true);
+    expect(replacement.canLeave).toBe(true);
   });
 });

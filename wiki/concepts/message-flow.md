@@ -1,9 +1,9 @@
 ---
 title: Message Flow
 type: concept
-tags: [messages, bridge, wasm, bevy, events, routing, delivery-class, snapshot, coordination]
-sources: [src/core/debug_surface.rs, src/debug/catalogue.rs, src/server/bridge.rs, src/core/codec.rs, src/core/messages.rs, src/core/broadcast/, src/lobby/server.rs, src/lobby/handler.rs, src/command_admission/, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/server_app/registration.rs, src/ship/shields.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/console/helm/server.rs, src/console/weapons/server.rs, src/console/repair/server.rs, src/console_bridge.rs, server.html, client.html, gui/client-router.js, gui/debug-surfaces.generated.js, gui/debug-surface-adapters.js, gui/server-settings.js, gui/settings-panel.js, gui/sim-state.js, gui/console-state.js, gui/coordination-popup.js, scripts/generate-debug-surfaces.mjs, scripts/build-client.mjs, AGENTS.md]
-updated: 2026-08-28
+tags: [messages, bridge, wasm, bevy, events, routing, delivery-class, snapshot, coordination, gm]
+sources: [src/core/debug_surface.rs, src/debug/catalogue.rs, src/server/bridge.rs, src/core/codec.rs, src/core/messages.rs, src/core/broadcast/, src/lobby/server.rs, src/lobby/handler.rs, src/command_admission/, src/gm_action.rs, src/gm_join.rs, src/gm_activity.rs, src/lockstep/frame.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/server_app/registration.rs, src/ship/shields.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/console/helm/server.rs, src/console/weapons/server.rs, src/console/repair/server.rs, src/console_bridge.rs, server.html, client.html, gui/client-router.js, gui/host-channel.js, gui/gm-activity-feed.js, gui/host-mesh.js, gui/fleet-session.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/debug-surfaces.generated.js, gui/debug-surface-adapters.js, gui/server-settings.js, gui/settings-panel.js, gui/sim-state.js, gui/console-state.js, gui/coordination-popup.js, scripts/generate-debug-surfaces.mjs, scripts/build-client.mjs, AGENTS.md]
+updated: 2026-09-02
 ---
 
 # Message Flow
@@ -38,6 +38,43 @@ Lobby/session variants are handled by dedicated systems in `src/lobby/server.rs`
 
 In-game actions use `ClientMessage::ControlSystem { target: SystemId, payload }`. `command_admission` resolves token tenure, station ownership, system damage/availability, control source, and special host-only routes once per logical tick. Accepted commands enter the owning ship's `AdmittedCommands`; the domain applier then treats human and AI emissions identically.
 
+Host-class GM actions use a separate typed control-plane lane. The GM page
+queues `GmActionRequest`; Rust authenticates its operator against the frozen
+GM-slot binding and any GM peer may send a `GmActionProposal`. Only the frozen
+technical owner assigns the canonical sequence and apply tick, then emits a
+`Granted` or `Refused` decision. JavaScript ferries the Rust-owned
+`GmActionFrame` opaquely: Proposal, Granted, and Refused frames cross between
+simulation peers, while omniscient projection data does not. The owner has an
+ordering responsibility, not product authority over the equal GMs. `PreUpdate`
+applies the due journal prefix and derives pause and the terminal action log
+even while the fixed schedule is paused; results return locally over the
+`gm_session` Host Channel.
+
+A first-time running-session GM uses visible browser-owned request and decision
+control frames before it can enter the simulation mesh. Acceptance starts a
+Rust-owned `GmJoinFrame` transaction: one exact pause boundary, the canonical
+#1117 snapshot transfer with complete command and GM-action history, then a
+candidate `Restored` digest. The browser keeps the candidate connection and
+reserved identity private throughout; Rust holds its provisional topology in
+`GmJoinBootstrap`, not `FleetRoster` or `FleetLockstep`. An authenticated
+owner-carried `host-loss` which follows snapshot capture is also forwarded over
+that private link, but Rust stages it in non-authoritative
+`GmJoinPendingHostLoss`, leaving both admission and the restored digest
+unchanged. A matching digest produces `Committed` and only then installs the
+authoritative roster and lockstep wait-set; Commit drains each staged loss into
+`PendingHostLoss` and departs that slot before Resume, with exact retries inert.
+A successful restore engages the candidate's technical join hold even when it
+arrived from behind the pause boundary. Candidate disconnect and
+transfer/gate/integrity failure produce an owner-sequenced visible `Refused`
+result before commit. A disconnect racing an already retained Commit re-emits
+the same proof instead of regressing the terminal result. A stalled not-ready restore is bounded by
+authenticated candidate requests and owner grants on the `RestoreBoundary`
+protocol clock; duplicate, stale, and render-only updates cannot advance it.
+After commit, transport loss uses the normal host-loss frame.
+Exact retries re-project the existing terminal result and never mint a second
+pause. The join's technical pause hold survives either terminal result until a
+later attributed `SetSessionPaused { active: false }` is applied.
+
 ## Outbound routing
 
 `OutboundMessage` carries a `Target`, `ServerMessage`, and `DeliveryClass`:
@@ -54,6 +91,23 @@ matching on the `ServerMessage` variant. `LobbyOutbox` remains intrinsically
 Reliable. `flush_outbound` is the Rust-to-JavaScript boundary. `routeOutbound`
 prefers the client's unordered snapshot channel for snapshot traffic and falls
 back to reliable when that channel is absent.
+
+The browser host also owns page-local Host Channels which never enter that
+peer route. For a rendererless GM, `gm_entity` carries the absolute stable-ID
+map and `gm_activity` carries one absolute bounded seven-category history:
+Damage, Destruction, Objective, Trigger, Red Alert, Connection, and GM Action.
+Every row shares the raw `{ tick, category, ships, links, detail }` contract.
+Fixed source facts and fixed-step connection changes are stamped before
+`advance_sim_tick`; sampling each completed step preserves the real source tick
+when one rendered frame spends several fixed steps. PostUpdate catches
+connection changes made while paused or in a frame with no fixed step, fans out
+terminal Pause/Resume and typed Force Start results using their producing tick,
+and publishes one replacement before the host bridge drains those results.
+The browser's category and semantic-ship filters compose as a strict AND;
+global rows appear only under All ships, while selection links remain separate
+from filtering. The feed is not a new simulation event bus, `ServerMessage`,
+mesh frame, snapshot, or digest input. Both strict DTOs remain raw at the
+dispatcher and localise only explicit display fields while rendering.
 
 ## Reconnect and disconnect
 

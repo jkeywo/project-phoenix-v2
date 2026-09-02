@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { CAPTAIN_VIEW_ACTION_ID } from '../../gui/stations/captain-actions.js';
 import '../../gui/components/ph-camera-select.js';
 
 function setup(opts) {
-  const sendAction = opts && opts.sendAction;
-  if (sendAction) {
-    window.sendAction = sendAction;
+  const activateSemanticAction = opts && opts.activateSemanticAction;
+  if (activateSemanticAction) {
+    window.activateSemanticAction = activateSemanticAction;
   }
   document.body.innerHTML = '<ph-camera-select id="test-el"></ph-camera-select>';
   const el = document.getElementById('test-el');
@@ -21,12 +22,12 @@ function queryText(host, sel) {
 describe('PhCameraSelect', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
-    delete window.sendAction;
+    delete window.activateSemanticAction;
   });
 
   afterEach(() => {
     document.body.innerHTML = '';
-    delete window.sendAction;
+    delete window.activateSemanticAction;
   });
 
   it('is defined and registered as a custom element', () => {
@@ -108,9 +109,9 @@ describe('PhCameraSelect', () => {
     expect(badge.style.display).toBe('none');
   });
 
-  it('clicking a view button calls sendAction with set_view and direction', () => {
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+  it('routes a visible view through the parameterised Captain semantic identity', () => {
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
     el.state = {
       viewscreen_system_id: 'viewscreen',
       current_view: 'Fore',
@@ -120,8 +121,13 @@ describe('PhCameraSelect', () => {
 
     const btn = el.shadowRoot.querySelector('[data-view="Port"]');
     btn.click();
-    expect(sendAction).toHaveBeenCalledTimes(1);
-    expect(sendAction).toHaveBeenCalledWith('set_view', { direction: 'Port' });
+    expect(activateSemanticAction).toHaveBeenCalledTimes(1);
+    expect(activateSemanticAction).toHaveBeenCalledWith(
+      CAPTAIN_VIEW_ACTION_ID,
+      expect.objectContaining({
+        context: 'captain', source: 'control', detail: { direction: 'Port' },
+      }),
+    );
   });
 
   it('buttons disabled when auto=true', () => {
@@ -139,8 +145,8 @@ describe('PhCameraSelect', () => {
   });
 
   it('clicking a button does nothing when auto=true', () => {
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
     el.state = {
       viewscreen_system_id: 'viewscreen',
       current_view: 'Fore',
@@ -150,6 +156,6 @@ describe('PhCameraSelect', () => {
 
     const btn = el.shadowRoot.querySelector('[data-view="Aft"]');
     btn.click();
-    expect(sendAction).not.toHaveBeenCalled();
+    expect(activateSemanticAction).not.toHaveBeenCalled();
   });
 });

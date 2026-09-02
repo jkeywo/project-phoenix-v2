@@ -3,7 +3,7 @@ import {
   ClientCommsState, commsState, effectiveThreadId, COMMS_PRIORITY,
   normalizeCommsPriority, commsPriority, latestLiveThreadPriority,
   isLatestLiveCriticalMessage,
-  hailMessage, selectCommsMessage, respondToMessage, clearCommsMessage,
+  hailMessage, respondToMessage, clearCommsMessage,
   commsPreview, COMMS_PREVIEW_CHARS,
 } from '../../gui/comms-state.js';
 import { CHANGE_DOMAINS } from '../../gui/reducer-result.js';
@@ -420,10 +420,6 @@ describe('outbound message builders', () => {
     expect(hailMessage('u1')).toEqual({
       type: 'ControlSystem',
       data: { target: 'comms', payload: { type: 'Hail', data: { target_uuid: 'u1' } } },
-    });
-    expect(selectCommsMessage('m1')).toEqual({
-      type: 'ControlSystem',
-      data: { target: 'comms', payload: { type: 'SelectCommsMessage', data: { message_id: 'm1' } } },
     });
     expect(respondToMessage('m1', 2)).toEqual({
       type: 'ControlSystem',

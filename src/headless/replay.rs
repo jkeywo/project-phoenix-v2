@@ -110,6 +110,7 @@ use crate::command_admission::log::{LoggedCommand, ReplayRejection};
 use crate::command_admission::CommandLog;
 use crate::console_bridge::LOCAL_CONSOLE_TOKEN;
 use crate::core::messages::{ClientMessage, GamePhase, SystemId};
+use crate::gm_action::GmActionJournal;
 use crate::headless::args::HeadlessArgs;
 use crate::headless::digest::{state_digest, DigestLedger, Divergence};
 use crate::lobby::InboundMessage;
@@ -172,8 +173,22 @@ pub struct PhoenixSim {
     /// Whether to drive the tail after the last command. True for every real
     /// run; see [`PhoenixSim::new_tailless`] for the one case that wants it off.
     tail: bool,
+    /// Typed GM grants replayed through the same authoritative journal the
+    /// browser mesh feeds. Only the source's applied prefix is preloaded into
+    /// the live journal, with a live applied frontier of zero; that makes every
+    /// future boundary visible to the fixed-loop stopper without letting it
+    /// enter current state early.
+    gm_actions: GmActionJournal,
+    /// A replay terminates on the recording's final logical tick rather than
+    /// on its wall-frame budget. Paused frames deliberately do not advance
+    /// simulation state, so replaying their count would make pause duration an
+    /// accidental authoritative input.
+    final_tick: Option<u64>,
     ledger: DigestLedger,
 }
+
+#[derive(Resource, Clone)]
+struct ReplayGmSeed(GmActionJournal);
 
 impl PhoenixSim {
     /// Build a run from `args`, ready to be driven by a log of `commands` long,
@@ -183,7 +198,14 @@ impl PhoenixSim {
         expected_commands: usize,
         checkpoint_every: u64,
     ) -> Result<Self, crate::headless::BuildError> {
-        Self::build(args, expected_commands, checkpoint_every, true)
+        Self::build(
+            args,
+            expected_commands,
+            checkpoint_every,
+            true,
+            GmActionJournal::default(),
+            None,
+        )
     }
 
     /// A run that stops the moment its last command has been submitted, rather
@@ -207,7 +229,33 @@ impl PhoenixSim {
         args: &HeadlessArgs,
         expected_commands: usize,
     ) -> Result<Self, crate::headless::BuildError> {
-        Self::build(args, expected_commands, 0, false)
+        Self::build(
+            args,
+            expected_commands,
+            0,
+            false,
+            GmActionJournal::default(),
+            None,
+        )
+    }
+
+    /// Build the second half of a replay artifact, including its typed GM
+    /// input and exact logical stopping boundary.
+    fn new_replay(
+        args: &HeadlessArgs,
+        expected_commands: usize,
+        checkpoint_every: u64,
+        gm_actions: GmActionJournal,
+        final_tick: u64,
+    ) -> Result<Self, crate::headless::BuildError> {
+        Self::build(
+            args,
+            expected_commands,
+            checkpoint_every,
+            true,
+            gm_actions,
+            Some(final_tick),
+        )
     }
 
     fn build(
@@ -215,12 +263,27 @@ impl PhoenixSim {
         expected_commands: usize,
         checkpoint_every: u64,
         tail: bool,
+        gm_actions: GmActionJournal,
+        final_tick: Option<u64>,
     ) -> Result<Self, crate::headless::BuildError> {
         let mut app = crate::headless::build_headless_app(args)?;
         // `headless::run_sampled` does this before its loop; a driver that
         // steps the app by hand has to do it too, or `Startup` never runs.
         app.finish();
         app.cleanup();
+        // Future grants remain replay input rather than current state, but the
+        // journal's base state is already authoritative at tick zero. Keeping
+        // it is what lets an ordinary restored pause replay a typed Resume as
+        // Applied instead of silently reclassifying it as a no-op.
+        // The production run-start chain resets every per-run input lane. Seed
+        // replay immediately after that reset, on the same OnEnter boundary,
+        // so neither the reset can erase the script nor an InProgress fixed
+        // step can run before an initial Pause is visible.
+        app.insert_resource(ReplayGmSeed(gm_actions.clone()));
+        app.add_systems(
+            OnEnter(crate::core::messages::GamePhase::InProgress),
+            seed_replay_on_run_start.after(crate::gm_action::reset),
+        );
         Ok(Self {
             app,
             max_frames: args.max_ticks,
@@ -229,6 +292,8 @@ impl PhoenixSim {
             applied: 0,
             submitted: 0,
             tail,
+            gm_actions,
+            final_tick,
             ledger: DigestLedger::new(checkpoint_every),
         })
     }
@@ -246,6 +311,15 @@ impl PhoenixSim {
         self.app
             .world()
             .get_resource::<CommandLog>()
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// The canonical typed GM input the app itself retained.
+    pub fn recorded_gm_actions(&self) -> GmActionJournal {
+        self.app
+            .world()
+            .get_resource::<GmActionJournal>()
             .cloned()
             .unwrap_or_default()
     }
@@ -319,6 +393,80 @@ impl PhoenixSim {
     fn frames_left(&self) -> bool {
         self.frames < self.max_frames
     }
+
+    /// The recording's logical end has been reached only after every action
+    /// at that same boundary has had a `PreUpdate` in which to apply. This is
+    /// the pause-safe equivalent of spending the recording's frame count.
+    fn reached_replay_end(&self) -> bool {
+        self.final_tick.is_some_and(|final_tick| {
+            let applied = self
+                .app
+                .world()
+                .resource::<GmActionJournal>()
+                .applied_grants();
+            self.tick() >= final_tick && applied >= self.gm_actions.applied_grants()
+        })
+    }
+}
+
+/// Seed only the journal state that exists at replay tick zero. Grants remain
+/// in [`PhoenixSim::gm_actions`] until their recorded boundary is due, so an
+/// early receipt can never enter a checkpoint digest while an adopted restore
+/// pause is still preserved exactly.
+#[cfg(test)]
+fn seed_replay_initial_state(app: &mut App, source: &GmActionJournal) {
+    seed_replay_world(app.world_mut(), source);
+}
+
+fn seed_replay_on_run_start(world: &mut World) {
+    let Some(source) = world.remove_resource::<ReplayGmSeed>() else {
+        return;
+    };
+    seed_replay_world(world, &source.0);
+}
+
+fn seed_replay_world(world: &mut World, source: &GmActionJournal) {
+    let paused = source.initial_paused();
+    world
+        .resource_mut::<GmActionJournal>()
+        .adopt_initial_pause(paused);
+    for recovery in source.recovery_generations() {
+        let generation = world
+            .resource_mut::<GmActionJournal>()
+            .record_slot_recovery(recovery.slot, recovery.boundary_tick)
+            .expect("validated GM recovery generations enter an empty journal");
+        assert_eq!(
+            generation, recovery.generation,
+            "validated GM recovery generation remains canonical during replay"
+        );
+    }
+    for grant in source.applied_prefix() {
+        world
+            .resource_mut::<GmActionJournal>()
+            .insert(grant.clone())
+            .expect("validated GM replay prefix must enter an empty journal");
+    }
+    world.insert_resource(crate::gm_action::SimulationPaused(paused));
+    if let Some(mut time) = world.get_resource_mut::<bevy::time::Time<bevy::time::Virtual>>() {
+        if paused {
+            time.pause();
+            time.advance_by(std::time::Duration::ZERO);
+        } else {
+            time.unpause();
+        }
+    }
+    if paused {
+        if let Some(mut fixed) = world.get_resource_mut::<bevy::time::Time<bevy::time::Fixed>>() {
+            let remaining = fixed.overstep();
+            let timestep = fixed.timestep();
+            let remainder_nanos = remaining.as_nanos() % timestep.as_nanos();
+            let remainder = std::time::Duration::new(
+                u64::try_from(remainder_nanos / 1_000_000_000).unwrap_or(u64::MAX),
+                (remainder_nanos % 1_000_000_000) as u32,
+            );
+            fixed.discard_overstep(remaining - remainder);
+        }
+    }
 }
 
 impl vellum_replay::Simulation for PhoenixSim {
@@ -378,7 +526,9 @@ impl vellum_replay::Simulation for PhoenixSim {
     }
 
     fn is_over(&self) -> bool {
-        is_game_over(&self.app) || self.frames >= self.max_frames
+        is_game_over(&self.app)
+            || self.reached_replay_end()
+            || (self.final_tick.is_none() && self.frames >= self.max_frames)
     }
 
     /// The canonical authoritative-state digest of `headless::digest`, folded
@@ -429,7 +579,12 @@ fn is_game_over(app: &App) -> bool {
 /// than defaulted: a missing order would read as `slot-0 seq 0` on every entry,
 /// which is a claim that one host issued the whole run in a single instant, and
 /// #1118's recovery is going to merge two hosts' logs on exactly that key.
-pub const ARTIFACT_VERSION: u32 = 3;
+///
+/// `4` (from `3`): issue #1292 adds the canonical typed GM-action journal and
+/// the recording's final logical tick. A version-3 artifact cannot say that a
+/// run paused, resumed, or ended while paused; replaying its wall-frame count
+/// would silently simulate a different number of authoritative ticks.
+pub const ARTIFACT_VERSION: u32 = 4;
 
 /// Everything a second run needs to reproduce the first: the run's setup, the
 /// commands it accepted, and the digests it passed through.
@@ -457,8 +612,13 @@ pub struct ReplayArtifact {
     /// pacing the recording did.
     pub max_ticks: u64,
     pub dt: f64,
+    /// The exact logical boundary the recording finished on. Unlike
+    /// `max_ticks`, this is unaffected by wall frames spent paused.
+    pub final_tick: u64,
     /// Everything the network boundary admitted, in apply order.
     pub log: CommandLog,
+    /// Every typed, attributed GM grant in canonical application order.
+    pub gm_actions: GmActionJournal,
     /// The sampled digests and the final one.
     pub ledger: DigestLedger,
 }
@@ -475,6 +635,9 @@ pub enum ArtifactError {
     },
     /// The recording run had no seed, so nothing can reproduce it.
     Unseeded,
+    /// A deserialised GM journal bypasses `GmActionJournal::insert`; reject a
+    /// malformed/non-canonical sequence before it reaches replay.
+    InvalidGmActions(String),
 }
 
 impl std::fmt::Display for ArtifactError {
@@ -493,6 +656,9 @@ impl std::fmt::Display for ArtifactError {
                  with --seed: without one the second run re-draws every stream \
                  from the OS and reproduces nothing."
             ),
+            ArtifactError::InvalidGmActions(why) => {
+                write!(f, "replay artifact has invalid GM actions: {why}")
+            }
         }
     }
 }
@@ -508,9 +674,11 @@ impl ReplayArtifact {
     pub fn capture(
         args: &HeadlessArgs,
         log: CommandLog,
+        gm_actions: GmActionJournal,
+        final_tick: u64,
         ledger: DigestLedger,
     ) -> Result<Self, ArtifactError> {
-        Ok(Self {
+        let artifact = Self {
             version: ARTIFACT_VERSION,
             seed: args.seed.ok_or(ArtifactError::Unseeded)?,
             world_path: args.world_path.clone(),
@@ -519,9 +687,13 @@ impl ReplayArtifact {
             side_b: args.side_b.clone(),
             max_ticks: args.max_ticks,
             dt: args.dt,
+            final_tick,
             log,
+            gm_actions,
             ledger,
-        })
+        };
+        artifact.validate_gm_actions()?;
+        Ok(artifact)
     }
 
     /// The arguments a replay of this artifact must run under.
@@ -573,6 +745,7 @@ impl ReplayArtifact {
         }
         let artifact: Self =
             ron::from_str(text).map_err(|e| ArtifactError::Parse(e.to_string()))?;
+        artifact.validate_gm_actions()?;
         Ok(artifact)
     }
 
@@ -586,6 +759,62 @@ impl ReplayArtifact {
             .map_err(|e| ArtifactError::Io(format!("{path:?}: {e}")))?;
         Self::from_ron(&text)
     }
+
+    /// Defensively rebuild the journal through its production insertion
+    /// boundary before capture or replay. `GmActionJournal`'s custom
+    /// deserialiser already enforces the same invariant on file input; keeping
+    /// this check also covers artifacts assembled in memory by library callers.
+    fn validate_gm_actions(&self) -> Result<(), ArtifactError> {
+        validate_gm_action_journal(&self.gm_actions)?;
+        if self
+            .gm_actions
+            .applied_prefix()
+            .iter()
+            .any(|grant| grant.apply_tick > self.final_tick)
+        {
+            return Err(ArtifactError::InvalidGmActions(
+                "applied GM frontier crosses the replay's final tick".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn validate_gm_action_journal(journal: &GmActionJournal) -> Result<(), ArtifactError> {
+    let mut rebuilt = GmActionJournal::default();
+    rebuilt.adopt_initial_pause(journal.initial_paused());
+    for recovery in journal.recovery_generations() {
+        let generation = rebuilt
+            .record_slot_recovery(recovery.slot, recovery.boundary_tick)
+            .map_err(|why| ArtifactError::InvalidGmActions(why.into()))?;
+        if generation != recovery.generation {
+            return Err(ArtifactError::InvalidGmActions(
+                "GM slot recovery generation is not contiguous".into(),
+            ));
+        }
+    }
+    for grant in journal.grants() {
+        rebuilt.insert(grant.clone()).map_err(|reason| {
+            ArtifactError::InvalidGmActions(format!("grant {:?}: {reason:?}", grant.key()))
+        })?;
+    }
+    if journal.applied_results().is_empty() {
+        rebuilt
+            .restore_applied_frontier(journal.applied_grants())
+            .map_err(|why| ArtifactError::InvalidGmActions(why.into()))?;
+    } else {
+        for result in journal.applied_results() {
+            rebuilt
+                .record_applied_result(result.clone())
+                .map_err(|why| ArtifactError::InvalidGmActions(why.into()))?;
+        }
+    }
+    if &rebuilt != journal {
+        return Err(ArtifactError::InvalidGmActions(
+            "journal is duplicated or not in canonical order".into(),
+        ));
+    }
+    Ok(())
 }
 
 // ── The drivers ──────────────────────────────────────────────────────────────
@@ -650,6 +879,29 @@ pub fn drive_run(
     Ok(sim)
 }
 
+/// As [`drive_run`], with typed GM grants entering through the production
+/// journal at their recorded logical boundaries. This is primarily the
+/// recording/test seam; ordinary unattended headless runs pass an empty GM
+/// script.
+pub fn drive_run_with_gm_actions(
+    args: &HeadlessArgs,
+    script: &[LoggedCommand],
+    gm_actions: &GmActionJournal,
+    checkpoint_every: u64,
+) -> Result<PhoenixSim, ReplayError> {
+    validate_gm_action_journal(gm_actions)?;
+    let mut planned = gm_actions.clone();
+    planned
+        .restore_applied_frontier(planned.len())
+        .map_err(|why| ArtifactError::InvalidGmActions(why.into()))?;
+    let mut sim = PhoenixSim::build(args, script.len(), checkpoint_every, true, planned, None)?;
+    vellum_replay::replay_into(&mut sim, script).map_err(|fault| ReplayError::Refused {
+        at_command: fault.at_command,
+        why: fault.rejection.to_string(),
+    })?;
+    Ok(sim)
+}
+
 /// Replay an artifact: rebuild the run from its own recorded setup, drive it
 /// with its own log, and return the ledger the second run produced.
 pub fn replay_artifact(
@@ -658,7 +910,14 @@ pub fn replay_artifact(
 ) -> Result<DigestLedger, ReplayError> {
     let args = artifact.replay_args();
     let commands = artifact.log.entries();
-    let mut sim = PhoenixSim::new(&args, commands.len(), checkpoint_every)?;
+    artifact.validate_gm_actions()?;
+    let mut sim = PhoenixSim::new_replay(
+        &args,
+        commands.len(),
+        checkpoint_every,
+        artifact.gm_actions.clone(),
+        artifact.final_tick,
+    )?;
     vellum_replay::replay_into(&mut sim, commands).map_err(|fault| ReplayError::Refused {
         at_command: fault.at_command,
         why: fault.rejection.to_string(),
@@ -678,8 +937,22 @@ pub fn verify_artifact(artifact: &ReplayArtifact) -> Result<Option<Divergence>, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::command_admission::ShipKey;
+    use crate::command_admission::{HostSlot, ShipKey};
     use crate::core::messages::SystemControlPayload;
+
+    fn gm_pause_grant(apply_tick: u64, active: bool) -> crate::gm_action::GmActionGrant {
+        crate::gm_action::GmActionGrant {
+            from: HostSlot(1),
+            sequenced_by: HostSlot(1),
+            operator_id: "gm-one".into(),
+            correlation: crate::gm_action::GmActionId::new(format!("replay-{apply_tick}-{active}"))
+                .unwrap(),
+            recovery_generation: 0,
+            apply_tick,
+            order: crate::gm_action::GmActionOrder::new(HostSlot(1), 1),
+            action: crate::gm_action::GmAction::SetSessionPaused { active },
+        }
+    }
 
     fn artifact() -> ReplayArtifact {
         let mut ledger = DigestLedger::new(50);
@@ -694,7 +967,9 @@ mod tests {
             side_b: Vec::new(),
             max_ticks: 260,
             dt: 1.0 / 60.0,
+            final_tick: 259,
             log: CommandLog::default(),
+            gm_actions: GmActionJournal::default(),
             ledger,
         }
     }
@@ -718,6 +993,20 @@ mod tests {
         assert!(matches!(
             ReplayArtifact::from_ron(&text),
             Err(ArtifactError::Version { .. })
+        ));
+    }
+
+    #[test]
+    fn a_version_three_artifact_is_refused_before_missing_gm_state_is_defaulted() {
+        let mut old = artifact();
+        old.version = 3;
+        let text = old.to_ron().expect("serialises");
+        assert!(matches!(
+            ReplayArtifact::from_ron(&text),
+            Err(ArtifactError::Version {
+                found: 3,
+                expected: ARTIFACT_VERSION
+            })
         ));
     }
 
@@ -770,7 +1059,13 @@ mod tests {
             ..Default::default()
         };
         assert!(matches!(
-            ReplayArtifact::capture(&args, CommandLog::default(), DigestLedger::new(0)),
+            ReplayArtifact::capture(
+                &args,
+                CommandLog::default(),
+                GmActionJournal::default(),
+                0,
+                DigestLedger::new(0),
+            ),
             Err(ArtifactError::Unseeded)
         ));
     }
@@ -808,5 +1103,95 @@ mod tests {
         };
         assert!(entry.ship.is_named());
         assert_eq!(replay_token_for(&entry.target), AI_BACKFILL_TOKEN);
+    }
+
+    #[test]
+    fn replay_preserves_an_adopted_restore_pause_for_a_typed_resume() {
+        let mut source = GmActionJournal::default();
+        source.adopt_initial_pause(true);
+        source.insert(gm_pause_grant(0, false)).unwrap();
+        source.restore_applied_frontier(1).unwrap();
+        validate_gm_action_journal(&source).expect("the adopted base state is canonical");
+
+        let mut app = App::new();
+        app.insert_resource(SimTick(0));
+        app.insert_resource(GmActionJournal::default());
+        app.insert_resource(crate::gm_action::GmActionLog::default());
+        app.insert_resource(crate::gm_action::SimulationPaused(true));
+        app.add_systems(PreUpdate, crate::gm_action::apply_due_actions);
+        seed_replay_initial_state(&mut app, &source);
+
+        let mut sim = PhoenixSim {
+            app,
+            max_frames: 1,
+            frames: 0,
+            expected_commands: 0,
+            applied: 0,
+            submitted: 0,
+            tail: true,
+            gm_actions: source,
+            final_tick: Some(0),
+            ledger: DigestLedger::new(0),
+        };
+        sim.step();
+
+        assert!(
+            !sim.app
+                .world()
+                .resource::<crate::gm_action::SimulationPaused>()
+                .0
+        );
+        assert_eq!(
+            sim.app
+                .world()
+                .resource::<crate::gm_action::GmActionLog>()
+                .entries()[0]
+                .outcome,
+            crate::gm_action::GmActionOutcome::Applied
+        );
+    }
+
+    #[test]
+    fn replay_end_ignores_canonical_grants_beyond_the_recorded_final_tick() {
+        let mut future = GmActionJournal::default();
+        future.insert(gm_pause_grant(20, true)).unwrap();
+        let mut app = App::new();
+        app.insert_resource(SimTick(10));
+        app.insert_resource(GmActionJournal::default());
+        seed_replay_initial_state(&mut app, &future);
+        let sim = PhoenixSim {
+            app,
+            max_frames: 1,
+            frames: 0,
+            expected_commands: 0,
+            applied: 0,
+            submitted: 0,
+            tail: true,
+            gm_actions: future,
+            final_tick: Some(10),
+            ledger: DigestLedger::new(0),
+        };
+
+        assert!(
+            sim.reached_replay_end(),
+            "a retained future owner commit must not drive replay past final_tick"
+        );
+    }
+
+    #[test]
+    fn an_applied_gm_frontier_cannot_cross_the_recorded_final_tick() {
+        let mut captured = artifact();
+        captured.final_tick = 10;
+        captured
+            .gm_actions
+            .insert(gm_pause_grant(20, true))
+            .unwrap();
+        captured.gm_actions.restore_applied_frontier(1).unwrap();
+
+        assert!(matches!(
+            captured.validate_gm_actions(),
+            Err(ArtifactError::InvalidGmActions(why))
+                if why == "applied GM frontier crosses the replay's final tick"
+        ));
     }
 }

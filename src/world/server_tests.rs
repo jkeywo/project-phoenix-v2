@@ -22,8 +22,15 @@ const RHAI_IN_SECONDS_COMPLETE_OBJECTIVE: &str = r#"fn on_x(ctx) {
             }"#;
 
 /// `scripted_on_destroyed_completes_objective_through_the_live_pipeline`.
+/// Two same-tick registrations let that test cover both an explicitly named
+/// trigger and the stable script/function fallback without a synthetic fire.
 const SCRIPT_ON_DESTROYED_COMPLETES_OBJECTIVE: &str = r#"[script]
-setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.effects.complete_objective("obj"); }'
+setup = '''
+on_destroyed("raider", "k");
+on_destroyed("raider", "observe");
+fn k(ctx) { ctx.effects.complete_objective("obj"); }
+fn observe(ctx) { }
+'''
 "#;
 
 /// `scripted_open_comms_queues_on_the_runtime_through_the_live_pipeline`.
@@ -516,9 +523,10 @@ fn compile_fixture_scripts(world_toml: &str) -> WorldScriptRuntime {
 fn scripted_on_destroyed_completes_objective_through_the_live_pipeline() {
     // One inline `[script]` trigger: on the raider's death, complete "obj".
     let mut sr = compile_fixture_scripts(SCRIPT_ON_DESTROYED_COMPLETES_OBJECTIVE);
-    assert_eq!(sr.triggers.len(), 1, "one scripted trigger authored");
+    assert_eq!(sr.triggers.len(), 2, "two scripted triggers authored");
 
     let mut app = ai_trigger_test_app();
+    app.add_message::<crate::core::balance::BalanceEvent>();
     let raider_uuid = "raider-uuid-984a";
     {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
@@ -529,9 +537,10 @@ fn scripted_on_destroyed_completes_objective_through_the_live_pipeline() {
         // the parallel handler table.
         runtime.trigger_states = Vec::new();
         merge_script_triggers(&mut runtime, &mut sr, None);
-        assert_eq!(runtime.trigger_states.len(), 1);
+        assert_eq!(runtime.trigger_states.len(), 2);
+        runtime.trigger_states[0].trigger.id = Some("raider-destroyed".into());
     }
-    assert_eq!(sr.handlers.len(), 1);
+    assert_eq!(sr.handlers.len(), 2);
     assert!(
         sr.handlers[0].is_some(),
         "the scripted index carries a handler"
@@ -544,6 +553,10 @@ fn scripted_on_destroyed_completes_objective_through_the_live_pipeline() {
         true,
         vec![],
     );
+    let mut balance_cursor = app
+        .world()
+        .resource::<Messages<crate::core::balance::BalanceEvent>>()
+        .get_cursor();
 
     // Drive the live pipeline: emit the destruction event and step once.
     app.world_mut()
@@ -564,6 +577,47 @@ fn scripted_on_destroyed_completes_objective_through_the_live_pipeline() {
         snap.status,
         ObjectiveStatus::Completed,
         "a scripted on_destroyed handler must complete the objective through the LIVE pipeline"
+    );
+    let balance = app
+        .world()
+        .resource::<Messages<crate::core::balance::BalanceEvent>>();
+    let facts: Vec<_> = balance_cursor.read(balance).cloned().collect();
+    assert!(
+        facts.iter().any(|fact| matches!(
+            fact,
+            crate::core::balance::BalanceEvent::TriggerFired {
+                trigger_id,
+                origin,
+                entity: Some(entity),
+            } if trigger_id == "raider-destroyed"
+                && origin == "fixture/scripted.toml#script.setup"
+                && entity == raider_uuid
+        )),
+        "the actual trigger fire seam must retain an authored id: {facts:?}"
+    );
+    assert!(
+        facts.iter().any(|fact| matches!(
+            fact,
+            crate::core::balance::BalanceEvent::TriggerFired {
+                trigger_id,
+                origin,
+                entity: Some(entity),
+            } if trigger_id == "fixture/scripted.toml#script.setup::observe"
+                && origin == "fixture/scripted.toml#script.setup"
+                && entity == raider_uuid
+        )),
+        "an anonymous same-tick fire must use the stable script/function fallback: {facts:?}"
+    );
+    assert!(
+        facts.iter().any(|fact| matches!(
+            fact,
+            crate::core::balance::BalanceEvent::ObjectiveChanged {
+                objective_id,
+                status: ObjectiveStatus::Completed,
+                ..
+            } if objective_id == "obj"
+        )),
+        "the actual shared dispatcher transition must emit its lifecycle fact: {facts:?}"
     );
 }
 
@@ -5523,6 +5577,89 @@ fn unload_world_despawns_entities_added_by_load_world() {
     );
 }
 
+/// A named layer entity is one authored identity across layer incarnations.
+/// Unload removes its current ECS entity, but reload must reuse the retained
+/// name registry UUID rather than minting a second contact identity (#1296).
+#[test]
+fn layer_reload_reuses_named_entity_uuid_without_a_duplicate() {
+    const PATH: &str = "tests/fixtures/layer_entities.toml";
+    const NAME: &str = "test.layer_fixture.raider";
+
+    let mut app = layer_test_app();
+    app.world_mut()
+        .resource_mut::<PendingWorldLayerChanges>()
+        .0
+        .push(WorldLayerChange::Load {
+            path: PATH.into(),
+            loader_path: None,
+        });
+    app.update();
+
+    let first_entity = app.world().resource::<WorldLayerMap>().0[PATH].spawned_entities[0];
+    let first_uuid = app
+        .world()
+        .get::<EntityUuid>(first_entity)
+        .expect("named layer entity carries an EntityUuid")
+        .0
+        .clone();
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .name_to_uuid
+            .get(NAME),
+        Some(&first_uuid),
+        "the live authored-name registry and spawned entity must agree"
+    );
+
+    app.world_mut()
+        .resource_mut::<PendingWorldLayerChanges>()
+        .0
+        .push(WorldLayerChange::Unload(PATH.into()));
+    app.update();
+
+    assert!(
+        app.world().get_entity(first_entity).is_err(),
+        "unload removes the current ECS incarnation"
+    );
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .name_to_uuid
+            .get(NAME),
+        Some(&first_uuid),
+        "unload retains authored identity for a later incarnation"
+    );
+
+    app.world_mut()
+        .resource_mut::<PendingWorldLayerChanges>()
+        .0
+        .push(WorldLayerChange::Load {
+            path: PATH.into(),
+            loader_path: None,
+        });
+    app.update();
+
+    let second_entity = app.world().resource::<WorldLayerMap>().0[PATH].spawned_entities[0];
+    assert_eq!(
+        app.world()
+            .get::<EntityUuid>(second_entity)
+            .expect("reloaded named layer entity carries an EntityUuid")
+            .0,
+        first_uuid,
+        "reload must restore the authored UUID"
+    );
+    let matching_entities = app
+        .world_mut()
+        .query::<&EntityUuid>()
+        .iter(app.world())
+        .filter(|uuid| uuid.0 == first_uuid)
+        .count();
+    assert_eq!(
+        matching_entities, 1,
+        "reload leaves exactly one live entity with the authored UUID"
+    );
+}
+
 /// Issue #751: unloading a layer removes exactly the objectives its
 /// triggers added (tracked in `WorldRuntime.owned_objective_ids`), leaving
 /// base-world objectives untouched.
@@ -6254,7 +6391,8 @@ fn trigger_from_layer_missing_in_layer_map_reads_base_flags() {
 fn delayed_queue_dispatches_every_action_variant_in_queue_order() {
     let template_path = write_spawn_template_fixture();
     let mut app = ai_trigger_test_app();
-    app.init_resource::<WorldLayerMap>()
+    app.add_message::<crate::core::balance::BalanceEvent>()
+        .init_resource::<WorldLayerMap>()
         .init_resource::<PendingWorldLayerChanges>()
         .init_resource::<crate::server_app::GameOverReason>();
 
@@ -6415,7 +6553,35 @@ fn delayed_queue_dispatches_every_action_variant_in_queue_order() {
         all_variants
     };
 
+    let mut balance_cursor = app
+        .world()
+        .resource::<Messages<crate::core::balance::BalanceEvent>>()
+        .get_cursor();
     dispatch_delayed_actions(&mut app, None, None, all_variants);
+    let lifecycle: Vec<_> = balance_cursor
+        .read(
+            app.world()
+                .resource::<Messages<crate::core::balance::BalanceEvent>>(),
+        )
+        .filter_map(|fact| match fact {
+            crate::core::balance::BalanceEvent::ObjectiveChanged {
+                objective_id,
+                status,
+                ..
+            } => Some((objective_id.as_str(), status.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        lifecycle,
+        vec![
+            ("obj-alpha", ObjectiveStatus::Active),
+            ("obj-alpha", ObjectiveStatus::Completed),
+            ("obj-beta", ObjectiveStatus::Active),
+            ("obj-beta", ObjectiveStatus::Failed),
+        ],
+        "only actual lifecycle transitions emit and they retain dispatch order"
+    );
     // Second update: the queued transitions reach the pipeline (so the
     // witness can fire) and the `GameOver` state transition lands.
     app.update();

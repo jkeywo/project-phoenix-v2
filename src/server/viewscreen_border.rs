@@ -294,7 +294,9 @@ pub(crate) fn push_lobby_state(
     phase: Res<State<GamePhase>>,
     world_resource: Option<Res<WorldResource>>,
     preload: Option<Res<AssetPreloadResource>>,
+    model_rigs: Option<Res<crate::entities::model_markers::ModelRigReadiness>>,
     countdown: Option<Res<CountdownTimer>>,
+    gm_roster: Option<Res<crate::gm_roster::GmRoster>>,
     mut writer: MessageWriter<LobbyStateChanged>,
 ) {
     let Some(sessions) = sessions else { return };
@@ -324,7 +326,12 @@ pub(crate) fn push_lobby_state(
         .map(|w| w.0.scenario_description.clone())
         .unwrap_or_default();
 
-    let all_ready = sessions.0.all_ready();
+    let readiness = sessions.0.readiness_tally();
+    let all_ready = readiness.all_ready();
+    // The wire field predates authoritative rig preloading and retains its
+    // protocol name. It now means the complete local start-assets gate: GPU
+    // presentation when present, plus primary model rigs on every profile.
+    let presentation_ready = local_start_assets_ready(preload.as_deref(), model_rigs.as_deref());
 
     let loading_progress = if *phase.get() == GamePhase::Loading {
         preload.as_ref().filter(|p| p.started).map(|p| p.fraction())
@@ -344,8 +351,14 @@ pub(crate) fn push_lobby_state(
         max_players: roster.max_players,
         all_stations_filled: roster.all_filled,
         all_ready,
+        readiness,
+        presentation_ready,
         stations: roster.stations,
         spectators,
+        gms: gm_roster
+            .as_ref()
+            .map(|roster| roster.projection())
+            .unwrap_or_default(),
         loading_progress,
         countdown_secs,
     };
@@ -353,6 +366,26 @@ pub(crate) fn push_lobby_state(
     if let Ok(json) = codec::encode_lobby_state(&payload) {
         writer.write(LobbyStateChanged { json });
     }
+}
+
+/// Project the host-local presentation gate into the fleet lobby snapshot.
+///
+/// A present preload resource is ready only after its terminal `complete`
+/// state. `AssetPreloadResource` counts failed render assets as terminal, so a
+/// missing model cannot deadlock the fleet. A rendererless/headless app has no
+/// preload resource and therefore no local presentation work to wait for.
+fn local_presentation_ready(preload: Option<&AssetPreloadResource>) -> bool {
+    match preload {
+        Some(preload) => preload.complete,
+        None => true,
+    }
+}
+
+fn local_start_assets_ready(
+    preload: Option<&AssetPreloadResource>,
+    model_rigs: Option<&crate::entities::model_markers::ModelRigReadiness>,
+) -> bool {
+    local_presentation_ready(preload) && model_rigs.is_none_or(|rigs| rigs.is_ready())
 }
 
 /// Build the host viewscreen lobby roster from claimable bridge seats only.
@@ -781,6 +814,52 @@ fn push_hud_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn presentation_readiness_requires_terminal_preload_but_not_a_renderer() {
+        let mut preload = AssetPreloadResource::default();
+
+        assert!(
+            local_presentation_ready(None),
+            "a rendererless host has no presentation preload to wait for"
+        );
+        assert!(
+            !local_presentation_ready(Some(&preload)),
+            "an unstarted or in-flight preload is not terminal"
+        );
+
+        preload.started = true;
+        assert!(!local_presentation_ready(Some(&preload)));
+
+        preload.complete = true;
+        assert!(local_presentation_ready(Some(&preload)));
+    }
+
+    #[test]
+    fn local_start_assets_wait_for_authoritative_rigs_without_a_renderer() {
+        let rigs = crate::entities::model_markers::ModelRigReadiness::default();
+
+        assert!(local_start_assets_ready(None, None));
+        assert!(
+            !local_start_assets_ready(None, Some(&rigs)),
+            "rendererless does not mean canonical weapon geometry is ready"
+        );
+
+        let mut app = App::new();
+        app.init_resource::<crate::entities::model_markers::ModelRigReadiness>()
+            .add_systems(
+                Update,
+                crate::entities::model_markers::sync_authoritative_model_markers,
+            );
+        app.update();
+        assert!(local_start_assets_ready(
+            None,
+            Some(
+                app.world()
+                    .resource::<crate::entities::model_markers::ModelRigReadiness>()
+            )
+        ));
+    }
 
     #[test]
     fn host_lobby_roster_excludes_auxiliary_stations() {

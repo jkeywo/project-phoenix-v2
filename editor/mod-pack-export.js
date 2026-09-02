@@ -147,14 +147,29 @@ export function crc32(bytes) {
 }
 
 const encoder = new TextEncoder();
-const decoder = new TextDecoder();
+// Rust's `read_store_zip` uses `std::str::from_utf8`, so replacement-character
+// decoding here would accept bytes the authoritative host refuses and would
+// destroy the source needed for repair. `ignoreBOM: true` keeps a leading BOM
+// in the decoded text so valid UTF-8 bytes can round-trip exactly.
+const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+const copyBytes = (bytes) => Uint8Array.from(bytes);
+
+function decodeUtf8(bytes, description) {
+  try {
+    return decoder.decode(bytes);
+  } catch {
+    throw new Error(`${description} is not valid UTF-8`);
+  }
+}
 
 // ── Store-only ZIP writer ─────────────────────────────────────────────────────
 
 /**
  * Build a store-only (compression method 0) ZIP archive.
  *
- * @param {Array<{ path: string, text: string }>} entries  File entries.
+ * @param {Array<{ path: string, text?: string, bytes?: Uint8Array }>} entries
+ *   File entries. Exact `bytes` take precedence over encoded `text`; callers
+ *   that supply bytes must already have validated that they represent `text`.
  * @returns {Uint8Array} the archive bytes.
  *
  * Deliberately minimal: no compression, no data descriptors, no ZIP64. Every
@@ -165,7 +180,9 @@ const decoder = new TextDecoder();
 export function createStoreZip(entries) {
   const files = entries.map((e) => {
     const nameBytes = encoder.encode(e.path);
-    const dataBytes = encoder.encode(e.text);
+    const dataBytes = e.bytes instanceof Uint8Array
+      ? copyBytes(e.bytes)
+      : encoder.encode(String(e.text ?? ''));
     return { nameBytes, dataBytes, crc: crc32(dataBytes) };
   });
 
@@ -247,34 +264,150 @@ export function createStoreZip(entries) {
 }
 
 /**
- * Read a store-only ZIP produced by {@link createStoreZip} back into a map of
- * `{ path: text }`. Verifies each entry's stored CRC and rejects any entry
- * that is not compression method 0. Throws on a malformed archive.
+ * Read a store-only ZIP produced by {@link createStoreZip}. Alongside the
+ * convenient `{ path: text }` map, returns an explicit source representation:
+ * exact archive bytes plus ordered entries with exact path/content bytes.
+ * Verifies structure, stored CRCs and fatal UTF-8 for both local and central
+ * names and every member body. Throws on a malformed archive.
  */
-export function readStoreZip(bytes) {
+export function readStoreZipArchive(bytes) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const files = {};
+  // Archive member names are untrusted data, so they must not be assigned to a
+  // normal object's inherited setters. In particular, `files['__proto__'] =`
+  // would otherwise mutate the map's prototype and silently drop that member
+  // before the semantic path whitelist gets a chance to refuse it.
+  const files = Object.create(null);
+  const sourceEntries = [];
+  const localEntries = new Map();
   let pos = 0;
   while (pos + 4 <= bytes.length && view.getUint32(pos, true) === 0x04034b50) {
+    const localOffset = pos;
+    if (pos + 30 > bytes.length) {
+      throw new Error('malformed ZIP archive: truncated local file header');
+    }
     const method = view.getUint16(pos + 8, true);
     const crc = view.getUint32(pos + 14, true);
     const compSize = view.getUint32(pos + 18, true);
+    const uncompSize = view.getUint32(pos + 22, true);
     const nameLen = view.getUint16(pos + 26, true);
     const extraLen = view.getUint16(pos + 28, true);
     const nameStart = pos + 30;
     const dataStart = nameStart + nameLen + extraLen;
+    const dataEnd = dataStart + compSize;
     if (method !== 0) {
       throw new Error(`unsupported compression method ${method}`);
     }
-    const name = decoder.decode(bytes.subarray(nameStart, nameStart + nameLen));
-    const data = bytes.subarray(dataStart, dataStart + compSize);
+    if (uncompSize !== compSize) {
+      throw new Error('malformed ZIP archive: stored entry sizes differ');
+    }
+    if (dataStart > bytes.length || dataEnd > bytes.length) {
+      throw new Error('malformed ZIP archive: truncated local file entry');
+    }
+    const nameBytes = bytes.subarray(nameStart, nameStart + nameLen);
+    const name = decodeUtf8(nameBytes, 'file name');
+    const data = bytes.subarray(dataStart, dataEnd);
     if (crc32(data) !== crc) {
       throw new Error(`CRC mismatch for "${name}"`);
     }
-    files[name] = decoder.decode(data);
-    pos = dataStart + compSize;
+    const text = decodeUtf8(data, `file "${name}"`);
+    files[name] = text;
+    const sourceEntry = {
+      path: name,
+      pathBytes: copyBytes(nameBytes),
+      bytes: copyBytes(data),
+      text,
+    };
+    sourceEntries.push(sourceEntry);
+    localEntries.set(localOffset, {
+      name,
+      nameBytes: sourceEntry.pathBytes,
+      method,
+      crc,
+      compSize,
+      uncompSize,
+    });
+    pos = dataEnd;
   }
-  return files;
+
+  // A local-header scan alone cannot distinguish an empty ZIP from arbitrary
+  // bytes (both previously returned `{}`), and it accepts a truncated archive
+  // with no directory. Verify the central directory + EOCD emitted by the
+  // store-only writer before exposing any decoded files to an import caller.
+  const centralOffset = pos;
+  const seenLocalOffsets = new Set();
+  let centralCount = 0;
+  while (pos + 4 <= bytes.length && view.getUint32(pos, true) === 0x02014b50) {
+    if (pos + 46 > bytes.length) {
+      throw new Error('malformed ZIP archive: truncated central directory entry');
+    }
+    const method = view.getUint16(pos + 10, true);
+    const crc = view.getUint32(pos + 16, true);
+    const compSize = view.getUint32(pos + 20, true);
+    const uncompSize = view.getUint32(pos + 24, true);
+    const nameLen = view.getUint16(pos + 28, true);
+    const extraLen = view.getUint16(pos + 30, true);
+    const commentLen = view.getUint16(pos + 32, true);
+    const localOffset = view.getUint32(pos + 42, true);
+    const entryEnd = pos + 46 + nameLen + extraLen + commentLen;
+    if (entryEnd > bytes.length) {
+      throw new Error('malformed ZIP archive: truncated central directory entry');
+    }
+    const centralNameBytes = bytes.subarray(pos + 46, pos + 46 + nameLen);
+    const name = decodeUtf8(centralNameBytes, 'central directory file name');
+    const local = localEntries.get(localOffset);
+    if (
+      !local ||
+      seenLocalOffsets.has(localOffset) ||
+      local.name !== name ||
+      local.nameBytes.length !== centralNameBytes.length ||
+      !local.nameBytes.every((value, index) => value === centralNameBytes[index]) ||
+      local.method !== method ||
+      local.crc !== crc ||
+      local.compSize !== compSize ||
+      local.uncompSize !== uncompSize
+    ) {
+      throw new Error('malformed ZIP archive: central directory does not match local entries');
+    }
+    seenLocalOffsets.add(localOffset);
+    centralCount += 1;
+    pos = entryEnd;
+  }
+
+  const centralSize = pos - centralOffset;
+  if (pos + 22 > bytes.length || view.getUint32(pos, true) !== 0x06054b50) {
+    throw new Error('malformed ZIP archive: end-of-central-directory record not found');
+  }
+  const diskNumber = view.getUint16(pos + 4, true);
+  const centralDisk = view.getUint16(pos + 6, true);
+  const diskEntries = view.getUint16(pos + 8, true);
+  const totalEntries = view.getUint16(pos + 10, true);
+  const declaredCentralSize = view.getUint32(pos + 12, true);
+  const declaredCentralOffset = view.getUint32(pos + 16, true);
+  const archiveCommentLen = view.getUint16(pos + 20, true);
+  if (
+    diskNumber !== 0 ||
+    centralDisk !== 0 ||
+    diskEntries !== totalEntries ||
+    totalEntries !== centralCount ||
+    centralCount !== localEntries.size ||
+    declaredCentralSize !== centralSize ||
+    declaredCentralOffset !== centralOffset ||
+    pos + 22 + archiveCommentLen !== bytes.length
+  ) {
+    throw new Error('malformed ZIP archive: invalid central directory');
+  }
+  return {
+    files,
+    source: {
+      bytes: copyBytes(bytes),
+      entries: sourceEntries,
+    },
+  };
+}
+
+/** Compatibility map-only reader used by validation and older callers. */
+export function readStoreZip(bytes) {
+  return readStoreZipArchive(bytes).files;
 }
 
 // ── Manifest ──────────────────────────────────────────────────────────────────
@@ -283,6 +416,28 @@ export function readStoreZip(bytes) {
  * `SUPPORTED_PACK_FORMAT` in `src/world/manifest.rs`: a versioning constant, not
  * a gameplay value. */
 export const PACK_FORMAT = 1;
+
+// TOML integers have the same signed 64-bit range Rust's `toml` crate exposes.
+// smol-toml's BigInt mode deliberately leaves range enforcement to its caller,
+// so keep the authoritative host's limits explicit at this import boundary.
+const TOML_I64_MIN = -0x8000_0000_0000_0000n;
+const TOML_I64_MAX = 0x7fff_ffff_ffff_ffffn;
+const JS_SAFE_INTEGER_MIN = BigInt(Number.MIN_SAFE_INTEGER);
+const JS_SAFE_INTEGER_MAX = BigInt(Number.MAX_SAFE_INTEGER);
+
+function portableInteger(value) {
+  return value >= JS_SAFE_INTEGER_MIN && value <= JS_SAFE_INTEGER_MAX
+    ? Number(value)
+    : value;
+}
+
+// JSON has no BigInt representation. This is an internal equality key for the
+// known editable manifest fields, not an interchange format.
+function manifestSemanticState(value) {
+  return JSON.stringify(value, (_key, item) => (
+    typeof item === 'bigint' ? { __phoenixTomlInteger: item.toString() } : item
+  ));
+}
 
 /**
  * Normalise the caller-supplied `pack` metadata into the `[pack]` table shape
@@ -302,9 +457,12 @@ export function buildPackTable(pack) {
     p.description = pack.description;
   }
   const req = pack?.requires ?? {};
+  const contentEpoch = req.content_epoch ?? 0;
   p.requires = {
     content_id: String(req.content_id ?? ''),
-    content_epoch: Number(req.content_epoch ?? 0),
+    // Keep an imported i64 as BigInt. Coercing it to Number here would corrupt
+    // a host-valid epoch before smol-toml serialises it back to an integer token.
+    content_epoch: typeof contentEpoch === 'bigint' ? contentEpoch : Number(contentEpoch),
   };
   return p;
 }
@@ -312,14 +470,16 @@ export function buildPackTable(pack) {
 /**
  * Serialise a mod-pack manifest to TOML. When `pack` metadata is supplied the
  * `[pack]` identity table (issue #986) is emitted ABOVE the `[[scenario]]`
- * entries; each scenario emits `id`, `world`, and an optional `label`, matching
- * the schema `parse_pack_manifest`/`parse_manifest` read (`src/world/manifest.rs`).
+ * entries; each scenario emits `id`, `world`, optional `label`, and optional
+ * curated `ships`, matching the schema `parse_pack_manifest`/`parse_manifest`
+ * read (`src/world/manifest.rs`).
  */
 export function buildManifestToml(scenarios, pack) {
   const scenario = [];
   for (const s of scenarios || []) {
     const entry = { id: String(s.id ?? ''), world: String(s.world ?? '') };
     if (typeof s.label === 'string' && s.label.length > 0) entry.label = s.label;
+    if (Array.isArray(s.ships) && s.ships.length > 0) entry.ships = [...s.ships];
     scenario.push(entry);
   }
   // Object key order is the emit order: `[pack]` (and its nested
@@ -331,25 +491,87 @@ export function buildManifestToml(scenarios, pack) {
 /**
  * Inverse of {@link buildManifestToml} — parse a pack manifest's TOML back into
  * `{ pack, scenarios }` (issue #989). `pack` is `null` for a base manifest with
- * no `[pack]` header. Optional `author`/`description` are carried only when the
- * manifest declared them, and `format` defaults to {@link PACK_FORMAT}, so
- * `buildManifestToml(scenarios, pack)` of the result reproduces the SAME
- * manifest text — the byte-identity the MOD-mode round trip relies on.
+ * no `[pack]` header. Before normalising optional fields, it enforces the raw
+ * serde shape from `src/world/manifest.rs`: mandatory `format`, lexical TOML
+ * integer types, and `[[scenario]]` tables with string ids/worlds/ships. That
+ * prevents an invalid source value from becoming an apparently valid workspace
+ * value.
  */
 export function parsePackManifest(manifestToml) {
-  const doc = tomlParse(manifestToml);
-  const rawPack = doc && typeof doc === 'object' ? doc.pack : null;
+  // Parse ONCE in the type-preserving mode. The default parser rejects valid
+  // i64 values outside JS's safe range before we can validate their Rust schema
+  // or preserve ignored extension fields verbatim.
+  const doc = tomlParse(manifestToml, { integersAsBigInt: true });
+  const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
+  const record = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+  const schemaError = (message) => {
+    throw new Error(`mod-pack manifest schema error: ${message}`);
+  };
+
+  // Rust's TOML value model is signed i64 even for fields serde later ignores.
+  // Validate the complete document so an extension integer cannot make the
+  // editor accept bytes the host rejects, while retaining every in-range value
+  // in its exact BigInt form until source provenance is written back out.
+  const validateTomlIntegers = (value, path = 'manifest') => {
+    if (typeof value === 'bigint') {
+      if (value < TOML_I64_MIN || value > TOML_I64_MAX) {
+        schemaError(`${path} integer must fit a signed 64-bit integer`);
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => validateTomlIntegers(item, `${path}[${index}]`));
+      return;
+    }
+    if (record(value)) {
+      for (const [key, item] of Object.entries(value)) {
+        validateTomlIntegers(item, `${path}.${key}`);
+      }
+    }
+  };
+  validateTomlIntegers(doc);
+
+  const rawPack = doc && typeof doc === 'object' && own(doc, 'pack') ? doc.pack : null;
   let pack = null;
-  if (rawPack && typeof rawPack === 'object') {
-    const req = rawPack.requires && typeof rawPack.requires === 'object' ? rawPack.requires : {};
+  if (rawPack !== null) {
+    if (!record(rawPack)) schemaError('[pack] must be a table');
+    if (!own(rawPack, 'format')) schemaError('[pack] format is required');
+    if (typeof rawPack.format !== 'bigint') {
+      schemaError('[pack] format must use a TOML integer token (not a float or string)');
+    }
+    if (rawPack.format < 0n || rawPack.format > 0xffff_ffffn) {
+      schemaError('[pack] format must fit an unsigned 32-bit integer');
+    }
+    for (const field of ['id', 'version', 'name', 'author', 'description']) {
+      if (own(rawPack, field) && typeof rawPack[field] !== 'string') {
+        schemaError(`[pack] ${field} must be a string`);
+      }
+    }
+
+    const hasRequires = own(rawPack, 'requires');
+    const req = hasRequires ? rawPack.requires : {};
+    if (hasRequires && !record(req)) schemaError('[pack.requires] must be a table');
+    if (own(req, 'content_id') && typeof req.content_id !== 'string') {
+      schemaError('[pack.requires] content_id must be a string');
+    }
+    if (own(req, 'content_epoch')) {
+      if (typeof req.content_epoch !== 'bigint') {
+        schemaError(
+          '[pack.requires] content_epoch must use a TOML integer token (not a float or string)',
+        );
+      }
+    }
+
     pack = {
-      format: Number.isInteger(rawPack.format) ? rawPack.format : PACK_FORMAT,
-      id: typeof rawPack.id === 'string' ? rawPack.id : '',
-      version: typeof rawPack.version === 'string' ? rawPack.version : '',
-      name: typeof rawPack.name === 'string' ? rawPack.name : '',
+      format: Number(rawPack.format),
+      id: own(rawPack, 'id') ? rawPack.id : '',
+      version: own(rawPack, 'version') ? rawPack.version : '',
+      name: own(rawPack, 'name') ? rawPack.name : '',
       requires: {
-        content_id: typeof req.content_id === 'string' ? req.content_id : '',
-        content_epoch: Number(req.content_epoch ?? 0),
+        content_id: own(req, 'content_id') ? req.content_id : '',
+        // Preserve the full host-valid i64 range. Small values remain Numbers
+        // for the existing form API; unsafe values remain exact BigInts.
+        content_epoch: own(req, 'content_epoch') ? portableInteger(req.content_epoch) : null,
       },
     };
     if (typeof rawPack.author === 'string' && rawPack.author.length > 0) {
@@ -359,16 +581,33 @@ export function parsePackManifest(manifestToml) {
       pack.description = rawPack.description;
     }
   }
-  const scenarios = Array.isArray(doc?.scenario)
-    ? doc.scenario.map((s) => {
-        const entry = {
-          id: typeof s?.id === 'string' ? s.id : '',
-          world: typeof s?.world === 'string' ? s.world : '',
-        };
-        if (typeof s?.label === 'string' && s.label.length > 0) entry.label = s.label;
-        return entry;
-      })
+  const rawScenarios = doc && typeof doc === 'object' && own(doc, 'scenario')
+    ? doc.scenario
     : [];
+  if (!Array.isArray(rawScenarios)) schemaError('scenario must be an array of tables');
+  const scenarios = rawScenarios.map((s, index) => {
+    if (!record(s)) schemaError(`scenario ${index + 1} must be a table`);
+    if (typeof s.id !== 'string') schemaError(`scenario ${index + 1} id must be a string`);
+    if (typeof s.world !== 'string') {
+      schemaError(`scenario ${index + 1} world must be a string`);
+    }
+    if (own(s, 'label') && typeof s.label !== 'string') {
+      schemaError(`scenario ${index + 1} label must be a string`);
+    }
+    if (
+      own(s, 'ships') &&
+      (!Array.isArray(s.ships) || s.ships.some((ship) => typeof ship !== 'string'))
+    ) {
+      schemaError(`scenario ${index + 1} ships must be an array of strings`);
+    }
+    const entry = {
+      id: s.id,
+      world: s.world,
+    };
+    if (typeof s.label === 'string' && s.label.length > 0) entry.label = s.label;
+    if (Array.isArray(s.ships) && s.ships.length > 0) entry.ships = [...s.ships];
+    return entry;
+  });
   return { pack, scenarios };
 }
 
@@ -384,18 +623,32 @@ export function validatePackMeta(pack) {
     errors.push('a mod pack requires [pack] metadata (id, version, name, requires) — none was provided');
     return errors;
   }
-  if (String(pack.id ?? '').trim() === '') errors.push('[pack] id is required and must not be empty');
-  if (String(pack.version ?? '').trim() === '') errors.push('[pack] version is required');
-  if (String(pack.name ?? '').trim() === '') errors.push('[pack] name is required');
+  if (!Number.isInteger(pack.format) || pack.format < 0 || pack.format > 0xffff_ffff) {
+    errors.push('[pack] format is required and must be an unsigned 32-bit integer');
+  } else if (pack.format > PACK_FORMAT) {
+    errors.push(`[pack] format ${pack.format} is unsupported; this editor supports at most ${PACK_FORMAT}`);
+  }
+  if (typeof pack.id !== 'string' || pack.id.trim() === '') {
+    errors.push('[pack] id is required and must not be empty');
+  }
+  if (typeof pack.version !== 'string' || pack.version.trim() === '') {
+    errors.push('[pack] version is required and must be a string');
+  }
+  if (typeof pack.name !== 'string' || pack.name.trim() === '') {
+    errors.push('[pack] name is required and must be a string');
+  }
   const req = pack.requires;
-  if (!req || typeof req !== 'object') {
+  if (!req || typeof req !== 'object' || Array.isArray(req)) {
     errors.push('[pack.requires] is required — name the content_id + content_epoch the pack targets');
   } else {
-    if (String(req.content_id ?? '').trim() === '') {
-      errors.push('[pack.requires] content_id is required');
+    if (typeof req.content_id !== 'string' || req.content_id.trim() === '') {
+      errors.push('[pack.requires] content_id is required and must be a string');
     }
-    if (!Number.isInteger(req.content_epoch)) {
-      errors.push('[pack.requires] content_epoch is required and must be an integer');
+    const epoch = req.content_epoch;
+    const validNumber = typeof epoch === 'number' && Number.isSafeInteger(epoch);
+    const validBigInt = typeof epoch === 'bigint' && epoch >= TOML_I64_MIN && epoch <= TOML_I64_MAX;
+    if (!validNumber && !validBigInt) {
+      errors.push('[pack.requires] content_epoch is required and must be a signed 64-bit integer');
     }
   }
   return errors;
@@ -406,7 +659,7 @@ export function validatePackMeta(pack) {
  * manifest's root-world entries against the SELECTED content: each entry's
  * world must resolve within the pack (be one of the exported files) and parse.
  *
- * @param {Array<{id, world, label?}>} scenarios  Manifest entries.
+ * @param {Array<{id, world, label?, ships?:string[]}>} scenarios  Manifest entries.
  * @param {Object<string,string>} contentByPath   path -> TOML text for every
  *   file that will be in the pack (used as the `resolve_world` closure).
  * @returns {Array<{ path, severity, message, category }>} findings.
@@ -481,14 +734,32 @@ export function validateManifestEntries(scenarios, contentByPath) {
       });
       continue;
     }
+    let parsedWorld;
     try {
-      tomlParse(worldToml);
+      parsedWorld = tomlParse(worldToml);
     } catch (e) {
       findings.push({
         path: MANIFEST_PATH,
         severity: 'error',
         category: 'unparseable-scenario-world',
         message: `scenario "${id}" world "${world}" failed to parse: ${e.message}`,
+      });
+      continue;
+    }
+
+    const curatedShips = Array.isArray(entry.ships) ? entry.ships : [];
+    const offeredShips = Array.isArray(parsedWorld?.available_ships)
+      ? parsedWorld.available_ships
+          .map((ship) => ship?.template_path)
+          .filter((path) => typeof path === 'string')
+      : [];
+    for (const shipPath of curatedShips) {
+      if (offeredShips.includes(shipPath)) continue;
+      findings.push({
+        path: MANIFEST_PATH,
+        severity: 'error',
+        category: 'unknown-scenario-ship',
+        message: `scenario "${id}" curates ship "${shipPath}" which world "${world}" does not offer`,
       });
     }
   }
@@ -556,11 +827,49 @@ export function exportModPack(input) {
   const files = Array.isArray(input?.files) ? input.files : [];
   const scenarios = Array.isArray(input?.scenarios) ? input.scenarios : [];
   const pack = input?.pack ?? null;
+  const manifestSource = input?.manifestSource ?? null;
   const rigIndex = input?.rigIndex ?? null;
   const fragmentSource = normaliseFragmentSource(input?.fragmentSource);
 
   const errors = [];
   const warnings = [];
+
+  // The host deserialises the raw [pack] header and gates its format before it
+  // looks at authored members. Do the same for imported provenance: a missing
+  // discriminator, wrong TOML scalar type, absent required metadata, or future
+  // format must not first pass through the editable model's normalisers and
+  // then compare equal to that model for verbatim source reuse.
+  let sourceSemantics = null;
+  if (manifestSource && typeof manifestSource.text === 'string') {
+    try {
+      sourceSemantics = parsePackManifest(manifestSource.text);
+      for (const error of validatePackMeta(sourceSemantics.pack)) {
+        errors.push(`${MANIFEST_PATH} source: ${error}`);
+      }
+    } catch (error) {
+      errors.push(`${MANIFEST_PATH} source could not be parsed: ${error.message}`);
+    }
+    if (errors.length > 0) return { ok: false, errors, warnings };
+  }
+
+  // Raw provenance is used only when it still decodes to the exact text that
+  // was validated. This keeps source-byte retention from becoming a route for
+  // exporting different bytes than the editor inspected.
+  const verifiedSourceBytes = (sourceBytes, text, description) => {
+    if (!(sourceBytes instanceof Uint8Array)) return undefined;
+    let decoded;
+    try {
+      decoded = decodeUtf8(sourceBytes, `${description} source`);
+    } catch (error) {
+      errors.push(error.message);
+      return undefined;
+    }
+    if (decoded !== text) {
+      errors.push(`${description} source bytes do not match its editable text`);
+      return undefined;
+    }
+    return copyBytes(sourceBytes);
+  };
 
   // 0. Pack identity is required (issue #986): a pack without a valid [pack]
   //    header cannot be uploaded (the host rejects `missing-pack-header`), so
@@ -610,7 +919,11 @@ export function exportModPack(input) {
       }
       seenPaths.add(path);
       scriptPaths.push(path);
-      zipEntries.push({ path, text: src });
+      zipEntries.push({
+        path,
+        text: src,
+        bytes: verifiedSourceBytes(file.sourceBytes, src, `"${path}"`),
+      });
       continue;
     }
 
@@ -625,7 +938,11 @@ export function exportModPack(input) {
     seenPaths.add(path);
     contentByPath[path] = text;
     parsedByPath[path] = file.parsed;
-    zipEntries.push({ path, text });
+    zipEntries.push({
+      path,
+      text,
+      bytes: verifiedSourceBytes(file.sourceBytes, text, `"${path}"`),
+    });
   }
 
   // 1a. Every `.rhai` member must be referenced by a world's `script = "..."`
@@ -711,14 +1028,40 @@ export function exportModPack(input) {
   for (const r of manifestErrors) errors.push(`${MANIFEST_PATH}: ${r.message}`);
   for (const r of manifestWarnings) warnings.push(`${MANIFEST_PATH}: ${r.message}`);
 
+  // An imported manifest whose known semantic fields are unchanged can ride
+  // back out verbatim. Comments, ordering and unknown extension keys are not
+  // represented by the form model, so regenerating it would silently discard
+  // source material while the operator repaired an unrelated member finding.
+  let manifestToml = buildManifestToml(scenarios, pack);
+  let manifestBytes;
+  if (sourceSemantics) {
+    try {
+      const expected = parsePackManifest(manifestToml);
+      if (manifestSemanticState(sourceSemantics) !== manifestSemanticState(expected)) {
+        errors.push(`${MANIFEST_PATH} source no longer matches the editable manifest fields`);
+      } else {
+        manifestToml = manifestSource.text;
+        manifestBytes = verifiedSourceBytes(
+          manifestSource.bytes,
+          manifestToml,
+          `"${MANIFEST_PATH}"`,
+        );
+      }
+    } catch (error) {
+      errors.push(`${MANIFEST_PATH} source could not be parsed: ${error.message}`);
+    }
+  }
+
   if (errors.length > 0) {
     return { ok: false, errors, warnings };
   }
 
   // 4. Build the archive: the required manifest (with its [pack] header) plus
   //    every validated file.
-  const manifestToml = buildManifestToml(scenarios, pack);
-  const archiveEntries = [{ path: MANIFEST_PATH, text: manifestToml }, ...zipEntries];
+  const archiveEntries = [
+    { path: MANIFEST_PATH, text: manifestToml, bytes: manifestBytes },
+    ...zipEntries,
+  ];
   const zip = createStoreZip(archiveEntries);
 
   return {

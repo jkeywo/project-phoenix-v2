@@ -69,6 +69,28 @@ pub fn encode_audio_cue(c: &crate::audio_config::AudioCue) -> Result<String, ser
     serde_json::to_string(c)
 }
 
+/// Encode the rendererless GM peer's absolute local map Host Channel projection.
+pub fn encode_gm_entity_projection(
+    payload: &crate::gm_projection::GmEntityProjectionPayload,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(payload)
+}
+
+/// Encode the rendererless GM peer's absolute bounded activity Host Channel
+/// projection (issues #1297/#1298).
+pub fn encode_gm_activity_feed(
+    payload: &crate::gm_activity::GmActivityFeedPayload,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(payload)
+}
+
+/// Encode the rendererless GM peer's authentic Station-interface projection.
+pub fn encode_gm_station_projection(
+    payload: &crate::gm_projection::GmStationProjectionPayload,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(payload)
+}
+
 /// Encode a station-activity debug payload to JSON (issue #1145, PRD #1144).
 ///
 /// The single seam where `crate::debug::payload::StationActivityPayload` becomes
@@ -462,6 +484,7 @@ pub fn encode_mesh_frame(frame: &crate::lockstep::MeshFrame) -> Result<String, s
                 "from": f.from.0,
                 "tick": f.tick,
                 "ready_through": f.ready_through,
+                "start_grant": f.start_grant,
                 "commands": f
                     .commands
                     .iter()
@@ -530,6 +553,108 @@ pub fn encode_mesh_frame(frame: &crate::lockstep::MeshFrame) -> Result<String, s
                 "tick": f.tick,
             }),
         ),
+        MeshFrame::GmAction(f) => match f {
+            crate::gm_action::GmActionFrame::Proposal(proposal) => (
+                0,
+                serde_json::json!({
+                    "from": proposal.from.0,
+                    "tick": 0,
+                    "kind": "proposal",
+                    "operator_id": proposal.operator_id,
+                    "correlation": proposal.correlation,
+                    "action": serde_json::to_value(&proposal.action)?,
+                }),
+            ),
+            crate::gm_action::GmActionFrame::Granted(grant) => (
+                grant.apply_tick,
+                serde_json::json!({
+                    "from": grant.sequenced_by.0,
+                    "tick": grant.apply_tick,
+                    "kind": "granted",
+                    "requester": grant.from.0,
+                    "operator_id": grant.operator_id,
+                    "correlation": grant.correlation,
+                    "recovery_generation": grant.recovery_generation,
+                    "apply_tick": grant.apply_tick,
+                    "sequence": grant.order.sequence,
+                    "action": serde_json::to_value(&grant.action)?,
+                }),
+            ),
+            crate::gm_action::GmActionFrame::Refused(refusal) => (
+                refusal.tick,
+                serde_json::json!({
+                    "from": refusal.sequenced_by.0,
+                    "tick": refusal.tick,
+                    "kind": "refused",
+                    "requester": refusal.requester.0,
+                    "operator_id": refusal.operator_id,
+                    "correlation": refusal.correlation,
+                    "action_kind": refusal.action_kind,
+                    "requested_active": refusal.requested_active,
+                    "reason": refusal.reason,
+                }),
+            ),
+        },
+        MeshFrame::GmJoin(frame) => match frame {
+            crate::gm_join::GmJoinFrame::Pause(approval) => (
+                approval.apply_tick,
+                serde_json::json!({
+                    "from": approval.owner.0,
+                    "tick": approval.apply_tick,
+                    "kind": "pause",
+                    "join_kind": approval.kind,
+                    "join_id": approval.id.0,
+                    "approved_by": approval.approved_by.0,
+                    "candidate": approval.candidate.host.0,
+                    "operator_id": approval.candidate.operator_id,
+                    "apply_tick": approval.apply_tick,
+                    "transfer_id": format!("{:016x}", approval.transfer_id),
+                }),
+            ),
+            crate::gm_join::GmJoinFrame::Restored { from, id, digest } => (
+                0,
+                serde_json::json!({
+                    "from": from.0,
+                    "tick": 0,
+                    "kind": "restored",
+                    "join_id": id.0,
+                    "digest": format!("{:016x}", digest),
+                }),
+            ),
+            crate::gm_join::GmJoinFrame::RestoreBoundary { from, id, boundary } => (
+                0,
+                serde_json::json!({
+                    "from": from.0,
+                    "tick": 0,
+                    "kind": "restore-boundary",
+                    "join_id": id.0,
+                    "boundary": boundary,
+                }),
+            ),
+            crate::gm_join::GmJoinFrame::Committed(commit) => (
+                commit.tick,
+                serde_json::json!({
+                    "from": commit.owner.0,
+                    "tick": commit.tick,
+                    "kind": "committed",
+                    "join_kind": commit.kind,
+                    "join_id": commit.id.0,
+                    "candidate": commit.candidate.host.0,
+                    "operator_id": commit.candidate.operator_id,
+                    "digest": format!("{:016x}", commit.digest),
+                }),
+            ),
+            crate::gm_join::GmJoinFrame::Refused { from, id, reason } => (
+                0,
+                serde_json::json!({
+                    "from": from.0,
+                    "tick": 0,
+                    "kind": "refused",
+                    "join_id": id.0,
+                    "reason": reason,
+                }),
+            ),
+        },
     };
     Ok(serde_json::json!({
         MESH_ENVELOPE_PROTOCOL: crate::lockstep::HOST_MESH_PROTOCOL,
@@ -564,6 +689,15 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
     let tick = body.get("tick")?.as_u64()?;
     match value.get(MESH_ENVELOPE_TYPE)?.as_str()? {
         crate::lockstep::frame::TYPE_TICK => {
+            let start_grant = match body.get("start_grant")? {
+                serde_json::Value::Null => None,
+                value => {
+                    let grant: crate::lobby::start_policy::StartGrant =
+                        serde_json::from_value(value.clone()).ok()?;
+                    grant.validate().ok()?;
+                    Some(grant)
+                }
+            };
             let mut commands = Vec::new();
             for entry in body.get("commands")?.as_array()? {
                 commands.push(MeshCommand {
@@ -582,6 +716,7 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
                 tick,
                 ready_through: body.get("ready_through")?.as_u64()?,
                 commands,
+                start_grant,
             }))
         }
         crate::lockstep::frame::TYPE_DIGEST => Some(MeshFrame::Digest(DigestFrame {
@@ -614,6 +749,135 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
                 tick,
             }))
         }
+        crate::lockstep::frame::TYPE_GM_ACTION => {
+            let frame = match body.get("kind")?.as_str()? {
+                "proposal" => {
+                    if tick != 0 {
+                        return None;
+                    }
+                    let proposal = crate::gm_action::GmActionProposal {
+                        from,
+                        operator_id: body.get("operator_id")?.as_str()?.to_string(),
+                        correlation: serde_json::from_value(body.get("correlation")?.clone())
+                            .ok()?,
+                        action: serde_json::from_value(body.get("action")?.clone()).ok()?,
+                    };
+                    proposal
+                        .validate()
+                        .is_ok()
+                        .then_some(crate::gm_action::GmActionFrame::Proposal(proposal))?
+                }
+                "granted" => {
+                    let requester = HostSlot(u32::try_from(body.get("requester")?.as_u64()?).ok()?);
+                    let grant = crate::gm_action::GmActionGrant {
+                        from: requester,
+                        sequenced_by: from,
+                        operator_id: body.get("operator_id")?.as_str()?.to_string(),
+                        correlation: serde_json::from_value(body.get("correlation")?.clone())
+                            .ok()?,
+                        recovery_generation: body.get("recovery_generation")?.as_u64()?,
+                        apply_tick: body.get("apply_tick")?.as_u64()?,
+                        order: crate::gm_action::GmActionOrder::new(
+                            requester,
+                            body.get("sequence")?.as_u64()?,
+                        ),
+                        action: serde_json::from_value(body.get("action")?.clone()).ok()?,
+                    };
+                    if grant.apply_tick != tick || grant.validate().is_err() {
+                        return None;
+                    }
+                    crate::gm_action::GmActionFrame::Granted(grant)
+                }
+                "refused" => {
+                    crate::gm_action::GmActionFrame::Refused(crate::gm_action::GmActionRefusal {
+                        sequenced_by: from,
+                        requester: HostSlot(u32::try_from(body.get("requester")?.as_u64()?).ok()?),
+                        operator_id: body.get("operator_id")?.as_str()?.to_string(),
+                        correlation: serde_json::from_value(body.get("correlation")?.clone())
+                            .ok()?,
+                        action_kind: serde_json::from_value(body.get("action_kind")?.clone())
+                            .ok()?,
+                        requested_active: body.get("requested_active")?.as_bool()?,
+                        tick,
+                        reason: serde_json::from_value(body.get("reason")?.clone()).ok()?,
+                    })
+                }
+                _ => return None,
+            };
+            Some(MeshFrame::GmAction(frame))
+        }
+        crate::lockstep::frame::TYPE_GM_JOIN => {
+            use crate::gm_join::{
+                GmJoinApproval, GmJoinCandidate, GmJoinCommit, GmJoinFrame, GmJoinId,
+            };
+            let id = GmJoinId(body.get("join_id")?.as_u64()?);
+            let frame = match body.get("kind")?.as_str()? {
+                "pause" => {
+                    let approval = GmJoinApproval {
+                        id,
+                        kind: serde_json::from_value(body.get("join_kind")?.clone()).ok()?,
+                        owner: from,
+                        approved_by: HostSlot(
+                            u32::try_from(body.get("approved_by")?.as_u64()?).ok()?,
+                        ),
+                        candidate: GmJoinCandidate {
+                            host: HostSlot(u32::try_from(body.get("candidate")?.as_u64()?).ok()?),
+                            operator_id: body.get("operator_id")?.as_str()?.to_string(),
+                        },
+                        apply_tick: body.get("apply_tick")?.as_u64()?,
+                        transfer_id: u64::from_str_radix(body.get("transfer_id")?.as_str()?, 16)
+                            .ok()?,
+                    };
+                    if approval.apply_tick != tick {
+                        return None;
+                    }
+                    GmJoinFrame::Pause(approval)
+                }
+                "restored" => {
+                    if tick != 0 {
+                        return None;
+                    }
+                    GmJoinFrame::Restored {
+                        from,
+                        id,
+                        digest: u64::from_str_radix(body.get("digest")?.as_str()?, 16).ok()?,
+                    }
+                }
+                "restore-boundary" => {
+                    if tick != 0 {
+                        return None;
+                    }
+                    GmJoinFrame::RestoreBoundary {
+                        from,
+                        id,
+                        boundary: u16::try_from(body.get("boundary")?.as_u64()?).ok()?,
+                    }
+                }
+                "committed" => GmJoinFrame::Committed(GmJoinCommit {
+                    id,
+                    kind: serde_json::from_value(body.get("join_kind")?.clone()).ok()?,
+                    owner: from,
+                    candidate: GmJoinCandidate {
+                        host: HostSlot(u32::try_from(body.get("candidate")?.as_u64()?).ok()?),
+                        operator_id: body.get("operator_id")?.as_str()?.to_string(),
+                    },
+                    tick,
+                    digest: u64::from_str_radix(body.get("digest")?.as_str()?, 16).ok()?,
+                }),
+                "refused" => {
+                    if tick != 0 {
+                        return None;
+                    }
+                    GmJoinFrame::Refused {
+                        from,
+                        id,
+                        reason: serde_json::from_value(body.get("reason")?.clone()).ok()?,
+                    }
+                }
+                _ => return None,
+            };
+            Some(MeshFrame::GmJoin(frame))
+        }
         _ => None,
     }
 }
@@ -622,7 +886,8 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
 /// start (issue #1116).
 ///
 /// ```json
-/// { "local": 2, "delay": 6,
+/// { "local": 2, "owner": 1, "participants": [1, 2, 3], "delay": 6,
+///   "gms": [ { "host": 2, "operator_id": "gm-1" } ],
 ///   "ships": [ { "host": 1, "ship_path": "assets/entities/alliance_cruiser.toml",
 ///                "crew": [["helm", "Std"], ["tactical", "Std"]] } ] }
 /// ```
@@ -638,7 +903,7 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
 pub fn decode_fleet_roster(raw: &str) -> Option<(crate::lockstep::FleetRoster, Option<u64>)> {
     use crate::command_admission::HostSlot;
     use crate::core::messages::StationId;
-    use crate::lockstep::{FleetRoster, FleetShip};
+    use crate::lockstep::{FleetGm, FleetRoster, FleetShip};
 
     let value: serde_json::Value = serde_json::from_str(raw).ok()?;
     let local = HostSlot(u32::try_from(value.get("local")?.as_u64()?).ok()?);
@@ -669,10 +934,168 @@ pub fn decode_fleet_roster(raw: &str) -> Option<(crate::lockstep::FleetRoster, O
             crew,
         });
     }
-    if ships.is_empty() {
-        return None;
+    if let Some(entries) = value.get("participants") {
+        let participants = entries
+            .as_array()?
+            .iter()
+            .map(|entry| {
+                let slot = u32::try_from(entry.as_u64()?).ok()?;
+                (slot > 0).then_some(HostSlot(slot))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let owner = HostSlot(u32::try_from(value.get("owner")?.as_u64()?).ok()?);
+        let gms = value
+            .get("gms")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+            .iter()
+            .map(|entry| {
+                Some(FleetGm {
+                    host: HostSlot(u32::try_from(entry.get("host")?.as_u64()?).ok()?),
+                    operator_id: entry.get("operator_id")?.as_str()?.to_string(),
+                })
+            })
+            .collect::<Option<Vec<_>>>()?;
+        return Some((
+            FleetRoster::with_participants_and_gms(ships, participants, gms, local, owner)?,
+            delay,
+        ));
     }
-    Some((FleetRoster::new(ships, local), delay))
+    // Compatibility for pre-v7 native fixtures and stored boot identities. A
+    // new browser fleet always supplies the explicit private participant set;
+    // only that exact path may represent a zero-ship GM-only simulation.
+    (!ships.is_empty()).then(|| (FleetRoster::new(ships, local), delay))
+}
+
+/// Decode one complete crew-public GM roster from the host page (issue #1289).
+///
+/// The accepted wire shape is exactly an array of
+/// `{ id, name, connected, ready }`
+/// rows. [`crate::gm_roster::GmOperator`]'s `deny_unknown_fields` prevents a
+/// private peer id, reconnect credential or authority flag from crossing this
+/// boundary unnoticed; [`crate::gm_roster::GmRoster::try_new`] applies the
+/// bounded, unique and deterministic roster contract.
+pub fn decode_gm_roster(raw: &str) -> Option<crate::gm_roster::GmRoster> {
+    let operators: Vec<crate::gm_roster::GmOperator> = serde_json::from_str(raw).ok()?;
+    crate::gm_roster::GmRoster::try_new(operators).ok()
+}
+
+/// Decode the one privileged browser-GM action ingress (issue #1292).
+/// Unknown fields are refused so this narrow route cannot accidentally become
+/// a generic host mutation surface.
+pub fn decode_gm_action_request(raw: &str) -> Option<crate::gm_action::GmActionRequest> {
+    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let object = value.as_object()?;
+    let action = match object.get("action")?.as_str()? {
+        "set_session_paused" if object.len() == 4 && object.contains_key("active") => {
+            crate::gm_action::GmAction::SetSessionPaused {
+                active: object.get("active")?.as_bool()?,
+            }
+        }
+        "set_station_puppet"
+            if object.len() == 6
+                && object.contains_key("ship")
+                && object.contains_key("station")
+                && object.contains_key("active") =>
+        {
+            crate::gm_action::GmAction::SetStationPuppet {
+                ship: crate::command_admission::log::ShipKey(bounded_gm_target_id(
+                    object.get("ship")?.as_str()?,
+                )?),
+                station: crate::core::messages::StationId(bounded_gm_target_id(
+                    object.get("station")?.as_str()?,
+                )?),
+                active: object.get("active")?.as_bool()?,
+            }
+        }
+        "issue_station_command"
+            if object.len() == 7
+                && object.contains_key("ship")
+                && object.contains_key("station")
+                && object.contains_key("target")
+                && object.contains_key("payload") =>
+        {
+            let payload: crate::core::messages::SystemControlPayload =
+                serde_json::from_value(object.get("payload")?.clone()).ok()?;
+            crate::gm_action::GmAction::IssueStationCommand {
+                ship: crate::command_admission::log::ShipKey(bounded_gm_target_id(
+                    object.get("ship")?.as_str()?,
+                )?),
+                station: crate::core::messages::StationId(bounded_gm_target_id(
+                    object.get("station")?.as_str()?,
+                )?),
+                target: crate::core::messages::SystemId(bounded_gm_target_id(
+                    object.get("target")?.as_str()?,
+                )?),
+                payload: canonical_system_command(&payload)?,
+            }
+        }
+        _ => return None,
+    };
+    let request = crate::gm_action::GmActionRequest {
+        operator_id: object.get("operator_id")?.as_str()?.to_string(),
+        correlation: serde_json::from_value(object.get("correlation")?.clone()).ok()?,
+        action,
+    };
+    (!request.operator_id.is_empty()
+        && request.operator_id.chars().count() <= crate::gm_roster::MAX_GM_OPERATOR_ID_CHARS)
+        .then_some(request)
+}
+
+fn bounded_gm_target_id(value: &str) -> Option<String> {
+    (!value.is_empty() && value.len() <= 128 && !value.chars().any(char::is_control))
+        .then(|| value.to_string())
+}
+
+pub fn canonical_system_command(
+    payload: &crate::core::messages::SystemControlPayload,
+) -> Option<crate::gm_puppet::CanonicalSystemCommandPayload> {
+    crate::gm_puppet::CanonicalSystemCommandPayload::new(serde_json::to_string(payload).ok()?).ok()
+}
+
+pub fn decode_canonical_system_command(
+    raw: &str,
+) -> Option<crate::core::messages::SystemControlPayload> {
+    let payload = serde_json::from_str(raw).ok()?;
+    (canonical_system_command(&payload)?.as_str() == raw).then_some(payload)
+}
+
+pub fn encode_gm_session_projection(
+    projection: &crate::gm_action::GmSessionProjection,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(projection)
+}
+
+/// Encode the read-only GM admission/reconnect progress mirrored to the page.
+pub fn encode_gm_join_progress(
+    progress: &crate::gm_join::GmJoinProgress,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(progress)
+}
+
+/// Decode and validate one host-mesh lobby start grant (issue #1290).
+///
+/// JSON stays confined to this codec seam. The grant itself is exact and
+/// bounded; `StartGrant::validate` additionally checks the `start-N`
+/// idempotency key and the mode/attribution pairing.
+pub fn decode_start_grant(raw: &str) -> Option<crate::lobby::start_policy::StartGrant> {
+    let grant: crate::lobby::start_policy::StartGrant = serde_json::from_str(raw).ok()?;
+    grant.validate().ok()?;
+    Some(grant)
+}
+
+pub fn encode_start_grant_result(
+    result: &crate::lobby::start_policy::StartGrantResult,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(result)
+}
+
+/// Encode the definitive asynchronous result of `wasm_join_fleet` adoption.
+pub fn encode_fleet_join_status(
+    status: &crate::lockstep::FleetJoinStatus,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(status)
 }
 
 /// Encode the fleet-link status the host page's operator surface reads.
@@ -732,6 +1155,7 @@ pub fn encode_mesh_status(
 mod mesh_frame_tests {
     use crate::command_admission::{CommandOrder, HostSlot, ShipKey};
     use crate::core::messages::{SystemControlPayload, SystemId};
+    use crate::lobby::start_policy::{StartGrant, StartGrantMode};
     use crate::lockstep::{DigestFrame, HostLossFrame, MeshCommand, MeshFrame, TickFrame};
 
     fn tick_frame() -> MeshFrame {
@@ -755,6 +1179,12 @@ mod mesh_frame_tests {
                     payload: SystemControlPayload::SetRedAlert { active: true },
                 },
             ],
+            start_grant: Some(StartGrant {
+                id: "start-7".into(),
+                mode: StartGrantMode::Forced,
+                operator_id: Some("gm-1".into()),
+                apply_tick: 419,
+            }),
         })
     }
 
@@ -764,12 +1194,16 @@ mod mesh_frame_tests {
     fn a_tick_frame_round_trips_through_the_shared_envelope() {
         let frame = tick_frame();
         let text = super::encode_mesh_frame(&frame).expect("encodes");
-        assert!(text.contains("\"m\":4"), "the revision travels: {text}");
+        assert!(text.contains("\"m\":11"), "the revision travels: {text}");
         assert!(text.contains("\"t\":\"tick\""), "{text}");
         assert!(
             text.contains("\"tick\":412"),
             "the envelope's own tick stamp — the field #1114 added for exactly \
              this — must carry the tick the frame applies at: {text}"
+        );
+        assert!(
+            text.contains("\"apply_tick\":419"),
+            "the owner-scheduled start boundary travels inside the tick frame: {text}"
         );
         assert_eq!(super::decode_mesh_frame(&text), Some(frame));
     }
@@ -873,7 +1307,7 @@ mod mesh_frame_tests {
             tick: 418,
         });
         let text = super::encode_mesh_frame(&frame).expect("encodes");
-        assert!(text.contains("\"m\":4"), "the revision travels: {text}");
+        assert!(text.contains("\"m\":11"), "the revision travels: {text}");
         assert!(text.contains("\"t\":\"host-loss\""), "{text}");
         assert!(
             text.contains("\"lost\":3"),
@@ -908,6 +1342,180 @@ mod mesh_frame_tests {
             "the deterministic tiebreak must survive the wire: {text}"
         );
         assert_eq!(super::decode_mesh_frame(&text), Some(frame));
+    }
+
+    #[test]
+    fn an_attributed_gm_action_round_trips_through_the_shared_envelope() {
+        let frame = MeshFrame::GmAction(crate::gm_action::GmActionFrame::Granted(
+            crate::gm_action::GmActionGrant {
+                from: HostSlot(2),
+                sequenced_by: HostSlot(1),
+                operator_id: "gm-1".into(),
+                correlation: crate::gm_action::GmActionId::new("pause-17").unwrap(),
+                recovery_generation: 0,
+                apply_tick: 419,
+                order: crate::gm_action::GmActionOrder::new(HostSlot(2), 17),
+                action: crate::gm_action::GmAction::SetSessionPaused { active: true },
+            },
+        ));
+        let text = super::encode_mesh_frame(&frame).expect("encodes");
+        assert!(text.contains("\"m\":11"), "the revision travels: {text}");
+        assert!(text.contains("\"t\":\"gm-action\""), "{text}");
+        assert!(text.contains("\"operator_id\":\"gm-1\""), "{text}");
+        assert!(text.contains("\"tick\":419"), "{text}");
+        assert_eq!(super::decode_mesh_frame(&text), Some(frame));
+    }
+
+    #[test]
+    fn gm_proposals_and_canonical_refusals_round_trip_on_the_same_lane() {
+        let proposal = MeshFrame::GmAction(crate::gm_action::GmActionFrame::Proposal(
+            crate::gm_action::GmActionProposal {
+                from: HostSlot(2),
+                operator_id: "gm-1".into(),
+                correlation: crate::gm_action::GmActionId::new("proposal-1").unwrap(),
+                action: crate::gm_action::GmAction::SetSessionPaused { active: true },
+            },
+        ));
+        let refusal = MeshFrame::GmAction(crate::gm_action::GmActionFrame::Refused(
+            crate::gm_action::GmActionRefusal {
+                sequenced_by: HostSlot(1),
+                requester: HostSlot(2),
+                operator_id: "gm-1".into(),
+                correlation: crate::gm_action::GmActionId::new("proposal-1").unwrap(),
+                action_kind: crate::gm_action::GmActionKind::SessionPause,
+                requested_active: true,
+                tick: 419,
+                reason: crate::gm_action::GmActionRefusalReason::WrongPhase,
+            },
+        ));
+        for frame in [proposal, refusal] {
+            let text = super::encode_mesh_frame(&frame).unwrap();
+            assert_eq!(super::decode_mesh_frame(&text), Some(frame));
+        }
+    }
+
+    #[test]
+    fn first_time_gm_join_frames_round_trip_on_the_shared_envelope() {
+        use crate::gm_join::{
+            GmJoinApproval, GmJoinCandidate, GmJoinCommit, GmJoinFrame, GmJoinId, GmJoinKind,
+            GmJoinRefusal,
+        };
+
+        let candidate = GmJoinCandidate {
+            host: HostSlot(3),
+            operator_id: "gm-2".into(),
+        };
+        let frames = [
+            MeshFrame::GmJoin(GmJoinFrame::Pause(GmJoinApproval {
+                id: GmJoinId(7),
+                kind: GmJoinKind::FirstTime,
+                owner: HostSlot(1),
+                approved_by: HostSlot(2),
+                candidate: candidate.clone(),
+                apply_tick: 419,
+                transfer_id: 0x1293_0000_0000_0007,
+            })),
+            MeshFrame::GmJoin(GmJoinFrame::Restored {
+                from: HostSlot(3),
+                id: GmJoinId(7),
+                digest: 0xfeed_beef,
+            }),
+            MeshFrame::GmJoin(GmJoinFrame::RestoreBoundary {
+                from: HostSlot(3),
+                id: GmJoinId(7),
+                boundary: 4,
+            }),
+            MeshFrame::GmJoin(GmJoinFrame::Committed(GmJoinCommit {
+                id: GmJoinId(7),
+                kind: GmJoinKind::Reconnect,
+                owner: HostSlot(1),
+                candidate: candidate.clone(),
+                tick: 419,
+                digest: 0xfeed_beef,
+            })),
+            MeshFrame::GmJoin(GmJoinFrame::Refused {
+                from: HostSlot(1),
+                id: GmJoinId(7),
+                reason: GmJoinRefusal::DigestMismatch {
+                    expected: 1,
+                    restored: 2,
+                },
+            }),
+        ];
+        for frame in frames {
+            let text = super::encode_mesh_frame(&frame).expect("encodes");
+            assert!(text.contains("\"m\":11"), "the revision travels: {text}");
+            assert!(text.contains("\"t\":\"gm-join\""), "{text}");
+            assert_eq!(super::decode_mesh_frame(&text), Some(frame));
+        }
+    }
+
+    #[test]
+    fn the_gm_action_ingress_is_one_exact_bounded_typed_shape() {
+        let request = super::decode_gm_action_request(
+            r#"{"operator_id":"gm-1","correlation":"pause-17","action":"set_session_paused","active":true}"#,
+        )
+        .expect("valid request");
+        assert_eq!(request.operator_id, "gm-1");
+        assert_eq!(request.correlation.as_str(), "pause-17");
+        assert_eq!(request.action.requested_pause(), Some(true));
+
+        for refused in [
+            r#"{"operator_id":"","correlation":"pause-17","action":"set_session_paused","active":true}"#,
+            r#"{"operator_id":"gm-1","correlation":"bad id","action":"set_session_paused","active":true}"#,
+            r#"{"operator_id":"gm-1","correlation":"pause-17","action":"toggle_pause","active":true}"#,
+            r#"{"operator_id":"gm-1","correlation":"pause-17","action":"set_session_paused","active":true,"component":"Transform"}"#,
+        ] {
+            assert!(
+                super::decode_gm_action_request(refused).is_none(),
+                "must fail closed: {refused}"
+            );
+        }
+    }
+
+    #[test]
+    fn station_takeover_and_existing_system_commands_share_the_exact_typed_ingress() {
+        let takeover = super::decode_gm_action_request(
+            r#"{"operator_id":"gm-1","correlation":"take-17","action":"set_station_puppet","ship":"ship-1","station":"captain","active":true}"#,
+        )
+        .expect("valid takeover request");
+        assert_eq!(
+            takeover.action,
+            crate::gm_action::GmAction::SetStationPuppet {
+                ship: crate::command_admission::log::ShipKey("ship-1".into()),
+                station: crate::core::messages::StationId("captain".into()),
+                active: true,
+            }
+        );
+
+        let command = super::decode_gm_action_request(
+            r#"{"operator_id":"gm-1","correlation":"command-17","action":"issue_station_command","ship":"ship-1","station":"captain","target":"red-alert","payload":{"type":"SetRedAlert","data":{"active":true}}}"#,
+        )
+        .expect("valid existing System command");
+        let crate::gm_action::GmAction::IssueStationCommand { payload, .. } = command.action else {
+            panic!("decoded the wrong typed action")
+        };
+        assert_eq!(
+            super::decode_canonical_system_command(payload.as_str()),
+            Some(crate::core::messages::SystemControlPayload::SetRedAlert { active: true })
+        );
+        assert!(
+            super::decode_canonical_system_command(
+                r#"{ "type":"SetRedAlert", "data":{"active":true} }"#
+            )
+            .is_none(),
+            "only the canonical command bytes replay"
+        );
+
+        for refused in [
+            r#"{"operator_id":"gm-1","correlation":"take-17","action":"set_station_puppet","ship":"ship-1","station":"captain","active":true,"authority":"human"}"#,
+            r#"{"operator_id":"gm-1","correlation":"command-17","action":"issue_station_command","ship":"ship-1","station":"captain","target":"red-alert","payload":{"type":"NotACommand"}}"#,
+        ] {
+            assert!(
+                super::decode_gm_action_request(refused).is_none(),
+                "must fail closed: {refused}"
+            );
+        }
     }
 
     /// No session token can reach this wire, because the type it projects from

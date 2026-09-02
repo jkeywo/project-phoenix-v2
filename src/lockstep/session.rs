@@ -91,17 +91,33 @@ impl LockstepSession {
     /// for ticks `0..=delay`. Seeding anything lower would deadlock the fleet
     /// on tick zero, since no host can send a frame before it has stepped.
     pub fn new(local: HostSlot, peers: impl IntoIterator<Item = HostSlot>, delay: u64) -> Self {
+        Self::new_at(local, peers, delay, 0).expect("tick zero plus a u64 delay cannot overflow")
+    }
+
+    /// Open a session at an already-agreed activation tick.
+    ///
+    /// Browser participants rebase to a common non-zero lobby epoch before the
+    /// wait-set is installed. Seeding peers through only bare `delay` there
+    /// would deadlock immediately because the next local tick is already far
+    /// beyond that watermark; the seed is therefore `activation_tick + delay`.
+    pub fn new_at(
+        local: HostSlot,
+        peers: impl IntoIterator<Item = HostSlot>,
+        delay: u64,
+        activation_tick: u64,
+    ) -> Option<Self> {
+        let initial_ready = activation_tick.checked_add(delay)?;
         let ready_through = peers
             .into_iter()
             .filter(|slot| *slot != local)
-            .map(|slot| (slot, delay))
+            .map(|slot| (slot, initial_ready))
             .collect();
-        Self {
+        Some(Self {
             local,
             delay,
             ready_through,
             departed: BTreeSet::new(),
-        }
+        })
     }
 
     /// This host's own slot — the origin every command it admits is ordered
@@ -127,6 +143,20 @@ impl LockstepSession {
     /// solo path acquires a stall it can never clear.
     pub fn is_alone(&self) -> bool {
         self.ready_through.is_empty()
+    }
+
+    /// Add a digest-proven mid-session participant at a paused boundary.
+    ///
+    /// The candidate restored this exact `activation_tick`; seeding its
+    /// watermark through `tick + delay` is the same bootstrap guarantee
+    /// [`Self::new_at`] gives every original peer.  Exact retries are inert.
+    pub fn admit_peer(&mut self, peer: HostSlot, activation_tick: u64) {
+        if peer == self.local || self.departed.contains(&peer) {
+            return;
+        }
+        self.ready_through
+            .entry(peer)
+            .or_insert_with(|| activation_tick.saturating_add(self.delay));
     }
 
     /// Record a peer's watermark.

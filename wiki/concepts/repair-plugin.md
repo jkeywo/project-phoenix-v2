@@ -1,9 +1,9 @@
 ---
 title: Repair Runtime
 type: concept
-tags: [repair, damage, teams, blackboard, ai, external-repair]
-sources: [src/console/repair/server.rs, src/console/repair/dispatch.rs, src/console/repair/external_server.rs, src/console/repair/visibility.rs, src/ship/coordination_systems.rs, src/ship/damage_sync.rs, src/ship/components.rs, src/modifiers/repair_teams.rs, src/core/messages.rs, gui/components/ph-repair-teams.js]
-updated: 2026-08-27
+tags: [repair, damage, teams, blackboard, ai, external-repair, semantic-actions, feedback]
+sources: [src/console/repair/server.rs, src/console/repair/dispatch.rs, src/console/repair/external_server.rs, src/console/repair/visibility.rs, src/ship/coordination_systems.rs, src/ship/damage_sync.rs, src/ship/components.rs, src/modifiers/repair_teams.rs, src/core/messages.rs, src/command_admission/mod.rs, gui/components/ph-repair-teams.js, gui/stations/engineering-actions.js, gui/action-map.js]
+updated: 2026-08-31
 ---
 
 # Repair Runtime
@@ -16,6 +16,18 @@ The Repair console and `operate_repair_ai` emit the same admitted payloads. The 
 
 An on-site team sweeps repairable systems at its station worst-first. `SetRepairTargetPriority` can pin one system as the next job without changing the standing deterministic order. Team slots carry `SystemId` and display text so the client never reconstructs target identity from an obsolete console enum.
 
+`repair.dispatch-team` preserves the exact authored Repair owner, selected integer
+team slot and Station/core target, while `repair.prioritise-system` preserves that
+owner plus the named damaged `SystemId`. Their
+parameter-free bindings choose only an idle visible team/target or a damaged
+row included in the owner's exact `priority_targets` projection. That list is
+derived from the same sweep-group candidate predicate that applies a named
+priority, then visibility-filtered, so neither the adapter nor the component
+guesses reachability from partial hull rows. The owning dispatch router
+returns `Applied` only for an existing, non-committed slot with a resolvable
+target; named priority returns it only when an on-site sweep accepts the pin.
+All other correlated outcomes are `Refused`, with no optimistic team movement.
+
 `RepairRequestQueue` is the per-ship AI request queue. It deduplicates by
 Station and retains the worst tier, largest exact deficit, and deterministic
 Station-id tie-break. `RepairHumanAlerted` is the separate per-ship human alert
@@ -24,6 +36,14 @@ latch and is cleared when the reported damage group returns to Operational.
 ## External repairs
 
 `src/console/repair/external_server.rs` owns dispatch to a nearby ally or structure. It shares the ship's team pool, consumes ordinary admitted commands, and applies progress to the target's authoritative condition track. Backfill uses the same command seam.
+
+`repair.external-dispatch` is the shared dispatch/recall semantic action on
+Repair and Engineering variants. Dispatch feedback completes after the live
+lock, range and free-team verdict; explicit recall is an idempotent applied
+assignment. A team remains committed, travels and repairs at the authored rates
+owned by the existing server state machines. A correlated external command on a
+hull without the optional dispatch capability terminates once as `Refused` rather
+than entering a queue with no owner.
 
 ## Publication and visibility
 

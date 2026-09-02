@@ -193,9 +193,14 @@ describe('sendAction — envelope shape', () => {
     expect(stamp).toBeLessThanOrEqual(after);
   });
 
-  it('does not let a caller override the input stamp', () => {
+  it('preserves a supplied finite press stamp across adapter forwarding', () => {
     sendAction('set_target', { __input_ms: 1 });
-    expect(capturedPayload().__input_ms).toBeGreaterThan(1);
+    expect(capturedPayload().__input_ms).toBe(1);
+  });
+
+  it('replaces a non-finite supplied stamp on the shared epoch clock', () => {
+    sendAction('set_target', { __input_ms: Number.NaN });
+    expect(Number.isFinite(capturedPayload().__input_ms)).toBe(true);
   });
 });
 

@@ -84,6 +84,21 @@ describe('installKeyRelay', () => {
     expect(onKey).not.toHaveBeenCalled();
   });
 
+  it('does not relay a key captured by the Settings remap surface', () => {
+    const onKey = vi.fn();
+    target.addEventListener('keydown', onKey);
+    install();
+
+    const capture = document.createElement('button');
+    capture.setAttribute('data-semantic-binding-capture', 'true');
+    document.body.appendChild(capture);
+    capture.dispatchEvent(new KeyboardEvent('keydown', {
+      code: 'KeyR', bubbles: true, cancelable: true,
+    }));
+
+    expect(onKey).not.toHaveBeenCalled();
+  });
+
   it('does nothing when no console is active', () => {
     const onKey = vi.fn();
     target.addEventListener('keydown', onKey);

@@ -3,10 +3,23 @@
 // table is loaded, so the constructor's template t() calls never see an
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
-import { t } from '../strings.js';
+import { t, wireText } from '../strings.js';
 import { phColor } from './ph-console-styles.js';
 import { rovingKeyTarget } from '../roving-tabindex.js';
 import { PhElement, phDefine } from './ph-element.js';
+import { activateNavigationAction } from '../stations/navigation-action-control.js';
+import {
+  NAVIGATION_CONTACT_ACTION_ID,
+  NAVIGATION_PAN_DOWN_ACTION_ID,
+  NAVIGATION_PAN_LEFT_ACTION_ID,
+  NAVIGATION_PAN_RIGHT_ACTION_ID,
+  NAVIGATION_PAN_UP_ACTION_ID,
+  NAVIGATION_WAYPOINT_ANCHOR_ACTION_ID,
+  NAVIGATION_WAYPOINT_CLEAR_ACTION_ID,
+  NAVIGATION_WAYPOINT_PLACE_ACTION_ID,
+  NAVIGATION_ZOOM_IN_ACTION_ID,
+  NAVIGATION_ZOOM_OUT_ACTION_ID,
+} from '../stations/navigation-actions.js';
 
 export class PhNavigationMap extends PhElement {
   // Pure state and per-frame scratch: PRIVATE, because nothing reads them until
@@ -16,10 +29,15 @@ export class PhNavigationMap extends PhElement {
   // onTemplate runs before this subclass's field-init phase (see ph-element.js).
   #state = null;
   #offscreen = null;
+  #icons = {};
   #projectedBlips = [];
+  #projectedRegions = [];
   #selectedBlip = null;
   #toastTimer = null;
   #picking = false;
+  #keyboardCursorX = Number.NaN;
+  #keyboardCursorY = Number.NaN;
+  #keyboardCursorVisible = false;
 
   #zoom = 1;
   #panX = 0;
@@ -66,6 +84,7 @@ export class PhNavigationMap extends PhElement {
       '.wp-btn.show { display: block; }',
       '.wp-btn.active { color: var(--gold); border-color: var(--gold); }',
       '.wp-btn:active { opacity: 0.7; }',
+      '.wp-btn:disabled { opacity: 0.42; cursor: not-allowed; }',
       '.toast { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-family: "JetBrains Mono", monospace; font-size: var(--text-sm); letter-spacing: 0.3em; color: var(--tactical); background: rgba(var(--rgb-deep), 0.92); border: 1px solid var(--tactical); box-shadow: 0 0 24px rgba(var(--rgb-tactical), 0.25); padding: 10px 24px; pointer-events: none; opacity: 0; transition: opacity 0.22s ease; z-index: 3; }',
       '.toast.show { opacity: 1; }',
       '</style>',
@@ -123,6 +142,7 @@ export class PhNavigationMap extends PhElement {
     // commits a waypoint through the SAME named action the bar button does.
     this.setAttribute('role', 'group');
     this.setAttribute('aria-label', t('component.navigation_map.label'));
+    this.setAttribute('aria-description', t('component.navigation_map.keyboard_help'));
     if (!this.hasAttribute('tabindex')) this.setAttribute('tabindex', '0');
     this.addEventListener('keydown', this.#boundKeyDown);
     this.canvas.addEventListener('mousedown', this.#boundMouseDown);
@@ -159,10 +179,157 @@ export class PhNavigationMap extends PhElement {
 
   set state(val) {
     this.#state = val;
+    const inspect = val && val.interaction === 'inspect';
+    if (inspect) {
+      this.setAttribute('aria-label', t('component.entity_map.label'));
+      this.setAttribute('aria-description', t('component.entity_map.keyboard_help'));
+    }
+    // Keep the stable UUID selected, but replace the retained point/Region
+    // object with this absolute projection's current values. The GM inspector
+    // can then survive movement/status refreshes without retaining stale detail.
+    if (this.#selectedBlip && val) {
+      const refreshed = this.#selectionCandidates(val)
+        .find((entry) => entry.uuid === this.#selectedBlip.uuid);
+      if (refreshed) this.#selectedBlip = refreshed;
+    }
+    if (val && val.auto && this.#picking) {
+      this.#picking = false;
+      this.canvas.classList.remove('picking');
+    }
     this.needsRender = true;
   }
 
   get state() { return this.#state; }
+
+  /** Current local contact identity for the Navigation semantic adapter. */
+  navigationSelectedUuid() {
+    return this.#selectedBlip && this.#selectedBlip.uuid || null;
+  }
+
+  /** Return the free world position under the local keyboard cursor. */
+  navigationPlacement() {
+    if (!this.canvas || this.canvas.width <= 0 || this.canvas.height <= 0) return null;
+    this.#ensureKeyboardCursor();
+    const state = this.#state || {};
+    const range = state.range || 50000;
+    const rangeClamped = range > 0 ? range : 50000;
+    const R = Math.min(this.canvas.width, this.canvas.height) / 2;
+    const scale = R / rangeClamped;
+    const [x, z] = this.#screenToWorld(
+      this.#keyboardCursorX,
+      this.#keyboardCursorY,
+      0,
+      0,
+      0,
+      scale,
+      this.canvas.width / 2,
+      this.canvas.height / 2,
+    );
+    return Number.isFinite(x) && Number.isFinite(z) ? { x, z } : null;
+  }
+
+  /** Apply one local contact-selection semantic operation. */
+  navigationSelect(detail = {}) {
+    const contacts = this.#selectionCandidates();
+    let next = null;
+    if (Object.prototype.hasOwnProperty.call(detail, 'uuid')) {
+      next = detail.uuid == null ? null
+        : contacts.find((entry) => entry.uuid === detail.uuid) || null;
+      if (detail.uuid != null && !next) return false;
+    } else {
+      if (contacts.length === 0) return false;
+      const uuids = contacts.map((entry) => entry.uuid);
+      const current = this.#selectedBlip ? uuids.indexOf(this.#selectedBlip.uuid) : -1;
+      const direction = Number(detail.direction) < 0 ? -1 : 1;
+      const index = current < 0
+        ? (direction < 0 ? contacts.length - 1 : 0)
+        : (current + direction + contacts.length) % contacts.length;
+      next = contacts[index];
+    }
+    if ((this.#selectedBlip && this.#selectedBlip.uuid) === (next && next.uuid)) return false;
+    if (!this.#selectedBlip && !next) return false;
+    this.#selectedBlip = next;
+    this.toggleAttribute('data-has-selection', !!next);
+    if (next) this.dataset.selectedEntityId = next.uuid;
+    else delete this.dataset.selectedEntityId;
+    this.#showOverlay(this.#isInspectMode() ? null : next);
+    this.#updateBar();
+    this.#dispatch('navselect', next);
+    this.needsRender = true;
+    return true;
+  }
+
+  /** Apply one local pan operation from a semantic binding or pointer gesture. */
+  navigationPan(detail = {}) {
+    if (!this.canvas || this.canvas.width <= 0 || this.canvas.height <= 0) return false;
+    const step = Math.min(this.canvas.width, this.canvas.height) * 0.08;
+    const dx = Number.isFinite(detail.x) ? detail.x
+      : detail.direction === 'left' ? -step : detail.direction === 'right' ? step : 0;
+    const dy = Number.isFinite(detail.y) ? detail.y
+      : detail.direction === 'up' ? -step : detail.direction === 'down' ? step : 0;
+    if (!Number.isFinite(dx) || !Number.isFinite(dy) || (dx === 0 && dy === 0)) return false;
+    this.#panX += dx;
+    this.#panY += dy;
+    this.needsRender = true;
+    return true;
+  }
+
+  /** Apply one local zoom operation, retaining the gesture's focal point. */
+  navigationZoom(detail = {}) {
+    if (!this.canvas || this.canvas.width <= 0 || this.canvas.height <= 0) return false;
+    const factor = Number.isFinite(detail.factor) && detail.factor > 0
+      ? detail.factor : detail.direction === 'out' ? 0.885 : 1.13;
+    const oldZoom = this.#zoom;
+    const newZoom = Math.max(this.#ZOOM_MIN, Math.min(this.#ZOOM_MAX, oldZoom * factor));
+    if (newZoom === oldZoom) return false;
+    const cx = this.canvas.width / 2;
+    const cy = this.canvas.height / 2;
+    const x = Number.isFinite(detail.x) ? detail.x : cx;
+    const y = Number.isFinite(detail.y) ? detail.y : cy;
+    const zoomRatio = newZoom / oldZoom;
+    this.#panX = x - cx - (x - cx - this.#panX) * zoomRatio;
+    this.#panY = y - cy - (y - cy - this.#panY) * zoomRatio;
+    this.#zoom = newZoom;
+    this.needsRender = true;
+    return true;
+  }
+
+  #activatePan(dx, dy) {
+    if (dx !== 0) {
+      const actionId = dx < 0 ? NAVIGATION_PAN_LEFT_ACTION_ID : NAVIGATION_PAN_RIGHT_ACTION_ID;
+      const detail = { x: dx };
+      if (this.#isInspectMode()) this.navigationPan(detail);
+      else activateNavigationAction(this, actionId, detail, () => this.navigationPan(detail));
+    }
+    if (dy !== 0) {
+      const actionId = dy < 0 ? NAVIGATION_PAN_UP_ACTION_ID : NAVIGATION_PAN_DOWN_ACTION_ID;
+      const detail = { y: dy };
+      if (this.#isInspectMode()) this.navigationPan(detail);
+      else activateNavigationAction(this, actionId, detail, () => this.navigationPan(detail));
+    }
+  }
+
+  #activateZoom(factor, x, y) {
+    const actionId = factor < 1 ? NAVIGATION_ZOOM_OUT_ACTION_ID : NAVIGATION_ZOOM_IN_ACTION_ID;
+    const detail = { factor, x, y };
+    if (this.#isInspectMode()) this.navigationZoom(detail);
+    else activateNavigationAction(this, actionId, detail, () => this.navigationZoom(detail));
+  }
+
+  #isInspectMode() {
+    return !!(this.#state && this.#state.interaction === 'inspect');
+  }
+
+  #selectionCandidates(state = this.#state) {
+    const blips = ((state && state.blips) || [])
+      .filter((entry) => entry && typeof entry.uuid === 'string' && entry.uuid);
+    if (!(state && state.interaction === 'inspect')) return blips;
+    const regions = ((state && state.regions) || [])
+      .filter((entry) => entry && entry.selectable === true
+        && typeof entry.uuid === 'string' && entry.uuid);
+    return [...blips, ...regions]
+      .sort((left, right) => left.uuid.localeCompare(right.uuid));
+  }
 
   initResize() {
     const updateSize = () => {
@@ -256,8 +423,11 @@ export class PhNavigationMap extends PhElement {
 
     // Drop a selection whose blip left the chart (it may have despawned or
     // fallen outside the refresh). Emit only on a change.
-    if (this.#selectedBlip && !blips.some((b) => b.uuid === this.#selectedBlip.uuid)) {
+    if (this.#selectedBlip
+        && !this.#selectionCandidates(state).some((entry) => entry.uuid === this.#selectedBlip.uuid)) {
       this.#selectedBlip = null;
+      this.removeAttribute('data-has-selection');
+      delete this.dataset.selectedEntityId;
       this.#showOverlay(null);
       this.#dispatch('navselect', null);
     }
@@ -284,32 +454,52 @@ export class PhNavigationMap extends PhElement {
     // Areas sit under every point marker, matching the viewscreen radar's
     // draw order (regions before blips) so a hull never hides inside its fill.
     const showNames = this.#zoom >= 0.4;
+    this.#projectedRegions = [];
     this.#drawRegions(octx, regions, cx, cy, scale, namePx, showNames);
 
     if (waypoint && Number.isFinite(waypoint.x) && Number.isFinite(waypoint.z)) {
       this.#drawWaypoint(octx, waypoint, cx, cy, scale, wpPx);
     }
 
-    const [shipSx, shipSy] = this.#worldToScreen(shipPos.x, shipPos.z, 0, 0, 0, scale, cx, cy);
-    this.#drawShipMarker(octx, shipSx, shipSy, R, headingRad);
+    if (state.show_ship_marker !== false) {
+      const [shipSx, shipSy] = this.#worldToScreen(shipPos.x, shipPos.z, 0, 0, 0, scale, cx, cy);
+      this.#drawShipMarker(octx, shipSx, shipSy, R, headingRad);
+    }
 
     this.#projectedBlips = [];
     const blipR = Math.max(3, R * 0.015);
     for (const b of blips) {
       const [sx, sy] = this.#worldToScreen(b.world_x, b.world_z, 0, 0, 0, scale, cx, cy);
       if (sx < -50 || sx > W + 50 || sy < -50 || sy > H + 50) continue;
-      const color = this.#blipColor(b.stance);
+      const markerR = Number.isFinite(b.radar_size)
+        ? Math.max(3, b.radar_size * scale * this.#zoom) : blipR;
+      const color = this.#colourCss(b.color, this.#blipColor(b.stance));
       // Mission contacts wear a plain gold ring. The ticked ring is the
       // target-lock decoration on the tactical radar — a different feature.
-      if (b.objective_target) this.#drawObjectiveRing(octx, sx, sy, blipR + 6);
-      this.#drawBlipShape(octx, b.kind, sx, sy, blipR, color);
+      if (b.objective_target) this.#drawObjectiveRing(octx, sx, sy, markerR + 6);
+      const icon = b.icon ? this.#getIconImage(b.icon) : null;
+      if (this.#imageIsLoaded(icon)) {
+        const size = markerR * 2;
+        octx.drawImage(icon, sx - markerR, sy - markerR, size, size);
+      } else {
+        // Missing, pending, and failed artwork all retain the semantic kind
+        // shape. The map therefore stays deterministic and non-colour-legible
+        // while an authored icon loads or when its asset is unavailable.
+        this.#drawBlipShape(octx, b.kind, sx, sy, markerR, color);
+      }
+      if (b.destroyed) this.#drawDestroyedMark(octx, sx, sy, markerR + 4);
+      if (this.#selectedBlip && this.#selectedBlip.uuid === b.uuid) {
+        this.#drawSelectionRing(octx, sx, sy, markerR + 8);
+      }
       if (showNames && b.name) {
         octx.font = namePx + 'px "JetBrains Mono", monospace';
         octx.fillStyle = phColor(this, color);
-        octx.fillText(b.name, sx + blipR + 4, sy + 4);
+        octx.fillText(wireText(b.name), sx + markerR + 4, sy + 4);
       }
-      this.#projectedBlips.push({ uuid: b.uuid, sx, sy, hitR: Math.max(14, blipR + 6), blip: b });
+      this.#projectedBlips.push({ uuid: b.uuid, sx, sy, hitR: Math.max(14, markerR + 6), blip: b });
     }
+
+    if (this.#keyboardCursorVisible) this.#drawKeyboardCursor(octx, W, H, px);
 
     if (this.#offscreen) {
       this.ctx.drawImage(this.#offscreen, 0, 0);
@@ -417,6 +607,41 @@ export class PhNavigationMap extends PhElement {
     octx.restore();
   }
 
+  #ensureKeyboardCursor() {
+    if (!Number.isFinite(this.#keyboardCursorX) || !Number.isFinite(this.#keyboardCursorY)) {
+      this.#keyboardCursorX = this.canvas.width / 2;
+      this.#keyboardCursorY = this.canvas.height / 2;
+    }
+    this.#keyboardCursorX = Math.max(0, Math.min(this.canvas.width, this.#keyboardCursorX));
+    this.#keyboardCursorY = Math.max(0, Math.min(this.canvas.height, this.#keyboardCursorY));
+  }
+
+  #drawKeyboardCursor(octx, width, height, px) {
+    this.#ensureKeyboardCursor();
+    const x = Math.max(0, Math.min(width, this.#keyboardCursorX));
+    const y = Math.max(0, Math.min(height, this.#keyboardCursorY));
+    const radius = 10 * px;
+    octx.save();
+    octx.strokeStyle = phColor(this, 'var(--gold)');
+    octx.lineWidth = Math.max(1, px);
+    octx.beginPath();
+    octx.moveTo(x - radius, y); octx.lineTo(x + radius, y);
+    octx.moveTo(x, y - radius); octx.lineTo(x, y + radius);
+    octx.stroke();
+    octx.restore();
+  }
+
+  #moveKeyboardCursor(dx, dy) {
+    this.#ensureKeyboardCursor();
+    const cssWidth = this.getBoundingClientRect ? this.getBoundingClientRect().width : 0;
+    const px = cssWidth > 0 ? this.canvas.width / cssWidth : 1;
+    const step = 24 * px;
+    this.#keyboardCursorX = Math.max(0, Math.min(this.canvas.width, this.#keyboardCursorX + dx * step));
+    this.#keyboardCursorY = Math.max(0, Math.min(this.canvas.height, this.#keyboardCursorY + dy * step));
+    this.#keyboardCursorVisible = true;
+    this.needsRender = true;
+  }
+
   /**
    * Region colour as `[r, g, b]` 0-255 ints. `region.color` arrives as the
    * entity's authored `[radar_appearance].region_colour` — raw 0..1 floats,
@@ -432,13 +657,40 @@ export class PhNavigationMap extends PhElement {
     ];
   }
 
+  #colourCss(color, fallback) {
+    if (!Array.isArray(color) || color.length < 3) return fallback;
+    const [r, g, b] = this.#regionRgb(color);
+    return 'rgb(' + r + ',' + g + ',' + b + ')';
+  }
+
+  #iconStemFromName(name) {
+    if (!name) return '';
+    return name.charAt(0).toUpperCase() + name.slice(1);
+  }
+
+  #getIconImage(name) {
+    if (!name) return null;
+    if (this.#icons[name]) return this.#icons[name];
+    if (typeof Image === 'undefined') return null;
+    const image = new Image();
+    image.onload = () => { this.needsRender = true; };
+    image.onerror = () => { this.needsRender = true; };
+    const stem = name === 'player' ? 'PlayerShip' : this.#iconStemFromName(name);
+    this.#icons[name] = image;
+    image.src = '../../assets/radar_icons/Icon-' + stem + '.png';
+    return image;
+  }
+
+  #imageIsLoaded(image) {
+    return !!(image && image.complete && image.naturalWidth > 0);
+  }
+
   /**
    * Draw region hulls and outlines under the blips.
    *
-   * Shapes mirror the viewscreen radar's renderer: a sphere is a filled
-   * circle, a torus is one thick stroked ring (no fill), a box is an
-   * axis-aligned filled rect — box `yaw` is deliberately ignored, matching
-   * the Rust renderer. An `objective_target` region strokes in the waypoint
+   * Shapes mirror authored Region geometry: a sphere is a filled circle, a
+   * torus is one thick stroked ring (no fill), and a box is a yaw-rotated
+   * filled rect. An `objective_target` region strokes in the waypoint
    * gold instead of its own colour: for a sphere or box that gold outline
    * sits around the region's own fill, but a torus never has a fill to
    * begin with, so its single stroked ring renders entirely gold. That is
@@ -466,6 +718,11 @@ export class PhNavigationMap extends PhElement {
       const fill = 'rgba(' + r + ',' + g + ',' + b + ',0.3)';
       const stroke = region.objective_target ? 'var(--gold)' : 'rgb(' + r + ',' + g + ',' + b + ')';
       let labelOffset;
+      let projected;
+
+      octx.setLineDash?.([]);
+      if (this.#isInspectMode() && region.kind === 'hazard') octx.setLineDash?.([9, 5]);
+      else if (this.#isInspectMode() && region.kind === 'asteroid_field') octx.setLineDash?.([2, 5]);
 
       if (region.shape === 'sphere') {
         const rPx = Math.max(4, (region.radius || 0) * pxPerWorld);
@@ -477,6 +734,7 @@ export class PhNavigationMap extends PhElement {
         octx.lineWidth = 1.5;
         octx.stroke();
         labelOffset = rPx;
+        projected = { uuid: region.uuid, region, shape: 'sphere', sx, sy, radius: rPx };
       } else if (region.shape === 'torus') {
         const outerR = region.outer_radius != null ? region.outer_radius : (region.radius || 0);
         const outerPx = Math.max(4, outerR * pxPerWorld);
@@ -488,27 +746,83 @@ export class PhNavigationMap extends PhElement {
         octx.strokeStyle = phColor(this, stroke);
         octx.stroke();
         labelOffset = outerPx;
+        projected = {
+          uuid: region.uuid,
+          region,
+          shape: 'torus',
+          sx,
+          sy,
+          innerRadius: innerPx,
+          outerRadius: outerPx,
+        };
       } else if (region.shape === 'box') {
         const he = region.half_extents || [0, 0];
         const halfW = Math.max(4, (he[0] || 0) * pxPerWorld);
         const halfH = Math.max(4, (he[1] || 0) * pxPerWorld);
+        const yaw = Number.isFinite(region.yaw) ? region.yaw : 0;
+        octx.save();
+        octx.translate(sx, sy);
+        // World +Z projects towards canvas -Y, so positive authored yaw is a
+        // negative canvas rotation. This is the drawing inverse of the hit
+        // transform below and matches RegionShape::contains in Rust.
+        octx.rotate(-yaw);
         octx.fillStyle = phColor(this, fill);
-        octx.fillRect(sx - halfW, sy - halfH, halfW * 2, halfH * 2);
+        octx.fillRect(-halfW, -halfH, halfW * 2, halfH * 2);
         octx.strokeStyle = phColor(this, stroke);
         octx.lineWidth = 1.5;
-        octx.strokeRect(sx - halfW, sy - halfH, halfW * 2, halfH * 2);
-        labelOffset = halfW;
+        octx.strokeRect(-halfW, -halfH, halfW * 2, halfH * 2);
+        octx.restore();
+        labelOffset = halfW * Math.abs(Math.cos(yaw)) + halfH * Math.abs(Math.sin(yaw));
+        projected = { uuid: region.uuid, region, shape: 'box', sx, sy, halfW, halfH, yaw };
       } else {
         // Unknown shape — skip, matching the viewscreen radar's own `_ => None`.
         continue;
+      }
+
+      if (projected && region.selectable === true && typeof region.uuid === 'string') {
+        this.#projectedRegions.push(projected);
+      }
+      if (projected && this.#selectedBlip && this.#selectedBlip.uuid === region.uuid) {
+        this.#drawRegionSelection(octx, projected);
       }
 
       // Same label treatment as blip names, including the zoom-out floor.
       if (showNames && region.name) {
         octx.font = namePx + 'px "JetBrains Mono", monospace';
         octx.fillStyle = phColor(this, stroke);
-        octx.fillText(region.name, sx + labelOffset + 4, sy + 4);
+        octx.fillText(wireText(region.name), sx + labelOffset + 4, sy + 4);
       }
+    }
+    octx.restore();
+  }
+
+  #drawRegionSelection(octx, projected) {
+    octx.save();
+    octx.strokeStyle = phColor(this, 'var(--gold)');
+    octx.lineWidth = 2;
+    octx.setLineDash?.([4, 3]);
+    if (projected.shape === 'sphere') {
+      octx.beginPath();
+      octx.arc(projected.sx, projected.sy, projected.radius + 4, 0, Math.PI * 2);
+      octx.stroke();
+    } else if (projected.shape === 'torus') {
+      octx.beginPath();
+      octx.arc(projected.sx, projected.sy, projected.outerRadius + 4, 0, Math.PI * 2);
+      octx.stroke();
+      if (projected.innerRadius > 4) {
+        octx.beginPath();
+        octx.arc(projected.sx, projected.sy, projected.innerRadius - 4, 0, Math.PI * 2);
+        octx.stroke();
+      }
+    } else if (projected.shape === 'box') {
+      octx.translate(projected.sx, projected.sy);
+      octx.rotate(-projected.yaw);
+      octx.strokeRect(
+        -projected.halfW - 4,
+        -projected.halfH - 4,
+        projected.halfW * 2 + 8,
+        projected.halfH * 2 + 8,
+      );
     }
     octx.restore();
   }
@@ -520,6 +834,30 @@ export class PhNavigationMap extends PhElement {
     octx.lineWidth = 2;
     octx.beginPath();
     octx.arc(sx, sy, ringR, 0, Math.PI * 2);
+    octx.stroke();
+    octx.restore();
+  }
+
+  #drawSelectionRing(octx, sx, sy, ringR) {
+    octx.save();
+    octx.strokeStyle = phColor(this, 'var(--gold)');
+    octx.lineWidth = 2;
+    octx.setLineDash?.([4, 3]);
+    octx.beginPath();
+    octx.arc(sx, sy, ringR, 0, Math.PI * 2);
+    octx.stroke();
+    octx.restore();
+  }
+
+  #drawDestroyedMark(octx, sx, sy, radius) {
+    octx.save();
+    octx.strokeStyle = phColor(this, 'var(--ink)');
+    octx.lineWidth = 2;
+    octx.beginPath();
+    octx.moveTo(sx - radius, sy - radius);
+    octx.lineTo(sx + radius, sy + radius);
+    octx.moveTo(sx + radius, sy - radius);
+    octx.lineTo(sx - radius, sy + radius);
     octx.stroke();
     octx.restore();
   }
@@ -548,10 +886,19 @@ export class PhNavigationMap extends PhElement {
         else octx.lineTo(px, py);
       }
       octx.closePath(); octx.fill();
-    } else if (kind === 'station') {
+    } else if (kind === 'station' || kind === 'structure') {
       const half = r * 1.1;
       octx.fillRect(sx - half, sy - half, half * 2, half * 2);
-    } else if (kind === 'ship') {
+    } else if (kind === 'player_ship') {
+      const s = r * 1.25;
+      octx.beginPath();
+      octx.moveTo(sx, sy - s);
+      octx.lineTo(sx + s, sy);
+      octx.lineTo(sx, sy + s);
+      octx.lineTo(sx - s, sy);
+      octx.closePath();
+      octx.fill();
+    } else if (kind === 'ship' || kind === 'npc_ship') {
       const s = r * 1.3;
       octx.beginPath();
       octx.moveTo(sx, sy - s);
@@ -559,7 +906,7 @@ export class PhNavigationMap extends PhElement {
       octx.lineTo(sx, sy + s * 0.05);
       octx.lineTo(sx - s * 0.6, sy + s * 0.5);
       octx.closePath(); octx.fill();
-    } else if (kind === 'asteroid') {
+    } else if (kind === 'asteroid' || kind === 'authored_asteroid') {
       octx.beginPath();
       octx.arc(sx, sy, r * 0.5, 0, Math.PI * 2);
       octx.fill();
@@ -579,7 +926,9 @@ export class PhNavigationMap extends PhElement {
       this.overlay.classList.remove('show');
       return;
     }
-    nameEl.textContent = blip.name || blip.uuid || t('console.common.unknown');
+    nameEl.textContent = blip.name
+      ? wireText(blip.name)
+      : blip.uuid || t('console.common.unknown');
     kindEl.textContent = (blip.kind || 'unknown').toUpperCase();
     stanceEl.textContent = blip.stance ? t('console.stance.' + blip.stance) : t('console.common.unknown');
     stanceEl.className = 'st-' + (blip.stance || 'unknown');
@@ -587,6 +936,11 @@ export class PhNavigationMap extends PhElement {
   }
 
   #getBlipAt(canvasX, canvasY) {
+    if (this.#isInspectMode()) {
+      return this.#projectedBlips
+        .filter((candidate) => Math.hypot(canvasX - candidate.sx, canvasY - candidate.sy) <= candidate.hitR)
+        .sort((left, right) => left.uuid.localeCompare(right.uuid))[0] || null;
+    }
     let best = null;
     let bestDist = Infinity;
     for (const b of this.#projectedBlips) {
@@ -597,6 +951,28 @@ export class PhNavigationMap extends PhElement {
       }
     }
     return best;
+  }
+
+  #getRegionAt(canvasX, canvasY) {
+    return this.#projectedRegions
+      .filter((candidate) => {
+        const dx = canvasX - candidate.sx;
+        const dy = canvasY - candidate.sy;
+        if (candidate.shape === 'sphere') return Math.hypot(dx, dy) <= candidate.radius;
+        if (candidate.shape === 'torus') {
+          const distance = Math.hypot(dx, dy);
+          return distance >= candidate.innerRadius && distance <= candidate.outerRadius;
+        }
+        if (candidate.shape === 'box') {
+          const cosYaw = Math.cos(candidate.yaw);
+          const sinYaw = Math.sin(candidate.yaw);
+          const localX = dx * cosYaw - dy * sinYaw;
+          const localY = dx * sinYaw + dy * cosYaw;
+          return Math.abs(localX) <= candidate.halfW && Math.abs(localY) <= candidate.halfH;
+        }
+        return false;
+      })
+      .sort((left, right) => left.uuid.localeCompare(right.uuid))[0] || null;
   }
 
   #handleTap(bufX, bufY) {
@@ -621,10 +997,10 @@ export class PhNavigationMap extends PhElement {
       this.#showOverlay(null);
       this.#dispatch('navselect', null);
       this.#updateBar();
-      if (this.sendAction) {
-        this.sendAction('set_navigation_waypoint', { x: wx, z: wz });
-        this.#showToast(t('console.navigation.waypoint_set'));
-      }
+      const detail = { x: wx, z: wz };
+      activateNavigationAction(this, NAVIGATION_WAYPOINT_PLACE_ACTION_ID, detail, () => {
+        if (this.sendAction) this.sendAction('set_navigation_waypoint', detail);
+      });
       return;
     }
 
@@ -632,26 +1008,27 @@ export class PhNavigationMap extends PhElement {
     // set the waypoint — that is an explicit command (bar buttons), matching
     // the former navigation console. Tapping empty space clears selection.
     const hit = this.#getBlipAt(bufX, bufY);
-    if (hit) {
-      if (this.#selectedBlip && this.#selectedBlip.uuid === hit.blip.uuid) return;
-      this.#selectedBlip = hit.blip;
-      this.#showOverlay(hit.blip);
-    } else {
-      if (!this.#selectedBlip) return;
-      this.#selectedBlip = null;
-      this.#showOverlay(null);
+    const regionHit = !hit && this.#isInspectMode() ? this.#getRegionAt(bufX, bufY) : null;
+    const detail = { uuid: hit ? hit.blip.uuid : regionHit ? regionHit.region.uuid : null };
+    if (this.#isInspectMode()) this.navigationSelect(detail);
+    else {
+      activateNavigationAction(this, NAVIGATION_CONTACT_ACTION_ID, detail, () => {
+        this.navigationSelect(detail);
+      });
     }
-    this.#updateBar();
-    this.#dispatch('navselect', this.#selectedBlip);
   }
 
   #beginPick() {
+    if (this.#state && this.#state.auto) return;
     this.#picking = !this.#picking;
     if (this.#picking) {
       this.#selectedBlip = null;
       this.#showOverlay(null);
       this.#dispatch('navselect', null);
       this.canvas.classList.add('picking');
+      this.#keyboardCursorVisible = true;
+      this.#ensureKeyboardCursor();
+      this.focus();
       this.#showToast(t('console.navigation.tap_to_place'), 4000);
     } else {
       this.canvas.classList.remove('picking');
@@ -661,20 +1038,25 @@ export class PhNavigationMap extends PhElement {
 
   #setToSelected() {
     const b = this.#selectedBlip;
-    if (!b || !this.sendAction) return;
+    if (!b) return;
     // Anchor the waypoint to the selected entity's UUID; the server refreshes
     // x/z from the entity's live transform each tick and auto-clears the
     // waypoint if the entity despawns (matching the former console).
-    this.sendAction('set_navigation_waypoint', {
-      x: b.world_x,
-      z: b.world_z,
-      source_uuid: b.uuid,
+    const detail = { source_uuid: b.uuid };
+    activateNavigationAction(this, NAVIGATION_WAYPOINT_ANCHOR_ACTION_ID, detail, () => {
+      if (!this.sendAction) return;
+      this.sendAction('set_navigation_waypoint', {
+        x: b.world_x,
+        z: b.world_z,
+        source_uuid: b.uuid,
+      });
     });
-    this.#showToast(t('console.navigation.waypoint_set'));
   }
 
   #clearWaypoint() {
-    if (this.sendAction) this.sendAction('clear_navigation_waypoint', {});
+    activateNavigationAction(this, NAVIGATION_WAYPOINT_CLEAR_ACTION_ID, {}, () => {
+      if (this.sendAction) this.sendAction('clear_navigation_waypoint', {});
+    });
   }
 
   /**
@@ -692,7 +1074,24 @@ export class PhNavigationMap extends PhElement {
    * flight bindings, which are a different console entirely.
    */
   #boundKeyDown = (event) => {
+    // Ctrl-modified arrows belong to the semantic pan bindings;
+    // Shift+arrows retain the placement-cursor behaviour below.
+    if (event.ctrlKey && !event.shiftKey
+        && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
     const key = event.key;
+    const cursorDelta = key === 'ArrowLeft' ? [-1, 0]
+      : key === 'ArrowRight' ? [1, 0]
+        : key === 'ArrowUp' ? [0, -1]
+          : key === 'ArrowDown' ? [0, 1] : null;
+    // Pick mode is the keyboard sibling of tap-to-place: move a visible chart
+    // cursor and commit through the same semantic placement adapter. Holding
+    // Shift exposes/moves that cursor outside pick mode, so a remapped Place
+    // binding can use an arbitrary chart coordinate without any drag gesture.
+    if (cursorDelta && (this.#picking || event.shiftKey)) {
+      event.preventDefault();
+      this.#moveKeyboardCursor(cursorDelta[0], cursorDelta[1]);
+      return;
+    }
     if (key === 'Enter' || key === ' ' || key === 'Spacebar') {
       // Only the HOST's own Enter/Space commits the selection as a waypoint.
       // The bar buttons (SET AS WAYPOINT, CLEAR WAYPOINT) are focusable
@@ -703,13 +1102,24 @@ export class PhNavigationMap extends PhElement {
       // when the focused target is a descendant control; the button runs its
       // own action, unimpeded, and the host stays out of it.
       if (event.composedPath()[0] !== this) return;
-      if (this.#selectedBlip) {
+      if (this.#isInspectMode()) {
+        if (this.#selectedBlip) event.preventDefault();
+      } else if (this.#picking) {
+        event.preventDefault();
+        this.#picking = false;
+        this.canvas.classList.remove('picking');
+        this.#updateBar();
+        const detail = this.navigationPlacement();
+        activateNavigationAction(this, NAVIGATION_WAYPOINT_PLACE_ACTION_ID, detail, () => {
+          if (detail && this.sendAction) this.sendAction('set_navigation_waypoint', detail);
+        });
+      } else if (this.#selectedBlip) {
         event.preventDefault();
         this.#setToSelected();
       }
       return;
     }
-    const contacts = ((this.#state && this.#state.blips) || []).filter((b) => b && b.uuid);
+    const contacts = this.#selectionCandidates();
     if (contacts.length === 0) return;
     const uuids = contacts.map((b) => b.uuid);
     const current = this.#selectedBlip ? uuids.indexOf(this.#selectedBlip.uuid) : -1;
@@ -725,13 +1135,22 @@ export class PhNavigationMap extends PhElement {
     }
     if (next < 0) return;
     event.preventDefault();
-    this.#selectedBlip = contacts[next];
-    this.#showOverlay(this.#selectedBlip);
-    this.#updateBar();
-    this.#dispatch('navselect', this.#selectedBlip);
+    const detail = { uuid: contacts[next].uuid };
+    if (this.#isInspectMode()) this.navigationSelect(detail);
+    else {
+      activateNavigationAction(this, NAVIGATION_CONTACT_ACTION_ID, detail, () => {
+        this.navigationSelect(detail);
+      });
+    }
   };
 
   #updateBar() {
+    if (this.#isInspectMode()) {
+      this.btnSetWaypoint.classList.remove('show', 'active');
+      this.btnSetSelected.classList.remove('show');
+      this.btnClearWaypoint.classList.remove('show');
+      return;
+    }
     const state = this.#state || {};
     const wp = state.waypoint;
     const hasWp = !!(wp && Number.isFinite(wp.x) && Number.isFinite(wp.z));
@@ -740,6 +1159,10 @@ export class PhNavigationMap extends PhElement {
     this.btnSetSelected.classList.toggle('show', hasSel);
     this.btnClearWaypoint.classList.toggle('show', hasWp);
     this.btnSetWaypoint.classList.toggle('active', this.#picking);
+    const auto = !!state.auto;
+    this.btnSetWaypoint.disabled = auto;
+    this.btnSetSelected.disabled = auto;
+    this.btnClearWaypoint.disabled = auto;
   }
 
   #showToast(msg, duration) {
@@ -778,9 +1201,7 @@ export class PhNavigationMap extends PhElement {
     const dy = cpos.y - this.#dragStartY;
     if (Math.hypot(dx, dy) > 5) {
       this.#tapMoved = true;
-      this.#panX = this.#startPanX + dx;
-      this.#panY = this.#startPanY + dy;
-      this.needsRender = true;
+      this.#activatePan(this.#startPanX + dx - this.#panX, this.#startPanY + dy - this.#panY);
     }
   };
 
@@ -796,15 +1217,7 @@ export class PhNavigationMap extends PhElement {
     e.preventDefault();
     const cpos = this.#eventBufPos(e);
     const factor = e.deltaY < 0 ? 1.13 : 0.885;
-    const newZoom = Math.max(this.#ZOOM_MIN, Math.min(this.#ZOOM_MAX, this.#zoom * factor));
-    const canvas = this.canvas;
-    const cx = canvas.width / 2;
-    const cy = canvas.height / 2;
-    const zoomRatio = newZoom / this.#zoom;
-    this.#panX = cpos.x - cx - (cpos.x - cx - this.#panX) * zoomRatio;
-    this.#panY = cpos.y - cy - (cpos.y - cy - this.#panY) * zoomRatio;
-    this.#zoom = newZoom;
-    this.needsRender = true;
+    this.#activateZoom(factor, cpos.x, cpos.y);
   };
 
   #boundTouchStart = (e) => {
@@ -836,25 +1249,15 @@ export class PhNavigationMap extends PhElement {
       const t0 = e.touches[0], t1 = e.touches[1];
       const dist = Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
       const factor = dist / this.#lastPinchDist;
-      const newZoom = Math.max(this.#ZOOM_MIN, Math.min(this.#ZOOM_MAX, this.#zoom * factor));
-      const canvas = this.canvas;
-      const cx = canvas.width / 2;
-      const cy = canvas.height / 2;
-      const zoomRatio = newZoom / this.#zoom;
-      this.#panX = this.#pinchMidX - cx - (this.#pinchMidX - cx - this.#panX) * zoomRatio;
-      this.#panY = this.#pinchMidY - cy - (this.#pinchMidY - cy - this.#panY) * zoomRatio;
-      this.#zoom = newZoom;
+      this.#activateZoom(factor, this.#pinchMidX, this.#pinchMidY);
       this.#lastPinchDist = dist;
-      this.needsRender = true;
     } else if (e.touches.length === 1 && this.#isDragging) {
       const cpos = this.#eventBufPos(e);
       const dx = cpos.x - this.#dragStartX;
       const dy = cpos.y - this.#dragStartY;
       if (Math.hypot(dx, dy) > 5) {
         this.#tapMoved = true;
-        this.#panX = this.#startPanX + dx;
-        this.#panY = this.#startPanY + dy;
-        this.needsRender = true;
+        this.#activatePan(this.#startPanX + dx - this.#panX, this.#startPanY + dy - this.#panY);
       }
     }
   };

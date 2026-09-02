@@ -1,9 +1,9 @@
 ---
 title: Objectives
 type: concept
-tags: [world, objectives, ai, captain, gui, authoring]
-sources: [src/objectives.rs, src/objectives/directive.rs, src/entities/config.rs, src/world/config.rs, src/world/script/effects.rs, src/world/server.rs, src/world/dispatch.rs, src/console/comms/server.rs, src/console/captain/server.rs, src/console/weapons/torpedo.rs, src/ship/helm_ai/impulse.rs, src/ai/core.rs, assets/worlds/combat_test.toml]
-updated: 2026-08-28
+tags: [world, objectives, ai, captain, gui, authoring, gm, activity]
+sources: [src/objectives.rs, src/objectives/directive.rs, src/entities/config.rs, src/world/config.rs, src/world/script/effects.rs, src/world/server.rs, src/world/dispatch.rs, src/core/balance.rs, src/gm_activity.rs, src/console/comms/server.rs, src/console/captain/server.rs, src/console/weapons/torpedo.rs, src/ship/helm_ai/mod.rs, src/ship/helm_ai/impulse.rs, src/ai/core.rs, assets/worlds/combat_test.toml]
+updated: 2026-09-01
 ---
 
 # Objectives
@@ -15,11 +15,16 @@ World triggers and comms responses create mission objectives. Each carries playe
 1. Entity `[[behaviour.doctrine]]` entries and World/scripted `add_objective` actions project their existing fields into `objectives::directive::AuthoredDirective`.
 2. The shared contract validates kind, field ownership and requirements, applies established defaults, and performs the only conversion to `AiDirective`.
 3. `add_objective`, `complete_objective`, and `fail_objective` actions mutate the session-lifetime `ObjectiveManager`.
-4. Active objectives are utility-scored from base priority, mandatory bonus, world conditions, modifiers, zero gates, and an optional Captain boost.
-5. Each ship's viewscreen blackboard carries its scored pool. Backfill Helm,
+4. Each actual Active, Completed, or Failed transition emits an unconditional
+   lifecycle fact with its stable id and authored targets. The shared action
+   dispatcher and the independent Helm-AI Reach completion path use the same
+   fact; idempotent repeats and layer-unload removal emit nothing. The bounded
+   local GM activity feed projects these facts without entering peer transport.
+5. Active objectives are utility-scored from base priority, mandatory bonus, world conditions, modifiers, zero gates, and an optional Captain boost.
+6. Each ship's viewscreen blackboard carries its scored pool. Backfill Helm,
    Weapons/Tactical, Comms, Navigation, Sensors, Engineering, and Repair consume
    positive directives selected for their `SystemAffinity`.
-6. Captain and Comms apply the same player-facing visibility rule: mission
+7. Captain and Comms apply the same player-facing visibility rule: mission
    objectives remain visible at any score, while doctrine objectives appear
    only at positive utility. Ship-specific GUI objective lists render those
    projections.

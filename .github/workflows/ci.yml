@@ -482,6 +482,18 @@ jobs:
           path: tests/smoke/playwright-report/
           retention-days: 7
 
+      # Issue #1300's peer-tracer is a stable, sanitized index of the complete
+      # GM M1 exit run: seed/roster/actions plus snapshot framing and digests,
+      # never snapshot RON or the private reconnect capability.
+      - name: Upload GM M1 exit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gm-m1-exit-report
+          path: target/gm-m1-exit/report.json
+          if-no-files-found: error
+          retention-days: 14
+
       # Handed to the perf job, which has the Rust toolchain that owns the
       # comparison (issue #868).
       - name: Upload browser perf capture

@@ -40,7 +40,8 @@ pub const FIRED_KIND_BLASTER: &str = "blaster";
 /// not combat: folding it into the per-ship ledgers would credit a shooter
 /// with `damage_dealt` for shooting a rock. The discriminator lets emission
 /// stay unconditional while aggregation stays ship-only.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum VictimKind {
     /// A ship, station, or any other entity with an `EntityUuid`.
     Ship,
@@ -191,6 +192,30 @@ pub enum BalanceEvent {
         /// Stable objective id that completed.
         objective_id: String,
     },
+    /// A mission objective actually entered one of its lifecycle states.
+    ///
+    /// Unlike [`ObjectiveCompleted`](Self::ObjectiveCompleted), which remains
+    /// for balance-report compatibility, this carries the complete lifecycle
+    /// and the objective's authored targets for presentation projections.
+    ObjectiveChanged {
+        /// Stable authored objective id.
+        objective_id: String,
+        /// New state after the successful transition.
+        status: crate::core::messages::ObjectiveStatus,
+        /// Authored target names/UUIDs. Consumers resolve names through the
+        /// world's existing public identity table rather than inventing ids.
+        targets: Vec<String>,
+    },
+    /// One actual trigger firing at the shared evaluator seam.
+    TriggerFired {
+        /// Authored trigger id, or the stable `script_path::fn_name` fallback
+        /// for an anonymous registration. Never a mutable vector index.
+        trigger_id: String,
+        /// Content-relative script path that registered the handler.
+        origin: String,
+        /// Stable UUID involved in the condition when one was resolved.
+        entity: Option<String>,
+    },
     /// The global game phase changed (`Lobby` → `InProgress` → `GameOver`, …).
     PhaseChanged {
         /// Phase before the transition (`Debug`-formatted `GamePhase`).
@@ -226,7 +251,7 @@ impl BalanceEvent {
     /// timeline-coverage test when a variant is added, forcing whoever adds one
     /// to say whether it is a story beat or per-tick bookkeeping. A derived
     /// count would track the enum silently and guard nothing.
-    pub const VARIANT_COUNT: usize = 11;
+    pub const VARIANT_COUNT: usize = 13;
 
     /// Whether this event belongs in the ndjson *timeline stream*.
     ///
@@ -313,6 +338,28 @@ impl BalanceEvent {
             ),
             BalanceEvent::ObjectiveCompleted { objective_id } => format!(
                 "{{\"event\":\"ObjectiveCompleted\",\"objective_id\":{objective_id:?}}}"
+            ),
+            BalanceEvent::ObjectiveChanged {
+                objective_id,
+                status,
+                targets,
+            } => {
+                let status = match status {
+                    crate::core::messages::ObjectiveStatus::Active => "active",
+                    crate::core::messages::ObjectiveStatus::Completed => "completed",
+                    crate::core::messages::ObjectiveStatus::Failed => "failed",
+                };
+                format!(
+                    "{{\"event\":\"ObjectiveChanged\",\"objective_id\":{objective_id:?},\"status\":{status:?},\"targets\":{targets:?}}}"
+                )
+            }
+            BalanceEvent::TriggerFired {
+                trigger_id,
+                origin,
+                entity,
+            } => format!(
+                "{{\"event\":\"TriggerFired\",\"trigger_id\":{trigger_id:?},\"origin\":{origin:?},\"entity\":{}}}",
+                opt_string(entity),
             ),
             BalanceEvent::PhaseChanged { from, to } => {
                 format!("{{\"event\":\"PhaseChanged\",\"from\":{from:?},\"to\":{to:?}}}")
@@ -478,6 +525,8 @@ pub fn aggregate_damage<'a>(
             | BalanceEvent::Disarmed { .. }
             | BalanceEvent::RedAlertChanged { .. }
             | BalanceEvent::ObjectiveCompleted { .. }
+            | BalanceEvent::ObjectiveChanged { .. }
+            | BalanceEvent::TriggerFired { .. }
             | BalanceEvent::PhaseChanged { .. }
             | BalanceEvent::DoctrinePhaseChanged { .. } => {}
         }
@@ -1255,6 +1304,16 @@ mod tests {
             BalanceEvent::ObjectiveCompleted {
                 objective_id: "reach_beacon".into(),
             },
+            BalanceEvent::ObjectiveChanged {
+                objective_id: "reach_beacon".into(),
+                status: crate::core::messages::ObjectiveStatus::Completed,
+                targets: vec!["beacon".into()],
+            },
+            BalanceEvent::TriggerFired {
+                trigger_id: "reach_beacon".into(),
+                origin: "world.rhai".into(),
+                entity: Some("a".into()),
+            },
             BalanceEvent::PhaseChanged {
                 from: "Lobby".into(),
                 to: "InProgress".into(),
@@ -1381,6 +1440,16 @@ mod tests {
             },
             BalanceEvent::ObjectiveCompleted {
                 objective_id: "reach_beacon".into(),
+            },
+            BalanceEvent::ObjectiveChanged {
+                objective_id: "reach_beacon".into(),
+                status: crate::core::messages::ObjectiveStatus::Completed,
+                targets: vec!["beacon".into()],
+            },
+            BalanceEvent::TriggerFired {
+                trigger_id: "reach_beacon".into(),
+                origin: "world.rhai".into(),
+                entity: Some("player".into()),
             },
             BalanceEvent::PhaseChanged {
                 from: "Lobby".into(),

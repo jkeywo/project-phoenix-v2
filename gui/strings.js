@@ -264,21 +264,42 @@ export const TEXT_PARAMS_SUFFIX = '_params';
  * @returns {T}
  */
 export function localiseTree(value) {
+  return localiseTreeValue(value, false);
+}
+
+/**
+ * Recursive half of {@link localiseTree}.
+ *
+ * ActionFeedback correlations are opaque protocol identities.  They share the
+ * wire with display-string ids, so an identity that happens to equal a real id
+ * must still arrive byte-for-byte unchanged.
+ *
+ * @template T
+ * @param {T} value
+ * @param {boolean} actionFeedbackData
+ * @returns {T}
+ */
+function localiseTreeValue(value, actionFeedbackData) {
   if (typeof value === 'string') {
     return table.has(value) ? t(value) : value;
   }
   if (Array.isArray(value)) {
-    return value.map(localiseTree);
+    return value.map((item) => localiseTreeValue(item, false));
   }
   if (value !== null && typeof value === 'object') {
     const out = {};
     for (const key of Object.keys(value)) {
+      if (actionFeedbackData && key === 'correlation') {
+        out[key] = value[key];
+        continue;
+      }
       const params = paramsFor(value, key);
       if (params) {
         const id = value[key];
         out[key] = table.has(id) ? t(id, params) : id;
       } else {
-        out[key] = localiseTree(value[key]);
+        const isActionFeedbackData = key === 'data' && value.type === 'ActionFeedback';
+        out[key] = localiseTreeValue(value[key], isActionFeedbackData);
       }
     }
     return out;

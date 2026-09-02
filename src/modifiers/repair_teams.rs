@@ -321,8 +321,8 @@ impl RepairTeams {
     ///
     /// Ties (two teams sweeping the same group) go to the lowest slot index, so
     /// the choice is a pure function of state like every other repair decision.
-    pub fn prioritise_system(
-        &mut self,
+    fn priority_team_for_system(
+        &self,
         target: &SystemId,
         hull: &SystemHull,
         config: &ShipConfig,
@@ -331,7 +331,7 @@ impl RepairTeams {
         // Snapshot before the search: `sweep_candidates` needs the whole on-site
         // set, and the write at the end needs `self.slots` mutably.
         let occupied: Vec<SystemId> = self.on_site_systems().cloned().collect();
-        let idx = self.slots.iter().enumerate().find_map(|(idx, slot)| {
+        self.slots.iter().enumerate().find_map(|(idx, slot)| {
             let TeamSlot::Repairing {
                 system_id: Some(current),
                 ..
@@ -347,7 +347,30 @@ impl RepairTeams {
                 .iter()
                 .any(|(sid, _)| sid == target)
                 .then_some(idx)
-        })?;
+        })
+    }
+
+    /// Every SystemId a named priority order can currently reach, in the
+    /// authoritative hull order. Publication uses this exact predicate so a
+    /// keyboard/gamepad adapter never has to reconstruct station sweep groups
+    /// from a partial client projection.
+    pub fn prioritisable_systems(&self, hull: &SystemHull, config: &ShipConfig) -> Vec<SystemId> {
+        hull.iter()
+            .filter(|(system_id, _)| {
+                self.priority_team_for_system(system_id, hull, config)
+                    .is_some()
+            })
+            .map(|(system_id, _)| system_id.clone())
+            .collect()
+    }
+
+    pub fn prioritise_system(
+        &mut self,
+        target: &SystemId,
+        hull: &SystemHull,
+        config: &ShipConfig,
+    ) -> Option<usize> {
+        let idx = self.priority_team_for_system(target, hull, config)?;
         if let Some(TeamSlot::Repairing {
             priority_system_id, ..
         }) = self.slots.get_mut(idx)

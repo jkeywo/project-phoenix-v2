@@ -137,3 +137,29 @@
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
 }
+
+/* The pre-scenario join surface (issue #865's save catalogue, carried over in
+   the GM platform merge, #1300). Before a world is selected, server.html's
+   `showJoinQrOverPanel` docks the live #overlay INTO #scenario-panel as a real
+   flex child, between the world picker and the saved-session catalogue, and adds
+   this class; `resetJoinQrLayer` moves it back out and removes it. Keeping it in
+   layout keeps every catalogue control visible and clickable, and lets the
+   portrait layout scroll all three surfaces in sequence. The rules live here
+   with the rest of the join panel's rather than back in server.html (#1329);
+   the native lobby document never adds the class, so they are inert there. */
+#overlay.pre-scenario {
+  position: static;
+  flex: 0 1 auto;
+  align-self: center;
+  min-width: 0;
+  max-height: calc(100vh - var(--settings-cog-keepout, 56px) - 1.5rem);
+  margin: var(--settings-cog-keepout, 56px) 1rem 1.5rem;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+#overlay.pre-scenario #qr-panel { margin-left: auto; margin-right: auto; }
+@media (orientation: portrait), (max-width: 800px) {
+  #overlay.pre-scenario {
+    width: 100%; max-height: none; margin: 0; padding: 1rem; overflow: visible;
+  }
+}

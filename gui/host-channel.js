@@ -7,11 +7,11 @@
  * through the #1224 latch in server.html's classic prelude. `createHostChannel`
  * builds the function that latch hands off to: a handler table routes each
  * named channel (hud, lobby, chatter, audio_config, audio_cue, audio_level,
- * shake) to the page's existing render/audio functions. Adding a channel is
+ * shake, gm_entity) to the page's existing render/audio functions. Adding a channel is
  * one Rust table row + one entry in the `handlers` object server.html passes
  * in.
  *
- * Payload shapes: JSON string for hud/lobby/chatter/audio_config/audio_cue;
+ * Payload shapes: JSON string for hud/lobby/chatter/audio_config/audio_cue/gm_entity;
  * a bare number for audio_level; a two-element [x, y] array for shake.
  *
  * JS must not assume any cross-channel ordering: even though a single flush
@@ -22,18 +22,26 @@
  *
  * ## Localisation boundary (issue #949)
  *
- * Every host-channel payload is built from authored DATA, so — exactly like a
- * peer message — it can carry string ids: a world's `[global] title` on the
- * lobby channel, a `game_over` trigger's `message` on the hud channel. A
+ * Presentation-oriented host-channel payloads are built from authored DATA,
+ * so — exactly like a peer message — they can carry string ids: a world's
+ * `[global] title` on the lobby channel, a `game_over` trigger's `message` on
+ * the hud channel. A
  * phone crosses localiseTree() once, in gui/rendezvous-transport.js, at the
  * point a peer message is decoded. This dispatcher is the host's equivalent
- * boundary — the single place every channel payload enters the page — so the
- * ids are resolved HERE rather than at each render site. Fixing it per render
+ * boundary — the single place those payloads enter the page — so their ids are
+ * resolved HERE rather than at each render site. Fixing it per render
  * site is what left `world.combat_test.global.title` on #lobby-title after
  * the scenario buttons were fixed (issue #949): two call sites found, and no
  * reason to think a third would not appear.
  *
- * Same rule as localiseTree: substitute only what the table actually holds.
+ * `gm_entity` and `gm_activity` are deliberate exceptions. They are strict domain DTOs whose
+ * String Table display ids must remain raw through parsing and state; only the
+ * map and inspector resolve its known display fields at presentation. Recursive
+ * localisation here could otherwise mutate opaque strings before strict DTO
+ * validation, including a value that happens to equal a String Table key.
+ *
+ * For every other channel, use the same rule as localiseTree: substitute only
+ * what the table actually holds.
  * Machine tokens (`phase`, station-rating names, the audio cue `kind`),
  * player-typed names and prose a mod pack authored literally all pass through
  * untouched — every id in strings.csv is dotted, so none of them can collide.
@@ -87,7 +95,11 @@ export function createHostChannel({ handlers, strings }) {
   return function hostChannelDispatch(name, payload) {
     const handler = handlers[name];
     if (handler) {
-      handler(localiseHostPayload(payload, strings));
+      // GM DTOs are parsed by strict adapters and localised only at their
+      // explicit presentation sites. Preserve UUIDs, weapon/System ids, and
+      // raw String Table display ids exactly as Rust sent them.
+      handler(name === 'gm_entity' || name === 'gm_activity'
+        ? payload : localiseHostPayload(payload, strings));
     } else {
       console.warn('[Phoenix] unhandled host channel:', name);
     }

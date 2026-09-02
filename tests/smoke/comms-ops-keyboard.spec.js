@@ -13,6 +13,17 @@
 // click/tap/hover/mouse.
 
 import { test, expect } from './fixtures';
+import { SENSORS_SCAN_ACTION } from '../../gui/stations/sensors-actions.js';
+
+function keyboardChord(binding) {
+  const modifiers = [
+    binding.ctrlKey && 'Control',
+    binding.shiftKey && 'Shift',
+    binding.altKey && 'Alt',
+    binding.metaKey && 'Meta',
+  ].filter(Boolean);
+  return [...modifiers, binding.code].join('+');
+}
 
 /** The active element's identity, reaching through the shadow boundary. */
 async function activeId(page) {
@@ -58,8 +69,12 @@ test('Comms console: a hail is selected and answered from the keyboard, with no 
     contacts: [],
     messages: [
       {
-        id: 'hail-1', sender_name: 'RELAY STATION', body: 'Do you copy?', is_read: false,
+        id: 'hail-1', sender_name: 'RELAY STATION', body: 'Do you copy?', is_read: true,
         responses: [{ text: 'Acknowledge', available: true, important: false }],
+      },
+      {
+        id: 'hail-2', sender_name: 'OUTER RELAY', body: 'Routine traffic follows.', is_read: false,
+        responses: [],
       },
     ],
   })));
@@ -67,11 +82,18 @@ test('Comms console: a hail is selected and answered from the keyboard, with no 
   // ── Tab reaches the hail list — it is one Tab stop (AC #1) ──────────────────
   expect(await tabTo(page, '#comms-hail-list')).toBe(true);
 
-  // Enter opens the focused hail: the SAME select_comms_message a tap sends.
+  // The unread second hail is the automatic thread, while focus starts on the
+  // first row. Enter therefore proves the shared local selection actually
+  // repaints both panels; no unconsumed host command leaves the console.
+  await expect(page.locator('ph-comms-current-message #sender-label')).toHaveText('OUTER RELAY');
   await page.keyboard.press('Enter');
-  await expect.poll(() => page.evaluate(
-    () => window.__sent.some((a) => a.action === 'select_comms_message' && a.message_id === 'hail-1')
-  )).toBe(true);
+  await expect(page.locator('ph-comms-hail-list .row').first())
+    .toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('ph-comms-current-message #sender-label')).toHaveText('RELAY STATION');
+  expect(await page.evaluate(
+    () => window.__sent.some((a) => a.action === 'select_comms_message')
+  )).toBe(false);
+  expect(await page.evaluate(() => window.__sent)).toEqual([]);
 
   // ── Tab on to the open thread and answer it from the keyboard ───────────────
   expect(await tabTo(page, '#comms-current-message')).toBe(true);
@@ -134,7 +156,51 @@ test('Captain console: an objective is boosted and a scan taken from the keyboar
   )).toBe(true);
 
   const scan = await page.evaluate(() => window.__sent.find((a) => a.action === 'scan_target'));
-  expect(scan).toMatchObject({ action: 'scan_target', console: 'captain', uuid: 'contact-1' });
+  expect(scan).toMatchObject({
+    action: 'scan_target',
+    console: 'captain',
+    uuid: 'contact-1',
+    semantic_action: 'sensors.scan',
+  });
+  expect(scan.correlation).toMatch(/^[\x21-\x7e]{1,64}$/);
+  expect(Number.isFinite(scan.__input_ms)).toBe(true);
+
+  // Shared feedback is correlation-specific and never substitutes for the
+  // authoritative scan projection. First prove a refusal, then invoke the
+  // default semantic binding itself and prove a later accepted occurrence.
+  const scanStatus = page.locator(
+    '.semantic-action-feedback__item[data-action-id="sensors.scan"]',
+  );
+  await expect(scanStatus).toHaveAttribute('data-state', 'Pending');
+  await page.evaluate((correlation) => window.__updateActionFeedback({
+    correlation, state: 'Refused',
+  }), scan.correlation);
+  await expect(scanStatus).toHaveAttribute('data-state', 'Refused');
+  await expect(page.locator('#scan-readout').locator('#reason')).toBeHidden();
+
+  const scanBinding = SENSORS_SCAN_ACTION.bindings[0];
+  expect(scanBinding).toMatchObject({
+    type: 'keyboard',
+    code: 'KeyN',
+    ctrlKey: false,
+    shiftKey: true,
+    altKey: false,
+    metaKey: false,
+  });
+  await page.keyboard.press(keyboardChord(scanBinding));
+  await expect.poll(() => page.evaluate(
+    () => window.__sent.filter((a) => a.action === 'scan_target').length,
+  )).toBe(2);
+  const accepted = await page.evaluate(
+    () => window.__sent.filter((a) => a.action === 'scan_target').at(-1),
+  );
+  expect(accepted.correlation).not.toBe(scan.correlation);
+  await expect(scanStatus).toHaveAttribute('data-state', 'Pending');
+  await page.evaluate((correlation) => window.__updateActionFeedback({
+    correlation, state: 'Applied',
+  }), accepted.correlation);
+  await expect(scanStatus).toHaveAttribute('data-state', 'Applied');
+  await expect(page.locator('#scan-readout').locator('#reason')).toBeHidden();
 
   // Not one pointer event was used to get here.
   expect(await page.evaluate(() => window.__pointerEvents)).toBe(0);

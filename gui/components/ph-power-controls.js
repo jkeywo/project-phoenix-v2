@@ -6,6 +6,11 @@ import { phAdoptConsoleStyles } from './ph-console-styles.js';
 import '../strings-boot.js';
 import { t } from '../strings.js';
 import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
+import {
+  POWER_DECREASE_ACTION_ID,
+  POWER_INCREASE_ACTION_ID,
+} from '../stations/engineering-actions.js';
+import { activateEngineeringAction } from '../stations/engineering-action-control.js';
 import { PhElement, phDefine } from './ph-element.js';
 
 /**
@@ -149,28 +154,40 @@ export class PhPowerControls extends PhElement {
         const pipRow = el.querySelector('.pip-row');
         pipRow.addEventListener('click', e => {
           const pip = e.target.closest('.pip');
-          if (!pip || auto) return;
+          if (!pip || this.#stateAuto()) return;
           const level = Number(pip.dataset.level);
-          if (!isNaN(level) && this.sendAction) {
-            this.sendAction('set_power', { target: gid, level });
+          const current = this.#currentLevel(gid);
+          if (!isNaN(level) && level !== current) {
+            activateEngineeringAction(
+              this,
+              level < current ? POWER_DECREASE_ACTION_ID : POWER_INCREASE_ACTION_ID,
+              { target: gid, level },
+              'set_power',
+            );
           }
         });
         const incrBtn = el.querySelector('.mini-btn[data-action="incr"]');
         const decrBtn = el.querySelector('.mini-btn[data-action="decr"]');
         incrBtn.addEventListener('click', () => {
-          if (auto) return;
+          if (this.#stateAuto()) return;
           const cur = this.#currentLevel(gid);
-          const max = group.max_level != null ? group.max_level : 4;
-          if (cur < max && this.sendAction) {
-            this.sendAction('set_power', { target: gid, level: cur + 1 });
+          const live = this.#group(gid);
+          const max = live?.max_level != null ? live.max_level : 4;
+          if (cur < max) {
+            activateEngineeringAction(
+              this, POWER_INCREASE_ACTION_ID, { target: gid, level: cur + 1 }, 'set_power',
+            );
           }
         });
         decrBtn.addEventListener('click', () => {
-          if (auto) return;
+          if (this.#stateAuto()) return;
           const cur = this.#currentLevel(gid);
-          const min = group.min_level != null ? group.min_level : DEFAULT_MIN_LEVEL;
-          if (cur > min && this.sendAction) {
-            this.sendAction('set_power', { target: gid, level: cur - 1 });
+          const live = this.#group(gid);
+          const min = live?.min_level != null ? live.min_level : DEFAULT_MIN_LEVEL;
+          if (cur > min) {
+            activateEngineeringAction(
+              this, POWER_DECREASE_ACTION_ID, { target: gid, level: cur - 1 }, 'set_power',
+            );
           }
         });
         // NB: both handlers step from `#currentLevel`, which is the COMMANDED
@@ -257,10 +274,18 @@ export class PhPowerControls extends PhElement {
    * a pre-#952 server sends.
    */
   #currentLevel(groupId) {
+    const g = this.#group(groupId);
+    return g ? commandedLevel(g) : 0;
+  }
+
+  #group(groupId) {
     const s = this.state || {};
     const groups = Array.isArray(s.groups) ? s.groups : [];
-    const g = groups.find(x => x.id === groupId);
-    return g ? commandedLevel(g) : 0;
+    return groups.find(x => x.id === groupId) || null;
+  }
+
+  #stateAuto() {
+    return !!(this.state && this.state.auto);
   }
 }
 

@@ -105,6 +105,8 @@ fn referenced_ship_uuids(event: &BalanceEvent) -> Vec<&String> {
             ids.push(victim);
             ids.extend(killer.iter());
         }
+        BalanceEvent::ObjectiveChanged { targets, .. } => ids.extend(targets),
+        BalanceEvent::TriggerFired { entity, .. } => ids.extend(entity.iter()),
         BalanceEvent::ObjectiveCompleted { .. } | BalanceEvent::PhaseChanged { .. } => {}
     }
     ids

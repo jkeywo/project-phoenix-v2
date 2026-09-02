@@ -19,6 +19,65 @@
 
 use super::*;
 
+/// The identities attached to authored `GameStart` rows in the run that booted.
+///
+/// Kept as derived boot metadata so [`crate::snapshot::capture`] can persist the
+/// exact pre-restore roster without marking entities or changing their
+/// archetypes. The vector contains only rows that actually spawned (a false
+/// `when` predicate contributes nothing), in authored row order.
+#[derive(Resource, Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct GameStartEntityUuids(pub(crate) Vec<crate::snapshot::GameStartEntityUuid>);
+
+/// GameStart identities a compatible saved run requires on a fresh boot.
+///
+/// This is a transient, target-neutral boot resource: browser and native resume
+/// stage the same value after the full save gate, and the shared spawn system
+/// consumes it once. It is deliberately not part of snapshot restore itself —
+/// by then every captured entity row is already keyed by these UUIDs and it is
+/// too late to repair a freshly minted identity.
+#[derive(Resource, Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ResumeGameStartEntityUuids(Vec<crate::snapshot::GameStartEntityUuid>);
+
+/// Stage the validated GameStart identity part of a saved boot record.
+pub(crate) fn stage_resume_game_start_entity_uuids(
+    world: &mut World,
+    boot: &crate::snapshot::BootIdentity,
+) {
+    world.insert_resource(ResumeGameStartEntityUuids(
+        boot.game_start_entity_uuids.clone(),
+    ));
+}
+
+fn select_game_start_entity_uuid(
+    resume: Option<&ResumeGameStartEntityUuids>,
+    authored_index: u32,
+    registered_uuid: Option<&String>,
+    minted_uuid: String,
+) -> String {
+    resume
+        .and_then(|saved| {
+            saved
+                .0
+                .binary_search_by_key(&authored_index, |row| row.authored_index)
+                .ok()
+                .map(|index| saved.0[index].entity_uuid.clone())
+        })
+        .or_else(|| registered_uuid.cloned())
+        .unwrap_or(minted_uuid)
+}
+
+fn resume_game_start_row_inclusion(
+    resume: Option<&ResumeGameStartEntityUuids>,
+    authored_index: u32,
+) -> Option<bool> {
+    resume.map(|saved| {
+        saved
+            .0
+            .binary_search_by_key(&authored_index, |row| row.authored_index)
+            .is_ok()
+    })
+}
+
 /// Reconciles the live ECS entities with the `TrackedEntities` registry each tick.
 pub(crate) fn upsert_world_entity(world: &mut WorldResource, snapshot: EntitySnapshot) {
     if let Some(existing) = world
@@ -362,6 +421,9 @@ pub(crate) fn spawn_game_start_entities(
     mut has_spawned: Local<bool>,
     id_mint: Option<Res<crate::world_id::WorldIdMint>>,
     roster: Option<Res<crate::lockstep::FleetRoster>>,
+    gm_join_bootstrap: Option<Res<crate::gm_join::GmJoinBootstrap>>,
+    fleet_session: Option<Res<crate::lockstep::FleetLockstep>>,
+    resume_game_start_uuids: Option<Res<ResumeGameStartEntityUuids>>,
 ) {
     if *has_spawned {
         return;
@@ -379,15 +441,35 @@ pub(crate) fn spawn_game_start_entities(
     // the world's GameStart `ship` rows in slot order. An app with no roster
     // resource at all (a bare fixture) behaves as a fleet of one.
     let solo_roster = crate::lockstep::FleetRoster::default();
-    let roster = roster.as_deref().unwrap_or(&solo_roster);
+    let roster = roster
+        .as_deref()
+        .or_else(|| {
+            gm_join_bootstrap
+                .as_deref()
+                .map(|bootstrap| bootstrap.topology())
+        })
+        .unwrap_or(&solo_roster);
     let mut player_ships_spawned = 0usize;
+    let mut game_start_entity_uuids = Vec::new();
     let named_positions = crate::world::config::build_named_entity_positions(mc);
-    for entity_inst in &mc.entities {
+    for (authored_index, entity_inst) in mc.entities.iter().enumerate() {
         if entity_inst.spawn_on != crate::world::config::WorldEntitySpawnOn::GameStart {
             continue;
         }
-        // Evaluate optional spawn predicate against the world flag store.
-        if let Some(pred) = &entity_inst.when_predicate {
+        let authored_index = u32::try_from(authored_index)
+            .expect("a WorldConfig cannot contain more than u32::MAX entity rows");
+        // A resume reproduces the original GameStart row set recorded in its
+        // authored-index map. Fresh lobby timing may leave flags at different
+        // values, so re-evaluating `when` here could omit a saved live entity or
+        // add one the original run never spawned. A normal boot keeps the exact
+        // old predicate path.
+        if let Some(included) =
+            resume_game_start_row_inclusion(resume_game_start_uuids.as_deref(), authored_index)
+        {
+            if !included {
+                continue;
+            }
+        } else if let Some(pred) = &entity_inst.when_predicate {
             let empty = crate::world::flags::FlagStore::new();
             let flags_ref = runtime.as_ref().map(|r| &r.flags).unwrap_or(&empty);
             if !pred.evaluate(&[flags_ref]) {
@@ -450,8 +532,27 @@ pub(crate) fn spawn_game_start_entities(
             config
         };
 
-        let uuid =
+        // Always consume the ordinary mint, including on resume. Its counter is
+        // authoritative state and the fresh bootstrap must take the identical
+        // draw it would have taken without a saved run. The value attached to a
+        // saved authored GameStart row takes precedence; on a normal boot, a
+        // named row uses the UUID Startup already registered in `name_to_uuid`.
+        // That is the same identity guarantee the Immediate named path makes:
+        // trigger/GM lookups must resolve to the entity that actually spawned.
+        // A row skipped by its `when` predicate consumes neither a mint nor a
+        // saved identity.
+        let minted_uuid =
             crate::world_id::mint_id_with(id_mint.as_deref(), crate::world_id::IdNamespace::Entity);
+        let registered_uuid = entity_inst
+            .name
+            .as_ref()
+            .and_then(|name| mc.name_to_uuid.get(name));
+        let uuid = select_game_start_entity_uuid(
+            resume_game_start_uuids.as_deref(),
+            authored_index,
+            registered_uuid,
+            minted_uuid,
+        );
         let pos = match crate::world::config::resolve_entity_position_with(
             entity_inst,
             &mc.anchors,
@@ -511,9 +612,13 @@ pub(crate) fn spawn_game_start_entities(
             &mut commands,
             &config,
             pos,
-            uuid,
+            uuid.clone(),
             entity_inst.id.clone(),
         );
+        game_start_entity_uuids.push(crate::snapshot::GameStartEntityUuid {
+            authored_index,
+            entity_uuid: uuid,
+        });
 
         // Apply rotation on the spawned entity's Transform
         if let Some(q) = player_spawn_rot {
@@ -548,7 +653,11 @@ pub(crate) fn spawn_game_start_entities(
                 &FleetPlacement {
                     host: fleet_ship.host,
                     is_local: roster.is_local(fleet_ship.host),
-                    solo: roster.is_solo(),
+                    uses_live_sessions: crate::lockstep::uses_live_sessions(
+                        roster,
+                        fleet_session.is_some(),
+                        fleet_ship.host,
+                    ),
                     crew: &fleet_ship.crew,
                     hull_path: hull_path.as_deref(),
                 },
@@ -558,6 +667,19 @@ pub(crate) fn spawn_game_start_entities(
         }
     }
 
+    // A resumed run keeps the ORIGINAL mapping even when this fresh bootstrap
+    // skipped a conditional row or the saved entity had already been destroyed.
+    // The restore may despawn fresh surplus entities, but later saves still need
+    // the run's complete boot identity rather than a reconstruction of this
+    // particular bootstrap attempt.
+    let persistent_game_start_uuids = resume_game_start_uuids
+        .as_deref()
+        .map(|saved| saved.0.clone())
+        .unwrap_or(game_start_entity_uuids);
+    commands.insert_resource(GameStartEntityUuids(persistent_game_start_uuids));
+    if resume_game_start_uuids.is_some() {
+        commands.remove_resource::<ResumeGameStartEntityUuids>();
+    }
     *has_spawned = true;
 }
 
@@ -572,10 +694,10 @@ pub(crate) struct FleetPlacement<'a> {
     pub host: crate::command_admission::HostSlot,
     /// Whether that host is this one — the whole of what `LocalShip` means.
     pub is_local: bool,
-    /// Whether this is a lone host rather than a fleet. A lone host keeps the
-    /// pre-#1116 seeding path exactly: its own live `Sessions`, its own
-    /// players' pending Rating choices.
-    pub solo: bool,
+    /// Whether this ship takes its crew and pending Ratings from the App's live
+    /// `Sessions`. This is true for the local ship in a solo or independently
+    /// restored saved fleet, and false for every ship in active lockstep.
+    pub uses_live_sessions: bool,
     /// The frozen crewing of this ship, `(station, rating)`.
     pub crew: &'a [(crate::core::messages::StationId, String)],
     /// The hull this slot flies, as an entity-template path.
@@ -593,15 +715,16 @@ pub(crate) struct FleetPlacement<'a> {
 ///
 /// The pre-#1116 seeding reads local `Sessions` — which stations have a
 /// connected player, and what complexity Rating each of them chose. That is the
-/// right answer for a lone host and the wrong one for a fleet: `Sessions`
-/// describes only THIS host's crew, so slot 2's ship would boot fully
-/// AI-backfilled here and human-crewed on the machine its crew is sitting at.
-/// The two hosts would then run different AI on the same hull from tick zero.
+/// right answer for a ship run by this App alone and the wrong one for an active
+/// fleet: `Sessions` describes only THIS host's crew, so slot 2's ship would boot
+/// fully AI-backfilled here and human-crewed on the machine its crew is sitting
+/// at. The two hosts would then run different AI on the same hull from tick zero.
 ///
-/// So a fleet seeds every ship — its own included — from the roster's frozen
-/// crewing, which every host received identically when the roster froze. A lone
-/// host (`solo`) keeps the live-`Sessions` path untouched, which is why nothing
-/// about single-player boot moved.
+/// An active `FleetLockstep` therefore seeds every ship — its own included —
+/// from the roster's frozen crewing, which every host received identically when
+/// the roster froze. With no lockstep session, the local ship uses live
+/// `Sessions`; any retained remote saved ships use their empty frozen crew and
+/// start on Backfill.
 fn configure_player_ship(
     commands: &mut Commands,
     spawned: Entity,
@@ -649,10 +772,10 @@ fn configure_player_ship(
     // allocatable. Empty for a config with no `[power_groups.*]`.
     let power_group_seed =
         crate::ship::power::authored_power_group_seed(&ship_config.0.power_groups);
-    let (initial_control_sources, initial_active_ratings) = if !placement.solo {
-        // A fleet: every host seeds every ship from the SAME frozen crewing,
-        // its own included, so no two hosts can disagree about who is aboard
-        // or at what Rating.
+    let (initial_control_sources, initial_active_ratings) = if !placement.uses_live_sessions {
+        // An active fleet, or a remote ship in an independent saved fleet:
+        // seed from the frozen roster. Active peers therefore agree exactly;
+        // the standalone remote roster is empty and yields AI Backfill.
         let (resolver, active_ratings) =
             crate::ship::rating::seed_boot_ratings(&ship_config.0, |station| {
                 placement
@@ -709,8 +832,14 @@ fn configure_player_ship(
             ),
         }
     };
-    if let Some(sess) = sessions.as_mut() {
-        sess.0.clear_all_pending_ratings();
+    // Pending ratings belong only to this App's local lobby. A remote ship may
+    // spawn first (when restoring slot 2), so it must not consume them before
+    // the local ship reads them. Active fleets still discard the now-obsolete
+    // local lobby choices when their local frozen-roster ship is configured.
+    if placement.is_local {
+        if let Some(sess) = sessions.as_mut() {
+            sess.0.clear_all_pending_ratings();
+        }
     }
 
     insert_player_core_bundle(
@@ -1658,4 +1787,76 @@ pub(crate) fn dump_tracked_entities(
         );
     }
     bevy::log::info!("=== ENTITY DUMP END ({} entities) ===", count);
+}
+
+#[cfg(test)]
+mod game_start_identity_tests {
+    use super::{
+        resume_game_start_row_inclusion, select_game_start_entity_uuid, ResumeGameStartEntityUuids,
+    };
+
+    #[test]
+    fn non_resume_keeps_the_normal_mint_value_unchanged() {
+        let minted = "00000000-0000-8000-8000-000000000009".to_string();
+        assert_eq!(
+            select_game_start_entity_uuid(None, 7, None, minted.clone()),
+            minted
+        );
+    }
+
+    #[test]
+    fn a_named_game_start_row_uses_its_registered_world_identity() {
+        let registered = "00000000-0000-8000-8000-000000000007".to_string();
+        assert_eq!(
+            select_game_start_entity_uuid(None, 7, Some(&registered), "unused-mint".into()),
+            registered,
+            "the name-to-UUID map and spawned entity must describe the same contact"
+        );
+    }
+
+    #[test]
+    fn authored_indexes_restore_player_and_npc_rows_without_predicate_shifting() {
+        let saved = ResumeGameStartEntityUuids(vec![
+            crate::snapshot::GameStartEntityUuid {
+                authored_index: 3,
+                entity_uuid: "00000000-0000-8000-8000-000000000003".into(),
+            },
+            crate::snapshot::GameStartEntityUuid {
+                authored_index: 8,
+                entity_uuid: "00000000-0000-8000-8000-000000000008".into(),
+            },
+        ]);
+        let registered_player = "registered-player".to_string();
+
+        assert_eq!(
+            select_game_start_entity_uuid(
+                Some(&saved),
+                3,
+                Some(&registered_player),
+                "fresh-player".into(),
+            ),
+            "00000000-0000-8000-8000-000000000003"
+        );
+        assert_eq!(
+            select_game_start_entity_uuid(Some(&saved), 5, None, "fresh-skipped".into()),
+            "fresh-skipped",
+            "a predicate-skipped authored row cannot shift the later mapping"
+        );
+        assert_eq!(
+            select_game_start_entity_uuid(Some(&saved), 8, None, "fresh-npc".into()),
+            "00000000-0000-8000-8000-000000000008",
+            "GameStart NPCs take their own saved identity too"
+        );
+        assert_eq!(resume_game_start_row_inclusion(Some(&saved), 3), Some(true));
+        assert_eq!(
+            resume_game_start_row_inclusion(Some(&saved), 5),
+            Some(false)
+        );
+        assert_eq!(resume_game_start_row_inclusion(Some(&saved), 8), Some(true));
+        assert_eq!(
+            resume_game_start_row_inclusion(None, 5),
+            None,
+            "a normal boot still decides row inclusion from its authored predicate"
+        );
+    }
 }

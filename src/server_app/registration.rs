@@ -26,7 +26,7 @@ use super::*;
 /// systems registered alongside it (`StarRenderPlugin`, `PlanetRenderPlugin`,
 /// `render_spawned_entities` and friends, the viewscreen radar, the asset
 /// preloader) need meshes, materials and a `GameCamera`. Callers that run
-/// without a `RenderPlugin` — the headless binary, and eventually the WASM
+/// without a `RenderPlugin` — the headless binary and the WASM
 /// automation branch in `bridge.rs` — set `render: false` to skip them.
 #[derive(Clone, Copy, Debug)]
 pub struct SimPluginOptions {
@@ -264,6 +264,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         ),
     ));
     crate::sim_tick::register_sim_tick(app);
+    crate::save_slots_lifecycle::register(app);
     app.add_systems(First, crate::sim_tick::reconcile_fixed_timestep);
 
     // Physics first, unless the caller asked for it last — see
@@ -310,6 +311,21 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         app
             // Timers / outboxes: wall-clock / transport bookkeeping, not sim state.
             .declare_state::<SimOutbox>(StateClass::Timer, "digest-exclusion-classes")
+            // Peer-local asynchronous content delivery and its virtual-clock
+            // hold. The exact sidecar bytes and resolved ModelMarkers are the
+            // authority; which frame this peer finished loading them on is not.
+            .declare_state::<crate::entities::model_markers::ModelRigReadiness>(
+                StateClass::Timer,
+                "model-rig-readiness-state",
+            )
+            // Peer-local boot identity derived from the explicit browser GM
+            // profile. Lobby systems name the optional resource on every
+            // assembled target, so its census declaration belongs at this
+            // shared assembly site even though only the browser GM inserts it.
+            .declare_state::<crate::gm_projection::BrowserGameMaster>(
+                StateClass::Derived,
+                "browser-gm-profile-marker-state",
+            )
             .declare_state::<crate::debug_overlay::DamageLog>(
                 StateClass::Timer,
                 "digest-exclusion-classes",
@@ -368,6 +384,15 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             .declare_state::<crate::entities::spawner::EntityMass>(
                 StateClass::Derived,
                 "entity-mass-state",
+            )
+            // Save-resume boot identity is derived from the GameStart spawn
+            // rows (or transiently staged from the compatible saved run). The
+            // spawned EntityUuid components are folded; these lookup vectors
+            // exist only to reproduce/capture those identities.
+            .declare_state::<GameStartEntityUuids>(StateClass::Derived, "save-resume-boot-identity")
+            .declare_state::<ResumeGameStartEntityUuids>(
+                StateClass::Derived,
+                "save-resume-boot-identity",
             );
     }
 
@@ -585,8 +610,8 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 "weapons-target-state",
             )
             .declare_state::<crate::debug_overlay::SimulationPaused>(
-                StateClass::DeferredFold,
-                "host-debug-simulation-override-state",
+                StateClass::Folded,
+                "gm-action-state",
             )
             .declare_state::<crate::entities::model_rig::ModelMarkers>(
                 StateClass::DeferredFold,
@@ -653,7 +678,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         // `server` on (headless = default + headless).
         #[cfg(feature = "server")]
         app.declare_state::<crate::server::asset_preload::AssetPreloadResource>(
-            StateClass::DeferredFold,
+            StateClass::Presentation,
             "asset-loading-state",
         );
         app.declare_state::<crate::ship::combat_activity::RecentCombatActivity>(
@@ -837,6 +862,34 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 // commit exactly.
                 .before(crate::world::server::spawn_world_entities),
         )
+        // Model markers are authored simulation content, not a by-product of
+        // materialising a GLB (issue #1291). These renderer-independent systems
+        // prime the primary sidecars, apply the authored parent transform, and
+        // retry marker attachment for headless and browser-GM profiles too.
+        // None depends on `Assets<Scene>` or a render plugin.
+        .init_resource::<crate::entities::model_markers::ModelRigReadiness>()
+        .add_systems(
+            PreUpdate,
+            (
+                crate::entities::model_markers::apply_authored_mesh_transform,
+                crate::entities::model_markers::sync_authoritative_model_markers,
+            )
+                .chain()
+                .before(crate::lockstep::MeshSet),
+        )
+        // FixedUpdate commands are flushed before FixedLast. Synchronise any
+        // runtime spawn there so it has canonical markers before the next fixed
+        // consumer; if its WASM sidecar is pending, discard only whole unbegun
+        // catch-up steps and let the PreUpdate clock gate hold the next frame.
+        .add_systems(
+            FixedLast,
+            (
+                crate::entities::model_markers::sync_authoritative_model_markers,
+                crate::entities::model_markers::discard_blocked_model_rig_overstep,
+            )
+                .chain()
+                .after(crate::sim_tick::advance_sim_tick),
+        )
         .add_systems(
             OnEnter(GamePhase::InProgress),
             (
@@ -849,6 +902,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 // kind of thing — per-run state that a multi-game session has to
                 // hand back.
                 crate::command_admission::reset_command_log,
+                crate::gm_action::reset,
                 reset_broadcast_caches_on_start,
                 crate::world::server::seed_ship_power_counter,
                 spawn_game_start_entities,
@@ -921,6 +975,43 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     app.add_systems(
         FixedUpdate,
         apply_god_mode_toggle.in_set(crate::sim_sets::SimSet::Input),
+    );
+
+    // Crew-rating replication across the fleet (issue #1119): the same ownerless
+    // synthetic-system pattern as God Mode above. The ship host injects an
+    // `AssignStationRating` when its own ship's `ActiveStationRatings` changes so
+    // every peer makes the same Backfill<->Human transition on the agreed tick;
+    // without it a stationless GM keeps the frozen roster's Backfill and its AI
+    // overwrites what a reconnected human just did. The consumer registration
+    // keeps the unrouted-command lint quiet, exactly as God Mode's does.
+    app.init_resource::<crate::lobby::crew_replication::LastReplicatedRatings>();
+    {
+        use crate::authoritative::{DeclareState, StateClass};
+        use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
+        // A one-directional delta-suppression mirror of `ActiveStationRatings`
+        // (which is the truth it diffs against) — the census's Cache class,
+        // verbatim.
+        app.declare_state::<crate::lobby::crew_replication::LastReplicatedRatings>(
+            StateClass::Cache,
+            "digest-exclusion-classes",
+        );
+        app.register_admitted_consumer(ConsumerMatcher::undeclared_exact(
+            crate::ship::system_registry::ASSIGN_STATION_RATING_SYSTEM_ID,
+        ));
+    }
+    app.add_systems(
+        FixedUpdate,
+        (
+            // After the lobby handlers have written the change and before
+            // admission reads the injected command, so it is stamped and staged
+            // to the mesh on the tick the change happened.
+            crate::lobby::crew_replication::replicate_local_crew_ratings
+                .after(crate::lobby::LobbySystemSet)
+                .before(crate::command_admission::AdmissionSet),
+            // Applies the admitted command on every peer's copy of the ship.
+            crate::lobby::crew_replication::apply_assigned_station_rating
+                .in_set(crate::sim_sets::SimSet::Input),
+        ),
     );
 
     // The phone client's settings route (issue #940): drain the debug flags and

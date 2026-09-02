@@ -3,8 +3,8 @@ use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
 use crate::core::messages::{
-    CoordinationPayload, CoordinationPresentation, ModifierSlot, SensorsBlackboard,
-    SystemBlackboard, SystemControlPayload, SystemId,
+    ActionFeedbackOutcome, CoordinationPayload, CoordinationPresentation, ModifierSlot,
+    SensorsBlackboard, SystemBlackboard, SystemControlPayload, SystemId,
 };
 use crate::ship_plugin::CoordinationEnqueue;
 
@@ -170,6 +170,9 @@ pub fn handle_sensors_messages(
         &crate::entities::spawner::EntityName,
     )>,
     mut writer: MessageWriter<CoordinationEnqueue>,
+    mut outbound: Option<
+        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
+    >,
 ) {
     for (entity, admitted, ship_config, mut entity_target, control_sources) in ship_query.iter_mut()
     {
@@ -180,6 +183,11 @@ pub fn handle_sensors_messages(
                     // A clear deselects — there is no contact to designate,
                     // so no channel-3 advisory is emitted.
                     entity_target.0 = None;
+                    crate::command_admission::finish_action_feedback(
+                        cmd,
+                        &mut outbound,
+                        ActionFeedbackOutcome::Applied,
+                    );
                     continue;
                 }
                 _ => continue,
@@ -187,6 +195,11 @@ pub fn handle_sensors_messages(
 
             // Write to this ship's own SensorRadarSelection component (player or NPC).
             entity_target.0 = Some(uuid.clone());
+            crate::command_admission::finish_action_feedback(
+                cmd,
+                &mut outbound,
+                ActionFeedbackOutcome::Applied,
+            );
 
             // Resolve a human-readable label for the target, falling back to
             // the raw uuid if no matching EntityName is found (e.g. asteroids

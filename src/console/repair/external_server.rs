@@ -151,7 +151,7 @@ pub fn handle_external_repair_commands(
         Query<(
             Entity,
             &AdmittedCommands,
-            &ExternalRepairDispatch,
+            Option<&ExternalRepairDispatch>,
             Option<&TacticalRadarSelection>,
             &Transform,
             Option<&ShipRepairTeams>,
@@ -161,18 +161,34 @@ pub fn handle_external_repair_commands(
         // Apply the verdict.
         Query<&mut ExternalRepairDispatch>,
     )>,
+    mut outbound: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
 ) {
     // One request per operator this tick — the latest command wins, the same
     // latest-wins policy the tractor and helm axes take, so a stale-UI double
     // tap is idempotent.
     enum Request {
         Dispatch {
+            command: crate::core::messages::AdmittedCommand,
             lock: Option<String>,
             operator_pos: Vec3,
             has_free_team: bool,
             range: f32,
         },
-        Recall,
+        Recall {
+            command: crate::core::messages::AdmittedCommand,
+        },
+        Unavailable {
+            command: crate::core::messages::AdmittedCommand,
+        },
+    }
+    impl Request {
+        fn command(&self) -> &crate::core::messages::AdmittedCommand {
+            match self {
+                Self::Dispatch { command, .. }
+                | Self::Recall { command }
+                | Self::Unavailable { command } => command,
+            }
+        }
     }
     let requests: Vec<(Entity, Request)> = set
         .p0()
@@ -189,15 +205,48 @@ pub fn handle_external_repair_commands(
                             let has_free_team = teams
                                 .map(|t| !t.0.free_team_indices(0).is_empty())
                                 .unwrap_or(false);
-                            request = Some(Request::Dispatch {
-                                lock: selection.and_then(|s| s.0.clone()),
-                                operator_pos: transform.translation,
-                                has_free_team,
-                                range: dispatch.config.range,
-                            });
+                            let next = if let Some(dispatch) = dispatch {
+                                Request::Dispatch {
+                                    command: cmd.clone(),
+                                    lock: selection.and_then(|s| s.0.clone()),
+                                    operator_pos: transform.translation,
+                                    has_free_team,
+                                    range: dispatch.config.range,
+                                }
+                            } else {
+                                // Correlated external commands are protocol-
+                                // allowlisted for the Repair owner. A hull that
+                                // omits the optional capability must therefore
+                                // still terminate the promise explicitly.
+                                Request::Unavailable {
+                                    command: cmd.clone(),
+                                }
+                            };
+                            if let Some(previous) = request.replace(next) {
+                                crate::command_admission::finish_admitted_action_feedback(
+                                    &mut outbound,
+                                    previous.command(),
+                                    crate::core::messages::ActionFeedbackOutcome::Refused,
+                                );
+                            }
                         }
                         SystemControlPayload::RecallExternalRepair => {
-                            request = Some(Request::Recall);
+                            let next = if dispatch.is_some() {
+                                Request::Recall {
+                                    command: cmd.clone(),
+                                }
+                            } else {
+                                Request::Unavailable {
+                                    command: cmd.clone(),
+                                }
+                            };
+                            if let Some(previous) = request.replace(next) {
+                                crate::command_admission::finish_admitted_action_feedback(
+                                    &mut outbound,
+                                    previous.command(),
+                                    crate::core::messages::ActionFeedbackOutcome::Refused,
+                                );
+                            }
                         }
                         _ => {}
                     }
@@ -228,7 +277,7 @@ pub fn handle_external_repair_commands(
                         .map(|(_, t)| t.translation)?;
                     Some(operator_pos.distance(target))
                 }
-                Request::Recall => None,
+                Request::Recall { .. } | Request::Unavailable { .. } => None,
             })
             .collect()
     };
@@ -237,6 +286,11 @@ pub fn handle_external_repair_commands(
     let mut dispatches = set.p2();
     for ((entity, request), separation) in requests.iter().zip(separations) {
         let Ok(mut dispatch) = dispatches.get_mut(*entity) else {
+            crate::command_admission::finish_admitted_action_feedback(
+                &mut outbound,
+                request.command(),
+                crate::core::messages::ActionFeedbackOutcome::Refused,
+            );
             continue;
         };
         match request {
@@ -250,20 +304,44 @@ pub fn handle_external_repair_commands(
                     Ok(()) => {
                         dispatch.dispatched_target = lock.clone();
                         dispatch.last_refusal = None;
+                        crate::command_admission::finish_admitted_action_feedback(
+                            &mut outbound,
+                            request.command(),
+                            crate::core::messages::ActionFeedbackOutcome::Applied,
+                        );
                     }
                     Err(refusal) => {
                         // A refused dispatch sends nobody: the target is left
                         // untouched and the reason is retained for the console.
                         dispatch.last_refusal = Some(refusal);
+                        crate::command_admission::finish_admitted_action_feedback(
+                            &mut outbound,
+                            request.command(),
+                            crate::core::messages::ActionFeedbackOutcome::Refused,
+                        );
                     }
                 }
             }
-            Request::Recall => {
+            Request::Recall { .. } => {
                 // Recall brings the team home and stops the work, leaving what it
                 // already did on the target. A deliberate recall is not a
                 // refusal, so the reason clears.
                 dispatch.dispatched_target = None;
                 dispatch.last_refusal = None;
+                crate::command_admission::finish_admitted_action_feedback(
+                    &mut outbound,
+                    request.command(),
+                    crate::core::messages::ActionFeedbackOutcome::Applied,
+                );
+            }
+            Request::Unavailable { .. } => {
+                // The mutable-component lookup above always handles this arm.
+                // Keep it exhaustive in case the gather/apply query changes.
+                crate::command_admission::finish_admitted_action_feedback(
+                    &mut outbound,
+                    request.command(),
+                    crate::core::messages::ActionFeedbackOutcome::Refused,
+                );
             }
         }
     }
@@ -617,6 +695,186 @@ pub fn register_external_repair(app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn correlated_external_command(
+        correlation: &str,
+        payload: SystemControlPayload,
+    ) -> crate::core::messages::AdmittedCommand {
+        crate::core::messages::AdmittedCommand {
+            target: repair_system_id(),
+            payload,
+            response_token: Some("repair-holder".into()),
+            feedback_correlation: Some(
+                crate::core::messages::ActionCorrelationId::new(correlation)
+                    .expect("valid test correlation"),
+            ),
+        }
+    }
+
+    #[test]
+    fn external_repair_feedback_finishes_at_dispatch_and_recall_verdicts() {
+        let mut app = App::new();
+        app.add_message::<crate::lobby::OutboundMessage>()
+            .add_systems(Update, handle_external_repair_commands);
+        let operator = app
+            .world_mut()
+            .spawn((
+                AdmittedCommands(vec![correlated_external_command(
+                    "external-applied",
+                    SystemControlPayload::DispatchExternalRepair,
+                )]),
+                record(),
+                TacticalRadarSelection(Some("ally-1".into())),
+                Transform::default(),
+                ShipRepairTeams(crate::modifiers::repair_teams::RepairTeams::new(1)),
+            ))
+            .id();
+        app.world_mut().spawn((
+            EntityUuid("ally-1".into()),
+            Transform::from_xyz(10.0, 0.0, 0.0),
+        ));
+        let mut cursor = app
+            .world()
+            .resource::<Messages<crate::lobby::OutboundMessage>>()
+            .get_cursor();
+        let feedback_count = |messages: &[crate::lobby::OutboundMessage], correlation, expected| {
+            messages
+                .iter()
+                .filter(|message| {
+                    matches!(
+                        (&message.target, &message.msg),
+                        (
+                            crate::lobby::Target::Token(token),
+                            crate::core::messages::ServerMessage::ActionFeedback {
+                                correlation: actual,
+                                outcome,
+                            }
+                        ) if token == "repair-holder"
+                            && actual.as_str() == correlation
+                            && outcome == &expected
+                    )
+                })
+                .count()
+        };
+
+        app.update();
+        let messages = app
+            .world()
+            .resource::<Messages<crate::lobby::OutboundMessage>>();
+        let first: Vec<_> = cursor.read(messages).cloned().collect();
+        assert_eq!(
+            feedback_count(
+                &first,
+                "external-applied",
+                crate::core::messages::ActionFeedbackOutcome::Applied,
+            ),
+            1
+        );
+        assert_eq!(
+            app.world()
+                .get::<ExternalRepairDispatch>(operator)
+                .and_then(|dispatch| dispatch.dispatched_target.as_deref()),
+            Some("ally-1"),
+        );
+
+        app.world_mut()
+            .entity_mut(operator)
+            .insert(AdmittedCommands(vec![correlated_external_command(
+                "external-recall",
+                SystemControlPayload::RecallExternalRepair,
+            )]));
+        app.update();
+        let messages = app
+            .world()
+            .resource::<Messages<crate::lobby::OutboundMessage>>();
+        let second: Vec<_> = cursor.read(messages).cloned().collect();
+        assert_eq!(
+            feedback_count(
+                &second,
+                "external-recall",
+                crate::core::messages::ActionFeedbackOutcome::Applied,
+            ),
+            1
+        );
+        assert!(app
+            .world()
+            .get::<ExternalRepairDispatch>(operator)
+            .is_some_and(|dispatch| dispatch.dispatched_target.is_none()));
+
+        app.world_mut().entity_mut(operator).insert((
+            AdmittedCommands(vec![correlated_external_command(
+                "external-refused",
+                SystemControlPayload::DispatchExternalRepair,
+            )]),
+            TacticalRadarSelection(None),
+        ));
+        app.update();
+        let messages = app
+            .world()
+            .resource::<Messages<crate::lobby::OutboundMessage>>();
+        let third: Vec<_> = cursor.read(messages).cloned().collect();
+        assert_eq!(
+            feedback_count(
+                &third,
+                "external-refused",
+                crate::core::messages::ActionFeedbackOutcome::Refused,
+            ),
+            1
+        );
+    }
+
+    #[test]
+    fn external_repair_feedback_refuses_once_when_capability_is_absent() {
+        let mut app = App::new();
+        app.add_message::<crate::lobby::OutboundMessage>()
+            .add_systems(Update, handle_external_repair_commands);
+        let operator = app
+            .world_mut()
+            .spawn((AdmittedCommands::default(), Transform::default()))
+            .id();
+        let mut cursor = app
+            .world()
+            .resource::<Messages<crate::lobby::OutboundMessage>>()
+            .get_cursor();
+
+        for (correlation, payload) in [
+            (
+                "external-absent-dispatch",
+                SystemControlPayload::DispatchExternalRepair,
+            ),
+            (
+                "external-absent-recall",
+                SystemControlPayload::RecallExternalRepair,
+            ),
+        ] {
+            app.world_mut()
+                .entity_mut(operator)
+                .insert(AdmittedCommands(vec![correlated_external_command(
+                    correlation,
+                    payload,
+                )]));
+            app.update();
+            let messages = app
+                .world()
+                .resource::<Messages<crate::lobby::OutboundMessage>>();
+            let feedback: Vec<_> = cursor
+                .read(messages)
+                .filter(|message| {
+                    matches!(
+                        (&message.target, &message.msg),
+                        (
+                            crate::lobby::Target::Token(token),
+                            crate::core::messages::ServerMessage::ActionFeedback {
+                                correlation: actual,
+                                outcome: crate::core::messages::ActionFeedbackOutcome::Refused,
+                            }
+                        ) if token == "repair-holder" && actual.as_str() == correlation
+                    )
+                })
+                .collect();
+            assert_eq!(feedback.len(), 1, "{correlation} must terminate once");
+        }
+    }
 
     fn record() -> ExternalRepairDispatch {
         ExternalRepairDispatch::new(ExternalRepairConfig {

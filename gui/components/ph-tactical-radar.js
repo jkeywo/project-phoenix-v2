@@ -12,6 +12,8 @@ import {
 } from './ph-scope-chrome.js';
 import { rovingKeyTarget } from '../roving-tabindex.js';
 import { PhElement, phDefine } from './ph-element.js';
+import { TACTICAL_TARGET_ACTION_ID } from '../stations/tactical-actions.js';
+import { activateTacticalAction } from '../stations/tactical-action-control.js';
 
 /** The overlay's user-space box. Badge geometry is in these units, not pixels. */
 const SCOPE_VIEWBOX = 100;
@@ -69,7 +71,9 @@ export class PhTacticalRadar extends PhElement {
     super.connectedCallback();
     if (this.innerRadar) {
       this.innerRadar.sendAction = (action, payload) => {
-        this.sendAction?.(action, payload);
+        if (action === 'set_target') {
+          activateTacticalAction(this, TACTICAL_TARGET_ACTION_ID, payload, action);
+        } else this.sendAction?.(action, payload);
       };
     }
     // Role + accessible name + keyboard reach (issue #1170). The scope is one
@@ -115,9 +119,10 @@ export class PhTacticalRadar extends PhElement {
     // Enter / Space lock the cursor's contact through the SAME named action the
     // tap emits (issue #1170) — no second designation path, no behaviour fork.
     if (key === 'Enter' || key === ' ' || key === 'Spacebar') {
-      if (this.#cursorUuid && this.sendAction) {
+      if (this.#cursorUuid) {
         event.preventDefault();
-        this.sendAction('set_target', { uuid: this.#cursorUuid });
+        activateTacticalAction(this, TACTICAL_TARGET_ACTION_ID,
+          { uuid: this.#cursorUuid }, 'set_target');
       }
       return;
     }

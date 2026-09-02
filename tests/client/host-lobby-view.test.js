@@ -1,9 +1,21 @@
 import { describe, it, expect } from 'vitest';
-import { hostLobbyViewModel, hostLobbyMonitorRow, hostLobbyStationRows } from '../../gui/host-lobby-view.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  hostLobbyViewModel,
+  hostLobbyMonitorRow,
+  hostLobbyStationRows,
+  fleetStartValidationState,
+} from '../../gui/host-lobby-view.js';
 // The real assets/strings/strings.csv is loaded by the vitest setup file, so the
 // tests below can check the sentence an operator actually reads and not only the
 // id and the params it is built from.
 import { t } from '../../gui/strings.js';
+
+const SERVER_HTML = fs.readFileSync(path.join(
+  path.dirname(fileURLToPath(import.meta.url)), '../../server.html',
+), 'utf-8');
 
 function payload(overrides = {}) {
   return {
@@ -15,6 +27,7 @@ function payload(overrides = {}) {
     all_ready: false,
     stations: [],
     spectators: [],
+    gms: [],
     countdown_secs: 0,
     ...overrides,
   };
@@ -747,5 +760,155 @@ describe('hostLobbyViewModel — a card carries its own screen row', () => {
   it('gives every card none on the browser host, which passes no layout', () => {
     const vm = hostLobbyViewModel(payload({ stations: [helmStation({ id: 'helm' })] }), '');
     expect(vm.cards[0].screens).toBeNull();
+  });
+});
+describe('fleetStartValidationState', () => {
+  const selectedAndBootReady = {
+    fleetLinked: true,
+    wasmReady: true,
+    worldLoaded: true,
+    bootReady: true,
+    selectedHull: { template_path: 'assets/entities/alliance_cruiser.toml' },
+    validatedHullPath: 'assets/entities/alliance_cruiser.toml',
+  };
+
+  it('holds validation false until Rust reports terminal presentation readiness', () => {
+    expect(fleetStartValidationState({
+      ...selectedAndBootReady,
+      presentationReady: false,
+    })).toBe(false);
+    expect(fleetStartValidationState({
+      ...selectedAndBootReady,
+      presentationReady: true,
+    })).toBe(true);
+  });
+
+  it('does not let presentation readiness replace selection or station validation', () => {
+    expect(fleetStartValidationState({
+      ...selectedAndBootReady,
+      selectedHull: null,
+      presentationReady: true,
+    })).toBe(false);
+    expect(fleetStartValidationState({
+      ...selectedAndBootReady,
+      validatedHullPath: 'assets/entities/alliance_destroyer.toml',
+      presentationReady: true,
+    })).toBe(false);
+  });
+
+  it('lets an explicit GM peer validate without inventing a local hull', () => {
+    expect(fleetStartValidationState({
+      role: 'gm',
+      fleetLinked: true,
+      wasmReady: true,
+      worldLoaded: true,
+      bootReady: true,
+      selectedHull: null,
+      validatedHullPath: null,
+      presentationReady: true,
+    })).toBe(true);
+    expect(fleetStartValidationState({
+      role: 'gm',
+      fleetLinked: true,
+      wasmReady: true,
+      worldLoaded: true,
+      bootReady: true,
+      presentationReady: false,
+    })).toBe(false);
+  });
+});
+
+describe('hostLobbyViewModel GM presence', () => {
+  it('ships a labelled host-lobby region with list semantics', () => {
+    expect(SERVER_HTML).toContain('id="lobby-gm-group" role="region" aria-labelledby="lobby-gm-heading"');
+    expect(SERVER_HTML).toContain('id="lobby-gm-list" class="lobby-rail-section" role="list"');
+    expect(SERVER_HTML).toContain('id="fleet-gm-group" role="region" aria-labelledby="fleet-gm-heading"');
+    expect(SERVER_HTML).toContain('id="fleet-gms" role="list"');
+    expect(SERVER_HTML).toContain("pill.setAttribute('role', 'listitem')");
+  });
+
+  it('ships an accessible admitted-GM start region and the fleet/Rust seams', () => {
+    expect(SERVER_HTML).toContain('id="gm-start-controls" role="region" aria-labelledby="gm-start-heading" aria-hidden="true"');
+    expect(SERVER_HTML).toContain('id="gm-start-policy" role="status" aria-live="polite"');
+    expect(SERVER_HTML).toContain('id="gm-start-result" role="status" aria-live="polite"');
+    expect(SERVER_HTML.match(/onSimulationRoster: adoptFleetSimulationRoster/g)).toHaveLength(2);
+    expect(SERVER_HTML).toContain('onStartPolicy: receiveFleetStartPolicy');
+    // Only the mesh owner proposes the pure grant. Members learn the scheduled
+    // grant from the owner's authenticated Rust TickFrame.
+    expect(SERVER_HTML.match(/onStartGrant: applyFleetStartGrant/g)).toHaveLength(1);
+    expect(SERVER_HTML).toContain('onForceResult: receiveFleetForceResult');
+    expect(SERVER_HTML).toContain('window.wasm_set_fleet_managed_lobby = wasmBindings.wasm_set_fleet_managed_lobby');
+    expect(SERVER_HTML).toContain('window.wasm_fleet_join_status = wasmBindings.wasm_fleet_join_status');
+    expect(SERVER_HTML).toContain('window.wasm_leave_fleet = wasmBindings.wasm_leave_fleet');
+    expect(SERVER_HTML).toContain('window.wasm_apply_start_grant = wasmBindings.wasm_apply_start_grant');
+    expect(SERVER_HTML).toContain('fleetPresentationReady = s.presentation_ready === true');
+    expect(SERVER_HTML).toContain('presentationReady: fleetPresentationReady');
+    expect(SERVER_HTML).toContain('function validatePlayerHull(templatePath, toml)');
+    expect(SERVER_HTML).toContain('if (!status || status.generation !== pending.generation) return false;');
+    expect(SERVER_HTML).toContain('if (pollFleetSimulationRoster()) {\n        pollFleetGmJoin();\n        return;');
+    expect(SERVER_HTML).toContain('if (fleetSimulationRosterKey) flushFleetStartGrants();');
+    expect(SERVER_HTML).toContain("if (refusal !== 'fleet-lobby-input-queue-full')");
+    expect(SERVER_HTML).toContain("if (refusal === 'start-grant-queue-full')");
+    expect(SERVER_HTML).toContain("canLeave: fleetLobbyPhase === 'Lobby' && !pendingFleetLeave");
+    expect(SERVER_HTML).toContain('if (status.status === \'accepted\') {\n          finalizeFleetLeave(leave.reason);');
+    expect(SERVER_HTML).toContain("fleetFault = status.reason || 'fleet-leave-refused'");
+    expect(SERVER_HTML).toContain('if (adopted && adopted.adopted === true) {\n            pendingFleetSimulationRoster = null;\n            settleFleetSimulationRoster(adopted, true);');
+    expect(SERVER_HTML).toContain('attempt.adopted = true;\n        if (!pendingFleetLeave) {');
+    expect(SERVER_HTML).toContain('if (pendingFleetSimulationRoster) {\n        paintFleetPanel();\n        return true;');
+    expect(SERVER_HTML).toContain('_fleetBootReady = true;\n  publishFleetLobbyState();\n  try { wasm_init();');
+  });
+
+  it('keeps the legacy AI launch outside fleet and GM authority', () => {
+    expect(SERVER_HTML).toContain("vm.aiLaunchVisible && !fleetHandle && fleetRole !== 'gm'");
+    expect(SERVER_HTML).toContain("!fleetHandle && fleetRole !== 'gm' && typeof wasm_force_start === 'function'");
+  });
+
+  it('projects connected and disconnected GMs into a distinct equal group', () => {
+    const vm = hostLobbyViewModel(payload({
+      gms: [
+        { id: 'gm-a', name: 'Ada', connected: true, ready: true },
+        // A stale ready bit on a disconnected reconnectable row is ignored.
+        { id: 'gm-b', name: 'Bo', connected: false, ready: true },
+      ],
+    }), '');
+    expect(vm.gmGroup).toEqual({
+      visible: true,
+      headingId: 'lobby.gms.heading',
+      pills: [
+        {
+          id: 'gm-a', name: 'Ada', connected: true, ready: true,
+          labelId: 'lobby.gms.connected', readinessLabelId: 'lobby.gms.ready',
+        },
+        {
+          id: 'gm-b', name: 'Bo', connected: false, ready: false,
+          labelId: 'lobby.gms.disconnected', readinessLabelId: 'lobby.gms.not_ready',
+        },
+      ],
+    });
+  });
+
+  it('does not count GMs as crew, spectators or AI-launch blockers', () => {
+    const vm = hostLobbyViewModel(payload({
+      crew_count: 0,
+      max_players: 3,
+      spectators: [],
+      gms: [{ id: 'gm-a', name: 'Ada', connected: true, ready: false }],
+    }), '');
+    expect(vm.crew).toEqual({
+      count: 0,
+      max: 3,
+      dots: [false, false, false],
+      spectatorTag: { visible: false, count: 0 },
+    });
+    expect(vm.spectatorPills).toEqual([{ kind: 'empty', id: 'server.no_players', params: {} }]);
+    expect(vm.aiLaunchVisible).toBe(true);
+  });
+
+  it('hides the GM region when the public roster is empty', () => {
+    expect(hostLobbyViewModel(payload(), '').gmGroup).toEqual({
+      visible: false,
+      headingId: 'lobby.gms.heading',
+      pills: [],
+    });
   });
 });

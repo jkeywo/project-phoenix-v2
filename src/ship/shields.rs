@@ -3,8 +3,8 @@ use bevy::prelude::*;
 
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::core::messages::{
-    AdmittedCommands, CoordinationPayload, ShieldArcBlackboard, ShieldFacingStatus,
-    ShieldsBlackboard, SystemBlackboard, SystemControlPayload, SystemId,
+    ActionFeedbackOutcome, AdmittedCommands, CoordinationPayload, ShieldArcBlackboard,
+    ShieldFacingStatus, ShieldsBlackboard, SystemBlackboard, SystemControlPayload, SystemId,
 };
 use crate::ship_plugin::{
     CoordinationDelivery, CoordinationEnqueue, DeliveredCoordination, ShipConfigComponent,
@@ -476,6 +476,9 @@ pub fn shields_state_broadcaster() -> SimBroadcaster {
 /// focus on any other arc (the shield system carries a single focus slot).
 pub fn handle_shields_messages(
     mut ship_query: Query<(&AdmittedCommands, &mut ShipShields), With<crate::server_app::Ship>>,
+    mut outbound: Option<
+        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
+    >,
 ) {
     for (admitted, mut shields) in ship_query.iter_mut() {
         // Snapshot arc ids first so we don't hold an immutable borrow across
@@ -522,6 +525,11 @@ pub fn handle_shields_messages(
                         new_focus = Some(None);
                     }
                 }
+                crate::command_admission::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    ActionFeedbackOutcome::Applied,
+                );
             }
         }
 

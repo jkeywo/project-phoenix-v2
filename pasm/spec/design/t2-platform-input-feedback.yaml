@@ -1,0 +1,115 @@
+entities:
+  - component: t2-semantic-action-registry
+    core:
+      status: partially-implemented
+      confidence: confirmed
+      title: Product-Wide Semantic Action Registry
+      summary: "T2 introduces one context-scoped semantic action registry above the existing client action map for player Stations, client and host chrome, the GM console, save-slot UX, and the existing mod/editor workflow. Actions declare stable identity, contexts, input shape, feedback semantics, confirmation category, and accessibility metadata. #1283 migrated Comms, #1284 Tactical target and weapon controls, #1285 Sensors and Science, #1286 Navigation chart, waypoint, contact and civilian-order surfaces, and #1287 Power allocation, internal and external Repair, Tractor, and Umbilical controls, without creating a second authority path. M6 reuses the registry rather than creating a Workshop-only command layer."
+      rationale:
+        - "Conflicts exist only where action contexts overlap. The registry is presentation and dispatch metadata, not a new command-authority path."
+        - "PRD #1273 was decomposed on 2026-08-29 into issues #1274-#1288 for the shared input/feedback foundation and concrete console-family adoption, #1315 for configurable GM confirmations, #1321/#1322 for the bounded existing-editor workflow, and HITL exit #1323. Existing save issue #865 is reused and updated rather than duplicated."
+        - "Issue #1283 adopts every shipped Comms action through one `comms` context. Hail, respond, clear, and show-on-screen carry correlations to their existing authoritative consumers. Message selection is the one local lifecycle because no host consumer changes selection state: pointer and bindings call the renderer's single selected-message owner, it validates or cycles the live messages and repaints the list/current thread synchronously, and only successful work completes Applied; no SelectCommsMessage envelope is emitted. The adapters preserve the wire contact UUID, the selected-or-automatic current-thread rule, important-response confirmation, and exact message-id/response-index submission."
+        - "Issue #1287 registers seven semantic actions across dedicated Power/Repair, composite Engineering, and Courier Captain surfaces: allocation down/up, team dispatch, named-System priority, Tractor engage/release, Umbilical start/stop, and external-repair dispatch/recall. Parameterised pointer actions retain the exact authored owner SystemId plus group, team slot, dispatch target, or named damaged System identity; bindings derive only from the latest authoritative family view. Courier Captain layers Captain, Comms, Power, and Repair adapters in one iframe and reports its active semantic subcontext to the parent gamepad owner, which routes the activation back to that owning iframe without changing Station authority. A missing iframe capability keeps the neutral gate closed until the live catalogue can be sampled."
+    architecture:
+      kind: client-input-registry
+      authority: non-authoritative
+      coordinates: [roadmap-release-polish, gm-milestone-peer-tracer, gm-milestone-integrated-workshop]
+      runs_in: [phone-browser-runtime, host-browser-runtime, native-host-runtime]
+
+  - mechanic: t2-two-slot-binding-contract
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Two Remappable Bindings Per Semantic Action
+      summary: "Every remappable semantic action has exactly two binding slots. Each slot may hold a keyboard key plus modifiers or one gamepad input. Remapping detects conflicts only in overlapping contexts and offers Replace or Cancel; reserved browser/OS combinations are refused. Users can restore one action or the whole registry to defaults. Bindings are private profile data and never affect session authority."
+      rationale:
+        - "Keyboard support includes keys plus modifiers. Gamepad support uses logical standard controls rather than hardware GUID-specific bindings."
+    architecture:
+      kind: client-input-policy
+      authority: non-authoritative
+      coordinates: [t2-semantic-action-registry]
+      runs_in: [phone-browser-runtime, host-browser-runtime, native-host-runtime]
+
+  - mechanic: t2-gamepad-normalization-and-ownership
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Standard Gamepad Inputs with Explicit Device Ownership
+      summary: "T2 uses the browser standard gamepad mapping, including face and D-pad buttons, Select, Start and both stick buttons. Discrete actions may bind buttons or an axis direction crossing an authored threshold; continuous actions may bind analogue axes with inversion and deadzone. Multi-button controller chords are out of scope. A private profile names the preferred connected gamepad. When several exist the user selects explicitly; disconnect stops its input and warns rather than transferring control, keyboard remains available, and reconnect resumes only after neutral-input detection."
+      rationale:
+        - "Explicit device ownership prevents a newly connected or drifting controller from silently taking a live Station."
+    architecture:
+      kind: client-input-policy
+      authority: non-authoritative
+      coordinates: [t2-two-slot-binding-contract]
+      runs_in: [phone-browser-runtime, host-browser-runtime, native-host-runtime]
+
+  - mechanic: t2-command-feedback-lifecycle
+    core:
+      status: accepted
+      confidence: confirmed
+      title: State-Driven Input and Command Feedback
+      summary: "Every semantic action follows Pressed, then Sent/Pending where authoritative work exists, then Applied, Refused, or Timed Out. A correlation id connects the action registry dispatch to an authoritative acknowledgement; purely local presentation actions complete immediately. The client may show pending state but never optimistically mutates gameplay. Visual and accessible status feedback are mandatory and optional vibration is supported; semantic cue emission is included but new audio production waits for T4. The same timestamps feed the existing input-to-feedback observability and performance budgets."
+      rationale:
+        - "One lifecycle replaces scattered button flashes and bespoke rejection messages while retaining authority at the simulation."
+        - "Issue #1283 retains `CommsResponseRejected` for its response-control-specific red flash while also completing the shared lifecycle. A stale, out-of-range, out-of-bounds, or otherwise invalid response therefore produces both the established exact-control refusal and a correlated `Refused`; it never becomes optimistic client state."
+        - "Issue #1286 applies that rule at the actual Navigation owners: waypoint set/clear settles only after the waypoint consumer runs, and a civilian order settles only after the civilian adapter accepts or refuses delivery into its authored compliance machine. Pending input never paints a waypoint or civilian outcome optimistically."
+        - "Issue #1287 completes Power/Repair/Engineering correlations at the gameplay owner rather than at routing: allocation and repair mutations answer after their validators, external repair after its dispatch verdict, and Tractor/Umbilical starts only after the same-tick live hold/flow verdict. Stops and recalls are explicit idempotent assignments. Admission or Station-authority failures answer Refused before ownership, and authoritative blackboards remain the only gameplay-state update."
+    architecture:
+      kind: client-feedback-policy
+      authority: non-authoritative
+      coordinates: [t2-semantic-action-registry, roadmap-debug-observability]
+      runs_in: [phone-browser-runtime, host-browser-runtime, native-host-runtime]
+
+  - decision: t2-gm-confirmation-settings
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Private Configurable GM Confirmation Matrix
+      summary: "Each GM privately maps every action category to Immediate, Confirm, or Confirm plus Preview in Settings. Defaults are Immediate for Pause, release takeover, reveal/conceal/normal, healing, and routine repeatable quick actions; Confirm for one-shot Fire/Skip, force-start, takeover of a human-held Station, disable, damage, and Objective complete/fail; Confirm plus Preview for safe despawn or damage sufficient to destroy. Every category remains user-configurable. Results always produce a toast/status and activity entry regardless of confirmation choice."
+      rationale:
+        - "Confirmation is local presentation policy, not an authoritative precondition, and follows the GM profile across browser/native surfaces."
+    architecture:
+      kind: client-safety-policy
+      authority: non-authoritative
+      coordinates: [t2-semantic-action-registry, gm-milestone-directing]
+      runs_in: [host-browser-runtime, native-host-runtime]
+
+  - state: t2-private-operator-profile
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Versioned Private Operator Profile
+      summary: "One versioned client-local schema carries accessibility effects, the two bindings per action, gamepad choice and tuning, feedback preferences, and GM confirmation settings. It never enters deterministic session state or a scenario save. Explicit JSON export/import moves the profile between browser and native surfaces; identity, Station ownership, and save data are excluded. Unknown and older versions migrate or fail safely without leaking private settings to peers."
+    architecture:
+      classification: local
+      owner: t2-semantic-action-registry
+      writers: [t2-semantic-action-registry]
+
+  - component: t2-peer-local-save-slot-lifecycle
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Peer-Local Save Slot Lifecycle
+      summary: "Issue #865 gives every simulation peer an equal private save-slot catalogue: every peer autosaves at the same deterministic capture ticks, while storage writes and failures remain local side effects. Every peer may create, name, export, and delete local saves. A manual save captures only that peer at its next deterministic tick and commands no other peer. Any peer may later start a new session from a compatible local save. GM-only and combined native instances follow the same rule. Live-session restore is explicitly deferred to T3 M5."
+      rationale:
+        - "There is no leader or privileged save owner: everyone autosaves and can create saves, while deterministic capture timing keeps independently stored artifacts comparable."
+    architecture:
+      kind: save-user-experience
+      authority: non-authoritative
+      coordinates: [roadmap-authoritative-snapshots, gm-milestone-operations-safety]
+      reads: [world-snapshot-artifact]
+      runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
+
+  - decision: t2-existing-editor-polish-boundary
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Narrow T2 Mod and Editor Polish Before M6
+      summary: "T2 integrates the existing mod/editor workflow with the semantic action registry, shared feedback, focus behavior, validation status, and private settings, and fixes only blocking usability defects across import, edit, validate, and export. It does not build unified inspectors, project editing, model tooling, or a redesigned Workshop because T4 M6 replaces the old editor and viewer with those capabilities."
+      rationale:
+        - "The T2 investment makes the existing workflow operable and consistent without constructing a second authoring product that M6 must delete."
+    architecture:
+      kind: scope-boundary
+      authority: non-authoritative
+      coordinates: [roadmap-mod-content-packs, gm-milestone-integrated-workshop, roadmap-release-polish]

@@ -43,7 +43,10 @@
 //! covers the whole of its **IN** list plus everything `RunFingerprint` already
 //! covered, and nothing from its **OUT**/exclusion list. Precisely:
 //!
-//! **Folded (the run-scope preamble):** `SimTick`; the whole `SimRngState`
+//! **Folded (the run-scope preamble):** `SimTick`; the absolute
+//! `SimulationPaused` value; the applied canonical `GmActionJournal` prefix
+//! (including attribution and idempotency keys); canonical `StationPuppets`
+//! membership; the whole `SimRngState`
 //! (master seed, its provenance, and every `SimStream`'s exact `Pcg32`
 //! position) through `digest_postcard`, so a divergent *draw count* is caught
 //! the tick it happens; `WorldIdMint`'s tick and per-namespace counters (issue
@@ -472,9 +475,46 @@ pub fn first_divergent_scope(mine: &World, theirs: &[(&'static str, u64)]) -> Op
         .map(|((name, _), _)| name)
 }
 
-/// The run-scope preamble: tick, RNG, phase, ending, captain boosts, world.
+/// The run-scope preamble: tick, typed GM pause/action frontier, RNG, phase,
+/// ending, captain boosts, world.
 fn fold_run_scope(world: &World, mut acc: u64) -> u64 {
     acc = fold_u64(acc, world.get_resource::<SimTick>().map_or(0, |t| t.0));
+
+    // Typed GM control becomes current authoritative state at its application
+    // boundary, not when a transport happens to deliver a future owner commit.
+    // Fold only the actually-applied canonical prefix; every field in that
+    // prefix (operator
+    // attribution and correlation included) remains part of the replay/
+    // idempotency fact. Future commits are retained by the journal/snapshot but
+    // cannot create a receipt-timing digest split between honest peers.
+    // SimulationPaused stays separate because trusted solo-host pause remains a
+    // valid writer.
+    acc = match world.get_resource::<crate::gm_action::SimulationPaused>() {
+        Some(paused) => fold_serde(acc, paused),
+        None => fold_str(acc, "simulation-paused:absent"),
+    };
+    acc = match world.get_resource::<crate::gm_action::GmActionJournal>() {
+        Some(journal) => fold_serde(
+            acc,
+            &(
+                journal.initial_paused(),
+                journal.applied_prefix(),
+                journal.applied_results(),
+                journal.recovery_generations_through(
+                    world.get_resource::<SimTick>().map_or(0, |tick| tick.0),
+                ),
+            ),
+        ),
+        None => fold_str(acc, "gm-action-journal:absent"),
+    };
+    acc = match world.get_resource::<crate::gm_puppet::StationPuppets>() {
+        Some(puppets) => fold_serde(acc, puppets),
+        None => fold_str(acc, "gm-station-puppets:absent"),
+    };
+    acc = match world.get_resource::<crate::gm_puppet::PendingGmStationCommands>() {
+        Some(commands) => fold_serde(acc, commands),
+        None => fold_str(acc, "gm-station-commands:absent"),
+    };
 
     // SimRng: the FULL state, not a probe draw. `RunFingerprint` takes one draw
     // per stream because it has no serde shape to lean on; the record puts

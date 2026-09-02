@@ -160,6 +160,23 @@ describe('PhRepairTeams', () => {
     expect(drow.style.display).toBe('none');
   });
 
+  it('keeps an externally committed idle slot visible but not dispatchable', () => {
+    const { el } = setup();
+    el.state = {
+      teams: [
+        { id: 0, label: 'T1', status: 'idle' },
+        { id: 1, label: 'T2', status: 'idle' },
+      ],
+      targets: [{ id: 'helm', label: 'Helm', damage_pct: 0.4 }],
+      externally_committed_teams: 1,
+    };
+    const free = el.shadowRoot.querySelector('[data-team-id="0"]');
+    const committed = el.shadowRoot.querySelector('[data-team-id="1"]');
+    expect(free.querySelector('.dispatch-row').style.display).not.toBe('none');
+    expect(committed.querySelector('.dispatch-row').style.display).toBe('none');
+    expect(committed.textContent).toContain(t('component.repair_teams.external_commitment'));
+  });
+
   it('dispatches dispatch_repair_team with the clicked target for an idle team', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
@@ -184,9 +201,9 @@ describe('PhRepairTeams', () => {
   // ordinal itself is untouched by the pin).
 
   const damagedRows = () => [
-    { system_id: 'hull-plating', display_name: 'Hull Plating', tier: 'Destroyed', damage_pct: 1, prioritised: false, in_progress: false },
-    { system_id: 'helm-engine-port', display_name: 'Port Engine', tier: 'Disabled', damage_pct: 0.8, prioritised: false, in_progress: true },
-    { system_id: 'core', display_name: 'Core', tier: 'Damaged', damage_pct: 0.3, prioritised: false, in_progress: false },
+    { system_id: 'hull-plating', display_name: 'Hull Plating', tier: 'Destroyed', damage_pct: 1, prioritised: false, in_progress: false, prioritisable: true },
+    { system_id: 'helm-engine-port', display_name: 'Port Engine', tier: 'Disabled', damage_pct: 0.8, prioritised: false, in_progress: true, prioritisable: false },
+    { system_id: 'core', display_name: 'Core', tier: 'Damaged', damage_pct: 0.3, prioritised: false, in_progress: false, prioritisable: true },
   ];
 
   it('has no per-team priority buttons any more', () => {
@@ -294,18 +311,31 @@ describe('PhRepairTeams', () => {
     expect(sendAction).toHaveBeenCalledWith('set_repair_target_priority', { system_id: 'core' });
   });
 
-  // A pin is a choice the host actually made, so the row keeps its live state
-  // even if the same payload also reports a team on it — the highlight is not
-  // something to grey out.
-  it('leaves a prioritised row live even when it also reads in_progress', () => {
+  // A stale pin echo remains visible, but owner eligibility is the enablement
+  // source; a highlight cannot turn an unreachable row into a live control.
+  it('does not let a stale prioritised echo override owner eligibility', () => {
     const { el } = setup();
     const rows = damagedRows();
     rows[1].prioritised = true;
     el.state = { teams: [{ id: 0, label: 'T1', status: 'repairing' }], damaged: rows };
     const row = el.shadowRoot.querySelector('.dmg-row[data-system-id="helm-engine-port"]');
-    expect(row.disabled).toBe(false);
+    expect(row.disabled).toBe(true);
     expect(row.title)
       .toBe(t('component.repair_teams.prioritised_title', { name: 'Port Engine' }));
+  });
+
+  it('renders visible damage outside every on-site sweep as a disabled readout', () => {
+    const sendAction = vi.fn();
+    const { el } = setup({ sendAction });
+    const rows = damagedRows();
+    rows[2].prioritisable = false;
+    el.state = { teams: [{ id: 0, label: 'T1', status: 'repairing' }], damaged: rows };
+    const row = el.shadowRoot.querySelector('.dmg-row[data-system-id="core"]');
+    expect(row.disabled).toBe(true);
+    expect(row.title)
+      .toBe(t('component.repair_teams.unavailable_title', { name: 'Core' }));
+    row.click();
+    expect(sendAction).not.toHaveBeenCalled();
   });
 
   it('disables the damaged rows and sends nothing while repair is on AUTO', () => {

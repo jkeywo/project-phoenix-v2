@@ -34,6 +34,10 @@
 //! | `world_digest` folds | [`PhoenixSnapshot`] carries |
 //! |---|---|
 //! | `SimTick` | [`PhoenixSnapshot::tick`] |
+//! | `SimulationPaused` | [`PhoenixSnapshot::paused`] |
+//! | `GmActionJournal` | [`PhoenixSnapshot::gm_actions`] |
+//! | `StationPuppets` | [`PhoenixSnapshot::gm_puppets`] |
+//! | accepted pending GM Station commands | [`PhoenixSnapshot::gm_station_commands`] |
 //! | `SimRng`'s six stream positions | [`PhoenixSnapshot::rng`] (`SimRngState`) |
 //! | `WorldIdMint`'s tick + per-namespace counters | [`PhoenixSnapshot::mint`] |
 //! | `GamePhase` | [`PhoenixSnapshot::phase`] |
@@ -484,7 +488,38 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// system can rebuild it on the first continuation tick. Navigation's waypoint
 /// and clearance frontier and Weapons' global/default replacement state also
 /// landed before any format-14 artifact shipped, so they share this boundary.
-pub const SNAPSHOT_FORMAT: u32 = 14;
+///
+/// Format 15 carries the boot identity that must exist before a snapshot can be
+/// restored: the selected local hull, the frozen fleet roster, and every
+/// successfully spawned authored `GameStart` entity's `EntityUuid`. A scenario
+/// may offer several hulls whose authored component sets differ while retaining
+/// the same scenario content digest. A fresh lobby may also reach `GameStart` on
+/// a different tick, so merely rebuilding the same roster can mint different
+/// UUIDs for the player ships and for any authored GameStart NPCs every captured
+/// row names. Without this field a fresh session can boot one hull (or the right
+/// hull and roster under new identities), pass every version check, and then
+/// apply a snapshot captured from another. There is no honest migration for a
+/// format-14 artifact because the missing choices cannot be inferred from world
+/// state, so the format gate refuses it rather than guessing.
+///
+/// Format 16 carries the typed GM action frontier: the absolute session pause
+/// state and the complete bounded action journal that supplies ordering,
+/// idempotency, attribution, and future scheduled actions. A format-15 record
+/// cannot distinguish an unpaused run with no GM actions from a paused run (or
+/// one with an already-received future action), so defaulting those fields would
+/// silently resume or forget authoritative work. The format gate refuses that
+/// ambiguity rather than inventing a migration.
+///
+/// Format 17 carries the authoritative Station takeover membership reduced
+/// from that action frontier. A format-16 record can contain a takeover grant
+/// but no reliable statement that its applied side effect crossed the snapshot
+/// boundary, so restore refuses to guess between active Backfill and puppeting.
+///
+/// Format 18 carries actual apply-boundary GM outcomes and the already-admitted
+/// Station command queue. A format-17 capture taken after PreUpdate but before
+/// the command's FixedUpdate delivery can otherwise say Applied while losing
+/// the only source-stripped payload that continues that effect.
+pub const SNAPSHOT_FORMAT: u32 = 18;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -515,7 +550,13 @@ pub const SNAPSHOT_FORMAT: u32 = 14;
 /// `StoredRun`'s continuation log element gained a `CommandOrder`. A pre-#1116
 /// save restores intact and then diverges on its first continuation tick, which
 /// is precisely the failure the rules dimension exists to name.
-pub const SIMULATION_RULES: &str = "0.3";
+///
+/// `"0.4"` — issue #1292 makes typed, attributed GM actions part of the
+/// authoritative run. Session pause now participates in the fold and its
+/// ordered journal can change both the current clock state and future logical
+/// boundaries. A pre-#1292 save recorded a narrower digest even when its payload
+/// otherwise parses, so the rules dimension names that change explicitly.
+pub const SIMULATION_RULES: &str = "0.4";
 
 /// The authored data, computed rather than remembered.
 ///
@@ -2265,6 +2306,39 @@ fn reduce_dialogue_node(message_id: &str, dialogue: &ActiveDialogue) -> Dialogue
     }
 }
 
+/// One authored `GameStart` row's stable identity.
+///
+/// The row index is stored alongside the UUID rather than relying on the UUID
+/// vector's position alone. A `when` predicate may skip a row on either boot;
+/// keying by authored index makes that drift fail honestly as a missing/extra
+/// entity instead of shifting every later UUID onto the wrong entity.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GameStartEntityUuid {
+    pub authored_index: u32,
+    pub entity_uuid: String,
+}
+
+/// The choices that determine which authored player-ship world is built before
+/// [`restore`] may run.
+///
+/// This reuses [`crate::lockstep::FleetRoster`] itself rather than introducing a
+/// second fleet schema. `selected_ship` is the canonical template path held by
+/// [`crate::lobby::SelectedShipResource`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BootIdentity {
+    pub selected_ship: String,
+    pub fleet: crate::lockstep::FleetRoster,
+    /// Every authored `GameStart` entity that actually spawned, in authored row
+    /// order. This includes the fleet's player ships and any GameStart NPCs.
+    ///
+    /// Defaulted only so a damaged format-15 development artifact still parses
+    /// far enough for [`required_boot_identity`] to give the semantic refusal.
+    /// A current-format run with a missing, short, invalid, out-of-order, or
+    /// duplicate list is never admitted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub game_start_entity_uuids: Vec<GameStartEntityUuid>,
+}
+
 /// Captured authoritative world state: everything issue #894's record says a
 /// divergence is defined over, at one tick.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -2273,6 +2347,11 @@ pub struct PhoenixSnapshot {
     /// `vellum_save::Snapshot::tick`, which is the envelope's copy; this is the
     /// resource's own value, and [`restore`] writes it back.
     pub tick: u64,
+    /// The pre-world choices this payload requires. Present in every real host;
+    /// optional only so deliberately partial bare-`App` fixtures remain useful.
+    /// Current-format save-slot admission treats absence as malformed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boot_identity: Option<BootIdentity>,
     /// `Time<Fixed>`'s exact accumulator toward the next logical tick.
     ///
     /// `SimTick` says which tick completed; this says whether the next rendered
@@ -2281,6 +2360,25 @@ pub struct PhoenixSnapshot {
     /// through seconds can move the next fixed-step boundary by one update.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fixed_overstep_nanos: Option<u64>,
+    /// The authoritative product pause value at this boundary. This is stored
+    /// separately from the journal because raw trusted-host pause remains a
+    /// valid solo-host writer, while a coordinated fleet derives the same value
+    /// from [`PhoenixSnapshot::gm_actions`].
+    pub paused: bool,
+    /// The complete bounded GM action/idempotency journal, including actions
+    /// already received for a future logical boundary and its exact applied
+    /// prefix. The prefix cannot be inferred from `tick`: immediately after
+    /// FixedLast advances it, a grant at that new value still awaits PreUpdate.
+    pub gm_actions: crate::gm_action::GmActionJournal,
+    /// Station-scoped takeover membership at the captured boundary. This is
+    /// stored alongside the journal so a future grant and an already-applied
+    /// grant remain distinguishable across FixedLast/PreUpdate boundaries.
+    #[serde(default)]
+    pub gm_puppets: crate::gm_puppet::StationPuppets,
+    /// Source-stripped Station commands already accepted by the canonical GM
+    /// reducer but not yet copied into this tick's `AdmittedCommands` buffer.
+    #[serde(default)]
+    pub gm_station_commands: crate::gm_puppet::PendingGmStationCommands,
     pub rng: Option<SimRngState>,
     pub mint: Option<WorldIdMintState>,
     pub phase: Option<GamePhase>,
@@ -2407,11 +2505,39 @@ pub struct TrackedEntitiesState {
 /// step have drawn and others have not, so "all six streams right now" is not a
 /// point any system agrees on.
 pub fn capture(world: &World) -> PhoenixSnapshot {
+    let paused = world
+        .get_resource::<crate::gm_action::SimulationPaused>()
+        .is_some_and(|paused| paused.0);
+    let gm_actions = world
+        .get_resource::<crate::gm_action::GmActionJournal>()
+        .cloned()
+        .unwrap_or_default();
     PhoenixSnapshot {
         tick: world.get_resource::<SimTick>().map_or(0, |t| t.0),
+        boot_identity: world
+            .get_resource::<crate::lobby::SelectedShipResource>()
+            .zip(world.get_resource::<crate::lockstep::FleetRoster>())
+            .map(|(selected, fleet)| BootIdentity {
+                selected_ship: selected.0.clone(),
+                fleet: fleet.clone(),
+                game_start_entity_uuids: world
+                    .get_resource::<crate::server_app::GameStartEntityUuids>()
+                    .map(|uuids| uuids.0.clone())
+                    .unwrap_or_default(),
+            }),
         fixed_overstep_nanos: world
             .get_resource::<Time<bevy::time::Fixed>>()
             .and_then(|time| u64::try_from(time.overstep().as_nanos()).ok()),
+        paused,
+        gm_actions,
+        gm_puppets: world
+            .get_resource::<crate::gm_puppet::StationPuppets>()
+            .cloned()
+            .unwrap_or_default(),
+        gm_station_commands: world
+            .get_resource::<crate::gm_puppet::PendingGmStationCommands>()
+            .cloned()
+            .unwrap_or_default(),
         rng: world.get_resource::<SimRng>().map(SimRng::state),
         mint: world.get_resource::<WorldIdMint>().map(WorldIdMint::state),
         phase: world
@@ -4627,7 +4753,180 @@ pub fn load_from<S: vellum_save::Store>(
         .ok_or(LoadRefusal::Empty)?;
     let run = StoredRun::from_ron(&text).map_err(|e| LoadRefusal::Unparsable(e.to_string()))?;
     run.versions.check(current).map_err(LoadRefusal::Moved)?;
+    required_boot_identity(&run)?;
     Ok(run)
+}
+
+/// Return the pre-world identity a current-format run requires.
+///
+/// The version check must run before this semantic check so an older artifact
+/// reports the authoritative format refusal. A run claiming the current format
+/// while omitting either its snapshot or its boot identity is malformed: there
+/// is no safe hull/fleet a host can infer on its behalf.
+pub fn required_boot_identity(run: &StoredRun) -> Result<&BootIdentity, LoadRefusal> {
+    let identity = run
+        .snapshot
+        .as_ref()
+        .and_then(|snapshot| snapshot.state.boot_identity.as_ref())
+        .ok_or_else(|| {
+            LoadRefusal::Unparsable(
+                "the current snapshot format does not carry its required boot identity".to_string(),
+            )
+        })?;
+
+    if identity.selected_ship.trim().is_empty() {
+        return Err(LoadRefusal::Unparsable(
+            "the current snapshot boot identity has no selected player hull".to_string(),
+        ));
+    }
+    if identity.fleet.is_empty() {
+        return Err(LoadRefusal::Unparsable(
+            "the current snapshot boot identity has an empty fleet roster".to_string(),
+        ));
+    }
+    if !identity.fleet.is_member(identity.fleet.local()) {
+        return Err(LoadRefusal::Unparsable(
+            "the current snapshot boot identity's local slot is absent from its fleet roster"
+                .to_string(),
+        ));
+    }
+    if identity
+        .fleet
+        .ships()
+        .windows(2)
+        .any(|pair| pair[0].host >= pair[1].host)
+    {
+        return Err(LoadRefusal::Unparsable(
+            "the current snapshot boot identity's fleet roster is not in unique slot order"
+                .to_string(),
+        ));
+    }
+    if identity.game_start_entity_uuids.len() < identity.fleet.len() {
+        return Err(LoadRefusal::Unparsable(format!(
+            "the current snapshot boot identity carries {} GameStart UUID(s) for a fleet of {}",
+            identity.game_start_entity_uuids.len(),
+            identity.fleet.len()
+        )));
+    }
+    if identity
+        .game_start_entity_uuids
+        .windows(2)
+        .any(|pair| pair[0].authored_index >= pair[1].authored_index)
+    {
+        return Err(LoadRefusal::Unparsable(
+            "the current snapshot boot identity's GameStart UUIDs are not in unique authored-row order"
+                .to_string(),
+        ));
+    }
+    let snapshot = run
+        .snapshot
+        .as_ref()
+        .expect("a boot identity can only be reached through a snapshot");
+    if snapshot
+        .state
+        .gm_actions
+        .applied_prefix()
+        .iter()
+        .any(|grant| grant.apply_tick > snapshot.state.tick)
+    {
+        return Err(LoadRefusal::Unparsable(
+            "the snapshot's applied GM frontier crosses its capture tick".to_string(),
+        ));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for row in &identity.game_start_entity_uuids {
+        let uuid = &row.entity_uuid;
+        let Some(parsed) = crate::world_id::WorldId::parse(uuid) else {
+            return Err(LoadRefusal::Unparsable(format!(
+                "the current snapshot boot identity's GameStart UUID for authored row {} is not a minted world id",
+                row.authored_index
+            )));
+        };
+        if parsed.namespace != crate::world_id::IdNamespace::Entity {
+            return Err(LoadRefusal::Unparsable(format!(
+                "the current snapshot boot identity's GameStart UUID for authored row {} is not an entity id",
+                row.authored_index
+            )));
+        }
+        if parsed.render() != *uuid {
+            return Err(LoadRefusal::Unparsable(format!(
+                "the current snapshot boot identity's GameStart UUID for authored row {} is not canonical",
+                row.authored_index
+            )));
+        }
+        if !seen.insert(uuid) {
+            return Err(LoadRefusal::Unparsable(format!(
+                "the current snapshot boot identity repeats GameStart UUID {uuid:?}"
+            )));
+        }
+        let occurrences = snapshot
+            .state
+            .entities
+            .iter()
+            .filter(|entity| entity.uuid == *uuid)
+            .count();
+        if occurrences > 1 {
+            return Err(LoadRefusal::Unparsable(format!(
+                "the current snapshot boot identity's GameStart UUID {uuid:?} occurs {occurrences} times in the captured entity roster"
+            )));
+        }
+    }
+
+    Ok(identity)
+}
+
+/// Validate the saved GameStart identity map against the world that will boot.
+///
+/// Format validation above can prove order, namespace and UUID uniqueness without
+/// loading content. Once the selected scenario is available, this second gate
+/// proves every authored index still exists and still names a `GameStart` row.
+/// It deliberately does not require the UUID to occur in the captured entity
+/// roster: a GameStart entity destroyed before the save is absent there, but its
+/// original identity is still required so the fresh bootstrap can spawn and the
+/// restore can recognise that entity as surplus and despawn it again.
+pub fn validate_boot_identity_for_world(
+    identity: &BootIdentity,
+    world_config: &crate::world::config::WorldConfig,
+) -> Result<(), LoadRefusal> {
+    for row in &identity.game_start_entity_uuids {
+        let authored_index = row.authored_index as usize;
+        let Some(authored) = world_config.entities.get(authored_index) else {
+            return Err(LoadRefusal::Unparsable(format!(
+                "the current snapshot boot identity names missing authored entity row {} in a world with {} row(s)",
+                row.authored_index,
+                world_config.entities.len()
+            )));
+        };
+        if authored.spawn_on != crate::world::config::WorldEntitySpawnOn::GameStart {
+            return Err(LoadRefusal::Unparsable(format!(
+                "the current snapshot boot identity names authored entity row {}, which is not a GameStart row",
+                row.authored_index
+            )));
+        }
+    }
+    for (authored_index, authored) in world_config.entities.iter().enumerate() {
+        if authored.spawn_on != crate::world::config::WorldEntitySpawnOn::GameStart
+            || authored.when_predicate.is_some()
+        {
+            continue;
+        }
+        let authored_index = u32::try_from(authored_index).map_err(|_| {
+            LoadRefusal::Unparsable(
+                "the loaded world contains more authored entity rows than a boot identity can address"
+                    .to_string(),
+            )
+        })?;
+        if identity
+            .game_start_entity_uuids
+            .binary_search_by_key(&authored_index, |row| row.authored_index)
+            .is_err()
+        {
+            return Err(LoadRefusal::Unparsable(format!(
+                "the current snapshot boot identity omits unconditional GameStart entity row {authored_index}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 // ── Restore ──────────────────────────────────────────────────────────────────
@@ -4942,11 +5241,10 @@ fn restore_coordination_staging(
 /// first post-restore frame can consume a coincidentally armed or disarmed
 /// latch before `FixedLast` corrects it.
 fn restore_ai_cadence(world: &mut World) {
-    use bevy::ecs::system::RunSystemOnce;
     // A partial bare-World fixture may not have installed the cadence
     // resources. That is the same best-effort partial-restore contract used by
     // `restore_ai_world_snapshot` below.
-    let _ = world.run_system_once(crate::ai::cadence::tick_ai_cadence);
+    crate::ai::cadence::rederive_ai_cadence(world);
 }
 
 /// Rebuild each ship's `ShipModifiers` from the reactor allocation this restore
@@ -5027,6 +5325,53 @@ fn rebuild_ai_world_snapshot(world: &mut World) {
 fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut RestoreReport) {
     world.insert_resource(SimTick(snapshot.tick));
 
+    world.insert_resource(crate::gm_action::SimulationPaused(snapshot.paused));
+    // The journal is itself folded authoritative state, so restore it exactly.
+    // In particular a technical GM-join hold may make `SimulationPaused` true
+    // without being a durable GM action; changing an empty journal's initial
+    // baseline here would make the restored digest differ from the sender's.
+    // The first later typed grant adopts the current pause on every peer at its
+    // replicated admission boundary (`lockstep::apply_mesh_inbox`), which keeps
+    // Resume effective without rewriting the captured history.
+    let gm_actions = snapshot.gm_actions.clone();
+    world.insert_resource(gm_actions.clone());
+    // The journal's terminal result log is derived, never stored. Replace a
+    // bootstrap's stale projection immediately so host-channel readers cannot
+    // observe pre-restore results before the next PreUpdate recomputes them.
+    world.insert_resource(gm_actions.applied_log());
+    crate::gm_activity::rebase_after_restore(world);
+    world.insert_resource(snapshot.gm_puppets.clone());
+    // Rebase derived membership history to the restored authoritative set so
+    // the first continuation pass cannot interpret every active target as a
+    // fresh takeover or miss the next release.
+    world.insert_resource(
+        crate::gm_puppet::PreviousStationPuppetTargets::from_puppets(&snapshot.gm_puppets),
+    );
+    // Unlike ordinary network receipt queues, these payloads already passed
+    // live Station/System admission and are part of the captured boundary.
+    world.insert_resource(snapshot.gm_station_commands.clone());
+    // Consumer reply routes are transient and reconstructed from the accepted
+    // pending commands above.  A pre-restore route must never settle a command
+    // belonging to the new continuation.
+    world.insert_resource(crate::gm_puppet::PendingGmStationFeedbackRoutes::default());
+    // Activity is presentation rebuilt from the restored timeline.
+    world.insert_resource(crate::gm_puppet::StationPuppetActivity::default());
+    if snapshot.paused {
+        // Pausing is always safe and must take effect before this frame can enter
+        // FixedUpdate. Do not symmetrically unpause here: lockstep recovery,
+        // model readiness, and peer stalls share Time<Virtual>, their gate ran
+        // earlier in this PreUpdate frame, and releasing their hold here could
+        // admit one forbidden tick. The next gate frame unpauses iff every hold
+        // (including this restored product pause) is clear.
+        if let Some(mut virtual_time) = world.get_resource_mut::<Time<bevy::time::Virtual>>() {
+            virtual_time.pause();
+            // `TimeSystem` already computed this rendered frame's delta in
+            // First. Pausing prevents later frames, but RunFixedMainLoop would
+            // still accumulate the current delta unless restore consumes it.
+            virtual_time.advance_by(std::time::Duration::ZERO);
+        }
+    }
+
     if let (Some(stored_nanos), Some(mut fixed)) = (
         snapshot.fixed_overstep_nanos,
         world.get_resource_mut::<Time<bevy::time::Fixed>>(),
@@ -5037,6 +5382,19 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
         let bootstrap_overstep = fixed.overstep();
         fixed.discard_overstep(bootstrap_overstep);
         fixed.accumulate_overstep(std::time::Duration::from_nanos(stored_nanos));
+        if snapshot.paused {
+            // A canonical capture carries only interpolation remainder here.
+            // Preserve that exact fraction while refusing any malformed whole
+            // step of pre-restore debt from running in the restore frame.
+            let restored = fixed.overstep();
+            let timestep = fixed.timestep();
+            let remainder_nanos = restored.as_nanos() % timestep.as_nanos();
+            let remainder = std::time::Duration::new(
+                u64::try_from(remainder_nanos / 1_000_000_000).unwrap_or(u64::MAX),
+                (remainder_nanos % 1_000_000_000) as u32,
+            );
+            fixed.discard_overstep(restored - remainder);
+        }
     }
 
     if let Some(mode) = snapshot.phaser_mode {
@@ -7117,9 +7475,43 @@ fn belt_ready(world: &World, snapshot: &PhoenixSnapshot) -> bool {
     if stored.needs_init {
         return true;
     }
-    world
-        .get_resource::<AsteroidWindow>()
-        .is_some_and(|live| !live.needs_init && live.composition_key == stored.composition_key)
+    let Some(live) = world.get_resource::<AsteroidWindow>() else {
+        return false;
+    };
+    if !live.needs_init {
+        return live.composition_key == stored.composition_key;
+    }
+
+    // A paused GM-reconnect candidate is deliberately forbidden from taking a
+    // private fixed tick before the owner's canonical record commits. That
+    // means its fresh AsteroidWindow can still carry `needs_init = true` even
+    // though every authored field entity has finished loading. Waiting for
+    // `update_asteroid_window` here would deadlock: that system is itself in
+    // FixedUpdate, behind the pause this transaction must preserve.
+    //
+    // The initialized window was only a proxy for the fact we actually need:
+    // the live field composition must be the one the stored window was built
+    // from, so the first post-Resume fixed tick cannot rebuild the restored
+    // belt. Compute that same order-sensitive key directly from the standing
+    // field components. `restore_asteroid_window` then installs the canonical
+    // initialized window (including this key) without spending a simulation
+    // tick. Ordinary save resume still takes its existing initialized-window
+    // branch above.
+    let Some(mut fields) =
+        world.try_query::<(Entity, &crate::entities::spawner::AsteroidFieldSection)>()
+    else {
+        return false;
+    };
+    let mut sections: Vec<(Entity, &crate::entities::spawner::AsteroidFieldSection)> =
+        fields.iter(world).collect();
+    sections.sort_by_key(|(entity, _)| *entity);
+    let contributions: Vec<crate::asteroids::spawner::FieldContribution> = sections
+        .into_iter()
+        .filter_map(|(_, section)| {
+            crate::asteroids::spawner::FieldContribution::from_config(&section.0)
+        })
+        .collect();
+    crate::asteroids::lifecycle::composition_key(&contributions) == stored.composition_key
 }
 
 // ── Verification ─────────────────────────────────────────────────────────────
@@ -7215,3 +7607,7 @@ fn apply_hull(hull: &mut crate::ship::damage::SystemHull, rows: &[(String, f32, 
         hull.set_hp(&SystemId(id.clone()), *current);
     }
 }
+
+#[cfg(test)]
+#[path = "snapshot_tests.rs"]
+mod tests;

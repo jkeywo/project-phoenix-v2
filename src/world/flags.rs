@@ -60,7 +60,7 @@
 
 use crate::bounded_history::BoundedHistory;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 // ── Flag store ────────────────────────────────────────────────────────────
 
@@ -409,7 +409,13 @@ impl AiFacts {
 /// serde for the #862 snapshot payload; the payload boundary is the #894 record.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct AiPolicyMemory {
-    values: HashMap<String, f64>,
+    // A `BTreeMap`, not a `HashMap`: this bag rides the #862 snapshot payload,
+    // and the payload must not inherit a `HashMap`'s process-local iteration
+    // order — two same-seed peers would then serialize the same slots to
+    // different bytes (identical digest, divergent artifact). Sorted keys keep
+    // the record deterministic, the same standing rule `AiHistory` already
+    // follows with its own `BTreeMap`.
+    values: BTreeMap<String, f64>,
     state_time_secs: f64,
     history: AiHistory,
 }

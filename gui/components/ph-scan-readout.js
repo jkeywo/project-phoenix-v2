@@ -31,6 +31,7 @@
 import '../strings-boot.js';
 import { t } from '../strings.js';
 import { PhElement, phDefine } from './ph-element.js';
+import { SENSORS_SCAN_ACTION_ID } from '../stations/sensors-actions.js';
 
 /**
  * Whole-percent condition, rendered at the precision the answering band bought.
@@ -108,9 +109,12 @@ export class PhScanReadout extends PhElement {
 
   #onAction() {
     const action = this.action;
-    if (!action || !this.sendAction) return;
-    const { action: name, ...payload } = action;
-    this.sendAction(name, payload);
+    const activate = typeof window !== 'undefined' && window.activateSemanticAction;
+    if (!action || typeof activate !== 'function') return;
+    activate(SENSORS_SCAN_ACTION_ID, {
+      source: 'control',
+      detail: { uuid: action.uuid },
+    });
   }
 
   render(state) {

@@ -1,0 +1,710 @@
+//! The continuous-task lifecycle vocabulary (issue #1341, PRD #1337).
+//!
+//! [`crate::core::narrative`] answers "what happened in the story"; this module
+//! answers a narrower question the story keeps asking of *ongoing work*: **who
+//! started doing what to whom, and how did it end**.
+//!
+//! A scan, a tractor hold, and every continuous task the later slices of PRD
+//! #1337 add (#1345, #1346, #1348, #1350) share one shape:
+//!
+//! * an **operator** — the hull whose station-owned `[[system]]` is doing it;
+//! * a **verb** — what kind of work it is;
+//! * an optional **subject** — the entity it is being done to;
+//! * a **start**, and exactly **one terminal** moment, with a reason.
+//!
+//! Nothing here is scan-shaped or tractor-shaped. Those two are the tracer
+//! workflows that establish the interface; a later mechanic pushes the same
+//! [`TaskLifecycleRequest`]s and gets the same timeline entries without
+//! inventing a parallel telemetry.
+//!
+//! # The activation key
+//!
+//! [`TaskKey`] is the deterministic identity an activation carries from its
+//! start event to its terminal event. It is built from state the fixed tick
+//! already decided — the operator uuid, the system id, the verb, the subject
+//! uuid — plus an **ordinal**: a per-[`TaskSlot`] counter that separates a
+//! restart from the activation it replaced. That is what makes the four cases
+//! issue #1341 asks about separately identifiable:
+//!
+//! | case | what distinguishes it |
+//! |---|---|
+//! | repeated | the ordinal |
+//! | simultaneous | the operator, the system, and the subject |
+//! | cancelled | its own terminal event, with reason [`TaskTerminalReason::Released`] |
+//! | restarted | the ordinal again — the old key is closed before the new one opens |
+//!
+//! No clock, no RNG, no allocation address: two hosts running the same seeded
+//! tick mint the same key.
+//!
+//! # Exactly one terminal event
+//!
+//! [`TaskLifecycles`] is the registry that makes "exactly one" true rather than
+//! hoped for. A terminal request for a slot with no live activation is DROPPED,
+//! which is what lets several sites report the same ending without coordinating:
+//! the AI host reporting a withdrawn order and the command handler reporting the
+//! release it caused are the same ending, and the first one through the queue is
+//! the one the timeline records.
+//!
+//! # Determinism
+//!
+//! Everything here is pure or ordered: [`TaskSlot`] is `Ord` and the registry is
+//! a `BTreeMap`, so every sweep over live activations walks in slot order, never
+//! in the order they were opened or in a `HashMap`'s.
+
+use bevy::prelude::Resource;
+use std::collections::BTreeMap;
+
+use crate::core::narrative::{NarrativeActor, NarrativeEvent, NarrativeKind, NarrativeValue};
+
+/// The verb a science scan's lifecycle is recorded under (issue #1341).
+///
+/// A code-level semantic identifier, exactly like a `[[system]]` id and never
+/// player-visible: the localizable half of a terminal moment is
+/// [`TaskTerminalReason::string_id`].
+pub const TASK_VERB_SCAN: &str = "scan";
+
+/// The verb a tractor hold's lifecycle is recorded under (issue #1341).
+pub const TASK_VERB_TRACTOR_HOLD: &str = "tractor_hold";
+
+/// The four ways a continuous task can end, as issue #1341's acceptance
+/// criterion names them.
+///
+/// The CLASS, not the reason: several reasons share a class, and an
+/// after-action reading that only wants "did it work" reads this while one that
+/// wants "why not" reads [`TaskTerminalReason`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TaskOutcome {
+    /// The task did what it set out to do.
+    Completed,
+    /// Somebody with the authority to stop it stopped it — the operator, or the
+    /// scenario order that opened it.
+    Cancelled,
+    /// The task's own preconditions stopped holding: power, damage, range, or a
+    /// subject it could never read.
+    Failed,
+    /// Something outside the task ended it: the subject left, the activation was
+    /// replaced, or the mission did.
+    Interrupted,
+}
+
+impl TaskOutcome {
+    /// The narrative kind a terminal event of this class is recorded as.
+    pub fn kind(self) -> NarrativeKind {
+        match self {
+            TaskOutcome::Completed => NarrativeKind::TaskCompleted,
+            TaskOutcome::Cancelled => NarrativeKind::TaskCancelled,
+            TaskOutcome::Failed => NarrativeKind::TaskFailed,
+            TaskOutcome::Interrupted => NarrativeKind::TaskInterrupted,
+        }
+    }
+
+    /// The stable snake_case label written into JSON and ndjson.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TaskOutcome::Completed => "completed",
+            TaskOutcome::Cancelled => "cancelled",
+            TaskOutcome::Failed => "failed",
+            TaskOutcome::Interrupted => "interrupted",
+        }
+    }
+}
+
+/// Why a continuous task ended (issue #1341).
+///
+/// The refusal vocabularies the two tracer workflows already own
+/// ([`crate::tractor::coupling::TractorRefusal`],
+/// [`crate::science::scan::ScanRefusal`]) map ONTO this rather than being
+/// duplicated by it — a beam that dropped for want of power and a scan refused
+/// for want of power ended for the same reason, and an after-action reading
+/// should not have to know which subsystem was speaking to say so.
+///
+/// What this adds over those two is the distinction they cannot make: a hold
+/// that ENDED because the operator let go, because the scenario withdrew the
+/// order, because the subject was destroyed, or because the mission did, all
+/// look identical to `hold_status` — it simply stops being asked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TaskTerminalReason {
+    /// The work produced its result. A scan that returned a reading.
+    Completed,
+    /// The operator — human console or ship AI, indistinguishably (AGENTS.md
+    /// rule 6) — stopped it.
+    Released,
+    /// The scenario order that opened it is no longer active, so the AI host
+    /// that was serving it let go. The "scenario closes the task" case.
+    OrderWithdrawn,
+    /// A fresh activation of the same operator/system/verb arrived while this
+    /// one was live. Recorded so the replaced activation still has its one
+    /// terminal event and the restart is visibly a restart.
+    Restarted,
+    /// The selection or lock the task needed is gone, but the subject is still
+    /// in the world.
+    TargetLost,
+    /// The subject left the world — destroyed in combat, or removed by the
+    /// scenario.
+    TargetDestroyed,
+    /// The run ended with the task still live.
+    MissionEnded,
+    /// The subject is past the authored reach.
+    OutOfRange,
+    /// The owning system's power group is below its authored minimum.
+    Unpowered,
+    /// The owning system is damaged out.
+    Disabled,
+    /// This hull cannot do this work at all.
+    NotCapable,
+    /// Nothing in the world answers to the subject the command named.
+    NoSuchTarget,
+    /// The subject carries nothing this work can read.
+    Unreadable,
+    /// Interference pushed the return past anything usable.
+    Blinded,
+}
+
+impl TaskTerminalReason {
+    /// How many reasons this enum has. Hand-maintained for
+    /// [`crate::core::narrative::NarrativeKind::KIND_COUNT`]'s reason: its only
+    /// job is to fail [`Self::ALL`]'s coverage test when a reason is added,
+    /// forcing whoever adds one to classify it and give it a `strings.csv` row.
+    pub const REASON_COUNT: usize = 14;
+
+    /// Every reason, in declaration order (which is also `Ord`'s).
+    pub const ALL: [TaskTerminalReason; Self::REASON_COUNT] = [
+        TaskTerminalReason::Completed,
+        TaskTerminalReason::Released,
+        TaskTerminalReason::OrderWithdrawn,
+        TaskTerminalReason::Restarted,
+        TaskTerminalReason::TargetLost,
+        TaskTerminalReason::TargetDestroyed,
+        TaskTerminalReason::MissionEnded,
+        TaskTerminalReason::OutOfRange,
+        TaskTerminalReason::Unpowered,
+        TaskTerminalReason::Disabled,
+        TaskTerminalReason::NotCapable,
+        TaskTerminalReason::NoSuchTarget,
+        TaskTerminalReason::Unreadable,
+        TaskTerminalReason::Blinded,
+    ];
+
+    /// Which of the four classes this reason belongs to.
+    pub fn outcome(self) -> TaskOutcome {
+        match self {
+            TaskTerminalReason::Completed => TaskOutcome::Completed,
+            TaskTerminalReason::Released | TaskTerminalReason::OrderWithdrawn => {
+                TaskOutcome::Cancelled
+            }
+            TaskTerminalReason::Restarted
+            | TaskTerminalReason::TargetLost
+            | TaskTerminalReason::TargetDestroyed
+            | TaskTerminalReason::MissionEnded => TaskOutcome::Interrupted,
+            TaskTerminalReason::OutOfRange
+            | TaskTerminalReason::Unpowered
+            | TaskTerminalReason::Disabled
+            | TaskTerminalReason::NotCapable
+            | TaskTerminalReason::NoSuchTarget
+            | TaskTerminalReason::Unreadable
+            | TaskTerminalReason::Blinded => TaskOutcome::Failed,
+        }
+    }
+
+    /// The stable snake_case label written into JSON and ndjson. Hand-written,
+    /// not derived, so the wire vocabulary is visible where it is promised.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TaskTerminalReason::Completed => "completed",
+            TaskTerminalReason::Released => "released",
+            TaskTerminalReason::OrderWithdrawn => "order_withdrawn",
+            TaskTerminalReason::Restarted => "restarted",
+            TaskTerminalReason::TargetLost => "target_lost",
+            TaskTerminalReason::TargetDestroyed => "target_destroyed",
+            TaskTerminalReason::MissionEnded => "mission_ended",
+            TaskTerminalReason::OutOfRange => "out_of_range",
+            TaskTerminalReason::Unpowered => "unpowered",
+            TaskTerminalReason::Disabled => "disabled",
+            TaskTerminalReason::NotCapable => "not_capable",
+            TaskTerminalReason::NoSuchTarget => "no_such_target",
+            TaskTerminalReason::Unreadable => "unreadable",
+            TaskTerminalReason::Blinded => "blinded",
+        }
+    }
+
+    /// The `strings.csv` id a console or after-action surface resolves through
+    /// `t()`. A `match`, not a composed `format!`, so `check-strings.mjs` can
+    /// see every id a new variant needs a row for — the same shape
+    /// [`crate::tractor::coupling::TractorRefusal::string_id`] keeps.
+    pub fn string_id(self) -> &'static str {
+        match self {
+            TaskTerminalReason::Completed => "task.ended.completed",
+            TaskTerminalReason::Released => "task.ended.released",
+            TaskTerminalReason::OrderWithdrawn => "task.ended.order_withdrawn",
+            TaskTerminalReason::Restarted => "task.ended.restarted",
+            TaskTerminalReason::TargetLost => "task.ended.target_lost",
+            TaskTerminalReason::TargetDestroyed => "task.ended.target_destroyed",
+            TaskTerminalReason::MissionEnded => "task.ended.mission_ended",
+            TaskTerminalReason::OutOfRange => "task.ended.out_of_range",
+            TaskTerminalReason::Unpowered => "task.ended.unpowered",
+            TaskTerminalReason::Disabled => "task.ended.disabled",
+            TaskTerminalReason::NotCapable => "task.ended.not_capable",
+            TaskTerminalReason::NoSuchTarget => "task.ended.no_such_target",
+            TaskTerminalReason::Unreadable => "task.ended.unreadable",
+            TaskTerminalReason::Blinded => "task.ended.blinded",
+        }
+    }
+
+    /// Whether this reason is one a vanished subject would better explain.
+    ///
+    /// A hold whose subject was destroyed reports itself as out of range or as
+    /// having lost its lock, because that is all the subsystem can see: the
+    /// entity is simply not in the transform query any more. The emitter
+    /// upgrades exactly these two to [`Self::TargetDestroyed`] when the subject
+    /// really has left the world, and leaves every other reason alone — a beam
+    /// that lost power while its target was being destroyed lost power.
+    ///
+    /// [`Self::NoSuchTarget`] is deliberately NOT one of them, even though its
+    /// subject is equally absent from the world: it means the order named a
+    /// contact that was never there, and re-reading that as a destruction would
+    /// invent a hull for the timeline to mourn.
+    pub fn masks_target_loss(self) -> bool {
+        matches!(
+            self,
+            TaskTerminalReason::TargetLost | TaskTerminalReason::OutOfRange
+        )
+    }
+}
+
+/// The identity of a task *position*: one operator's one system doing one kind
+/// of work.
+///
+/// A slot holds at most one live activation, which is what makes a terminal
+/// request addressable without the reporting site having to remember a key it
+/// never minted. Two different subjects on the same slot are two activations in
+/// sequence (the second [`TaskTerminalReason::Restarted`]s the first); two
+/// different slots are genuinely simultaneous and keep separate keys.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TaskSlot {
+    /// The operating hull's uuid.
+    pub operator: String,
+    /// The ship-system id that owns the work (`"sensors"`, `"tractor"`, …).
+    pub system: String,
+    /// What kind of work it is — [`TASK_VERB_SCAN`], [`TASK_VERB_TRACTOR_HOLD`], …
+    pub verb: String,
+}
+
+impl TaskSlot {
+    /// A slot from its three parts.
+    pub fn new(
+        operator: impl Into<String>,
+        system: impl Into<String>,
+        verb: impl Into<String>,
+    ) -> Self {
+        Self {
+            operator: operator.into(),
+            system: system.into(),
+            verb: verb.into(),
+        }
+    }
+}
+
+/// The deterministic identity of ONE activation, stable from its start event to
+/// its terminal event.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TaskKey {
+    /// The slot this activation occupies.
+    pub slot: TaskSlot,
+    /// The subject uuid, when the work has one.
+    pub target: Option<String>,
+    /// Which activation of this slot this is, counted from 0 for the run.
+    pub ordinal: u32,
+}
+
+/// The placeholder written into a [`TaskKey`] string for a task with no
+/// subject, so the encoding stays a fixed five fields.
+const NO_TARGET: &str = "-";
+
+impl TaskKey {
+    /// The wire form: `operator/system/verb/target#ordinal`.
+    ///
+    /// `/` and `#` are the separators because neither can occur in a uuid, a
+    /// system id or a verb, so the encoding is unambiguous without escaping.
+    pub fn as_str(&self) -> String {
+        format!(
+            "{}/{}/{}/{}#{}",
+            self.slot.operator,
+            self.slot.system,
+            self.slot.verb,
+            self.target.as_deref().unwrap_or(NO_TARGET),
+            self.ordinal,
+        )
+    }
+}
+
+/// One live activation, as the registry holds it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TaskActivation {
+    /// Its stable identity.
+    pub key: TaskKey,
+    /// The station the operating system belongs to, when the operator's config
+    /// resolves one. `None` rather than the system id cast to a station — the
+    /// same rule the Comms beat keeps.
+    pub station: Option<String>,
+    /// The fixed sim tick the activation started on.
+    pub start_tick: u64,
+}
+
+/// A lifecycle moment on its way from a workflow site to the event stream
+/// (issue #1341).
+///
+/// Buffered onto an [`crate::effect_queue::EffectQueue`] rather than written
+/// straight to `Messages<NarrativeEvent>`, for the reason every other #1223
+/// effect is: the sites that know a hold began or ended (`handle_tractor_
+/// commands`, `tick_tractor`, `tick_scans`) are ordinary fixed-tick systems near
+/// Bevy's parameter limit, and a queue push costs them one `Option<ResMut<_>>`
+/// instead of a writer plus every lookup a key needs.
+///
+/// It also puts the ordinal, the station resolution and the one-terminal rule in
+/// ONE place — the emitter — rather than in every site that will ever report a
+/// task.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TaskLifecycleRequest {
+    /// Work began on this slot, against this subject.
+    Start {
+        slot: TaskSlot,
+        target: Option<String>,
+    },
+    /// Work on this slot ended. Dropped by the emitter if the slot holds no live
+    /// activation, which is what makes duplicate reports of one ending harmless.
+    End {
+        slot: TaskSlot,
+        reason: TaskTerminalReason,
+    },
+}
+
+/// Every live task activation, and the per-slot ordinal counter that keeps
+/// restarts distinct (issue #1341).
+///
+/// Presentation-class state for the #894 digest boundary: the fixed tick never
+/// reads it, nothing branches on it, and neither `sim_digest` nor `snapshot`
+/// walks it. It decides only what the after-action surface SHOWS.
+///
+/// A resource rather than a `Local` on the emitter — unlike the objective and
+/// deadline views in [`crate::narrative`] — for one reason: the run's LAST
+/// terminal events are the ones nothing in the schedule can emit, because the
+/// run has stopped. `crate::headless::report::finalize_task_lifecycles` drains
+/// what is left here at the report boundary, so a task that was still running
+/// when the mission ended still gets its one terminal event.
+#[derive(Resource, Debug, Clone, Default, PartialEq)]
+pub struct TaskLifecycles {
+    active: BTreeMap<TaskSlot, TaskActivation>,
+    next_ordinal: BTreeMap<TaskSlot, u32>,
+}
+
+impl TaskLifecycles {
+    /// Open an activation on `slot`, minting its ordinal.
+    ///
+    /// The caller is responsible for having closed any activation already on the
+    /// slot — [`Self::end`] first, and record it as
+    /// [`TaskTerminalReason::Restarted`]. Nothing here silently drops one, so a
+    /// missing close shows up as an overwritten `active` entry rather than as a
+    /// timeline that quietly lost a beat.
+    pub fn begin(
+        &mut self,
+        slot: TaskSlot,
+        target: Option<String>,
+        station: Option<String>,
+        tick: u64,
+    ) -> TaskActivation {
+        let ordinal = self.next_ordinal.entry(slot.clone()).or_insert(0);
+        let activation = TaskActivation {
+            key: TaskKey {
+                slot: slot.clone(),
+                target,
+                ordinal: *ordinal,
+            },
+            station,
+            start_tick: tick,
+        };
+        *ordinal += 1;
+        self.active.insert(slot, activation.clone());
+        activation
+    }
+
+    /// Close the activation on `slot`, if there is one.
+    pub fn end(&mut self, slot: &TaskSlot) -> Option<TaskActivation> {
+        self.active.remove(slot)
+    }
+
+    /// The live activation on `slot`, if any.
+    pub fn get(&self, slot: &TaskSlot) -> Option<&TaskActivation> {
+        self.active.get(slot)
+    }
+
+    /// Every live activation, in slot order.
+    pub fn active(&self) -> impl Iterator<Item = &TaskActivation> {
+        self.active.values()
+    }
+
+    /// How many activations are live.
+    pub fn len(&self) -> usize {
+        self.active.len()
+    }
+
+    /// Whether nothing is running.
+    pub fn is_empty(&self) -> bool {
+        self.active.is_empty()
+    }
+
+    /// Take every live activation, in slot order, leaving the registry empty.
+    ///
+    /// The ordinal counters are deliberately kept: a run that closed everything
+    /// and then started a fresh activation of the same slot must still mint a
+    /// new key.
+    pub fn take_all(&mut self) -> Vec<TaskActivation> {
+        std::mem::take(&mut self.active).into_values().collect()
+    }
+}
+
+/// The start beat for one activation (issue #1341).
+///
+/// Pure — no world access — so the whole event shape is unit-testable without
+/// booting an app, the same property [`crate::core::narrative::fold_narrative`]
+/// has.
+pub fn start_event(activation: &TaskActivation) -> NarrativeEvent {
+    base_event(NarrativeKind::TaskStarted, activation)
+}
+
+/// The terminal beat for one activation, of the kind its reason classifies to.
+///
+/// `end_tick` is the fixed tick the task ended on; the event carries both it and
+/// the start tick, so an after-action reading gets the duration without having
+/// to pair the two beats itself.
+pub fn terminal_event(
+    activation: &TaskActivation,
+    reason: TaskTerminalReason,
+    end_tick: u64,
+) -> NarrativeEvent {
+    let outcome = reason.outcome();
+    base_event(outcome.kind(), activation)
+        .text("reason", reason.as_str())
+        .text("reason_text", reason.string_id())
+        .text("outcome", outcome.as_str())
+        .detail(
+            "start_tick",
+            NarrativeValue::Int(activation.start_tick as i64),
+        )
+        .detail(
+            "duration_ticks",
+            NarrativeValue::Int(end_tick.saturating_sub(activation.start_tick) as i64),
+        )
+}
+
+/// The half of the event shape both beats share: the key as the semantic id, the
+/// operator/station/system as the source, the subject as the target, and the
+/// verb and ordinal as structured detail.
+fn base_event(kind: NarrativeKind, activation: &TaskActivation) -> NarrativeEvent {
+    let key = &activation.key;
+    let mut event = NarrativeEvent::new(kind, key.as_str())
+        .from_actor(NarrativeActor {
+            entity: Some(key.slot.operator.clone()),
+            station: activation.station.clone(),
+            system: Some(key.slot.system.clone()),
+        })
+        .text("verb", key.slot.verb.clone())
+        .detail("ordinal", NarrativeValue::Int(key.ordinal as i64));
+    if let Some(target) = &key.target {
+        event = event.to_target(target.clone());
+    }
+    event
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn slot() -> TaskSlot {
+        TaskSlot::new("uuid-tender", "tractor", TASK_VERB_TRACTOR_HOLD)
+    }
+
+    /// The coverage guard: every reason is deliberately classified and given a
+    /// `strings.csv` id. Adding a reason without touching `ALL` fails to compile
+    /// the array; adding one to `ALL` without bumping `REASON_COUNT` fails to
+    /// compile too — this test then forces the remaining two decisions.
+    #[test]
+    fn every_reason_is_classified_and_localizable() {
+        assert_eq!(
+            TaskTerminalReason::ALL.len(),
+            TaskTerminalReason::REASON_COUNT
+        );
+        let mut labels = std::collections::BTreeSet::new();
+        let mut ids = std::collections::BTreeSet::new();
+        for reason in TaskTerminalReason::ALL {
+            assert!(
+                labels.insert(reason.as_str()),
+                "duplicate terminal-reason label {:?}",
+                reason.as_str()
+            );
+            assert!(
+                ids.insert(reason.string_id()),
+                "duplicate terminal-reason String Id {:?}",
+                reason.string_id()
+            );
+            assert!(
+                reason.string_id().starts_with("task.ended."),
+                "{:?} must resolve through the task.ended.* family",
+                reason
+            );
+        }
+        // All four classes are reachable — a vocabulary that could never report
+        // a cancellation would satisfy every other assertion here.
+        let classes: std::collections::BTreeSet<TaskOutcome> = TaskTerminalReason::ALL
+            .iter()
+            .map(|r| r.outcome())
+            .collect();
+        assert_eq!(classes.len(), 4, "{classes:?}");
+    }
+
+    /// Only the two reasons a HOLD can give for a subject it once had are
+    /// re-read as a destruction. `NoSuchTarget` names a contact that was never
+    /// there, and must not be turned into a hull the timeline mourns.
+    #[test]
+    fn only_a_lost_hold_can_be_re_read_as_a_destroyed_subject() {
+        let masking: Vec<&str> = TaskTerminalReason::ALL
+            .iter()
+            .filter(|r| r.masks_target_loss())
+            .map(|r| r.as_str())
+            .collect();
+        assert_eq!(masking, vec!["target_lost", "out_of_range"]);
+    }
+
+    /// The key is a pure function of state the tick already decided, and the
+    /// ordinal is what separates a restart from the activation it replaced.
+    #[test]
+    fn a_restart_of_the_same_slot_mints_a_distinct_key() {
+        let mut registry = TaskLifecycles::default();
+        let first = registry.begin(slot(), Some("uuid-hulk".into()), None, 10);
+        assert_eq!(
+            first.key.as_str(),
+            "uuid-tender/tractor/tractor_hold/uuid-hulk#0"
+        );
+        assert!(registry.end(&slot()).is_some());
+        let second = registry.begin(slot(), Some("uuid-hulk".into()), None, 40);
+        assert_eq!(
+            second.key.as_str(),
+            "uuid-tender/tractor/tractor_hold/uuid-hulk#1",
+            "the same operator holding the same hull a second time is a SECOND task"
+        );
+        assert_ne!(first.key, second.key);
+    }
+
+    /// Two different slots run at once and keep separate identities — the
+    /// "simultaneous tasks stay separately identifiable" half of AC3.
+    #[test]
+    fn simultaneous_slots_do_not_share_an_activation() {
+        let mut registry = TaskLifecycles::default();
+        let hold = registry.begin(slot(), Some("uuid-hulk".into()), None, 1);
+        let scan = registry.begin(
+            TaskSlot::new("uuid-tender", "sensors", TASK_VERB_SCAN),
+            Some("uuid-depot".into()),
+            None,
+            1,
+        );
+        assert_eq!(registry.len(), 2);
+        assert_ne!(hold.key.as_str(), scan.key.as_str());
+        // …and each ordinal counts its OWN slot, so the second task is not
+        // numbered as though it were the first one's restart.
+        assert_eq!(hold.key.ordinal, 0);
+        assert_eq!(scan.key.ordinal, 0);
+    }
+
+    /// A terminal request for a slot with nothing live is dropped — the whole
+    /// of the "exactly one terminal event" rule.
+    #[test]
+    fn ending_an_unstarted_slot_yields_nothing() {
+        let mut registry = TaskLifecycles::default();
+        assert!(registry.end(&slot()).is_none());
+        registry.begin(slot(), None, None, 0);
+        assert!(registry.end(&slot()).is_some());
+        assert!(
+            registry.end(&slot()).is_none(),
+            "a second report of the same ending must add nothing"
+        );
+    }
+
+    /// `take_all` is the mission-end sweep: it empties the live set in slot
+    /// order but keeps the counters, so a resumed slot still mints a fresh key.
+    #[test]
+    fn take_all_empties_the_live_set_but_not_the_counters() {
+        let mut registry = TaskLifecycles::default();
+        registry.begin(slot(), None, None, 0);
+        registry.begin(
+            TaskSlot::new("uuid-tender", "sensors", TASK_VERB_SCAN),
+            None,
+            None,
+            0,
+        );
+        let taken = registry.take_all();
+        assert_eq!(taken.len(), 2);
+        assert_eq!(
+            taken
+                .iter()
+                .map(|a| a.key.slot.system.as_str())
+                .collect::<Vec<_>>(),
+            vec!["sensors", "tractor"],
+            "the sweep walks in slot order, never in the order tasks opened"
+        );
+        assert!(registry.is_empty());
+        assert_eq!(registry.begin(slot(), None, None, 0).key.ordinal, 1);
+    }
+
+    /// The two beats share their identity and point the same way; the terminal
+    /// one adds the reason, the class, and the span.
+    #[test]
+    fn the_two_beats_share_one_identity() {
+        let mut registry = TaskLifecycles::default();
+        let activation = registry.begin(
+            slot(),
+            Some("uuid-hulk".into()),
+            Some("engineering".into()),
+            30,
+        );
+        let start = start_event(&activation);
+        let end = terminal_event(&activation, TaskTerminalReason::Released, 90);
+
+        assert_eq!(start.kind, NarrativeKind::TaskStarted);
+        assert_eq!(end.kind, NarrativeKind::TaskCancelled);
+        assert_eq!(start.id, end.id, "one activation, one key");
+        assert_eq!(start.target.as_deref(), Some("uuid-hulk"));
+        assert_eq!(end.target.as_deref(), Some("uuid-hulk"));
+        assert_eq!(start.source.entity.as_deref(), Some("uuid-tender"));
+        assert_eq!(start.source.system.as_deref(), Some("tractor"));
+        assert_eq!(start.source.station.as_deref(), Some("engineering"));
+        assert_eq!(
+            end.detail.get("reason"),
+            Some(&NarrativeValue::Text("released".into()))
+        );
+        assert_eq!(
+            end.detail.get("reason_text"),
+            Some(&NarrativeValue::Text("task.ended.released".into())),
+            "the localizable half of the reason is a String Id, never prose"
+        );
+        assert_eq!(
+            end.detail.get("outcome"),
+            Some(&NarrativeValue::Text("cancelled".into()))
+        );
+        assert_eq!(
+            end.detail.get("duration_ticks"),
+            Some(&NarrativeValue::Int(60))
+        );
+    }
+
+    /// A task with no subject encodes a fixed five-field key rather than a
+    /// shorter one, so a reader never has to count separators.
+    #[test]
+    fn a_subjectless_task_still_encodes_five_fields() {
+        let mut registry = TaskLifecycles::default();
+        let activation = registry.begin(slot(), None, None, 0);
+        assert_eq!(
+            activation.key.as_str(),
+            "uuid-tender/tractor/tractor_hold/-#0"
+        );
+        assert!(start_event(&activation).target.is_none());
+    }
+}

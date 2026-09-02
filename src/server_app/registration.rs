@@ -366,6 +366,23 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 StateClass::Presentation,
                 "computer-message-state",
             )
+            // The continuous-task lifecycle queue (issue #1341): pushed by the
+            // tractor and scan sites, drained in full every tick by
+            // `narrative::emit_task_lifecycle_narrative`, so it is empty at every
+            // fold/snapshot boundary — the same `ClearedAtFold` contract every
+            // other `EffectQueue<T>` carries.
+            .declare_state::<
+                crate::effect_queue::EffectQueue<crate::core::task_lifecycle::TaskLifecycleRequest>,
+            >(StateClass::ClearedAtFold, "digest-exclusion-classes")
+            // Presentation: the live task-activation registry (issue #1341). It
+            // decides only what the after-action timeline SHOWS — nothing in the
+            // fixed tick reads it, and neither `sim_digest` nor `snapshot` walks
+            // it. A resource rather than a `Local` on the emitter so the report
+            // boundary can close whatever was still running when the run stopped.
+            .declare_state::<crate::core::task_lifecycle::TaskLifecycles>(
+                StateClass::Presentation,
+                "task-lifecycle-registry",
+            )
             // Presentation: the host per-Station attention surface (issue #1101);
             // it drives which tab asks for attention, never what the tick computes.
             .declare_state::<StationImportanceRes>(
@@ -845,6 +862,13 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 crate::core::computer_message::ComputerMessageRequest,
             >,
         >()
+        // The continuous-task lifecycle queue and its activation registry (issue
+        // #1341): the tractor and scan sites push start/end reports, and the
+        // emitter turns them into the paired timeline beats.
+        .init_resource::<
+            crate::effect_queue::EffectQueue<crate::core::task_lifecycle::TaskLifecycleRequest>,
+        >()
+        .init_resource::<crate::core::task_lifecycle::TaskLifecycles>()
         .init_resource::<CaptainPriorityBoost>()
         // The sim's one source of randomness. `init_resource` draws an OS seed, so
         // an unconfigured app (browser host, unit tests) behaves as it always did;
@@ -942,6 +966,10 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 // other two so a message authored by the SAME trigger that
                 // also posts a beat this tick reports in a stable order.
                 crate::narrative::tick_computer_message,
+                // Last of the three (issue #1341): a task's terminal beat reads
+                // as the consequence of the tick, so it sequences after the
+                // Objective, deadline and entity beats that share it.
+                crate::narrative::emit_task_lifecycle_narrative,
             )
                 .chain()
                 .after(crate::sim_sets::SimSet::Broadcast),

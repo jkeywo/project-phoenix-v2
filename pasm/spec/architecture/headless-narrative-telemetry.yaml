@@ -90,3 +90,51 @@ entities:
       paths: [src/core/narrative.rs, src/headless/report.rs]
       symbols: [fold_narrative, NarrativeTimeline, RunReport]
       tests: [cargo test, tests/narrative_timeline.rs]
+
+  - component: task-lifecycle-emitter
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Task Lifecycle Emitter
+      summary: Turns the queued start/end reports from continuous workflows — the science scan and the tractor hold are the two tracer workflows — into paired narrative beats, minting each activation's deterministic task key, resolving the station its system belongs to, and guaranteeing exactly one terminal event per activation across completion, cancellation, failure, interruption, subject loss and mission end.
+      rationale:
+        - "Generic by construction, not scan-shaped or tractor-shaped. A continuous task is an operator, a system, a verb, an optional subject, a start and exactly one terminal moment; the later mechanics of PRD #1337 (#1345, #1346, #1348, #1350) push the same TaskLifecycleRequest and inherit the whole contract rather than inventing parallel lifecycle telemetry."
+        - "The SITES report one fact each — work began, or work ended for this reason — and the EMITTER makes all four judgements. handle_tractor_commands, tick_tractor, operate_tractor_ai and tick_scans know none of the ordinal, the owning station, whether the subject is still in the world, or whether another site already reported the same ending; concentrating those here is what keeps a new workflow's cost to two queue pushes."
+        - "Exactly one terminal event is enforced by the registry, not hoped for: a terminal report for a slot with no live activation is DROPPED. That is what lets operate_tractor_ai report an order withdrawal and handle_tractor_commands report the ReleaseTractor it causes, on the same tick, and have the timeline record the truer of the two — the AI host is ordered before the command handler, so the first report through the queue wins and a withdrawn order does not read as a crew decision."
+        - "A restart is a NEW activation, never a second event on the old one. A start on a slot that already holds one closes the old key as restarted first, so both are separately identifiable and neither is left unterminated. The ordinal is per slot, so simultaneous tasks on one hull (a hold and a scan) count independently."
+        - "A hold whose subject was destroyed can only report itself as out of range or as having lost its lock — a despawned hull and a distant one are identical to hold_status. The emitter upgrades exactly those two reasons to target_destroyed when the subject really has left the world, and closes a still-live activation whose subject vanished even when no site reports it, which is what covers a scripted removal. NoSuchTarget is deliberately not upgraded: it names a contact that was never there."
+        - "The run's LAST terminal events cannot come from a system. Reaching max_ticks is not a transition — run() simply stops calling update() — so headless::report::finalize_task_lifecycles drains the registry at the report boundary and writes the mission_ended terminals with the same stamping and the same ndjson line the per-tick collector uses, keeping the stream and the report's timeline in agreement. The GamePhase::GameOver case IS observable, and the emitter closes it in the tick it happens."
+        - "Determinism: the drained batch is STABLY sorted by slot, so the timeline's order does not depend on the archetype order the reporting queries walked, while the order of reports within a slot — the part that carries meaning — is preserved exactly. The registry is a BTreeMap, so every sweep walks in slot order. No wall clock, no RNG."
+        - "Capture is read-only. The sites push onto a ClearedAtFold EffectQueue and touch no component; the registry is Presentation-class; nothing in sim_digest or snapshot walks either. tests/task_lifecycle_narrative.rs A/Bs the JSON and NDJSON formats of the same driven run and requires the authoritative digest and every report line to match."
+    architecture:
+      kind: telemetry-emitter
+      authority: observational
+      reads: [task-lifecycle-registry, tractor-beam-state, science-scan-state]
+      produces: [narrative-event-stream]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/core/task_lifecycle.rs, src/narrative.rs, src/tractor/server.rs, src/science/server.rs, src/headless/report.rs, src/server_app/registration.rs]
+      symbols: [TaskKey, TaskSlot, TaskOutcome, TaskTerminalReason, TaskActivation, TaskLifecycleRequest, TaskLifecycles, start_event, terminal_event, emit_task_lifecycle_narrative, finalize_task_lifecycles]
+      tests: [cargo test, tests/task_lifecycle_narrative.rs]
+
+  - state: task-lifecycle-registry
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Task Lifecycle Registry
+      summary: The live activation per task slot (operator, system, verb) plus the per-slot ordinal counter that keeps repeats and restarts distinct — the state that makes one-start-one-terminal an invariant rather than an aspiration.
+      rationale:
+        - "Presentation-class for the #894 digest boundary: the fixed tick never reads it, nothing branches on it, and neither sim_digest nor snapshot walks it. It decides only what the after-action surface SHOWS."
+        - "A resource rather than a Local on the emitter — unlike the objective and deadline views the other narrative emitters keep — for one reason: the run's last terminal events are the ones nothing in the schedule can emit, because the run has stopped. The report boundary drains what is left here."
+        - "take_all empties the live set but KEEPS the ordinal counters, so a slot that is closed and started again still mints a fresh key."
+    architecture:
+      classification: observational
+      owner: task-lifecycle-emitter
+      writers: [task-lifecycle-emitter]
+      readers: [task-lifecycle-emitter, narrative-telemetry-collector]
+    implementation:
+      status: declared
+      paths: [src/core/task_lifecycle.rs]
+      symbols: [TaskLifecycles, TaskActivation, TaskKey, TaskSlot]
+      tests: [cargo test]

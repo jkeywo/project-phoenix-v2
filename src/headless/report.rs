@@ -17,6 +17,7 @@ use crate::core::messages::{GamePhase, ServerMessage, ServerMessageDiscriminants
 use crate::core::narrative::{
     fold_narrative, NarrativeEvent, NarrativeTimeline, StampedNarrativeEvent,
 };
+use crate::core::task_lifecycle::{terminal_event, TaskLifecycles, TaskTerminalReason};
 use crate::debug::payload::StationActivityPayload;
 use crate::entities::spawner::{EntityName, EntitySystemHull, EntityUuid, FactionComponent};
 use crate::lobby::OutboundMessage;
@@ -458,8 +459,59 @@ fn reported_wall_seconds(seed_source: &str, wall_seconds: f64) -> f64 {
     }
 }
 
+/// Close every continuous task still running when the run stopped (issue #1341).
+///
+/// # Why this is not a system
+///
+/// `crate::narrative::emit_task_lifecycle_narrative` already closes live
+/// activations when the mission reaches `GamePhase::GameOver`, because that is a
+/// transition the schedule can observe. The OTHER way a run stops — reaching
+/// `max_ticks` — is not a transition at all: `run()` simply stops calling
+/// `update()`, and no further tick exists for any system to notice on. A hold
+/// that was still holding at that moment would leave the timeline with a start
+/// and no terminal, which is precisely the invariant issue #1341 exists to
+/// guarantee. So the LAST terminal events of a run are written here, at the
+/// report boundary, from the registry the emitter keeps.
+///
+/// Stamped exactly as [`collect_narrative_events`] stamps its own: the run's
+/// final tick and sim-time, the next sequence numbers, and the same ndjson line
+/// when stream capture is on — so the stream and the report's timeline still
+/// agree event for event.
+///
+/// Idempotent: the registry is emptied, so a second call adds nothing.
+pub fn finalize_task_lifecycles(app: &mut App) {
+    let tick = app.world().resource::<crate::sim_tick::SimTick>().0;
+    let sim_t = app.world().resource::<Time>().elapsed_secs_f64();
+    let Some(mut lifecycles) = app.world_mut().get_resource_mut::<TaskLifecycles>() else {
+        return;
+    };
+    // Slot order, from the registry's own `BTreeMap` — never the order the
+    // tasks happened to open in.
+    let dangling = lifecycles.take_all();
+    if dangling.is_empty() {
+        return;
+    }
+    let mut telemetry = app.world_mut().resource_mut::<RunTelemetry>();
+    for activation in dangling {
+        let stamped = StampedNarrativeEvent {
+            seq: telemetry.narrative_events.len() as u64,
+            tick,
+            sim_t,
+            event: terminal_event(&activation, TaskTerminalReason::MissionEnded, tick),
+        };
+        if telemetry.capture_stream && stamped.event.in_timeline_stream() {
+            let line = stamped.to_stream_json();
+            telemetry.stream.push(line);
+        }
+        telemetry.narrative_events.push(stamped);
+    }
+}
+
 /// Read the finished world and produce the summary.
 pub fn build_report(app: &mut App, args: &HeadlessArgs, wall_seconds: f64) -> RunReport {
+    // Before anything reads the telemetry: give every task that was still
+    // running when the run stopped its one terminal event (issue #1341).
+    finalize_task_lifecycles(app);
     let telemetry = app.world().resource::<RunTelemetry>();
     let message_counts = telemetry.message_counts.clone();
     let final_sim_t = app.world().resource::<Time>().elapsed_secs_f64();

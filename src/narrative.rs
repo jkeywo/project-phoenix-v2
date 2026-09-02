@@ -62,14 +62,20 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::core::balance::BalanceEvent;
 use crate::core::computer_message::{ActiveComputerMessage, ComputerMessageRequest};
 use crate::core::messages::ObjectiveStatus;
+use crate::core::messages::{GamePhase, SystemId};
 use crate::core::narrative::{
     NarrativeActor, NarrativeEvent, NarrativeKind, NarrativeMark, NarrativeRequest, NarrativeValue,
+};
+use crate::core::task_lifecycle::{
+    start_event, terminal_event, TaskActivation, TaskLifecycleRequest, TaskLifecycles, TaskSlot,
+    TaskTerminalReason,
 };
 use crate::effect_queue::EffectQueue;
 use crate::entities::spawner::EntityUuid;
 use crate::objectives::{ObjectiveTransition, ObjectiveTransitionKind};
 use crate::sim_tick::SimTick;
 use crate::world::config::WorldConfig;
+use crate::ship::components::{HumanSeekingHosts, ShipConfigComponent};
 use crate::world::deadlines::DeadlineState;
 use crate::world::script::schedule::SchedClock;
 use crate::world::server::{ObjectiveManagerRes, WorldContentRuntime};
@@ -440,6 +446,205 @@ pub fn tick_computer_message(
 /// narrative beat (see [`ActiveComputerMessage::clear`]'s doc for why).
 pub fn clear_active_computer_message(mut active: ResMut<ActiveComputerMessage>) {
     active.clear();
+}
+
+// ── The continuous-task lifecycle (issue #1341) ──────────────────────────────
+
+/// Turn the queued task-lifecycle reports into their narrative beats, holding
+/// the one-start-one-terminal contract (issue #1341).
+///
+/// # Why the sites report and this system decides
+///
+/// The three reporting sites — `tractor::server::handle_tractor_commands`,
+/// `tractor::server::tick_tractor`, `science::server::tick_scans`, and the AI
+/// host `tractor::server::operate_tractor_ai` — each know one fact: work began,
+/// or work ended for this reason. None of them knows the activation's ordinal,
+/// the station the system belongs to, whether the subject is still in the world,
+/// or whether some other site has already reported the same ending. Putting
+/// those four decisions here means a later mechanic (#1345, #1346, #1348, #1350)
+/// reports the same two facts and inherits all four.
+///
+/// # The four decisions
+///
+/// 1. **Ordinal.** [`TaskLifecycles::begin`] mints it per slot, so a repeat of
+///    the same work is a new key rather than a second event on the old one.
+/// 2. **Station.** Resolved through `command_admission::policy::
+///    station_for_system` off the operator's own config, so the beat names the
+///    station a human WOULD be sitting at, human or AI (AGENTS.md rule 6). An
+///    unresolvable station stays `None` rather than being the system id cast to
+///    a station — the rule the Comms beat keeps.
+/// 3. **A vanished subject.** A hold whose target was destroyed reports itself
+///    as out of range or as having lost its lock, because that is all
+///    `hold_status` can see. Any reason [`TaskTerminalReason::masks_target_loss`]
+///    admits is upgraded to [`TaskTerminalReason::TargetDestroyed`] when the
+///    subject really has left the world — and a still-live activation whose
+///    subject vanished is closed here even if no site reports it at all, which
+///    is what covers a scripted removal.
+/// 4. **Exactly one terminal.** A terminal report for a slot with no live
+///    activation is dropped. That is what lets `operate_tractor_ai` report an
+///    `OrderWithdrawn` and `handle_tractor_commands` report the `Released` it
+///    caused, on the same tick, and have the timeline record the truer of the
+///    two — the first one through the queue, which is the AI host, because it is
+///    ordered before the command handler.
+///
+/// # Determinism
+///
+/// The drained batch is STABLY sorted by slot before it is read, so the
+/// timeline's order does not depend on the archetype order the reporting
+/// queries happened to walk — while the order of reports WITHIN a slot, which
+/// is the part that carries meaning, is preserved exactly. The registry is a
+/// `BTreeMap`, so every sweep walks in slot order. No clock, no RNG.
+pub fn emit_task_lifecycle_narrative(
+    queue: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
+    lifecycles: Option<ResMut<TaskLifecycles>>,
+    tick: Option<Res<crate::sim_tick::SimTick>>,
+    phase: Option<Res<State<GamePhase>>>,
+    operators: Query<(
+        &EntityUuid,
+        Option<&ShipConfigComponent>,
+        Option<&HumanSeekingHosts>,
+    )>,
+    mut out: MessageWriter<NarrativeEvent>,
+) {
+    let Some(mut lifecycles) = lifecycles else {
+        return;
+    };
+    let batch: Vec<TaskLifecycleRequest> = match queue {
+        Some(mut queue) if !queue.0.is_empty() => std::mem::take(&mut queue.0),
+        _ => Vec::new(),
+    };
+    let mission_over = phase.is_some_and(|p| *p.get() == GamePhase::GameOver);
+    if batch.is_empty() && lifecycles.is_empty() {
+        return;
+    }
+    let now = tick.map(|t| t.0).unwrap_or(0);
+
+    let mut batch = batch;
+    // Stable: cross-slot order becomes the slot's own total order, intra-slot
+    // order stays the order the tick produced it in. See the determinism note.
+    batch.sort_by(|a, b| slot_of(a).cmp(slot_of(b)));
+
+    for request in batch {
+        match request {
+            TaskLifecycleRequest::Start { slot, target } => {
+                // A start on a slot that already holds one closes the old
+                // activation first, so the restart is visible as a restart and
+                // the replaced key still gets its single terminal event.
+                if let Some(previous) = lifecycles.end(&slot) {
+                    out.write(terminal_event(
+                        &previous,
+                        TaskTerminalReason::Restarted,
+                        now,
+                    ));
+                }
+                let station = station_for(&operators, &slot);
+                let activation = lifecycles.begin(slot, target, station, now);
+                out.write(start_event(&activation));
+            }
+            TaskLifecycleRequest::End { slot, reason } => {
+                // The dedupe: no live activation, no event.
+                let Some(activation) = lifecycles.end(&slot) else {
+                    continue;
+                };
+                let reason = if reason.masks_target_loss() && subject_gone(&operators, &activation)
+                {
+                    TaskTerminalReason::TargetDestroyed
+                } else {
+                    reason
+                };
+                out.write(terminal_event(&activation, reason, now));
+            }
+        }
+    }
+
+    // A subject that left the world ends the work whether or not the owning
+    // system got as far as saying so this tick.
+    let vanished: Vec<TaskSlot> = lifecycles
+        .active()
+        .filter(|activation| subject_gone(&operators, activation))
+        .map(|activation| activation.key.slot.clone())
+        .collect();
+    for slot in vanished {
+        if let Some(activation) = lifecycles.end(&slot) {
+            out.write(terminal_event(
+                &activation,
+                TaskTerminalReason::TargetDestroyed,
+                now,
+            ));
+        }
+    }
+
+    // And the mission ending ends everything still running under it. The
+    // headless report boundary (`headless::report::finalize_task_lifecycles`)
+    // covers the OTHER way a run stops — simply reaching `max_ticks`, where no
+    // further tick runs for this system to observe anything on.
+    if mission_over {
+        for activation in lifecycles.take_all() {
+            out.write(terminal_event(
+                &activation,
+                TaskTerminalReason::MissionEnded,
+                now,
+            ));
+        }
+    }
+}
+
+/// The slot a queued request addresses — the sort key that makes the batch
+/// order independent of query iteration order.
+fn slot_of(request: &TaskLifecycleRequest) -> &TaskSlot {
+    match request {
+        TaskLifecycleRequest::Start { slot, .. } => slot,
+        TaskLifecycleRequest::End { slot, .. } => slot,
+    }
+}
+
+/// The station the operating system belongs to on the operator's own hull, or
+/// `None` when the hull carries no config or the system resolves to no station.
+fn station_for(
+    operators: &Query<(
+        &EntityUuid,
+        Option<&ShipConfigComponent>,
+        Option<&HumanSeekingHosts>,
+    )>,
+    slot: &TaskSlot,
+) -> Option<String> {
+    let (_, config, hosts) = operators
+        .iter()
+        .find(|(uuid, _, _)| uuid.0 == slot.operator)?;
+    let config = config?;
+    crate::command_admission::policy::station_for_system(
+        &config.0,
+        hosts,
+        &SystemId(slot.system.clone()),
+    )
+    .map(|station| station.0)
+}
+
+/// Whether this activation's subject has left the world.
+///
+/// A task with no subject can never lose one. A world with no uuid'd entities at
+/// all is a reduced fixture that is not simulating entities, and reports nothing
+/// gone — otherwise every activation in such a fixture would be closed as though
+/// its subject had been destroyed.
+fn subject_gone(
+    operators: &Query<(
+        &EntityUuid,
+        Option<&ShipConfigComponent>,
+        Option<&HumanSeekingHosts>,
+    )>,
+    activation: &TaskActivation,
+) -> bool {
+    let Some(target) = activation.key.target.as_deref() else {
+        return false;
+    };
+    let mut any = false;
+    for (uuid, _, _) in operators.iter() {
+        any = true;
+        if uuid.0 == target {
+            return false;
+        }
+    }
+    any
 }
 
 #[cfg(test)]
@@ -946,6 +1151,247 @@ mod tests {
             drain(&mut app).is_empty(),
             "an unmarked hull a script removes is not a story beat"
         );
+    }
+
+    // ── The continuous-task lifecycle (issue #1341) ───────────────────────────
+    //
+    // The emitter's four decisions — ordinal, station, vanished subject, and the
+    // one-terminal rule — exercised against a bare app, so what is being
+    // asserted is this system and not the tractor or the scan.
+
+    use crate::core::task_lifecycle::{
+        TaskLifecycleRequest, TaskLifecycles, TaskSlot, TaskTerminalReason, TASK_VERB_SCAN,
+        TASK_VERB_TRACTOR_HOLD,
+    };
+
+    const OPERATOR: &str = "uuid-tender";
+    const SUBJECT: &str = "uuid-hulk";
+
+    fn hold_slot() -> TaskSlot {
+        TaskSlot::new(OPERATOR, "tractor", TASK_VERB_TRACTOR_HOLD)
+    }
+
+    /// A bare app carrying the lifecycle plumbing, the operator hull and the
+    /// subject hull, with the emitter as its only system.
+    fn lifecycle_app() -> App {
+        let mut app = narrative_app();
+        app.init_resource::<EffectQueue<TaskLifecycleRequest>>()
+            .init_resource::<TaskLifecycles>()
+            .init_resource::<crate::sim_tick::SimTick>()
+            .add_systems(Update, emit_task_lifecycle_narrative);
+        app.world_mut().spawn(EntityUuid(OPERATOR.into()));
+        app.world_mut().spawn(EntityUuid(SUBJECT.into()));
+        app
+    }
+
+    fn push(app: &mut App, request: TaskLifecycleRequest) {
+        app.world_mut()
+            .resource_mut::<EffectQueue<TaskLifecycleRequest>>()
+            .0
+            .push(request);
+    }
+
+    fn start(slot: TaskSlot, target: &str) -> TaskLifecycleRequest {
+        TaskLifecycleRequest::Start {
+            slot,
+            target: Some(target.to_string()),
+        }
+    }
+
+    fn end(slot: TaskSlot, reason: TaskTerminalReason) -> TaskLifecycleRequest {
+        TaskLifecycleRequest::End { slot, reason }
+    }
+
+    /// The reason recorded on a terminal event.
+    fn reason_of(event: &NarrativeEvent) -> String {
+        match event.detail.get("reason") {
+            Some(NarrativeValue::Text(s)) => s.clone(),
+            other => panic!("a terminal event must carry its reason, got {other:?}"),
+        }
+    }
+
+    /// The core contract: one start, one terminal, sharing one key.
+    #[test]
+    fn an_activation_produces_one_start_and_one_terminal_sharing_a_key() {
+        let mut app = lifecycle_app();
+        push(&mut app, start(hold_slot(), SUBJECT));
+        app.update();
+        let events = drain(&mut app);
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert_eq!(events[0].kind, NarrativeKind::TaskStarted);
+        let key = events[0].id.clone();
+        assert_eq!(events[0].source.entity.as_deref(), Some(OPERATOR));
+        assert_eq!(events[0].source.system.as_deref(), Some("tractor"));
+        assert_eq!(events[0].target.as_deref(), Some(SUBJECT));
+
+        push(&mut app, end(hold_slot(), TaskTerminalReason::Released));
+        app.update();
+        let events = drain(&mut app);
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert_eq!(events[0].kind, NarrativeKind::TaskCancelled);
+        assert_eq!(
+            events[0].id, key,
+            "the terminal beat carries the start's key"
+        );
+        assert_eq!(reason_of(&events[0]), "released");
+    }
+
+    /// The dedupe, which is what makes "exactly one terminal event" true when
+    /// two sites report the same ending: `operate_tractor_ai`'s withdrawn order
+    /// and the `ReleaseTractor` it causes are one hold ending once, and the
+    /// FIRST report — the truer one — is what the timeline records.
+    #[test]
+    fn a_second_report_of_the_same_ending_adds_nothing() {
+        let mut app = lifecycle_app();
+        push(&mut app, start(hold_slot(), SUBJECT));
+        app.update();
+        drain(&mut app);
+
+        push(
+            &mut app,
+            end(hold_slot(), TaskTerminalReason::OrderWithdrawn),
+        );
+        push(&mut app, end(hold_slot(), TaskTerminalReason::Released));
+        app.update();
+        let events = drain(&mut app);
+        assert_eq!(events.len(), 1, "one hold ends once: {events:?}");
+        assert_eq!(reason_of(&events[0]), "order_withdrawn");
+
+        // …and a terminal report for a slot that never started says nothing at
+        // all, rather than inventing an activation to close.
+        push(&mut app, end(hold_slot(), TaskTerminalReason::Released));
+        app.update();
+        assert!(drain(&mut app).is_empty());
+    }
+
+    /// A restart closes the activation it replaces and opens a distinct key, so
+    /// both are separately identifiable in the timeline — AC3.
+    #[test]
+    fn a_restart_closes_the_old_activation_and_mints_a_new_key() {
+        let mut app = lifecycle_app();
+        push(&mut app, start(hold_slot(), SUBJECT));
+        app.update();
+        let first_key = drain(&mut app)[0].id.clone();
+
+        push(&mut app, start(hold_slot(), SUBJECT));
+        app.update();
+        let events = drain(&mut app);
+        assert_eq!(events.len(), 2, "{events:?}");
+        assert_eq!(events[0].kind, NarrativeKind::TaskInterrupted);
+        assert_eq!(events[0].id, first_key);
+        assert_eq!(reason_of(&events[0]), "restarted");
+        assert_eq!(events[1].kind, NarrativeKind::TaskStarted);
+        assert_ne!(
+            events[1].id, first_key,
+            "the second hold of the same hull is a SECOND task"
+        );
+    }
+
+    /// Two slots run at once and neither ends the other — the simultaneous half
+    /// of AC3.
+    #[test]
+    fn simultaneous_tasks_on_one_hull_stay_separate() {
+        let mut app = lifecycle_app();
+        let scan_slot = TaskSlot::new(OPERATOR, "sensors", TASK_VERB_SCAN);
+        push(&mut app, start(hold_slot(), SUBJECT));
+        push(&mut app, start(scan_slot.clone(), SUBJECT));
+        push(&mut app, end(scan_slot, TaskTerminalReason::Completed));
+        app.update();
+
+        let events = drain(&mut app);
+        // Stable slot sort: the sensors slot sorts before the tractor slot, and
+        // its own start-then-end order is preserved inside it.
+        let shape: Vec<(&str, &str)> = events
+            .iter()
+            .map(|e| (e.kind.as_str(), e.source.system.as_deref().unwrap_or("")))
+            .collect();
+        assert_eq!(
+            shape,
+            vec![
+                ("task_started", "sensors"),
+                ("task_completed", "sensors"),
+                ("task_started", "tractor"),
+            ],
+            "{events:?}"
+        );
+        // The hold is untouched by the scan finishing.
+        assert_eq!(
+            app.world().resource::<TaskLifecycles>().len(),
+            1,
+            "the tractor hold must still be running"
+        );
+    }
+
+    /// The subject leaving the world is a target-DESTROYED interruption, even
+    /// though the owning system can only see "out of range".
+    #[test]
+    fn a_vanished_subject_upgrades_the_reason_it_masked() {
+        let mut app = lifecycle_app();
+        push(&mut app, start(hold_slot(), SUBJECT));
+        app.update();
+        drain(&mut app);
+
+        let subject = app
+            .world_mut()
+            .query::<(Entity, &EntityUuid)>()
+            .iter(app.world())
+            .find(|(_, uuid)| uuid.0 == SUBJECT)
+            .map(|(entity, _)| entity)
+            .expect("the fixture spawns the subject");
+        app.world_mut().entity_mut(subject).despawn();
+
+        push(&mut app, end(hold_slot(), TaskTerminalReason::OutOfRange));
+        app.update();
+        let events = drain(&mut app);
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert_eq!(events[0].kind, NarrativeKind::TaskInterrupted);
+        assert_eq!(
+            reason_of(&events[0]),
+            "target_destroyed",
+            "a hull that left the world is not merely distant"
+        );
+    }
+
+    /// …and it ends the task even when nothing reports it at all — the case a
+    /// scripted removal produces, where the owning system may not run again
+    /// before the timeline is read.
+    #[test]
+    fn a_vanished_subject_ends_the_task_unreported() {
+        let mut app = lifecycle_app();
+        push(&mut app, start(hold_slot(), SUBJECT));
+        app.update();
+        drain(&mut app);
+
+        let subject = app
+            .world_mut()
+            .query::<(Entity, &EntityUuid)>()
+            .iter(app.world())
+            .find(|(_, uuid)| uuid.0 == SUBJECT)
+            .map(|(entity, _)| entity)
+            .expect("the fixture spawns the subject");
+        app.world_mut().entity_mut(subject).despawn();
+        app.update();
+
+        let events = drain(&mut app);
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert_eq!(reason_of(&events[0]), "target_destroyed");
+        assert!(app.world().resource::<TaskLifecycles>().is_empty());
+
+        // And it happens once: the sweep closed the activation, so the next tick
+        // has nothing left to close.
+        app.update();
+        assert!(drain(&mut app).is_empty());
+    }
+
+    /// A quiet tick with nothing running writes nothing — the emitter must not
+    /// be a per-tick heartbeat.
+    #[test]
+    fn an_idle_run_produces_no_lifecycle_events() {
+        let mut app = lifecycle_app();
+        for _ in 0..5 {
+            app.update();
+        }
+        assert!(drain(&mut app).is_empty());
     }
 
     /// A marked hull that is SHOT and then tidied away by a script reports one

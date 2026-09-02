@@ -128,6 +128,25 @@ pub enum NarrativeKind {
     /// The post-mission report was finalized. **No emitter yet**, same slice as
     /// [`Self::ReportRowUpdated`].
     ReportFinalized,
+    /// A continuous task began (issue #1341). `id` is the activation's
+    /// deterministic [`crate::core::task_lifecycle::TaskKey`]; `source` names
+    /// the operating hull, its station and its system; `target` is the subject.
+    ///
+    /// Exactly one of the four terminal kinds below follows it, carrying the
+    /// same `id` — that pairing is the whole contract, and
+    /// [`crate::core::task_lifecycle::TaskLifecycles`] is what enforces it.
+    TaskStarted,
+    /// A continuous task produced its result.
+    TaskCompleted,
+    /// A continuous task was stopped by the operator, or by the scenario order
+    /// that opened it.
+    TaskCancelled,
+    /// A continuous task's own preconditions stopped holding — power, damage,
+    /// range, or a subject it could never read.
+    TaskFailed,
+    /// A continuous task was ended from outside: the subject left the world, a
+    /// restart replaced the activation, or the mission ended under it.
+    TaskInterrupted,
 }
 
 impl NarrativeKind {
@@ -139,7 +158,7 @@ impl NarrativeKind {
     /// whoever adds one to say whether it belongs in the ndjson timeline or is
     /// fold-only. A derived count would track the enum silently and guard
     /// nothing.
-    pub const KIND_COUNT: usize = 18;
+    pub const KIND_COUNT: usize = 23;
 
     /// Every kind, in declaration order. The order is the enum's, which is also
     /// `Ord`'s, so a per-kind fold keyed on this is stable.
@@ -162,6 +181,11 @@ impl NarrativeKind {
         NarrativeKind::ComputerMessageCleared,
         NarrativeKind::ReportRowUpdated,
         NarrativeKind::ReportFinalized,
+        NarrativeKind::TaskStarted,
+        NarrativeKind::TaskCompleted,
+        NarrativeKind::TaskCancelled,
+        NarrativeKind::TaskFailed,
+        NarrativeKind::TaskInterrupted,
     ];
 
     /// The stable snake_case label written into JSON and ndjson. Hand-written,
@@ -187,7 +211,35 @@ impl NarrativeKind {
             NarrativeKind::ComputerMessageCleared => "computer_message_cleared",
             NarrativeKind::ReportRowUpdated => "report_row_updated",
             NarrativeKind::ReportFinalized => "report_finalized",
+            NarrativeKind::TaskStarted => "task_started",
+            NarrativeKind::TaskCompleted => "task_completed",
+            NarrativeKind::TaskCancelled => "task_cancelled",
+            NarrativeKind::TaskFailed => "task_failed",
+            NarrativeKind::TaskInterrupted => "task_interrupted",
         }
+    }
+
+    /// Whether this kind is one half of a continuous task's lifecycle (issue
+    /// #1341) — the start, or one of the four terminal classes.
+    ///
+    /// The one consumer today is the timeline's own test surface, which asserts
+    /// the pairing; it is here rather than there so a later lifecycle kind is
+    /// added in the same place as the rest of the vocabulary.
+    pub fn is_task_lifecycle(self) -> bool {
+        matches!(
+            self,
+            NarrativeKind::TaskStarted
+                | NarrativeKind::TaskCompleted
+                | NarrativeKind::TaskCancelled
+                | NarrativeKind::TaskFailed
+                | NarrativeKind::TaskInterrupted
+        )
+    }
+
+    /// Whether this kind ENDS a continuous task's activation. Exactly one of
+    /// these follows each [`Self::TaskStarted`].
+    pub fn is_task_terminal(self) -> bool {
+        self.is_task_lifecycle() && self != NarrativeKind::TaskStarted
     }
 
     /// Whether this kind belongs in the ndjson *timeline stream*.

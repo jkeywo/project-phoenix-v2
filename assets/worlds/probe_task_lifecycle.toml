@@ -1,0 +1,80 @@
+# Probe world for issue #1341 — the continuous-task lifecycle, end to end.
+#
+# One `lifecycle_tender` (a tractor beam AND a survey suite on one hull), one
+# derelict for the beam to hold, and one published structure for the suite to
+# read. There is no combat and nothing scripted: the tender is a backfilled
+# player ship, so the headless test drives BOTH workflows through the ordinary
+# admitted-command path — `EngageTractor`/`ReleaseTractor` on the tractor system
+# and `ScanTarget` on the sensors system — which is the only way to prove the
+# lifecycle is recorded off the real commands rather than off a test hook.
+#
+# WHAT THIS WORLD PROVES (all of issue #1341's acceptance criteria):
+#
+#   1. ONE START, EXACTLY ONE TERMINAL, per activation of either workflow, each
+#      carrying the operator, the subject, a deterministic task key and a
+#      terminal reason.
+#
+#   2. THE FOUR TERMINAL CLASSES ARE DISTINCT. The test drives a completion (a
+#      reading comes back), a cancellation (the crew release the beam), a
+#      failure (the tender flies out of the beam's authored range, and asks the
+#      suite for a contact that does not exist), and interruptions (the held
+#      derelict is destroyed under the beam; the mission ends with a hold still
+#      running).
+#
+#   3. REPEATED, SIMULTANEOUS, CANCELLED AND RESTARTED TASKS STAY SEPARATE. The
+#      same beam holds the same derelict twice and the two activations carry
+#      different keys; a scan runs while a hold is live and neither ends the
+#      other.
+#
+# Nothing here is authored for the lifecycle: the tender's `[tractor]` and
+# `[scan]` tables and the depot's `[infrastructure]` track are the same authored
+# content the tractor (#1156) and scan (#1032) probes already use. Recording is
+# a read-only projection off them.
+
+[global]
+seed = 1341
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# The tender — the backfilled player ship, spawned at game start.
+[[entity]]
+template_path = "assets/entities/lifecycle_tender.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# ── The beam's subject ───────────────────────────────────────────────────────
+# An inert hull 80 units off, well inside the tender's 600-unit reach. The test
+# never gives it a lane, so it drifts nowhere on its own: every metre it moves is
+# the beam holding it.
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+name = "world.probe_task_lifecycle.entity.derelict.name"
+transform = { position = [80.0, 0.0, 0.0] }
+overrides = { mass = 60000.0 }
+
+# ── The suite's subject ──────────────────────────────────────────────────────
+# A published structure 100 units off — inside the tender's authored detailed
+# band, so a reading comes back rather than a refusal. Its capacity and threshold
+# tables are authored on this instance, exactly as `probe_scan.toml` does.
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+id = "lifecycle_depot"
+name = "world.probe_task_lifecycle.entity.depot.name"
+transform = { position = [0.0, 0.0, 100.0] }
+
+[entity.overrides.infrastructure]
+condition = 62.0
+decay_per_sec = 0.0
+
+[[entity.overrides.infrastructure.capacity]]
+id = "depot_berths"
+amount = 4
+label = "world.probe_task_lifecycle.capacity.berths.label"
+
+[[entity.overrides.infrastructure.threshold]]
+flag = "depot_transfer_capable"
+fails_below = 0.4
+label = "world.probe_task_lifecycle.threshold.transfer_capable.label"

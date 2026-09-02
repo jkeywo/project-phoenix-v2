@@ -69,7 +69,11 @@ use crate::core::messages::{
     AdmittedCommands, InfrastructureSnapshot, PowerGroupId, ScanBlackboard, ScanReadingSnapshot,
     SystemBlackboard, SystemControlPayload, SystemId,
 };
+use crate::core::task_lifecycle::{
+    TaskLifecycleRequest, TaskSlot, TaskTerminalReason, TASK_VERB_SCAN,
+};
 use crate::dossier::SubjectCondition;
+use crate::effect_queue::EffectQueue;
 use crate::entities::spawner::{EntityName, EntityUuid};
 use crate::infrastructure::InfrastructureCondition;
 use crate::logging::LogFilterConfig;
@@ -235,6 +239,10 @@ pub fn tick_scans(
     region_effects: Query<&crate::entities::spawner::RegionEffectsSection>,
     mut commands: Commands,
     log: Option<Res<LogFilterConfig>>,
+    // The continuous-task lifecycle queue (issue #1341). `Option` so a reduced
+    // fixture that runs this system without the narrative plugin scans exactly
+    // as it did before this existed.
+    mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
 ) {
     let now_tick = tick.map(|t| t.0).unwrap_or(0);
 
@@ -247,7 +255,7 @@ pub fn tick_scans(
         .collect();
     rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.index().cmp(&b.1.index())));
 
-    for (_, entity) in rows {
+    for (operator_uuid, entity) in rows {
         let Ok((entity, _, transform, admitted, power, record)) = ships.get_mut(entity) else {
             continue;
         };
@@ -261,6 +269,11 @@ pub fn tick_scans(
         if requested.is_empty() {
             continue;
         }
+        let scan_slot = TaskSlot::new(
+            operator_uuid.clone(),
+            crate::ship::system_registry::SENSORS_SYSTEM_ID,
+            TASK_VERB_SCAN,
+        );
         let Some(mut record) = record else {
             // No `[scan]` table at all. Insert the record holding the refusal
             // rather than saying nothing; it lands a tick later, which no
@@ -269,6 +282,17 @@ pub fn tick_scans(
                 refusal: Some(ScanRefusal::NotCapable),
                 ..Default::default()
             });
+            // Each asked-for reading is still an activation that began and
+            // ended (issue #1341) — a crew who asked a hull with no suite to
+            // scan get an answer, and the timeline records the asking.
+            for target_uuid in requested {
+                push_scan_lifecycle(
+                    lifecycle.as_deref_mut(),
+                    &scan_slot,
+                    &target_uuid,
+                    TaskTerminalReason::NotCapable,
+                );
+            }
             continue;
         };
         let effects = operator_region_effects(membership.as_deref(), &region_effects, entity);
@@ -284,6 +308,12 @@ pub fn tick_scans(
                     crate::logging::LogCat::Sensors,
                     entity = entity,
                     "scan refused: no entity in this world answers to '{target_uuid}'"
+                );
+                push_scan_lifecycle(
+                    lifecycle.as_deref_mut(),
+                    &scan_slot,
+                    &target_uuid,
+                    TaskTerminalReason::NoSuchTarget,
                 );
                 continue;
             };
@@ -324,6 +354,12 @@ pub fn tick_scans(
                     if let Some(authored_id) = authored_id {
                         mirror_scanned(runtime.as_deref_mut(), &authored_id.0, &log);
                     }
+                    push_scan_lifecycle(
+                        lifecycle.as_deref_mut(),
+                        &scan_slot,
+                        &target_uuid,
+                        TaskTerminalReason::Completed,
+                    );
                 }
                 Err(refusal) => {
                     crate::pdebug!(
@@ -335,9 +371,62 @@ pub fn tick_scans(
                     );
                     record.last = None;
                     record.refusal = Some(refusal);
+                    push_scan_lifecycle(
+                        lifecycle.as_deref_mut(),
+                        &scan_slot,
+                        &target_uuid,
+                        terminal_reason_for(refusal),
+                    );
                 }
             }
         }
+    }
+}
+
+/// Record one asked-for reading as a whole task lifecycle (issue #1341).
+///
+/// A scan is INSTANTANEOUS — there is no hold to open on one tick and close on
+/// the next — so its start and its terminal moment land on the same fixed tick,
+/// in that order. They are still two events, because the lifecycle contract is
+/// what a later mechanic reuses and because "the crew asked" and "this is what
+/// came back" are two different facts about the run: a request that was refused
+/// is not the same as a request nobody made.
+///
+/// Both are queued together here, so a scan can never leave a start unmatched.
+fn push_scan_lifecycle(
+    queue: Option<&mut EffectQueue<TaskLifecycleRequest>>,
+    slot: &TaskSlot,
+    target_uuid: &str,
+    reason: TaskTerminalReason,
+) {
+    let Some(queue) = queue else {
+        return;
+    };
+    queue.0.push(TaskLifecycleRequest::Start {
+        slot: slot.clone(),
+        target: Some(target_uuid.to_string()),
+    });
+    queue.0.push(TaskLifecycleRequest::End {
+        slot: slot.clone(),
+        reason,
+    });
+}
+
+/// The terminal reason a refused reading reports, from the refusal the pure
+/// derivation returned (issue #1341).
+///
+/// Every scan refusal is a FAILURE class: the suite could not do the work asked
+/// of it. The cancelled/interrupted classes belong to tasks that have a
+/// duration to be interrupted during, which is why the tractor's mapping is the
+/// richer one.
+fn terminal_reason_for(refusal: ScanRefusal) -> TaskTerminalReason {
+    match refusal {
+        ScanRefusal::NotCapable => TaskTerminalReason::NotCapable,
+        ScanRefusal::NoSuchTarget => TaskTerminalReason::NoSuchTarget,
+        ScanRefusal::NoReadableCondition => TaskTerminalReason::Unreadable,
+        ScanRefusal::OutOfRange => TaskTerminalReason::OutOfRange,
+        ScanRefusal::Underpowered => TaskTerminalReason::Unpowered,
+        ScanRefusal::Blinded => TaskTerminalReason::Blinded,
     }
 }
 

@@ -109,10 +109,13 @@ subsequent ones are a fast no-op.
       (Navigation, Comms and Command are `auxiliary` hosted tabs with no lobby
       seat of their own, so they have no card and therefore no screen row. Use
       the four above wherever this kit names a station.)
-- [ ] **The lobby says nobody can join.** With no `--rendezvous` the terminal
-      carries `no --rendezvous, so nobody can join this host …` and the join panel
-      on the viewscreen reads **"Crew joining is off — this host has no join
-      service."** That is §2's first PASS as well; note it here and move on.
+- [ ] **The lobby is already joinable.** With no flags at all the terminal
+      carries `crew join code XXXXX — phones join this host directly, no service
+      needed`, and the join panel on the viewscreen is holding that code as a
+      framed QR. Since issue #1353 the host answers the game socket on the same
+      port it serves the bundle from, so this is the ordinary state rather than
+      something a flag turns on. That is §2's first PASS as well; note it here
+      and move on.
 - [ ] **Nothing needed the command line.** You typed one word (`lobby`) and made
       every mission decision on the glass.
 
@@ -122,49 +125,22 @@ Leave this host running — §3 and §4 use it.
 
 ## 2. The join QR
 
-The QR is the crew's whole route in, so it is worth its own section and its own
-prerequisites. Read §2a before running §2b: two of the three ways a native host's
-QR can be useless are configuration outside this repository.
+The QR is the crew's whole route in, so it is worth its own section. Since issue
+#1353 it needs **nothing outside this checkout**: the host mints its own code and
+answers the join socket on its own port, so §2a runs on the plain `lobby`
+launch. The one remaining external dependency is the cloud service, and it has
+moved to §2e where it belongs — it is now the *internet play* leg, not the LAN
+one.
 
-### 2a. Joining is off, in words (no `--rendezvous`)
+### 2a. A real code, and a phone that reaches it — with no service anywhere
 
-From the host still running in §1:
+From the host still running in §1. **Nothing else is running**: no wrangler, no
+deployed worker; unplug the bridge machine's internet if you want the strongest
+version of this test.
 
-- [ ] **The join panel says joining is off**, in words, with **no framed QR**:
-      *"Crew joining is off — this host has no join service."* A framed empty
-      code would have a crew standing in front of the viewscreen scanning
-      something that can never work, and "the code has not arrived yet" and
-      "there will never be a code" look identical on a wall.
-- [ ] The same holds for `run-native.bat lobby --solo` — one condition, two
-      spellings. (`--solo` starts the mission on the tick the world lands, so the
-      caption is only up while you are still picking; that is the moment to read
-      it.)
-
-### 2b. A real code, and a phone that reaches it
-
-> **Prerequisites, and they are outside this checkout.** The rendezvous service
-> must be **deployed** (`docs/delivery-checklist.md` §3a — as of writing,
-> `worker-rendezvous/` has never been deployed), and its `ALLOWED_ORIGIN` must
-> carry **two** origins: the one you pass as `--origin`, *and the origin the
-> phone's page is served from*, which for a native host is the bridge machine's
-> own LAN address (`http://192.168.x.y:8080`). A browser-hosted game does not
-> hit this, because the phones load the same public page the operator is on.
-> Until both are true this leg cannot pass, and **that is a park, not a fail** —
-> record it in §9 and carry on. Run
-> `node scripts/check-rendezvous.mjs --rendezvous <URL> --origin <URL>` first;
-> a non-zero exit means stop here.
-
-```
-run-native.bat lobby --rendezvous https://phoenix-rendezvous.project-phoenix.workers.dev --origin https://pp-dev.kiwigamedesign.co.uk
-```
-
-Use the **built-in** service URL above. A *different* one is silently swapped for
-the built-in one by a scanning phone (the client's `?rendezvous=` gate reads the
-parameter's own host), and the host says so at the prompt — see §2c.
-
-- [ ] **The terminal prints the code**: `phoenix-host: crew join code XXXXX
-      (full: …)`, and beside it `the join QR is on the viewscreen, pointing phones
-      at http://<address>`.
+- [ ] **The terminal prints the code**: `phoenix-host: crew join code XXXXX —
+      phones join this host directly, no service needed (full: …)`, and beside it
+      `the join QR is on the viewscreen, pointing phones at http://<address>`.
 - [ ] **The same code is on the viewscreen**, as a framed QR with the five
       letters under it ("or type this code"). Not a terminal-only code: this is
       the whole of #1329.
@@ -184,16 +160,37 @@ parameter's own host), and the host says so at the prompt — see §2c.
       participant; this is the baseline the consoles in §4 are measured against.
 - [ ] **Typing the five letters works too**, from a second phone — the QR and the
       code are two routes to one string.
+- [ ] **Unplugging is clean.** Put the joined phone into flight mode (or walk it
+      out of Wi-Fi range). Within a few seconds the station it held goes back to
+      Backfill on the viewscreen and the crew counter drops. Turn it back on: the
+      page reconnects on its own and reclaims the seat.
+
+### 2b. Joining is off, in words (`--solo`)
+
+There is one condition left that has no way in at all, and it must still say so
+rather than framing an empty QR:
+
+```
+run-native.bat lobby --solo
+```
+
+- [ ] **The join panel says joining is off**, in words, with **no framed QR**:
+      *"Crew joining is off — this host has no join service."* A framed empty
+      code would have a crew standing in front of the viewscreen scanning
+      something that can never work, and "the code has not arrived yet" and
+      "there will never be a code" look identical on a wall. (`--solo` starts the
+      mission on the tick the world lands, so the caption is only up while you
+      are still picking; that is the moment to read it.)
 
 ### 2c. When the address the QR names cannot work
 
 The host classifies the address it puts in the QR and says at the prompt when no
 phone in the room can open it. This is a **prompt-side** check made before
-anything is registered, so it runs whether or not §2b's service is deployed —
-only `--rendezvous` needs to be on the line. Reproduce **one** of these; a VPN is
-the easiest:
+anything is registered, so it runs on the plain `lobby` launch. Reproduce **one**
+of these; a VPN is the easiest:
 
-- [ ] **Bring up a VPN (Tailscale or similar) and relaunch §2b's command.** The
+- [ ] **Bring up a VPN (Tailscale or similar) and relaunch `run-native.bat
+      lobby`.** The
       terminal carries a second line after the "pointing phones at" one:
       `…which is a carrier-grade NAT address (100.64.0.0/10) — usually a VPN
       interface such as Tailscale — so a phone on the room's Wi-Fi has no path to
@@ -203,20 +200,17 @@ the easiest:
       warning is gone and the QR points at the LAN:
 
       ```
-      run-native.bat lobby --addr 192.168.1.5:8080 --rendezvous https://phoenix-rendezvous.project-phoenix.workers.dev --origin https://pp-dev.kiwigamedesign.co.uk
+      run-native.bat lobby --addr 192.168.1.5:8080
       ```
 
       (Substitute your machine's own LAN address. An explicit `--addr` is the
-      operator's own answer and is used exactly as given.)
+      operator's own answer and is used exactly as given — and note that the
+      phone's whole route in is now that one address: it loads the bundle from
+      it and opens its game socket back to it.)
 - [ ] **Note which classes you actually exercised.** The other three sentences —
       loopback (`--addr 127.0.0.1:8080`), link-local (a network with no DHCP), and
       "not a private LAN address" — are the same mechanism; one is enough for this
       box, and the rest are pinned by unit tests. Say in your write-up which you saw.
-- [ ] **Optional, 30 seconds.** Pass a non-default `--rendezvous` (a staging
-      worker URL) and confirm the extra line: `…but a scanning phone will IGNORE
-      the --rendezvous service in that QR and dial the client bundle's built-in
-      one … instead, so it will not find this host.` That is the gate #1112 owns,
-      reported rather than papered over.
 
 ### 2d. The toggle, in the lobby and in play
 
@@ -227,10 +221,10 @@ that panel is holding a code or the joining-off sentence.
 - [ ] **In the lobby, the surface's own control toggles the QR.** The viewscreen
       window has no settings cog, so the surface carries one control of its own,
       top right. Click it: the join panel hides. Click again: it comes back.
-- [ ] **A phone toggles it too** *(needs §2b)*. From a joined phone's settings
+- [ ] **A phone toggles it too** *(needs a joined phone — §2a)*. From a joined phone's settings
       menu, press the QR toggle. The panel on the viewscreen flips. (Two presses
       are two flips — it is an edge, not a state.)
-- [ ] **The QR is above the picker** *(needs §2b for a real code; the panel's
+- [ ] **The QR is above the picker** *(the panel holds a real code on any plain launch; the panel's
       position is visible either way)*. Relaunch and confirm the join panel is
       readable *while you are still choosing the scenario*: the crew join while
       the operator picks.
@@ -242,11 +236,42 @@ that panel is holding a code or the joining-off sentence.
       covers the view — that is the native answer, not a bug). The QR toggle is
       there; press it and the code shows for a late arrival. Press **F9** again to
       hide the surface.
-- [ ] **A phone cannot uncover the surface** *(needs §2b)*. With the surface
+- [ ] **A phone cannot uncover the surface** *(needs a joined phone — §2a)*. With the surface
       hidden mid-mission, press a phone's QR toggle. The viewscreen does **not**
       open — a phone in somebody's pocket must not drop a sheet over a running
       mission. It sets what the operator finds when they next press F9; confirm
       that too.
+
+### 2e. The cloud service, for play beyond this LAN *(parked until it is deployed)*
+
+> **Prerequisites, and they are outside this checkout.** The rendezvous service
+> must be **deployed** (`docs/delivery-checklist.md` §3a — as of writing,
+> `worker-rendezvous/` has never been deployed) and its `ALLOWED_ORIGIN` must
+> carry the origin you pass as `--origin`. Until both are true this leg cannot
+> pass, and **that is a park, not a fail** — record it in §9 and carry on. Run
+> `node scripts/check-rendezvous.mjs --rendezvous <URL> --origin <URL>` first; a
+> non-zero exit means stop here.
+
+```
+run-native.bat lobby --rendezvous https://phoenix-rendezvous.project-phoenix.workers.dev --origin https://pp-dev.kiwigamedesign.co.uk
+```
+
+Both legs are live on this launch: LAN phones still join directly, and a player
+on another network joins through the service from the deployed web page.
+
+- [ ] **Two codes are printed**, the direct one and the service's own
+      (`phoenix-host: crew join code …` twice, the second after `registering
+      with …`).
+- [ ] **The viewscreen shows the LAN code, not the cloud one**, and the terminal
+      says why: `…with the LAN code, not the cloud one: the QR carries the page as
+      well as the code`. This is the thing that would otherwise be silently
+      wrong — a QR served by this host but carrying the worker's five letters
+      sends every phone in the room to a service that never heard of them.
+- [ ] **A remote player joins with the cloud code** from the deployed page
+      (`https://pp-dev.kiwigamedesign.co.uk/client/`), typing the five letters
+      the terminal printed after `registering with`, while a LAN phone is on the
+      direct leg. Both crew members hold stations at once and neither drops when
+      the other joins or leaves.
 
 ---
 
@@ -321,7 +346,7 @@ want it on.
       as well as a border, so it reads without colour).
 - [ ] **It joins and claims like a phone.** At that monitor, claim **Helm** from
       the console's own station grid. The Helm card on the viewscreen fills in
-      with its initials, exactly as §2b's phone did. Admission cannot tell the
+      with its initials, exactly as §2a's phone did. Admission cannot tell the
       console from a phone.
 - [ ] **Anyone may sit there.** Release the station from the console and claim it
       from a *phone* instead, then claim it back. The station id in the layout
@@ -767,12 +792,12 @@ corresponding criterion until the condition beside it is met.**
 And two **prerequisites**, which are not parks but will read like them if they are
 not met on the day. Say which applied:
 
-- **§2b (a phone actually joining)** needs the rendezvous service deployed *and*
-  its `ALLOWED_ORIGIN` carrying the bridge machine's own LAN origin
-  (`http://192.168.x.y:8080`) as well as the `--origin` you pass. See
-  `docs/delivery-checklist.md` §3a. Without both there is no join path at all —
-  not a degraded one — and every QR check past §2a fails identically and
-  uninformatively.
+- **§2e (a remote player joining through the cloud service)** needs that service
+  deployed with its `ALLOWED_ORIGIN` carrying the `--origin` you pass. See
+  `docs/delivery-checklist.md` §3a. This is the only join path with an external
+  prerequisite left: since issue #1353 the LAN path in §2a is this process
+  answering its own port, so a phone in the room joins with nothing deployed
+  anywhere. If the service is not up, park §2e and say so.
 - **§3d and §4e (one-monitor behaviour)** need you to actually run one-screen. If
   you did not, say so; they are not hardware you lack, they are a configuration
   you skipped.
@@ -825,6 +850,13 @@ Feature-**off**, run by the ordinary `cargo test` in CI:
   latest-wins and deferral rules, the reveal state machine (F9 both ways, the
   latch cleared by every phase change), and all six page→host record tags through
   one drain.
+- **The whole join path, over a real socket** (`tests/native_direct_join.rs`,
+  issue #1353) — a real WebSocket client dials a bound host on loopback and goes
+  through handshake, code, relay attach, stamp verdict, `Identify`, both delivery
+  classes and a clean `Disconnected`, plus the reserved-token refusal and the
+  malformed-upgrade answers with bundle delivery untouched. It needs no service
+  running, which is why — unlike `tests/native_relay_live.rs` — it is not
+  `#[ignore]`d. §2a is the same path with a real phone on a real network.
 - **The view models and renderers** (`tests/client/host-lobby-view.test.js`,
   `host-lobby-render.test.js`, `host-qr.test.js`, `qr-encoder.test.js`) — the
   monitor row, the per-station screen rows and their greying, the QR visibility
@@ -865,7 +897,7 @@ is what §§1–8 above are for.
   and the same OS-preference limit from the console side.
 - `docs/acceptance/1126-media.md` — the media kit, parked on its own missing
   backend in the same way.
-- `docs/acceptance/1113-networks.md` — the network scenarios behind §2's
+- `docs/acceptance/1113-networks.md` — the network scenarios behind §2e's
   prerequisites; its §0 is where the rendezvous deploy check lives.
 - `wiki/concepts/native-host.md` — what each of these behaviours is and why,
   section by section (#1325 → #1334).

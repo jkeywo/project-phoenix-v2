@@ -112,9 +112,8 @@ node scripts/build-client.mjs                  # → dist/client/, then serve di
 # modes. With no --world it serves a built bundle, the content manifest, the
 # scenario catalogue and a version stamp from a native process instead of an
 # open browser tab: DELIVERY ONLY, the authoritative simulation is still
-# server.html or phoenix-headless, and crew signalling goes through the
-# rendezvous service exactly as it does in a browser. There is no TLS or auth
-# in either mode — LAN or behind something else, never a public address.
+# server.html or phoenix-headless. There is no TLS or auth in either mode — LAN
+# or behind something else, never a public address.
 cargo build --release --features host --bin phoenix-host
 ./target/release/phoenix-host --client-dir dist
 #   Binds 0.0.0.0:8080 by default — LAN-reachable out of the box; Windows
@@ -152,7 +151,10 @@ cargo build --release --features host --bin phoenix-host
 # longer wasm-gated, so a crew who are all on phones can be launched from the
 # viewscreen. Each flag still skips exactly the stage it decides — --world skips
 # the scenario stage, --world --ship skips both, --lobby --ship skips the hull.
-./target/release/phoenix-host --client-dir dist --lobby --rendezvous <URL> --origin <URL>
+./target/release/phoenix-host --client-dir dist --lobby
+#   …and that is the whole of a LAN game since issue #1353: the host takes crew
+#   on its own port. --rendezvous <URL> --origin <URL> adds the cloud leg for
+#   play beyond the LAN; both run at once.
 #   run-native.bat is the Windows wrapper for the two invocations above: no
 #   argument runs the delivery-only host, `run-native.bat lobby` adds --lobby.
 #   The default invocation is unchanged and the acceptance kits depend on it.
@@ -216,9 +218,12 @@ cargo build --release --features host --bin phoenix-host
 #     process serves itself, so a bridge machine with no internet still shows a
 #     code. Its URL points at the address the LISTENER bound, not the loopback
 #     one the surface loaded from — pass --addr <lan-ip>:<port> if the machine's
-#     routing cannot answer that (the boot log says when it could not). With no
-#     --rendezvous, or --solo, the panel says joining is off rather than framing
-#     a dead code. Shown in the lobby, hidden at mission start, and toggled in
+#     routing cannot answer that (the boot log says when it could not). The code
+#     in it is the host's OWN (issue #1353), minted at bind, so the panel is
+#     live on a plain --lobby launch; only --solo or a bundle-less host says
+#     joining is off rather than framing a dead code. A host that ALSO has
+#     --rendezvous holds two codes and shows the direct one: the QR carries the
+#     page as well as the code, and the page it opens is served from here. Shown in the lobby, hidden at mission start, and toggled in
 #     play from the surface's own control (after F9) or a phone's settings menu.
 #     THAT LOBBY CARRIES THE MONITOR ROW (issue #1330): one button per connected
 #     display, the current viewscreen marked, and pressing another moves the
@@ -378,15 +383,36 @@ cargo build --release --features host --bin phoenix-host
 #   plausible mission with the wrong numbers.
 #   src/entities/template_preload.rs is the one strict populate every native
 #   process shares.
-#   --rendezvous <URL> --origin <URL>  IS the crew path (issue #1113), and the
-#     answer to what #1121 deferred. The host registers with the rendezvous
-#     service, prints its five-letter code at startup, and every crew member
-#     reaches it over the service's WebSocket game relay — a native process has
-#     no WebRTC, so it registers saying `transports: ["ws-relay"]` and joiners
-#     skip the direct ladder instead of spending 90 s discovering that.
+#   THE CREW PATH IS TWO LEGS, and a host may run either or both.
+#   DIRECT LAN ACCEPT (issue #1353) is ON by default whenever the host serves a
+#     --client-dir bundle and is not --solo: THE HOST IS ITS OWN RENDEZVOUS.
+#     It mints its own code from assets/join/join-codes.toml, and a request on
+#     its delivery port asking to upgrade /v1/join is taken off the HTTP path
+#     (delivery::serve's ConnectionUpgrade door) and answered by
+#     native_host::direct_join — the single-game subset of
+#     worker-rendezvous/src/registry.js, in process. A phone loads the bundle
+#     from this host and opens its socket back to the same origin, so a LAN game
+#     needs NO external service: no worker, no wrangler, no internet. The client
+#     half of that rule is gui/join-url.js's rendezvousBaseForOrigin — a page
+#     dials the origin that served it unless that origin is one of the published
+#     web ones (KNOWN_WEB_ORIGINS, the twin of worker-rendezvous/wrangler.toml's
+#     ALLOWED_ORIGIN), which supersedes #1336's ?rendezvous= question.
+#     It is NOT a second host implementation: it is a RelaySocket, so
+#     relay_transport.rs's registration, stamp handshake, Identify gate,
+#     reserved-token refusal and shedding rule are the same code on both legs
+#     and a phone cannot tell them apart. tests/native_direct_join.rs drives a
+#     real WebSocket client through a bound host and is NOT #[ignore]d.
+#   --rendezvous <URL> --origin <URL>  is the OTHER leg (issue #1113): play
+#     beyond one LAN. The host registers with the rendezvous service, prints its
+#     five-letter code at startup, and every crew member reaches it over the
+#     service's WebSocket game relay — a native process has no WebRTC, so it
+#     registers saying `transports: ["ws-relay"]` and joiners skip the direct
+#     ladder instead of spending 90 s discovering that.
 #     `--origin` is required and deliberately not defaulted: the service refuses
-#     an upgrade whose Origin is not on its deployed allowlist. Without these
-#     flags nobody can join and the host says so at boot — that is `--solo`.
+#     an upgrade whose Origin is not on its deployed allowlist. (The direct leg
+#     has no such gate, and must not grow one — see direct_join.rs's header.)
+#     With neither leg nobody can join and the host says so at boot — that is
+#     `--solo`, or a host serving no bundle.
 #     src/native_host/transport.rs is the seam; relay_transport.rs is what
 #     plugs into it and relay_socket.rs is the tungstenite half.
 #     The socket REDIALS on a backoff if it dies, the way the browser host's

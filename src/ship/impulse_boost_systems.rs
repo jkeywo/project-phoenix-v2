@@ -429,6 +429,8 @@ mod tests {
             held_response: None,
             dock: None,
             umbilical: None,
+            security: None,
+            security_target: None,
             civilian: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();

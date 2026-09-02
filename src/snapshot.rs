@@ -840,6 +840,24 @@ pub struct EntityState {
     /// build that predates this vocabulary refuses the template outright.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub umbilical: Option<crate::umbilical::UmbilicalSaveState>,
+    /// The ship's Security-team assignments (issue #1346) — which teams are out,
+    /// where, doing what, and how far through.
+    ///
+    /// A **projection**, not the whole [`crate::security::ShipSecurityTeams`]
+    /// component, for `umbilical`'s reason: the authored `[security]` terms ride
+    /// the component and are re-derived from the template on spawn. What travels
+    /// is the one thing the fold cannot otherwise recover — a team's live
+    /// assignment and its position in it, which a resume would otherwise drop,
+    /// bringing every team home mid-job and losing the work already done. The last
+    /// refusal is deliberately not persisted: it is a projection the next tick
+    /// re-derives.
+    ///
+    /// Did not bump [`SNAPSHOT_FORMAT`] for `umbilical`'s reason: a world gains
+    /// Security by its hull TOML gaining a `[security]` table (and a `kind =
+    /// "security"` system), and `EntityConfig` sets `deny_unknown_fields`, so a
+    /// build that predates this vocabulary refuses the template outright.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security: Option<crate::security::SecuritySaveState>,
     /// The ship's scan record (issue #1032) — the last reading its sensor suite
     /// took, or why the last scan returned nothing.
     ///
@@ -3630,6 +3648,23 @@ fn capture_umbilicals(world: &World) -> Vec<(String, crate::umbilical::Umbilical
         .collect()
 }
 
+/// The Security-team assignments, in a query of their own, joined by uuid — see
+/// [`EntityState::security`]. Only hulls that authored a `[security]` table carry
+/// one, so most worlds capture an empty list. A muster with every team home
+/// captures nothing, the same reading `fold_security_namespace` takes.
+fn capture_security(world: &World) -> Vec<(String, crate::security::SecuritySaveState)> {
+    let Some(mut query) = world.try_query::<(&EntityUuid, &crate::security::ShipSecurityTeams)>()
+    else {
+        return Vec::new();
+    };
+    let idle = crate::security::SecuritySaveState::default();
+    query
+        .iter(world)
+        .map(|(uuid, security)| (uuid.0.clone(), security.save_state()))
+        .filter(|(_, state)| *state != idle)
+        .collect()
+}
+
 /// The scan records, in a query of their own, joined by uuid — see
 /// [`EntityState::scan`]. Only hulls that authored `[scan]` carry one, so most
 /// worlds capture an empty list.
@@ -4095,6 +4130,7 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
     let docks = capture_docks(world);
     let external_repair = capture_external_repair(world);
     let umbilicals = capture_umbilicals(world);
+    let securities = capture_security(world);
     let scans = capture_scans(world);
     let civilians = capture_civilians(world);
     let spawn_origins = capture_spawn_origins(world);
@@ -4229,6 +4265,10 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
                     .find(|(id, _)| id == &uuid.0)
                     .map(|(_, state)| state.clone()),
                 umbilical: umbilicals
+                    .iter()
+                    .find(|(id, _)| id == &uuid.0)
+                    .map(|(_, state)| state.clone()),
+                security: securities
                     .iter()
                     .find(|(id, _)| id == &uuid.0)
                     .map(|(_, state)| state.clone()),
@@ -5916,6 +5956,11 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         if let Some(umbilical) = &row.umbilical {
             if let Some(mut control) = entity_mut.get_mut::<crate::umbilical::TransferUmbilical>() {
                 control.restore(umbilical);
+            }
+        }
+        if let Some(security) = &row.security {
+            if let Some(mut teams) = entity_mut.get_mut::<crate::security::ShipSecurityTeams>() {
+                teams.restore(security);
             }
         }
         if let Some(scan) = &row.scan {

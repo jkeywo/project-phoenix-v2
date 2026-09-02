@@ -2273,6 +2273,114 @@ fn external_repair_dispatch_and_recall_control_system_round_trip() {
     );
 }
 
+/// Security dispatch and recall (issue #1346): both control payloads round-trip
+/// and keep their pinned wire shape. Unlike `DispatchExternalRepair`, both NAME
+/// their team — and the dispatch also names its target and action — because a
+/// hull with two teams working two places cannot resolve any of the three from a
+/// single Tactical lock.
+#[test]
+fn security_dispatch_and_recall_control_system_round_trip() {
+    let dispatch = ClientMessage::ControlSystem {
+        target: SystemId(crate::ship::system_registry::SECURITY_SYSTEM_ID.into()),
+        payload: SystemControlPayload::DispatchSecurityTeam {
+            team_idx: 1,
+            target: "00000000-0000-8000-8000-000000000042".into(),
+            action: "assist_evacuation".into(),
+        },
+    };
+    assert_client_roundtrip(&JsonCodec, dispatch.clone());
+    assert_client_roundtrip(&PrettyJsonCodec, dispatch.clone());
+    assert_eq!(
+        JsonCodec.encode_client(&dispatch).unwrap(),
+        r#"{"type":"ControlSystem","data":{"target":"security","payload":{"type":"DispatchSecurityTeam","data":{"team_idx":1,"target":"00000000-0000-8000-8000-000000000042","action":"assist_evacuation"}}}}"#,
+        "DispatchSecurityTeam wire shape must stay pinned"
+    );
+
+    let recall = ClientMessage::ControlSystem {
+        target: SystemId(crate::ship::system_registry::SECURITY_SYSTEM_ID.into()),
+        payload: SystemControlPayload::RecallSecurityTeam { team_idx: 0 },
+    };
+    assert_client_roundtrip(&JsonCodec, recall.clone());
+    assert_client_roundtrip(&PrettyJsonCodec, recall.clone());
+    assert_eq!(
+        JsonCodec.encode_client(&recall).unwrap(),
+        r#"{"type":"ControlSystem","data":{"target":"security","payload":{"type":"RecallSecurityTeam","data":{"team_idx":0}}}}"#,
+        "RecallSecurityTeam wire shape must stay pinned"
+    );
+}
+
+/// The Security blackboard (issue #1346) round-trips whole, and an idle muster
+/// pays for none of the optional fields — so a hull that musters teams and has
+/// used none of them puts a payload on the wire with no refusal and no
+/// assignments in it.
+#[test]
+fn security_blackboard_round_trips_and_omits_its_optional_fields_when_idle() {
+    use crate::core::messages::{
+        SecurityActionOption, SecurityBlackboard, SecurityTargetOption, SecurityTeamSlot,
+    };
+
+    let working = SystemBlackboard::Security(SecurityBlackboard {
+        range: 400.0,
+        teams: vec![
+            SecurityTeamSlot {
+                state: "working".into(),
+                target: Some("00000000-0000-8000-8000-000000000042".into()),
+                target_name: Some("world.falling_skyway.entity.rung_c_compartment.name".into()),
+                action: Some("secure_contain".into()),
+                progress: 0.5,
+                risk: 0.6,
+            },
+            SecurityTeamSlot {
+                state: "available".into(),
+                ..Default::default()
+            },
+        ],
+        targets: vec![SecurityTargetOption {
+            uuid: "00000000-0000-8000-8000-000000000042".into(),
+            name: Some("world.falling_skyway.entity.rung_c_compartment.name".into()),
+            separation: 180.0,
+            in_range: true,
+            actions: vec![SecurityActionOption {
+                action: "assist_evacuation".into(),
+                duration_secs: 20.0,
+                risk: 0.35,
+                priority: "life_safety".into(),
+                warning: Some("security.warning.evacuation_under_fire".into()),
+            }],
+        }],
+        refusal: Some("security.dispatch.refused.team_busy".into()),
+    });
+    let json = serde_json::to_string(&working).unwrap();
+    assert_eq!(
+        serde_json::from_str::<SystemBlackboard>(&json).unwrap(),
+        working
+    );
+    assert!(
+        json.contains(r#""kind":"Security""#),
+        "the blackboard is tagged by kind so the JS mirror can switch on it, got {json}"
+    );
+
+    let idle = SystemBlackboard::Security(SecurityBlackboard {
+        range: 400.0,
+        teams: vec![SecurityTeamSlot {
+            state: "available".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    let idle_json = serde_json::to_string(&idle).unwrap();
+    assert!(
+        !idle_json.contains("refusal")
+            && !idle_json.contains("target_name")
+            && !idle_json.contains("\"action\""),
+        "an idle muster omits its optional fields, got {idle_json}"
+    );
+    assert_eq!(
+        serde_json::from_str::<SystemBlackboard>(&idle_json).unwrap(),
+        idle
+    );
+}
+
 /// The external repair-dispatch fields on the repair blackboard (issue #1161)
 /// round-trip, and a hull that authored no dispatch pays for none of the
 /// optional fields — so its wire shape is byte-identical to one built before

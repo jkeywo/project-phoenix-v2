@@ -783,6 +783,12 @@ impl Plugin for WorldPlugin {
             // docked state) and before the infrastructure tick (so the capacity it
             // queues moves the same tick), the ordering the tractor's arrest keeps.
             .add_plugins(crate::umbilical::server::UmbilicalPlugin)
+            // Security teams (issue #1346) stand beside them for the same reason:
+            // the targets a team crosses to are world furniture spawned from world
+            // files, and the consequence a completed action raises is a flag on
+            // this plugin's own `WorldContentRuntime` store, so a scenario trigger
+            // fires the tick the work lands.
+            .add_plugins(crate::security::SecurityPlugin)
             .add_plugins(crate::civilian::CivilianPlugin)
             // Dossiers (issue #1030) join them for the same reason: the
             // commitments a fact sheet lists are a field on

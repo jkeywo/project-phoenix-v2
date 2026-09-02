@@ -546,6 +546,27 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 StateClass::Folded,
                 "umbilical-flow-state",
             )
+            // Security teams (issue #1346), the umbilical's shape exactly: what
+            // `fold_security_namespace` walks is the authoritative half — which
+            // teams are out, in what state, against which target — while the
+            // authored `[security]` terms are content `content_digest` answers
+            // for and the risk/elapsed/last-refusal fields are projections the
+            // next tick re-derives.
+            .declare_state::<crate::security::ShipSecurityTeams>(
+                StateClass::Folded,
+                "security-team-state",
+            )
+            // The target-side authored table is `DeferredFold` with ZERO folded
+            // fields, which is the honest reading of that class: it is
+            // authoritative — a host that thought a compartment offered a
+            // different action would dispatch differently — but every byte of it
+            // came out of the entity template and nothing ever writes it, so
+            // `content_digest` already answers for it and `world_digest` walks
+            // none of it.
+            .declare_state::<crate::security::SecurityTargetActions>(
+                StateClass::DeferredFold,
+                "security-target-state",
+            )
             .declare_state::<AsteroidUuid>(StateClass::Folded, "digest-fold-order-policy")
             // ---- DeferredFold: authoritative, not yet walked by `world_digest`. ----
             .declare_state::<crate::ai::server::LodBubble>(

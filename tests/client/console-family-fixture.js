@@ -8,7 +8,7 @@ const FIXTURE_FAMILIES = Object.freeze({
   'tactical-radar': 'tactical', 'phaser-control': 'tactical', 'phaser-omni': 'tactical',
   'blaster-fore': 'tactical', 'blaster-port': 'tactical', 'blaster-starboard': 'tactical',
   'helm-thrust': 'helm', 'helm-joystick': 'helm', 'helm-steering': 'helm',
-  tractor: 'tractor', umbilical: 'umbilical',
+  tractor: 'tractor', umbilical: 'umbilical', security: 'security',
 });
 
 export function withConsoleFamilyProjection(payload, overrides = {}) {

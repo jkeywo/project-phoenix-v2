@@ -264,6 +264,17 @@ damaged_threshold_pct = 0.5
 disabled_threshold_pct = 0.15
 debuff_magnitude = 0.15
 
+# Security (issue #1346). The teams' own muster space and lockers: wreck it and
+# every team goes off the board (`unavailable`) and whatever they were doing ends
+# where it stands. [ai] Unratified; the same 30 HP the coupling systems carry,
+# because it is the same kind of thing — a compartment, not a weapon.
+[[hull.system_hull]]
+system_id = "security"
+max_hp = 30
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
+debuff_magnitude = 0.15
+
 [repair]
 repair_team_count = 2
 travel_duration_secs = 5
@@ -286,6 +297,30 @@ repair_rate_hp_per_sec = 0.5
 [repair.external_dispatch]
 range = 400.0
 repair_rate = 0.5
+
+# Security teams (issue #1346, PRD #1337). TWO teams, dispatched and recalled
+# independently from whichever station the `[[system]] kind = "security"` block
+# below gives them to — Tactical, on this hull — with no Duty Officer standing
+# between the seat and the order.
+#
+# What a team may DO once it gets somewhere is authored on the TARGET, never
+# here: this table is only the hull's own half — how many people it can send, how
+# long they take to get across and come back, and how far they can reach. A hull
+# that authors no `[security]` table musters nobody.
+#
+# [ai] All four unratified. `range = 400` is carried across from
+# `[repair.external_dispatch]` above deliberately: a repair team and a security
+# team cross the same gap by the same means, and two different reaches on one
+# hull would be a difference the crew could see and nobody could explain. The
+# crossing and return times are longer than the internal damage-control walk
+# (`[repair] travel_duration_secs = 5`) because this is a transfer to another
+# structure under way, not a run down a corridor — and the asymmetry (out slower
+# than back) is the encumbrance of going equipped.
+[security]
+team_count = 2
+deploy_duration_secs = 8.0
+withdraw_duration_secs = 6.0
+range = 400.0
 
 [weapons_console]
 power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
@@ -1417,6 +1452,26 @@ id = "dock"
 kind = "dock"
 station = "helm"
 power_group = "helm"
+
+# ── Security (issue #1346) ───────────────────────────────────────────────────
+#
+# TACTICAL owns the Security teams on this hull. That is an authoring decision
+# rather than an engine one — `kind = "security"` is generic and another hull may
+# hang it off Command or Engineering — but it is the right one here: the seat that
+# already holds the combat lock and reads the tactical picture is the seat that
+# knows which compartment is worth risking people on, and the destroyer's
+# Engineering officer already has the tractor, the umbilical and the damage-
+# control sweep on their hands.
+#
+# NO POWER GROUP, deliberately. Security is people: a Power officer who robs a
+# group does not stop a boarding party crossing, and hanging the teams off `helm`
+# with the couplings would have made "the drive is browned out" mean "nobody can
+# fight a fire". The damage entry below is the lever that DOES take them off the
+# board — the compartment they muster from being wrecked.
+[[system]]
+id = "security"
+kind = "security"
+station = "tactical"
 
 # ── Reference grid ───────────────────────────────────────────────────────────
 #

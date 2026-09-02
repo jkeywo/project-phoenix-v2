@@ -25,11 +25,13 @@ pub enum DirectiveKind {
     Escort,
     Transfer,
     FieldRepair,
+    /// Secure the named target with a Security team (issue #1346).
+    Secure,
     Order,
 }
 
 impl DirectiveKind {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::None,
         Self::Patrol,
         Self::Destroy,
@@ -43,6 +45,7 @@ impl DirectiveKind {
         Self::Escort,
         Self::Transfer,
         Self::FieldRepair,
+        Self::Secure,
         Self::Order,
     ];
 
@@ -61,6 +64,7 @@ impl DirectiveKind {
             Self::Escort => "Escort",
             Self::Transfer => "Transfer",
             Self::FieldRepair => "FieldRepair",
+            Self::Secure => "Secure",
             Self::Order => "Order",
         }
     }
@@ -90,7 +94,8 @@ impl DirectiveKind {
             | Self::Stabilise
             | Self::Escort
             | Self::Transfer
-            | Self::FieldRepair => matches!(slot, DirectiveSlot::Target),
+            | Self::FieldRepair
+            | Self::Secure => matches!(slot, DirectiveSlot::Target),
         }
     }
 }
@@ -211,6 +216,7 @@ impl DirectiveField {
                     | DirectiveKind::Escort
                     | DirectiveKind::Transfer
                     | DirectiveKind::FieldRepair
+                    | DirectiveKind::Secure
                     | DirectiveKind::Order
             ),
             Self::DoctrineDestroyTarget => matches!(kind, DirectiveKind::Destroy),
@@ -224,6 +230,7 @@ impl DirectiveField {
                     | DirectiveKind::Escort
                     | DirectiveKind::Transfer
                     | DirectiveKind::FieldRepair
+                    | DirectiveKind::Secure
             ),
             Self::DoctrineOrderTarget | Self::WorldRoute | Self::DoctrineOrderRoute => {
                 matches!(kind, DirectiveKind::Order)
@@ -517,7 +524,8 @@ fn expected_field(
             | DirectiveKind::Stabilise
             | DirectiveKind::Escort
             | DirectiveKind::Transfer
-            | DirectiveKind::FieldRepair => DirectiveField::DoctrineOperateTarget,
+            | DirectiveKind::FieldRepair
+            | DirectiveKind::Secure => DirectiveField::DoctrineOperateTarget,
             DirectiveKind::Order => DirectiveField::DoctrineOrderTarget,
             _ => DirectiveField::DoctrineDestroyTarget,
         },
@@ -600,6 +608,9 @@ pub fn interpret(raw: &AuthoredDirective) -> Result<AiDirective, DirectiveError>
             target: values.target.expect("required above"),
         },
         DirectiveKind::FieldRepair => AiDirective::FieldRepair {
+            target: values.target.expect("required above"),
+        },
+        DirectiveKind::Secure => AiDirective::Secure {
             target: values.target.expect("required above"),
         },
         DirectiveKind::Order => AiDirective::Order {

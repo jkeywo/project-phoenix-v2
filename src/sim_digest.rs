@@ -232,6 +232,7 @@ use crate::dock::DockControl;
 use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 use crate::infrastructure::{InfrastructureCondition, InfrastructureState};
 use crate::lobby::WorldResource;
+use crate::security::ShipSecurityTeams;
 use crate::server_app::{AsteroidUuid, CaptainPriorityBoost, GameOverReason};
 use crate::ship::damage::SystemHull;
 use crate::ship::state::{ShipPhysics, ShipRedAlert, ShipWeaponsHold};
@@ -434,6 +435,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("umbilical", fold_umbilical_namespace),
     ("asteroid", fold_asteroid_namespace),
     ("collisions", fold_collisions),
+    ("security", fold_security_namespace),
 ];
 
 /// The running accumulator after each named stage of the fold.
@@ -1794,6 +1796,82 @@ fn fold_umbilical_namespace(world: &World, mut acc: u64) -> u64 {
     acc = fold_u64(acc, rows.len() as u64);
     for (key, _) in rows {
         acc = fold_str(acc, &key.id);
+    }
+    acc
+}
+
+/// Every ship with a Security team OUT (issue #1346), in [`FoldKey`] order, in
+/// its own namespace.
+///
+/// # What is folded, and why it has to be
+///
+/// Each committed team's index, state and target, for every ship with anybody
+/// abroad. This is the authoritative divergence signal a resume must survive that
+/// nothing else catches: what a completed action leaves behind lands on the world
+/// flag store (which folds through the scenario scope), but WHICH teams are out,
+/// where, and how far along, is the state that decides whether the next tick
+/// completes the work at all — exactly as the umbilical folds its running fact
+/// and the dock the docked one. The authored terms are content, which
+/// `content_digest` answers for; the risk, the elapsed clock and the last refusal
+/// are projections the next tick re-derives, so none of them is folded (the
+/// elapsed clock would also make every tick of a live assignment a fresh digest,
+/// which is a rate, not a fact).
+///
+/// The empty-walk affordance is [`fold_umbilical_namespace`]'s, and does the same
+/// real work: a hull that authored `[security]` and has every team home folds
+/// NOTHING — not even a row — so a shipped hull can gain Security teams without
+/// moving any committed world's digest. The moment one team crosses over, the row
+/// count is in the accumulator like everyone else's.
+fn fold_security_namespace(world: &World, mut acc: u64) -> u64 {
+    let Some(mut query) = world.try_query::<(Entity, &EntityUuid, &ShipSecurityTeams)>() else {
+        // A world that never registered the component musters nobody — the empty
+        // case, not a distinct one.
+        return acc;
+    };
+    let mut rows: Vec<(
+        FoldKey,
+        bevy::ecs::entity::EntityIndex,
+        Vec<(u8, &'static str, String)>,
+    )> = query
+        .iter(world)
+        .filter_map(|(entity, uuid, security)| {
+            let committed: Vec<(u8, &'static str, String)> = security
+                .teams
+                .iter()
+                .enumerate()
+                .filter(|(_, team)| team.is_committed())
+                .map(|(index, team)| {
+                    (
+                        index as u8,
+                        team.state.as_str(),
+                        team.target.clone().unwrap_or_default(),
+                    )
+                })
+                .collect();
+            (!committed.is_empty()).then(|| {
+                (
+                    FoldKey::from_world_id(Namespace::Entity, &uuid.0),
+                    entity.index(),
+                    committed,
+                )
+            })
+        })
+        .collect();
+    if rows.is_empty() {
+        return acc;
+    }
+    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+
+    acc = fold_str(acc, "security-namespace");
+    acc = fold_u64(acc, rows.len() as u64);
+    for (key, _, committed) in rows {
+        acc = fold_str(acc, &key.id);
+        acc = fold_u64(acc, committed.len() as u64);
+        for (index, state, target) in committed {
+            acc = fold_u64(acc, index as u64);
+            acc = fold_str(acc, state);
+            acc = fold_str(acc, &target);
+        }
     }
     acc
 }

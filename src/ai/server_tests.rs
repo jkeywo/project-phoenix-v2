@@ -1272,6 +1272,8 @@ fn weapons_console_section_attached_when_config_has_weapons_console() {
         held_response: None,
         dock: None,
         umbilical: None,
+        security: None,
+        security_target: None,
         civilian: None,
         faction: None,
         hull: None,

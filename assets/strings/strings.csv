@@ -1775,3 +1775,36 @@ world.probe_task_lifecycle.entity.derelict.name,assets/worlds/probe_task_lifecyc
 world.probe_task_lifecycle.entity.depot.name,assets/worlds/probe_task_lifecycle.toml -> [[entity]] name,[Skyway Transfer Depot]
 world.probe_task_lifecycle.capacity.berths.label,assets/worlds/probe_task_lifecycle.toml -> [[entity.overrides.infrastructure.capacity]] label,[Berths]
 world.probe_task_lifecycle.threshold.transfer_capable.label,assets/worlds/probe_task_lifecycle.toml -> [[entity.overrides.infrastructure.threshold]] label,[Transfer Arm]
+security.dispatch.refused.disabled,"Security dispatch refusal — the Security System is damaged out, so no team can be sent anywhere (issue #1346)","[Security offline — no team can be sent.]"
+security.dispatch.refused.no_such_team,"Security dispatch refusal — the command named a team this hull does not muster (issue #1346)","[No such Security team.]"
+security.dispatch.refused.team_busy,"Security dispatch refusal — that team already holds an assignment; one team, one job (issue #1346)","[Team already assigned — recall it first.]"
+security.dispatch.refused.no_such_target,"Security dispatch refusal — nothing answers to the named target, or what does offers no Security work (issue #1346)","[No such target.]"
+security.dispatch.refused.action_unavailable,"Security dispatch refusal — the target does not offer the action that was asked for (issue #1346)","[That cannot be done here.]"
+security.dispatch.refused.out_of_range,"Security dispatch refusal — the target is past the hull's authored Security reach (issue #1346)","[Out of range — close on the target.]"
+world.falling_skyway.security.warning.head_evacuation,"assets/worlds/falling_skyway.toml -> [[entity.overrides.security_target.action]] warning — what a Security team is being asked to walk into on the slipping tether head (issue #1346)","[Tether under load — team exposed to a structural failure while aboard.]"
+world.falling_skyway.security.warning.gallery_fire,"assets/worlds/falling_skyway.toml -> [[entity.overrides.security_target.action]] warning — the pump-gallery fire on Ladder B (issue #1346)","[Gallery fire, unattended. Smoke and no local crew to hand over to.]"
+world.falling_skyway.objective.head_evacuation.text,"assets/worlds/falling_skyway.toml -> add_objective text — the optional Security objective to get the people off the tether head (issue #1346)","[Get the people off the tether head.]"
+world.falling_skyway.objective.gallery_fire.text,"assets/worlds/falling_skyway.toml -> add_objective text — the optional Security objective to contain the Ladder B pump-gallery fire (issue #1346)","[Contain the pump-gallery fire on Ladder B.]"
+component.security_teams.title,Security teams panel heading (issue #1346),[SECURITY TEAMS]
+component.security_teams.jobs_title,"Security panel heading over the list of targets and actions a team can be sent to (issue #1346)",[AVAILABLE WORK]
+component.security_teams.no_teams,Security panel when the hull musters no Security teams (issue #1346),[NO SECURITY TEAMS]
+component.security_teams.no_jobs,Security panel when nothing in reach offers Security work (issue #1346),[Nothing to send a team to]
+component.security_teams.team,Security team fallback name. {n} is the team number (issue #1346),[Team {n}]
+component.security_teams.recall,Security team control that brings the team home (issue #1346),[RECALL]
+component.security_teams.risk,"Security job row: how dangerous and how long. {pct} is the authored risk as a percentage, {secs} the authored duration in seconds (issue #1346)",[{pct}% · {secs}s]
+component.security_teams.state.available,Security team status badge: mustered aboard and ready to be sent (issue #1346),[AVAILABLE]
+component.security_teams.state.deploying,Security team status badge: crossing to its target (issue #1346),[DEPLOYING]
+component.security_teams.state.working,Security team status badge: at the target doing the work (issue #1346),[WORKING]
+component.security_teams.state.withdrawing,Security team status badge: coming home (issue #1346),[WITHDRAWING]
+component.security_teams.state.unavailable,"Security team status badge: off the board because the Security System is damaged out (issue #1346)",[UNAVAILABLE]
+component.security_teams.action.secure_contain,Security action label: secure or contain the target (issue #1346),[Secure / Contain]
+component.security_teams.action.assist_evacuation,Security action label: assist an evacuation already under way (issue #1346),[Assist Evacuation]
+component.security_teams.action.board,Security action label: board the target (issue #1346),[Board]
+component.security_teams.action.place_charges,Security action label: place demolition charges (issue #1346),[Place Charges]
+component.security_teams.priority.life_safety,Security priority chip: an immediate threat to life (issue #1346),[LIFE]
+component.security_teams.priority.evacuation_underway,Security priority chip: an evacuation already under way (issue #1346),[EVAC]
+component.security_teams.priority.urgent_objective,Security priority chip: work a live urgent Objective names (issue #1346),[OBJECTIVE]
+component.security_teams.priority.threat_containment,Security priority chip: containing an active threat (issue #1346),[CONTAIN]
+component.security_teams.priority.optional,Security priority chip: worth doing when there is nothing better (issue #1346),[OPTIONAL]
+console.tactical.security,"tactical console — ""Security"" panel heading (issue #1346)",[Security]
+console.common.security_toggle,Button that toggles the Security teams overlay on the tactical console (issue #1346),[Security]

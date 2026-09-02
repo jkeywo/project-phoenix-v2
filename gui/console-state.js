@@ -2075,6 +2075,42 @@ export function buildUmbilicalConsoleState(state, systemIds = []) {
 }
 
 /**
+ * Security console family (issue #1346). Reads the raw Security blackboard the
+ * station-owned `security` system publishes under its own system id and returns
+ * JSON of the view the Security panel renders: the authored reach, the team list
+ * (each team's state, assignment, progress and risk), every target that offers
+ * Security work with its separation, whether the SERVER says it is in reach and
+ * the actions it offers, and the `strings.csv` id of the last refusal (which the
+ * console resolves through `t()` — no English crosses the wire).
+ *
+ * A family of its own rather than a corner of the Tactical view, even though the
+ * shipped destroyer's Tactical station owns the system: which station owns
+ * Security is a hull's authoring decision, so a console reaches it through
+ * `familyView(s, 'security')` and never through a station-role key. A hull with
+ * no Security teams publishes no such blackboard, so this returns the empty shape
+ * and the panel renders its own "no teams" state.
+ *
+ * The arrays are passed through whole rather than reshaped: every field on them
+ * is already a machine id or a server-decided number (`in_range` especially — see
+ * gui/security-dispatch.js), and re-deriving any of it here is how a panel comes
+ * to offer a dispatch the server refuses.
+ *
+ * @param {{ blackboards, blackboardKinds? }} state
+ * @param {string[]} [systemIds] authored Security-family ids for this Station
+ */
+export function buildSecurityConsoleState(state, systemIds = []) {
+  const entry = blackboardOfKind(state, 'Security', systemIds);
+  const bb = entry?.data || {};
+  return JSON.stringify({
+    system_id: entry?.systemId ?? systemIds[0] ?? null,
+    range: bb.range ?? 0,
+    teams: Array.isArray(bb.teams) ? bb.teams : [],
+    targets: Array.isArray(bb.targets) ? bb.targets : [],
+    refusal: bb.refusal ?? null,
+  });
+}
+
+/**
  * Console Family presentation registry. Every family owns its flat builder and
  * (where appropriate) a payload field that reports family-wide AI operation.
  * Tactical computes its narrower PhaserBank cue inside its builder instead.
@@ -2105,6 +2141,7 @@ const FAMILY_BUILDERS = Object.freeze({
   command: Object.freeze({ build: buildCommandConsoleState, autoField: 'command_auto' }),
   tractor: Object.freeze({ build: buildTractorConsoleState, autoField: 'tractor_auto', autoScope: 'first' }),
   umbilical: Object.freeze({ build: buildUmbilicalConsoleState, autoField: 'umbilical_auto', autoScope: 'first' }),
+  security: Object.freeze({ build: buildSecurityConsoleState, autoField: 'security_auto', autoScope: 'first' }),
 });
 
 /** Build and normalize one registered family view from actual owned ids. */

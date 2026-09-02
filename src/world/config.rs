@@ -781,7 +781,8 @@ pub(crate) struct RawActionEntry {
     // ── add_objective extended fields (issue #571) ─────────────────────────
     /// Directive kind: `"Patrol"`, `"Destroy"`, `"Reach"`, `"Retreat"`,
     /// `"Hail"`, `"Scan"`, `"Dock"`, `"Tow"`, `"Stabilise"`, `"Escort"`,
-    /// `"Transfer"`, `"FieldRepair"`, `"Order"`, or omit for `None`.
+    /// `"Transfer"`, `"FieldRepair"`, `"Secure"`, `"Order"`, or omit for
+    /// `None`.
     #[serde(default)]
     pub(crate) directive_kind: Option<String>,
     /// Anchor names for a `Patrol` directive.

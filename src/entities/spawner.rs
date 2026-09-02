@@ -269,6 +269,8 @@ const SPAWN_SECTIONS: &[&dyn SpawnSection] = &[
     &HeldResponseSpawn,
     &DockSpawn,
     &UmbilicalSpawn,
+    &SecuritySpawn,
+    &SecurityTargetSpawn,
     &ScanSpawn,
     &CivilianSpawn,
     &HullSpawn,
@@ -1645,6 +1647,32 @@ impl SpawnSection for UmbilicalSpawn {
                     power_group,
                 ));
             }
+        }
+    }
+}
+
+struct SecuritySpawn;
+impl SpawnSection for SecuritySpawn {
+    fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
+        // Security teams (issue #1346) — attach the muster when `[security]` is
+        // present, on the same argument as the umbilical. Which STATION owns the
+        // system rides the `[[system]]` block and is read by admission, not by the
+        // component, so nothing about the teams themselves needs it here.
+        // `EntityConfig` validation already guaranteed the paired system exists.
+        if let Some(security) = &config.security {
+            cmds.insert(crate::security::ShipSecurityTeams::new(security.clone()));
+        }
+    }
+}
+
+struct SecurityTargetSpawn;
+impl SpawnSection for SecurityTargetSpawn {
+    fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
+        // What a Security team may be sent HERE to do (issue #1346). Independent
+        // of `[security]` above: an entity that offers work needs no teams of its
+        // own, and a hull with teams need offer none.
+        if let Some(target) = &config.security_target {
+            cmds.insert(crate::security::SecurityTargetActions(target.clone()));
         }
     }
 }

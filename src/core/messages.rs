@@ -395,6 +395,15 @@ pub enum ConsoleFamily {
     Command,
     Tractor,
     Umbilical,
+    /// Security teams (issue #1346). A family of its own rather than reusing
+    /// `Tactical`, for the reason this enum exists: the Alliance Destroyer's
+    /// Tactical STATION owns the Security System, but its readout is nothing
+    /// like a weapons view — a team list, their assignments and progress, and
+    /// the targets they can be sent to — and another hull may hang the same
+    /// system off Command or Engineering without any of that changing. The
+    /// tractor and the umbilical are the same shape: engineering-owned, drawn by
+    /// their own family.
+    Security,
 }
 
 impl ConsoleFamily {
@@ -412,6 +421,7 @@ impl ConsoleFamily {
             Self::Command => "command",
             Self::Tractor => "tractor",
             Self::Umbilical => "umbilical",
+            Self::Security => "security",
         }
     }
 }
@@ -2421,6 +2431,39 @@ pub enum SystemControlPayload {
     /// umbilical, so there is nothing to disambiguate. What has already moved has
     /// moved.
     StopTransfer,
+    /// Send one Security team to a named target to perform a named action (issue
+    /// #1346). Targets the `security` system — a real station-owned system, so it
+    /// takes the ordinary station-tenure admission path: on the Alliance Destroyer
+    /// the Tactical holder may send it, the backfill Security host may emit it,
+    /// and nobody else is admitted. There is no Duty Officer gate.
+    ///
+    /// Unlike `DispatchExternalRepair`, this command NAMES all three of its parts,
+    /// because none of them can be resolved server-side from context: a hull
+    /// musters several teams working several targets at once, so a single Tactical
+    /// lock cannot say which team, which target, or which of the target's authored
+    /// actions is meant. `action` is one of the generic action ids
+    /// (`secure_contain`, `assist_evacuation`, `board`, `place_charges`); an id
+    /// nothing answers to, and one the target does not offer, are both refused with
+    /// a reason the console shows. Explicit intent, not a toggle:
+    /// `RecallSecurityTeam` is its own command, so a retried or stale-UI dispatch
+    /// of a team that is already out is refused rather than reassigning it.
+    DispatchSecurityTeam {
+        /// Which of the hull's authored teams to send, 0-based.
+        team_idx: u8,
+        /// The target entity's uuid.
+        target: String,
+        /// The action id to perform there.
+        action: String,
+    },
+    /// Bring one Security team home, ending whatever it was doing where it stands
+    /// (issue #1346). Targets the `security` system, the sibling of
+    /// `DispatchSecurityTeam`. The team index is named for the same reason the
+    /// dispatch names it: a hull with two teams out cannot say which one a
+    /// fieldless recall meant. Recalling a team that is not out is a no-op.
+    RecallSecurityTeam {
+        /// Which of the hull's authored teams to recall, 0-based.
+        team_idx: u8,
+    },
 }
 
 /// `ClientMessageDiscriminants` (from `strum::EnumDiscriminants`) is a
@@ -4299,6 +4342,116 @@ pub enum SystemBlackboard {
     /// umbilical IS a thing aboard the ship: it declares a power group, carries a
     /// damage entry and is commanded and refused through the engineering console.
     Umbilical(UmbilicalBlackboard),
+    /// The Security System's readout (issue #1346). One per ship carrying a
+    /// `security` system, keyed by `system_registry::security_system_id` — a REAL
+    /// system id, because Security IS a thing aboard the ship: it carries a damage
+    /// entry, is commanded and refused through the console of whichever station
+    /// the hull gave it to (Tactical, on the Alliance Destroyer), and its teams go
+    /// off the board when it is knocked out.
+    Security(SecurityBlackboard),
+}
+
+/// Raw sim truth for a ship's Security teams, published each tick under its
+/// system id (issue #1346).
+///
+/// This is the whole data half of the repair-team-style interface: the team list
+/// with each team's state, assignment, progress and risk, plus every target in
+/// the world that offers Security work and what each of them offers. The console
+/// renders it and sends `DispatchSecurityTeam` / `RecallSecurityTeam` back.
+///
+/// Additive on the wire in both directions: adding the `Security` variant leaves
+/// every other `SystemBlackboard` arm untouched, and every field here is
+/// `#[serde(default)]`, so a payload predating one decodes rather than being
+/// refused whole. No English crosses: names are world entity name ids, `state`,
+/// `action` and `priority` are machine ids, and `refusal` and `warning` are
+/// `strings.csv` ids the console resolves.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct SecurityBlackboard {
+    /// The authored reach a team can cross, so the console can show the crew how
+    /// far Security goes. Authored content, not live state.
+    #[serde(default)]
+    pub range: f32,
+    /// Every team the hull musters, in authored index order — the index a
+    /// dispatch or recall names.
+    #[serde(default)]
+    pub teams: Vec<SecurityTeamSlot>,
+    /// Every entity in the world that offers Security work, in uuid order, with
+    /// the actions each of them offers.
+    #[serde(default)]
+    pub targets: Vec<SecurityTargetOption>,
+    /// Why the last dispatch was refused, or why the world ended a live
+    /// assignment — a `strings.csv` id. `None` when nothing has been refused since
+    /// the last command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal: Option<String>,
+}
+
+/// One Security team's live state, as the console shows it (issue #1346).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct SecurityTeamSlot {
+    /// `available` / `deploying` / `working` / `withdrawing` / `unavailable`.
+    #[serde(default)]
+    pub state: String,
+    /// The uuid of the target it is assigned to, while it holds an assignment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    /// That target's authored world entity name id, resolved for display.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_name: Option<String>,
+    /// The action id it was sent to perform.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+    /// How far through its CURRENT state it is, 0.0–1.0 — the crossing, the work,
+    /// or the return, whichever it is in, so the console draws one bar.
+    #[serde(default)]
+    pub progress: f32,
+    /// The authored risk of the assignment it is on, 0.0–1.0.
+    #[serde(default)]
+    pub risk: f32,
+}
+
+/// One target that offers Security work, and what it offers (issue #1346).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct SecurityTargetOption {
+    /// The target entity's uuid — what a dispatch names.
+    #[serde(default)]
+    pub uuid: String,
+    /// Its authored world entity name id, for display.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// How far it is from the operator, in world units.
+    #[serde(default)]
+    pub separation: f32,
+    /// Whether it is inside the hull's authored Security reach this tick — the
+    /// "eligible target" answer, pre-computed so the console never re-derives a
+    /// range rule the server owns.
+    #[serde(default)]
+    pub in_range: bool,
+    /// The actions available here, in authored order.
+    #[serde(default)]
+    pub actions: Vec<SecurityActionOption>,
+}
+
+/// One action a target offers, and its authored terms (issue #1346).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct SecurityActionOption {
+    /// The action id a dispatch names.
+    #[serde(default)]
+    pub action: String,
+    /// How long a team works here once it has arrived.
+    #[serde(default)]
+    pub duration_secs: f32,
+    /// How dangerous it is, 0.0–1.0.
+    #[serde(default)]
+    pub risk: f32,
+    /// How urgent it is — the same class the backfill host ranks on, shown so the
+    /// crew and the AI are reading one list.
+    #[serde(default)]
+    pub priority: String,
+    /// A `strings.csv` id for the warning shown beside this action, when the
+    /// target authors one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
 }
 
 /// Raw sim truth for a ship's tractor beam, published each tick under its system
@@ -5279,6 +5432,20 @@ pub enum AiDirective {
     /// `DispatchExternalRepair`/`RecallExternalRepair`, and the shared free-team
     /// availability answer keeps it from starving the hull's own repairs.
     FieldRepair { target: String },
+    /// Secure the named target (issue #1346): Tactical sends a Security team
+    /// across to do whatever that target authors as the most urgent work
+    /// available there. Routes to Security.
+    ///
+    /// A *per-verb operate directive* like the tractor's: it lives upstream of
+    /// admission and names WHAT to secure, never the concrete command or the
+    /// action. Which of the target's authored actions is served — contain the
+    /// fire, assist the evacuation, board, place charges — is the target's own
+    /// priority ranking, not the mission's, which is what keeps a mission from
+    /// having to know a compartment's internal vocabulary. What naming a target
+    /// DOES buy is urgency: an active `Secure` order promotes that target's
+    /// authored work to `urgent_objective` in the backfill ranking, and never
+    /// below what it already was.
+    Secure { target: String },
 }
 
 /// Whether an objective originates from the active mission or from standing doctrine.
@@ -5322,6 +5489,14 @@ pub enum SystemAffinity {
     /// tractor is crewed (or vice versa) routes each directive to exactly the
     /// seat that owns it.
     Repair,
+    /// Security cares about the `Secure` operate directive (issue #1346): the
+    /// backfilled Security host consumes it from the local scored-objective pool
+    /// and issues the same `DispatchSecurityTeam` command a human at the owning
+    /// station sends. Its own affinity, kept apart from `Weapons`, because which
+    /// STATION owns Security is the hull's authoring decision — Tactical on the
+    /// Alliance Destroyer, but not necessarily anywhere else — so the directive
+    /// routes to the SYSTEM rather than to a seat the engine assumed.
+    Security,
 }
 
 /// An objective with its computed utility score, published on the Viewscreen

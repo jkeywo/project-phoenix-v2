@@ -252,6 +252,13 @@ pub fn directive_relevance(directive: &AiDirective) -> Vec<SystemAffinity> {
         // Weapons Tactical selector reads it too (to lock the ally), for the
         // same reason as the tractor verbs above.
         AiDirective::FieldRepair { .. } => vec![SystemAffinity::Repair],
+        // Secure routes to Security, which owns the teams (issue #1346). Its own
+        // affinity rather than Weapons': which station owns the Security System is
+        // a hull's authoring decision, so the directive names the system and the
+        // seat that holds it decides the concrete `DispatchSecurityTeam`.
+        // Deliberately NOT a Helm or Weapons goal — a team crossing to a burning
+        // compartment is not an acquisition.
+        AiDirective::Secure { .. } => vec![SystemAffinity::Security],
     }
 }
 
@@ -303,6 +310,16 @@ pub fn transfer_directive_target(directive: &AiDirective) -> Option<&str> {
 pub fn field_repair_directive_target(directive: &AiDirective) -> Option<&str> {
     match directive {
         AiDirective::FieldRepair { target } => Some(target.as_str()),
+        _ => None,
+    }
+}
+
+/// The target a `Secure` directive names, or `None` (issue #1346). The Security
+/// backfill host's predicate: a target it names has its authored Security work
+/// promoted to `urgent_objective` in the host's ranking.
+pub fn secure_directive_target(directive: &AiDirective) -> Option<&str> {
+    match directive {
+        AiDirective::Secure { target } => Some(target.as_str()),
         _ => None,
     }
 }

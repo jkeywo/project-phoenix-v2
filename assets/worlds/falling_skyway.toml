@@ -1128,6 +1128,43 @@ recover_per_sec = 2.0
 [entity.overrides.comms]
 hailable = true
 
+# ── WHAT SECURITY CAN DO ON THE HEAD (issue #1346) ───────────────────────────
+#
+# There are people on the head and the tether is slipping under them. This table
+# is the whole of what a boarding party may be sent up there to do, and it is
+# authored HERE rather than anywhere in Rust: the engine knows four generic verbs
+# and nothing at all about the Falling Skyway, so a compartment on this head and
+# a boarding target in some later mission are the same code path with different
+# numbers.
+#
+# ONE action, deliberately. The head is not a place you contain something on —
+# the emergency is the structure itself, which is the tractor's job (#1156) and
+# the repair dispatch's (#1161). What a Security team adds is the half neither of
+# those can do: getting the people off while the structural work goes on. That is
+# also why it is authored `life_safety` — the top of the backfill's priority
+# order, above anything at Ladder B — so a hull with two teams and both jobs in
+# reach sends the first one HERE, and a hull with one team left holds it for here
+# rather than spending it on containment.
+#
+# `outcome_flag` is the ONLY consequence path: raising it is what reaches the
+# script (`on_head_evacuation_assisted`), so the scenario hangs its beat off an
+# ordinary world flag exactly as the strike settlement hangs off
+# `skyway_strike_settled`. Nothing in the engine knows what the flag means.
+#
+# [ai] All three numbers unratified. 45 seconds against the ~100 the third tether
+# warning leaves is the trade the act turns on: a crew who commit a team to the
+# head cannot also have that team on the ladder, and a crew who leave it too late
+# get the team interrupted by the failure rather than a completion.
+[entity.overrides.security_target]
+
+[[entity.overrides.security_target.action]]
+action = "assist_evacuation"
+duration_secs = 45.0
+risk = 0.65
+priority = "life_safety"
+outcome_flag = "skyway_head_evacuation_assisted"
+warning = "world.falling_skyway.security.warning.head_evacuation"
+
 # Ladder Depot A — the rung that still works. Its capacity and threshold tables
 # are replaced wholesale by this instance (arrays replace at the instance
 # layer), because a flag name and a capacity id are the SCENARIO's namespace:
@@ -1241,6 +1278,30 @@ label = "world.falling_skyway.threshold.pumping.label"
 flag = "depot_b_meets_certified_load"
 fails_below = 0.6
 label = "world.falling_skyway.threshold.certified_load.label"
+
+# ── WHAT SECURITY CAN DO ON LADDER B (issue #1346) ───────────────────────────
+#
+# The rung under its own line, with a fire in the pump gallery nobody is there to
+# fight because its people walked out. This is the SECOND thing Security could be
+# doing at any moment, and it exists so the priority order is a choice the crew
+# and the backfill host both have to make rather than a rule with one candidate:
+# containment is real work with a real consequence, and it is authored
+# `threat_containment` — below the head's `life_safety`, so a hull down to one
+# free team holds that team for the head and leaves this until there are two.
+#
+# It is longer and less dangerous than the head's evacuation, which is the other
+# half of the trade: taking it commits a team for a long time.
+#
+# [ai] All three unratified.
+[entity.overrides.security_target]
+
+[[entity.overrides.security_target.action]]
+action = "secure_contain"
+duration_secs = 60.0
+risk = 0.4
+priority = "threat_containment"
+outcome_flag = "depot_b_gallery_contained"
+warning = "world.falling_skyway.security.warning.gallery_fire"
 
 # Skyway Control. Federation, hailable at the template level, and the party the
 # survey report goes to. It is a `station_axiom.toml` because that is the
@@ -2035,6 +2096,14 @@ on_waypoint_reached("world.falling_skyway.entity.hauler_lark.name", "corridor_ga
 // the objective posts, and the remembered-objective helper preserves that work.
 on_flag_set("skyway_strike_settled", "on_strike_settled");
 
+// THE SECURITY SEAM (#1346). A boarding party finishing its authored work at a
+// target raises that target's authored `outcome_flag` on the ordinary world
+// store, so the consequence arrives here the same way the settlement does — off
+// a flag, not off a wire into the Security System. Nothing in the engine knows
+// what either flag means; both handlers are this scenario's.
+on_flag_set("skyway_head_evacuation_assisted", "on_head_evacuation_assisted");
+on_flag_set("depot_b_gallery_contained", "on_gallery_contained");
+
 // The corridor and triage reads are visible on arrival. The survey itself posts
 // when the tether slips: its deadline is visible from the opening tick, and the
 // structures plus Control are already actionable, so a crew can pre-empt the
@@ -2212,7 +2281,67 @@ fn on_tether_slip(ctx) {
     post_survey_objective(ctx);
     post_survey_scan_objectives(ctx);
     post_strike_objectives(ctx);
+    post_security_objectives(ctx);
     open_strike_channels(ctx);
+}
+
+// ── SECURITY (#1346) ─────────────────────────────────────────────────────────
+//
+// The slip is the beat that puts people in danger, so it is the beat that makes
+// the boarding party's work visible. Two objectives, both OPTIONAL: the mandatory
+// set is #1142's and this slice does not widen it. What they buy is the crew
+// being TOLD there is something a team could do, and — because each carries a
+// `Secure` directive naming its structure — the backfill Security host being
+// told the same thing, so a hull with nobody at the owning console works the same
+// list in the same order.
+//
+// The directive names WHAT to secure and nothing else. Which of the target's
+// authored actions gets served is the target's own ranking (`life_safety` on the
+// head, `threat_containment` on Ladder B), which is what keeps the mission from
+// having to know a structure's internal vocabulary — and what makes the head win
+// the tie when both are in reach and only one team is free.
+//
+// Pre-emption memory, like every other late-posting thread here: a crew who got
+// there before the slip see the row post already green rather than being asked to
+// do it twice.
+fn post_security_objectives(ctx) {
+    post_remembered_objective(ctx, #{
+        id: "obj-a1-head-evacuation",
+        text: "world.falling_skyway.objective.head_evacuation.text",
+        mandatory: false,
+        source: "mission",
+        base_priority: 70,
+        directive_kind: "Secure",
+        target: "world.falling_skyway.entity.skyhook.name",
+        targets: ["world.falling_skyway.entity.skyhook.name"],
+    }, "skyway_head_evacuation_assisted");
+    post_remembered_objective(ctx, #{
+        id: "obj-a1-gallery",
+        text: "world.falling_skyway.objective.gallery_fire.text",
+        mandatory: false,
+        source: "mission",
+        base_priority: 30,
+        directive_kind: "Secure",
+        target: "world.falling_skyway.entity.depot_ladder_b.name",
+        targets: ["world.falling_skyway.entity.depot_ladder_b.name"],
+    }, "depot_b_gallery_contained");
+}
+
+// The people are off the head. Recorded as a counter rather than a bare flag for
+// the reason every other outcome here is: the epilogue reads what the crew
+// achieved, and "nobody was up there when it went" is a different ending from
+// "we never got to them".
+fn on_head_evacuation_assisted(ctx) {
+    ctx.flags.increment("a3_head_evacuated", 1);
+    ctx.effects.complete_objective("obj-a1-head-evacuation");
+}
+
+// The gallery fire is out. It does not repair the rung — a fire put out is not a
+// pump re-certified — so nothing here touches the condition track; what it buys
+// is that Ladder B is no longer getting worse for a reason nobody was fighting.
+fn on_gallery_contained(ctx) {
+    ctx.flags.increment("a1_gallery_contained", 1);
+    ctx.effects.complete_objective("obj-a1-gallery");
 }
 
 // Chained off the crossing, one tick later. [ai] Placeholder: in the skeleton

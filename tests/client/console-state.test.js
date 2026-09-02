@@ -42,7 +42,7 @@ function fixtureFamily(id) {
   if (id.startsWith('helm-') || id === 'dock') return 'helm';
   if (id === 'tactical-radar' || id.startsWith('phaser-') || id.startsWith('blaster-') || id.startsWith('torpedo-')) return 'tactical';
   if (id === 'sensors' || id === 'sensor-radar') return 'sensors';
-  if (id === 'navigation' || id === 'comms' || id === 'repair' || id === 'command' || id === 'tractor' || id === 'umbilical') return id;
+  if (id === 'navigation' || id === 'comms' || id === 'repair' || id === 'command' || id === 'tractor' || id === 'umbilical' || id === 'security') return id;
   if (id === 'shields-system' || id.startsWith('shield-arc-')) return 'shields';
   if (id.startsWith('power-')) return 'power';
   return null;
@@ -56,7 +56,7 @@ function fixtureBlackboardKind(id) {
     'tactical-radar': 'TacticalRadar', 'sensor-radar': 'SensorRadar',
     'torpedo-magazine': 'TorpedoMagazine', 'power-reactor': 'PowerReactor',
     'power-battery': 'PowerBattery', dossiers: 'Dossiers', scan: 'Scan',
-    tractor: 'Tractor', umbilical: 'Umbilical', dock: 'Dock',
+    tractor: 'Tractor', umbilical: 'Umbilical', dock: 'Dock', security: 'Security',
     'helm-lateral-thrust': 'HelmLateralThrust',
   };
   if (exact[id]) return exact[id];
@@ -2343,6 +2343,72 @@ describe('umbilical via buildSystemStationConsoleState (issue #1160)', () => {
       blackboards: { umbilical: {} },
     }));
     expect(s.systems['umbilical'].umbilical_auto).toBe(true);
+  });
+});
+
+describe('security via buildSystemStationConsoleState (issue #1346)', () => {
+  // The Alliance Destroyer's Tactical station owns the Security System. The
+  // family is Security's own, not Tactical's, so a hull that hangs the same
+  // system off Command or Engineering reaches it exactly the same way.
+  const TAC_SYSTEMS = { tactical: ['tactical-radar', 'phaser-omni', 'security'] };
+  const BLACKBOARD = {
+    range: 400,
+    teams: [
+      { state: 'working', target: 'u-1', target_name: 'world.x.name', action: 'assist_evacuation', progress: 0.5, risk: 0.65 },
+      { state: 'available' },
+    ],
+    targets: [
+      {
+        uuid: 'u-1',
+        name: 'world.x.name',
+        separation: 180,
+        in_range: true,
+        actions: [{ action: 'assist_evacuation', duration_secs: 45, risk: 0.65, priority: 'life_safety', warning: 'world.x.warning' }],
+      },
+    ],
+    refusal: null,
+  };
+
+  it('exposes the team list, the eligible targets and their authored actions', () => {
+    const s = parse(buildSystemStationConsoleState('tactical', {
+      stationSystems: TAC_SYSTEMS,
+      blackboards: { security: BLACKBOARD },
+    }));
+    const view = s.systems['security'];
+    expect(view).toBeTruthy();
+    expect(view.range).toBe(400);
+    expect(view.teams).toHaveLength(2);
+    expect(view.teams[0].action).toBe('assist_evacuation');
+    expect(view.teams[0].progress).toBe(0.5);
+    expect(view.targets[0].in_range).toBe(true);
+    expect(view.targets[0].actions[0].priority).toBe('life_safety');
+    // The Tactical weapons view is a separate family and is untouched by it.
+    expect(s.systems['tactical-radar']).not.toBe(view);
+  });
+
+  it('surfaces the refusal string id the console shows, never English', () => {
+    const s = parse(buildSystemStationConsoleState('tactical', {
+      stationSystems: TAC_SYSTEMS,
+      blackboards: { security: { refusal: 'security.dispatch.refused.team_busy' } },
+    }));
+    expect(s.systems['security'].refusal).toBe('security.dispatch.refused.team_busy');
+  });
+
+  it('a station that owns no security system gets no security view — a hull without teams is unchanged', () => {
+    const s = parse(buildSystemStationConsoleState('tactical', {
+      stationSystems: { tactical: ['tactical-radar'] },
+      blackboards: { security: BLACKBOARD },
+    }));
+    expect(s.systems).not.toHaveProperty('security');
+  });
+
+  it('an empty muster renders as empty arrays rather than throwing', () => {
+    const s = parse(buildSystemStationConsoleState('tactical', {
+      stationSystems: TAC_SYSTEMS,
+      blackboards: {},
+    }));
+    expect(s.systems['security'].teams).toEqual([]);
+    expect(s.systems['security'].targets).toEqual([]);
   });
 });
 

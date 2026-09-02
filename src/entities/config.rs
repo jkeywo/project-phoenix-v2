@@ -43,7 +43,8 @@ pub struct DoctrineObjective {
     pub mandatory: bool,
     /// Directive kind: `"Patrol"`, `"Destroy"`, `"Reach"`, `"Retreat"`,
     /// `"Hail"`, `"Scan"`, `"Dock"`, `"Tow"`, `"Stabilise"`, `"Escort"`,
-    /// `"Transfer"`, `"FieldRepair"`, `"Order"`, or absent for `None`.
+    /// `"Transfer"`, `"FieldRepair"`, `"Secure"`, `"Order"`, or absent for
+    /// `None`.
     #[serde(default)]
     pub directive_kind: Option<String>,
     /// Anchor names for `Patrol` directives.
@@ -74,8 +75,9 @@ pub struct DoctrineObjective {
     /// load rather than silently resolving to no scan subject.
     #[serde(default)]
     pub directive_scan_target: Option<String>,
-    /// Named target for the issue-#1162 operate verbs — `Tow`, `Stabilise`,
-    /// `Escort`, `Transfer` and `FieldRepair`. One shared field for all five,
+    /// Named target for the operate verbs — `Tow`, `Stabilise`, `Escort`,
+    /// `Transfer` and `FieldRepair` (issue #1162), plus `Secure` (issue #1346).
+    /// One shared field for all six,
     /// the way `Reach`/`Retreat` share `directive_anchor`: each verb names a
     /// target the owning seat operates on, resolved to a live UUID the same way
     /// a `Destroy`/`Dock` target is.
@@ -3152,6 +3154,24 @@ pub struct EntityConfig {
     /// under the umbilical's `capacity` id for anything to move.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub umbilical: Option<crate::umbilical::UmbilicalConfig>,
+    /// The Security-team terms (issue #1346) — how many teams the hull musters,
+    /// how long they take to cross and come back, and how far they can reach.
+    /// Present on a hull whose crew can send teams across; absent for everything
+    /// else, which carries no `ShipSecurityTeams` component and is unchanged in
+    /// every way. The `[[system]] kind = "security"` block declares the system's
+    /// identity (which STATION owns it, its damage entry); this table carries what
+    /// the teams themselves are, and a hull that authors one without the other is
+    /// refused by name at load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security: Option<crate::security::SecurityConfig>,
+    /// What a Security team may be sent HERE to do (issue #1346) — the mirror of
+    /// `security`: that table says what a hull can do the work with, this one says
+    /// what work this entity offers, how long each action takes, how risky and how
+    /// urgent it is, and the world flag its success raises. Absent for every entity
+    /// that authors nothing, which cannot be dispatched to at all — which is why
+    /// every shipped hull and every existing world is untouched by this slice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security_target: Option<crate::security::SecurityTargetConfig>,
     /// The faint world-locked lattice drawn under this hull on the viewscreen.
     /// Present only on a hull meant to be FLOWN — the grid is a motion cue for
     /// the crew looking out of their own ship, and it is only ever read off the
@@ -3663,6 +3683,63 @@ impl EntityConfig {
                      umbilical's power allocation is what an interruption checks",
                 ));
             }
+        }
+
+        // Validation: a [security] table has to describe a capability that can
+        // do something (issue #1346), and it has to be paired with the system
+        // that gives it its identity. A teamless muster, a negative crossing time
+        // or a zero reach is caught by `SecurityConfig::validate`; the pairing is
+        // checked here for the umbilical's reason — the team terms live in a table
+        // and the owning station and damage entry live on a `[[system]] kind =
+        // "security"` block, so a hull that authored one without the other would
+        // carry a console control that dispatches nobody, or a system with terms
+        // nobody reads. No `power_group` is required: Security is people, not an
+        // allocation, and a hull that wants its teams to fail with the lights may
+        // still declare one.
+        if let Some(ref security) = config.security {
+            security.validate().map_err(SerdeError::custom)?;
+            config
+                .ship_config
+                .as_ref()
+                .and_then(|sc| {
+                    sc.systems
+                        .iter()
+                        .find(|s| s.kind == crate::ship::system_registry::SECURITY_KIND)
+                })
+                .ok_or_else(|| {
+                    SerdeError::custom(
+                        "a [security] table needs a matching [[system]] kind = \"security\" block \
+                         to declare which station owns the teams and its damage entry",
+                    )
+                })?;
+        }
+        if let Some(system) = config.ship_config.as_ref().and_then(|sc| {
+            sc.systems
+                .iter()
+                .find(|s| s.kind == crate::ship::system_registry::SECURITY_KIND)
+        }) {
+            if config.security.is_none() {
+                return Err(SerdeError::custom(
+                    "a [[system]] kind = \"security\" block needs a matching [security] table to \
+                     declare its team count, crossing times and reach",
+                ));
+            }
+            if system.station.is_none() {
+                return Err(SerdeError::custom(
+                    "the [[system]] kind = \"security\" block must declare a station — Security is \
+                     assigned through ship configuration, and a system nobody owns can be \
+                     commanded by nobody",
+                ));
+            }
+        }
+
+        // Validation: a [security_target] table has to offer work a team could
+        // actually be sent to do (issue #1346) — at least one action, each with a
+        // positive duration, a risk inside the band the console renders, and no
+        // verb authored twice (the second could never be reached, because a
+        // dispatch names one action id and the first match answers).
+        if let Some(ref security_target) = config.security_target {
+            security_target.validate().map_err(SerdeError::custom)?;
         }
 
         // Validation: a [reference_grid] table has to describe a lattice that

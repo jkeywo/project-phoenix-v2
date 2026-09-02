@@ -181,6 +181,21 @@ pub const DOCK_KIND: &str = "dock";
 pub const UMBILICAL_SYSTEM_ID: &str = "umbilical";
 pub const UMBILICAL_KIND: &str = "umbilical";
 
+/// Wire `SystemId` for the Security System (issue #1346, PRD #1337).
+///
+/// A GENERIC station-owned `[[system]]`: which station owns it is the hull's
+/// authoring decision, and on the Alliance Destroyer that is Tactical. It carries
+/// a damage entry, is admission-gated (`DispatchSecurityTeam` /
+/// `RecallSecurityTeam`) and publishes its own blackboard. Its terms — how many
+/// teams, how long they take to cross and return, how far they can reach — are
+/// authored in a hull's `[security]` table, and what a team may DO at a given
+/// target is authored on the TARGET's `[security_target]` table, so a hull that
+/// declares neither the system nor the table is unchanged in every way. There is
+/// no Duty Officer: the station that owns it commands it, and #1162's backfill
+/// hosts drive it when nobody is sitting there.
+pub const SECURITY_SYSTEM_ID: &str = "security";
+pub const SECURITY_KIND: &str = "security";
+
 // ── Fine-grained Helm systems (issue #511) ────────────────────────────────────
 
 /// Wire `SystemId` for the Helm Joystick fine system.
@@ -493,6 +508,14 @@ impl SystemKindRegistry {
         registry.register_commandable(DOCK_KIND, ConsoleFamily::Helm)?;
         // Transfer umbilical (issue #1160).
         registry.register_commandable(UMBILICAL_KIND, ConsoleFamily::Umbilical)?;
+        // Security teams (issue #1346). Its OWN presentation family, the way the
+        // tractor and umbilical have theirs: the shipped destroyer gives the
+        // system to Tactical, but a team list and the work available to it is
+        // nothing like a weapons view, and another hull may hang the same system
+        // off Command or Engineering without that changing. Ownership stays the
+        // hull's `station = ...` decision — exactly the split `ConsoleFamily`
+        // exists to keep.
+        registry.register_commandable(SECURITY_KIND, ConsoleFamily::Security)?;
         // Fine-grained Helm systems (issue #511)
         registry.register(HELM_JOYSTICK_KIND, ConsoleFamily::Helm)?;
         registry.register(HELM_ENGINE_KIND, ConsoleFamily::Helm)?;
@@ -727,6 +750,13 @@ pub fn dock_system_id() -> SystemId {
 /// under.
 pub fn umbilical_system_id() -> SystemId {
     SystemId(UMBILICAL_SYSTEM_ID.to_string())
+}
+
+/// The Security System's wire `SystemId` (issue #1346). The admitted target for
+/// `DispatchSecurityTeam` / `RecallSecurityTeam`, the key its blackboard publishes
+/// under, and the damage entry its teams are taken off the board by.
+pub fn security_system_id() -> SystemId {
+    SystemId(SECURITY_SYSTEM_ID.to_string())
 }
 
 // ── Fine Helm system id helpers (issue #511) ──────────────────────────────────
@@ -971,6 +1001,7 @@ mod tests {
             (TRACTOR_KIND, ConsoleFamily::Tractor),
             (DOCK_KIND, ConsoleFamily::Helm),
             (UMBILICAL_KIND, ConsoleFamily::Umbilical),
+            (SECURITY_KIND, ConsoleFamily::Security),
             (HELM_JOYSTICK_KIND, ConsoleFamily::Helm),
             (HELM_ENGINE_KIND, ConsoleFamily::Helm),
             (HELM_RADAR_KIND, ConsoleFamily::Helm),

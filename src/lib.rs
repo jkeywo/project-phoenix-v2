@@ -125,6 +125,12 @@ pub mod regions;
 /// adapter. There is no authored scan text anywhere behind it — see
 /// `pasm/spec/design/simulation-differentiation.yaml`.
 pub mod science;
+/// The Security System (issue #1346, PRD #1337): the pure team state machine,
+/// action vocabulary, dispatch verdict and backfill priority selection, and its
+/// Bevy adapter. A generic station-owned `[[system]]` — Tactical's on the Alliance
+/// Destroyer — whose teams cross to authored targets to contain, evacuate, board
+/// or place charges. What each target offers is the target's TOML, never Rust.
+pub mod security;
 pub mod server_app;
 /// The render half lifted out of `server_app` (issue #1195): the Bevy mesh
 /// cache, material factory, LOD swapper, and light spawners. Registered from

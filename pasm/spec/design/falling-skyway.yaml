@@ -697,6 +697,14 @@ entities:
         with nobody to tell is still a board that must not advertise lift that
         cannot fly.
 
+        [ai] And a claimant the corridor removes leaves the scoring with it. The
+        comms engine puts a despawned sender's thread out of reach, so a claim
+        that was open when its hull went cannot be granted or refused by anybody
+        after that; it is latched as resolved-by-loss and left out of the count
+        of requests the bridge was answerable for. A decision already made is
+        untouched — a refusal stays a refusal — so the crew are scored on the
+        conversations they could actually have, not on the corridor's timing.
+
         [ai] Control's restatement is classified on what is still STANDING and
         not only on what has been decided. The opening-state body counts three
         claims out loud, so it belongs to a board that still has three on it; a
@@ -713,16 +721,29 @@ entities:
         convoy — skyway_window_refused_lost / skyway_berth_refused_lost — and
         neither skyway_window_reserved nor skyway_shelter_reserved moves.
         window_stands_undecided implies all three claims standing.
-        Berth name offered implies min(shelter_supply_now,
-        skyway_shelter_supply) - skyway_shelter_reserved > 0 and the claimant is
-        still there, which is exactly book_berth's grant condition. Control's
-        lift row moves only by exact deltas against a latch
+        skyway_claim_lost_convoy > 0 implies the convoy's claim is left out of
+        resolve_the_choice's asked count, so a claimant the corridor removes
+        while its claim is open is neither an answer nor a silence — the comms
+        engine puts a despawned sender's whole thread out of reach, so no answer
+        is possible after that. It is latched only while that claim is
+        undecided, so a grant or a refusal already given stays in the count as
+        the answer it was.
+        Berth name offered implies min(shelter_supply_now +
+        skyway_shelter_reserved, skyway_shelter_supply) -
+        skyway_shelter_reserved > 0 and the claimant is still there, which is
+        exactly book_berth's grant condition — the reservation is added back
+        before the cap and taken off after it, because book_berth banks the
+        reservation AND takes the mooring off depot_a_shelter_berths, so one
+        allocation never comes off the room twice at any authored capacity.
+        skyway_berth_decided > 0 implies control_berth_settled whatever the room
+        reads. Control's lift row moves only by exact deltas against a latch
         (skyway_window_published), so a booking and a republish landing in one
         tick compose instead of double-counting the claim.
       asserted_by:
         - falling_skyway_no_reachable_ledger_offers_a_lift_the_window_cannot_honour
         - falling_skyway_control_has_a_body_for_every_shape_the_window_can_take
         - falling_skyway_a_refusal_answers_a_claim_and_silence_does_not
+        - falling_skyway_a_convoy_lost_mid_window_leaves_no_claim_unanswered
         - falling_skyway_the_last_berth_never_offers_a_mooring_the_seam_would_refuse
         - falling_skyway_the_board_only_moves_in_the_scene_that_has_a_board
         - falling_skyway_the_lift_row_moves_by_an_exact_delta_whoever_moved_it_last

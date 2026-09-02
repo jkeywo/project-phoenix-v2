@@ -15848,7 +15848,10 @@ struct WindowScript {
 /// authored unit-supply ceiling this act is tuned against, and the figure a
 /// booked climber is measured against for the whole window. `live` is what the
 /// chain can deliver NOW. The two differ whenever a rung, a shift or the head's
-/// certification went between the announcement and the answer.
+/// certification moved between the announcement and the answer — in EITHER
+/// direction: repairs land, strikes settle and certifications come back, so
+/// `live` above `banked` is a reachable ledger and the one the ceiling rule is
+/// about.
 #[derive(Clone, Copy, Debug)]
 struct WindowLedger {
     banked: i64,
@@ -15952,8 +15955,31 @@ impl WindowScript {
         fn_name: &str,
         flags: &project_phoenix::world::flags::FlagStore,
     ) -> project_phoenix::world::script::comms::ScriptDialogueNode {
+        let (_effects, node) = self.enter(fn_name, flags);
+        node.unwrap_or_else(|| panic!("{fn_name} must return a node"))
+    }
+
+    /// A response PICKED, run the way a console runs it: an `on_pick` fn is
+    /// entered exactly like a node fn, writes its flags and effects, and returns
+    /// the follow-up body. What a test walking a road wants back is the writes.
+    fn pick(
+        &self,
+        fn_name: &str,
+        flags: &project_phoenix::world::flags::FlagStore,
+    ) -> project_phoenix::world::script::schedule::CallEffects {
+        self.enter(fn_name, flags).0
+    }
+
+    fn enter(
+        &self,
+        fn_name: &str,
+        flags: &project_phoenix::world::flags::FlagStore,
+    ) -> (
+        project_phoenix::world::script::schedule::CallEffects,
+        Option<project_phoenix::world::script::comms::ScriptDialogueNode>,
+    ) {
         let mut budget = project_phoenix::world::script::schedule::TickBudget::new();
-        let (_effects, node) = project_phoenix::world::script::comms::enter_node(
+        project_phoenix::world::script::comms::enter_node(
             &self.host,
             &mut budget,
             &project_phoenix::world::script::schedule::SchedClock::ZERO,
@@ -15965,8 +15991,7 @@ impl WindowScript {
             &project_phoenix::world::commitments::CommitmentLedger::default(),
             &project_phoenix::dossier::evidence::EvidenceLog::default(),
         )
-        .unwrap_or_else(|error| panic!("{fn_name} must enter cleanly: {error:?}"));
-        node.unwrap_or_else(|| panic!("{fn_name} must return a node"))
+        .unwrap_or_else(|error| panic!("{fn_name} must enter cleanly: {error:?}"))
     }
 
     /// The window's ledger as flags, with the chain tuned so `window_supply`
@@ -16071,6 +16096,32 @@ fn window_flag_values(
     out
 }
 
+/// Apply a call's buffered flag writes to a store, in the order the script
+/// emitted them — which is what the dispatcher does with them a moment later.
+///
+/// Act 3's beats are separate triggers with the ledger between them, so a test
+/// that walks a ROAD rather than a single state has to carry the writes forward
+/// the way the world does: the parley opens and latches who asked, the corridor
+/// destroys a hull, the captain answers the claimants who are left, and only
+/// then is the choice scored.
+fn window_apply_flags(
+    effects: &project_phoenix::world::script::schedule::CallEffects,
+    flags: &mut project_phoenix::world::flags::FlagStore,
+) {
+    use project_phoenix::world::dispatch::{ActionCmd, FlagMutation};
+    use project_phoenix::world::script::effects::BufferedEffect;
+    for effect in &effects.commands {
+        if let BufferedEffect::Cmd(ActionCmd::MutateFlag { name, mutation, .. }) = effect {
+            match mutation {
+                FlagMutation::Set => flags.set_flag(name),
+                FlagMutation::Clear => flags.clear_flag(name),
+                FlagMutation::Increment(by) => flags.increment_flag(name, *by),
+                FlagMutation::SetValue(value) => flags.set_flag_value(name, *value),
+            };
+        }
+    }
+}
+
 /// Every comms thread a call asked to open, by root node fn, in authored order.
 fn window_comms_opened(
     effects: &project_phoenix::world::script::schedule::CallEffects,
@@ -16130,8 +16181,9 @@ fn window_objective_verdicts(
 /// it that the booking seam would refuse.**
 ///
 /// The sweep walks every value the window's unspoken-for lift can take, reached
-/// BOTH ways it can be reached — lift already granted away, and a chain that
-/// stopped delivering after the shutters went up — crossed with every
+/// all three ways it can be reached — lift already granted away, a chain that
+/// stopped delivering after the shutters went up, and a chain that came back up
+/// past what the window was priced for — crossed with every
 /// combination of which claimants have been answered, how (granted or refused),
 /// and whether the corridor still has a convoy in it. That is the whole
 /// reachable space of this conversation.
@@ -16171,15 +16223,33 @@ fn falling_skyway_no_reachable_ledger_offers_a_lift_the_window_cannot_honour() {
         "precondition: the authored chain has lift in it and never covers all three"
     );
 
+    let biggest_claim = *claims.iter().max().expect("three claims are authored");
     let decisions = [None, Some(true), Some(false)];
     let mut checked = 0usize;
+    // How often the third shape actually put a claim inside the raised live
+    // figure and outside the banked one. That crossing is the only thing the
+    // ceiling clamp does, so a sweep that never produces it would pass with the
+    // clamp deleted.
+    let mut raised_but_withheld = 0usize;
     for room in 0..=ceiling {
-        // The same shortage, reached the two ways the mission can reach it.
-        for ledger_shape in 0..2 {
-            let (banked, live, reserved) = if ledger_shape == 0 {
-                (ceiling, ceiling, ceiling - room)
-            } else {
-                (ceiling, room, 0)
+        // The same shortage, reached the three ways the mission can reach it.
+        for ledger_shape in 0..3 {
+            let (banked, live, reserved) = match ledger_shape {
+                // Lift already granted away, off a chain that still delivers.
+                0 => (ceiling, ceiling, ceiling - room),
+                // A chain that stopped delivering after the shutters went up.
+                1 => (ceiling, room, 0),
+                // A chain that came back UP inside the window — the direction
+                // the clamp exists for and the one the other two shapes cannot
+                // reach, because both of them hold live at or below banked.
+                // `skyway_window_supply` is banked once at the opening while the
+                // supply arithmetic re-reads the head's certification, both
+                // pumping thresholds and both workforce stoppages, and any of
+                // those can rise mid-window: a rung repaired, a strike settled,
+                // the head recertified. None of that may mint lift the window
+                // was not priced for, so the offers and the grants here must
+                // still be the ones `banked` allows.
+                _ => (ceiling, ceiling + biggest_claim, ceiling - room),
             };
             for committee in decisions {
                 for havelock in decisions {
@@ -16209,6 +16279,27 @@ fn falling_skyway_no_reachable_ledger_offers_a_lift_the_window_cannot_honour() {
                                      {room} unspoken for against a claim of {}",
                                     SKYWAY_CLAIM_NODES[index], claims[index]
                                 );
+
+                                // AC2, the ceiling half, named where it bites: a
+                                // claim that fits ONLY because the chain came
+                                // back up inside the window is neither offered
+                                // here nor granted below — the booking seam's
+                                // refusal is asserted by the converse branch a
+                                // few lines down, against this same ledger.
+                                if ledger_shape == 2
+                                    && standing
+                                    && claims[index] > room
+                                    && claims[index] <= live - reserved
+                                {
+                                    assert!(
+                                        !offered,
+                                        "AC2: a claim of {} fits the raised live figure \
+                                         ({live} against {banked} banked) and nothing else, \
+                                         so it must not be on offer: {ledger:?}",
+                                        claims[index]
+                                    );
+                                    raised_but_withheld += 1;
+                                }
 
                                 // AC2: and what is offered is what the seam grants.
                                 let booking = window_increments(
@@ -16275,6 +16366,12 @@ fn falling_skyway_no_reachable_ledger_offers_a_lift_the_window_cannot_honour() {
     assert!(
         checked > 1_000,
         "the sweep must actually walk the space: {checked} combinations"
+    );
+    assert!(
+        raised_but_withheld > 0,
+        "the sweep must actually cross the ceiling: without a claim that fits the live \
+         figure and not the banked one, deleting the clamp would leave every assertion \
+         above passing"
     );
 }
 
@@ -16478,6 +16575,164 @@ fn falling_skyway_a_refusal_answers_a_claim_and_silence_does_not() {
     );
 }
 
+/// **Issue #1340, AC4 — a claimant the corridor takes is neither a refusal nor
+/// a silence, at any point in the act.**
+///
+/// The parley opens with three claimants alive, and the corridor destroys one of
+/// them with its thread still on a console. From that moment the request cannot
+/// be answered by anybody: the comms engine takes a despawned sender's whole
+/// thread out of reach — every response on it is stamped unavailable because the
+/// sender is out of range for good, which
+/// `entity_despawn_flips_sender_in_range_to_false` is the standing guard for —
+/// so there is no grant and no refusal a captain could still give. The
+/// repricing skips a lost convoy and the hold's callback returns early, so
+/// nothing reopens it either.
+///
+/// Scoring that as an unanswered request would fail the crew for a conversation
+/// the engine closed under them, and would fail exactly the captain who had not
+/// answered yet while passing the one who happened to answer a beat earlier.
+/// This walks that road — open, destroy, answer the two who are left, score —
+/// and asserts the mandatory objective completes with nothing outstanding, while
+/// the record that three parties spoke survives.
+#[test]
+fn falling_skyway_a_convoy_lost_mid_window_leaves_no_claim_unanswered() {
+    let script = WindowScript::compile();
+    let ceiling = (script.authored("skyhook_transfer_berths")
+        * script.authored("skyhook_climber_load"))
+    .min(script.authored("depot_a_fuel_lift") + script.authored("depot_b_fuel_lift"));
+    let ledger = WindowLedger {
+        banked: ceiling,
+        live: ceiling,
+        reserved: 0,
+        decided: [None; 3],
+        convoy_lost: false,
+    };
+
+    // The parley, opened the way the window opens it, with the convoy alive.
+    let mut flags = script.flags(&ledger);
+    window_apply_flags(&script.call("the_parley_at_the_ladder", &flags), &mut flags);
+    assert_eq!(
+        flags.counter("skyway_claim_asked_convoy"),
+        1,
+        "precondition: the convoy is alive at the opening and puts its claim"
+    );
+
+    // …and the corridor takes it, mid-window, before anybody answered it.
+    window_apply_flags(&script.call("on_convoy_lost", &flags), &mut flags);
+
+    // The captain answers the two claimants who are still there — one lifted,
+    // one refused, because a refusal is an answer.
+    window_apply_flags(&script.pick("on_lift_committee", &flags), &mut flags);
+    window_apply_flags(&script.pick("on_deny_havelock", &flags), &mut flags);
+    assert_eq!(
+        flags.counter("skyway_granted_committee"),
+        1,
+        "precondition: the lift was granted against a window that had room for it"
+    );
+    assert_eq!(
+        flags.counter("skyway_granted_convoy") + flags.counter("skyway_refused_convoy"),
+        0,
+        "precondition: the lost claimant was never granted and never refused"
+    );
+
+    let effects = script.call("resolve_the_choice", &flags);
+    let (completed, failed) = window_objective_verdicts(&effects);
+    let values = window_flag_values(&effects);
+    assert!(
+        completed.contains(&"obj-a3-choice".to_string()),
+        "AC4: the captain answered every claimant who could be answered, and the mandatory \
+         objective must complete: completed={completed:?} failed={failed:?}"
+    );
+    assert!(
+        !failed.contains(&"obj-a3-choice".to_string()),
+        "AC4: …and it cannot be failed as well"
+    );
+    assert_eq!(
+        values.get("skyway_claims_unanswered").copied(),
+        Some(0),
+        "AC4: a claim the corridor removed is not outstanding — there is nobody to answer"
+    );
+    assert_eq!(
+        values.get("skyway_claims_asked").copied(),
+        Some(2),
+        "AC4: …and it is out of the count rather than counted and forgiven"
+    );
+    assert_eq!(
+        flags.counter("skyway_claim_asked_convoy"),
+        1,
+        "AC4: the ask still happened, and the record of it is kept — the loss is latched \
+         separately so the history survives"
+    );
+
+    // The control, on the same road: a captain who simply never answered the
+    // third claimant is still failed. The loss is what closes the claim, not the
+    // convenience of having one fewer thread open.
+    let mut ignored = script.flags(&ledger);
+    window_apply_flags(
+        &script.call("the_parley_at_the_ladder", &ignored),
+        &mut ignored,
+    );
+    window_apply_flags(&script.pick("on_lift_committee", &ignored), &mut ignored);
+    window_apply_flags(&script.pick("on_deny_havelock", &ignored), &mut ignored);
+    let effects = script.call("resolve_the_choice", &ignored);
+    let (completed, failed) = window_objective_verdicts(&effects);
+    assert!(
+        failed.contains(&"obj-a3-choice".to_string())
+            && !completed.contains(&"obj-a3-choice".to_string()),
+        "AC4: a claimant who is still there and was never told anything is the failure this \
+         objective names: completed={completed:?} failed={failed:?}"
+    );
+    assert_eq!(
+        window_flag_values(&effects)
+            .get("skyway_claims_unanswered")
+            .copied(),
+        Some(1),
+        "…and the silence is reported as one outstanding request"
+    );
+
+    // And the answer a captain DID give is not unmade by what happens to the
+    // hull afterwards: a convoy refused and then destroyed stays a decision
+    // somebody made, and stays in the count as one.
+    let mut refused_then_lost = script.flags(&ledger);
+    window_apply_flags(
+        &script.call("the_parley_at_the_ladder", &refused_then_lost),
+        &mut refused_then_lost,
+    );
+    window_apply_flags(
+        &script.pick("on_deny_convoy", &refused_then_lost),
+        &mut refused_then_lost,
+    );
+    window_apply_flags(
+        &script.call("on_convoy_lost", &refused_then_lost),
+        &mut refused_then_lost,
+    );
+    assert_eq!(
+        refused_then_lost.counter("skyway_claim_lost_convoy"),
+        0,
+        "AC4: a claim that was already answered is not re-classified as resolved-by-loss"
+    );
+    window_apply_flags(
+        &script.pick("on_lift_committee", &refused_then_lost),
+        &mut refused_then_lost,
+    );
+    window_apply_flags(
+        &script.pick("on_deny_havelock", &refused_then_lost),
+        &mut refused_then_lost,
+    );
+    let effects = script.call("resolve_the_choice", &refused_then_lost);
+    let (completed, _failed) = window_objective_verdicts(&effects);
+    let values = window_flag_values(&effects);
+    assert!(
+        completed.contains(&"obj-a3-choice".to_string()),
+        "AC4: three answers is three answers, whatever became of the third hull afterwards"
+    );
+    assert_eq!(
+        values.get("skyway_claims_asked").copied(),
+        Some(3),
+        "…and the refusal is still one of the requests the bridge was scored on"
+    );
+}
+
 /// One reachable state of the berth scene's one-line ledger.
 ///
 /// The smaller, worse road: the chain delivers nothing, so `the_claimants_ask`
@@ -16571,8 +16826,33 @@ fn falling_skyway_the_last_berth_never_offers_a_mooring_the_seam_would_refuse() 
                             decided,
                         };
                         let flags = script.berth_flags(&berth);
-                        let room = banked.min(live) - reserved;
+                        // A booking spends a mooring ONCE. `depot_a_shelter_berths`
+                        // is Ladder A's own row and `book_berth` takes the mooring
+                        // off it as well as banking the reservation, so the live
+                        // reading is already post-allocation — the ceiling the
+                        // banked figure is compared against is the rung with the
+                        // reservations put back, and the allocations come off
+                        // once, at the end.
+                        let room = banked.min(live + reserved) - reserved;
                         let node = script.node("control_berth_offer", &flags);
+
+                        // AC3: and the body says which of those it is. A settled
+                        // scene is settled whatever the room reads — the mooring
+                        // is zero BECAUSE the captain filled it, and "there is
+                        // nothing to give anybody" is the wrong sentence for the
+                        // one crew who decided.
+                        let expected_body = if decided {
+                            "world.falling_skyway.comms.control_berth_settled"
+                        } else if room <= 0 {
+                            "world.falling_skyway.comms.control_no_berth"
+                        } else {
+                            "world.falling_skyway.comms.control_berth_offer"
+                        };
+                        assert_eq!(
+                            node.message, expected_body,
+                            "AC3: Control reads the wrong body for {berth:?} with {room} \
+                             mooring(s) unspoken for"
+                        );
 
                         for index in 0..3 {
                             let displayed = node
@@ -16660,6 +16940,69 @@ fn falling_skyway_the_last_berth_never_offers_a_mooring_the_seam_would_refuse() 
     assert!(
         checked >= 3 * 8,
         "the sweep must actually walk the berth ledger: {checked} combinations"
+    );
+
+    // ── The coupled state a booking actually leaves behind ──────────────────
+    //
+    // `book_berth` moves TWO things for one allocation: it banks the reservation
+    // and it takes the mooring off Ladder A's published row, which is the row
+    // `shelter_supply` reads back. So the ledger a moment after a booking is not
+    // any of the independent (banked, live, reserved) combinations a sweep
+    // stumbles into by accident — it is the coupled one, `live == banked -
+    // reserved`, and it is the only one the mission actually produces.
+    //
+    // Stated here as the scene states it rather than as the arithmetic states
+    // it: a rung with `capacity` moorings and `taken` of them spoken for has
+    // `capacity - taken` left, and Control offers a name for every one of them.
+    // Driven ABOVE the authored capacity of one as well, because at one mooring
+    // a second subtraction lands on -1, which reads exactly like "nothing left"
+    // and hides itself. At two it loses a mooring the designer authored, and a
+    // capacity is a TOML amount a tuning pass is entitled to move.
+    for capacity in 1..=ceiling + 2 {
+        for taken in 0..=capacity {
+            let berth = BerthLedger {
+                banked: capacity,
+                live: capacity - taken,
+                reserved: taken,
+                convoy_lost: false,
+                decided: false,
+            };
+            let flags = script.berth_flags(&berth);
+            let left = capacity - taken;
+            let node = script.node("control_berth_offer", &flags);
+            for line in SKYWAY_BERTH_LINES {
+                assert_eq!(
+                    node.responses.iter().any(|response| response.text == line),
+                    left > 0,
+                    "AC2: a rung of {capacity} mooring(s) with {taken} spoken for has {left} \
+                     left, and {line} must be on the offer for every one of them"
+                );
+            }
+            let booking = window_increments(&script.call("on_berth_ask_committee", &flags));
+            assert_eq!(
+                booking.get("skyway_shelter_reserved").copied().unwrap_or(0),
+                i64::from(left > 0),
+                "AC2: …and the seam grants against the same figure: {berth:?}"
+            );
+        }
+    }
+
+    // …and the one crew who decided hear that they decided, not that the rung
+    // is bare. At the authored capacity of one this is the state EVERY berth
+    // road ends in, so the reordering is not an edge case.
+    let settled = BerthLedger {
+        banked: ceiling,
+        live: 0,
+        reserved: ceiling,
+        convoy_lost: false,
+        decided: true,
+    };
+    assert_eq!(
+        script
+            .node("control_berth_offer", &script.berth_flags(&settled))
+            .message,
+        "world.falling_skyway.comms.control_berth_settled",
+        "AC3: a berth that was given away is settled, not short"
     );
 }
 

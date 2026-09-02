@@ -5122,6 +5122,31 @@ on_flag_set("skyway_berth_ask_convoy", "on_berth_ask_convoy");
 // to move — reaches the right board or none at all.
 fn on_convoy_lost(ctx) {
     ctx.flags.skyway_convoy_lost = 1;
+    // …AND THE CLAIM GOES WITH THE HULL (#1340). A request the corridor removes
+    // is neither a refusal nor a silence, and this is the only place that fact
+    // can be recorded: the comms engine takes a despawned sender's whole thread
+    // out of reach the moment the entity is gone — every response on it is
+    // stamped unavailable because its sender is out of range for good — so a
+    // captain who had not yet answered this claimant CANNOT answer it now. No
+    // grant, no refusal, not ever. Scoring that as an unanswered request would
+    // fail a crew for a conversation the engine closed under them, and would
+    // fail them for exactly the road where they were fighting the thing that
+    // killed the convoy.
+    //
+    // A SEPARATE FLAG rather than clearing `skyway_claim_asked_convoy`, because
+    // the ask really did happen and the record of it is worth keeping: the
+    // debrief, the campaign row and any later reading of this act can still see
+    // that three parties spoke. `resolve_the_choice` is the one place that has
+    // to leave it out of the count.
+    //
+    // Only while the claim is still open. A convoy that was granted or refused
+    // before the corridor took it was ANSWERED, and an answer already given is
+    // not unmade by what happens to the hull afterwards — that decision is the
+    // captain's and it stands.
+    if ctx.flags.skyway_claim_asked_convoy > 0 &&
+       !claim_decided(ctx, "skyway_granted_convoy", "skyway_refused_convoy") {
+        ctx.flags.skyway_claim_lost_convoy = 1;
+    }
     the_ledger_moved(ctx);
 }
 
@@ -5803,8 +5828,16 @@ fn convoy_node(ctx, body) {
         // `convoy_standing` and not just the ledger (#1340): the corridor can
         // lose this hull outright while its thread is still on a console, and a
         // lift offered to a craft that is no longer there would spend the window
-        // on nobody. The refusal stays offered — a captain answering a thread
-        // that has outlived its sender is still closing it.
+        // on nobody.
+        //
+        // The refusal below is still built, but nobody can pick it once the hull
+        // is gone: the comms engine stamps every response on a despawned
+        // sender's thread unavailable, so a claim the corridor removes cannot be
+        // closed from the bridge at all. That is what `on_convoy_lost`'s
+        // resolved-by-loss latch is for — the claim leaves the count rather than
+        // waiting for an answer the engine will not carry. What the refusal line
+        // covers is the ordinary case: a node drawn while the convoy was alive
+        // and answered before it wasn't.
         if convoy_standing(ctx) && window_room(ctx) >= ctx.flags["skyway_claim_convoy"] {
             responses.push(#{
                 text: "world.falling_skyway.comms.lift_convoy",
@@ -5871,11 +5904,31 @@ fn shelter_supply(ctx) {
 // WHAT IS STILL TIED UP ALONGSIDE, on `window_room`'s rule and for its reason
 // (#1340). The banked figure is what Ladder A could offer when the scene opened
 // and is the ceiling; the live reading can only lower it, and the reservation
-// comes off both. A rung that goes under after Control asks for a name has a
+// comes off ONCE.
+//
+// AND "ONCE" IS THE WHOLE ARITHMETIC HERE, because a booking moves both terms.
+// `book_berth` increments `skyway_shelter_reserved` AND takes the mooring off
+// Ladder A's own row, which is the row `shelter_supply` reads back — so the live
+// reading a moment after an allocation is already the post-allocation figure.
+// Subtracting the reservation from THAT would spend one mooring twice: at the
+// authored capacity of one it drives the room to -1, which reads the same as
+// "nothing left" and hides the bug, and at a tuned capacity of two it would lose
+// the second mooring outright and this road would quietly have half the shelter
+// its designer authored.
+//
+// So the reservation is added back before the two are compared, and taken off
+// after: the live rung is put back to what it could offer with nothing spoken
+// for, capped against the banked ceiling exactly as the window's own ledger is,
+// and the allocations come off the result. It is also insensitive to WHEN the
+// mirrored row catches up — the capacity delta lands a tick behind the
+// reservation, and both orders reach the same figure.
+//
+// A rung that goes under after Control asks for a name still lowers this, which
+// is the case that made the live reading necessary in the first place: it has a
 // name and nothing to put it against, and the offer has to say so.
 fn berth_room(ctx) {
     let deliverable = ctx.flags.skyway_shelter_supply;
-    let live = shelter_supply(ctx);
+    let live = shelter_supply(ctx) + ctx.flags.skyway_shelter_reserved;
     if live < deliverable { deliverable = live; }
     deliverable - ctx.flags.skyway_shelter_reserved
 }
@@ -5945,17 +5998,21 @@ fn convoy_pleads(ctx)    { #{ message: "world.falling_skyway.comms.convoy_pleads
 // ONE node, one berth, four names to put on it — and the fourth is nobody.
 // Index 0 is the hold, for the whole band's reason.
 fn control_berth_offer(ctx) {
-    // The live reading since #1340, not the figure banked when the scene opened.
-    // Conservative by construction: a booked berth comes off `berth_room` twice
-    // — once as a reservation, once when the mirrored row catches up a tick
-    // later — and both readings are the same side of zero, which is all this
-    // asks. Erring towards "there is nothing left" is the only safe direction
-    // for an offer that has to be honourable when it is picked.
-    if berth_room(ctx) <= 0 {
-        return #{ message: "world.falling_skyway.comms.control_no_berth", responses: [] };
-    }
+    // THE SETTLED READING FIRST, and the order is the point (#1340). Once a name
+    // has been given, "the mooring is spoken for" is the true thing to say about
+    // this scene and "there is nothing to give anybody" is not — the room is
+    // zero BECAUSE the captain filled it, which is a different sentence from a
+    // rung that went under with the berth still empty. Asking the room first put
+    // the factually wrong body in front of every crew who actually decided.
     if ctx.flags.skyway_berth_decided > 0 {
         return #{ message: "world.falling_skyway.comms.control_berth_settled", responses: [] };
+    }
+    // Then the live reading since #1340, not the figure banked when the scene
+    // opened. `berth_room` counts an allocation once, so this is the honest
+    // question — is there a mooring left to offer — rather than a conservative
+    // one that happened to land on the right side of zero at a capacity of one.
+    if berth_room(ctx) <= 0 {
+        return #{ message: "world.falling_skyway.comms.control_no_berth", responses: [] };
     }
     let responses = [
         #{ text: "world.falling_skyway.comms.claim_stand_by", on_pick: "on_berth_hold" },
@@ -6162,7 +6219,16 @@ fn resolve_the_choice(ctx) {
         asked += 1;
         if claim_decided(ctx, "skyway_granted_havelock", "skyway_refused_havelock") { answered += 1; }
     }
-    if ctx.flags.skyway_claim_asked_convoy > 0 {
+    // …and not against a claimant the corridor took off the board mid-window
+    // (#1340). `skyway_claim_lost_convoy` is written by `on_convoy_lost` when
+    // the hull goes while its claim is still open, and it is a THIRD outcome
+    // beside granted and refused: the request was made, the engine put the
+    // thread out of reach with its sender, and there is no answer the bridge
+    // could have given after that. Counting it as asked would fail every
+    // captain who had not answered it yet while passing the one who happened to
+    // have answered it a beat earlier — the same crew, scored on the corridor's
+    // timing rather than on their own.
+    if ctx.flags.skyway_claim_asked_convoy > 0 && ctx.flags.skyway_claim_lost_convoy == 0 {
         asked += 1;
         if claim_decided(ctx, "skyway_granted_convoy", "skyway_refused_convoy") { answered += 1; }
     }

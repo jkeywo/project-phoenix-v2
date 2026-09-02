@@ -961,6 +961,13 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 // kind of thing — per-run state that a multi-game session has to
                 // hand back.
                 crate::command_admission::reset_command_log,
+                // The run boundary for the post-mission report (issue #1344),
+                // beside the command log's and for exactly the same reason: the
+                // report is per-run state, and a second round reached through
+                // `ReturnToLobby` must not inherit the first round's rows —
+                // least of all into a scenario that authored no report and has
+                // to keep its ordinary victory/defeat ending (AC5).
+                crate::mission_report::reset_mission_report,
                 reset_broadcast_caches_on_start,
                 crate::world::server::seed_ship_power_counter,
                 spawn_game_start_entities,

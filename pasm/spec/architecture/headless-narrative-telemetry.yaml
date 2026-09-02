@@ -155,15 +155,16 @@ entities:
         - "Order is CONTENT, so the rows live in a Vec in authored write order and the fold walks them in that order rather than sorting. Two instances that agree on the rows but disagree on their order would show two different reports and must not share a digest."
         - "A row that was never written is OMITTED, never written as unresolved. A run that ends catastrophically before Lyra's fate is decided reports no Lyra row at all: the mission never reached the point where the question had an answer, and inventing one would be the report lying about what the crew did. A report with NO rows is not a report — the ending falls back to its declared victory/defeat framing, which is what keeps every scenario that has not opted in exactly as it was."
         - "The signed score is the reason the player projection is a SEPARATE shape. Design wants a diagnostic number; players want an account of what happened to the people they were sent to help, and a crew reading 'Lyra Ascending: saved (+6)' is reading a coupon. ServerMessage::GameOver's GameOverReportRow and ViewscreenHudState's game_over_report have no score field at all, so the split is a compile-time guarantee rather than a filter somebody has to remember; the headless OutcomeReport JSON carries the scores and the total."
+        - "PER-RUN, and a session is not. reset_mission_report clears the accumulator (and its inbound queue) on OnEnter(InProgress), beside reset_command_log and for the identical reason: a second round reached through ReturnToLobby must not inherit the first round's rows. Without that boundary a report-free scenario played after Falling Skyway publishes Lyra's row, is classified reported, and beats report_finalized over a report nobody wrote — the same 'lying about what the crew did' failure as an invented row, arriving by a different door. The restore path is deliberately NOT covered by it: snapshot resume writes State::new and skips OnEnter, so a resumed run keeps the rows the captured tick held."
     architecture:
       classification: authoritative
       owner: post-mission-report-accumulator
       writers: [post-mission-report-accumulator]
-      readers: [narrative-timeline-projector, game-over-broadcast, viewscreen-hud]
+      readers: [narrative-timeline-projector, host-state-broadcaster, viewscreen-hud-effects, run-outcome-classifier]
     implementation:
       status: declared
       paths: [src/core/report.rs, src/sim_digest.rs, src/snapshot.rs, src/server_app/registration.rs]
-      symbols: [MissionReport, ReportRow, ReportRowState, SnapshotReportRow, GameOverReportRow]
+      symbols: [MissionReport, ReportRow, ReportRowState, SnapshotReportRow, GameOverReportRow, reset_mission_report]
       tests: [cargo test, tests/narrative_timeline.rs, tests/snapshot_resume.rs]
 
   - component: post-mission-report-accumulator
@@ -180,11 +181,12 @@ entities:
     architecture:
       kind: effect-applier
       authority: authoritative
+      owns: [post-mission-report-state]
       reads: [narrative-event-stream]
       produces: [post-mission-report-state, narrative-event-stream]
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
       paths: [src/mission_report.rs, src/world/dispatch.rs, src/world/server.rs, src/world/script/effects.rs, src/server_app/broadcast_publish.rs, src/server/viewscreen_border.rs, src/core/balance.rs, gui/game-over-view.js, gui/lobby-state.js]
-      symbols: [apply_report_rows, finalized_event, SetReportRow, report_row, on_game_over_enter, RunOutcome, classify, gameOverView]
+      symbols: [apply_report_rows, reset_mission_report, finalized_event, SetReportRow, report_row, on_game_over_enter, RunOutcome, classify, gameOverView]
       tests: [cargo test, tests/narrative_timeline.rs, tests/client/game-over-view.test.js]

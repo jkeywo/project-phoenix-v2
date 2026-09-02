@@ -9,9 +9,13 @@
  * closing message, never both, so blowing up threw away the world's own
  * account of the defeat.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { gameOverView } from '../../gui/game-over-view.js';
 import { LobbyState } from '../../gui/lobby-state.js';
+import { localiseTree, setTable, getTable, wireText } from '../../gui/strings.js';
 
 describe('gameOverView — visibility', () => {
   it('is visible only in the GameOver phase', () => {
@@ -336,5 +340,83 @@ describe('gameOverView — the report, fed from the wire', () => {
     expect(s.gameOverReport).toHaveLength(1);
     s.apply({ type: 'ReturnedToLobby' });
     expect(s.gameOverReport).toEqual([]);
+  });
+});
+
+// ── The phone's real ingress: localiseTree runs BEFORE lobby-state ─────────
+//
+// A phone does not receive String Ids. `gui/rendezvous-transport.js` resolves
+// the whole decoded `ServerMessage` through `localiseTree` the moment it
+// arrives, so every id the table holds — the report's included, since #1344
+// added them to strings.csv — is already prose by the time `LobbyState.apply`
+// stores it. The tests above feed `LobbyState` raw ids directly and therefore
+// skip that step; this block puts it back, because skipping it is exactly how
+// the double-localisation bug (rows rendering as ⟨Lyra Ascending⟩) got in.
+describe('the report through the phone ingress', () => {
+  const HEADING = 'Lyra Ascending';
+  const SAVED = 'Pulled clear of the lane before the band closed.';
+
+  const fixture = () =>
+    new Map([
+      ['world.falling_skyway.report.lyra.heading', HEADING],
+      ['world.falling_skyway.report.lyra.saved', SAVED],
+      ['client.game_over_reported', 'MISSION REPORT'],
+    ]);
+
+  let saved;
+  beforeEach(() => {
+    saved = getTable();
+    setTable(fixture());
+  });
+  afterEach(() => setTable(saved));
+
+  /** The row text exactly as client.html's overlay composes it. */
+  const rendered = (vm) =>
+    vm.rows.map((row) => [wireText(row.headingId), wireText(row.outcomeId)]);
+
+  it('renders the prose, not a doubly-resolved miss', () => {
+    const wire = localiseTree({
+      type: 'GameOver',
+      data: {
+        reason: 'world.falling_skyway.game_over.lark_collision',
+        outcome: 'defeat',
+        report: [lyraSaved],
+      },
+    });
+    // The ingress already did the resolving; the ids are gone from the payload.
+    expect(wire.data.report[0].heading).toBe(HEADING);
+
+    const s = new LobbyState();
+    s.apply(wire);
+    const vm = gameOverView({
+      phase: s.phase,
+      reason: s.gameOverReason,
+      outcome: s.gameOverOutcome,
+      report: s.gameOverReport,
+      scenarioTitle: 'Falling Skyway',
+    });
+
+    expect(vm.outcome).toBe('reported');
+    expect(rendered(vm)).toEqual([[HEADING, SAVED]]);
+    for (const cell of rendered(vm).flat()) expect(cell).not.toMatch(/^⟨/);
+  });
+
+  // The Viewscreen's own resolver (localiseHostPayload) and a host that never
+  // learned the ids both hand this surface a still-raw id. One render site has
+  // to cover both, so the same call must also resolve.
+  it('still resolves a row that arrived unresolved', () => {
+    const vm = gameOverView({ phase: 'GameOver', report: [lyraSaved] });
+    expect(rendered(vm)).toEqual([[HEADING, SAVED]]);
+  });
+
+  // The render site itself, pinned in the page source: `t()` here is the bug,
+  // and no view-model test can see which function client.html calls.
+  it('is what client.html actually calls on the row fields', () => {
+    const page = readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), '../../client.html'),
+      'utf8',
+    );
+    expect(page).toMatch(/heading\.textContent\s*=\s*wireText\(row\.headingId\)/);
+    expect(page).toMatch(/outcome\.textContent\s*=\s*wireText\(row\.outcomeId\)/);
   });
 });

@@ -6873,6 +6873,93 @@ fn game_over_beats_report_finalized_only_when_there_are_rows() {
     );
 }
 
+/// AC5 across a MULTI-ROUND session: round two must not inherit round one's
+/// report.
+///
+/// The report is per-run state and the process is not. Play Falling Skyway to
+/// a saved Lyra, end, `ReturnToLobby`, then start combat_test — a scenario
+/// that authors no report at all — and reach its ending. Without the run
+/// boundary that `reset_mission_report` puts on
+/// `OnEnter(GamePhase::InProgress)`, that ending publishes Lyra's row, the
+/// client classifies it `reported` and swaps the victory headline for MISSION
+/// REPORT, and the timeline carries a `ReportFinalized` beat over a report
+/// nobody wrote — a report about a mission the crew never flew.
+#[test]
+fn a_second_round_does_not_inherit_the_first_rounds_report() {
+    use crate::core::narrative::{NarrativeEvent, NarrativeKind};
+    use crate::core::report::{MissionReport, ReportRow, ReportRowState};
+    use crate::effect_queue::EffectQueue;
+    use crate::mission_report::reset_mission_report;
+    use bevy::ecs::system::RunSystemOnce;
+
+    let mut world = World::new();
+    world.init_resource::<SimOutbox>();
+    world.init_resource::<bevy::ecs::message::Messages<NarrativeEvent>>();
+    world.init_resource::<EffectQueue<ReportRow>>();
+    world.init_resource::<MissionReport>();
+
+    // Round one: Falling Skyway, Lyra pulled clear, ending broadcast.
+    world.resource_mut::<MissionReport>().set_row(ReportRow {
+        id: "lyra".into(),
+        heading_id: "world.falling_skyway.report.lyra.heading".into(),
+        outcome_id: "world.falling_skyway.report.lyra.saved".into(),
+        state: ReportRowState::Saved,
+        score: 6,
+    });
+    world.insert_resource(GameOverReason(
+        Some("world.falling_skyway.game_over.lark_collision".into()),
+        Some(crate::core::balance::Outcome::Defeat),
+    ));
+    world.run_system_once(on_game_over_enter).unwrap();
+    world.resource_mut::<SimOutbox>().clear();
+    world
+        .resource_mut::<bevy::ecs::message::Messages<NarrativeEvent>>()
+        .clear();
+
+    // Round two begins: the run boundary runs, then a report-free scenario
+    // reaches its own declared ending.
+    world.run_system_once(reset_mission_report).unwrap();
+    world.insert_resource(GameOverReason(
+        Some("world.combat_test.game_over.cleared".into()),
+        Some(crate::core::balance::Outcome::Victory),
+    ));
+    world.run_system_once(on_game_over_enter).unwrap();
+
+    match world
+        .resource::<SimOutbox>()
+        .iter()
+        .next()
+        .map(|(_, message)| message)
+    {
+        Some(ServerMessage::GameOver {
+            reason,
+            outcome,
+            report,
+        }) => {
+            assert_eq!(reason, "world.combat_test.game_over.cleared");
+            // Classified by ITS declared outcome, because there is nothing to
+            // report — which is the whole of AC5.
+            assert_eq!(outcome.as_deref(), Some("victory"));
+            assert!(
+                report.is_empty(),
+                "round two published round one's rows: {report:?}"
+            );
+        }
+        other => panic!("expected GameOver, got {other:?}"),
+    }
+
+    let beats: Vec<NarrativeEvent> = world
+        .resource_mut::<bevy::ecs::message::Messages<NarrativeEvent>>()
+        .drain()
+        .collect();
+    assert!(
+        !beats
+            .iter()
+            .any(|e| e.kind == NarrativeKind::ReportFinalized),
+        "a report-free ending must not beat ReportFinalized"
+    );
+}
+
 // ── The narrative mark on the GameStart spawn path (issue #1338) ──────────
 
 /// `narrative = true` says nothing about WHEN the hull enters the world, so

@@ -2040,18 +2040,28 @@
           if (headlineEl) headlineEl.textContent = t(gv.headlineId);
           gameOverMsgEl.textContent = gv.bodyId ? t(gv.bodyId) : wireText(gv.bodyText);
           // The report rows, in the author's order. Rebuilt rather than diffed:
-          // this runs once, on an overlay that has just appeared. Every string
-          // goes through `t()` — the wire carries ids, never prose — and the
-          // row's state rides a data attribute so the accent is CSS's decision
-          // and not a second vocabulary in here.
+          // this runs once, on an overlay that has just appeared. The row's
+          // state rides a data attribute so the accent is CSS's decision and
+          // not a second vocabulary in here.
+          //
+          // `wireText` and NOT `t`, for the same reason the scenario name and
+          // the closing line above it use it: these are wire-borne fields, and
+          // a phone resolves the whole decoded `ServerMessage` through
+          // `localiseTree` at ingress (gui/rendezvous-transport.js), so by the
+          // time a row reaches here its two ids are already the prose they name.
+          // `t()` on already-resolved prose is a table MISS, which renders
+          // ⟨Lyra Ascending⟩ and warns once per row. `wireText` passes a
+          // resolved value through and still resolves an id that arrived raw —
+          // which is what the Viewscreen path (server.html, post-
+          // `localiseHostPayload`) needs, so both surfaces stay one code path.
           const reportEl = document.getElementById('game-over-report');
           if (reportEl) {
             reportEl.replaceChildren();
             for (const row of gv.rows) {
               const heading = document.createElement('dt');
-              heading.textContent = t(row.headingId);
+              heading.textContent = wireText(row.headingId);
               const outcome = document.createElement('dd');
-              outcome.textContent = t(row.outcomeId);
+              outcome.textContent = wireText(row.outcomeId);
               if (row.state) {
                 heading.dataset.state = row.state;
                 outcome.dataset.state = row.state;

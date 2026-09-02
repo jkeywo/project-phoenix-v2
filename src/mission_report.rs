@@ -98,6 +98,34 @@ pub fn apply_report_rows(
     }
 }
 
+/// The run boundary for the report: a starting round holds no rows.
+///
+/// [`MissionReport`] is PER-RUN state, and a session can play many runs — a
+/// round ends, `ReturnToLobby` sends everyone back, and another scenario
+/// starts in the same process. Without this, round two inherits round one's
+/// rows: a combat_test run that authored no report at all would still publish
+/// Falling Skyway's saved-Lyra row, be classified `reported`, and beat
+/// `ReportFinalized` over a report nobody wrote. Even a second run of the SAME
+/// scenario would show what the PREVIOUS crew did — which is precisely the
+/// report lying about the mission that [`crate::core::report`]'s module docs
+/// forbid.
+///
+/// Registered on `OnEnter(GamePhase::InProgress)` beside
+/// [`crate::command_admission::reset_command_log`], which exists at the same
+/// seam for the identical reason.
+///
+/// The queue is cleared too. It is `ClearedAtFold` and empty at every boundary
+/// in practice, but "a row queued before this run started belongs to this run"
+/// is not a claim worth leaving to scheduling: clearing it costs nothing and
+/// makes the boundary total.
+pub fn reset_mission_report(
+    mut queue: ResMut<EffectQueue<ReportRow>>,
+    mut report: ResMut<MissionReport>,
+) {
+    queue.0.clear();
+    *report = MissionReport::default();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,6 +230,64 @@ mod tests {
         app.update();
         assert!(drain(&mut app).is_empty());
         assert_eq!(app.world().resource::<MissionReport>().rows().len(), 1);
+    }
+
+    /// The run boundary (AC5). A second round must not inherit round one's
+    /// rows: the report is per-run state, and a scenario that authored nothing
+    /// has to reach its ending with an empty report even when the round before
+    /// it filled one.
+    #[test]
+    fn a_new_run_starts_with_no_rows() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut app = report_app();
+        push(&mut app, row("lyra", ReportRowState::Saved, 6));
+        app.update();
+        assert_eq!(app.world().resource::<MissionReport>().rows().len(), 1);
+        let _ = drain(&mut app);
+
+        // Round two starts. `OnEnter(GamePhase::InProgress)` runs this on every
+        // start, including the one a `ReturnToLobby` leads back to.
+        app.world_mut()
+            .run_system_once(reset_mission_report)
+            .expect("reset_mission_report should run");
+
+        let report = app.world().resource::<MissionReport>();
+        assert!(
+            report.is_empty(),
+            "round two inherited round one's rows: {:?}",
+            report.rows()
+        );
+        assert_eq!(report.total(), 0);
+
+        // And the round that follows still accumulates normally.
+        push(&mut app, row("traffic", ReportRowState::Partial, 2));
+        app.update();
+        let ids: Vec<String> = app
+            .world()
+            .resource::<MissionReport>()
+            .rows()
+            .iter()
+            .map(|r| r.id.clone())
+            .collect();
+        assert_eq!(ids, vec!["traffic".to_string()]);
+    }
+
+    /// A row still sitting in the queue when a run starts belongs to the run
+    /// that queued it, not to this one.
+    #[test]
+    fn a_new_run_starts_with_an_empty_queue() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut app = report_app();
+        push(&mut app, row("lyra", ReportRowState::Saved, 6));
+        app.world_mut()
+            .run_system_once(reset_mission_report)
+            .expect("reset_mission_report should run");
+        app.update();
+
+        assert!(app.world().resource::<MissionReport>().is_empty());
+        assert!(drain(&mut app).is_empty());
     }
 
     /// A run that authored nothing leaves the report empty — which is what

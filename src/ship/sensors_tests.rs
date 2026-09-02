@@ -2191,3 +2191,188 @@ fn sensor_radar_velocity_none_when_scanner_has_no_physics() {
         "scanner with no ShipPhysics of its own → no relative-velocity field"
     );
 }
+
+// ── Working down a debris field (issue #1347) ────────────────────────────────
+//
+// Sensors is the seat that turns a rock into a threat, so these tests pin the
+// two things that makes true: that a hazard reaches this seat at all despite
+// having no faction, and that selecting one actually TAKES a reading rather than
+// merely pointing the radar at it.
+
+/// Spawn a moving hazard on the Sensors scan surface.
+///
+/// No `FactionComponent` and not a `Ship`, so it is invisible to every hostile
+/// source. The only thing that can surface it is the debris source, which is
+/// what makes these assertions about that source rather than about the fixture.
+fn spawn_debris_at(
+    app: &mut App,
+    uuid: &str,
+    x: f32,
+    z: f32,
+    assessed: bool,
+    confirmed: bool,
+) -> Entity {
+    let mut threat = crate::debris::DebrisThreat::new(crate::debris::DebrisConfig {
+        protected_target: "the-depot".into(),
+        impact_radius: 40.0,
+        ..Default::default()
+    });
+    threat.assessed = assessed;
+    threat.confirmed = confirmed;
+    app.world_mut()
+        .spawn((
+            crate::entities::spawner::EntityUuid(uuid.to_string()),
+            Transform::from_xyz(x, 0.0, z),
+            threat,
+        ))
+        .id()
+}
+
+/// Whether this tick's admitted sensors commands include a scan of `uuid`.
+fn scanned_this_tick(app: &mut App, uuid: &str) -> bool {
+    admitted_sensors_payloads(app)
+        .iter()
+        .any(|p| matches!(p, SystemControlPayload::ScanTarget { uuid: u } if u == uuid))
+}
+
+#[test]
+fn backfilled_sensors_selects_an_unread_hazard_despite_its_having_no_faction() {
+    // Every other Sensors source is gated on `hostile`, and a rock is not
+    // hostile — it has no faction and no opinion. The authored eligibility names
+    // the debris source explicitly so one can get through, and this is that.
+    let mut app = sensors_ai_test_app();
+    let rock = uuid::Uuid::new_v4().to_string();
+    spawn_debris_at(&mut app, &rock, 20.0, 0.0, false, false);
+
+    tick_sensors_ai(&mut app);
+
+    assert_eq!(
+        get_sensors_target(&mut app).as_deref(),
+        Some(rock.as_str()),
+        "an unread hazard is the best thing this instrument could be looking at"
+    );
+}
+
+#[test]
+fn backfilled_sensors_actually_takes_the_reading() {
+    // Pointing the radar at a rock is not reading it. The seat must send the
+    // same `ScanTarget` a human console does, or the contact would sit selected
+    // and unassessed forever and Tactical would never be told anything.
+    let mut app = sensors_ai_test_app();
+    let rock = uuid::Uuid::new_v4().to_string();
+    spawn_debris_at(&mut app, &rock, 20.0, 0.0, false, false);
+
+    tick_sensors_ai(&mut app);
+
+    assert!(
+        scanned_this_tick(&mut app, &rock),
+        "selecting a hazard that wants assessing must emit a ScanTarget"
+    );
+}
+
+#[test]
+fn backfilled_sensors_stops_asking_once_a_hazard_has_been_read() {
+    // The bound on the emission. A reading resolves on the tick it is asked for,
+    // so `needs_assessment` is false the next tick and the seat stops — otherwise
+    // "keep assessing" would mean a scan every tick, and the task lifecycle would
+    // fill with a rock nobody learned anything new about.
+    let mut app = sensors_ai_test_app();
+    let rock = uuid::Uuid::new_v4().to_string();
+    // `reassess_secs` defaults to 0 — read once — so this contact never comes
+    // back round on the cadence.
+    spawn_debris_at(&mut app, &rock, 20.0, 0.0, true, false);
+
+    tick_sensors_ai(&mut app);
+
+    assert!(
+        !scanned_this_tick(&mut app, &rock),
+        "a hazard whose reading is current must not be re-scanned every tick"
+    );
+}
+
+#[test]
+fn backfilled_sensors_moves_on_to_the_next_unknown() {
+    // What "continues assessing other candidates" means in practice. Two
+    // hazards, one already read; the seat must go to the one it knows nothing
+    // about. The read one carries the SMALLER uuid, so the selector's tie-break
+    // would keep it if the unread bonus did nothing.
+    let mut app = sensors_ai_test_app();
+    let already_read = "11111111-1111-4111-8111-111111111111";
+    let unknown = "99999999-9999-4999-8999-999999999999";
+    spawn_debris_at(&mut app, already_read, 20.0, 0.0, true, false);
+    spawn_debris_at(&mut app, unknown, 22.0, 0.0, false, false);
+
+    tick_sensors_ai(&mut app);
+
+    assert_eq!(
+        get_sensors_target(&mut app).as_deref(),
+        Some(unknown),
+        "an unknown rock is worth more of this seat's attention than one it has \
+         already read, however dangerous the read one turned out to be"
+    );
+}
+
+#[test]
+fn backfilled_sensors_puts_a_named_objective_above_any_hazard() {
+    // The mission's ladder: objective-critical scans first, THEN possible
+    // collisions. A hostile the mission named to destroy outranks a rock,
+    // because the crew were explicitly told which matters more.
+    let mut app = sensors_ai_test_app();
+    let named = uuid::Uuid::new_v4().to_string();
+    let rock = uuid::Uuid::new_v4().to_string();
+    spawn_named_target_at(&mut app, &named, "world.entity.raider.name", 20.0, 0.0);
+    insert_viewscreen_objective(&mut app, "world.entity.raider.name", 10.0);
+    spawn_debris_at(&mut app, &rock, 22.0, 0.0, false, false);
+
+    tick_sensors_ai(&mut app);
+
+    assert_eq!(
+        get_sensors_target(&mut app).as_deref(),
+        Some(named.as_str()),
+        "a named Destroy objective outranks an unread hazard"
+    );
+}
+
+#[test]
+fn backfilled_sensors_ignores_a_hazard_beyond_its_own_horizon() {
+    // The debris source is pre-filtered on the ship's LIVE, damage-scaled
+    // horizon like every other source here. A rock the crew cannot see is not a
+    // rock they can be asked to read.
+    let mut app = sensors_ai_test_app();
+    let rock = uuid::Uuid::new_v4().to_string();
+    let range = app
+        .world()
+        .resource::<crate::lobby::server::ShipClientConfigResource>()
+        .0
+        .sensors_radar_range;
+    spawn_debris_at(&mut app, &rock, range * 4.0, 0.0, false, false);
+
+    tick_sensors_ai(&mut app);
+
+    assert_eq!(
+        get_sensors_target(&mut app),
+        None,
+        "a hazard outside the live sensor horizon is not a candidate"
+    );
+}
+
+#[test]
+fn backfilled_sensors_leaves_a_struck_hazard_alone() {
+    // There is nothing left to learn about a rock that has already landed, and
+    // a seat still reading one would be reporting a deadline that has passed.
+    let mut app = sensors_ai_test_app();
+    let rock = uuid::Uuid::new_v4().to_string();
+    let entity = spawn_debris_at(&mut app, &rock, 20.0, 0.0, true, true);
+    app.world_mut()
+        .get_mut::<crate::debris::DebrisThreat>(entity)
+        .expect("the contact carries its threat state")
+        .struck = true;
+
+    tick_sensors_ai(&mut app);
+
+    assert_eq!(
+        get_sensors_target(&mut app),
+        None,
+        "a contact that has already struck is not worth an instrument"
+    );
+}

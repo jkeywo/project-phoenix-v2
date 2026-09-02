@@ -337,3 +337,78 @@ fn a_contact_nobody_assessed_has_no_deadline_to_reckon() {
     let threat = DebrisThreat::new(config());
     assert_eq!(threat.seconds_to_impact_at(100, 1.0), None);
 }
+
+// ── The re-assessment cadence (issue #1347) ─────────────────────────────────
+//
+// `needs_assessment` is what the Sensors seat works a debris field by, so the
+// four answers it can give each get a test: never read, read and current, read
+// and stale, and already landed.
+
+#[test]
+fn a_rock_nobody_has_read_always_wants_assessing() {
+    let threat = DebrisThreat::new(config());
+    assert!(threat.needs_assessment(0, 1.0));
+    assert!(
+        threat.needs_assessment(10_000, 1.0),
+        "and goes on wanting it — an unread rock does not become less unknown"
+    );
+}
+
+#[test]
+fn a_rock_read_once_stops_asking_when_no_cadence_is_authored() {
+    // The default `reassess_secs = 0` means "read once", and it is what makes a
+    // seat move on down a field instead of admiring the rock it just finished.
+    let mut threat = DebrisThreat::new(config());
+    threat.assessed = true;
+    threat.assessed_at_tick = 10;
+    assert!(!threat.needs_assessment(10, 1.0));
+    assert!(
+        !threat.needs_assessment(10_000, 1.0),
+        "no authored cadence means the reading never goes stale"
+    );
+}
+
+#[test]
+fn an_authored_cadence_brings_a_rock_back_round() {
+    // 45 seconds at one second a tick: current at 44, stale at 45. The boundary
+    // is inclusive because a reading exactly its own age old has expired.
+    let mut cfg = config();
+    cfg.reassess_secs = 45.0;
+    let mut threat = DebrisThreat::new(cfg);
+    threat.assessed = true;
+    threat.assessed_at_tick = 100;
+    assert!(!threat.needs_assessment(144, 1.0), "still current");
+    assert!(threat.needs_assessment(145, 1.0), "stale, worth re-reading");
+}
+
+#[test]
+fn a_struck_rock_never_wants_assessing_however_stale_its_reading() {
+    // The struck test lives inside `needs_assessment` rather than at each call
+    // site, so every consumer inherits it. There is nothing left to learn.
+    let mut cfg = config();
+    cfg.reassess_secs = 1.0;
+    let mut threat = DebrisThreat::new(cfg);
+    threat.assessed = true;
+    threat.assessed_at_tick = 0;
+    threat.struck = true;
+    assert!(!threat.needs_assessment(10_000, 1.0));
+}
+
+#[test]
+fn a_negative_cadence_fails_closed_to_read_once() {
+    // `validate` refuses this at load, so it is unreachable through content.
+    // What is pinned is the direction it fails IF it ever arrived: silence,
+    // rather than a contact re-scanning itself every tick forever.
+    let mut cfg = config();
+    cfg.reassess_secs = -5.0;
+    let mut threat = DebrisThreat::new(cfg);
+    threat.assessed = true;
+    assert!(!threat.needs_assessment(10_000, 1.0));
+    assert!(cfg_is_refused(-5.0), "and content-load refuses it outright");
+}
+
+fn cfg_is_refused(reassess_secs: f32) -> bool {
+    let mut cfg = config();
+    cfg.reassess_secs = reassess_secs;
+    cfg.validate().is_err()
+}

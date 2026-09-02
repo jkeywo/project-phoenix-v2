@@ -943,17 +943,18 @@ mod tests {
         begin_startup_restore(app.world_mut());
         app.update();
 
-        let service = app.world_mut().resource_mut::<SaveSlotService>();
-        assert!(!service.manual_names.contains_key(&slot_id));
-        assert_eq!(
-            service.manual_refusals.iter().cloned().collect::<Vec<_>>(),
-            vec![RefusedManualSave {
-                tick: 0,
-                slot_id: slot_id.clone(),
-                reason: ManualSaveRefusalReason::StartupRestorePending,
-            }]
-        );
-        drop(service);
+        {
+            let service = app.world_mut().resource_mut::<SaveSlotService>();
+            assert!(!service.manual_names.contains_key(&slot_id));
+            assert_eq!(
+                service.manual_refusals.iter().cloned().collect::<Vec<_>>(),
+                vec![RefusedManualSave {
+                    tick: 0,
+                    slot_id: slot_id.clone(),
+                    reason: ManualSaveRefusalReason::StartupRestorePending,
+                }]
+            );
+        }
         let mut service = app.world_mut().resource_mut::<SaveSlotService>();
         assert_eq!(service.pop_manual_refusal().unwrap().slot_id, slot_id);
         assert!(service.pop_manual_refusal().is_none());

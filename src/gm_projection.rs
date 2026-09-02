@@ -599,7 +599,7 @@ fn publish_station_projection(
                 let config_cache = crate::entities::config_cache::get_config_cache();
                 let ship_client_config = config_path
                     .and_then(|path| config_cache.get(path))
-                    .map(|config| crate::lobby::server::project_ship_client_config(&config))
+                    .map(crate::lobby::server::project_ship_client_config)
                     .unwrap_or_default();
                 let station_ratings = config
                     .0

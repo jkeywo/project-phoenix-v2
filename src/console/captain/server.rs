@@ -946,6 +946,11 @@ fn publish_captain_blackboard(
                         .collect()
                 })
                 .unwrap_or_default();
+            // `marker_names` walks a `HashMap`, whose order is process-local; this
+            // list rides the captain blackboard into the #862 snapshot, so sort it
+            // or two same-seed peers serialize the same cameras to different bytes.
+            // "cinematic" is appended after, keeping it last regardless.
+            camera_views.sort();
             let has_cinematic = cinematic_q.single().ok().is_some_and(|c| c.is_some());
             if has_cinematic {
                 camera_views.push("cinematic".to_string());

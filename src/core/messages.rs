@@ -2196,6 +2196,19 @@ pub enum SystemControlPayload {
         station: StationId,
         stance: String,
     },
+    /// Replicate a station's active RATING (control-source assignment) to every
+    /// fleet peer (issue #1119). Server-authored, not a client control: the ship
+    /// host mints one whenever a crew connect/disconnect/claim/rating change
+    /// alters its own ship's `ActiveStationRatings` during active lockstep, so a
+    /// stationless GM (and every other peer) makes the same Backfill<->Human
+    /// transition on the same agreed tick rather than each following its own view
+    /// of who is connected. Targets the Command coarse system (`command`) like
+    /// [`SetStationStance`]; `station` names the Station and `rating` its rating
+    /// id (or `Backfill`). Assign-not-invert, so a duplicate is idempotent.
+    AssignStationRating {
+        station: StationId,
+        rating: String,
+    },
     /// Set the throttle axis. Targets `helm-thrust` (issue #801).
     SetThrust {
         value: f32,

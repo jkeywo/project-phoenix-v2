@@ -153,9 +153,10 @@ pub enum GmJoinRefusal {
 }
 
 /// Public progress projected to every existing surface and the candidate.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", tag = "status")]
 pub enum GmJoinProgress {
+    #[default]
     Idle,
     AwaitingPause {
         approval: GmJoinApproval,
@@ -172,12 +173,6 @@ pub enum GmJoinProgress {
         id: GmJoinId,
         reason: GmJoinRefusal,
     },
-}
-
-impl Default for GmJoinProgress {
-    fn default() -> Self {
-        Self::Idle
-    }
 }
 
 /// One bounded GM join transaction, shared by first-time admission and reconnect.
@@ -1658,7 +1653,12 @@ pub fn register_join_driver(app: &mut App) {
         use crate::authoritative::{DeclareState, StateClass};
         app.declare_state::<GmJoinInbox>(StateClass::Timer, "gm-join-state")
             .declare_state::<GmJoinRuntime>(StateClass::Timer, "gm-join-state")
-            .declare_state::<GmJoinPauseHold>(StateClass::Timer, "gm-join-state");
+            .declare_state::<GmJoinPauseHold>(StateClass::Timer, "gm-join-state")
+            // Same join-transaction transport bookkeeping as their siblings
+            // above: the candidate's private pre-admission staging and the
+            // owner's pending host-loss watch never enter the folded world.
+            .declare_state::<GmJoinBootstrap>(StateClass::Timer, "gm-join-state")
+            .declare_state::<GmJoinPendingHostLoss>(StateClass::Timer, "gm-join-state");
     }
     app.init_resource::<GmJoinInbox>()
         .init_resource::<GmJoinRuntime>()
@@ -1939,7 +1939,7 @@ mod tests {
     fn rejection_does_not_change_roster_or_pause_transaction() {
         let before = roster(HostSlot(1));
         let mut joins = GmJoinCoordinator::default();
-        joins.reject(GmJoinId(7), GmJoinRefusal::UnknownApprover);
+        let _ = joins.reject(GmJoinId(7), GmJoinRefusal::UnknownApprover);
 
         assert_eq!(before.participants(), vec![HostSlot(1), HostSlot(2)]);
         assert_eq!(before.gms().len(), 1);

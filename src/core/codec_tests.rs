@@ -1412,6 +1412,27 @@ fn set_station_stance_control_system_round_trips() {
     );
 }
 
+/// Server-authored crew-rating replication as a ControlSystem payload (#1119).
+#[test]
+fn assign_station_rating_control_system_round_trips() {
+    let msg = ClientMessage::ControlSystem {
+        target: SystemId("command".into()),
+        payload: SystemControlPayload::AssignStationRating {
+            station: StationId("captain".into()),
+            rating: "Human".into(),
+        },
+    };
+    assert_client_roundtrip(&JsonCodec, msg.clone());
+    assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+
+    let encoded = JsonCodec.encode_client(&msg).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystem","data":{"target":"command","payload":{"type":"AssignStationRating","data":{"station":"captain","rating":"Human"}}}}"#,
+        "AssignStationRating wire shape stays stable for the fleet mesh replay"
+    );
+}
+
 /// Torpedo fire as a ControlSystem payload (issue #846).
 #[test]
 fn fire_torpedo_control_system_round_trips() {

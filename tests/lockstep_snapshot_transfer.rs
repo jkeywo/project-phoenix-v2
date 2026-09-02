@@ -1239,7 +1239,7 @@ fn host_loss_during_join_transfer_is_staged_until_commit_and_does_not_stall_resu
     // roster and wait-set until Commit.
     deliver(
         &mut candidate,
-        MeshFrame::HostLoss(agreed_loss.clone()),
+        MeshFrame::HostLoss(agreed_loss),
         HostSlot(1),
     );
     candidate.update();

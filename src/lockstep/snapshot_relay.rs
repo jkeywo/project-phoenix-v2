@@ -576,8 +576,8 @@ fn gate_and_restore_against_with_readiness(
             ))
         }
     }
-    if !snapshot::ready_to_restore(world, &snap.state)
-        && !(allow_rebuild && snapshot::ready_to_rebuild(world, &snap.state))
+    if !(snapshot::ready_to_restore(world, &snap.state)
+        || (allow_rebuild && snapshot::ready_to_rebuild(world, &snap.state)))
     {
         return MeshRestoreOutcome::NotReady;
     }

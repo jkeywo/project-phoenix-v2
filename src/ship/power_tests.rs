@@ -641,7 +641,7 @@ fn correlated_power_allocation_finishes_at_the_reactor_owner() {
     let mut app = test_app();
     start_game_with_power(&mut app);
 
-    let send = |app: &mut App, correlation: &str, level| {
+    let send = |app: &mut App, correlation: &str, group: &str, level| {
         push_msg(
             app,
             "power",
@@ -649,7 +649,7 @@ fn correlated_power_allocation_finishes_at_the_reactor_owner() {
                 correlation: ActionCorrelationId::new(correlation).expect("valid test correlation"),
                 target: crate::ship::system_registry::power_reactor_system_id(),
                 payload: SystemControlPayload::SetPowerGroupAllocation {
-                    group: PowerGroupId(SHIELDS_POWER_GROUP.into()),
+                    group: PowerGroupId(group.into()),
                     level,
                 },
             },
@@ -668,7 +668,7 @@ fn correlated_power_allocation_finishes_at_the_reactor_owner() {
         }).count()
         };
 
-    send(&mut app, "power-applied", 4);
+    send(&mut app, "power-applied", SHIELDS_POWER_GROUP, 4);
     assert_eq!(
         feedback_count(
             &tick(&mut app),
@@ -678,7 +678,10 @@ fn correlated_power_allocation_finishes_at_the_reactor_owner() {
         1
     );
 
-    send(&mut app, "power-refused", u8::MAX);
+    // An out-of-range LEVEL is deliberately clamped and applied
+    // (`PowerSystem::set_group_allocation`), so the genuine owner-side refusal
+    // is an unknown GROUP — the one arm the reactor answers with `Err`.
+    send(&mut app, "power-refused", "no-such-group", 4);
     assert_eq!(
         feedback_count(
             &tick(&mut app),

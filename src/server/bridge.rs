@@ -305,7 +305,7 @@ pub fn apply_instagib_toggles(count: u32, current: &mut bool) {
 /// second simulation participates, applying one locally would fork the world;
 /// the narrow #1290 policy is therefore to consume and refuse them while a
 /// [`crate::lockstep::FleetLockstep`] resource is installed.
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(target_arch = "wasm32")]
 pub(crate) const fn raw_host_control_allowed(fleet_active: bool) -> bool {
     !fleet_active
 }
@@ -391,7 +391,7 @@ const MAX_PENDING_BROWSER_SAVES: usize = 64;
 /// first catalogue read. The Rust bridge reads the same value so every Store
 /// operation — including fixed-tick autosaves with no JS action attached — is
 /// scoped to this simulation peer rather than the origin.
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(target_arch = "wasm32")]
 const BROWSER_SAVE_IDENTITY_KEY: &str = "phoenix-save-peer-id";
 
 /// Window property carrying the identity when Storage access itself is denied.
@@ -521,11 +521,11 @@ fn queue_fleet_lobby_input_bounded(
 ) -> bool {
     if let Some(back) = pending.back_mut() {
         match (&mut back.input, &input) {
-            (FleetLobbyInput::Validation(queued), FleetLobbyInput::Validation(latest)) => {
-                if back.generation == generation {
-                    *queued = *latest;
-                    return true;
-                }
+            (FleetLobbyInput::Validation(queued), FleetLobbyInput::Validation(latest))
+                if back.generation == generation =>
+            {
+                *queued = *latest;
+                return true;
             }
             (FleetLobbyInput::Managed(queued), FleetLobbyInput::Managed(latest))
                 if back.generation == generation && *queued == *latest =>

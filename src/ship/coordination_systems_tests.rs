@@ -2814,7 +2814,28 @@ station = "navigation"
         ],
         local,
     );
-    crate::lockstep::join_fleet(app.world_mut(), roster, 2);
+    // A genuine (non-solo) fleet adoption is startup-only and needs the
+    // authored world seed to canonicalise RNG across peers (the save-catalogue
+    // amendment to `join_fleet`); give the bare fixture one, and assert the
+    // adoption actually happened — a silently refused join would leave the
+    // live-Sessions path in force and this test asserting nothing.
+    {
+        let mut world_config = crate::world::config::WorldConfig::default();
+        world_config.global.seed = Some(7);
+        app.world_mut().insert_resource(world_config);
+    }
+    assert!(
+        crate::lockstep::join_fleet(app.world_mut(), roster, 2),
+        "the fixture fleet must adopt, or the freeze under test never engages"
+    );
+    // Adoption canonicalised the fixed clock (`join_fleet` replaces
+    // `Time<Fixed>`), which also wiped the fresh-app overstep preload
+    // `test_app()` made — and this app has still never run `update()`, whose
+    // first call reports a zero delta by Bevy design. Re-prime, exactly as the
+    // fixture did before the join, so the baseline tick below runs a real
+    // fixed step. A production host has updated long before it joins a fleet,
+    // so only this artificial fresh-app fixture needs the second prime.
+    drive_one_fixed_step_per_update(&mut app, TEST_TICK);
 
     // Baseline: the frozen captain seat hosts navigation as a human.
     tick(&mut app);

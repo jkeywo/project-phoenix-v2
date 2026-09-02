@@ -30,7 +30,7 @@ use project_phoenix::lockstep::{
     join_fleet, FleetLockstep, FleetRoster, FleetShip, HostLossFrame, MeshCommand, MeshFrame,
     MeshInbox, MeshOrigin, MeshOutbox, MeshRestoreOutcome, MeshSnapshotReceiver, PendingHostLoss,
     PendingSlotClaims, SlotClaimFrame, SlotRecoveryHold, SlotRecoveryLog, SlotRecoveryResult,
-    SlotRecoveryState,
+    SlotRecoveryState, FLEET_ACTIVATION_TICK,
 };
 use project_phoenix::sim_tick::SimTick;
 
@@ -304,8 +304,10 @@ fn a_replacement_recovers_a_disconnected_slot_and_the_fleet_reconverges() {
     hosts[2] = Host::new(SLOT_THREE, &all, &[SLOT_THREE]);
     assert_eq!(
         hosts[2].tick(),
-        0,
-        "the replacement starts from a fresh world"
+        FLEET_ACTIVATION_TICK,
+        "the replacement starts from a fresh world, rebased to the shared fleet \
+         activation epoch — not carrying the survivors' advanced tick; the snapshot \
+         transfer below fast-forwards it into step"
     );
 
     // The owner (slot 1) grants the claim: it stamps the current tick and the first

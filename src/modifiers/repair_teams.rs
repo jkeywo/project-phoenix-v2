@@ -356,11 +356,11 @@ impl RepairTeams {
     /// from a partial client projection.
     pub fn prioritisable_systems(&self, hull: &SystemHull, config: &ShipConfig) -> Vec<SystemId> {
         hull.iter()
-            .filter_map(|(system_id, _)| {
+            .filter(|(system_id, _)| {
                 self.priority_team_for_system(system_id, hull, config)
                     .is_some()
-                    .then(|| system_id.clone())
             })
+            .map(|(system_id, _)| system_id.clone())
             .collect()
     }
 

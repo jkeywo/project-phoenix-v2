@@ -105,10 +105,6 @@ impl Store for RecordingStore {
     }
 }
 
-fn args(ticks_per_frame: u32) -> HeadlessArgs {
-    args_for_hull(ticks_per_frame, "cruiser")
-}
-
 fn args_for_hull(ticks_per_frame: u32, hull: &str) -> HeadlessArgs {
     HeadlessArgs {
         world_path: WORLD.into(),

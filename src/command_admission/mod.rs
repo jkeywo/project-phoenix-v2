@@ -579,13 +579,14 @@ pub fn admit_system_commands(
             .iter()
             .find(|system| system.id == *target)
             .map(|system| system.kind.as_str());
-        if correlation.is_some()
-            && !supports_correlated_action_feedback_for_kind(target, payload, target_kind)
+        if let Some(correlation) = correlation
+            .as_ref()
+            .filter(|_| !supports_correlated_action_feedback_for_kind(target, payload, target_kind))
         {
             write_action_feedback(
                 &mut outbound,
                 &ev.token,
-                correlation.as_ref().expect("checked above"),
+                correlation,
                 ActionFeedbackOutcome::Refused,
             );
             continue;

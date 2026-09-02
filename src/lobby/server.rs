@@ -98,6 +98,10 @@ impl PendingStartGrants {
         self.0.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     pub fn is_full(&self) -> bool {
         self.0.len() >= MAX_PENDING_START_GRANTS
     }
@@ -121,6 +125,12 @@ impl PendingStartGrants {
     }
 }
 
+/// A second, different canonical start decision was proven for the same fleet
+/// generation — the one condition [`StartGrantTracker::adopt_canonical`] can
+/// refuse, and the whole of what its `Err` means.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConflictingCanonicalGrant;
+
 #[derive(Resource, Default)]
 pub struct StartGrantTracker {
     last_sequence: u64,
@@ -143,14 +153,14 @@ impl StartGrantTracker {
     pub fn adopt_canonical(
         &mut self,
         grant: &crate::lobby::start_policy::StartGrant,
-    ) -> Result<bool, ()> {
+    ) -> Result<bool, ConflictingCanonicalGrant> {
         match self.canonical.as_ref() {
             None => {
                 self.canonical = Some(grant.clone());
                 Ok(true)
             }
             Some(canonical) if canonical == grant => Ok(false),
-            Some(_) => Err(()),
+            Some(_) => Err(ConflictingCanonicalGrant),
         }
     }
 
@@ -2032,28 +2042,26 @@ fn apply_pending_start_grants(
             ));
             continue;
         }
-        if grant.apply_tick == 0 {
-            if local_is_owner {
-                let assigned = if roster.as_deref().is_some_and(|roster| !roster.is_solo()) {
-                    fleet
-                        .as_deref()
-                        .and_then(|fleet| fleet.ready_through(now).checked_add(1))
-                } else {
-                    Some(now)
-                };
-                let Some(assigned) = assigned
-                    .filter(|tick| *tick <= crate::lobby::start_policy::MAX_SAFE_START_APPLY_TICK)
-                else {
-                    tracker.last_sequence = sequence;
-                    results.push(start_result(
-                        &grant,
-                        crate::lobby::start_policy::StartGrantStatus::Refused,
-                        Some(crate::lobby::start_policy::StartGrantReason::UnsafeApplyTick),
-                    ));
-                    continue;
-                };
-                grant.apply_tick = assigned;
-            }
+        if grant.apply_tick == 0 && local_is_owner {
+            let assigned = if roster.as_deref().is_some_and(|roster| !roster.is_solo()) {
+                fleet
+                    .as_deref()
+                    .and_then(|fleet| fleet.ready_through(now).checked_add(1))
+            } else {
+                Some(now)
+            };
+            let Some(assigned) = assigned
+                .filter(|tick| *tick <= crate::lobby::start_policy::MAX_SAFE_START_APPLY_TICK)
+            else {
+                tracker.last_sequence = sequence;
+                results.push(start_result(
+                    &grant,
+                    crate::lobby::start_policy::StartGrantStatus::Refused,
+                    Some(crate::lobby::start_policy::StartGrantReason::UnsafeApplyTick),
+                ));
+                continue;
+            };
+            grant.apply_tick = assigned;
         }
 
         // A browser proposal is not the decision boundary on a member. The

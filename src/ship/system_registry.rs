@@ -76,6 +76,17 @@ pub const VIEWSCREEN_KIND: &str = "viewscreen";
 /// in the kind registry either.
 pub const GOD_MODE_SYSTEM_ID: &str = "god-mode";
 
+/// Wire `SystemId` for the server-authored crew-rating replication command
+/// (issue #1119). Ownerless and undeclared for exactly the same reasons as
+/// `GOD_MODE_SYSTEM_ID`: no `[[system]]` block declares it, so
+/// `station_for_system` returns `None` and denies any remote human token, while
+/// the ship host's own injection under `LOCAL_CONSOLE_TOKEN` is admitted by the
+/// unregistered-target `ControlSource::Human` default. A crew rating transition
+/// is host-authoritative bookkeeping, not a seat-owned control, so routing it
+/// through this ownerless system — rather than a station's own coarse system —
+/// is what keeps the mesh replay from having to prove tenure it cannot.
+pub const ASSIGN_STATION_RATING_SYSTEM_ID: &str = "assign-station-rating";
+
 // ── Station ids (console namespace, issue #801) ──────────────────────────────
 //
 // These are NOT system ids. `"helm"` and `"tactical"` name crew Stations.

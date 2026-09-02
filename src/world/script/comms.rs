@@ -78,6 +78,13 @@ pub struct ScriptDialogueResponse {
     /// analogue of [`CommsResponse::important`](crate::comms::content::CommsResponse)).
     /// Defaults to `false` when the response map omits it.
     pub important: bool,
+    /// What an UNMANNED Comms console does with this option, authored as
+    /// `ai_weight` / `ai_delay_seconds` on the response map (issue #1343) — the
+    /// script analogue of
+    /// [`CommsResponse::ai`](crate::comms::content::CommsResponse). Both fields
+    /// stay absent when the map omits them, which is every response in every
+    /// world but Falling Skyway's lift band.
+    pub ai: crate::comms::content::CommsResponseAi,
 }
 
 /// A scripted dialogue node materialized from a node fn's return map — the
@@ -161,7 +168,30 @@ fn read_response(value: Dynamic, index: usize) -> Result<ScriptDialogueResponse,
         text,
         on_pick,
         important,
+        ai: crate::comms::content::CommsResponseAi {
+            weight: take_count(&map, "ai_weight"),
+            delay_seconds: take_count(&map, "ai_delay_seconds"),
+        },
     })
+}
+
+/// Read an optional non-negative whole number off a response map.
+///
+/// Absent, or present as something that is not an integer, reads as `None` — the
+/// same forgiving shape `important` has had since the scripted front-end
+/// landed, and for the same reason: a response map is authored data, and this
+/// front-end deliberately does not reject unknown or mistyped keys. The
+/// load-time cross-reference lint is what catches authoring mistakes that
+/// matter (an `on_pick` naming no fn); a mistyped weight costs an unmanned
+/// console one option, and the mission's own tests are what notice.
+///
+/// Negatives clamp to zero rather than reading as absent, because the two mean
+/// different things to the picker: zero is "an unmanned console may not choose
+/// this", absent is "this node is not a weighted decision at all", and an author
+/// who wrote `-1` plainly meant the former.
+fn take_count(map: &Map, key: &str) -> Option<u32> {
+    let raw = map.get(key)?.as_int().ok()?;
+    Some(raw.clamp(0, i64::from(u32::MAX)) as u32)
 }
 
 /// Project a materialized script node onto the wire dialogue shape, returning
@@ -193,6 +223,7 @@ pub fn project_node(node: &ScriptDialogueNode) -> (CommsDialogueNode, Vec<String
         responses.push(CommsResponse {
             text: r.text.clone(),
             important: r.important,
+            ai: r.ai,
         });
         on_pick.push(r.on_pick.clone());
     }
@@ -463,14 +494,100 @@ mod tests {
                     text: "Yes".into(),
                     on_pick: "on_yes".into(),
                     important: false,
+                    ai: Default::default(),
                 },
                 ScriptDialogueResponse {
                     text: "No".into(),
                     on_pick: "on_no".into(),
                     important: true,
+                    ai: Default::default(),
                 },
             ]
         );
+    }
+
+    // ── Backfill choice metadata (issue #1343) ───────────────────────────────
+
+    /// The authoring seam for a decision an absent officer can be trusted with:
+    /// two whole numbers per response, straight through to the wire shape the
+    /// picker reads.
+    #[test]
+    fn a_response_can_author_a_backfill_weight_and_delay() {
+        let ast = compile(
+            r#"
+            fn root(ctx) {
+                #{ message: "Who gets the corridor?", responses: [
+                    #{ text: "Stand by", on_pick: "on_hold",  ai_weight: 0, ai_delay_seconds: 5 },
+                    #{ text: "Lift",     on_pick: "on_lift",  ai_weight: 1, ai_delay_seconds: 5, important: true },
+                    #{ text: "Deny",     on_pick: "on_deny",  ai_weight: 1, ai_delay_seconds: 5, important: true },
+                ] }
+            }
+            fn on_hold(ctx) { }
+            fn on_lift(ctx) { }
+            fn on_deny(ctx) { }
+            "#,
+        );
+        let host = RuntimeHost::new();
+        let (_e, node) = enter(&host, &ast, "root", &FlagStore::new()).unwrap();
+        let node = node.expect("root returns a node");
+
+        let (wire, _on_pick) = project_node(&node);
+        assert_eq!(
+            wire.responses
+                .iter()
+                .map(|r| (r.ai.weight, r.ai.delay_seconds))
+                .collect::<Vec<_>>(),
+            vec![(Some(0), Some(5)), (Some(1), Some(5)), (Some(1), Some(5))]
+        );
+        assert!(crate::comms::ai_choice::node_authors_ai_choice(
+            &wire.responses
+        ));
+        assert_eq!(
+            crate::comms::ai_choice::weighted_pool(&wire.responses, true)
+                .iter()
+                .map(|e| e.index)
+                .collect::<Vec<_>>(),
+            vec![1, 2],
+            "the zero-weight stand-by must not be reachable by an unmanned console"
+        );
+    }
+
+    /// A response that authors neither field materialises exactly as it always
+    /// did — the property that keeps every other conversation in every world on
+    /// the legacy first-response policy.
+    #[test]
+    fn a_response_without_backfill_metadata_authors_none() {
+        let ast = compile(
+            r#"
+            fn root(ctx) { #{ message: "m", responses: [ #{ text: "Ack", on_pick: "on_ack" } ] } }
+            fn on_ack(ctx) { }
+            "#,
+        );
+        let host = RuntimeHost::new();
+        let (_e, node) = enter(&host, &ast, "root", &FlagStore::new()).unwrap();
+        let node = node.expect("root returns a node");
+        assert_eq!(node.responses[0].ai, Default::default());
+        let (wire, _) = project_node(&node);
+        assert!(!crate::comms::ai_choice::node_authors_ai_choice(
+            &wire.responses
+        ));
+    }
+
+    /// A negative weight is an author saying "not this one", not an author
+    /// saying "no metadata" — the two produce different mechanisms, so the
+    /// clamp has to keep the field PRESENT.
+    #[test]
+    fn a_negative_weight_clamps_to_forbidden_rather_than_absent() {
+        let ast = compile(
+            r#"
+            fn root(ctx) { #{ message: "m", responses: [ #{ text: "No", on_pick: "on_no", ai_weight: -3 } ] } }
+            fn on_no(ctx) { }
+            "#,
+        );
+        let host = RuntimeHost::new();
+        let (_e, node) = enter(&host, &ast, "root", &FlagStore::new()).unwrap();
+        let node = node.expect("root returns a node");
+        assert_eq!(node.responses[0].ai.weight, Some(0));
     }
 
     // ── Parameterised bodies ──────────────────────────────────────────────────

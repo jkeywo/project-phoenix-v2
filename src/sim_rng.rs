@@ -92,6 +92,21 @@ pub enum SimStream {
     /// per landing tick and jitter once per cycle, so sharing would make the
     /// damage distribution a function of how often banks happened to relight.
     BeamCycleJitter,
+    /// `console::comms::server::operate_comms_response_ai` — which live
+    /// response an unmanned Comms console picks when its authored wait expires
+    /// (issue #1343).
+    ///
+    /// Its own stream for the reason every stream here is separate, and with a
+    /// sharper edge than most: a comms decision is drawn at most once per open
+    /// dialogue per mission, while damage is drawn per landing tick, so sharing
+    /// would make the damage distribution of a whole battle a function of how
+    /// many conversations the crew happened to leave unanswered.
+    ///
+    /// A dialogue whose responses author no `ai_weight` TAKES NO DRAW AT ALL —
+    /// the same discipline `BeamCycleJitter` follows for an unjittered bank. The
+    /// stream's position does not move for any world but Falling Skyway, so no
+    /// existing world's sequence is perturbed by the mechanism merely existing.
+    CommsBackfillChoice,
     /// **Retired, but deliberately still declared (issue #907).**
     ///
     /// This stream used to allocate entity UUIDs. Nothing draws from it any
@@ -116,13 +131,14 @@ pub enum SimStream {
 
 impl SimStream {
     /// Every stream, in declaration order. Used to build the resource.
-    pub const ALL: [SimStream; 7] = [
+    pub const ALL: [SimStream; 8] = [
         SimStream::CollisionDamage,
         SimStream::RegionDamage,
         SimStream::BeamDamage,
         SimStream::TorpedoDamage,
         SimStream::BlasterDamage,
         SimStream::BeamCycleJitter,
+        SimStream::CommsBackfillChoice,
         SimStream::EntityUuid,
     ];
 
@@ -138,6 +154,7 @@ impl SimStream {
             SimStream::TorpedoDamage => "torpedo-damage",
             SimStream::BlasterDamage => "blaster-damage",
             SimStream::BeamCycleJitter => "beam-cycle-jitter",
+            SimStream::CommsBackfillChoice => "comms-backfill-choice",
             SimStream::EntityUuid => "entity-uuid",
         }
     }
@@ -465,6 +482,7 @@ mod tests {
             (SimStream::TorpedoDamage, "torpedo-damage"),
             (SimStream::BlasterDamage, "blaster-damage"),
             (SimStream::BeamCycleJitter, "beam-cycle-jitter"),
+            (SimStream::CommsBackfillChoice, "comms-backfill-choice"),
             (SimStream::EntityUuid, "entity-uuid"),
         ] {
             assert_eq!(
@@ -477,7 +495,7 @@ mod tests {
         // variant would go unpinned and be free to be renamed later.
         assert_eq!(
             SimStream::ALL.len(),
-            7,
+            8,
             "a stream was added — pin its name above too"
         );
     }

@@ -1568,6 +1568,7 @@ fn seat_ai_dialogue(app: &mut App, sender_uuid: &str) -> (String, String) {
                     responses: vec![CommsResponse {
                         text: "Acknowledge.".into(),
                         important: false,
+                        ai: Default::default(),
                     }],
                 },
                 thread_id: id.clone(),
@@ -1937,10 +1938,12 @@ fn an_authored_comms_response_policy_beats_the_canonical_default() {
                 CommsResponse {
                     text: "Acknowledge.".into(),
                     important: false,
+                    ai: Default::default(),
                 },
                 CommsResponse {
                     text: "Stand by.".into(),
                     important: false,
+                    ai: Default::default(),
                 },
             ],
         };
@@ -2160,6 +2163,7 @@ fn seat_scripted_dialogue(
         .map(|(i, _)| CommsResponse {
             text: format!("Response {i}"),
             important: false,
+            ai: Default::default(),
         })
         .collect();
     let mut message = msg(&id);

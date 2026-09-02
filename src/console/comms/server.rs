@@ -1408,23 +1408,32 @@ pub struct CommsAiContext<'w> {
     log: Option<Res<'w, crate::logging::LogFilterConfig>>,
 }
 
-/// The read-only comms context `operate_comms_response_ai` reads besides the
+/// The comms context `operate_comms_response_ai` reads besides the
 /// [`crate::ai::host::AiHostEnv`], bundled as one `SystemParam` (issue #1185):
 /// the comms runtime, the inbox, the session table, the log filter, and the
 /// shared AI base cadence (raw tick + interval).
 ///
-/// A signature grouping only — every field keeps its type and `Option` fallback
-/// (`comms` here is a plain `Res`, unlike [`CommsAiContext`]'s `ResMut`), so the
-/// access set is byte-for-byte unchanged; the system destructures it back to its
-/// original locals at entry.
+/// `comms` became a `ResMut` in issue #1343, joining [`CommsAiContext`]'s: the
+/// weighted picker's running waits (`CommsRuntime::pending_ai_responses`) are
+/// authoritative comms state and this host is their only writer. The ordering
+/// that made the old shared borrow safe is unchanged and already total — the
+/// console plugin pins this system `.after(operate_comms_ai).after(handle_hail)`
+/// and `.before(handle_respond_to_message)` — so the upgrade adds no unordered
+/// pair. The world config joins for one read, `[global] sim_tick_hz`, which is
+/// what turns an authored delay in seconds into an absolute due tick; `sim_rng`
+/// is the seeded stream the weighted draw comes off, `Option` like every other
+/// simulation system's (a bare `Res` fails parameter validation in every
+/// bare-`App` fixture in the crate).
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct CommsResponseContext<'w> {
-    comms: Option<Res<'w, CommsRuntime>>,
+    comms: Option<ResMut<'w, CommsRuntime>>,
     inbox: Option<Res<'w, CommsInboxRes>>,
     sessions: Res<'w, crate::lobby::Sessions>,
     log: Option<Res<'w, crate::logging::LogFilterConfig>>,
     tick: Option<Res<'w, crate::sim_tick::SimTick>>,
     base_interval: Option<Res<'w, crate::ai::cadence::AiBaseInterval>>,
+    world_config: Option<Res<'w, crate::world::config::WorldConfig>>,
+    sim_rng: Option<Res<'w, crate::sim_rng::SimRng>>,
 }
 
 /// Backfill Comms AI: rank and issue hails through the AUTHORED selector
@@ -1855,6 +1864,32 @@ pub fn operate_comms_ai(
 /// The policy itself is stateless, so there is nothing to reset when control
 /// flips between human and AI.
 ///
+/// # Two mechanisms, one switch (issue #1343)
+///
+/// The policy above answers by authored INDEX, and every shipped hull authors
+/// index 0. That is right for a hail acknowledgement and wrong for a decision,
+/// because the option a human reaches for while they think — "stand by" — is the
+/// one an author puts first. A node whose responses carry
+/// [`CommsResponseAi`](crate::comms::content::CommsResponseAi) metadata is
+/// therefore decided by the WEIGHTED picker instead: the console waits the
+/// authored number of simulation seconds and then draws among the options that
+/// carry a positive weight. [`node_authors_ai_choice`] is the whole switch, and
+/// it is exclusive in both directions — a weighted node never consults the
+/// policy, and a node with no weights never touches the RNG stream, so no
+/// existing world's seeded sequence moves.
+///
+/// The wait itself is [`CommsRuntime::pending_ai_responses`], armed here and
+/// retired here, and the retirement is the interesting half. Every entry not
+/// re-armed on a pass is dropped, which is what makes the cancellations fall out
+/// of one rule rather than four hand-written hooks: a conversation that closed
+/// (answered, or its dialogue retired) is no longer walked, a human taking the
+/// console fails the Control-Source gate, a sender leaving comms range empties
+/// the pool, and a reprice supersedes the old message in its thread. The one
+/// cancellation that needs its own term is a node whose OPTIONS moved under a
+/// running wait: the record carries a fingerprint of the set it was armed
+/// against, and a fingerprint that no longer matches re-arms rather than
+/// answering a screen that has been repriced.
+///
 /// # AC4 — read-only scenario state
 ///
 /// Same structural guarantee as [`operate_comms_ai`]: `WorldContentRuntime` is a
@@ -1893,7 +1928,7 @@ pub fn operate_comms_response_ai(
         With<crate::server_app::LocalShip>,
     >,
 ) {
-    // Restore the pre-#1185 locals so the body below is byte-for-byte unchanged.
+    // Restore the pre-#1185 locals so the policy body below reads as it did.
     let CommsResponseContext {
         comms,
         inbox,
@@ -1901,13 +1936,32 @@ pub fn operate_comms_response_ai(
         log,
         tick,
         base_interval,
+        world_config,
+        sim_rng,
     } = context;
 
-    let (Some(comms), Some(inbox)) = (comms.as_deref(), inbox.as_deref()) else {
+    let (Some(mut comms_res), Some(inbox)) = (comms, inbox) else {
         return;
     };
+    let inbox = &*inbox;
     let tick = tick.map(|t| t.0).unwrap_or(0);
     let base_interval = base_interval.map(|b| b.0).unwrap_or(1);
+    // The authored fixed-step rate an `ai_delay_seconds` is converted against
+    // (issue #1343). The same read `handle_respond_to_message` makes to build its
+    // `SchedClock`, and the same fallback: a fixture with no world loaded runs at
+    // the canonical rate rather than dividing by nothing.
+    let tick_hz = world_config
+        .as_ref()
+        .map(|wc| wc.global.sim_tick_hz)
+        .unwrap_or(crate::world::script::schedule::SchedClock::ZERO.tick_hz);
+
+    // The waits that survive this pass. Every entry the pass does not re-arm is
+    // CANCELLED by being left out of it — see the system docs for why the four
+    // authored cancellation cases all reduce to that one rule.
+    let mut pending_next: std::collections::BTreeMap<
+        String,
+        crate::comms::server::PendingAiResponse,
+    > = std::collections::BTreeMap::new();
 
     for (
         entity,
@@ -1922,6 +1976,10 @@ pub fn operate_comms_response_ai(
         selector_comp,
     ) in ships.iter_mut()
     {
+        // Read-only for the length of the pass; the one write (`pending_next`
+        // replacing the running waits) lands after the loop, so nothing inside it
+        // can see a half-updated schedule.
+        let comms = &*comms_res;
         // The Control-Source gate (AC5 human exclusivity — a human Comms officer
         // answers their own dialogues) and the strict AI-declaration check (no
         // `[comms_console.ai]` ⇒ the ship answers nothing) now live in the shared
@@ -1967,6 +2025,62 @@ pub fn operate_comms_response_ai(
             }
 
             let sender_in_range = current_sender_in_range(comms, &message.sender_uuid);
+
+            // ── The weighted picker (issue #1343) ────────────────────────────
+            //
+            // Exclusive with the policy below: a node that authors weights is
+            // decided here and `decide` is never consulted for it, so the
+            // authored `response_index = 0` cannot answer a decision with the
+            // stand-by an author had to put first.
+            if crate::comms::ai_choice::node_authors_ai_choice(responses) {
+                match weighted_backfill_choice(
+                    WeightedChoiceInputs {
+                        comms,
+                        inbox,
+                        message: &message,
+                        responses,
+                        sender_in_range,
+                        sources,
+                        policy_declared: policy.is_some(),
+                        now_tick: tick,
+                        tick_hz,
+                    },
+                    sim_rng.as_deref(),
+                ) {
+                    // Nothing to wait on: a human holds the console, the ship
+                    // declares no comms AI, the sender is unreachable, the node
+                    // offers an unmanned console nothing, or a reprice has
+                    // superseded this message. Any running wait is cancelled by
+                    // not being carried into `pending_next`.
+                    WeightedChoiceOutcome::Cancel => {}
+                    // The wait is running — just armed, still counting, or
+                    // re-armed because the options moved under it.
+                    WeightedChoiceOutcome::Wait(record) => {
+                        pending_next.insert(message.id.clone(), record);
+                    }
+                    // The wait expired and the draw picked an option. It goes
+                    // through the ordinary admitted path a human's press takes,
+                    // and the record is not carried forward: the router answers
+                    // the message this same tick.
+                    WeightedChoiceOutcome::Answer(index) => {
+                        emit_backfill_response(
+                            &BackfillResponseEmit {
+                                entity,
+                                entity_uuid,
+                                message_id: &message.id,
+                                index,
+                                sources,
+                                sessions: &sessions,
+                                ship_config,
+                                log: log.as_deref(),
+                            },
+                            &mut admitted,
+                        );
+                    }
+                }
+                continue;
+            }
+
             let reading = CommsResponseReading {
                 response_count: responses.len(),
                 available_response_count: if sender_in_range { responses.len() } else { 0 },
@@ -2018,37 +2132,231 @@ pub fn operate_comms_response_ai(
                 continue;
             }
 
-            let admitted_ok = crate::command_admission::ai_emit::emit_ai_command(
-                entity_uuid,
-                crate::ship::system_registry::comms_system_id(),
-                crate::core::messages::SystemControlPayload::RespondToMessage {
-                    message_id: message.id.clone(),
-                    response_index: index,
+            emit_backfill_response(
+                &BackfillResponseEmit {
+                    entity,
+                    entity_uuid,
+                    message_id: &message.id,
+                    index,
+                    sources,
+                    sessions: &sessions,
+                    ship_config,
+                    log: log.as_deref(),
                 },
-                sources,
-                &sessions,
-                ship_config,
                 &mut admitted,
             );
-            if admitted_ok {
-                crate::pdebug!(
-                    log,
-                    crate::logging::LogCat::Comms,
-                    entity = entity,
-                    "backfill comms AI answered {} with response {index}",
-                    message.id
-                );
-            } else {
-                crate::pwarn!(
-                    log,
-                    crate::logging::LogCat::Comms,
-                    entity = entity,
-                    "backfill comms AI response to {} refused at admission",
-                    message.id
-                );
-            }
         }
     }
+
+    // The one write of the pass. Assigning the whole map rather than mutating it
+    // in place is what makes the cancellations structural: a wait that this pass
+    // did not re-arm is gone, and no cancellation case needs a hook of its own.
+    comms_res.pending_ai_responses = pending_next;
+}
+
+/// Everything [`emit_backfill_response`] needs, grouped so the two call sites
+/// (the authored policy and the weighted picker) submit through one seam.
+struct BackfillResponseEmit<'a> {
+    entity: Entity,
+    entity_uuid: Option<&'a EntityUuid>,
+    message_id: &'a str,
+    index: usize,
+    sources: &'a ShipSystemControlSources,
+    sessions: &'a crate::lobby::Sessions,
+    ship_config: Option<&'a crate::ship_plugin::ShipConfigComponent>,
+    log: Option<&'a crate::logging::LogFilterConfig>,
+}
+
+/// Submit one Backfill response through the ordinary admitted-command path.
+///
+/// The ONE emission seam for both mechanisms, and the reason it is one: an AI
+/// response is an ordinary `SystemControlPayload::RespondToMessage`, admitted
+/// against the same Control Source and drained by the same router a human's
+/// press is. Two copies of this would be two places for that to stop being true.
+fn emit_backfill_response(
+    emit: &BackfillResponseEmit<'_>,
+    admitted: &mut crate::core::messages::AdmittedCommands,
+) {
+    let log = emit.log;
+    let admitted_ok = crate::command_admission::ai_emit::emit_ai_command(
+        emit.entity_uuid,
+        crate::ship::system_registry::comms_system_id(),
+        crate::core::messages::SystemControlPayload::RespondToMessage {
+            message_id: emit.message_id.to_string(),
+            response_index: emit.index,
+        },
+        emit.sources,
+        emit.sessions,
+        emit.ship_config,
+        admitted,
+    );
+    let index = emit.index;
+    if admitted_ok {
+        crate::pdebug!(
+            log,
+            crate::logging::LogCat::Comms,
+            entity = emit.entity,
+            "backfill comms AI answered {} with response {index}",
+            emit.message_id
+        );
+    } else {
+        crate::pwarn!(
+            log,
+            crate::logging::LogCat::Comms,
+            entity = emit.entity,
+            "backfill comms AI response to {} refused at admission",
+            emit.message_id
+        );
+    }
+}
+
+/// What one evaluation of a weighted node decided (issue #1343).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WeightedChoiceOutcome {
+    /// No wait may run on this node right now, so any record for it is dropped.
+    Cancel,
+    /// The wait is running — carry this record into the next tick.
+    Wait(crate::comms::server::PendingAiResponse),
+    /// The wait expired and the draw selected this response index.
+    Answer(usize),
+}
+
+/// Everything [`weighted_backfill_choice`] reads, grouped to keep the signature
+/// honest rather than nine positional arguments.
+struct WeightedChoiceInputs<'a> {
+    comms: &'a CommsRuntime,
+    inbox: &'a CommsInboxRes,
+    message: &'a CommsMessage,
+    responses: &'a [crate::comms::content::CommsResponse],
+    sender_in_range: bool,
+    sources: &'a ShipSystemControlSources,
+    policy_declared: bool,
+    now_tick: u64,
+    tick_hz: f32,
+}
+
+/// Decide what an unmanned Comms console does with ONE weighted dialogue node
+/// this tick (issue #1343).
+///
+/// The order of the gates is the order of the acceptance criteria, and every
+/// early return is a cancellation:
+///
+///   1. **Control Source.** A human on the Comms console decides their own
+///      conversations; the wait is cancelled the tick they take the seat, and a
+///      fresh one arms if they hand it back.
+///   2. **Declaration.** Strict AI-declaration (issue #885): a ship with no
+///      `[comms_console.ai]` block does nothing at all, weighted node or not.
+///   3. **Supersession.** A repriced claim opens a NEW message on the same
+///      thread, and both stay independently answerable. The wait belongs to the
+///      screen that is current, so a message with a later live sibling in its
+///      thread is cancelled rather than answered against a board that has moved.
+///   4. **The pool.** Zero-weight, unweighted and unavailable options are
+///      excluded ([`weighted_pool`](crate::comms::ai_choice::weighted_pool)); an
+///      empty pool holds the conversation open rather than falling back to the
+///      first response, because falling back IS the bug this replaces.
+///   5. **The wait.** Armed against an absolute tick computed once from the
+///      authored seconds — never a wall-clock read — and re-armed whenever the
+///      node's options no longer fingerprint to what the wait was armed against.
+///   6. **The draw.** ONE draw off [`SimStream::CommsBackfillChoice`], taken
+///      only on the tick the answer is actually submitted, so a world that
+///      authors no weights never moves that stream at all.
+fn weighted_backfill_choice(
+    inputs: WeightedChoiceInputs<'_>,
+    sim_rng: Option<&crate::sim_rng::SimRng>,
+) -> WeightedChoiceOutcome {
+    use crate::comms::ai_choice;
+
+    if !crate::ai::host::ai_operates(
+        &inputs.sources.0,
+        crate::ship::system_registry::comms_system_id(),
+    ) {
+        return WeightedChoiceOutcome::Cancel;
+    }
+    if !inputs.policy_declared {
+        return WeightedChoiceOutcome::Cancel;
+    }
+    if message_is_superseded(inputs.comms, inputs.inbox, inputs.message) {
+        return WeightedChoiceOutcome::Cancel;
+    }
+
+    let pool = ai_choice::weighted_pool(inputs.responses, inputs.sender_in_range);
+    if pool.is_empty() {
+        return WeightedChoiceOutcome::Cancel;
+    }
+    let total = ai_choice::pool_total_weight(&pool);
+    if total == 0 {
+        return WeightedChoiceOutcome::Cancel;
+    }
+
+    let fingerprint = ai_choice::response_set_fingerprint(inputs.responses, inputs.sender_in_range);
+    let armed = inputs
+        .comms
+        .pending_ai_responses
+        .get(&inputs.message.id)
+        .filter(|record| record.response_fingerprint == fingerprint);
+    let Some(record) = armed else {
+        // First sight of this node, or the options moved under a running wait.
+        // Either way the pause starts now and the choice is sampled from the
+        // options that are on the screen when it ends.
+        let delay_ticks = crate::world::script::schedule::seconds_to_ticks(
+            i64::from(ai_choice::choice_delay_seconds(inputs.responses)),
+            inputs.tick_hz,
+        );
+        return WeightedChoiceOutcome::Wait(crate::comms::server::PendingAiResponse {
+            due_tick: inputs.now_tick.saturating_add(delay_ticks),
+            response_fingerprint: fingerprint,
+        });
+    };
+    if inputs.now_tick < record.due_tick {
+        return WeightedChoiceOutcome::Wait(*record);
+    }
+
+    // Due. One draw, one answer. `>=` rather than `==` because this host runs on
+    // the shared AI cadence and may not be evaluated on the exact due tick.
+    let draw = crate::sim_rng::with_stream(
+        sim_rng,
+        crate::sim_rng::SimStream::CommsBackfillChoice,
+        |rng| rng.below(total),
+    );
+    match ai_choice::pick_by_draw(&pool, draw) {
+        Some(index) => WeightedChoiceOutcome::Answer(index),
+        // Unreachable for a draw below the total, and a hold rather than a panic
+        // if it ever were: a dialogue must not be able to bring the server down.
+        None => WeightedChoiceOutcome::Wait(*record),
+    }
+}
+
+/// Whether a LATER message on the same thread has taken this conversation over
+/// (issue #1343).
+///
+/// Repricing does not edit the node a claimant is already showing: it opens a
+/// new message on the same `thread_id`, and the old one stays in the inbox,
+/// still answerable, still describing a board that has since moved. A human sees
+/// both and answers the one they mean. An unmanned console has no such judgement,
+/// so its wait follows the LATEST live message on the thread and every earlier
+/// one is cancelled — which is exactly the AC3 "response replacement/repricing
+/// cancels the pending choice" case, expressed against the shape repricing
+/// actually has here.
+///
+/// Inbox order is injection order, so "later" is a position comparison and needs
+/// no timestamps. Only messages with a live, unanswered dialogue count: a
+/// superseding message that has itself been answered supersedes nothing.
+fn message_is_superseded(
+    comms: &CommsRuntime,
+    inbox: &CommsInboxRes,
+    message: &CommsMessage,
+) -> bool {
+    inbox
+        .0
+        .messages()
+        .iter()
+        .skip_while(|m| m.id != message.id)
+        .skip(1)
+        .any(|later| {
+            later.thread_id == message.thread_id
+                && later.selected_response.is_none()
+                && comms.active_dialogues.contains_key(&later.id)
+        })
 }
 
 /// Resolve a Hail directive's target NAME to an entity UUID.

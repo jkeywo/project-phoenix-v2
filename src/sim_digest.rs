@@ -365,6 +365,19 @@ fn fold_optional_str(acc: u64, value: Option<&str>) -> u64 {
     }
 }
 
+/// Fold an optional number as a present/absent marker plus its value.
+///
+/// [`fold_optional_str`]'s reason, one step sharper: an authored
+/// `ai_weight = 0` and an unauthored one are different instructions to the
+/// Backfill picker (forbidden versus "this is not a weighted decision"), so
+/// folding them alike would hide exactly the disagreement worth catching.
+fn fold_optional_u64(acc: u64, value: Option<u64>) -> u64 {
+    match value {
+        Some(number) => fold_u64(fold_u64(acc, 1), number),
+        None => fold_u64(acc, 0),
+    }
+}
+
 /// Fold a value whose serde shape is deliberately pinned.
 pub fn fold_serde<T: serde::Serialize>(acc: u64, value: &T) -> u64 {
     fold_digest(acc, digest_postcard(value))
@@ -1231,7 +1244,13 @@ fn fold_comms_scope(world: &World, mut acc: u64) -> u64 {
     let inbox_len = inbox.map_or(0, |inbox| inbox.0.len());
     let dialogue_len = comms.map_or(0, |comms| comms.active_dialogues.len());
     let hail_len = comms.map_or(0, |comms| comms.open_hails.len());
-    if inbox_len == 0 && dialogue_len == 0 && hail_len == 0 && opens.is_empty() {
+    let pending_ai_len = comms.map_or(0, |comms| comms.pending_ai_responses.len());
+    if inbox_len == 0
+        && dialogue_len == 0
+        && hail_len == 0
+        && pending_ai_len == 0
+        && opens.is_empty()
+    {
         return acc;
     }
 
@@ -1284,6 +1303,13 @@ fn fold_comms_scope(world: &World, mut acc: u64) -> u64 {
             for response in &dialogue.current_node.responses {
                 acc = fold_str(acc, &response.text);
                 acc = fold_u64(acc, u64::from(response.important));
+                // The Backfill choice metadata (issue #1343). Folded because it
+                // decides what an unmanned console reaches for and when: two
+                // peers holding different weights for the same live node will
+                // answer it differently, which is a divergence the tick it
+                // happens rather than the tick they disagree about the outcome.
+                acc = fold_optional_u64(acc, response.ai.weight.map(u64::from));
+                acc = fold_optional_u64(acc, response.ai.delay_seconds.map(u64::from));
             }
             acc = fold_str(acc, &dialogue.script.script_path);
             acc = fold_optional_str(acc, dialogue.script.origin_layer.as_deref());
@@ -1298,7 +1324,20 @@ fn fold_comms_scope(world: &World, mut acc: u64) -> u64 {
         for target in &comms.open_hails {
             acc = fold_str(acc, target);
         }
+
+        // The unmanned console's running weighted decisions (issue #1343),
+        // already in message-id order — a `BTreeMap`, chosen for exactly this.
+        // Two peers that agree about every open conversation but disagree about
+        // WHEN one of them gets answered have diverged, and this is the tick
+        // that says so rather than the tick the answer lands.
+        acc = fold_u64(acc, pending_ai_len as u64);
+        for (message_id, record) in &comms.pending_ai_responses {
+            acc = fold_str(acc, message_id);
+            acc = fold_u64(acc, record.due_tick);
+            acc = fold_u64(acc, record.response_fingerprint);
+        }
     } else {
+        acc = fold_u64(acc, 0);
         acc = fold_u64(acc, 0);
     }
 

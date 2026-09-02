@@ -92,6 +92,46 @@ pub struct CommsRuntime {
     /// dirty tick. `None` until the first broadcast (or after a tick with no
     /// resolvable host).
     pub last_broadcast_host: Option<String>,
+    /// Backfill Comms's running weighted decisions, keyed by CommsMessage id
+    /// (issue #1343).
+    ///
+    /// Authoritative simulation state, not AI memory, and it lives in this
+    /// struct for the same reason `open_hails` does: two lockstep peers that
+    /// disagree about WHEN an unmanned console answers have diverged, so this
+    /// schedule is folded by `sim_digest` and carried by a snapshot exactly as
+    /// the dialogues it points at are.
+    ///
+    /// A `BTreeMap` rather than a `HashMap` — unlike `active_dialogues` this map
+    /// is ITERATED (to retire cancelled entries), and an unordered iteration
+    /// feeding authoritative state is precisely the determinism hazard
+    /// AGENTS.md names.
+    ///
+    /// Entries are armed, re-armed and retired by
+    /// [`crate::console::comms::server::operate_comms_response_ai`]; nothing
+    /// else writes them. One exists only while a live, unanswered, AI-operated
+    /// dialogue node is waiting out its authored pause.
+    pub pending_ai_responses: std::collections::BTreeMap<String, PendingAiResponse>,
+}
+
+/// One unmanned console's running wait on one open dialogue (issue #1343).
+///
+/// Two numbers and no captured choice, deliberately: the response is sampled at
+/// the moment the wait expires, from the options that are on the screen THEN.
+/// Storing a pre-drawn answer would make a repriced node answer with the pick it
+/// made against the old one, which is the failure this record's fingerprint
+/// exists to prevent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PendingAiResponse {
+    /// The sim tick at or after which the choice is sampled and submitted.
+    /// Absolute, computed once at arm time from the authored seconds and the
+    /// world's `sim_tick_hz` — the same seconds→ticks conversion (and the same
+    /// rounding) `world::deadlines` uses, so a delay is never a wall-clock read.
+    pub due_tick: u64,
+    /// The response set this wait was armed against
+    /// ([`crate::comms::ai_choice::response_set_fingerprint`]). When the live
+    /// node no longer fingerprints to this, the wait is cancelled and re-armed
+    /// so the choice is resampled from the current options.
+    pub response_fingerprint: u64,
 }
 
 /// Bevy resource wrapping the server-side comms inbox.

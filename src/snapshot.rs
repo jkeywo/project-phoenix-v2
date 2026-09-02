@@ -2206,6 +2206,21 @@ pub struct CommsState {
     /// there is nothing to normalise away.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_opens: Vec<OpenCommsRequest>,
+    /// `CommsRuntime::pending_ai_responses` as `(message_id, record)`, already
+    /// ordered (a `BTreeMap`) — an unmanned Comms console's running waits on the
+    /// weighted decisions it has been left holding (issue #1343).
+    ///
+    /// It travels for the reason `open_hails` does: it is a record of where the
+    /// run got to, not something a resumed world can re-derive. Dropping it
+    /// would restart every wait from zero on a resume, so a save taken four
+    /// seconds into a five-second pause would come back with nine seconds still
+    /// to run — a save silently changing the mission's timing, which is the same
+    /// failure re-hailing a cleared contact was.
+    ///
+    /// The due ticks are absolute and the tick counter is itself restored, so
+    /// they mean the same thing on the way back in.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_ai_responses: Vec<(String, crate::comms::server::PendingAiResponse)>,
 }
 
 /// One live dialogue - see [`CommsState`] for why every one of them travels.
@@ -2239,6 +2254,23 @@ pub struct DialogueState {
     /// - the index a `RespondToMessage` submits.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub responses: Vec<(String, bool)>,
+    /// The Backfill choice metadata of each shown response (issue #1343),
+    /// PARALLEL to `responses` and empty when the node authors none — which is
+    /// every node but Falling Skyway's lift band.
+    ///
+    /// A parallel vector rather than a third slot in the tuple above, so a save
+    /// written before this existed reads back through the same code unchanged: a
+    /// short or absent vector reads as "no metadata", which is exactly what such
+    /// a save meant.
+    ///
+    /// It travels because a restored node is NOT rebuilt from the script — it is
+    /// restored from this payload. A resume that dropped the weights would hand
+    /// the conversation back to the legacy first-response policy, so an unmanned
+    /// console would answer Falling Skyway's lift decisions with the stand-by
+    /// for ever and the act would never resolve: a behaviour change across a
+    /// save, which is the one thing this module exists to prevent.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub response_ai: Vec<crate::comms::content::CommsResponseAi>,
     /// The Rhai tree that answers this dialogue.
     ///
     /// It was `Option` while declarative threads existed; issue #985 made it
@@ -2279,6 +2311,13 @@ fn reduce_dialogue_node(message_id: &str, dialogue: &ActiveDialogue) -> Dialogue
             .iter()
             .map(|r| (r.text.clone(), r.important))
             .collect(),
+        // Skipped entirely for a node that authors none, so no existing world's
+        // payload gains a field it has no use for.
+        response_ai: if node.responses.iter().any(|r| r.ai != Default::default()) {
+            node.responses.iter().map(|r| r.ai).collect()
+        } else {
+            Vec::new()
+        },
         script: dialogue.script.clone(),
     }
 }
@@ -2762,6 +2801,12 @@ fn capture_comms(world: &World) -> Option<CommsState> {
             .get_resource::<WorldScriptRuntime>()
             .map(|script| script.pending_comms_opens.clone())
             .unwrap_or_default(),
+        // Already in message-id order — it is a `BTreeMap`.
+        pending_ai_responses: comms
+            .pending_ai_responses
+            .iter()
+            .map(|(id, record)| (id.clone(), *record))
+            .collect(),
     })
 }
 
@@ -5456,9 +5501,13 @@ fn restore_comms(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut Res
                             responses: row
                                 .responses
                                 .iter()
-                                .map(|(text, important)| CommsResponse {
+                                .enumerate()
+                                .map(|(i, (text, important))| CommsResponse {
                                     text: text.clone(),
                                     important: *important,
+                                    // A short or absent parallel vector reads as
+                                    // "no metadata" — see `DialogueState`.
+                                    ai: row.response_ai.get(i).copied().unwrap_or_default(),
                                 })
                                 .collect(),
                         },
@@ -5470,6 +5519,13 @@ fn restore_comms(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut Res
             .collect();
 
         comms.open_hails = stored.open_hails.iter().cloned().collect();
+        // The unmanned console's running waits resume where they were, rather
+        // than restarting — see `CommsState::pending_ai_responses`.
+        comms.pending_ai_responses = stored
+            .pending_ai_responses
+            .iter()
+            .map(|(id, record)| (id.clone(), *record))
+            .collect();
         // `range_flags` / `range_active` / `contacts` are all recomputed by
         // `update_comms_range_flags` on the next tick; what they need is for the
         // resumed world to push a fresh `CommsState` to its clients.

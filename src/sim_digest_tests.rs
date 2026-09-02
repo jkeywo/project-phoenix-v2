@@ -793,6 +793,7 @@ fn dialogue(node_fn: &str) -> ActiveDialogue {
             responses: vec![CommsResponse {
                 text: "comms.response.acknowledge".into(),
                 important: false,
+                ai: Default::default(),
             }],
         },
         thread_id: "thread-1".into(),

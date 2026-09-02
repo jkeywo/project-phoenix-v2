@@ -4985,6 +4985,7 @@ fn unloading_one_shared_ast_owner_retires_its_dialogue_before_a_response_can_run
                     responses: vec![CommsResponse {
                         text: "Accept".into(),
                         important: false,
+                        ai: Default::default(),
                     }],
                 },
                 thread_id: message.thread_id.clone(),

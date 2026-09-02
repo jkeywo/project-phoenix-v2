@@ -81,6 +81,11 @@ pub mod host_lobby;
 /// that feeds it real events is [`panes::ultralight`] behind `--features
 /// ultralight`.
 pub mod input_routing;
+/// The authored join-code table, read by a host that ISSUES codes
+/// (issue #1353). Pure and CI-tested: minting, canonicalisation and the typed
+/// lookup a direct-accept host answers a joiner's code with, all read out of
+/// `assets/join/join-codes.toml` rather than written down a second time.
+pub mod join_codes;
 /// The **saved bridge layouts** (issue #1334) — pure, Bevy-free, and its
 /// location injected. One TOML file per ship class under the operator's own
 /// settings directory (`%APPDATA%\ProjectPhoenix\bridge-layouts` on Windows),

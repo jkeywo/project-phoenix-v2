@@ -404,6 +404,35 @@ pub fn validate_entity_identity(
         }
     }
 
+    // `narrative = true` with nothing to name it (issue #1338). The mark's
+    // payload IS the `name` — it is what the timeline calls the hull, and what
+    // `ctx.effects.narrative_outcome(..)` addresses it by later — so a nameless
+    // row cannot be marked at all.
+    //
+    // Said out loud rather than left to the spawner's `if let Some(name)`,
+    // because a silently-dropped authoring flag is the one failure PRD #1337's
+    // "authored, never inferred" rule cannot absorb: the author believes they
+    // marked the hull, the run report is simply missing it, and nothing
+    // anywhere says why. Warning, not error: the world is still playable and
+    // every other row's telemetry is intact — only this hull's story is absent.
+    for entity in entities {
+        if entity.narrative && entity.name.is_none() {
+            findings.push(WorldFinding::warning(
+                "narrative-mark-needs-name",
+                path,
+                source_text,
+                &entity.template_path,
+                format!(
+                    "`narrative = true` on an [[entity]] with no `name` in '{path}' \
+                     (template '{}'); the narrative mark carries the entity's authored \
+                     `name`, so a nameless instance records no timeline events — give \
+                     the row a `name`, or drop the flag",
+                    entity.template_path
+                ),
+            ));
+        }
+    }
+
     findings
 }
 

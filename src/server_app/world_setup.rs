@@ -515,6 +515,29 @@ pub(crate) fn spawn_game_start_entities(
             entity_inst.id.clone(),
         );
 
+        // The authored narrative mark (issue #1338), attached on this path for
+        // the same reason `world::server::spawn_immediate_entities_internal`
+        // attaches it on its own: the payload is the WORLD's authored `name` —
+        // the unique reference id triggers, comms and objectives address this
+        // instance by — and the entity template knows nothing about it.
+        //
+        // Both spawn timings mark, because `narrative = true` says nothing
+        // about WHEN the hull enters the world. A story hull that the world
+        // holds back until the game starts (`spawn_on = "game_start"`) is still
+        // a story hull, and marking only the Immediate branch would drop its
+        // spawn and death from the timeline with no warning anywhere — the one
+        // failure PRD #1337's "authored, never inferred" rule cannot absorb,
+        // because the author believes they marked it. A nameless row cannot be
+        // marked (there is no id to carry); `world::validate` warns about that
+        // combination at load rather than leaving it silent here.
+        if entity_inst.narrative {
+            if let Some(name) = entity_inst.name.as_ref() {
+                commands
+                    .entity(spawned)
+                    .insert(crate::core::narrative::NarrativeMark(name.clone()));
+            }
+        }
+
         // Apply rotation on the spawned entity's Transform
         if let Some(q) = player_spawn_rot {
             commands

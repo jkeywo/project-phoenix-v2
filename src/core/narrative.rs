@@ -73,7 +73,10 @@ pub enum NarrativeKind {
     /// carries the message id, the body String Id and the response count.
     CommsOpened,
     /// A Comms response was picked (by a human console or by the Comms AI —
-    /// both traverse the same admitted command). `id` is the message id.
+    /// both traverse the same admitted command). `id` is the thread id, the
+    /// same identity [`Self::CommsOpened`] carries, so an answer pairs with the
+    /// message that asked; `detail` carries the message id, the response index
+    /// and the `on_pick` fn name.
     CommsAnswered,
     /// A marked entity entered the world.
     MarkedEntitySpawned,

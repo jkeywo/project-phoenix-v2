@@ -588,11 +588,27 @@ pub struct WorldEntity {
     /// disabled — is judged by the author through
     /// `ctx.effects.narrative_outcome(..)`.
     ///
+    /// Both spawn timings mark: `spawn_on = "immediate"` marks in
+    /// `world::server::spawn_immediate_entities_internal`, and `spawn_on =
+    /// "game_start"` in `server_app::world_setup::spawn_game_start_entities`.
+    /// The flag says nothing about WHEN the hull enters the world, so a story
+    /// hull the world holds back until the game starts is marked exactly as an
+    /// immediate one is.
+    ///
     /// Default `false`, and deliberately: PRD #1337's rule is that a story
     /// event is authored, never inferred, so an unmarked hull produces no
     /// timeline entry however violently it dies. Only NAMED entities can be
-    /// marked — the mark's payload IS the name — so setting it on an anonymous
-    /// instance does nothing.
+    /// marked — the mark's payload IS the name — so a row carrying the flag
+    /// without a [`name`](Self::name) records nothing, and
+    /// `world::validate::validate_entity_identity` raises a
+    /// `narrative-mark-needs-name` warning at load rather than dropping the
+    /// flag in silence.
+    ///
+    /// This field marks *declared* `[[entity]]` rows only. A hull a script
+    /// spawns mid-run (`ctx.effects.spawn_entity(..)`) has no `[[entity]]` row
+    /// to carry the flag and takes no mark: an author records its story through
+    /// `ctx.effects.narrative_outcome("name", "spawned" | "destroyed" | …)`
+    /// instead, which is the same vocabulary and reaches the same timeline.
     #[serde(default)]
     pub narrative: bool,
     /// Positioning, rotation and scale.

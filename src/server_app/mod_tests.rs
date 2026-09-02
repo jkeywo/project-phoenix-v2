@@ -6738,3 +6738,91 @@ fn game_over_publishes_no_outcome_when_none_was_declared() {
         other => panic!("expected GameOver, got {other:?}"),
     };
 }
+
+// ── The narrative mark on the GameStart spawn path (issue #1338) ──────────
+
+/// `narrative = true` says nothing about WHEN the hull enters the world, so
+/// the GameStart spawner marks exactly as the Immediate one does.
+///
+/// The combination the field doc promises and world validation accepts —
+/// `name` + `narrative = true` + `spawn_on = "game_start"` — used to spawn a
+/// hull with no `NarrativeMark`, so the run report recorded neither its
+/// arrival nor its death and nothing anywhere said why. That is the one
+/// failure PRD #1337's "authored, never inferred" rule cannot absorb: the
+/// author believes they marked it.
+#[test]
+fn a_game_start_entity_marked_narrative_carries_the_mark() {
+    use crate::core::narrative::NarrativeMark;
+    use crate::world::config::{
+        TransformConfig, WorldConfig as UnifiedWorldConfig, WorldEntity, WorldEntitySpawnOn,
+    };
+
+    // An `objective_marker` beacon rather than a hull: this test is about the
+    // mark, and a `ship`-tagged row would take the player-ship branch and drag
+    // the whole lobby loadout in with it.
+    fn beacon(name: &str, narrative: bool, x: f32) -> WorldEntity {
+        WorldEntity {
+            template_path: "assets/entities/nav_beacon.toml".into(),
+            name: Some(name.into()),
+            narrative,
+            spawn_on: WorldEntitySpawnOn::GameStart,
+            transform: Some(TransformConfig {
+                position: Some([x, 0.0, 0.0]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    let mut world_cfg = UnifiedWorldConfig::default();
+    world_cfg.entities.push(beacon("lyra", true, 120.0));
+    // The control: the same row without the flag. An unmarked hull produces no
+    // timeline entry however violently it dies.
+    world_cfg.entities.push(beacon("rock", false, 60.0));
+
+    let mut app = App::new();
+    app.insert_resource(world_cfg);
+    app.add_systems(Update, spawn_game_start_entities);
+    app.update();
+
+    let mut query = app.world_mut().query::<&NarrativeMark>();
+    let marks: Vec<String> = query.iter(app.world()).map(|mark| mark.0.clone()).collect();
+    assert_eq!(
+        marks,
+        vec!["lyra".to_string()],
+        "only the row that asked for it is marked, and the mark carries the \
+         world's authored name"
+    );
+}
+
+/// A nameless row cannot be marked — the mark's payload IS the name — and the
+/// spawner must not invent one. `world::validate` is what tells the author,
+/// through a `narrative-mark-needs-name` warning at load.
+#[test]
+fn a_nameless_game_start_entity_takes_no_mark() {
+    use crate::core::narrative::NarrativeMark;
+    use crate::world::config::{
+        TransformConfig, WorldConfig as UnifiedWorldConfig, WorldEntity, WorldEntitySpawnOn,
+    };
+
+    let mut world_cfg = UnifiedWorldConfig::default();
+    world_cfg.entities.push(WorldEntity {
+        template_path: "assets/entities/nav_beacon.toml".into(),
+        name: None,
+        narrative: true,
+        spawn_on: WorldEntitySpawnOn::GameStart,
+        transform: Some(TransformConfig {
+            position: Some([30.0, 0.0, 0.0]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+
+    let mut app = App::new();
+    app.insert_resource(world_cfg);
+    app.add_systems(Update, spawn_game_start_entities);
+    app.update();
+
+    let mut query = app.world_mut().query::<&NarrativeMark>();
+    assert_eq!(query.iter(app.world()).count(), 0);
+}

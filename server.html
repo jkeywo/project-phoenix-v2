@@ -211,11 +211,15 @@
     .gm-activity-metadata, .gm-activity-involved { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
     .gm-activity-tick, .gm-activity-category, .gm-activity-detail, .gm-activity-system { color: var(--ink-muted); }
     .gm-activity-category { text-transform: uppercase; letter-spacing: .08em; }
-    .gm-activity-identity {
+    .gm-activity-link {
       padding: .2rem .35rem; color: var(--ink-primary); background: transparent;
       border: 1px solid var(--edge-control); font: inherit; cursor: pointer;
     }
-    .gm-activity-identity:disabled { border-color: transparent; color: var(--ink-muted); cursor: default; }
+    .gm-activity-link:disabled { border-color: transparent; color: var(--ink-muted); cursor: default; }
+    #gm-activity-clear-filters {
+      align-self: end; padding: .45rem .75rem; color: var(--ink-primary);
+      background: var(--surface-panel-up); border: 1px solid var(--edge-control); font: inherit;
+    }
     #gm-entity-map {
       display: block; width: 100%; height: clamp(22rem, 54vh, 46rem);
       min-height: 22rem; border: 1px solid var(--edge-control); background: var(--surface-abyss);
@@ -1840,12 +1844,19 @@
                   <option value="all" data-i18n="server.gm.activity.filter.category_all"></option>
                   <option value="damage" data-i18n="server.gm.activity.category.damage"></option>
                   <option value="destruction" data-i18n="server.gm.activity.category.destruction"></option>
+                  <option value="objective" data-i18n="server.gm.activity.category.objective"></option>
+                  <option value="trigger" data-i18n="server.gm.activity.category.trigger"></option>
+                  <option value="red_alert" data-i18n="server.gm.activity.category.red_alert"></option>
+                  <option value="connection" data-i18n="server.gm.activity.category.connection"></option>
+                  <option value="gm_action" data-i18n="server.gm.activity.category.gm_action"></option>
                 </select>
               </label>
-              <label class="gm-activity-filter" for="gm-activity-identity-filter">
-                <span data-i18n="server.gm.activity.filter.identity"></span>
-                <select id="gm-activity-identity-filter"></select>
+              <label class="gm-activity-filter" for="gm-activity-ship-filter">
+                <span data-i18n="server.gm.activity.filter.ship"></span>
+                <select id="gm-activity-ship-filter"></select>
               </label>
+              <button id="gm-activity-clear-filters" type="button"
+                data-i18n="server.gm.activity.filter.clear"></button>
             </div>
             <p id="gm-activity-status" role="status" aria-live="polite" aria-atomic="true"></p>
             <p id="gm-activity-empty" data-i18n="server.gm.activity.empty"></p>

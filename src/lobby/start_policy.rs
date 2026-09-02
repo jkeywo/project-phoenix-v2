@@ -257,6 +257,10 @@ pub enum StartGrantReason {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StartGrantResult {
+    /// Logical tick at which the fixed-tick policy produced this terminal
+    /// result. The browser may not drain it until PostUpdate, after one or more
+    /// fixed steps have advanced `SimTick`.
+    pub tick: u64,
     pub status: StartGrantStatus,
     pub operator_id: Option<String>,
     pub reason: Option<StartGrantReason>,

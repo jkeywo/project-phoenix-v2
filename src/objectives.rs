@@ -557,6 +557,17 @@ impl ObjectiveManager {
         }
     }
 
+    /// Authored targets for one retained objective.
+    ///
+    /// This narrow read is used by transition observers at the mutation seam;
+    /// it deliberately exposes neither the private record nor mutable access.
+    pub fn targets(&self, id: &str) -> Option<&[String]> {
+        self.objectives
+            .iter()
+            .find(|objective| objective.id == id)
+            .map(|objective| objective.targets.as_slice())
+    }
+
     /// Remove the objective with `id` entirely (issue #751).
     ///
     /// Unlike `fail`/`complete` (which transition status but keep the record),

@@ -188,18 +188,27 @@ describe('host channel localisation boundary', () => {
       entries: [{
         tick: 9,
         category: 'damage',
-        victim: {
+        ships: [{
           entity_id: 'entity.alliance_destroyer.name',
           name: 'entity.alliance_destroyer.display_name',
-        },
-        source: null,
-        damage: {
-          victim_kind: 'ship',
-          weapon: 'entity.alliance_destroyer.name',
-          amount: 2,
-          shield_absorbed: 0,
-          hull_damage: 2,
-          system_hit: 'entity.alliance_destroyer.display_name',
+        }],
+        links: [{
+          role: 'victim',
+          entity: {
+            entity_id: 'entity.alliance_destroyer.name',
+            name: 'entity.alliance_destroyer.display_name',
+          },
+        }],
+        detail: {
+          type: 'damage',
+          data: {
+            victim_kind: 'ship',
+            weapon: 'entity.alliance_destroyer.name',
+            amount: 2,
+            shield_absorbed: 0,
+            hull_damage: 2,
+            system_hit: 'entity.alliance_destroyer.display_name',
+          },
         },
       }],
     };

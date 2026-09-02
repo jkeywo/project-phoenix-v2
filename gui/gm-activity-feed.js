@@ -1,15 +1,34 @@
 import { wireText } from './strings.js';
 
-/** Strict page-local adapter for the bounded GM damage/destruction feed. */
+/** Strict page-local adapter for the one bounded GM activity feed. */
 
-const CATEGORIES = new Set(['damage', 'destruction']);
+const CATEGORIES = new Set([
+  'damage',
+  'destruction',
+  'objective',
+  'trigger',
+  'red_alert',
+  'connection',
+  'gm_action',
+]);
+const LINK_ROLES = new Set(['source', 'victim', 'target', 'ship']);
 const VICTIM_KINDS = new Set(['ship', 'asteroid']);
+const OBJECTIVE_STATES = new Set(['active', 'completed', 'failed']);
+const CONNECTION_ROLES = new Set(['crew', 'spectator', 'game_master']);
+const CONNECTION_STATES = new Set(['connected', 'disconnected']);
+const ACTION_OUTCOMES = new Set(['applied', 'no-op', 'refused']);
 
 function normaliseReference(value) {
   if (!value || typeof value !== 'object'
       || typeof value.entity_id !== 'string' || value.entity_id.length === 0
       || typeof value.name !== 'string') return undefined;
   return { entity_id: value.entity_id, name: value.name };
+}
+
+function normaliseLink(value) {
+  if (!value || typeof value !== 'object' || !LINK_ROLES.has(value.role)) return undefined;
+  const entity = normaliseReference(value.entity);
+  return entity ? { role: value.role, entity } : undefined;
 }
 
 function normaliseDamage(value) {
@@ -30,16 +49,94 @@ function normaliseDamage(value) {
   };
 }
 
+function normalisePublicIdentity(value) {
+  if (!value || typeof value !== 'object'
+      || typeof value.id !== 'string' || value.id.length === 0
+      || typeof value.name !== 'string') return undefined;
+  return { id: value.id, name: value.name };
+}
+
+function normaliseAction(value) {
+  if (!value || typeof value !== 'object' || typeof value.type !== 'string') return undefined;
+  if (value.type === 'force_start') return { type: value.type };
+  if (value.type === 'set_session_paused' && typeof value.active === 'boolean') {
+    return { type: value.type, active: value.active };
+  }
+  return undefined;
+}
+
+function normaliseOrder(value) {
+  if (value === null) return null;
+  if (!value || typeof value !== 'object'
+      || !Number.isSafeInteger(value.sequence) || value.sequence < 0
+      || !Number.isSafeInteger(value.origin) || value.origin < 0) return undefined;
+  return { sequence: value.sequence, origin: value.origin };
+}
+
+function normaliseDetail(category, value) {
+  if (!value || typeof value !== 'object' || value.type !== category) return undefined;
+  const data = value.data;
+  if (category === 'damage') {
+    const damage = normaliseDamage(data);
+    return damage ? { type: category, data: damage } : undefined;
+  }
+  if (category === 'destruction') return { type: category };
+  if (category === 'objective') {
+    if (!data || typeof data !== 'object'
+        || typeof data.objective_id !== 'string' || data.objective_id.length === 0
+        || !OBJECTIVE_STATES.has(data.status)) return undefined;
+    return { type: category, data: { objective_id: data.objective_id, status: data.status } };
+  }
+  if (category === 'trigger') {
+    if (!data || typeof data !== 'object'
+        || typeof data.trigger_id !== 'string' || data.trigger_id.length === 0
+        || typeof data.origin !== 'string' || data.origin.length === 0) return undefined;
+    return { type: category, data: { trigger_id: data.trigger_id, origin: data.origin } };
+  }
+  if (category === 'red_alert') {
+    if (!data || typeof data !== 'object' || typeof data.active !== 'boolean') return undefined;
+    return { type: category, data: { active: data.active } };
+  }
+  if (category === 'connection') {
+    const identity = normalisePublicIdentity(data?.identity);
+    const ship = data?.ship === null ? null : normaliseReference(data?.ship);
+    if (!identity || !CONNECTION_ROLES.has(data?.role)
+        || !CONNECTION_STATES.has(data?.state) || ship === undefined) return undefined;
+    return { type: category, data: { identity, role: data.role, state: data.state, ship } };
+  }
+  if (category === 'gm_action') {
+    const operator = normalisePublicIdentity(data?.operator);
+    const action = normaliseAction(data?.action);
+    const order = normaliseOrder(data?.order);
+    if (!operator || typeof data?.correlation !== 'string' || data.correlation.length === 0
+        || !action || !ACTION_OUTCOMES.has(data?.outcome)
+        || (data.reason !== null && typeof data.reason !== 'string')
+        || order === undefined) return undefined;
+    return {
+      type: category,
+      data: {
+        operator,
+        correlation: data.correlation,
+        action,
+        outcome: data.outcome,
+        reason: data.reason,
+        order,
+      },
+    };
+  }
+  return undefined;
+}
+
 function normaliseEntry(value) {
   if (!value || typeof value !== 'object'
       || !Number.isSafeInteger(value.tick) || value.tick < 0
-      || !CATEGORIES.has(value.category)) return undefined;
-  const victim = normaliseReference(value.victim);
-  const source = value.source === null ? null : normaliseReference(value.source);
-  const damage = value.damage === null ? null : normaliseDamage(value.damage);
-  if (!victim || source === undefined || damage === undefined
-      || (value.category === 'damage') !== (damage !== null)) return undefined;
-  return { tick: value.tick, category: value.category, victim, source, damage };
+      || !CATEGORIES.has(value.category)
+      || !Array.isArray(value.ships) || !Array.isArray(value.links)) return undefined;
+  const ships = value.ships.map(normaliseReference);
+  const links = value.links.map(normaliseLink);
+  const detail = normaliseDetail(value.category, value.detail);
+  if (ships.some((ship) => !ship) || links.some((link) => !link) || !detail) return undefined;
+  return { tick: value.tick, category: value.category, ships, links, detail };
 }
 
 /** Parse one absolute payload without retaining partial or recursively localised data. */
@@ -74,16 +171,14 @@ export function reduceGmActivityFeed(_previous, payload) {
   };
 }
 
-/** Category plus exact involved-identity filtering, oldest first. */
+/** Category and semantic ship filters compose as a strict AND. */
 export function filterGmActivityEntries(
   entries,
-  { category = 'all', identity = 'all' } = {},
+  { category = 'all', ship = 'all' } = {},
 ) {
   return entries.filter((entry) => (
     (category === 'all' || entry.category === category)
-      && (identity === 'all'
-        || entry.victim.entity_id === identity
-        || entry.source?.entity_id === identity)
+      && (ship === 'all' || entry.ships.some((candidate) => candidate.entity_id === ship))
   ));
 }
 
@@ -97,7 +192,8 @@ export function createGmActivityFeed({
   const region = doc && doc.getElementById('gm-activity');
   const heading = doc && doc.getElementById('gm-activity-heading');
   const categoryFilter = doc && doc.getElementById('gm-activity-category-filter');
-  const identityFilter = doc && doc.getElementById('gm-activity-identity-filter');
+  const shipFilter = doc && doc.getElementById('gm-activity-ship-filter');
+  const clearButton = doc && doc.getElementById('gm-activity-clear-filters');
   const status = doc && doc.getElementById('gm-activity-status');
   const list = doc && doc.getElementById('gm-activity-list');
   const empty = doc && doc.getElementById('gm-activity-empty');
@@ -118,6 +214,7 @@ export function createGmActivityFeed({
     list.setAttribute('aria-relevant', 'additions text');
   }
   if (empty) empty.textContent = t('server.gm.activity.empty');
+  if (clearButton) clearButton.textContent = t('server.gm.activity.filter.clear');
   if (categoryFilter) {
     for (const option of categoryFilter.options) {
       const suffix = option.value === 'all' ? 'filter.category_all' : `category.${option.value}`;
@@ -134,7 +231,7 @@ export function createGmActivityFeed({
     try { return containsEntity(id) === true; } catch (_) { return false; }
   }
 
-  function paintIdentityButton(button) {
+  function paintLink(button) {
     const available = isAvailable(button.dataset.entityId);
     button.disabled = !available;
     button.setAttribute('aria-disabled', available ? 'false' : 'true');
@@ -143,52 +240,111 @@ export function createGmActivityFeed({
       : 'server.gm.activity.select_unavailable');
   }
 
-  function identityButton(reference, role) {
+  function linkButton(link) {
     const button = doc.createElement('button');
     button.type = 'button';
-    button.className = 'gm-activity-identity';
-    button.dataset.entityId = reference.entity_id;
-    button.dataset.involvement = role;
-    button.textContent = shownName(reference);
+    button.className = 'gm-activity-link';
+    button.dataset.entityId = link.entity.entity_id;
+    button.dataset.involvement = link.role;
+    button.textContent = shownName(link.entity);
     button.setAttribute('aria-label', t('server.gm.activity.select_entity', {
-      name: shownName(reference),
+      name: shownName(link.entity),
     }));
-    paintIdentityButton(button);
+    paintLink(button);
     button.addEventListener('click', () => {
-      // Re-check at activation: a gm_entity replacement may have raced this
-      // paint. A failed selection is a no-op and cannot clear another target.
-      if (!isAvailable(reference.entity_id)) {
-        paintIdentityButton(button);
+      if (!isAvailable(link.entity.entity_id)) {
+        paintLink(button);
         return;
       }
       let selected = false;
-      try { selected = selectEntity(reference.entity_id) === true; } catch (_) { selected = false; }
-      if (!selected) paintIdentityButton(button);
+      try { selected = selectEntity(link.entity.entity_id) === true; } catch (_) { selected = false; }
+      if (!selected) paintLink(button);
     });
     return button;
   }
 
-  function rebuildIdentityFilter() {
-    if (!identityFilter) return;
-    const wanted = identityFilter.value || 'all';
-    const identities = new Map();
+  function rebuildShipFilter() {
+    if (!shipFilter) return;
+    const wanted = shipFilter.value || 'all';
+    const ships = new Map();
     for (const entry of state.entries) {
-      identities.set(entry.victim.entity_id, entry.victim);
-      if (entry.source) identities.set(entry.source.entity_id, entry.source);
+      for (const ship of entry.ships) {
+        if (isAvailable(ship.entity_id)) ships.set(ship.entity_id, ship);
+      }
     }
-    identityFilter.replaceChildren();
+    shipFilter.replaceChildren();
     const all = doc.createElement('option');
     all.value = 'all';
-    all.textContent = t('server.gm.activity.filter.identity_all');
-    identityFilter.appendChild(all);
-    for (const reference of [...identities.values()]
+    all.textContent = t('server.gm.activity.filter.ship_all');
+    shipFilter.appendChild(all);
+    for (const ship of [...ships.values()]
       .sort((left, right) => left.entity_id.localeCompare(right.entity_id))) {
       const option = doc.createElement('option');
-      option.value = reference.entity_id;
-      option.textContent = shownName(reference);
-      identityFilter.appendChild(option);
+      option.value = ship.entity_id;
+      option.textContent = shownName(ship);
+      shipFilter.appendChild(option);
     }
-    identityFilter.value = identities.has(wanted) ? wanted : 'all';
+    shipFilter.value = ships.has(wanted) ? wanted : 'all';
+  }
+
+  function appendLinks(row, entry) {
+    if (entry.links.length === 0) return;
+    const involved = doc.createElement('div');
+    involved.className = 'gm-activity-involved';
+    for (const link of entry.links) {
+      const role = doc.createElement('span');
+      role.className = 'gm-activity-link-role';
+      role.textContent = t(`server.gm.activity.link_role.${link.role}`);
+      involved.append(role, linkButton(link));
+    }
+    row.appendChild(involved);
+  }
+
+  function detailText(entry) {
+    const detail = entry.detail.data;
+    switch (entry.category) {
+      case 'damage':
+        return t('server.gm.activity.damage_detail', {
+          amount: String(detail.amount),
+          shield: String(detail.shield_absorbed),
+          hull: String(detail.hull_damage),
+          weapon: detail.weapon,
+          kind: t(`server.gm.activity.victim_kind.${detail.victim_kind}`),
+        });
+      case 'destruction':
+        return t('server.gm.activity.destruction_detail');
+      case 'objective':
+        return t('server.gm.activity.objective_detail', {
+          objective: displayText(detail.objective_id, detail.objective_id),
+          status: t(`server.gm.activity.objective_status.${detail.status}`),
+        });
+      case 'trigger':
+        return t('server.gm.activity.trigger_detail', {
+          trigger: detail.trigger_id,
+          origin: detail.origin,
+        });
+      case 'red_alert':
+        return t(`server.gm.activity.red_alert.${detail.active ? 'active' : 'inactive'}`);
+      case 'connection':
+        return t('server.gm.activity.connection_detail', {
+          name: detail.identity.name || detail.identity.id,
+          role: t(`server.gm.activity.connection_role.${detail.role}`),
+          state: t(`server.gm.activity.connection_state.${detail.state}`),
+        });
+      case 'gm_action': {
+        const action = detail.action.type === 'force_start'
+          ? t('server.gm.activity.action.force_start')
+          : t(`server.gm.activity.action.${detail.action.active ? 'pause' : 'resume'}`);
+        return t('server.gm.activity.gm_action_detail', {
+          operator: detail.operator.name || detail.operator.id,
+          action,
+          outcome: t(`server.gm.activity.action_outcome.${detail.outcome}`),
+          correlation: detail.correlation,
+        });
+      }
+      default:
+        return '';
+    }
   }
 
   function appendEntry(entry) {
@@ -196,8 +352,6 @@ export function createGmActivityFeed({
     row.className = 'gm-activity-entry';
     row.dataset.tick = String(entry.tick);
     row.dataset.category = entry.category;
-    row.dataset.victimId = entry.victim.entity_id;
-    if (entry.source) row.dataset.sourceId = entry.source.entity_id;
 
     const metadata = doc.createElement('div');
     metadata.className = 'gm-activity-metadata';
@@ -210,49 +364,36 @@ export function createGmActivityFeed({
     metadata.append(tick, category);
     row.appendChild(metadata);
 
-    const involved = doc.createElement('div');
-    involved.className = 'gm-activity-involved';
-    if (entry.source) involved.appendChild(identityButton(entry.source, 'source'));
-    else {
-      const environment = doc.createElement('span');
-      environment.className = 'gm-activity-environment';
-      environment.textContent = t('server.gm.activity.environment');
-      involved.appendChild(environment);
-    }
-    const direction = doc.createElement('span');
-    direction.className = 'gm-activity-direction';
-    direction.textContent = t('server.gm.activity.direction');
-    involved.append(direction, identityButton(entry.victim, 'victim'));
-    row.appendChild(involved);
+    appendLinks(row, entry);
 
-    if (entry.damage) {
-      const detail = doc.createElement('div');
-      detail.className = 'gm-activity-detail';
-      detail.textContent = t('server.gm.activity.damage_detail', {
-        amount: String(entry.damage.amount),
-        shield: String(entry.damage.shield_absorbed),
-        hull: String(entry.damage.hull_damage),
-        weapon: entry.damage.weapon,
-        kind: t(`server.gm.activity.victim_kind.${entry.damage.victim_kind}`),
+    const detail = doc.createElement('div');
+    detail.className = 'gm-activity-detail';
+    detail.textContent = detailText(entry);
+    row.appendChild(detail);
+    if (entry.category === 'damage' && entry.detail.data.system_hit) {
+      const system = doc.createElement('div');
+      system.className = 'gm-activity-system';
+      system.textContent = t('server.gm.activity.system_hit', {
+        system: entry.detail.data.system_hit,
       });
-      row.appendChild(detail);
-      if (entry.damage.system_hit) {
-        const system = doc.createElement('div');
-        system.className = 'gm-activity-system';
-        system.textContent = t('server.gm.activity.system_hit', {
-          system: entry.damage.system_hit,
-        });
-        row.appendChild(system);
-      }
+      row.appendChild(system);
+    }
+    if (entry.category === 'gm_action' && entry.detail.data.reason) {
+      const reason = doc.createElement('div');
+      reason.className = 'gm-activity-reason';
+      reason.textContent = t('server.gm.activity.action_reason', {
+        reason: t(`server.gm.activity.action_reason.${entry.detail.data.reason}`),
+      });
+      row.appendChild(reason);
     }
     list.appendChild(row);
   }
 
-  function render({ rebuildIdentities = true } = {}) {
-    if (rebuildIdentities) rebuildIdentityFilter();
+  function render({ rebuildShips = true } = {}) {
+    if (rebuildShips) rebuildShipFilter();
     const filtered = filterGmActivityEntries(state.entries, {
       category: categoryFilter?.value || 'all',
-      identity: identityFilter?.value || 'all',
+      ship: shipFilter?.value || 'all',
     });
     if (list) {
       list.replaceChildren();
@@ -276,25 +417,35 @@ export function createGmActivityFeed({
     return true;
   }
 
-  function reconcileAvailability() {
-    if (!list) return;
-    for (const button of list.querySelectorAll('.gm-activity-identity')) {
-      paintIdentityButton(button);
-    }
+  function clearFilters() {
+    if (categoryFilter) categoryFilter.value = 'all';
+    if (shipFilter) shipFilter.value = 'all';
+    render();
   }
 
-  const onFilter = () => render({ rebuildIdentities: false });
+  function reconcileAvailability() {
+    rebuildShipFilter();
+    if (list) {
+      for (const button of list.querySelectorAll('.gm-activity-link')) paintLink(button);
+    }
+    render({ rebuildShips: false });
+  }
+
+  const onFilter = () => render({ rebuildShips: false });
   categoryFilter?.addEventListener('change', onFilter);
-  identityFilter?.addEventListener('change', onFilter);
+  shipFilter?.addEventListener('change', onFilter);
+  clearButton?.addEventListener('click', clearFilters);
   render();
 
   return {
     update,
+    clearFilters,
     reconcileAvailability,
     state: () => ({ capacity: state.capacity, entries: [...state.entries] }),
     destroy: () => {
       categoryFilter?.removeEventListener('change', onFilter);
-      identityFilter?.removeEventListener('change', onFilter);
+      shipFilter?.removeEventListener('change', onFilter);
+      clearButton?.removeEventListener('click', clearFilters);
     },
   };
 }

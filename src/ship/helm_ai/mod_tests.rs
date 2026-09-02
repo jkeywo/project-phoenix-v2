@@ -2721,8 +2721,8 @@ fn detect_reach_completion_marks_objective_complete() {
 /// variant literally and would stay green even if this wiring were deleted;
 /// this is the only guard on the `ObjectiveCompleted` emission itself.
 ///
-/// Two ticks share one cursor: arrival emits exactly one
-/// `ObjectiveCompleted` for the right id, and the second tick — where
+/// Two ticks share one cursor: arrival emits the compatibility completion fact
+/// plus the lifecycle fact for the right id, and the second tick — where
 /// `complete()` no longer transitions — emits nothing, pinning the
 /// idempotency guard (deleting `if complete()` would double-emit here).
 #[test]
@@ -2771,14 +2771,26 @@ fn detect_reach_completion_emits_objective_completed_once() {
     let first: Vec<&crate::core::balance::BalanceEvent> = cursor.read(messages).collect();
     assert_eq!(
         first.len(),
-        1,
-        "arrival must emit exactly one balance event, got {first:?}"
+        2,
+        "arrival must emit both source facts: {first:?}"
     );
     match first[0] {
         crate::core::balance::BalanceEvent::ObjectiveCompleted { objective_id } => {
             assert_eq!(objective_id, "reach-dock-alpha");
         }
         other => panic!("expected ObjectiveCompleted, got {other:?}"),
+    }
+    match first[1] {
+        crate::core::balance::BalanceEvent::ObjectiveChanged {
+            objective_id,
+            status,
+            targets,
+        } => {
+            assert_eq!(objective_id, "reach-dock-alpha");
+            assert_eq!(*status, crate::core::messages::ObjectiveStatus::Completed);
+            assert!(targets.is_empty());
+        }
+        other => panic!("expected ObjectiveChanged, got {other:?}"),
     }
 
     tick(&mut app);

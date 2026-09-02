@@ -87,7 +87,7 @@ pub struct GmEntityProjectionChanged {
     pub payload: crate::gm_projection::GmEntityProjectionPayload,
 }
 
-/// Absolute bounded damage/destruction activity for the rendererless GM page.
+/// Absolute bounded multi-category activity for the rendererless GM page.
 /// Drained only by the local Host Channel; it never enters the peer wire.
 #[derive(Message, Clone, Debug)]
 pub struct GmActivityFeedChanged {

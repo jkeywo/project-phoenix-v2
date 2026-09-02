@@ -1464,6 +1464,7 @@ pub fn apply_mesh_inbox(
                                 grant,
                                 crate::lobby::start_policy::StartGrantStatus::Refused,
                                 Some(reason),
+                                now,
                             ));
                         }
                     } else if let Some(pending) = pending_starts.as_deref_mut() {

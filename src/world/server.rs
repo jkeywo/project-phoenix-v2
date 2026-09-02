@@ -2480,6 +2480,34 @@ pub(crate) fn tick_trigger_pipeline(
 
         let mut next_events: Vec<WorldEvent> = Vec::new();
         for (idx, ft) in fired {
+            let handler = script
+                .runtime
+                .as_deref()
+                .and_then(|runtime| runtime.handlers.get(idx))
+                .and_then(Clone::clone);
+            let origin = handler
+                .as_ref()
+                .map(|handler| handler.script_path.clone())
+                .or_else(|| ft.origin_layer.clone())
+                .unwrap_or_else(|| "base-world".to_owned());
+            let trigger_id = runtime.trigger_states[idx].trigger.id.clone().or_else(|| {
+                handler
+                    .as_ref()
+                    .map(|handler| format!("{}::{}", handler.script_path, handler.fn_name))
+            });
+            if let (Some(trigger_id), Some(msgs)) = (trigger_id, balance_events.as_deref_mut()) {
+                let entity = ft
+                    .entity_name
+                    .as_deref()
+                    .and_then(|name| name_to_uuid.get(name))
+                    .cloned();
+                msgs.write(crate::core::balance::BalanceEvent::TriggerFired {
+                    trigger_id,
+                    origin,
+                    entity,
+                });
+            }
+
             // The handler for this trigger (IP-2, issue #984, Rhai M6 phase 2a).
             // A per-action dispatch loop for the fired trigger's own
             // `[[trigger.action]]` array used to run first; issue #985 deleted
@@ -2502,7 +2530,6 @@ pub(crate) fn tick_trigger_pipeline(
                     "WorldScriptRuntime::handlers has desynced from \
                      WorldContentRuntime::trigger_states"
                 );
-                let handler = sr.handlers.get(idx).and_then(|h| h.clone());
                 if let Some(h) = handler {
                     // The store chain THIS handler reads through (issue #1045):
                     // its own layer first, then outward to the base world — the
@@ -3120,6 +3147,7 @@ pub(crate) fn apply_dispatch_result(
                 command_stance,
                 origin_layer,
             } => {
+                let activity_targets = targets.clone();
                 let added = objectives.0.add_full_with_params(
                     id.clone(),
                     text,
@@ -3136,6 +3164,13 @@ pub(crate) fn apply_dispatch_result(
                 // a genuinely new insert, and only for layer-authored
                 // triggers with a live layer-map entry.
                 if added {
+                    if let Some(msgs) = balance_events.as_deref_mut() {
+                        msgs.write(crate::core::balance::BalanceEvent::ObjectiveChanged {
+                            objective_id: id.clone(),
+                            status: crate::core::messages::ObjectiveStatus::Active,
+                            targets: activity_targets,
+                        });
+                    }
                     if let (Some(path), Some(lm)) = (origin_layer, layer_map.as_deref_mut()) {
                         if let Some(layer) = lm.0.get_mut(&path) {
                             layer.owned_objective_ids.push(id);
@@ -3163,12 +3198,25 @@ pub(crate) fn apply_dispatch_result(
                         msgs.write(crate::core::balance::BalanceEvent::ObjectiveCompleted {
                             objective_id: id.clone(),
                         });
+                        msgs.write(crate::core::balance::BalanceEvent::ObjectiveChanged {
+                            objective_id: id.clone(),
+                            status: crate::core::messages::ObjectiveStatus::Completed,
+                            targets: objectives.0.targets(&id).unwrap_or_default().to_vec(),
+                        });
                     }
                 }
             }
 
             ActionCmd::FailObjective { id } => {
-                objectives.0.fail(&id);
+                if objectives.0.fail(&id) {
+                    if let Some(msgs) = balance_events.as_deref_mut() {
+                        msgs.write(crate::core::balance::BalanceEvent::ObjectiveChanged {
+                            objective_id: id.clone(),
+                            status: crate::core::messages::ObjectiveStatus::Failed,
+                            targets: objectives.0.targets(&id).unwrap_or_default().to_vec(),
+                        });
+                    }
+                }
             }
 
             ActionCmd::ApplyModifier {

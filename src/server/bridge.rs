@@ -1083,7 +1083,7 @@ pub mod host_channels {
     /// Rendererless GM peer's absolute omniscient ship-map projection. This
     /// callback is page-local and never enters the peer transport.
     pub const GM_ENTITY: &str = "gm_entity";
-    /// Rendererless GM peer's absolute bounded damage/destruction feed. This
+    /// Rendererless GM peer's absolute bounded multi-category feed. This
     /// callback is page-local and never enters the peer transport.
     pub const GM_ACTIVITY: &str = "gm_activity";
     /// Authoritative pause state plus attributed typed-action results.
@@ -1537,7 +1537,9 @@ pub fn wasm_init() {
         PostUpdate,
         (
             flush_outbound,
-            flush_host_channels.after(crate::gm_action::publish_session_projection),
+            flush_host_channels
+                .after(crate::gm_action::publish_session_projection)
+                .after(crate::gm_activity::publish_frame_activity),
             publish_sim_tick,
             publish_god_mode,
             publish_instagib,
@@ -1554,7 +1556,7 @@ pub fn wasm_init() {
             // so everything those ticks sealed goes out in one batch.
             flush_mesh_outbound,
             publish_mesh_status,
-            flush_start_grant_results,
+            flush_start_grant_results.after(crate::gm_activity::publish_frame_activity),
         ),
     );
 

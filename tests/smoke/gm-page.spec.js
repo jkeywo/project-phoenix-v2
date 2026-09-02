@@ -551,16 +551,17 @@ test('real damage and destruction stay ordered bounded and selectable after remo
     const feed = window.__hostGmActivityState?.();
     return feed?.entries?.some((entry) => entry.category === 'damage')
       && document.querySelector('.gm-activity-entry[data-category="damage"]'
-        + ' .gm-activity-identity[data-involvement="victim"]:not(:disabled)');
+        + ' .gm-activity-link[data-involvement="victim"]:not(:disabled)');
   });
   const liveVictim = await page.evaluate(() => {
     const feed = window.__hostGmActivityState();
     const entry = feed.entries.find((candidate) => candidate.category === 'damage');
+    const victim = entry.links.find((link) => link.role === 'victim').entity;
     const button = [...document.querySelectorAll('.gm-activity-entry[data-category="damage"]'
-      + ' .gm-activity-identity[data-involvement="victim"]')]
-      .find((candidate) => candidate.dataset.entityId === entry.victim.entity_id);
+      + ' .gm-activity-link[data-involvement="victim"]')]
+      .find((candidate) => candidate.dataset.entityId === victim.entity_id);
     button.click();
-    return { id: entry.victim.entity_id, name: button.textContent };
+    return { id: victim.entity_id, name: button.textContent };
   });
   expect(liveVictim.id).toMatch(/^[0-9a-f-]{36}$/i);
   expect(liveVictim.name.length).toBeGreaterThan(0);
@@ -569,20 +570,41 @@ test('real damage and destruction stay ordered bounded and selectable after remo
       && document.getElementById('gm-entity-card').dataset.entityId === uuid
   ), liveVictim.id);
 
+  // Category and semantic ship filters compose as a strict AND; clearing is
+  // one explicit operation that restores both defaults.
+  await page.selectOption('#gm-activity-category-filter', 'damage');
+  await page.selectOption('#gm-activity-ship-filter', liveVictim.id);
+  expect(await page.locator('.gm-activity-entry').evaluateAll((rows, uuid) => (
+    rows.length > 0 && rows.every((row) => {
+      const state = window.__hostGmActivityState();
+      const entry = state.entries.find((candidate) => String(candidate.tick) === row.dataset.tick
+        && candidate.category === row.dataset.category
+        && candidate.ships.some((ship) => ship.entity_id === uuid));
+      return row.dataset.category === 'damage' && Boolean(entry);
+    })
+  ), liveVictim.id)).toBe(true);
+  await page.click('#gm-activity-clear-filters');
+  expect(await page.evaluate(() => ({
+    category: document.getElementById('gm-activity-category-filter').value,
+    ship: document.getElementById('gm-activity-ship-filter').value,
+  }))).toEqual({ category: 'all', ship: 'all' });
+
   await page.waitForFunction((uuid) => {
     const feed = window.__hostGmActivityState?.();
     const map = document.getElementById('gm-entity-map');
     return feed?.capacity === 4
       && feed.entries.length === 4
       && feed.entries.at(-1)?.category === 'destruction'
-      && feed.entries.at(-1)?.victim.entity_id === uuid
+      && feed.entries.at(-1)?.links.some((link) => (
+        link.role === 'victim' && link.entity.entity_id === uuid
+      ))
       && !map.state.blips.some((blip) => blip.uuid === uuid);
   }, liveVictim.id, { timeout: 30_000 });
 
   const retained = await page.evaluate((uuid) => {
     const feed = window.__hostGmActivityState();
     const buttons = [...document.querySelectorAll(
-      `.gm-activity-identity[data-involvement="victim"][data-entity-id="${uuid}"]`,
+      `.gm-activity-link[data-involvement="victim"][data-entity-id="${uuid}"]`,
     )];
     return {
       capacity: feed.capacity,
@@ -597,14 +619,16 @@ test('real damage and destruction stay ordered bounded and selectable after remo
   }, liveVictim.id);
   expect(retained.capacity).toBe(4);
   expect(retained.entries).toHaveLength(4);
-  expect(retained.entries.every((entry) => entry.victim.entity_id === liveVictim.id)).toBe(true);
+  expect(retained.entries.every((entry) => entry.ships.some((ship) => (
+    ship.entity_id === liveVictim.id
+  )))).toBe(true);
   expect(retained.entries.at(-1).category).toBe('destruction');
   const finalTick = retained.entries.at(-1).tick;
   const finalBatch = retained.entries.filter((entry) => entry.tick === finalTick);
   expect(finalBatch.map((entry) => entry.category)).toEqual(['damage', 'destruction']);
   const damageSignatures = retained.entries
     .filter((entry) => entry.category === 'damage')
-    .map((entry) => JSON.stringify(entry.damage));
+    .map((entry) => JSON.stringify(entry.detail.data));
   expect(new Set(damageSignatures).size).toBeLessThan(damageSignatures.length);
   expect(retained.buttons.length).toBeGreaterThan(0);
   expect(retained.buttons.every((button) => button.text === liveVictim.name)).toBe(true);

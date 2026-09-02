@@ -192,6 +192,13 @@ impl StartGrantResults {
         self.0.drain(..)
     }
 
+    /// Observe typed grant outcomes before the browser bridge destructively
+    /// drains them. The GM activity publisher uses this fan-out seam so an
+    /// operational Force Start result cannot race its existing host callback.
+    pub fn iter(&self) -> impl Iterator<Item = &crate::lobby::start_policy::StartGrantResult> {
+        self.0.iter()
+    }
+
     pub fn clear(&mut self) {
         self.0.clear();
     }
@@ -1891,8 +1898,10 @@ pub(crate) fn start_result(
     grant: &crate::lobby::start_policy::StartGrant,
     status: crate::lobby::start_policy::StartGrantStatus,
     reason: Option<crate::lobby::start_policy::StartGrantReason>,
+    tick: u64,
 ) -> crate::lobby::start_policy::StartGrantResult {
     crate::lobby::start_policy::StartGrantResult {
+        tick,
         status,
         operator_id: grant.operator_id.clone(),
         reason,
@@ -1937,6 +1946,13 @@ fn apply_pending_start_grants(
     mut mesh_outbox: Option<ResMut<crate::lockstep::MeshOutbox>>,
 ) {
     let mut started_this_tick = false;
+    let source_tick = sim_tick.as_deref().map_or(0, |tick| tick.0);
+    let start_result =
+        |grant: &crate::lobby::start_policy::StartGrant,
+         status: crate::lobby::start_policy::StartGrantStatus,
+         reason: Option<crate::lobby::start_policy::StartGrantReason>| {
+            start_result(grant, status, reason, source_tick)
+        };
     // Process only the grants present at entry. Future grants are requeued;
     // walking until empty would immediately pop the same one forever.
     let queued_at_entry = pending.len();
@@ -3003,13 +3019,21 @@ mod tests {
             .resource_mut::<PendingStartGrants>()
             .try_push(automatic_grant(1)));
 
+        let source_tick = app.world().resource::<crate::sim_tick::SimTick>().0;
         let out = tick(&mut app);
         assert!(out
             .iter()
             .any(|message| matches!(message.msg, ServerMessage::GameStarted)));
+        let result = take_start_results(&mut app).pop().unwrap();
         assert_eq!(
-            take_start_results(&mut app)[0].status,
+            result.status,
             crate::lobby::start_policy::StartGrantStatus::Applied
+        );
+        assert_eq!(result.tick, source_tick);
+        assert_eq!(
+            app.world().resource::<crate::sim_tick::SimTick>().0,
+            source_tick + 1,
+            "the result must not inherit PostUpdate's continuation tick"
         );
     }
 

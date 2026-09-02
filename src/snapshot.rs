@@ -5306,6 +5306,7 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
     // bootstrap's stale projection immediately so host-channel readers cannot
     // observe pre-restore results before the next PreUpdate recomputes them.
     world.insert_resource(gm_actions.applied_log());
+    crate::gm_activity::rebase_after_restore(world);
     if snapshot.paused {
         // Pausing is always safe and must take effect before this frame can enter
         // FixedUpdate. Do not symmetrically unpause here: lockstep recovery,

@@ -3,7 +3,7 @@ title: Message Flow
 type: concept
 tags: [messages, bridge, wasm, bevy, events, routing, delivery-class, snapshot, coordination, gm]
 sources: [src/core/debug_surface.rs, src/debug/catalogue.rs, src/server/bridge.rs, src/core/codec.rs, src/core/messages.rs, src/core/broadcast/, src/lobby/server.rs, src/lobby/handler.rs, src/command_admission/, src/gm_action.rs, src/gm_join.rs, src/gm_activity.rs, src/lockstep/frame.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/server_app/registration.rs, src/ship/shields.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/console/helm/server.rs, src/console/weapons/server.rs, src/console/repair/server.rs, src/console_bridge.rs, server.html, client.html, gui/client-router.js, gui/host-channel.js, gui/gm-activity-feed.js, gui/host-mesh.js, gui/fleet-session.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/debug-surfaces.generated.js, gui/debug-surface-adapters.js, gui/server-settings.js, gui/settings-panel.js, gui/sim-state.js, gui/console-state.js, gui/coordination-popup.js, scripts/generate-debug-surfaces.mjs, scripts/build-client.mjs, AGENTS.md]
-updated: 2026-09-01
+updated: 2026-09-02
 ---
 
 # Message Flow
@@ -94,12 +94,20 @@ back to reliable when that channel is absent.
 
 The browser host also owns page-local Host Channels which never enter that
 peer route. For a rendererless GM, `gm_entity` carries the absolute stable-ID
-map and `gm_activity` carries an absolute bounded damage/destruction history.
-The latter is projected from `BalanceEvent` after fixed-tick producers and is
-flushed by `src/server/bridge.rs` directly to `server.html`; it is not a new
-simulation event bus, `ServerMessage`, mesh frame, snapshot, or digest input.
-Both strict DTOs remain raw at the dispatcher and localise only their explicit
-display-name fields while rendering.
+map and `gm_activity` carries one absolute bounded seven-category history:
+Damage, Destruction, Objective, Trigger, Red Alert, Connection, and GM Action.
+Every row shares the raw `{ tick, category, ships, links, detail }` contract.
+Fixed source facts and fixed-step connection changes are stamped before
+`advance_sim_tick`; sampling each completed step preserves the real source tick
+when one rendered frame spends several fixed steps. PostUpdate catches
+connection changes made while paused or in a frame with no fixed step, fans out
+terminal Pause/Resume and typed Force Start results using their producing tick,
+and publishes one replacement before the host bridge drains those results.
+The browser's category and semantic-ship filters compose as a strict AND;
+global rows appear only under All ships, while selection links remain separate
+from filtering. The feed is not a new simulation event bus, `ServerMessage`,
+mesh frame, snapshot, or digest input. Both strict DTOs remain raw at the
+dispatcher and localise only explicit display fields while rendering.
 
 ## Reconnect and disconnect
 

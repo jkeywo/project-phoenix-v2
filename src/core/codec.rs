@@ -77,7 +77,7 @@ pub fn encode_gm_entity_projection(
 }
 
 /// Encode the rendererless GM peer's absolute bounded activity Host Channel
-/// projection (issue #1297).
+/// projection (issues #1297/#1298).
 pub fn encode_gm_activity_feed(
     payload: &crate::gm_activity::GmActivityFeedPayload,
 ) -> Result<String, serde_json::Error> {

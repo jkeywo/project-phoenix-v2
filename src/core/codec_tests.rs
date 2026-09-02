@@ -1053,18 +1053,30 @@ fn encode_gm_entity_projection_pins_the_local_host_channel_shape() {
 
 #[test]
 fn encode_gm_activity_feed_pins_the_local_host_channel_shape() {
-    let payload = crate::gm_activity::GmActivityFeedPayload {
+    use crate::gm_activity::{
+        GmActivityAction, GmActivityActionOutcome, GmActivityCategory, GmActivityConnection,
+        GmActivityConnectionRole, GmActivityConnectionState, GmActivityDamage, GmActivityDetail,
+        GmActivityEntry, GmActivityFeedPayload, GmActivityGmAction, GmActivityLink,
+        GmActivityLinkRole, GmActivityObjective, GmActivityObjectiveStatus,
+        GmActivityPublicIdentity, GmActivityRedAlert, GmActivityTrigger,
+    };
+    let ship = crate::gm_projection::GmEntityReference {
+        entity_id: "00000000-0000-4000-8000-000000000001".into(),
+        name: "entity.alliance_cruiser.display_name".into(),
+    };
+    let ship_link = GmActivityLink {
+        role: GmActivityLinkRole::Ship,
+        entity: ship.clone(),
+    };
+    let payload = GmActivityFeedPayload {
         capacity: 128,
         entries: vec![
-            crate::gm_activity::GmActivityEntry {
+            GmActivityEntry {
                 tick: 42,
-                category: crate::gm_activity::GmActivityCategory::Damage,
-                victim: crate::gm_projection::GmEntityReference {
-                    entity_id: "00000000-0000-4000-8000-000000000001".into(),
-                    name: "entity.alliance_cruiser.display_name".into(),
-                },
-                source: None,
-                damage: Some(crate::gm_activity::GmActivityDamage {
+                category: GmActivityCategory::Damage,
+                ships: vec![ship.clone()],
+                links: vec![ship_link.clone()],
+                detail: GmActivityDetail::Damage(GmActivityDamage {
                     victim_kind: crate::core::balance::VictimKind::Ship,
                     weapon: "region".into(),
                     amount: 4.0,
@@ -1073,24 +1085,80 @@ fn encode_gm_activity_feed_pins_the_local_host_channel_shape() {
                     system_hit: None,
                 }),
             },
-            crate::gm_activity::GmActivityEntry {
+            GmActivityEntry {
                 tick: 42,
-                category: crate::gm_activity::GmActivityCategory::Destruction,
-                victim: crate::gm_projection::GmEntityReference {
-                    entity_id: "00000000-0000-4000-8000-000000000001".into(),
-                    name: "entity.alliance_cruiser.display_name".into(),
-                },
-                source: Some(crate::gm_projection::GmEntityReference {
-                    entity_id: "00000000-0000-4000-8000-000000000002".into(),
-                    name: "Raider".into(),
+                category: GmActivityCategory::Destruction,
+                ships: vec![ship.clone()],
+                links: vec![ship_link.clone()],
+                detail: GmActivityDetail::Destruction,
+            },
+            GmActivityEntry {
+                tick: 42,
+                category: GmActivityCategory::Objective,
+                ships: vec![],
+                links: vec![],
+                detail: GmActivityDetail::Objective(GmActivityObjective {
+                    objective_id: "reach_beacon".into(),
+                    status: GmActivityObjectiveStatus::Completed,
                 }),
-                damage: None,
+            },
+            GmActivityEntry {
+                tick: 42,
+                category: GmActivityCategory::Trigger,
+                ships: vec![],
+                links: vec![],
+                detail: GmActivityDetail::Trigger(GmActivityTrigger {
+                    trigger_id: "arrival".into(),
+                    origin: "world.rhai".into(),
+                }),
+            },
+            GmActivityEntry {
+                tick: 42,
+                category: GmActivityCategory::RedAlert,
+                ships: vec![ship.clone()],
+                links: vec![ship_link.clone()],
+                detail: GmActivityDetail::RedAlert(GmActivityRedAlert { active: true }),
+            },
+            GmActivityEntry {
+                tick: 42,
+                category: GmActivityCategory::Connection,
+                ships: vec![ship.clone()],
+                links: vec![ship_link],
+                detail: GmActivityDetail::Connection(GmActivityConnection {
+                    identity: GmActivityPublicIdentity {
+                        id: "crew-1".into(),
+                        name: "Ari".into(),
+                    },
+                    role: GmActivityConnectionRole::Crew,
+                    state: GmActivityConnectionState::Connected,
+                    ship: Some(ship),
+                }),
+            },
+            GmActivityEntry {
+                tick: 42,
+                category: GmActivityCategory::GmAction,
+                ships: vec![],
+                links: vec![],
+                detail: GmActivityDetail::GmAction(GmActivityGmAction {
+                    operator: GmActivityPublicIdentity {
+                        id: "gm-alpha".into(),
+                        name: "Morgan".into(),
+                    },
+                    correlation: "pause-1".into(),
+                    action: GmActivityAction::SetSessionPaused { active: true },
+                    outcome: GmActivityActionOutcome::Refused,
+                    reason: Some("wrong-phase".into()),
+                    order: Some(crate::gm_action::GmActionOrder::new(
+                        crate::command_admission::log::HostSlot(1),
+                        9,
+                    )),
+                }),
             },
         ],
     };
     assert_eq!(
         encode_gm_activity_feed(&payload).unwrap(),
-        r#"{"capacity":128,"entries":[{"tick":42,"category":"damage","victim":{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"},"source":null,"damage":{"victim_kind":"ship","weapon":"region","amount":4.0,"shield_absorbed":1.0,"hull_damage":3.0,"system_hit":null}},{"tick":42,"category":"destruction","victim":{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"},"source":{"entity_id":"00000000-0000-4000-8000-000000000002","name":"Raider"},"damage":null}]}"#
+        r#"{"capacity":128,"entries":[{"tick":42,"category":"damage","ships":[{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}],"links":[{"role":"ship","entity":{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}}],"detail":{"type":"damage","data":{"victim_kind":"ship","weapon":"region","amount":4.0,"shield_absorbed":1.0,"hull_damage":3.0,"system_hit":null}}},{"tick":42,"category":"destruction","ships":[{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}],"links":[{"role":"ship","entity":{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}}],"detail":{"type":"destruction"}},{"tick":42,"category":"objective","ships":[],"links":[],"detail":{"type":"objective","data":{"objective_id":"reach_beacon","status":"completed"}}},{"tick":42,"category":"trigger","ships":[],"links":[],"detail":{"type":"trigger","data":{"trigger_id":"arrival","origin":"world.rhai"}}},{"tick":42,"category":"red_alert","ships":[{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}],"links":[{"role":"ship","entity":{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}}],"detail":{"type":"red_alert","data":{"active":true}}},{"tick":42,"category":"connection","ships":[{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}],"links":[{"role":"ship","entity":{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}}],"detail":{"type":"connection","data":{"identity":{"id":"crew-1","name":"Ari"},"role":"crew","state":"connected","ship":{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}}}},{"tick":42,"category":"gm_action","ships":[],"links":[],"detail":{"type":"gm_action","data":{"operator":{"id":"gm-alpha","name":"Morgan"},"correlation":"pause-1","action":{"type":"set_session_paused","active":true},"outcome":"refused","reason":"wrong-phase","order":{"sequence":9,"origin":1}}}}]}"#
     );
 }
 
@@ -5359,6 +5427,22 @@ fn start_grant_codec_enforces_exact_id_mode_and_attribution() {
         r#"{"id":"start-6","mode":"automatic","operator_id":null,"apply_tick":9007199254740992}"#
     )
     .is_none());
+}
+
+#[test]
+fn start_grant_result_codec_preserves_the_fixed_source_tick() {
+    let encoded = encode_start_grant_result(&crate::lobby::start_policy::StartGrantResult {
+        tick: 41,
+        status: crate::lobby::start_policy::StartGrantStatus::Refused,
+        operator_id: Some("gm-1".into()),
+        reason: Some(crate::lobby::start_policy::StartGrantReason::MissedApplyTick),
+        grant_id: Some("start-7".into()),
+    })
+    .unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"tick":41,"status":"refused","operator_id":"gm-1","reason":"missed-apply-tick","grant_id":"start-7"}"#
+    );
 }
 
 #[test]

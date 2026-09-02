@@ -71,6 +71,12 @@ pub mod core;
 /// world both a native test and the browser drive, under deliberately
 /// different frame pacing, folding the canonical digest at shared ticks.
 pub mod cross_target_probe;
+/// Debris hazards (issue #1347): the pure closest-approach projection that turns
+/// a drifting mass into an assessed threat, and the Bevy adapter that drifts it,
+/// latches what a scan found, and raises the flags a scenario hangs its beat on.
+/// Owns no consequence — a strike's damage, its objective and its computer cue
+/// are the world file's.
+pub mod debris;
 /// Delivery (PRD #855): how a host — browser tab or native `phoenix-host`
 /// process — publishes its client bundle, its content manifest, its scenario
 /// catalogue and its version pin. Compiles on both targets on purpose: the

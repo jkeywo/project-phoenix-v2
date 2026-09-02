@@ -4651,6 +4651,24 @@ pub struct ScanReadingSnapshot {
     /// still decodes, at `0.0`.
     #[serde(default)]
     pub mass: f32,
+    /// The machine code of the bulk class that answered for `mass` (issue
+    /// #1347), or ABSENT when the scanning suite authors no
+    /// `[[scan.mass_class]]` ladder — which is every hull shipped before it, so
+    /// those readings put exactly the payload on the wire they did before.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub mass_class: String,
+    /// `strings.csv` id for that class's crew-facing name. Absent with the code.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub mass_class_label: String,
+    /// What the reading worked out about a moving hazard (issue #1347): what it
+    /// is closing on, how near it gets, and when. Absent for every subject that
+    /// is not debris, which is every subject shipped before it.
+    ///
+    /// Still a projection of state rather than a result somebody authored — see
+    /// `crate::debris::threat` for why the type has no field a scripted verdict
+    /// could arrive on, which is the same guarantee the reading around it makes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debris: Option<crate::debris::DebrisAssessment>,
     /// `(label id, held)` per operational flag the subject authored a label
     /// for. Empty when the answering band does not resolve flags.
     #[serde(default)]
@@ -4678,6 +4696,9 @@ impl ScanReadingSnapshot {
             condition_fraction: reading.condition_fraction,
             condition_step: reading.condition_step,
             mass: reading.mass,
+            mass_class: reading.mass_class.clone(),
+            mass_class_label: reading.mass_class_label.clone(),
+            debris: reading.debris.clone(),
             flags: reading.flags.clone(),
             capacities: reading.capacities.clone(),
         }

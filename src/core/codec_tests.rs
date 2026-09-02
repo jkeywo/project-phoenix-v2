@@ -2562,6 +2562,12 @@ fn system_blackboard_tractor_round_trips_and_is_additive() {
 /// and none of them a result, a summary, a narration or a description. A
 /// `scan_text` field would have to be added here, in a diff, moving this
 /// test.
+///
+/// Issue #1347 moved it exactly that way, and the ten stay ten: the bulk class
+/// and the debris projection are `skip_serializing_if`, so a reading of an
+/// ordinary structure puts the same keys on the wire it always did. What the
+/// three new keys may say is pinned separately, by
+/// [`a_debris_reading_carries_a_projection_and_still_no_prose`].
 #[test]
 fn system_blackboard_scan_round_trips_and_carries_no_field_for_authored_prose() {
     use crate::core::messages::{ScanBlackboard, ScanReadingSnapshot};
@@ -2576,6 +2582,9 @@ fn system_blackboard_scan_round_trips_and_carries_no_field_for_authored_prose() 
         condition_fraction: 0.31,
         condition_step: 0.01,
         mass: 250_000.0,
+        mass_class: String::new(),
+        mass_class_label: String::new(),
+        debris: None,
         flags: vec![("world.skyhook.transfer.label".into(), false)],
         capacities: vec![("world.skyhook.berths.label".into(), 4)],
     };
@@ -2643,6 +2652,84 @@ fn system_blackboard_scan_round_trips_and_carries_no_field_for_authored_prose() 
     };
     assert_server_roundtrip(&JsonCodec, msg.clone());
     assert_server_roundtrip(&PrettyJsonCodec, msg);
+}
+
+/// The debris half of a reading (issue #1347), pinned as its own key set for
+/// the reason the reading above is pinned as one.
+///
+/// A moving hazard is exactly the subject a scripted reveal would be most
+/// tempting for — "IT IS GOING TO HIT THE DEPOT" is a sentence somebody could
+/// have typed — so the wire shape says, in a form the compiler enforces, that
+/// nobody did: six keys, five of them numbers or a boolean derived from
+/// numbers, and one a `strings.csv` id an author wrote against **the protected
+/// asset** rather than against the threat. There is nowhere for a warning to
+/// ride.
+#[test]
+fn a_debris_reading_carries_a_projection_and_still_no_prose() {
+    use crate::core::messages::ScanReadingSnapshot;
+    use std::collections::BTreeSet;
+
+    let reading = ScanReadingSnapshot {
+        subject_uuid: "00000000-0000-8000-8000-000000000077".into(),
+        subject_name: "world.falling_skyway.entity.skyway_debris_alpha.name".into(),
+        band: "detailed".into(),
+        band_label: "entity.alliance_destroyer.scan.band.detailed.label".into(),
+        taken_at_tick: 1200,
+        condition_fraction: 1.0,
+        condition_step: 0.01,
+        mass: 4_200.0,
+        mass_class: "medium".into(),
+        mass_class_label: "entity.alliance_destroyer.scan.mass_class.medium.label".into(),
+        debris: Some(crate::debris::DebrisAssessment {
+            protected_name: "world.falling_skyway.entity.depot_ladder_b.name".into(),
+            course: [-14.0, 3.0],
+            closest_approach: 6.5,
+            seconds_to_closest_approach: 41.0,
+            on_collision_course: true,
+            seconds_to_impact: Some(37.0),
+        }),
+        flags: Vec::new(),
+        capacities: Vec::new(),
+    };
+
+    let value: serde_json::Value =
+        serde_json::from_str(&serde_json::to_string(&reading).unwrap()).unwrap();
+    let debris = value
+        .get("debris")
+        .and_then(|d| d.as_object())
+        .expect("an assessed debris reading carries its projection");
+    assert_eq!(
+        debris
+            .keys()
+            .map(String::as_str)
+            .collect::<BTreeSet<&str>>(),
+        BTreeSet::from([
+            "protected_name",
+            "course",
+            "closest_approach",
+            "seconds_to_closest_approach",
+            "on_collision_course",
+            "seconds_to_impact",
+        ]),
+        "the projection's whole surface — geometry and the protected asset's own \
+         name id, and nowhere for an authored warning to ride"
+    );
+
+    // Round-trips, and the absent-arrival case stays absent rather than
+    // decaying to a zero a crew would read as "impact now".
+    let decoded: ScanReadingSnapshot =
+        serde_json::from_str(&serde_json::to_string(&reading).unwrap()).unwrap();
+    assert_eq!(decoded, reading);
+    let mut misses = reading.clone();
+    if let Some(d) = misses.debris.as_mut() {
+        d.on_collision_course = false;
+        d.seconds_to_impact = None;
+    }
+    let json = serde_json::to_string(&misses).unwrap();
+    assert!(
+        !json.contains("seconds_to_impact"),
+        "a contact that never arrives says nothing about when: {json}"
+    );
 }
 
 /// The dossier blackboard (issue #1030), and the hidden-truth guarantee

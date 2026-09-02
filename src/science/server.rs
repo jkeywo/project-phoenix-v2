@@ -235,6 +235,10 @@ pub fn tick_scans(
         // those back to the same documented default a bare TOML gets — never
         // to zero.
         Option<&crate::entities::spawner::EntityMass>,
+        // The subject's `[debris]` table (issue #1347), when it is a moving
+        // hazard. `Option` like everything else here: a subject that is not
+        // debris reads exactly as it did before this existed.
+        Option<&crate::debris::DebrisThreat>,
     )>,
     region_effects: Query<&crate::entities::spawner::RegionEffectsSection>,
     mut commands: Commands,
@@ -243,6 +247,11 @@ pub fn tick_scans(
     // fixture that runs this system without the narrative plugin scans exactly
     // as it did before this existed.
     mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
+    // The debris-assessment queue (issue #1347), on `lifecycle`'s exact terms:
+    // the reading is composed HERE — this is where the suite, the range and the
+    // power are — but the contact's authoritative threat state belongs on the
+    // contact, and this system holds the subject query read-only.
+    mut debris_assessed: Option<ResMut<EffectQueue<crate::debris::DebrisAssessed>>>,
 ) {
     let now_tick = tick.map(|t| t.0).unwrap_or(0);
 
@@ -300,7 +309,8 @@ pub fn tick_scans(
 
         for target_uuid in requested {
             let found = subjects.iter().find(|(uuid, ..)| uuid.0 == target_uuid);
-            let Some((_, subject_transform, name, condition, authored_id, mass)) = found else {
+            let Some((_, subject_transform, name, condition, authored_id, mass, debris)) = found
+            else {
                 record.last = None;
                 record.refusal = Some(ScanRefusal::NoSuchTarget);
                 crate::pwarn!(
@@ -322,6 +332,7 @@ pub fn tick_scans(
                 name: name.map(|n| n.0.clone()).unwrap_or_default(),
                 condition: subject_condition(condition),
                 mass: subject_mass(mass),
+                debris: debris_subject(debris, subject_transform, &subjects),
             };
             let conditions = ScanConditions {
                 distance: ship_pos.distance(subject_transform.translation),
@@ -349,6 +360,20 @@ pub fn tick_scans(
                         reading.band,
                         conditions.distance
                     );
+                    // The debris half of the reading goes to the contact it
+                    // names (issue #1347), before the reading is moved onto the
+                    // record. Queued rather than written: `debris::server::
+                    // tick_debris_state` is the one owner of a contact's
+                    // authoritative threat state, and it runs after this system.
+                    if let (Some(assessment), Some(queue)) =
+                        (reading.debris.clone(), debris_assessed.as_deref_mut())
+                    {
+                        queue.0.push(crate::debris::DebrisAssessed {
+                            subject_uuid: target_uuid.clone(),
+                            taken_at_tick: reading.taken_at_tick,
+                            assessment,
+                        });
+                    }
                     record.last = Some(reading);
                     record.refusal = None;
                     if let Some(authored_id) = authored_id {
@@ -498,6 +523,57 @@ fn subject_condition(condition: Option<&InfrastructureCondition>) -> Option<Subj
     ))
 }
 
+/// The subject's raw debris geometry (issue #1347), stated relative to the asset
+/// its `[debris]` table names — **and the only path a hazard reaches a scan by**.
+///
+/// `None` for every subject that carries no `[debris]` table, and `None` again
+/// for one that carries a table naming an asset no longer in the world. The
+/// second case matters: a rock aimed at a depot that has already been destroyed
+/// is not "aimed at nothing at zero range", it is a contact with no answer to
+/// give, and reporting a projection against an absence would be worse than
+/// reporting none.
+///
+/// Lifted out as its own function for `subject_condition`'s reason: the gate is
+/// then one readable line inside the tick rather than a clause in the middle of
+/// it, and the name lookup is visibly the SAME one the objective and comms
+/// vocabularies resolve an authored entity reference by.
+fn debris_subject(
+    threat: Option<&crate::debris::DebrisThreat>,
+    subject_transform: &Transform,
+    subjects: &Query<(
+        &EntityUuid,
+        &Transform,
+        Option<&EntityName>,
+        Option<&InfrastructureCondition>,
+        Option<&crate::entities::spawner::EntityId>,
+        Option<&crate::entities::spawner::EntityMass>,
+        Option<&crate::debris::DebrisThreat>,
+    )>,
+) -> Option<crate::debris::DebrisSubject> {
+    let threat = threat?;
+    let protected = &threat.config.protected_target;
+    if protected.is_empty() {
+        return None;
+    }
+    let asset = subjects
+        .iter()
+        .find(|(_, _, name, ..)| name.is_some_and(|n| n.0 == *protected))
+        .map(|(_, tf, ..)| tf.translation)?;
+    Some(crate::debris::DebrisSubject {
+        relative_position: [
+            subject_transform.translation.x - asset.x,
+            subject_transform.translation.z - asset.z,
+        ],
+        // The protected asset is world furniture — a depot, a rung, a control
+        // tower — and the rock is the only thing moving, so the authored drift
+        // IS the relative velocity. The day a scenario protects something that
+        // moves, this is the one line that subtracts.
+        relative_velocity: [threat.config.drift[0], threat.config.drift[2]],
+        protected_name: protected.clone(),
+        impact_radius: threat.config.impact_radius,
+    })
+}
+
 /// The subject's authored mass (issue #1154), off its `EntityMass` component.
 ///
 /// Falls back to [`crate::entities::config::DEFAULT_ENTITY_MASS`] — never to
@@ -614,6 +690,7 @@ mod tests {
             ],
             degraded_by: Vec::new(),
             interference_bands: 1,
+            mass_classes: Vec::new(),
         }
     }
 

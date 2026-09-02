@@ -802,6 +802,11 @@ impl Plugin for WorldPlugin {
             // ordered AFTER `InfrastructurePlugin`'s, so a scan taken on the
             // tick a repair lands reads the repaired number.
             .add_plugins(crate::science::SciencePlugin)
+            // Debris hazards (issue #1347) stand beside the science plugin, and
+            // are ordered after it inside `SimSet::Modifiers`: what promotes a
+            // drifting rock to a confirmed threat is a scan, so the tick that
+            // latches an assessment has to run after the tick that takes one.
+            .add_plugins(crate::debris::DebrisPlugin)
             .init_resource::<WorldContentRuntime>()
             .init_resource::<ObjectiveManagerRes>()
             .init_resource::<PendingScenarioLoad>()

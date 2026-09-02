@@ -1268,6 +1268,7 @@ fn weapons_console_section_attached_when_config_has_weapons_console() {
         shield_arcs: Vec::new(),
         infrastructure: None,
         scan: None,
+        debris: None,
         tractor: None,
         held_response: None,
         dock: None,

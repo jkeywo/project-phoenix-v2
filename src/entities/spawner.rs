@@ -272,6 +272,7 @@ const SPAWN_SECTIONS: &[&dyn SpawnSection] = &[
     &SecuritySpawn,
     &SecurityTargetSpawn,
     &ScanSpawn,
+    &DebrisSpawn,
     &CivilianSpawn,
     &HullSpawn,
 ];
@@ -1689,6 +1690,20 @@ impl SpawnSection for ScanSpawn {
                 config: scan.clone(),
                 ..Default::default()
             });
+        }
+    }
+}
+
+struct DebrisSpawn;
+impl SpawnSection for DebrisSpawn {
+    fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
+        // The moving hazard (issue #1347) — attach the contact when `[debris]` is
+        // present, on the same argument as the scan record above. The component
+        // carries the authored table AND this run's history of the contact: it
+        // starts drifting, unread, and unconfirmed, which is the whole point —
+        // a rock is not a threat until somebody has been and looked at it.
+        if let Some(debris) = &config.debris {
+            cmds.insert(crate::debris::DebrisThreat::new(debris.clone()));
         }
     }
 }

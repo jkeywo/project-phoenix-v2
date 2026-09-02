@@ -425,6 +425,7 @@ mod tests {
             lod_bubble: None,
             infrastructure: None,
             scan: None,
+            debris: None,
             tractor: None,
             held_response: None,
             dock: None,

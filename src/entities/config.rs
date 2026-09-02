@@ -3115,6 +3115,17 @@ pub struct EntityConfig {
     /// to* an entity, this one says what an entity can *read*.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scan: Option<crate::science::ScanConfig>,
+    /// The moving-hazard table (issue #1347): a drift, the asset this contact is
+    /// on course for, the radius inside which it strikes, and the four world
+    /// flags a scenario hangs its beat on. Present on debris; absent for
+    /// everything else, which carries no `DebrisThreat` component, never drifts
+    /// and can never be confirmed as a threat.
+    ///
+    /// A third relative of `infrastructure` and `scan`: those say what can be
+    /// *done to* an entity and what an entity can *read*, and this one says what
+    /// it is going to *do* if nobody stops it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debris: Option<crate::debris::DebrisConfig>,
     /// The tractor beam's coupling terms (issue #1156) — range, rig offset and
     /// minimum power level. Present on a hull whose engineering seat can take a
     /// derelict under tow; absent for everything else, which carries no
@@ -3566,6 +3577,16 @@ impl EntityConfig {
         // for the rest of the mission.
         if let Some(ref scan) = config.scan {
             scan.validate().map_err(SerdeError::custom)?;
+        }
+
+        // Validation: a [debris] table has to describe a hazard that can arrive
+        // (issue #1347). A non-finite drift, a negative radius, or a contact
+        // that names a protected asset without a radius to reach it by are all
+        // author mistakes whose only other symptom would be a rock that drifts
+        // through a depot forever with nothing ever happening — the silently
+        // inert hazard the [scan] check above is written against the mirror of.
+        if let Some(ref debris) = config.debris {
+            debris.validate().map_err(SerdeError::custom)?;
         }
 
         // Validation: a [tractor] table has to describe a beam that can hold

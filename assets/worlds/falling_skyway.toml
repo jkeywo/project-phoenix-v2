@@ -929,6 +929,42 @@ head_debris_field = [120.0, 0.0, 140.0]
 # reposition away, which is what makes the epilogue a triage rather than a queue.
 head_debris_drift = [220.0, 0.0, 240.0]
 
+# ── Where the corridor sheds (issue #1347) ───────────────────────────────────
+#
+# Three contacts come down out of the storm's wake, and the two that matter are
+# each authored ON THE AXIS of a working rung — same X as the depot hull they
+# are aimed at — so their courses are checkable by eye against the numbers a few
+# hundred lines up: a rock at x = 620 drifting +Z is going to Depot A, and one at
+# x = 1180 is going to Depot B.
+#
+# NOTHING here says either of them is a threat. What is authored is a place and a
+# drift; that a rock arrives is arithmetic the projection does over these
+# coordinates, and re-authoring a start 60 units off its rung's axis makes the
+# same code report a miss with no line of copy edited.
+#
+# The distances are cut against the hull's OWN reach, which is what makes the
+# beat work: the survey suite answers to 260 units and the tactical radar
+# acquires at 50, so a crew cannot read a rock from the transfer manifold and
+# cannot shoot one they have not flown out to. Both start well outside both
+# numbers, and going to look is the whole first half of the work.
+#
+# [ai] Every coordinate here is unratified, like the rest of this table.
+
+# The lead contact: due north of Depot A's hull, 480 units up-track.
+debris_lead_start = [620.0, 0.0, -660.0]
+
+# The trailing contact: due north of Depot B's hull, 540 units up-track. Further
+# to run and slower, so it arrives well after the lead — which is what gives
+# Tactical two live deadlines to rank rather than one to react to.
+debris_trail_start = [1180.0, 0.0, -300.0]
+
+# The third contact, and the one aimed at nothing at all. It sits between the
+# ship's Act 3 station and the ladder — near enough to be the FIRST thing the
+# radar shows and the first thing anybody would reach for, and just outside the
+# 260-unit survey reach, so ruling it out still costs a crew the trip. A field
+# where every rock is a threat teaches nothing about assessing rocks.
+debris_stray_start = [430.0, 0.0, 60.0]
+
 # ── Lanes ────────────────────────────────────────────────────────────────────
 
 # The corridor run. Loops, so a craft left alone flies it for the whole mission
@@ -7598,6 +7634,348 @@ fn file_the_debrief(ctx) {
         text:       entry,
         provenance: "dialogue",
     });
+}
+
+// ═══ THE CORRIDOR SHEDS (issue #1347) ═══════════════════════════════════════
+//
+// The storm has gone through and left the ribbon's structure working. Three
+// masses come down out of its wake in the ~500 seconds between the corridor
+// clearing (t=1072) and the transfer window opening (t=1600), and the crew have
+// to find out what they are before they can do anything about them.
+//
+// It is a PARALLEL track in a window that already has one — the tether-strain
+// ladder runs through the same minutes — and that is the point of putting it
+// here rather than in a quiet stretch. The mission's question in Act 3 is what a
+// four-seat crew do when two things need doing at once.
+//
+// ── Who owns what ───────────────────────────────────────────────────────────
+//
+// The ENGINE owns the geometry: `src/debris/` drifts each contact, and a scan
+// taken through the ordinary lifecycle projects it against the asset it is
+// aimed at and raises four world flags — read, confirmed, urgent, struck.
+//
+// THIS FILE owns every consequence. Nothing below is a special case in Rust:
+// each handler is an ordinary `on_flag_set` / `on_destroyed`, and what a strike
+// costs, what the computer says and which objective goes red are authored data
+// that a designer retunes without a recompile.
+//
+// ── The one thing that does NOT happen here ─────────────────────────────────
+//
+// Nothing in this slice touches Tactical's Combat Lock, and there is no verb in
+// the scenario vocabulary that could. Confirming a threat posts an OBJECTIVE and
+// shows a MESSAGE; what Tactical does about it is Tactical's, whether that seat
+// is a person or Backfill. The AI reaches the same rock the same way a person
+// does — by looking at a panel that says something is on course — and never
+// because the scenario reached into the console and set a target.
+//
+// ── Why a rock nobody has read is not a threat ──────────────────────────────
+//
+// The stray is the whole argument. It is the nearest contact, the first thing
+// the radar shows, and it is going nowhere. A crew who assume and shoot spend
+// the window on it; a crew who look know inside one scan. Backfilled Tactical
+// cannot make that mistake at all — the candidate source that surfaces debris is
+// assessment-gated — but a human Tactical is free to, which is the right
+// asymmetry: the AI will not act on what the crew were not told, and a person
+// may back their own judgement.
+
+on_flag_set("skyway_storm_passed", "on_the_corridor_sheds");
+
+on_flag_set("skyway_debris_lead_confirmed", "on_debris_lead_confirmed");
+on_flag_set("skyway_debris_trail_confirmed", "on_debris_trail_confirmed");
+on_flag_set("skyway_debris_lead_urgent", "on_debris_lead_urgent");
+on_flag_set("skyway_debris_trail_urgent", "on_debris_trail_urgent");
+on_flag_set("skyway_debris_lead_struck", "on_debris_lead_struck");
+on_flag_set("skyway_debris_trail_struck", "on_debris_trail_struck");
+on_flag_set("skyway_debris_stray_read", "on_debris_stray_read");
+
+on_destroyed("world.falling_skyway.entity.debris_lead.name", "on_debris_lead_cleared");
+on_destroyed("world.falling_skyway.entity.debris_trail.name", "on_debris_trail_cleared");
+
+// Six seconds after the corridor clears, so the shedding reads as a consequence
+// of the weather rather than as part of it.
+fn on_the_corridor_sheds(ctx) {
+    ctx.schedule.after(6, |ctx| { shed_the_corridor(ctx); });
+}
+
+// One contact. Everything that varies between the three is an argument, so the
+// three spawns below read as one authored table rather than three near-copies —
+// and so a fourth contact costs one call.
+//
+// `mass` is what the survey suite's `[[scan.mass_class]]` ladder answers over,
+// and the three are deliberately in three different classes: a crew reading
+// "heavy, on course for Ladder A" have been told something a crew reading
+// "on course for Ladder A" have not.
+fn shed_one(ctx, name, anchor, mass, drift_x, drift_z, protects, radius, key) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/asteroid_common_1_large.toml",
+        name: name,
+        anchor: anchor,
+        groups: ["skyway_debris"],
+        overrides: #{
+            mass: mass,
+            debris: #{
+                drift: [drift_x, flt("0.0"), drift_z],
+                protected_target: protects,
+                impact_radius: radius,
+                // A minute's warning. It is a DOCTRINE number, not a physical
+                // one: how long this ship needs to solve a firing problem on a
+                // drifting mass, which is the designer's call and not the rock's.
+                urgent_secs: flt("60.0"),
+                // How long a reading stays current before the seat goes back for
+                // another. Short enough that the deadline Tactical prioritises on
+                // cannot rot through a whole approach; long enough that Sensors
+                // moves on to the next unknown in between.
+                reassess_secs: flt("45.0"),
+                assessed_flag: "skyway_debris_" + key + "_read",
+                confirmed_flag: "skyway_debris_" + key + "_confirmed",
+                urgent_flag: "skyway_debris_" + key + "_urgent",
+                impact_flag: "skyway_debris_" + key + "_struck",
+            },
+        },
+    });
+}
+
+// The three contacts, and the numbers that decide what happens.
+//
+// The lead runs 480 units to Ladder A at 1.8 a second and crosses its 40-unit
+// impact radius about 244 seconds out; the trailing mass runs 540 to Ladder B at
+// 1.3 and arrives about 385 seconds out. Both land before the transfer window,
+// and they are 140 seconds apart — far enough that a crew who work the nearer
+// one first still have time for the second, and close enough that a crew who
+// pick wrong do not.
+//
+// The stray protects nothing, so no closest approach is projected and it can
+// never be confirmed however near it passes. That is an authored choice the
+// engine supports directly, not an omission.
+//
+// [ai] Every number in this function is unratified. The two drifts and the
+// 40-unit radii are the whole difficulty surface of the beat.
+fn shed_the_corridor(ctx) {
+    shed_one(ctx,
+        "world.falling_skyway.entity.debris_lead.name",
+        "debris_lead_start", flt("48000.0"), flt("0.0"), flt("1.8"),
+        "world.falling_skyway.entity.depot_ladder_a.name", flt("40.0"), "lead");
+    shed_one(ctx,
+        "world.falling_skyway.entity.debris_trail.name",
+        "debris_trail_start", flt("9000.0"), flt("0.0"), flt("1.3"),
+        "world.falling_skyway.entity.depot_ladder_b.name", flt("40.0"), "trail");
+    shed_one(ctx,
+        "world.falling_skyway.entity.debris_stray.name",
+        "debris_stray_start", flt("1200.0"), flt("-2.2"), flt("0.9"),
+        "", flt("0.0"), "stray");
+
+    // THE CUE THE CREW ACTUALLY GET. Three returns and no identification on any
+    // of them, to the Captain, who holds the sensors target on this hull. It
+    // says what is true — that there are contacts and nobody knows what they are
+    // — and deliberately not which one matters, because that is the work.
+    ctx.effects.show_message(
+        "skyway_debris_unidentified",
+        "world.falling_skyway.computer_message.debris_unidentified",
+        "advisory",
+        12,
+        "captain",
+    );
+    ctx.effects.narrative_beat("skyway_corridor_shed");
+
+    // Three Scan objectives, which is what makes a Backfilled Sensors seat go
+    // and look: each names its own subject, so the directive resolves to one
+    // contact and the seat works down the list as each reading lands. Priorities
+    // descend in no particular order of danger — the crew have not been told
+    // which is dangerous, and an objective list that quietly ranked them would
+    // be answering the question the scan is supposed to answer.
+    //
+    // Above the transfer window's 54 (unknown masses in the corridor outrank
+    // paperwork) and below Act 3's rescue work at 85, which is people.
+    post_survey_scan_objective(ctx,
+        "obj-a3-debris-scan-near",
+        "world.falling_skyway.objective.debris_scan_near.text",
+        "world.falling_skyway.entity.debris_stray.name",
+        "skyway_debris_stray_read", 62);
+    post_survey_scan_objective(ctx,
+        "obj-a3-debris-scan-lead",
+        "world.falling_skyway.objective.debris_scan_lead.text",
+        "world.falling_skyway.entity.debris_lead.name",
+        "skyway_debris_lead_read", 61);
+    post_survey_scan_objective(ctx,
+        "obj-a3-debris-scan-trail",
+        "world.falling_skyway.objective.debris_scan_trail.text",
+        "world.falling_skyway.entity.debris_trail.name",
+        "skyway_debris_trail_read", 60);
+}
+
+// ── Confirmation ────────────────────────────────────────────────────────────
+//
+// Raised by the engine only when an assessment SOMEBODY TOOK came back on a
+// collision course. Two things follow, and neither of them is a firing order:
+// the interception objective goes on the panel, and the computer says what the
+// crew now know. The Destroy directive is how a Backfilled Tactical hears about
+// it — the same way it hears about any other named target — and a human Tactical
+// reads the same objective off the same list.
+fn confirm_one(ctx, id, text, target, priority, key) {
+    ctx.effects.complete_objective("obj-a3-debris-scan-" + key);
+    ctx.effects.add_objective(#{
+        id: id,
+        text: text,
+        mandatory: true,
+        source: "mission",
+        base_priority: priority,
+        directive_kind: "Destroy",
+        target: target,
+        targets: [target],
+    });
+    ctx.effects.show_message(
+        "skyway_debris_collision_" + key,
+        "world.falling_skyway.computer_message.debris_collision_" + key,
+        "warning",
+        14,
+        "tactical",
+    );
+    ctx.effects.narrative_beat("skyway_debris_confirmed_" + key);
+}
+
+fn on_debris_lead_confirmed(ctx) {
+    confirm_one(ctx,
+        "obj-a3-debris-lead",
+        "world.falling_skyway.objective.debris_lead.text",
+        "world.falling_skyway.entity.debris_lead.name",
+        76, "lead");
+}
+
+fn on_debris_trail_confirmed(ctx) {
+    confirm_one(ctx,
+        "obj-a3-debris-trail",
+        "world.falling_skyway.objective.debris_trail.text",
+        "world.falling_skyway.entity.debris_trail.name",
+        75, "trail");
+}
+
+// Running out of room. Critical, and the only place in this beat that shouts.
+fn urge_one(ctx, key) {
+    ctx.effects.show_message(
+        "skyway_debris_urgent_" + key,
+        "world.falling_skyway.computer_message.debris_urgent_" + key,
+        "critical",
+        20,
+        "tactical",
+    );
+}
+
+fn on_debris_lead_urgent(ctx)  { urge_one(ctx, "lead"); }
+fn on_debris_trail_urgent(ctx) { urge_one(ctx, "trail"); }
+
+// Reading the stray. Nothing happens, loudly — the objective goes green and the
+// panel says the mass is aimed at nothing, which is a finding and the reason the
+// crew can stop thinking about it. A beat is recorded because "they checked"
+// is a thing the debrief should be able to say.
+fn on_debris_stray_read(ctx) {
+    ctx.effects.complete_objective("obj-a3-debris-scan-near");
+    ctx.effects.show_message(
+        "skyway_debris_stray_clear",
+        "world.falling_skyway.computer_message.debris_stray_clear",
+        "info",
+        10,
+        "captain",
+    );
+    ctx.effects.narrative_beat("skyway_debris_ruled_out");
+}
+
+// ── The three endings, per protected asset ──────────────────────────────────
+//
+// Which rung was saved or harmed is recorded as its own durable flag, so a
+// debrief and any later mission read a fact about Ladder A rather than a score
+// for "the debris". The three outcomes are genuinely different states and not
+// three shades of one:
+//
+//   CLEARED   — intercepted with room to spare. The objective completes and the
+//               rung is untouched.
+//   LATE      — intercepted, but only after the urgency window opened. The rung
+//               survives and the objective still completes: they did the job.
+//               What is different is the record, and the debrief can say the
+//               margin was gone.
+//   STRUCK    — nobody stopped it. The rung takes authored damage on its own
+//               condition track, which is the same track the whole mission
+//               reads its thresholds off, so a struck rung may drop under its
+//               pumping line and stop delivering into the window — the loss
+//               arrives as arithmetic through the ladder the crew already know,
+//               not as a scripted announcement.
+fn clear_one(ctx, key, objective, saved_flag, late_flag) {
+    // Late is judged off the URGENCY flag rather than off a second clock: the
+    // engine already decided when this contact entered its authored window, and
+    // asking the same question twice is how two answers start disagreeing.
+    if ctx.flags["skyway_debris_" + key + "_urgent"] > 0 {
+        ctx.flags[late_flag] = 1;
+        ctx.effects.narrative_beat("skyway_debris_late_" + key);
+    } else {
+        ctx.effects.narrative_beat("skyway_debris_cleared_" + key);
+    }
+    ctx.flags[saved_flag] = 1;
+    ctx.effects.complete_objective(objective);
+    ctx.effects.narrative_outcome(
+        "world.falling_skyway.entity.debris_" + key + ".name", "destroyed");
+    debris_resolved(ctx);
+}
+
+fn on_debris_lead_cleared(ctx) {
+    clear_one(ctx, "lead", "obj-a3-debris-lead",
+        "skyway_ladder_a_debris_saved", "skyway_ladder_a_debris_late");
+}
+
+fn on_debris_trail_cleared(ctx) {
+    clear_one(ctx, "trail", "obj-a3-debris-trail",
+        "skyway_ladder_b_debris_saved", "skyway_ladder_b_debris_late");
+}
+
+// The rung takes it. [ai] 30 points unratified — it is the number that decides
+// whether a struck rung merely reads worse or actually stops pumping, since
+// Ladder A sits at 78 against a 40 % line and Ladder B at 34 against the same.
+fn strike_one(ctx, key, objective, depot, harmed_flag) {
+    ctx.flags[harmed_flag] = 1;
+    ctx.effects.fail_objective(objective);
+    ctx.effects.damage_infrastructure(depot, 30);
+    ctx.effects.show_message(
+        "skyway_debris_struck_" + key,
+        "world.falling_skyway.computer_message.debris_struck_" + key,
+        "critical",
+        18,
+    );
+    ctx.effects.narrative_beat("skyway_debris_struck_" + key);
+    ctx.dossier.append(#{
+        subject:    depot,
+        text:       "world.falling_skyway.evidence.debris_strike",
+        provenance: "scan",
+    });
+    debris_resolved(ctx);
+}
+
+fn on_debris_lead_struck(ctx) {
+    strike_one(ctx, "lead", "obj-a3-debris-lead",
+        "world.falling_skyway.entity.depot_ladder_a.name",
+        "skyway_ladder_a_debris_harmed");
+}
+
+fn on_debris_trail_struck(ctx) {
+    strike_one(ctx, "trail", "obj-a3-debris-trail",
+        "world.falling_skyway.entity.depot_ladder_b.name",
+        "skyway_ladder_b_debris_harmed");
+}
+
+// CORRIDOR CLEAR. Counted rather than tested against the two contacts by name,
+// so it stays right if a later slice sheds a third: every terminal handler above
+// calls this exactly once, whichever way its contact ended.
+//
+// Only the two aimed masses are counted. The stray resolves nothing because it
+// was never a threat, and a corridor-clear cue that waited for it would be
+// waiting on a rock that is simply leaving.
+fn debris_resolved(ctx) {
+    ctx.flags.increment("skyway_debris_resolved", 1);
+    if ctx.flags.skyway_debris_resolved < 2 { return; }
+    ctx.effects.show_message(
+        "skyway_debris_corridor_clear",
+        "world.falling_skyway.computer_message.debris_corridor_clear",
+        "info",
+        10,
+    );
+    ctx.effects.narrative_beat("skyway_corridor_clear");
 }
 
 fn debrief_workers_and_convoy(ctx)   { #{ message: "world.falling_skyway.comms.debrief_workers_and_convoy", responses: [] } }

@@ -1775,6 +1775,7 @@ world.probe_task_lifecycle.entity.derelict.name,assets/worlds/probe_task_lifecyc
 world.probe_task_lifecycle.entity.depot.name,assets/worlds/probe_task_lifecycle.toml -> [[entity]] name,[Skyway Transfer Depot]
 world.probe_task_lifecycle.capacity.berths.label,assets/worlds/probe_task_lifecycle.toml -> [[entity.overrides.infrastructure.capacity]] label,[Berths]
 world.probe_task_lifecycle.threshold.transfer_capable.label,assets/worlds/probe_task_lifecycle.toml -> [[entity.overrides.infrastructure.threshold]] label,[Transfer Arm]
+<<<<<<< HEAD
 security.dispatch.refused.disabled,"Security dispatch refusal — the Security System is damaged out, so no team can be sent anywhere (issue #1346)","[Security offline — no team can be sent.]"
 security.dispatch.refused.no_such_team,"Security dispatch refusal — the command named a team this hull does not muster (issue #1346)","[No such Security team.]"
 security.dispatch.refused.team_busy,"Security dispatch refusal — that team already holds an assignment; one team, one job (issue #1346)","[Team already assigned — recall it first.]"
@@ -1851,3 +1852,25 @@ world.probe_fleet_comms_choice.comms.stand_by,"assets/worlds/probe_fleet_comms_c
 world.probe_fleet_comms_choice.comms.grant,"assets/worlds/probe_fleet_comms_choice.toml -> response text, the one weighted option. [bracketed]: unapproved copy",[The corridor is yours.]
 world.probe_fleet_comms_choice.comms.refuse,"assets/worlds/probe_fleet_comms_choice.toml -> response text, authored but unweighted. [bracketed]: unapproved copy",[The corridor stays closed.]
 world.probe_fleet_comms_choice.entity.claimant_far.name,"assets/worlds/probe_fleet_comms_choice.toml -> [[entity]] name, the party that calls the FAR hull — out of the near hull's comms range on purpose. [bracketed]: unapproved copy",[PROBE FAR CORRIDOR CLAIMANT]
+entity.alliance_destroyer.scan.mass_class.light.label,"assets/entities/alliance_destroyer.toml -> [[scan.mass_class]] label","[Light]"
+entity.alliance_destroyer.scan.mass_class.medium.label,"assets/entities/alliance_destroyer.toml -> [[scan.mass_class]] label","[Medium]"
+entity.alliance_destroyer.scan.mass_class.heavy.label,"assets/entities/alliance_destroyer.toml -> [[scan.mass_class]] label","[Heavy]"
+entity.alliance_destroyer.scan.mass_class.massive.label,"assets/entities/alliance_destroyer.toml -> [[scan.mass_class]] label","[Massive]"
+world.falling_skyway.entity.debris_lead.name,"assets/worlds/falling_skyway.toml -> spawn_entity name, the debris on course for Ladder A","[Corridor Debris Alpha]"
+world.falling_skyway.entity.debris_trail.name,"assets/worlds/falling_skyway.toml -> spawn_entity name, the debris on course for Ladder B","[Corridor Debris Beta]"
+world.falling_skyway.entity.debris_stray.name,"assets/worlds/falling_skyway.toml -> spawn_entity name, the harmless drifting mass","[Corridor Debris Gamma]"
+world.falling_skyway.objective.debris_scan_near.text,"Objective text — assess the nearest shed mass, Falling Skyway","[Something came out of the storm's wake close aboard. Scan it and find out what it is.]"
+world.falling_skyway.objective.debris_scan_lead.text,"Objective text — assess the lead shed mass, Falling Skyway","[There is a second return up-track of Ladder A. Get in survey range and read it.]"
+world.falling_skyway.objective.debris_scan_trail.text,"Objective text — assess the trailing shed mass, Falling Skyway","[A third return is drifting down toward Ladder B. Find out where it is going.]"
+world.falling_skyway.objective.debris_lead.text,"Objective text — intercept the mass on course for Ladder A, Falling Skyway","[Corridor Debris Alpha is on course for Ladder A. Break it up before it arrives.]"
+world.falling_skyway.objective.debris_trail.text,"Objective text — intercept the mass on course for Ladder B, Falling Skyway","[Corridor Debris Beta is on course for Ladder B. Break it up before it arrives.]"
+world.falling_skyway.computer_message.debris_unidentified,"Ship's-computer cue — unidentified returns after the storm, Falling Skyway","[Three unidentified masses in the corridor. No trajectory solution.]"
+world.falling_skyway.computer_message.debris_collision_lead,"Ship's-computer cue — collision confirmed on Ladder A, Falling Skyway","[Collision confirmed. Corridor Debris Alpha will strike Ladder A.]"
+world.falling_skyway.computer_message.debris_collision_trail,"Ship's-computer cue — collision confirmed on Ladder B, Falling Skyway","[Collision confirmed. Corridor Debris Beta will strike Ladder B.]"
+world.falling_skyway.computer_message.debris_urgent_lead,"Ship's-computer cue — impact on Ladder A imminent, Falling Skyway","[Impact on Ladder A imminent. Firing window closing.]"
+world.falling_skyway.computer_message.debris_urgent_trail,"Ship's-computer cue — impact on Ladder B imminent, Falling Skyway","[Impact on Ladder B imminent. Firing window closing.]"
+world.falling_skyway.computer_message.debris_stray_clear,"Ship's-computer cue — the near mass is aimed at nothing, Falling Skyway","[Corridor Debris Gamma is on no collision course. Nothing under it.]"
+world.falling_skyway.computer_message.debris_struck_lead,"Ship's-computer cue — Ladder A was hit, Falling Skyway","[Impact. Ladder A has taken the mass we did not stop.]"
+world.falling_skyway.computer_message.debris_struck_trail,"Ship's-computer cue — Ladder B was hit, Falling Skyway","[Impact. Ladder B has taken the mass we did not stop.]"
+world.falling_skyway.computer_message.debris_corridor_clear,"Ship's-computer cue — no confirmed masses left in the corridor, Falling Skyway","[Corridor clear. No confirmed masses remaining.]"
+world.falling_skyway.evidence.debris_strike,"Evidence text — a rung struck by shed corridor debris, Falling Skyway","[Struck by a mass shed from the corridor after the storm. Damage is on the rung's own condition track.]"

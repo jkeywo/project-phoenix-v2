@@ -699,6 +699,43 @@ condition_step = 0.25
 # pretend to count berths.
 report_capacities = false
 
+# The BULK ladder (issue #1347), beside the fidelity ladder and for the same
+# reason: what a reading says about a contact's weight is a property of this
+# instrument, not of the contact. "Heavy" is a thing this suite says; the rock
+# just has a mass. A hull that authors no ladder reports no class at all, which
+# is what every hull did before this table existed.
+#
+# Unlike the bands above it does NOT coarsen with range — mass is content
+# identity, so the class is the same answer from 40 units or 240. What range
+# still decides is whether there is a reading at all.
+#
+# The four steps are cut against the masses actually authored in the fleet, so
+# each one separates things a crew would want separated: a courier or a piece of
+# corridor plating from a working hauler, a hauler from a warship, and a warship
+# from a depot or a skyhook. The last class is the open top — anything heavier
+# than 60,000 reports as the heaviest.
+#
+# [ai] All four thresholds unratified.
+[[scan.mass_class]]
+id = "light"
+label = "entity.alliance_destroyer.scan.mass_class.light.label"
+max_mass = 5000.0
+
+[[scan.mass_class]]
+id = "medium"
+label = "entity.alliance_destroyer.scan.mass_class.medium.label"
+max_mass = 20000.0
+
+[[scan.mass_class]]
+id = "heavy"
+label = "entity.alliance_destroyer.scan.mass_class.heavy.label"
+max_mass = 60000.0
+
+[[scan.mass_class]]
+id = "massive"
+label = "entity.alliance_destroyer.scan.mass_class.massive.label"
+max_mass = 1000000.0
+
 [helm_console]
 # Red-alert hostile weapon-arc overlay (issue #874): RGBA 0-1, the fourth
 # entry being the fill opacity. Deliberately far fainter than the Tactical

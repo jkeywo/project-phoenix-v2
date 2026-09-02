@@ -551,17 +551,16 @@ verb = "bring_torpedoes_to_bear"
 sources = ["sensors-designation", "objective-destroy", "last-attacker", "radar-contacts", "objective-operate", "confirmed-debris-threat"]
 horizon = 1e9
 switch_margin = 50.0
-
 # The two urgency bands below are read against these, in seconds of dead-reckoned
 # time-to-impact. They are doctrine, not physics: how much room THIS fleet thinks
 # it needs to solve a firing problem on a drifting mass. Widen them and Tactical
 # commits to rocks earlier; narrow them and it holds its lock on the warship
-# longer.
+# longer. An inline table rather than a `[weapons_console.selector.param]`
+# header, because a sub-table opened here would swallow every sibling key below
+# it — `eligibility` included — and the selector would parse as paramless.
 #
 # [ai] Both numbers are unratified.
-[weapons_console.selector.param]
-debris_pressing_secs = 60.0
-debris_urgent_secs = 25.0
+param = { debris_pressing_secs = 60.0, debris_urgent_secs = 25.0 }
 # Independent revalidation: `detectable` is required of everything, and beyond
 # that a candidate is engageable either because the host already vetted it
 # (objective order / last attacker / retained lock) OR because it is

@@ -16071,6 +16071,41 @@ fn window_flag_values(
     out
 }
 
+/// Every comms thread a call asked to open, by root node fn, in authored order.
+fn window_comms_opened(
+    effects: &project_phoenix::world::script::schedule::CallEffects,
+) -> Vec<String> {
+    effects
+        .comms_opens
+        .iter()
+        .map(|open| open.root_fn.clone())
+        .collect()
+}
+
+/// The net delta a call published onto each of Control's manifest rows.
+///
+/// Summed rather than listed because the whole point of #1340's row handling is
+/// that deltas COMPOSE: what a panel ends up reading is the sum of what landed
+/// on it, whichever order the movers ran in.
+fn window_capacity_moves(
+    effects: &project_phoenix::world::script::schedule::CallEffects,
+) -> std::collections::BTreeMap<String, i64> {
+    use project_phoenix::world::dispatch::ActionCmd;
+    use project_phoenix::world::script::effects::BufferedEffect;
+    let mut out = std::collections::BTreeMap::new();
+    for effect in &effects.commands {
+        if let BufferedEffect::Cmd(ActionCmd::AdjustInfrastructureCapacity {
+            capacity,
+            delta,
+            ..
+        }) = effect
+        {
+            *out.entry(capacity.clone()).or_insert(0) += delta;
+        }
+    }
+    out
+}
+
 /// The objective ids a call completed and failed.
 fn window_objective_verdicts(
     effects: &project_phoenix::world::script::schedule::CallEffects,
@@ -16392,6 +16427,431 @@ fn falling_skyway_a_refusal_answers_a_claim_and_silence_does_not() {
         verdict(&script, [false, false, false], [None, None, None]),
         (false, 0),
         "a window nobody ever reached is not a window everybody was answered on"
+    );
+}
+
+/// One reachable state of the berth scene's one-line ledger.
+///
+/// The smaller, worse road: the chain delivers nothing, so `the_claimants_ask`
+/// routes to `the_last_berth` and there is a single mooring alongside Ladder A
+/// for three parties. `banked` is what the rung could offer when the scene
+/// opened; `live` is what it offers now.
+#[derive(Clone, Copy, Debug)]
+struct BerthLedger {
+    banked: i64,
+    live: i64,
+    reserved: i64,
+    convoy_lost: bool,
+    decided: bool,
+}
+
+impl WindowScript {
+    /// The berth scene's ledger as flags, with the working rung tuned so
+    /// `shelter_supply` re-derives to `live`.
+    fn berth_flags(&self, berth: &BerthLedger) -> project_phoenix::world::flags::FlagStore {
+        let mut flags = project_phoenix::world::flags::FlagStore::new();
+        // The window flag is what `on_the_choice_opens` triggers on, and it is
+        // set on BOTH roads. That it is set says the shutters are up; it does
+        // not say there is a lift board behind them.
+        flags.set_flag_value("skyway_window_open", 1);
+        flags.set_flag_value("skyway_shelter_only", 1);
+        // The road this scene is only reachable down: the chain delivers nothing.
+        flags.set_flag_value("skyway_window_supply", 0);
+        flags.set_flag_value("skyway_shelter_supply", berth.banked);
+        flags.set_flag_value("skyway_shelter_reserved", berth.reserved);
+        flags.set_flag_value("depot_a_pumping", 1);
+        flags.set_flag_value("workforce.havelock_operations.on_strike", 0);
+        flags.set_flag_value("depot_a_shelter_berths", berth.live);
+        if berth.convoy_lost {
+            flags.set_flag_value("skyway_convoy_lost", 1);
+        }
+        if berth.decided {
+            flags.set_flag_value("skyway_berth_decided", 1);
+        }
+        flags
+    }
+}
+
+/// The board's mark, as the mission computes it: the lift still unspoken for,
+/// doubled, plus one if the corridor has lost the convoy.
+fn window_board_mark(ledger: &WindowLedger) -> i64 {
+    (ledger.banked.min(ledger.live) - ledger.reserved) * 2 + i64::from(ledger.convoy_lost)
+}
+
+const SKYWAY_BERTH_LINES: [&str; 3] = [
+    "world.falling_skyway.comms.berth_to_committee",
+    "world.falling_skyway.comms.berth_to_havelock",
+    "world.falling_skyway.comms.berth_to_convoy",
+];
+const SKYWAY_BERTH_ASK_HANDLERS: [&str; 3] = [
+    "on_berth_ask_committee",
+    "on_berth_ask_havelock",
+    "on_berth_ask_convoy",
+];
+
+/// **Issue #1340, AC2/AC4 — the berth scene's own ledger, swept the way the
+/// window's is.**
+///
+/// The collapse road hands the captain one mooring, three names and a hull the
+/// corridor can destroy at any point in the scene — and the offer node is
+/// rebuilt from that ledger by the watch and by the hold's own callback. Every
+/// name the offer draws has to be a name `book_berth` would actually grant,
+/// which is the same promise the window makes and the same seam/dialogue pairing
+/// that keeps it. A mooring spent on a claimant who is no longer there is the one
+/// berth this road has, and the endings would then report a destroyed convoy as
+/// having got out.
+#[test]
+fn falling_skyway_the_last_berth_never_offers_a_mooring_the_seam_would_refuse() {
+    let script = WindowScript::compile();
+    let ceiling = script.authored("depot_a_shelter_berths");
+    assert!(
+        ceiling >= 1,
+        "precondition: Ladder A has a mooring to give away"
+    );
+
+    let mut checked = 0usize;
+    for banked in 0..=ceiling + 1 {
+        for live in 0..=ceiling + 1 {
+            for reserved in 0..=banked {
+                for convoy_lost in [false, true] {
+                    for decided in [false, true] {
+                        let berth = BerthLedger {
+                            banked,
+                            live,
+                            reserved,
+                            convoy_lost,
+                            decided,
+                        };
+                        let flags = script.berth_flags(&berth);
+                        let room = banked.min(live) - reserved;
+                        let node = script.node("control_berth_offer", &flags);
+
+                        for index in 0..3 {
+                            let displayed = node
+                                .responses
+                                .iter()
+                                .any(|response| response.text == SKYWAY_BERTH_LINES[index]);
+                            // The convoy is the one claimant this corridor can
+                            // lose outright. The other two are on the rock.
+                            let claimant_there = !(index == 2 && convoy_lost);
+                            assert_eq!(
+                                displayed,
+                                room > 0 && !decided && claimant_there,
+                                "AC2: {} displayed={displayed} with {berth:?} and {room} \
+                                 mooring(s) unspoken for",
+                                SKYWAY_BERTH_LINES[index]
+                            );
+
+                            let booking = window_increments(
+                                &script.call(SKYWAY_BERTH_ASK_HANDLERS[index], &flags),
+                            );
+                            let granted =
+                                booking.get("skyway_shelter_reserved").copied().unwrap_or(0);
+                            let refused = booking
+                                .get("skyway_berth_refused_short")
+                                .copied()
+                                .unwrap_or(0)
+                                + booking
+                                    .get("skyway_berth_refused_shut")
+                                    .copied()
+                                    .unwrap_or(0)
+                                + booking
+                                    .get("skyway_berth_refused_lost")
+                                    .copied()
+                                    .unwrap_or(0);
+                            if displayed {
+                                assert_eq!(
+                                    (granted, refused),
+                                    (1, 0),
+                                    "AC2: a displayed mooring must be one {} grants, and \
+                                     {berth:?} refused it",
+                                    SKYWAY_BERTH_ASK_HANDLERS[index]
+                                );
+                            } else if room <= 0 || !claimant_there {
+                                // A settled scene withholds every name and the
+                                // seam would still grant — that is the pick
+                                // being spent, not the ledger being short. These
+                                // two are the ledger being short.
+                                assert_eq!(
+                                    (granted, refused),
+                                    (0, 1),
+                                    "AC2 (the other coat): {} must refuse where there is no \
+                                     mooring or nobody to put in it, and {berth:?} granted",
+                                    SKYWAY_BERTH_ASK_HANDLERS[index]
+                                );
+                            }
+                            checked += 1;
+                        }
+
+                        // AC2, at the moment of the pick: a node is built once
+                        // and answered later, so the guard the offer applies has
+                        // to be applied again when the name is finally given.
+                        let picked = window_flag_values(&script.call("on_berth_to_convoy", &flags));
+                        if convoy_lost {
+                            assert!(
+                                !picked.contains_key("skyway_granted_convoy")
+                                    && !picked.contains_key("skyway_berth_ask_convoy")
+                                    && !picked.contains_key("skyway_berth_decided"),
+                                "AC2: answering a stale offer with a hull the corridor already \
+                                 lost must decide nothing and spend nothing: {picked:?} for \
+                                 {berth:?}"
+                            );
+                        } else {
+                            assert_eq!(
+                                picked.get("skyway_berth_ask_convoy"),
+                                Some(&1),
+                                "a convoy that is still there is still a name the captain can \
+                                 give: {berth:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        checked >= 3 * 8,
+        "the sweep must actually walk the berth ledger: {checked} combinations"
+    );
+}
+
+/// **Issue #1340, AC2 — the board moves in the scene that has a board, and
+/// nowhere else.**
+///
+/// `skyway_window_open` is set on both of Act 3's roads: `on_the_choice_opens`
+/// triggers on it, and the berth scene is what the choice opens INTO when the
+/// chain delivers nothing. So the flag alone cannot be the guard on a repricing
+/// that talks about a lift board — there are two live states with the flag set
+/// and no board behind it, and this drives both of them.
+#[test]
+fn falling_skyway_the_board_only_moves_in_the_scene_that_has_a_board() {
+    let script = WindowScript::compile();
+    let ceiling = (script.authored("skyhook_transfer_berths")
+        * script.authored("skyhook_climber_load"))
+    .min(script.authored("depot_a_fuel_lift") + script.authored("depot_b_fuel_lift"));
+
+    // ── The berth scene, on the tick the corridor loses the convoy ───────────
+    let berth = BerthLedger {
+        banked: 1,
+        live: 1,
+        reserved: 0,
+        convoy_lost: true,
+        decided: false,
+    };
+    let mut moved = script.berth_flags(&berth);
+    // The mark as `the_last_berth` banked it, one convoy ago.
+    moved.set_flag_value("skyway_berth_seen", 2);
+    let effects = script.call("the_ledger_moved", &moved);
+    assert_eq!(
+        window_comms_opened(&effects),
+        vec!["control_berth_offer".to_string()],
+        "AC2: the berth ledger moved, so the berth offer is redrawn — and the parley trees \
+         this scene never opened stay shut, because their live deny responses would write \
+         refusals the berth scene writes for itself"
+    );
+    assert!(
+        window_capacity_moves(&effects).is_empty(),
+        "there is no lift row to publish in a scene with no lift"
+    );
+
+    // …and a berth ledger that has not moved says nothing at all.
+    let mut steady = script.berth_flags(&berth);
+    steady.set_flag_value("skyway_berth_seen", 3);
+    assert!(
+        window_comms_opened(&script.call("the_ledger_moved", &steady)).is_empty(),
+        "a quiet ledger is a silent one"
+    );
+
+    // The scene guard is inside `the_board_moved` as well as in front of it, so
+    // a future caller that reaches for it directly cannot reopen this hole.
+    assert!(
+        window_comms_opened(&script.call("the_board_moved", &moved)).is_empty(),
+        "AC2: `the_board_moved` describes a lift board, and the shelter scene has none"
+    );
+
+    // ── The gap between the shutters going up and the claimants speaking ─────
+    let ledger = WindowLedger {
+        banked: ceiling,
+        live: ceiling,
+        reserved: 0,
+        decided: [None; 3],
+        convoy_lost: true,
+    };
+    let mut gap = script.flags(&ledger);
+    gap.set_flag_value("skyway_board_marked", 1);
+    gap.set_flag_value("skyway_board_seen", ceiling * 2);
+    let effects = script.call("the_ledger_moved", &gap);
+    assert!(
+        window_comms_opened(&effects).is_empty(),
+        "AC2: 'the board has moved' before either claimant has spoken is news about a board \
+         nobody has been shown — `the_parley_at_the_ladder` is the announcement"
+    );
+    assert_eq!(
+        window_flag_values(&effects).get("skyway_board_seen"),
+        Some(&window_board_mark(&ledger)),
+        "…and the mark is banked anyway, so the parley opens against what the ledger says \
+         when the room is finally told"
+    );
+
+    // ── The parley, open, on a board that has since moved ────────────────────
+    let mut parley = script.flags(&ledger);
+    parley.set_flag_value("a3_parley_open", 1);
+    parley.set_flag_value("skyway_board_marked", 1);
+    parley.set_flag_value("skyway_board_seen", ceiling * 2);
+    parley.set_flag_value("skyway_window_published", ceiling);
+    let effects = script.call("the_ledger_moved", &parley);
+    assert_eq!(
+        window_comms_opened(&effects),
+        vec![
+            "committee_reprices".to_string(),
+            "havelock_reprices".to_string(),
+            "window_stands".to_string(),
+        ],
+        "AC2: the two claimants still waiting hear that the board moved, Control restates its \
+         own manifest, and the hull the corridor lost is not called back"
+    );
+
+    // …and asked again against the ledger it left, it is silent: one movement is
+    // announced once, however many triggers noticed it.
+    let mut settled = script.flags(&ledger);
+    settled.set_flag_value("a3_parley_open", 1);
+    settled.set_flag_value("skyway_board_marked", 1);
+    settled.set_flag_value("skyway_board_seen", window_board_mark(&ledger));
+    assert!(
+        window_comms_opened(&script.call("the_ledger_moved", &settled)).is_empty(),
+        "the mark bounds the message count: a board that has not moved since it was last \
+         announced is announced no further"
+    );
+}
+
+/// **Issue #1340, AC2 — Control's lift row moves by an exact delta, whoever
+/// moved it last.**
+///
+/// `adjust_capacity` takes a DELTA and the flag a capacity mirrors onto is
+/// re-published by the infrastructure tick, so an absolute publish computes its
+/// delta from a level that is stale for the rest of the tick it runs in. That
+/// was safe while every caller published the lift row once; it stopped being safe
+/// the moment the watch could republish it, because `tick_script_callbacks` runs
+/// after `tick_trigger_pipeline` and a watch callback can land on the tick a
+/// booking's `on_flag_set` handler ran — ledger flags moved, mirrored row not.
+/// This drives exactly that collision.
+#[test]
+fn falling_skyway_the_lift_row_moves_by_an_exact_delta_whoever_moved_it_last() {
+    let script = WindowScript::compile();
+    let ceiling = (script.authored("skyhook_transfer_berths")
+        * script.authored("skyhook_climber_load"))
+    .min(script.authored("depot_a_fuel_lift") + script.authored("depot_b_fuel_lift"));
+    let claim = script.authored("skyway_claim_committee");
+    let drop = ceiling / 4;
+    assert!(
+        drop > 0 && claim > 0 && claim < ceiling,
+        "precondition: the chain has room to lose and a claim to spend"
+    );
+
+    let ledger = WindowLedger {
+        banked: ceiling,
+        live: ceiling,
+        reserved: 0,
+        decided: [None; 3],
+        convoy_lost: false,
+    };
+    let mut booking_flags = script.flags(&ledger);
+    booking_flags.set_flag_value("skyway_window_published", ceiling);
+    // The mirrored row as the infrastructure tick last left it.
+    booking_flags.set_flag_value("skyway_window_available", ceiling);
+    let booking = script.call("on_book_committee", &booking_flags);
+    assert_eq!(
+        window_capacity_moves(&booking)
+            .get("skyway_window_available")
+            .copied(),
+        Some(-claim),
+        "a booking takes exactly its claim off the panel"
+    );
+    assert_eq!(
+        window_increments(&booking)
+            .get("skyway_window_published")
+            .copied(),
+        Some(-claim),
+        "…and the latch moves with the row, so a republish in the same tick sees it"
+    );
+
+    // The watch, on that same tick: reserved has moved, the latch has moved, the
+    // mirrored row has NOT. The republish must be a no-op.
+    let mut same_tick = script.flags(&WindowLedger {
+        reserved: claim,
+        ..ledger
+    });
+    same_tick.set_flag_value("a3_parley_open", 1);
+    same_tick.set_flag_value("skyway_board_marked", 1);
+    same_tick.set_flag_value("skyway_board_seen", ceiling * 2);
+    same_tick.set_flag_value("skyway_window_published", ceiling - claim);
+    same_tick.set_flag_value("skyway_window_available", ceiling);
+    assert_eq!(
+        window_capacity_moves(&script.call("the_ledger_moved", &same_tick))
+            .get("skyway_window_available")
+            .copied()
+            .unwrap_or(0),
+        0,
+        "AC2: the booking already moved this row by an exact delta. An absolute publish here \
+         would read the stale mirrored row and take the claim off the panel a second time"
+    );
+
+    // A chain that stopped delivering moves the row down to what is left, once.
+    let dropped = WindowLedger {
+        live: ceiling - drop,
+        ..ledger
+    };
+    let mut failing = script.flags(&dropped);
+    failing.set_flag_value("a3_parley_open", 1);
+    failing.set_flag_value("skyway_board_marked", 1);
+    failing.set_flag_value("skyway_board_seen", ceiling * 2);
+    failing.set_flag_value("skyway_window_published", ceiling);
+    failing.set_flag_value("skyway_window_available", ceiling);
+    let effects = script.call("the_ledger_moved", &failing);
+    assert_eq!(
+        window_capacity_moves(&effects)
+            .get("skyway_window_available")
+            .copied(),
+        Some(-drop),
+        "the row follows the chain down by exactly what the chain lost"
+    );
+    assert_eq!(
+        window_flag_values(&effects)
+            .get("skyway_window_published")
+            .copied(),
+        Some(ceiling - drop),
+        "…and the latch records where it left the row"
+    );
+
+    // The same movement, noticed again by a second trigger with a stale mark: the
+    // row is already where it belongs, so nothing is published.
+    let mut again = script.flags(&dropped);
+    again.set_flag_value("a3_parley_open", 1);
+    again.set_flag_value("skyway_board_marked", 1);
+    again.set_flag_value("skyway_board_seen", ceiling * 2);
+    again.set_flag_value("skyway_window_published", ceiling - drop);
+    again.set_flag_value("skyway_window_available", ceiling);
+    assert_eq!(
+        window_capacity_moves(&script.call("the_ledger_moved", &again))
+            .get("skyway_window_available")
+            .copied()
+            .unwrap_or(0),
+        0,
+        "publishing a figure the row already carries is not a movement"
+    );
+
+    // And the close takes the row to nothing THROUGH the latch. Off the banked
+    // supply it would subtract lift the chain's own failure had already taken,
+    // driving the panel below zero on exactly the road that marked it down.
+    let mut closing = script.flags(&dropped);
+    closing.set_flag_value("skyway_window_published", ceiling - drop);
+    closing.set_flag_value("skyway_window_available", ceiling - drop);
+    assert_eq!(
+        window_capacity_moves(&script.call("on_transfer_window_closes", &closing))
+            .get("skyway_window_available")
+            .copied(),
+        Some(-(ceiling - drop)),
+        "the window shutting takes what is left off the panel, and no more than that"
     );
 }
 

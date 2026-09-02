@@ -676,16 +676,33 @@ entities:
         convoy's own hull being destroyed all reprice the open threads and
         Control's manifest. Correcting the conversation never raises the
         authored unit-supply ceiling: the live reading can only lower it.
+
+        [ai] The same promise binds the sibling ledger on the collapse road,
+        where the chain delivers nothing and the act is one mooring alongside
+        Ladder A: the berth offer is drawn from the live rung and refuses a
+        claimant the corridor has lost, and book_berth asks that same question
+        at the moment the name is given. And the repricing that carries all of
+        this speaks only in the scene it describes — the parley — never in the
+        berth scene and never before the claimants have spoken.
     game_design:
       relation: >
         lift response offered for claim C implies min(window_supply_now,
         skyway_window_supply) - skyway_window_reserved >= C, which is exactly
         book_lift's grant condition; and min(...) <= skyway_window_supply
         always, so no repair mid-window mints lift the act was not priced for.
+        Berth name offered implies min(shelter_supply_now,
+        skyway_shelter_supply) - skyway_shelter_reserved > 0 and the claimant is
+        still there, which is exactly book_berth's grant condition. Control's
+        lift row moves only by exact deltas against a latch
+        (skyway_window_published), so a booking and a republish landing in one
+        tick compose instead of double-counting the claim.
       asserted_by:
         - falling_skyway_no_reachable_ledger_offers_a_lift_the_window_cannot_honour
         - falling_skyway_control_has_a_body_for_every_shape_the_window_can_take
         - falling_skyway_a_refusal_answers_a_claim_and_silence_does_not
+        - falling_skyway_the_last_berth_never_offers_a_mooring_the_seam_would_refuse
+        - falling_skyway_the_board_only_moves_in_the_scene_that_has_a_board
+        - falling_skyway_the_lift_row_moves_by_an_exact_delta_whoever_moved_it_last
       anchors:
         # The ceiling the live reading is capped by. If a tuning pass moves it,
         # this invariant wants re-reading rather than silently re-scaling.
@@ -695,6 +712,14 @@ entities:
           match: "id=depot_a_fuel_lift"
           key: amount
           expect: "40"
+        # The whole of the collapse road's supply: one mooring, three names.
+        # The berth sweep reads this rather than restating it.
+        - name: shelter-ceiling-ladder-a
+          path: assets/worlds/falling_skyway.toml
+          table: entity.overrides.infrastructure.capacity
+          match: "id=depot_a_shelter_berths"
+          key: amount
+          expect: "1"
     implementation:
       status: declared
       paths: [assets/worlds/falling_skyway.toml, tests/headless_runner.rs]

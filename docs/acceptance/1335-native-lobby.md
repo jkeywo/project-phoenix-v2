@@ -51,6 +51,18 @@ conditions are met, and do not read their unticked boxes as a failed run.
       Without it `run-native.bat` stops with
       `[ERROR] dist\index.html not found` before taking the port.
 
+      **Rebuild it for this run even if `dist/` is already there.** The join code
+      is **eight** letters now (issue #1353) and every reader refuses a code it
+      cannot parse, so a stale `dist/` — carrying the five-letter
+      `gui/join-code.js` and the five-letter `assets/join/join-codes.json` beside
+      it — answers a *correct* code with `malformed`. That reads like a broken
+      host rather than a stale build, and nothing checks the version for you.
+      `run-native.bat` rebuilds the **phone** bundle on every launch
+      (`node scripts\build-client.mjs`, which regenerates that JSON), but it does
+      not run trunk, so the host page's own copy is only as fresh as the last
+      time the line above was run. If a code that matches the viewscreen is
+      refused as malformed, rebuild before reporting it.
+
 - [ ] **Nothing else on port 8080**, and Windows' firewall prompt answered
       *allow* on first run — the host binds `0.0.0.0:8080` so phones on the room's
       Wi-Fi can reach the bundle.

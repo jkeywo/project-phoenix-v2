@@ -328,6 +328,42 @@ impl Joiner {
         }
     }
 
+    /// A joiner that resolved the code and then said nothing more.
+    ///
+    /// The state `JOIN_DEADLINE` never covered, because it is gated on
+    /// `!joined`: this socket counts as CREW against `max_peers_per_record`
+    /// while doing none of the things a crew member does.
+    fn joined_and_silent(host: &Host) -> Self {
+        let mut joiner = Joiner::connect_soon(host);
+        joiner.wait_for("ready");
+        joiner.send(&RendezvousFrame {
+            code: Some(CodeField::Typed(host.code.full.clone())),
+            ..RendezvousFrame::new("join")
+        });
+        joiner.wait_for("joined");
+        joiner
+    }
+
+    /// Read whatever arrives for `window`, answering pings and keeping nothing.
+    ///
+    /// What a healthy but idle console does: a WebSocket client answers a Ping
+    /// inside the library, so "still reading its socket" is the entire
+    /// obligation liveness puts on a peer.
+    fn keep_reading(&mut self, window: Duration) {
+        let until = Instant::now() + window;
+        while Instant::now() < until {
+            match self.socket.read() {
+                Ok(_) => {}
+                Err(tungstenite::Error::Io(e))
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) => {}
+                Err(e) => panic!("a healthy peer's socket died: {e}"),
+            }
+        }
+    }
+
     /// Get as far as a phone gets before it has said anything about itself:
     /// resolved, attached, and admitted by the compatibility handshake.
     fn admitted(host: &Host) -> Self {
@@ -969,6 +1005,238 @@ fn upgrade_head(addr: &str) -> String {
          Connection: Upgrade\r\nSec-WebSocket-Version: 13\r\n\
          Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"
     )
+}
+
+// ── Liveness: a socket that is there, and a socket that only looks it ───────
+//
+// The security re-review's remaining reliability finding. `JOIN_DEADLINE` is
+// gated on `!joined`, so once `settle_lookup` said yes and the slot promoted, a
+// socket was reaped by NOTHING: the read loop returns `WouldBlock` for ever and
+// the seat is held until the process exits. The probe: 32 sockets that send a
+// correct `join` and then go quiet fill `max_peers_per_record`, and every later
+// crew member is refused `join-record-full` — still, thirty-five seconds later.
+// In a room that is a phone dropping without a FIN (out of range, a venue AP
+// that lost the association, a battery gone mid-frame), and a bad night
+// accumulates them until the game is locked out with nothing on screen saying
+// why.
+
+#[test]
+fn a_joined_socket_that_never_attaches_gives_the_rooms_place_back() {
+    // Un-joined silence had a budget; JOINED silence had none. The clock that
+    // covers it is `attach_deadline`, and what it is measured against is the
+    // ONE thing a real joiner does next: `gui/rendezvous-transport.js` sends
+    // `relay-open` from the same `case 'joined'` arm that received the frame.
+    let budgets = AdmissionBudgets {
+        // Long enough that filling every seat finishes well inside it — the
+        // assertion below fails loudly rather than confusingly if a loaded
+        // machine ever makes that untrue — and short enough to wait out.
+        attach_deadline: Duration::from_secs(4),
+        ..AdmissionBudgets::default()
+    };
+    let host = Host::start_with(budgets.clone());
+    let cap = JoinCodeTable::read(std::path::Path::new(JOIN_TABLE))
+        .expect("the table reads")
+        .limits
+        .max_peers_per_record;
+
+    // The probe, verbatim: fill the record's crew bound with sockets that
+    // resolved the code and then said nothing.
+    let filling = Instant::now();
+    let zombies: Vec<Joiner> = (0..cap).map(|_| Joiner::joined_and_silent(&host)).collect();
+    let fill = filling.elapsed();
+    assert_eq!(zombies.len(), cap);
+    assert!(
+        fill < budgets.attach_deadline,
+        "the fill has to finish inside the deadline it is measuring: {fill:?}"
+    );
+    let refused = http(&host.addr, &upgrade_head(&host.addr));
+    assert!(
+        refused.starts_with("HTTP/1.1 503") && refused.contains("join-record-full"),
+        "the room really is full, which is the defect's whole shape: {refused}"
+    );
+
+    // …and then it empties itself, with no operator doing anything. A real crew
+    // member joins into a seat a zombie was holding.
+    let mut crew = Joiner::connect_soon(&host);
+    crew.wait_for("ready");
+    crew.send(&RendezvousFrame {
+        code: Some(CodeField::Typed(host.code.full.clone())),
+        ..RendezvousFrame::new("join")
+    });
+    assert_eq!(
+        crew.wait_for("joined").admission.as_deref(),
+        Some("open"),
+        "the reaped places came back to the room"
+    );
+}
+
+#[test]
+fn an_attached_peer_that_stops_answering_is_detached_and_its_station_freed() {
+    // The half-open case, which no deadline can answer: an attached console is
+    // legitimately silent for as long as its player is, so the host has to ASK.
+    // A WebSocket Ping is the question and `tungstenite` answers it for every
+    // healthy client with no client code at all — so silence that survives two
+    // of them is a link that is gone, whatever TCP still believes.
+    let host = Host::start_with(AdmissionBudgets {
+        ping_interval: Duration::from_millis(150),
+        silence_deadline: Duration::from_millis(500),
+        ..AdmissionBudgets::default()
+    });
+    let mut joiner = Joiner::admitted(&host);
+    joiner.relay(
+        JsonCodec
+            .encode_client(&ClientMessage::Identify {
+                token: "adrift".to_string(),
+                name: "Ada".to_string(),
+            })
+            .expect("encodable"),
+    );
+    host.events_until(1);
+
+    // From here the socket is never touched again: it is open at the OS level
+    // and answers nothing, which is exactly what a phone that walked out of
+    // range leaves behind.
+    let events = host.events_until(2);
+    assert_eq!(
+        events[1],
+        TransportEvent::Disconnected {
+            token: "adrift".to_string()
+        },
+        "the departure goes down the ORDINARY path, so the seat flips to \
+         Backfill and the phone's own reconnect yields it straight back"
+    );
+    drop(joiner);
+}
+
+#[test]
+fn a_quiet_peer_that_answers_its_pings_is_left_alone() {
+    // The other half, and the one that makes liveness safe to ship: a bridge
+    // where nobody is touching a control sends nothing for minutes, and must
+    // not be mistaken for a bridge that has gone.
+    let host = Host::start_with(AdmissionBudgets {
+        ping_interval: Duration::from_millis(100),
+        silence_deadline: Duration::from_millis(300),
+        ..AdmissionBudgets::default()
+    });
+    let mut joiner = Joiner::admitted(&host);
+    joiner.relay(
+        JsonCodec
+            .encode_client(&ClientMessage::Identify {
+                token: "patient".to_string(),
+                name: "Grace".to_string(),
+            })
+            .expect("encodable"),
+    );
+    host.events_until(1);
+
+    // Five silence deadlines of saying nothing whatsoever — only reading.
+    joiner.keep_reading(Duration::from_millis(1_500));
+    assert_eq!(
+        host.events.lock().unwrap().len(),
+        1,
+        "a console with an idle player is not a console that has gone"
+    );
+    // …and it is still an acting participant, not merely un-detached.
+    host.dispatch(
+        &Target::Token("patient".to_string()),
+        &ServerMessage::GameStarted,
+        DeliveryClass::Reliable,
+    );
+    assert_eq!(
+        JsonCodec
+            .decode_server(
+                joiner
+                    .wait_for("relay")
+                    .payload
+                    .as_deref()
+                    .unwrap_or_default()
+            )
+            .expect("a decodable ServerMessage"),
+        ServerMessage::GameStarted
+    );
+}
+
+#[test]
+fn a_message_past_the_wire_ceiling_ends_the_socket_before_it_is_buffered() {
+    // `from_raw_socket(.., None)` took `tungstenite`'s defaults: 64 MiB per
+    // message, 16 MiB per frame, reassembled and decoded BEFORE this module
+    // charges anything — `max_relay_frame_bytes` is checked against a payload
+    // that has already been built. So an un-joined socket could make the host
+    // hold 64 MiB per un-joined slot for free. The ceiling is at the wire now.
+    let host = Host::start();
+    let mut joiner = Joiner::connect(&host);
+    joiner.wait_for("ready");
+    let huge = "x".repeat(4 * 1024 * 1024);
+    let _ = joiner.socket.send(tungstenite::Message::Text(huge.into()));
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "an oversized message was tolerated rather than ending the socket"
+        );
+        match joiner.socket.read() {
+            Ok(_) => {}
+            Err(tungstenite::Error::Io(e))
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) => {}
+            Err(_) => break,
+        }
+    }
+    // …and the door is not poisoned by it: the next joiner gets in as normal.
+    let _ = Joiner::admitted(&host);
+}
+
+#[test]
+fn the_breakers_answer_delay_is_really_waited_out_on_the_wire() {
+    // Layer 2 asserted where it acts. The unit tests read `Joiner::throttle`,
+    // which is the DECISION; this is the delay actually being taken out of a
+    // guesser's own thread before the answer is written — and the ceiling
+    // holding, which is the half a legitimate guest depends on.
+    let budgets = AdmissionBudgets {
+        // Layer 1 out of the way, so what is measured is only the breaker.
+        guess_burst: u32::MAX,
+        breaker_free: 2,
+        breaker_ramp: 1,
+        breaker_step: Duration::from_millis(120),
+        breaker_max: Duration::from_millis(360),
+        ..AdmissionBudgets::default()
+    };
+    let host = Host::start_with(budgets.clone());
+    let mut joiner = Joiner::connect(&host);
+    joiner.wait_for("ready");
+
+    let guess = |joiner: &mut Joiner, n: usize| -> Duration {
+        let at = Instant::now();
+        joiner.send(&RendezvousFrame {
+            code: Some(CodeField::Typed(wrong_code(n))),
+            ..RendezvousFrame::new("join")
+        });
+        assert_eq!(joiner.wait_for("error").reason.as_deref(), Some("unknown"));
+        at.elapsed()
+    };
+
+    let free = guess(&mut joiner, 1);
+    assert!(
+        free < budgets.breaker_step,
+        "nobody waits before the service is being guessed at: {free:?}"
+    );
+    for n in 2..10 {
+        guess(&mut joiner, n);
+    }
+    let throttled = guess(&mut joiner, 10);
+    println!("free answer {free:?}, throttled answer {throttled:?}");
+    assert!(
+        throttled >= budgets.breaker_max,
+        "the ramp is charged to the guesser's own thread: {throttled:?}"
+    );
+    assert!(
+        throttled < budgets.breaker_max + Duration::from_secs(1),
+        "…to a stated ceiling, not to a hang, which is what keeps a legitimate \
+         guest inside its own 8 s connect timeout: {throttled:?}"
+    );
 }
 
 #[test]

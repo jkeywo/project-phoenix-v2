@@ -149,6 +149,47 @@ const PUMP_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 /// generous. Not a gameplay value (AGENTS.md rule 11).
 const JOIN_DEADLINE: Duration = Duration::from_secs(30);
 
+/// How long a socket that HAS joined may hold a crew place without ever opening
+/// its relay.
+///
+/// [`JOIN_DEADLINE`]'s other half, and the reason both exist: that one is gated
+/// on `!joined`, so the moment a socket resolved the code it stopped being
+/// reaped by anything at all. A joiner's own `relay-open` follows its `joined`
+/// frame in the same breath (`gui/rendezvous-transport.js` sends it from the
+/// `case 'joined'` arm), so a socket still un-attached thirty seconds later is
+/// not a slow phone, it is a caller sitting on one of `max_peers_per_record`'s
+/// places. Same value as [`JOIN_DEADLINE`] because it is the same judgement
+/// about the same wire, and generous for the same reason. Not a gameplay value
+/// (AGENTS.md rule 11) — it is one socket thread's own scheduling.
+const ATTACH_DEADLINE: Duration = Duration::from_secs(30);
+
+/// How long an ATTACHED peer may be silent before this host asks it, in band,
+/// whether it is still there.
+///
+/// A deadline cannot answer this case: an attached crew member is legitimately
+/// silent for minutes at a time (a console sends commands when a player acts,
+/// and nothing in between), so the only honest liveness signal is one the host
+/// generates itself. That is what WebSocket Ping is for, and `tungstenite`
+/// answers a peer's Ping automatically, so a healthy phone replies with no
+/// client code at all. Ten seconds is short enough that a half-open TCP is
+/// noticed within one player's patience and long enough that a quiet bridge
+/// costs one 2-byte frame per console per ten seconds. Transport plane
+/// (AGENTS.md rule 11): it never enters the simulation and no designer tunes it.
+const LIVENESS_PING_INTERVAL: Duration = Duration::from_secs(10);
+
+/// How long that silence may go on, unanswered, before the peer is gone.
+///
+/// This is the one that matters: a phone that drops without a FIN — out of
+/// range, a venue's WiFi, a battery dying mid-frame — leaves a TCP connection
+/// that is half-open rather than closed, so the read loop returns `WouldBlock`
+/// for ever and the seat is held by nobody. Three [`LIVENESS_PING_INTERVAL`]s,
+/// so two pings must go unanswered before a link is called dead and a burst of
+/// packet loss cannot detach a crew member mid-mission. The detach goes down the
+/// ORDINARY departure path, so the seat flips to Backfill and the phone's own
+/// reconnect yields it straight back when it comes into range. Transport plane
+/// (AGENTS.md rule 11).
+const LIVENESS_SILENCE_DEADLINE: Duration = Duration::from_secs(30);
+
 /// The peer id this service uses for the host itself, on the `from` field of a
 /// frame it hands a joiner. The worker puts the host's connection id there; a
 /// joiner does not read it (`gui/rendezvous-relay.js` routes on `class`), so
@@ -193,6 +234,33 @@ const PEER_PREFIX: &str = "lan-";
 /// entropy alone would be a single point of failure, and limits alone would
 /// leave a 35-minute secret behind a lock somebody only has to be patient with.
 ///
+/// # What these bounds do NOT stop, stated rather than implied
+///
+/// A guesser with MANY source addresses — trivial on IPv6, where privacy
+/// addressing hands one host a /64 to draw from — is not stopped by layer 1 at
+/// all: [`Self::guess_burst`] is per source, and past
+/// [`Self::tracked_sources`] a new address's guesses are not even charged to
+/// one. Layer 2 is what answers that caller, and it answers it on the only
+/// resource it cannot multiply: the un-joined socket. At most
+/// [`Self::unjoined_total`] callers are mid-lookup at once and each of their
+/// answers is held up to [`Self::breaker_max`], so the WHOLE SERVICE settles at
+/// `unjoined_total / breaker_max` ≈ 8 evaluated guesses a second (plus
+/// `breaker_free / breaker_window`) however many addresses it is spread over —
+/// which against 25^8 is expected search measured in centuries. Guessing stays
+/// infeasible.
+///
+/// What such a caller CAN do, and this is the accepted residual, is spend the
+/// un-joined budget: with [`Self::unjoined_per_source`] at a quarter of the
+/// total it takes four addresses to hold every silent slot, and while they do,
+/// a crew member's upgrade meets `join-sockets-busy` and its `Retry-After`.
+/// That is lockout PRESSURE during an active attack, not a lockout: every slot
+/// is reclaimed within [`JOIN_DEADLINE`] (30 s) whether the caller cooperates
+/// or not, the refusal is soft and the client retries on its own backoff, and a
+/// socket that DID join is on the [`ATTACH_DEADLINE`] and ping/pong clocks
+/// below. The alternative — refusing addresses the table cannot track — is a
+/// venue-NAT outage bought to defend a LAN port that already serves the whole
+/// client bundle to anyone who asks.
+///
 /// # AGENTS.md rule 11
 ///
 /// These are **transport-plane** numbers, not gameplay ones: they describe one
@@ -226,10 +294,19 @@ pub struct AdmissionBudgets {
     /// An un-joined socket is a live thread, so this is the DoS bound as well
     /// as an attack bound: without it one device holds every slot and the crew
     /// standing in the room is refused. A real phone is un-joined for the
-    /// milliseconds between the `ready` frame and its own `join`, so eight
+    /// milliseconds between the `ready` frame and its own `join`, so four
     /// concurrent from one address is already far past a whole crew scanning
     /// the QR at the same moment — and the refusal is soft, because a slot
     /// frees the instant its socket closes.
+    ///
+    /// A QUARTER of [`Self::unjoined_total`] rather than a half, and the
+    /// fraction is the whole point: at a half, TWO addresses hold every slot in
+    /// the service, and IPv6 privacy addressing hands an attacker a second
+    /// address for nothing. Four of sixteen means it takes four, and the
+    /// residual — an attacker with enough addresses can still hold the un-joined
+    /// budget and make legitimate upgrades wait out the reap — is stated in this
+    /// struct's own note rather than defended against, because defending it
+    /// would mean refusing unknown addresses and that is a venue NAT outage.
     pub unjoined_per_source: usize,
     /// Un-joined sockets across ALL sources, the second half of the same bound.
     ///
@@ -244,11 +321,22 @@ pub struct AdmissionBudgets {
     /// Distinct source addresses tracked at once.
     ///
     /// A per-source table is itself memory a stranger can spend, so it is
-    /// bounded and swept of settled sources. Past the bound a NEW source is
-    /// simply not tracked per-source — the global breaker below is the layer
-    /// that answers a guesser spread across many addresses, and pretending
-    /// otherwise (refusing every unknown source) would be a self-inflicted
-    /// outage the moment a venue NAT presents a thousand addresses.
+    /// bounded and swept of settled sources. Past the bound a new source's
+    /// FAILED GUESSES are simply not charged per-source — the global breaker
+    /// below is the layer that answers a guesser spread across many addresses,
+    /// and pretending otherwise (refusing every unknown source) would be a
+    /// self-inflicted outage the moment a venue NAT presents a thousand
+    /// addresses.
+    ///
+    /// Its SOCKETS are charged either way, and the asymmetry is deliberate: a
+    /// source that holds an un-joined socket is tracked whether or not the table
+    /// is at its bound, because the entry that tracking creates cannot outlive
+    /// the socket ([`SourceBudget::settled`] drops it on release) and there are
+    /// never more than [`Self::unjoined_total`] such sockets in the whole
+    /// service. Exempting them instead — which is what this used to do — meant
+    /// filling the table was a way to buy an exemption from
+    /// [`Self::unjoined_per_source`] and then hold every un-joined slot from one
+    /// address.
     pub tracked_sources: usize,
     /// The window the global failed-guess count is kept over.
     pub breaker_window: Duration,
@@ -282,6 +370,19 @@ pub struct AdmissionBudgets {
     /// than `unjoined_total / breaker_max` ≈ 8 wrong guesses a second however
     /// many addresses the guesser has.
     pub breaker_max: Duration,
+    /// How long a JOINED socket may hold a crew place without ever attaching —
+    /// see [`ATTACH_DEADLINE`], which is this field's production value.
+    pub attach_deadline: Duration,
+    /// How long an attached peer may be silent before it is pinged — see
+    /// [`LIVENESS_PING_INTERVAL`], which is this field's production value.
+    pub ping_interval: Duration,
+    /// How long unanswered silence ends an attached peer — see
+    /// [`LIVENESS_SILENCE_DEADLINE`], which is this field's production value.
+    ///
+    /// It rides here with the two above, and with [`Self::write_timeout`], for
+    /// the reason that field's note gives: proving that a half-open link is
+    /// detected otherwise means waiting out the production number on every run.
+    pub silence_deadline: Duration,
 }
 
 impl Default for AdmissionBudgets {
@@ -289,7 +390,7 @@ impl Default for AdmissionBudgets {
         Self {
             guess_burst: 20,
             guess_refill: Duration::from_secs(5),
-            unjoined_per_source: 8,
+            unjoined_per_source: 4,
             unjoined_total: 16,
             tracked_sources: 1024,
             breaker_window: Duration::from_secs(60),
@@ -298,6 +399,9 @@ impl Default for AdmissionBudgets {
             breaker_step: Duration::from_millis(100),
             write_timeout: PUMP_WRITE_TIMEOUT,
             breaker_max: Duration::from_secs(2),
+            attach_deadline: ATTACH_DEADLINE,
+            ping_interval: LIVENESS_PING_INTERVAL,
+            silence_deadline: LIVENESS_SILENCE_DEADLINE,
         }
     }
 }
@@ -398,25 +502,52 @@ impl Admissions {
         let now = Instant::now();
         let mut sources = self.sources.lock().unwrap_or_else(|e| e.into_inner());
         self.sweep(&mut sources, now, &ip);
-        if !sources.contains_key(&ip) && sources.len() >= self.budgets.tracked_sources {
-            // Untracked because the table is full: the global cap above and the
-            // breaker below are what answer this caller.
-            return Ok(());
-        }
+        // Tracked whether or not the table is at its bound, UNLIKE
+        // `charge_failure`. Exempting the untracked path was a way to buy an
+        // exemption from `unjoined_per_source`: fill the table with entries that
+        // are not settled (a single wrong guess does it, and it is not swept
+        // until it refunds), then take every un-joined slot in the service from
+        // one address, because the check below was never reached. Tracking here
+        // costs nothing a stranger can spend — the entry this creates holds an
+        // un-joined socket, `release_socket` drops it the moment the socket
+        // closes, and there are never more than `unjoined_total` of them — so
+        // the table's real ceiling is `tracked_sources + unjoined_total`, which
+        // is the honest number and is stated in that field's note.
         let entry = sources.entry(ip).or_default();
         if entry.unjoined >= self.budgets.unjoined_per_source {
             drop(sources);
-            self.unjoined.fetch_sub(1, Ordering::Relaxed);
+            self.release_slot();
             return Err("join-sockets-busy");
         }
         entry.unjoined += 1;
         Ok(())
     }
 
+    /// Hand one un-joined slot back to the global count.
+    ///
+    /// `fetch_update` rather than a `load` then a clamped `fetch_sub`: the pair
+    /// was not atomic, so two threads releasing at once could each read the same
+    /// `live` and subtract twice — an underflow, and on a `usize` an underflow
+    /// is `usize::MAX`, which is a service that refuses every upgrade for the
+    /// rest of the mission. The invariant IS one release per take (a
+    /// [`SocketSlot`] owns it, and the two pre-slot error paths in
+    /// `DirectJoinGate::accept` each return immediately after releasing), so the
+    /// `debug_assert` is the honest half: a saturating decrement that fires in
+    /// production would be hiding a leak, and this makes it fail a test run
+    /// instead.
+    fn release_slot(&self) {
+        let ok = self
+            .unjoined
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |live| {
+                live.checked_sub(1)
+            })
+            .is_ok();
+        debug_assert!(ok, "an un-joined slot was released more than once");
+    }
+
     /// Give one un-joined slot back — the socket closed, or it joined.
     fn release_socket(&self, source: Option<IpAddr>) {
-        let live = self.unjoined.load(Ordering::Relaxed);
-        self.unjoined.fetch_sub(1.min(live), Ordering::Relaxed);
+        self.release_slot();
         let Some(ip) = source else {
             return;
         };
@@ -442,11 +573,10 @@ impl Admissions {
             return false;
         }
         let entry = sources.entry(ip).or_default();
+        // `refill` sets the clock on a bucket that has none, so the charge below
+        // always lands on an entry that is already ticking.
         entry.refill(now, self.budgets.guess_refill);
         entry.spent = entry.spent.saturating_add(1);
-        if entry.refilled_at.is_none() {
-            entry.refilled_at = Some(now);
-        }
         entry.spent > self.budgets.guess_burst
     }
 
@@ -997,10 +1127,21 @@ impl ConnectionUpgrade for DirectJoinGate {
         // to read — only the 101 above to write, which is why this module
         // writes it. The alternative was peeking the socket without consuming
         // it, which std cannot do portably.
+        //
+        // With a CONFIG, not `None`: the default is 64 MiB per message and
+        // 16 MiB per frame, and those are buffered and decoded BEFORE this
+        // module charges anything — `max_relay_frame_bytes` is checked against a
+        // payload that has already been reassembled. So an un-joined socket
+        // could make this host hold 64 MiB before the first budget was
+        // consulted, once per un-joined slot. Bounded at the wire instead, where
+        // a message past the ceiling is a `Capacity` error and ends the
+        // connection.
         let socket = tungstenite::WebSocket::from_raw_socket(
             stream,
             tungstenite::protocol::Role::Server,
-            None,
+            Some(socket_config(
+                self.record.table.limits.max_relay_frame_bytes,
+            )),
         );
         let record = Arc::clone(&self.record);
         let slot = SocketSlot {
@@ -1021,6 +1162,41 @@ impl ConnectionUpgrade for DirectJoinGate {
         }
         Ok(())
     }
+}
+
+/// How much bigger a relay payload gets on the wire than the bytes
+/// `max_relay_frame_bytes` counts.
+///
+/// The authored ceiling is checked against the DECODED payload — the game's own
+/// JSON — and that payload travels inside a JSON string, so every `"` and `\`
+/// in it arrives doubled. Two is the worst case a valid payload can reach (a
+/// document that is nothing but quotes); a real `ServerMessage` runs nearer
+/// 1.2. Not a gameplay value (AGENTS.md rule 11) — it is an encoding fact about
+/// this wire.
+const RELAY_ESCAPE_FACTOR: usize = 2;
+
+/// Room for the envelope around an escaped payload — `v`, `kind`, `class`,
+/// `from`, the field names and the braces. Kilobytes for a frame that needs
+/// tens of bytes, because the number this widens is a REFUSAL ceiling and
+/// cutting it fine would refuse a legitimate frame to save nothing.
+const RELAY_ENVELOPE_HEADROOM: usize = 8 * 1024;
+
+/// The wire bounds one joiner socket is given, sized from the authored relay
+/// ceiling rather than left at `tungstenite`'s defaults.
+///
+/// `max_message_size` and `max_frame_size` are the same number: a message this
+/// service will refuse anyway must not be reassembled from fragments first, and
+/// nothing here legitimately fragments. Past it `tungstenite` answers
+/// `Error::Capacity`, the read loop ends the connection, and the caller is
+/// detached — which is the same end an over-large `relay` payload already
+/// reaches, one layer earlier and without the bytes being buffered.
+fn socket_config(max_relay_frame_bytes: usize) -> tungstenite::protocol::WebSocketConfig {
+    let ceiling = max_relay_frame_bytes
+        .saturating_mul(RELAY_ESCAPE_FACTOR)
+        .saturating_add(RELAY_ENVELOPE_HEADROOM);
+    tungstenite::protocol::WebSocketConfig::default()
+        .max_message_size(Some(ceiling))
+        .max_frame_size(Some(ceiling))
 }
 
 /// One accepted socket's place in the budgets, given back however it ends.
@@ -1052,8 +1228,20 @@ impl SocketSlot {
 impl Drop for SocketSlot {
     fn drop(&mut self) {
         if self.joined {
-            let live = self.record.joined.load(Ordering::Relaxed);
-            self.record.joined.fetch_sub(1.min(live), Ordering::Relaxed);
+            // `fetch_update`, for the reason `Admissions::release_slot` gives
+            // and with a sharper consequence: a `load` then a clamped
+            // `fetch_sub` is not atomic, and an underflowed crew count is
+            // `usize::MAX`, which makes `crew >= max_peers_per_record` true for
+            // ever — every later upgrade refused `join-record-full`, silently
+            // and permanently, on a service nobody is attacking.
+            let ok = self
+                .record
+                .joined
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |live| {
+                    live.checked_sub(1)
+                })
+                .is_ok();
+            debug_assert!(ok, "a crew place was released more than once");
         } else {
             self.record.admissions.release_socket(self.source);
         }
@@ -1153,10 +1341,22 @@ fn serve_joiner(record: &Arc<Record>, mut socket: JoinerSocket, mut slot: Socket
     // Without this the phone would sit on "connecting" against a host that was
     // waiting for it to speak first.
     reply(&mut joiner, &RendezvousFrame::new("ready"));
+    let budgets = record.admissions.budgets.clone();
     let opened = Instant::now();
-    loop {
+    // The three liveness clocks, one per state a socket can be in. Together
+    // they cover the whole life of a connection, which is the property that was
+    // missing: `JOIN_DEADLINE` is gated on `!joined`, so before this a socket
+    // that resolved the code was never reaped by anything at all.
+    //
+    // * un-joined  → `opened` against `JOIN_DEADLINE`
+    // * joined but not attached → `unattached_since` against `attach_deadline`
+    // * attached → `heard`/`pinged_at` against `ping_interval`/`silence_deadline`
+    let mut unattached_since = Instant::now();
+    let mut heard = Instant::now();
+    let mut pinged_at: Option<Instant> = None;
+    let ending = loop {
         if !record.open.load(Ordering::Relaxed) {
-            break;
+            break "closed";
         }
         if joiner.outbox.as_ref().is_some_and(|o| o.is_closed()) {
             // Drain whatever the host queued before it closed us — the
@@ -1170,10 +1370,45 @@ fn serve_joiner(record: &Arc<Record>, mut socket: JoinerSocket, mut slot: Socket
             {
                 let _ = socket.send(tungstenite::Message::Text(text.into()));
             }
-            break;
+            break "closed";
         }
         if !joiner.joined && opened.elapsed() > JOIN_DEADLINE {
-            break;
+            break "join-deadline";
+        }
+        if joiner.joined && joiner.outbox.is_none() {
+            // A crew place held by a socket that never opened its relay. The
+            // clock is reset by every other state below, so a peer that
+            // attaches, steps off with `relay-close` and attaches again gets a
+            // fresh window rather than an instant reap.
+            if unattached_since.elapsed() > budgets.attach_deadline {
+                break "attach-deadline";
+            }
+        } else {
+            unattached_since = Instant::now();
+        }
+        if joiner.outbox.is_some() {
+            // Attached, and a deadline cannot answer this case: a console is
+            // legitimately silent for as long as its player is. So the host
+            // asks — a WebSocket Ping, which every client answers in the
+            // library rather than in its own code — and only unanswered
+            // silence is a death. Without it a half-open TCP (a phone out of
+            // range, a battery gone, a venue AP that dropped the association)
+            // reads `WouldBlock` for ever and holds its seat until the mission
+            // ends.
+            let quiet = heard.elapsed();
+            if quiet > budgets.silence_deadline {
+                break "liveness-timeout";
+            }
+            let due = pinged_at.is_none_or(|at| at.elapsed() >= budgets.ping_interval);
+            if quiet >= budgets.ping_interval && due {
+                if socket
+                    .send(tungstenite::Message::Ping(tungstenite::Bytes::new()))
+                    .is_err()
+                {
+                    break "closed";
+                }
+                pinged_at = Some(Instant::now());
+            }
         }
 
         for text in std::mem::take(&mut joiner.pending) {
@@ -1196,6 +1431,8 @@ fn serve_joiner(record: &Arc<Record>, mut socket: JoinerSocket, mut slot: Socket
 
         match socket.read() {
             Ok(tungstenite::Message::Text(text)) => {
+                heard = Instant::now();
+                pinged_at = None;
                 on_client_frame(record, &mut joiner, &text);
                 if joiner.joined {
                     // Idempotent, and this is the one place the socket stops
@@ -1210,21 +1447,29 @@ fn serve_joiner(record: &Arc<Record>, mut socket: JoinerSocket, mut slot: Socket
                     std::thread::sleep(owed);
                 }
             }
-            Ok(tungstenite::Message::Close(_)) => break,
-            // Binary, ping and pong are `tungstenite`'s own business or nothing
-            // of ours: the protocol is JSON text, both ways, in every service.
-            Ok(_) => {}
+            Ok(tungstenite::Message::Close(_)) => break "closed",
+            // Binary is nothing of ours — the protocol is JSON text, both ways,
+            // in every service — but a Pong (or a Ping of the peer's own, which
+            // `tungstenite` has already answered) is the whole liveness signal,
+            // so ANY frame counts as this socket still being there.
+            Ok(_) => {
+                heard = Instant::now();
+                pinged_at = None;
+            }
             Err(tungstenite::Error::Io(e))
                 if matches!(
                     e.kind(),
                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
                 ) => {}
-            Err(_) => break,
+            Err(_) => break "closed",
         }
-    }
+    };
     let _ = socket.close(None);
     let _ = socket.flush();
-    finish(record, &joiner, "closed");
+    // Down the ORDINARY departure path whichever clock ran out, which is what
+    // makes a reaped seat flip to Backfill and a returning phone's reconnect
+    // yield it straight back.
+    finish(record, &joiner, ending);
 }
 
 /// This connection is over: detach it, which is what tells the host the crew

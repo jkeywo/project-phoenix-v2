@@ -351,29 +351,47 @@ acting participant. So the code is defended at the transport, in three layers
 (`AdmissionBudgets` in `direct_join.rs` carries the numbers and the arithmetic):
 
 1. **Budgets that survive reconnection.** `max_lookups_per_connection` is
-   charged to a socket, and a socket is exactly what a guesser throws away —
-   before this was fixed the door answered ~1,856 wrong codes in 1.5 s across
-   churned connections. So the failed-guess budget is keyed on the peer address
-   read at accept and held by the *record*: a token bucket, 20 wrong guesses
-   burst and one refunded every 5 s, alongside a per-source cap on sockets that
-   never join. Only **failed** lookups are charged, so a correct code costs
-   nothing — a crew behind one NAT address is spending a typo allowance, never a
-   join allowance.
+   charged to a socket, and a socket is exactly what a guesser throws away — an
+   unbudgeted door answered wrong codes in the high hundreds to a few thousand
+   per second, depending entirely on the machine the probe ran from. So the
+   failed-guess budget is keyed on the peer address read at accept and held by
+   the *record*: a token bucket, 20 wrong guesses burst and one refunded every
+   5 s, alongside a per-source cap on sockets that never join (4 of the 16 the
+   whole service allows — a quarter rather than a half, so that *two* addresses
+   cannot hold every slot, which IPv6 privacy addressing would make free). Only
+   **failed** lookups are charged, so a correct code costs nothing — a crew
+   behind one NAT address is spending a typo allowance, never a join allowance.
 2. **A global circuit-breaker.** Wrong guesses in a rolling minute ramp a delay
    onto every lookup answer, correct ones included (answering a right code
    faster during an attack would be a timing oracle), capped at 2 s — inside the
    client's own 8 s first-connect timeout, so a guest caught in an attack waits
    once and gets in. It is the layer that covers a guesser spread across more
-   addresses than the per-source table can hold.
+   addresses than the per-source table can hold, and it is *asserted* as a
+   composite: the whole service, driven from an address per guess, evaluates
+   **8.2 wrong codes a second** against a stated ceiling of
+   `unjoined_total / breaker_max + breaker_free / breaker_window` = 8.5, and
+   ~10.2/s through the ramp's own first window before it saturates.
 3. **Enough letters.** The authored suffix is eight, not five: 25^8 ≈ 1.5 × 10^11
    (37.15 bits), about 377 days of expected search at the *old* unthrottled
-   rate, where five letters (25^5, 23.2 bits) fell in about 35 minutes.
+   rate, where five letters (25^5, 23.2 bits) fell in about 35 minutes. At the
+   composite rate the two layers above allow, it is **centuries**.
 
 Every refusal is **soft** and says so — a stated reason in band, a `Retry-After`
 on a refused upgrade, a bucket that refills on a clock — because a whole crew
 can share one address, and a lockout that did not lift would be a self-inflicted
 outage waiting for one clumsy typist. On top of all of it, the compatibility
 handshake and the reserved-token gate still decide what a joiner may *be*.
+
+**The residual, stated rather than defended against.** A guesser with many
+addresses is not slowed by layer 1 at all, and layer 2 answers it on the one
+resource that cannot be multiplied — the un-joined socket. What such a caller
+*can* still do is hold that budget, so a crew member's upgrade meets
+`join-sockets-busy` and a `Retry-After` for as long as the attack runs. That is
+lockout **pressure** during an active attack rather than a lockout: every slot
+is reclaimed within the 30 s join deadline whether the caller cooperates or not.
+The alternative — refusing addresses the source table cannot track — is a
+venue-NAT outage bought to defend a port that already serves the whole client
+bundle to anyone on the LAN who asks.
 
 **Silence has its own budget.** A socket that upgrades and never joins is
 counted against `AdmissionBudgets::unjoined_total`, not the authored
@@ -382,7 +400,33 @@ to refuse the room with `join-sockets-full`. The thread ceiling this leg can
 reach is therefore peers *plus* un-joined, and both directions of a joiner
 socket are time-bounded — the write timeout is what stops a joiner that stalls
 its own reads from parking a host thread inside `send` for as long as the OS
-will hold a full buffer.
+will hold a full buffer. The socket's WebSocket config is sized from
+`max_relay_frame_bytes` too, rather than left at `tungstenite`'s 64 MiB message
+/ 16 MiB frame defaults, which were buffered and *decoded* before any budget was
+consulted.
+
+**Every state a socket can be in has a clock.** `JOIN_DEADLINE` is gated on
+`!joined`, so a socket that resolved the code used to be reaped by nothing at
+all: its read loop returned `WouldBlock` for ever and it held one of
+`max_peers_per_record`'s places until the process exited. Thirty-two such
+sockets fill the room. The three clocks now cover the whole life of a
+connection:
+
+| State | Clock | Value |
+| --- | --- | --- |
+| upgraded, not joined | `JOIN_DEADLINE` | 30 s |
+| joined, never opened its relay | `attach_deadline` | 30 s |
+| attached | WebSocket ping/pong | ping after 10 s quiet, detach after 30 s unanswered |
+
+A deadline cannot answer the attached case, because an attached console is
+legitimately silent for as long as its player is — so the host asks, with a
+WebSocket Ping that every client answers inside its library rather than in its
+own code. What that closes is the room's real failure: a phone dropping without
+a FIN (out of range, a venue AP losing the association, a battery gone
+mid-frame) leaves a **half-open** TCP, so the seat is held by nobody, and a bad
+night accumulates them until the game is locked out with nothing on screen
+saying why. Every reap goes down the ordinary departure path, so the seat flips
+to Backfill and a returning phone's own reconnect yields it straight back.
 
 **The client half is one rule**: `gui/join-url.js`'s
 `rendezvousBaseForOrigin` — *the service that served you the page is the service
@@ -416,11 +460,26 @@ so unlike `tests/native_relay_live.rs` it is **not** `#[ignore]`d.
 
 It also runs the attack, rather than asserting that the limits exist. The same
 churned-connection probe fires wrong codes at two hosts differing only in their
-budgets (1,856 guesses evaluated → 20, the burst, with the rest refused in
-band), and a real crew member with the right code joins **from the same
-loopback address the guessing is coming from** while it is going on — which is
-the property the soft limits are for, and the one an over-eager lockout would
-have quietly broken.
+budgets, and the assertion is **relative** — a collapse to the burst plus what
+refilled, with the rest refused in band — precisely because the absolute figure
+is the prober's own machine talking: two runs on different hardware measured
+1,856 → 20 and 411 → 20, and both are the same result. A real crew member with
+the right code joins **from the same loopback address the guessing is coming
+from** while it is going on (a few hundred milliseconds, again machine-dependent
+— what is asserted is that it is inside the client's own 8 s connect timeout),
+which is the property the soft limits are for and the one an over-eager lockout
+would have quietly broken.
+
+Loopback is one address, though, so the real-socket tests can only prove layer 1
+plus the breaker's *shape*. The composite ceiling the design rests on is
+asserted at the pure layer instead, driving the real `Admissions` from a
+distinct synthetic source per guess with the sockets' waiting simulated
+(`the_composite_guess_rate_holds_however_many_addresses_it_is_spread_over`), and
+one real-socket test times the breaker's delay actually being taken out of a
+guesser's thread before an answer is written. The liveness clocks have their own
+three: a joined-then-silent hoard giving the room's places back, a peer that
+stops answering its pings being detached, and a quiet peer that *does* answer
+being left alone.
 
 ## Local Station panes (issue #1122)
 

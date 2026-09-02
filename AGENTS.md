@@ -412,7 +412,14 @@ cargo build --release --features host --bin phoenix-host
 #     SOFT — the bucket refills, refusals carry Retry-After — because a whole
 #     crew can share one address. The authored suffix is EIGHT letters for the
 #     same reason (25^8 ≈ 1.5e11; five was walkable in ~35 min), and all three
-#     readers of assets/join/join-codes.toml inherit that.
+#     readers of assets/join/join-codes.toml inherit that. Every STATE a joiner
+#     socket can be in also has a clock, which is what stops a dropped phone
+#     holding a seat for the whole mission: un-joined on JOIN_DEADLINE, joined
+#     but never attached on attach_deadline, attached on WebSocket ping/pong.
+#     A half-open TCP (a phone out of range, no FIN) reads WouldBlock for ever,
+#     so nothing short of a ping detects it; every reap goes down the ordinary
+#     departure path, so the seat flips to Backfill and a reconnect yields it
+#     straight back.
 #   --rendezvous <URL> --origin <URL>  is the OTHER leg (issue #1113): play
 #     beyond one LAN. The host registers with the rendezvous service, prints its
 #     typed code at startup, and every crew member reaches it over the

@@ -747,6 +747,186 @@ fn silence_has_its_own_budget_and_cannot_spend_the_rooms_places() {
 }
 
 #[test]
+fn the_wire_ceiling_is_the_authored_one_and_never_refuses_a_legal_frame() {
+    // The bound `tungstenite`'s defaults did not give: 64 MiB buffered and
+    // decoded before a single budget was consulted. It has to be ABOVE the
+    // authored payload ceiling, because a legal frame refused at the wire would
+    // be a mission that works on one leg and fails on the other — the exact
+    // failure `max_relay_frame_bytes`'s own note exists to prevent.
+    let (record, _rx) = service();
+    let authored = record.table.limits.max_relay_frame_bytes;
+    let config = socket_config(authored);
+    let ceiling = authored * RELAY_ESCAPE_FACTOR + RELAY_ENVELOPE_HEADROOM;
+    assert_eq!(config.max_message_size, Some(ceiling));
+    assert_eq!(
+        config.max_frame_size,
+        Some(ceiling),
+        "a message this service will refuse must not be reassembled first"
+    );
+    assert!(
+        ceiling > authored,
+        "a payload of the authored size still fits, escaped, with its envelope"
+    );
+    assert!(
+        ceiling < 64 << 20,
+        "…and it is orders below the default it replaces"
+    );
+}
+
+#[test]
+fn filling_the_source_table_does_not_buy_an_exemption_from_the_socket_cap() {
+    // The hole the per-source socket cap had: `take_socket` returned Ok as soon
+    // as the source table was full, BEFORE reading `unjoined_per_source`. So an
+    // attacker filled the table first — one wrong guess per address leaves an
+    // entry that is not settled and is therefore not swept — and then took every
+    // un-joined slot in the service from a single address, which is the exact
+    // lockout the per-source cap exists to stop.
+    let budgets = AdmissionBudgets {
+        tracked_sources: 4,
+        unjoined_per_source: 2,
+        unjoined_total: 8,
+        // Nothing refunds during this test, so every filler entry stays
+        // unsettled and the table stays at its bound — the attacker's position.
+        guess_burst: u32::MAX,
+        guess_refill: Duration::from_secs(3600),
+        ..AdmissionBudgets::default()
+    };
+    let (record, _rx) = budgeted_service(budgets.clone());
+    for n in 0..8 {
+        let mut filler = from_source(&record, ip(&format!("198.51.100.{n}")));
+        guess(&record, &mut filler);
+        told(&mut filler);
+    }
+    assert!(
+        record.admissions.sources.lock().unwrap().len() >= budgets.tracked_sources,
+        "the table really is at its bound, which is the attacker's precondition"
+    );
+
+    // An address the table has never seen, taking sockets. It is charged the
+    // per-source cap like anybody else.
+    let stranger = ip("203.0.113.200");
+    assert!(record.admissions.take_socket(stranger).is_ok());
+    assert!(record.admissions.take_socket(stranger).is_ok());
+    assert_eq!(
+        record.admissions.take_socket(stranger),
+        Err("join-sockets-busy"),
+        "a full table is not an exemption from unjoined_per_source"
+    );
+    // …and the un-joined budget still has room in it for the crew, which is the
+    // thing the exemption used to spend.
+    assert!(record.admissions.take_socket(ip("192.168.1.90")).is_ok());
+
+    // Tracking a source past the bound cannot itself be spent: the entry exists
+    // only while its socket does, and there are never more than
+    // `unjoined_total` of those.
+    assert!(
+        record.admissions.sources.lock().unwrap().len()
+            <= budgets.tracked_sources + budgets.unjoined_total,
+        "the table's ceiling is tracked_sources + unjoined_total, and it is stated"
+    );
+    record.admissions.release_socket(stranger);
+    record.admissions.release_socket(stranger);
+    assert!(
+        !record
+            .admissions
+            .sources
+            .lock()
+            .unwrap()
+            .contains_key(&stranger.unwrap()),
+        "and the entry goes with the last socket that made it"
+    );
+}
+
+#[test]
+fn the_composite_guess_rate_holds_however_many_addresses_it_is_spread_over() {
+    // Layer 2's actual claim, and the one no loopback test can reach: every
+    // attack test on a real socket comes from ONE address, so it proves the
+    // per-source bucket and leaves the global breaker proved only as a ramp
+    // shape. What the design rests on is the COMPOSITE ceiling — what the whole
+    // service will evaluate per second for a guesser holding an address per
+    // guess, which bypasses layer 1 entirely (past `tracked_sources` a new
+    // address is not charged one at all). So this drives the real `Admissions`
+    // from distinct synthetic sources and simulates only the waiting.
+    let budgets = AdmissionBudgets {
+        // The one number scaled, and it is not in the ceiling: a fast refund
+        // keeps the source table sweepable so the run is a second rather than a
+        // minute. Every address guesses ONCE, so no bucket is ever near its
+        // burst and layer 1 is out of the measurement by construction.
+        guess_refill: Duration::from_millis(1),
+        tracked_sources: 64,
+        ..AdmissionBudgets::default()
+    };
+    let (record, _rx) = budgeted_service(budgets.clone());
+
+    // The service's real concurrency: a guesser's socket is by definition
+    // un-joined, so no more than `unjoined_total` lookups are ever in flight,
+    // and none of them may ask again until it has waited out the delay the
+    // breaker charged its last answer. One virtual clock per socket; the socket
+    // that comes free earliest asks next.
+    let run = Duration::from_secs(600);
+    let mut clocks = vec![Duration::ZERO; budgets.unjoined_total];
+    let mut address = 0u32;
+    let mut opening_minute = 0usize;
+    let mut evaluated = 0usize;
+    loop {
+        let (slot, at) = clocks
+            .iter()
+            .enumerate()
+            .map(|(i, d)| (i, *d))
+            .min_by_key(|(_, d)| *d)
+            .expect("the service has sockets");
+        if at >= run {
+            break;
+        }
+        address += 1;
+        // A fresh address for every guess — IPv6 privacy addressing makes this
+        // free, and it is the case layer 1 cannot answer.
+        let mut j = from_source(&record, ip(&format!("2001:db8::{address:x}")));
+        guess(&record, &mut j);
+        assert_eq!(
+            told(&mut j)[0].reason.as_deref(),
+            Some("unknown"),
+            "every address here is inside its own bucket: only the breaker bites"
+        );
+        evaluated += 1;
+        if at < budgets.breaker_window {
+            opening_minute += 1;
+        }
+        clocks[slot] = at + j.throttle;
+    }
+
+    let sustained = evaluated as f64 / run.as_secs_f64();
+    let opening = opening_minute as f64 / budgets.breaker_window.as_secs_f64();
+    // `unjoined_total` answers in flight, each held up to `breaker_max`, plus
+    // the guesses the breaker lets through free in each window.
+    let ceiling = budgets.unjoined_total as f64 / budgets.breaker_max.as_secs_f64()
+        + budgets.breaker_free as f64 / budgets.breaker_window.as_secs_f64();
+    println!(
+        "composite guess rate: sustained {sustained:.2}/s, opening minute \
+         {opening:.2}/s, stated ceiling {ceiling:.2}/s"
+    );
+    assert!(
+        sustained <= ceiling,
+        "the whole service, spread over {address} addresses, evaluated \
+         {sustained:.2} guesses a second against a stated ceiling of \
+         {ceiling:.2}"
+    );
+    // The ramp is not free, and saying so is the honest half: the first window
+    // runs hotter than the steady state because the breaker has to see the
+    // failures before it can charge for them. It is still an order of magnitude
+    // under the ~2,340/s an unbudgeted door answered.
+    assert!(
+        opening <= ceiling * 1.5,
+        "even the ramp's own window stays near the ceiling: {opening:.2}/s"
+    );
+    // …and at that rate the authored keyspace is not a target. 25^8 / 2 guesses
+    // at the sustained rate, in years.
+    let years = (25f64.powi(8) / 2.0) / sustained / (365.0 * 24.0 * 3600.0);
+    println!("expected search at the composite rate: {years:.0} years");
+    assert!(years > 100.0, "the margin is centuries, not hours: {years}");
+}
+
+#[test]
 fn the_source_table_is_bounded_and_the_breaker_carries_what_it_cannot_track() {
     // A per-source table is memory a stranger can spend, so it is swept of
     // settled sources rather than grown. What a flood of addresses meets is

@@ -17,7 +17,9 @@ use crate::core::messages::{GamePhase, ServerMessage, ServerMessageDiscriminants
 use crate::core::narrative::{
     fold_narrative, NarrativeEvent, NarrativeTimeline, StampedNarrativeEvent,
 };
-use crate::core::task_lifecycle::{terminal_event, TaskLifecycles, TaskTerminalReason};
+use crate::core::task_lifecycle::{
+    repeats_event, terminal_event, TaskLifecycles, TaskTerminalReason,
+};
 use crate::debug::payload::StationActivityPayload;
 use crate::entities::spawner::{EntityName, EntitySystemHull, EntityUuid, FactionComponent};
 use crate::lobby::OutboundMessage;
@@ -459,7 +461,8 @@ fn reported_wall_seconds(seed_source: &str, wall_seconds: f64) -> f64 {
     }
 }
 
-/// Close every continuous task still running when the run stopped (issue #1341).
+/// Close every continuous task still running when the run stopped, and report
+/// the polled attempts nothing has reported yet (issue #1341).
 ///
 /// # Why this is not a system
 ///
@@ -478,26 +481,41 @@ fn reported_wall_seconds(seed_source: &str, wall_seconds: f64) -> f64 {
 /// when stream capture is on — so the stream and the report's timeline still
 /// agree event for event.
 ///
-/// Idempotent: the registry is emptied, so a second call adds nothing.
+/// A standing order that was still being re-issued when the run stopped is the
+/// same problem one step along: its repeats were counted rather than written, so
+/// the census beat that makes them identifiable (issue #1341's AC3) has nowhere
+/// else to be emitted from either. Those go first — they describe attempts made
+/// DURING the run — and the mission-ended terminals follow.
+///
+/// Idempotent: the registry is emptied and the repeat counters drained, so a
+/// second call adds nothing.
 pub fn finalize_task_lifecycles(app: &mut App) {
     let tick = app.world().resource::<crate::sim_tick::SimTick>().0;
     let sim_t = app.world().resource::<Time>().elapsed_secs_f64();
     let Some(mut lifecycles) = app.world_mut().get_resource_mut::<TaskLifecycles>() else {
         return;
     };
-    // Slot order, from the registry's own `BTreeMap` — never the order the
+    // Slot order, from the registry's own `BTreeMap`s — never the order the
     // tasks happened to open in.
+    let repeats = lifecycles.take_all_repeats();
     let dangling = lifecycles.take_all();
-    if dangling.is_empty() {
+    if repeats.is_empty() && dangling.is_empty() {
         return;
     }
+    let events =
+        repeats
+            .into_iter()
+            .map(|(activation, reason, count)| repeats_event(&activation, reason, count))
+            .chain(dangling.into_iter().map(|activation| {
+                terminal_event(&activation, TaskTerminalReason::MissionEnded, tick)
+            }));
     let mut telemetry = app.world_mut().resource_mut::<RunTelemetry>();
-    for activation in dangling {
+    for event in events {
         let stamped = StampedNarrativeEvent {
             seq: telemetry.narrative_events.len() as u64,
             tick,
             sim_t,
-            event: terminal_event(&activation, TaskTerminalReason::MissionEnded, tick),
+            event,
         };
         if telemetry.capture_stream && stamped.event.in_timeline_stream() {
             let line = stamped.to_stream_json();

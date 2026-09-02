@@ -395,7 +395,25 @@ pub enum TaskLifecycleRequest {
 pub struct TaskLifecycles {
     active: BTreeMap<TaskSlot, TaskActivation>,
     next_ordinal: BTreeMap<TaskSlot, u32>,
-    last_terminal: BTreeMap<TaskSlot, (Option<String>, TaskTerminalReason)>,
+    last_terminal: BTreeMap<TaskSlot, LastTerminal>,
+}
+
+/// The terminal moment a slot last recorded, and how many identical
+/// instantaneous activations have been folded into it since (issue #1341).
+///
+/// The whole activation is kept, not just its subject and reason, for two
+/// reasons: the coalescing rule needs the subject, and the SUMMARY beat that
+/// reports the folded repeats has to name the same key the retained beat
+/// carried — otherwise the count would float free of the activation it counts.
+#[derive(Debug, Clone, PartialEq)]
+struct LastTerminal {
+    /// The activation the retained terminal beat belonged to.
+    activation: TaskActivation,
+    /// Why it ended.
+    reason: TaskTerminalReason,
+    /// How many identical repeats have been coalesced into it and not yet
+    /// reported. Zero once [`TaskLifecycles::take_repeats`] has drained them.
+    repeats: u32,
 }
 
 impl TaskLifecycles {
@@ -468,14 +486,70 @@ impl TaskLifecycles {
     /// Called for EVERY terminal the emitter writes, including the ones a sweep
     /// produces: what the rule below compares against is "the last thing this
     /// slot was seen to do", not "the last thing a workflow reported".
-    pub fn record_terminal(
+    ///
+    /// A freshly recorded terminal starts a new coalescing group, so its repeat
+    /// count begins at zero. The caller must have reported any repeats the slot
+    /// was still carrying first — [`Self::take_repeats`] — or the count would be
+    /// silently discarded, which is the whole failure this counter exists to
+    /// prevent.
+    pub fn record_terminal(&mut self, activation: &TaskActivation, reason: TaskTerminalReason) {
+        self.last_terminal.insert(
+            activation.key.slot.clone(),
+            LastTerminal {
+                activation: activation.clone(),
+                reason,
+                repeats: 0,
+            },
+        );
+    }
+
+    /// Count one coalesced repeat against the terminal `slot` last recorded.
+    ///
+    /// Called instead of writing a start/terminal pair, so the attempt is
+    /// BOUNDED rather than erased: [`Self::take_repeats`] hands the total back
+    /// for a single summary beat once the standing failure ends.
+    pub fn note_repeat(&mut self, slot: &TaskSlot) {
+        if let Some(last) = self.last_terminal.get_mut(slot) {
+            last.repeats = last.repeats.saturating_add(1);
+        }
+    }
+
+    /// Take the repeats folded into `slot`'s retained terminal, if any, with the
+    /// activation and reason they repeated. Leaves the retained terminal in
+    /// place — only the count is drained — so a further identical attempt still
+    /// coalesces rather than re-opening the flood.
+    pub fn take_repeats(
         &mut self,
         slot: &TaskSlot,
-        target: Option<&str>,
-        reason: TaskTerminalReason,
-    ) {
+    ) -> Option<(TaskActivation, TaskTerminalReason, u32)> {
+        let last = self.last_terminal.get_mut(slot)?;
+        if last.repeats == 0 {
+            return None;
+        }
+        let repeats = std::mem::take(&mut last.repeats);
+        Some((last.activation.clone(), last.reason, repeats))
+    }
+
+    /// Whether any slot is carrying unreported repeats.
+    pub fn has_pending_repeats(&self) -> bool {
+        self.last_terminal.values().any(|last| last.repeats > 0)
+    }
+
+    /// Take every slot's outstanding repeats, in slot order — the run-end
+    /// counterpart of [`Self::take_repeats`], for the standing order that was
+    /// still being re-issued when the run stopped.
+    pub fn take_all_repeats(&mut self) -> Vec<(TaskActivation, TaskTerminalReason, u32)> {
         self.last_terminal
-            .insert(slot.clone(), (target.map(str::to_string), reason));
+            .values_mut()
+            .filter(|last| last.repeats > 0)
+            .map(|last| {
+                (
+                    last.activation.clone(),
+                    last.reason,
+                    std::mem::take(&mut last.repeats),
+                )
+            })
+            .collect()
     }
 
     /// Whether an INSTANTANEOUS activation of `slot` against `target`, ending
@@ -504,6 +578,19 @@ impl TaskLifecycles {
     /// * A task that spanned ticks. Only an activation that began and ended
     ///   inside one tick can be a poll — a hold that ran for a while and failed
     ///   is a real ending even if the previous hold failed the same way.
+    ///
+    /// # What "coalesced" does NOT mean
+    ///
+    /// It does not mean *erased*. The rule cannot tell an AI cadence retry from
+    /// an engineer pressing Engage a second time on a target that is still out
+    /// of reach — both are one slot, one subject, one unchanged refusal, both
+    /// halves minted by one tick — and issue #1341's AC3 requires a repeat to
+    /// stay identifiable. So a coalesced attempt is COUNTED
+    /// ([`Self::note_repeat`]) and reported once, as a
+    /// [`crate::core::narrative::NarrativeKind::TaskRepeated`] census beat
+    /// carrying the retained activation's key, when the standing failure ends or
+    /// the run does. One beat per standing order either way; nothing counts in
+    /// the dark.
     pub fn repeats_last_failure(
         &self,
         slot: &TaskSlot,
@@ -513,11 +600,9 @@ impl TaskLifecycles {
         if reason.outcome() != TaskOutcome::Failed {
             return false;
         }
-        self.last_terminal
-            .get(slot)
-            .is_some_and(|(last_target, last_reason)| {
-                *last_reason == reason && last_target.as_deref() == target
-            })
+        self.last_terminal.get(slot).is_some_and(|last| {
+            last.reason == reason && last.activation.key.target.as_deref() == target
+        })
     }
 }
 
@@ -555,9 +640,32 @@ pub fn terminal_event(
         )
 }
 
-/// The half of the event shape both beats share: the key as the semantic id, the
-/// operator/station/system as the source, the subject as the target, and the
-/// verb and ordinal as structured detail.
+/// The census beat for the attempts that were coalesced into `activation`'s
+/// terminal (issue #1341).
+///
+/// It carries the SAME key as the beat it counts against — this is "and it was
+/// asked for `repeats` more times, unchanged", not a separate activation — with
+/// the total including the recorded one as `attempts`, so a reader does not have
+/// to do the arithmetic. Written once when the standing failure ends or the run
+/// does, never per attempt: that is what keeps a polled order O(1) in the
+/// timeline while leaving the repeats identifiable.
+pub fn repeats_event(
+    activation: &TaskActivation,
+    reason: TaskTerminalReason,
+    repeats: u32,
+) -> NarrativeEvent {
+    let outcome = reason.outcome();
+    base_event(NarrativeKind::TaskRepeated, activation)
+        .text("reason", reason.as_str())
+        .text("reason_text", reason.string_id())
+        .text("outcome", outcome.as_str())
+        .detail("repeats", NarrativeValue::Int(repeats as i64))
+        .detail("attempts", NarrativeValue::Int(repeats as i64 + 1))
+}
+
+/// The half of the event shape every beat here shares: the key as the semantic
+/// id, the operator/station/system as the source, the subject as the target, and
+/// the verb and ordinal as structured detail.
 fn base_event(kind: NarrativeKind, activation: &TaskActivation) -> NarrativeEvent {
     let key = &activation.key;
     let mut event = NarrativeEvent::new(kind, key.as_str())
@@ -759,6 +867,12 @@ mod tests {
     fn only_an_unchanged_failure_counts_as_a_repeat() {
         let mut registry = TaskLifecycles::default();
         let scan = TaskSlot::new("uuid-tender", "sensors", TASK_VERB_SCAN);
+        // The activation a terminal is recorded against — the registry now keeps
+        // the whole thing, because the repeat COUNT has to be reported under the
+        // same key the retained beat carried.
+        let recorded = |registry: &mut TaskLifecycles, target: &str| {
+            registry.begin(scan.clone(), Some(target.to_string()), None, 0)
+        };
         assert!(
             !registry.repeats_last_failure(
                 &scan,
@@ -768,7 +882,8 @@ mod tests {
             "a slot that has never ended anything cannot be repeating itself"
         );
 
-        registry.record_terminal(&scan, Some("uuid-hulk"), TaskTerminalReason::OutOfRange);
+        let hulk = recorded(&mut registry, "uuid-hulk");
+        registry.record_terminal(&hulk, TaskTerminalReason::OutOfRange);
         assert!(registry.repeats_last_failure(
             &scan,
             Some("uuid-hulk"),
@@ -796,13 +911,93 @@ mod tests {
         // and a cancellation is a decision somebody made, however often either
         // recurs.
         for reason in TaskTerminalReason::ALL {
-            registry.record_terminal(&scan, Some("uuid-hulk"), reason);
+            registry.record_terminal(&hulk, reason);
             assert_eq!(
                 registry.repeats_last_failure(&scan, Some("uuid-hulk"), reason),
                 reason.outcome() == TaskOutcome::Failed,
                 "{reason:?}"
             );
         }
+    }
+
+    /// A coalesced repeat is COUNTED, never erased: the registry hands the total
+    /// back once, under the key of the terminal the repeats were folded into, so
+    /// issue #1341's "repeated tasks remain separately identifiable" holds
+    /// without the timeline growing with the cadence.
+    #[test]
+    fn coalesced_repeats_are_counted_and_drained_once() {
+        let mut registry = TaskLifecycles::default();
+        let scan = TaskSlot::new("uuid-tender", "sensors", TASK_VERB_SCAN);
+        let activation = registry.begin(scan.clone(), Some("uuid-hulk".into()), None, 7);
+        registry.record_terminal(&activation, TaskTerminalReason::OutOfRange);
+
+        assert!(!registry.has_pending_repeats(), "nothing has repeated yet");
+        assert!(registry.take_repeats(&scan).is_none());
+
+        for _ in 0..40 {
+            registry.note_repeat(&scan);
+        }
+        assert!(registry.has_pending_repeats());
+        let (repeated, reason, count) = registry
+            .take_repeats(&scan)
+            .expect("40 coalesced attempts must be recoverable");
+        assert_eq!(count, 40);
+        assert_eq!(reason, TaskTerminalReason::OutOfRange);
+        assert_eq!(
+            repeated.key, activation.key,
+            "the count is reported under the key of the beat it was folded into"
+        );
+        // Drained, not duplicated…
+        assert!(registry.take_repeats(&scan).is_none());
+        assert!(!registry.has_pending_repeats());
+        // …but the retained terminal itself survives, so the NEXT identical
+        // attempt still coalesces rather than re-opening the flood.
+        assert!(registry.repeats_last_failure(
+            &scan,
+            Some("uuid-hulk"),
+            TaskTerminalReason::OutOfRange
+        ));
+
+        // The census beat carries the count, the total including the recorded
+        // attempt, and the retained activation's key.
+        let event = repeats_event(&repeated, reason, count);
+        assert_eq!(event.kind, NarrativeKind::TaskRepeated);
+        assert!(!event.kind.is_task_lifecycle(), "it terminates nothing");
+        assert_eq!(event.id, activation.key.as_str());
+        assert_eq!(event.detail.get("repeats"), Some(&NarrativeValue::Int(40)));
+        assert_eq!(event.detail.get("attempts"), Some(&NarrativeValue::Int(41)));
+        assert_eq!(
+            event.detail.get("reason"),
+            Some(&NarrativeValue::Text("out_of_range".into()))
+        );
+    }
+
+    /// A run that stops with several slots still polling reports each one's
+    /// count, in slot order — never in the order they happened to start.
+    #[test]
+    fn every_slots_repeats_drain_in_slot_order() {
+        let mut registry = TaskLifecycles::default();
+        let tractor = slot();
+        let scan = TaskSlot::new("uuid-tender", "sensors", TASK_VERB_SCAN);
+        // Opened tractor-first, so the drain order cannot be the insertion one.
+        let held = registry.begin(tractor.clone(), Some("uuid-hulk".into()), None, 0);
+        let read = registry.begin(scan.clone(), Some("uuid-hulk".into()), None, 0);
+        registry.record_terminal(&held, TaskTerminalReason::OutOfRange);
+        registry.record_terminal(&read, TaskTerminalReason::NoSuchTarget);
+        registry.note_repeat(&tractor);
+        registry.note_repeat(&scan);
+        registry.note_repeat(&scan);
+
+        let drained = registry.take_all_repeats();
+        assert_eq!(
+            drained
+                .iter()
+                .map(|(a, _, n)| (a.key.slot.system.as_str(), *n))
+                .collect::<Vec<_>>(),
+            vec![("sensors", 2), ("tractor", 1)],
+            "slot order, and each slot's own count"
+        );
+        assert!(registry.take_all_repeats().is_empty(), "drained once");
     }
 
     /// A task with no subject encodes a fixed five-field key rather than a

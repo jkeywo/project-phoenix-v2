@@ -67,8 +67,8 @@ use crate::core::narrative::{
     NarrativeActor, NarrativeEvent, NarrativeKind, NarrativeMark, NarrativeRequest, NarrativeValue,
 };
 use crate::core::task_lifecycle::{
-    start_event, terminal_event, TaskActivation, TaskLifecycleRequest, TaskLifecycles, TaskSlot,
-    TaskTerminalReason,
+    repeats_event, start_event, terminal_event, TaskActivation, TaskLifecycleRequest,
+    TaskLifecycles, TaskSlot, TaskTerminalReason,
 };
 use crate::effect_queue::EffectQueue;
 use crate::entities::spawner::EntityUuid;
@@ -486,15 +486,22 @@ pub fn clear_active_computer_message(mut active: ResMut<ActiveComputerMessage>) 
 ///    caused, on the same tick, and have the timeline record the truer of the
 ///    two — the first one through the queue, which is the AI host, because it is
 ///    ordered before the command handler.
-/// 5. **A poll is not a beat.** An AI host serving a standing objective
+/// 5. **A poll is bounded, not erased.** An AI host serving a standing objective
 ///    re-issues its request every authored snapshot until the objective is
 ///    satisfied — the Sensors host's Scan says so in as many words — so an order
 ///    that can never be fulfilled is refused again on every cadence. An
 ///    instantaneous activation that repeats, exactly, the failure its slot last
-///    recorded is dropped whole (see [`TaskLifecycles::repeats_last_failure`]),
-///    so a standing unfulfillable order costs the timeline one pair of beats
-///    rather than a rate. The moment anything about it changes — the subject,
-///    the reason, or the fact that it now works — it is a beat again.
+///    recorded does not get its own pair of beats (see
+///    [`TaskLifecycles::repeats_last_failure`]); it is COUNTED against the
+///    retained terminal instead, and the count is written once — as a
+///    `task_repeated` census beat carrying that terminal's key — when the
+///    standing failure ends or the run does. That keeps a standing unfulfillable
+///    order at O(1) beats rather than a rate, while leaving the repeats
+///    identifiable, which is what AC3 asks for: this rule cannot tell an AI
+///    cadence retry from an engineer pressing Engage a second time, so it must
+///    not make either of them vanish. The moment anything about it changes — the
+///    subject, the reason, or the fact that it now works — it is a full beat
+///    again, and the repeats it had accumulated are reported first.
 ///
 /// # Determinism
 ///
@@ -523,7 +530,11 @@ pub fn emit_task_lifecycle_narrative(
         _ => Vec::new(),
     };
     let mission_over = phase.is_some_and(|p| *p.get() == GamePhase::GameOver);
-    if batch.is_empty() && lifecycles.is_empty() {
+    // A run that ends with a standing order still being polled has repeats to
+    // report even though nothing is live and nothing was queued, so the quiet-
+    // tick early-out has to let that one case through.
+    let flush_pending_repeats = mission_over && lifecycles.has_pending_repeats();
+    if batch.is_empty() && lifecycles.is_empty() && !flush_pending_repeats {
         return;
     }
     let now = tick.map(|t| t.0).unwrap_or(0);
@@ -541,10 +552,13 @@ pub fn emit_task_lifecycle_narrative(
             TaskLifecycleRequest::Start { slot, target } => {
                 // An INSTANTANEOUS activation — a start and its own terminal,
                 // adjacent on one slot, both minted by this tick — that repeats
-                // the failure the slot last recorded is a poll, not a beat.
-                // Neither half is written and the ordinal is not spent, so a
-                // standing unfulfillable order costs the timeline one pair and
-                // then nothing. See `TaskLifecycles::repeats_last_failure`.
+                // the failure the slot last recorded gets no beats of its own
+                // and spends no ordinal. It is COUNTED against the retained
+                // terminal instead, so a standing unfulfillable order costs the
+                // timeline one pair plus one census beat rather than a rate —
+                // and no attempt goes unrecorded, which is the half of AC3 a
+                // silent drop would lose. See
+                // `TaskLifecycles::repeats_last_failure`.
                 if let Some(TaskLifecycleRequest::End {
                     slot: next_slot,
                     reason,
@@ -553,10 +567,17 @@ pub fn emit_task_lifecycle_narrative(
                     if *next_slot == slot
                         && lifecycles.repeats_last_failure(&slot, target.as_deref(), *reason)
                     {
+                        lifecycles.note_repeat(&slot);
                         index += 1;
                         continue;
                     }
                 }
+                // Anything else on this slot ENDS the standing failure it was
+                // repeating, so the attempts folded into that terminal are
+                // reported before the new activation opens — and before the
+                // restart below, whose own terminal would otherwise overwrite
+                // the count.
+                write_repeats(&mut out, &mut lifecycles, &slot);
                 // A start on a slot that already holds one closes the old
                 // activation first, so the restart is visible as a restart and
                 // the replaced key still gets its single terminal event.
@@ -613,6 +634,11 @@ pub fn emit_task_lifecycle_narrative(
     // covers the OTHER way a run stops — simply reaching `max_ticks`, where no
     // further tick runs for this system to observe anything on.
     if mission_over {
+        // The polled orders' counts first — they describe attempts made DURING
+        // the run — then the terminals for what the ending itself stopped.
+        for (activation, reason, repeats) in lifecycles.take_all_repeats() {
+            out.write(repeats_event(&activation, reason, repeats));
+        }
         for activation in lifecycles.take_all() {
             write_terminal(
                 &mut out,
@@ -622,6 +648,22 @@ pub fn emit_task_lifecycle_narrative(
                 now,
             );
         }
+    }
+}
+
+/// Report the attempts coalesced into `slot`'s retained terminal, if any, as one
+/// census beat carrying that terminal's key (issue #1341).
+///
+/// The retained terminal itself stays recorded, so a further identical attempt
+/// still coalesces: what is drained is the count, not the memory of what the
+/// slot last did.
+fn write_repeats(
+    out: &mut MessageWriter<NarrativeEvent>,
+    lifecycles: &mut TaskLifecycles,
+    slot: &TaskSlot,
+) {
+    if let Some((activation, reason, repeats)) = lifecycles.take_repeats(slot) {
+        out.write(repeats_event(&activation, reason, repeats));
     }
 }
 
@@ -637,11 +679,7 @@ fn write_terminal(
     reason: TaskTerminalReason,
     now: u64,
 ) {
-    lifecycles.record_terminal(
-        &activation.key.slot,
-        activation.key.target.as_deref(),
-        reason,
-    );
+    lifecycles.record_terminal(activation, reason);
     out.write(terminal_event(activation, reason, now));
 }
 
@@ -1516,8 +1554,121 @@ mod tests {
         assert_eq!(events[0].kind, NarrativeKind::TaskStarted);
         assert_eq!(reason_of(&events[1]), "out_of_range");
         // The suppressed repeats did not spend ordinals either, so the key the
-        // reader sees is the first activation's and nothing counts in the dark.
+        // reader sees is the first activation's.
         assert!(events[0].id.ends_with("#0"), "{:?}", events[0].id);
+        // …but they were COUNTED, not erased: 199 attempts are still waiting to
+        // be reported under that same key. Nothing counts in the dark.
+        assert!(app
+            .world()
+            .resource::<TaskLifecycles>()
+            .has_pending_repeats());
+    }
+
+    /// The other half of that rule, and the half issue #1341's AC3 turns on: the
+    /// coalesced attempts are reported, once, under the key of the beat they
+    /// were folded into.
+    ///
+    /// The emitter cannot tell an AI cadence retry from an engineer pressing
+    /// Engage a second time on a target that is still out of reach — both are
+    /// one slot, one subject, one unchanged refusal, both halves minted by one
+    /// tick — so it must bound the repeat without making it invisible.
+    #[test]
+    fn the_coalesced_repeats_are_reported_once_when_the_standing_failure_ends() {
+        let mut app = lifecycle_app();
+        let scan_slot = TaskSlot::new(OPERATOR, "sensors", TASK_VERB_SCAN);
+        // Drained every iteration: `Messages` is double-buffered, so an event
+        // left unread for two updates expires on its own.
+        let mut first = Vec::new();
+        for _ in 0..12 {
+            push(&mut app, start(scan_slot.clone(), SUBJECT));
+            push(
+                &mut app,
+                end(scan_slot.clone(), TaskTerminalReason::OutOfRange),
+            );
+            app.update();
+            first.extend(drain(&mut app));
+        }
+        assert_eq!(first.len(), 2, "one pair for the standing order");
+        let key = first[0].id.clone();
+
+        // The order finally reaches its subject. That ENDS the standing failure,
+        // so the eleven suppressed attempts are reported first — under the key
+        // they repeated — and the reading that came back is its own activation.
+        push(&mut app, start(scan_slot.clone(), SUBJECT));
+        push(&mut app, end(scan_slot, TaskTerminalReason::Completed));
+        app.update();
+        let events = drain(&mut app);
+        assert_eq!(
+            events
+                .iter()
+                .map(|e| (e.kind, e.id.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (NarrativeKind::TaskRepeated, key.as_str()),
+                (
+                    NarrativeKind::TaskStarted,
+                    "uuid-tender/sensors/scan/uuid-hulk#1"
+                ),
+                (
+                    NarrativeKind::TaskCompleted,
+                    "uuid-tender/sensors/scan/uuid-hulk#1"
+                ),
+            ],
+            "the census beat, then the activation that broke the standing failure"
+        );
+        assert_eq!(
+            events[0].detail.get("repeats"),
+            Some(&NarrativeValue::Int(11)),
+            "eleven attempts were folded into the recorded refusal"
+        );
+        assert_eq!(
+            events[0].detail.get("attempts"),
+            Some(&NarrativeValue::Int(12))
+        );
+        assert!(
+            !app.world()
+                .resource::<TaskLifecycles>()
+                .has_pending_repeats(),
+            "reported once, not once per later beat"
+        );
+    }
+
+    /// A run that stops with the standing order still being polled has nothing
+    /// left to break the failure, so the mission ending is what reports the
+    /// count. (`headless::report::finalize_task_lifecycles` covers the other way
+    /// a run stops, where no further tick exists at all.)
+    #[test]
+    fn a_still_polling_order_reports_its_repeats_when_the_mission_ends() {
+        let mut app = lifecycle_app();
+        app.insert_resource(State::new(GamePhase::InProgress));
+        let scan_slot = TaskSlot::new(OPERATOR, "sensors", TASK_VERB_SCAN);
+        // Drained every iteration: `Messages` is double-buffered, so an event
+        // left unread for two updates expires on its own.
+        let mut recorded = Vec::new();
+        for _ in 0..5 {
+            push(&mut app, start(scan_slot.clone(), SUBJECT));
+            push(
+                &mut app,
+                end(scan_slot.clone(), TaskTerminalReason::OutOfRange),
+            );
+            app.update();
+            recorded.extend(drain(&mut app));
+        }
+        assert_eq!(recorded.len(), 2);
+
+        app.insert_resource(State::new(GamePhase::GameOver));
+        app.update();
+        let events = drain(&mut app);
+        assert_eq!(events.len(), 1, "one census beat: {events:?}");
+        assert_eq!(events[0].kind, NarrativeKind::TaskRepeated);
+        assert_eq!(
+            events[0].detail.get("repeats"),
+            Some(&NarrativeValue::Int(4))
+        );
+        // …and the tick after adds nothing, however long the run sits in
+        // GameOver.
+        app.update();
+        assert!(drain(&mut app).is_empty());
     }
 
     /// …but only while nothing about it changes. A different subject, a
@@ -1537,11 +1688,29 @@ mod tests {
         refuse(&mut app, SUBJECT, TaskTerminalReason::OutOfRange);
         assert_eq!(drain(&mut app).len(), 2, "the first refusal is a beat");
         refuse(&mut app, SUBJECT, TaskTerminalReason::OutOfRange);
-        assert!(drain(&mut app).is_empty(), "the unchanged repeat is not");
+        assert!(
+            drain(&mut app).is_empty(),
+            "the unchanged repeat is not a beat of its own"
+        );
 
-        // A different subject.
+        // A different subject — which also ENDS the standing failure, so the one
+        // suppressed repeat is reported alongside the new pair.
         refuse(&mut app, OPERATOR, TaskTerminalReason::OutOfRange);
-        assert_eq!(drain(&mut app).len(), 2);
+        let changed = drain(&mut app);
+        assert_eq!(
+            changed.iter().map(|e| e.kind).collect::<Vec<_>>(),
+            vec![
+                NarrativeKind::TaskRepeated,
+                NarrativeKind::TaskStarted,
+                NarrativeKind::TaskFailed
+            ],
+            "the census of what was coalesced, then the beat that changed: \
+             {changed:?}"
+        );
+        assert_eq!(
+            changed[0].detail.get("repeats"),
+            Some(&NarrativeValue::Int(1))
+        );
         // A different reason for the same subject.
         refuse(&mut app, SUBJECT, TaskTerminalReason::Unpowered);
         assert_eq!(drain(&mut app).len(), 2);

@@ -249,6 +249,15 @@ fn detail_text(event: &project_phoenix::core::narrative::NarrativeEvent, key: &s
     }
 }
 
+/// One `NarrativeValue::Int` detail field, or -1 when absent — a value no
+/// counter here can legitimately take, so a missing field fails loudly.
+fn detail_int(event: &project_phoenix::core::narrative::NarrativeEvent, key: &str) -> i64 {
+    match event.detail.get(key) {
+        Some(project_phoenix::core::narrative::NarrativeValue::Int(n)) => *n,
+        _ => -1,
+    }
+}
+
 fn count(report: &RunReport, kind: &str) -> u64 {
     report
         .narrative
@@ -600,15 +609,19 @@ fn retargeting_under_a_live_hold_closes_one_task_and_opens_another() {
     );
 }
 
-/// A standing order that can never be fulfilled is a POLL, not a beat.
+/// A standing order that can never be fulfilled is BOUNDED — one activation
+/// plus one census of the attempts folded into it — rather than a beat per
+/// cadence or, worse, a silence.
 ///
 /// The Sensors AI host deliberately re-issues its `ScanTarget` on every authored
 /// snapshot while its Scan objective stays unsatisfied — it says so in as many
 /// words, because `science::server::tick_scans` is the sole applier of
 /// capability and range refusals. Repeating the request here through the same
-/// admitted-command path is exactly what that retry produces, and an unchanged
-/// refusal must cost the timeline one pair of beats rather than a pair per
-/// cadence — in the report, the counts and the ndjson stream alike.
+/// admitted-command path is exactly what that retry produces, and it is also
+/// exactly what an engineer pressing the same control 25 times produces: the
+/// emitter cannot tell them apart, so the repeats must stay COUNTABLE (AC3)
+/// while the timeline, the counts and the ndjson stream stay O(1) in the
+/// cadence.
 #[test]
 fn a_standing_unfulfillable_scan_stays_bounded() {
     use project_phoenix::headless::report::RunTelemetry;
@@ -637,6 +650,32 @@ fn a_standing_unfulfillable_scan_stays_bounded() {
         report.narrative.counts_by_kind
     );
 
+    // The 24 coalesced attempts are still identifiable: one census beat, under
+    // the retained activation's own key, carrying how many were folded in.
+    let census: Vec<_> = report
+        .narrative
+        .events
+        .iter()
+        .filter(|e| e.event.kind.as_str() == "task_repeated")
+        .collect();
+    assert_eq!(
+        census.len(),
+        1,
+        "one census beat for the whole standing order: {census:?}"
+    );
+    assert_eq!(
+        census[0].event.id, rows[1].2,
+        "the count is reported under the key of the beat it was folded into"
+    );
+    assert_eq!(
+        detail_int(&census[0].event, "repeats"),
+        24,
+        "one refusal recorded, 24 more attempts counted: {:?}",
+        census[0].event
+    );
+    assert_eq!(detail_int(&census[0].event, "attempts"), 25);
+    assert_eq!(count(&report, "task_repeated"), 1);
+
     let streamed = app
         .world()
         .resource::<RunTelemetry>()
@@ -645,8 +684,9 @@ fn a_standing_unfulfillable_scan_stays_bounded() {
         .filter(|l| l.contains("\"narrative\":"))
         .count();
     assert_eq!(
-        streamed, 2,
-        "the ndjson stream is the surface that would flood first"
+        streamed, 3,
+        "the ndjson stream is the surface that would flood first: the pair, \
+         plus one census of everything it stands for"
     );
 
     // …and the moment the request CHANGES, it is a beat again: a reading that

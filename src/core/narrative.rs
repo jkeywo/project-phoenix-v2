@@ -147,6 +147,22 @@ pub enum NarrativeKind {
     /// A continuous task was ended from outside: the subject left the world, a
     /// restart replaced the activation, or the mission ended under it.
     TaskInterrupted,
+    /// Further identical attempts were folded into one already-recorded terminal
+    /// beat (issue #1341). Carries that activation's `id` and the number of
+    /// attempts folded into it, in the `repeats` detail.
+    ///
+    /// A standing order that cannot be fulfilled is refused again on every AI
+    /// cadence, and a crew pressing the same control twice against an unchanged
+    /// refusal produce the identical shape. The emitter records the FIRST of
+    /// those as a whole activation and coalesces the rest so the timeline stays
+    /// O(1) per standing order; this beat is what keeps the coalesced ones
+    /// *countable* rather than invisible, which is what issue #1341's "repeated
+    /// tasks remain separately and deterministically identifiable" asks for.
+    ///
+    /// Deliberately NOT one of [`Self::is_task_lifecycle`]'s kinds: it opens no
+    /// activation and closes none, so the one-start-one-terminal pairing is read
+    /// without it.
+    TaskRepeated,
 }
 
 impl NarrativeKind {
@@ -158,7 +174,7 @@ impl NarrativeKind {
     /// whoever adds one to say whether it belongs in the ndjson timeline or is
     /// fold-only. A derived count would track the enum silently and guard
     /// nothing.
-    pub const KIND_COUNT: usize = 23;
+    pub const KIND_COUNT: usize = 24;
 
     /// Every kind, in declaration order. The order is the enum's, which is also
     /// `Ord`'s, so a per-kind fold keyed on this is stable.
@@ -186,6 +202,7 @@ impl NarrativeKind {
         NarrativeKind::TaskCancelled,
         NarrativeKind::TaskFailed,
         NarrativeKind::TaskInterrupted,
+        NarrativeKind::TaskRepeated,
     ];
 
     /// The stable snake_case label written into JSON and ndjson. Hand-written,
@@ -216,6 +233,7 @@ impl NarrativeKind {
             NarrativeKind::TaskCancelled => "task_cancelled",
             NarrativeKind::TaskFailed => "task_failed",
             NarrativeKind::TaskInterrupted => "task_interrupted",
+            NarrativeKind::TaskRepeated => "task_repeated",
         }
     }
 
@@ -225,6 +243,10 @@ impl NarrativeKind {
     /// The one consumer today is the timeline's own test surface, which asserts
     /// the pairing; it is here rather than there so a later lifecycle kind is
     /// added in the same place as the rest of the vocabulary.
+    ///
+    /// [`Self::TaskRepeated`] is excluded on purpose: it is a *census* of
+    /// activations that were deliberately not written, so counting it as a half
+    /// of the pairing would make every summarised slot look doubly terminated.
     pub fn is_task_lifecycle(self) -> bool {
         matches!(
             self,

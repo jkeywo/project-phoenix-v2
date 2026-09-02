@@ -562,6 +562,11 @@ impl Plugin for PaneDisplayPlugin {
                 // the router at all is decided here, and a click this frame must
                 // be routed against this frame's answer.
                 sync_host_lobby_presence,
+                // Also before input and before the frame copy: a resize moves the
+                // views and re-tiles, and both the router and `drive_panes` must
+                // see this frame's rects. Gated like `drive_panes` — no image
+                // assets means no surfaces to resize (the Contract host).
+                resize_pane_surfaces.run_if(resource_exists::<Assets<Image>>),
                 (
                     route_pointer_input,
                     route_touch_input,
@@ -1063,6 +1068,92 @@ fn sync_host_lobby_presence(
     // model rather than the other way round.
     let next = host.focus.focused();
     host.focus_view(previously_focused, next);
+}
+
+/// Follow each OS window's size: resize every surface's Ultralight view and its
+/// Bevy texture so the page reflows to the window, the way a browser viewport
+/// does.
+///
+/// [`init_pane_host`] sizes each view once, from the window it finds at startup,
+/// and never revisits it — so without this the lobby chrome and the consoles
+/// stay frozen at their opening size when the operator resizes the window, and
+/// Bevy's own window resize would leave the view (old size) and the window's
+/// render target (new size) disagreeing. Runs every frame and does nothing until
+/// a window's physical size actually changes.
+///
+/// The per-window layout mirrors [`init_pane_host`]'s: a lone surface fills its
+/// window; several panes on one window tile side by side in their existing
+/// order. The device scale is taken as unchanged (a resize within one monitor);
+/// a drag onto a monitor of a different DPI would need the view rebuilt at the
+/// new `device_scale`, which is out of scope here.
+fn resize_pane_surfaces(
+    host: Option<NonSendMut<PaneHost>>,
+    windows: Query<&Window>,
+    mut images: ResMut<Assets<Image>>,
+    mut nodes: Query<&mut Node>,
+) {
+    let Some(mut host) = host else {
+        return;
+    };
+    // Group pane indices by the window they sit on, preserving order — a pane's
+    // tile index within its window is its position here, exactly as at init.
+    let mut groups: Vec<(Entity, Vec<usize>)> = Vec::new();
+    for (i, pane) in host.windows.iter().enumerate() {
+        match groups.iter_mut().find(|(w, _)| *w == pane.window) {
+            Some((_, idxs)) => idxs.push(i),
+            None => groups.push((pane.window, vec![i])),
+        }
+    }
+    // Target (origin, size) per pane in physical pixels within its window.
+    let mut targets: Vec<Option<((u32, u32), (u32, u32))>> = vec![None; host.windows.len()];
+    for (window_entity, idxs) in &groups {
+        let Ok(window) = windows.get(*window_entity) else {
+            continue;
+        };
+        let pw = window.physical_width().max(1);
+        let ph = window.physical_height().max(1);
+        if idxs.len() == 1 {
+            targets[idxs[0]] = Some(((0, 0), (pw, ph)));
+        } else {
+            let count = idxs.len() as u32;
+            let tile_w = (pw / count).max(1);
+            for (slot, &i) in idxs.iter().enumerate() {
+                targets[i] = Some(((tile_w * slot as u32, 0), (tile_w, ph)));
+            }
+        }
+    }
+    let mut changed = false;
+    for (i, pane) in host.windows.iter_mut().enumerate() {
+        let Some((origin, size)) = targets[i] else {
+            continue;
+        };
+        if origin == pane.origin && size == pane.size {
+            continue;
+        }
+        // Move the view, reallocate the texture it copies into, and resize the
+        // node that draws it — all three must agree, or `copy_frame` writes a
+        // buffer of the wrong length into the image the next frame.
+        pane.surface.view_mut().resize(size.0, size.1);
+        if let Some(image) = images.get_mut(&pane.image) {
+            image.resize(Extent3d {
+                width: size.0,
+                height: size.1,
+                depth_or_array_layers: 1,
+            });
+        }
+        if let Ok(mut node) = nodes.get_mut(pane.canvas) {
+            node.left = Val::Px(origin.0 as f32 / pane.scale as f32);
+            node.top = Val::Px(origin.1 as f32 / pane.scale as f32);
+            node.width = Val::Px(size.0 as f32 / pane.scale as f32);
+            node.height = Val::Px(size.1 as f32 / pane.scale as f32);
+        }
+        pane.origin = origin;
+        pane.size = size;
+        changed = true;
+    }
+    if changed {
+        host.rebuild_layout();
+    }
 }
 
 /// Route this frame's pointer into the pane it belongs to, and let focus follow

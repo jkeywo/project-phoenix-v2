@@ -120,7 +120,12 @@ import {
   relayPeerStub,
 } from './rendezvous-relay.js';
 import { defaultTransportLevers } from './transport-levers.js';
-import { DEV_RENDEZVOUS_URL, joinUrlForCode } from './join-url.js';
+import {
+  DEV_RENDEZVOUS_URL,
+  KNOWN_WEB_ORIGINS,
+  joinUrlForCode,
+  rendezvousBaseForOrigin,
+} from './join-url.js';
 
 /** Re-exported so a consumer of this module needs only one import. */
 export { RENDEZVOUS_PROTOCOL };
@@ -136,7 +141,23 @@ export { RENDEZVOUS_PROTOCOL };
  * in Rust. Loading this whole module there, to concatenate a string, would have
  * been the wrong dependency in the wrong direction.
  */
-export { DEV_RENDEZVOUS_URL, joinUrlForCode };
+export { DEV_RENDEZVOUS_URL, KNOWN_WEB_ORIGINS, joinUrlForCode, rendezvousBaseForOrigin };
+
+/**
+ * The service THIS page should dial when nothing overrides it (issue #1353).
+ *
+ * A function rather than a constant because it is a fact about the page, and
+ * the two exported entry points below take it as a default-parameter
+ * expression — evaluated per call, so a test may drive them with an explicit
+ * base and a page never has to remember to pass one.
+ *
+ * Off a browser entirely (the Node test environment, a worker) there is no
+ * origin to have been served by, so the built-in service stands.
+ */
+function pageRendezvousBase() {
+  const origin = typeof location !== 'undefined' && location ? location.origin : '';
+  return rendezvousBaseForOrigin(origin);
+}
 
 /** Label of the reliable ordered channel: commands and reliable messages. */
 export const RELIABLE_CHANNEL = 'reliable';
@@ -251,9 +272,16 @@ function isLoopbackHost(hostname) {
  * — an old `?rendezvous=on` bookmark must open the game, not try to dial a
  * service called "on" and throw building the socket URL.
  *
+ * The DEFAULT is no longer always the cloud service (issue #1353): a page
+ * served by a native host dials that host, which is
+ * {@link rendezvousBaseForOrigin}'s rule, read off this page's own origin. The
+ * parameter still wins where it is honoured — a `wrangler dev` on loopback is
+ * exactly the case a developer overrides FOR — and the rule needs no parameter
+ * of its own, so no link can point a guest's join anywhere.
+ *
  * @returns {string} base URL — never null, because there is no "off"
  */
-export function rendezvousBaseFromLocation(search, defaultBase = DEV_RENDEZVOUS_URL) {
+export function rendezvousBaseFromLocation(search, defaultBase = pageRendezvousBase()) {
   const value = (new URLSearchParams(search || '').get('rendezvous') || '').trim();
   if (!value) return defaultBase;
   try {
@@ -280,7 +308,7 @@ export function rendezvousBaseFromLocation(search, defaultBase = DEV_RENDEZVOUS_
  * a status line, and this function never needs to know what yesterday's links
  * looked like.
  */
-export function joinRouteFromLocation(search, hash, defaultBase = DEV_RENDEZVOUS_URL) {
+export function joinRouteFromLocation(search, hash, defaultBase = pageRendezvousBase()) {
   const base = rendezvousBaseFromLocation(search, defaultBase);
   const fragment = String(hash || '').replace(/^#/, '').trim();
   return fragment ? { route: 'rendezvous', base, code: fragment } : { route: 'entry', base };
@@ -1684,6 +1712,7 @@ if (typeof window !== 'undefined') {
     JOIN_ATTEMPTS_BEFORE_ENTRY,
     isRetryableReason,
     rendezvousBaseFromLocation,
+    rendezvousBaseForOrigin,
     joinRouteFromLocation,
     socketUrl,
     joinUrlForCode,

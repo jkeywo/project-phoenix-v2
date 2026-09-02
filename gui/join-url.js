@@ -31,6 +31,62 @@
 export const DEV_RENDEZVOUS_URL = 'https://phoenix-rendezvous.project-phoenix.workers.dev';
 
 /**
+ * The origins the BROWSER game is published at.
+ *
+ * The twin of `ALLOWED_ORIGIN` in `worker-rendezvous/wrangler.toml`, and it has
+ * to stay the twin: that variable is the list of origins the cloud rendezvous
+ * will accept a socket from, so a page on any other origin could not use that
+ * service even if it tried. `tests/client/join-url.test.js` reads the wrangler
+ * file and fails if the two lists drift.
+ *
+ * pp-dev is the canonical custom domain, the github.io origin covers direct
+ * Pages access, and the three localhost ports are the dev servers that serve
+ * THIS bundle: 3000 is the smoke suite's `serve dist`, 3911 the local
+ * dist-preview server and 8080 `trunk serve`.
+ *
+ * One caveat worth knowing, because 8080 is also `phoenix-host`'s own default
+ * delivery port: a browser that opens a native host at `http://localhost:8080`
+ * is on a known web origin and will dial the cloud service, not the host in
+ * front of it. Every phone gets the LAN address from the QR instead, which is
+ * not on this list; an operator who wants the same on their own machine can use
+ * the LAN address too.
+ */
+export const KNOWN_WEB_ORIGINS = Object.freeze([
+  'https://pp-dev.kiwigamedesign.co.uk',
+  'https://jkeywo.github.io',
+  'http://localhost:3000',
+  'http://localhost:3911',
+  'http://localhost:8080',
+]);
+
+/**
+ * Which rendezvous service a page on `pageOrigin` should dial (issue #1353).
+ *
+ * **The service that served you the page is the service you dial.** A native
+ * host now accepts join sockets on its own delivery port
+ * (`src/native_host/direct_join.rs`), so a phone that loaded the bundle from
+ * `http://192.168.1.5:8080` opens `ws://192.168.1.5:8080/v1/join` and the LAN
+ * game needs no external service at all. A page served from one of the
+ * {@link KNOWN_WEB_ORIGINS} was served by a static host that cannot accept a
+ * socket, so it keeps the built-in cloud service.
+ *
+ * This deliberately SUPERSEDES the `?rendezvous=` posture question (issue
+ * #1336) for the served-by-a-host case: there is no parameter, so there is no
+ * link somebody can be handed that points their join somewhere else. The
+ * parameter survives as what it always was, a loopback-only development lever
+ * (`rendezvousBaseFromLocation` in `gui/rendezvous-transport.js`), and it still
+ * wins where it is honoured.
+ *
+ * A page with no usable origin — `file://`, a sandboxed iframe's `null` — gets
+ * the built-in service: it was not served by anything dialable.
+ */
+export function rendezvousBaseForOrigin(pageOrigin, defaultBase = DEV_RENDEZVOUS_URL) {
+  const origin = String(pageOrigin || '').trim().replace(/\/+$/, '');
+  if (!/^https?:\/\/[^/]+$/i.test(origin)) return defaultBase;
+  return KNOWN_WEB_ORIGINS.includes(origin.toLowerCase()) ? defaultBase : origin;
+}
+
+/**
  * The link a QR encodes and a guest reads aloud: the client page with the full
  * structured code in the fragment. There is no QR *scanner* in the product —
  * the phone's own camera opens this URL — so "QR entry" and "pasted full code"

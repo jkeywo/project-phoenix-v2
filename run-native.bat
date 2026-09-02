@@ -1,13 +1,14 @@
 @echo off
 REM =====================================================
 REM run-native.bat - launch the native host (PRD #855 /
-REM issues #1121, #1326, #1328)
+REM issues #1121, #1326, #1328, #1353)
 REM
 REM   run-native.bat            DEFAULT: the on-screen game
-REM                             lobby, on the viewscreen, with
-REM                             the join relay pointed at THIS
-REM                             machine's LAN address so a crew
-REM                             on the same network can join.
+REM                             lobby, on the viewscreen. The
+REM                             host takes crew on its OWN port,
+REM                             so phones on this network join
+REM                             with no other service running -
+REM                             scan the QR, that is all.
 REM                             Pick the scenario and hull on
 REM                             screen; no --world / --ship.
 REM
@@ -25,16 +26,17 @@ REM Extras after the mode are forwarded verbatim, e.g.
 REM   run-native.bat --addr 0.0.0.0:8080
 REM   run-native.bat raw --world assets\worlds\combat_test.toml --solo
 REM
-REM To let phones actually JOIN, the join relay has to be
-REM reachable at the LAN address this script uses. Run it
-REM locally in another terminal (no cloud, no account needed):
-REM   cd worker-rendezvous
-REM   npx wrangler dev --ip 0.0.0.0 --port 8787
-REM One caveat today (issue #1336): a scanning phone still dials
-REM the built-in cloud relay, so LAN-only joins need either that
-REM relay deployed with this LAN origin allow-listed, or the
-REM client rebuilt to dial the local relay. The lobby, the
-REM viewscreen and the on-screen controls all work regardless.
+REM JOINING NEEDS NOTHING ELSE (issue #1353). The host mints
+REM its own join code and answers the game socket on the same
+REM port it serves the bundle from, so a phone that scans the
+REM QR loads from this machine and dials this machine. No
+REM worker, no wrangler, no internet.
+REM
+REM For play beyond this LAN, add the cloud service yourself:
+REM   run-native.bat --rendezvous <URL> --origin <URL>
+REM Both legs then run at once; the viewscreen QR stays the LAN
+REM one (the page it opens is served from here), and the cloud
+REM code is printed in this window for anybody joining remotely.
 REM =====================================================
 setlocal EnableDelayedExpansion
 cd /d "%~dp0"
@@ -101,7 +103,9 @@ if not defined LANIP (
     echo [run-native] could not detect a LAN IP; falling back to 127.0.0.1
     set "LANIP=127.0.0.1"
 )
-set "RZV=http://!LANIP!:8787"
+REM No --rendezvous is passed (issue #1353): the host IS the join service now.
+REM The address is still detected because it is what the echo below tells the
+REM room to open, and it is what the QR encodes.
 set "ORG=http://!LANIP!:8080"
 
 REM Re-accumulate any extra args (cmd's shift leaves %* naming the whole original
@@ -116,7 +120,7 @@ goto :lobby_loop
 :lobby_run
 echo === Native host: lobby (pick the scenario on the viewscreen) ===
 echo     LAN address : !LANIP!
-echo     join relay  : !RZV!   (run: cd worker-rendezvous ^&^& npx wrangler dev --ip 0.0.0.0 --port 8787)
-echo     phones open : !ORG!
-"%HOST%" --client-dir dist --lobby --rendezvous !RZV! --origin !ORG!!EXTRA!
+echo     phones open : !ORG!   (or just scan the QR on the viewscreen)
+echo     join service: this host - nothing else to run
+"%HOST%" --client-dir dist --lobby!EXTRA!
 exit /b %errorlevel%

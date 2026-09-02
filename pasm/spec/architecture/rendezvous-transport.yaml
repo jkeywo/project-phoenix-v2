@@ -248,6 +248,62 @@ entities:
         - src/native_host/relay_transport_tests.rs
         - tests/native_relay_protocol.rs
         - tests/native_relay_live.rs
+        - tests/native_direct_join.rs
+
+  - component: native-direct-join-service
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Native Host Direct Join Service
+      origin: ai
+      summary: >-
+        The host as its own rendezvous (issue #1353). A native host accepts the crew's game socket
+        on the SAME port it serves the client bundle from: an upgrade on /v1/join is taken off the
+        HTTP path by delivery::serve's ConnectionUpgrade door and answered in process by the
+        single-game subset of the rendezvous service — joiner attach with the typed code lookup,
+        the protocol-version gate, the join stamp, the frame ferry per delivery class, and detach on
+        close. A LAN game therefore needs no external service at all. It is not a second host
+        implementation: it is a RelaySocket, so native-relay-transport sits on top of it unchanged
+        and both legs run at once.
+      rationale:
+        - "[ai] Both hosts dialled OUT to a meet-in-the-middle relay because a BROWSER host cannot accept an inbound connection — two browsers can only meet at a third party. A native process can accept; it is already accepting HTTP on that port. Issue #1121 deferred this leg explicitly, and until it landed a LAN game depended on a Cloudflare Worker that has never been deployed."
+        - "[ai] The reuse is the design. RelayTransport already holds the whole host end of the protocol behind the narrow RelaySocket trait, so implementing THAT rather than NativeTransport means registration, the in-band stamp handshake, the Identify gate, the reserved-token refusal, the duplicate-token sever, audience resolution and the shedding rule are the same code on both legs — and a phone cannot tell which leg answered it, which is the property the whole feature is for."
+        - "[ai] What collapses relative to the worker: no /v1/host socket (the host IS this process), one record instead of a map, and no code rotation or reclaim grace — a record whose host has gone is a process that has exited, so the two lifecycle features #1115 grew for a socket that might come back have nothing to be about. What does NOT collapse is any validation, because a phone must get the same answers from both legs or they are different games."
+        - "[ai] The handshake's 101 is written by this module and the socket wrapped with WebSocket::from_raw_socket, rather than handed to tungstenite::accept. delivery::serve has ALREADY read the request head — that is how the path and the key were known at all — so there is no handshake left to read, and std cannot peek a socket without consuming it portably. The alternative was restructuring the accept loop to defer its read, which would have made every ordinary bundle request pay for the one endpoint that upgrades."
+        - "[ai] No Origin allow-list on this leg, deliberately. The worker's gate is right for a public multi-tenant service on a different origin from every page it serves; here the page and the socket are the same origin by construction, so a list would have to name every address and hostname a phone might reach the machine by, and a wrong entry refuses the whole crew with nothing on screen saying why — the 2026-08 TURN incident's failure mode, bought for no defence. The port already hands the entire bundle to the LAN; what gates a JOIN is the code, the compatibility handshake and the reserved-token refusal."
+        - "[ai] The host MINTS its own code, which core::rendezvous deliberately refuses to do — a host is ISSUED a code and never composes one. That stays true of that module: a host that is its own service is the party that mints, so join_codes.rs does it natively, reading assets/join/join-codes.toml rather than writing the scheme down a second time. Only the small logic around the data is mirrored, function by function, against gui/join-code.js and the registry's lookup()."
+        - "[ai] One thread per joiner, the same pump shape as relay_socket's and delivery::serve's: this repository has no async runtime and every native I/O surface it owns is a blocking std thread. The bounds are the authored table's — live join sockets by max_peers_per_record, relay peers by max_relay_peers_per_record, lookups per connection, the frame ceiling, and the per-class queue depths — plus an un-joined socket deadline, so the socket cap cannot be filled by silence."
+        - "[ai] The client half is a rule rather than a parameter: a page dials the origin that served it unless that origin is one of the published browser-game web origins, which cannot accept a socket. That supersedes #1336's ?rendezvous= posture question for the served-by-a-host case — a default has no link somebody can be handed."
+        - "[ai] It is CI-testable where the cloud leg never was. tests/native_relay_live.rs needs a service running and is #[ignore]d, because a test that skips when it cannot reach one reports green for a broken build; this leg's equivalent binds a host on loopback and drives a real tungstenite client through the whole join, so it runs on every cargo test --features host."
+    architecture:
+      kind: service
+      authority: authoritative
+      sends: [rendezvous-signalling-frame]
+      coordinates: [join-code-scheme, join-compatibility-gate]
+      runs_in: [native-host-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/native_host/direct_join.rs
+        - src/native_host/join_codes.rs
+        - src/delivery/serve.rs
+        - src/bin/phoenix_host.rs
+        - gui/join-url.js
+        - assets/join/join-codes.toml
+      symbols:
+        - DirectJoinService
+        - DirectJoinGate
+        - JoinCodeTable
+        - ConnectionUpgrade
+        - websocket_upgrade
+        - UpgradeVerdict
+        - on_upgrade
+        - rendezvousBaseForOrigin
+        - KNOWN_WEB_ORIGINS
+      tests:
+        - src/native_host/direct_join_tests.rs
+        - tests/native_direct_join.rs
+        - tests/client/join-url.test.js
 
   - component: join-compatibility-gate
     core:

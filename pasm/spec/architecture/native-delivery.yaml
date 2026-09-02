@@ -7,7 +7,7 @@ entities:
       summary: The native phoenix-host binary. One executable, two modes. With no --world it serves a built client bundle, the content manifest, the scenario catalogue and the delivery version stamp over HTTP, so a Phoenix host is not required to be an open browser tab. With --world (issue #1121) the SAME process is authoritative: it runs the ordinary simulation and plugin graph through the shared boot seam and draws the shared viewscreen with native Bevy/wgpu through winit, while the delivery half moves to a worker thread because winit owns the main one.
       rationale:
         - "[ai] Authority is a property of the invocation, not of a second binary, and the entity is marked authoritative because that is the stronger of the two modes it can be in. Issue #1121 asked for the delivered host to be EVOLVED rather than duplicated, so PRD #855's bundle serving, catalogue restriction and startup version pin are the same code either way — a parallel binary would have had to fork them or link them anyway."
-        - "[ai] What it does NOT yet do is accept browser crew clients: PeerJS is browser JavaScript and cannot run in a native process, which is why #1121 is filed as blocked by the Phoenix transport (#1112). src/native_host/transport.rs is the seam that transport plugs into, and --solo is currently the only mode that reaches a running mission."
+        - "[ai] Superseded twice on the crew question. #1121 recorded that it could not accept browser clients at all (PeerJS is browser JavaScript); #1113 gave it one OUTBOUND socket to the rendezvous service; and #1353 gave it the inbound leg the shape had been missing — it accepts the crew's game socket on its own delivery port, so a LAN game needs no external service. src/native_host/transport.rs is still the seam, and both legs plug into it as ordinary transports."
     architecture:
       kind: runtime
       authority: authoritative
@@ -110,10 +110,11 @@ entities:
       summary: The phoenix-host binary — one process, two modes. Its delivery half loads the manifest and worlds off disk, builds the catalogue through the shared payload, runs the startup bundle pin, and serves the stamp, manifest and client bundle, choosing its public catalogue by which manifest file it is pointed at (the same lever the browser page pulls with ?manifest=). Its authoritative half, added by issue #1121, composes the ordinary simulation through boot's fourth profile and draws the shared viewscreen natively; the two halves share the process with Bevy on the main thread and the socket loop on a worker with a shutdown path.
       rationale:
         - "[ai] The catalogue restriction needed no new mechanism: issue #917's curated assets/scenarios.demo.toml already filters the catalogue built from a world without editing that world, so --manifest is the whole of the native host's half. Since #1121 the same allowlist also narrows the DEFAULT HULL the process flies, so one host cannot publish a curated catalogue and simultaneously run something outside it; an explicit --ship still wins, exactly as ?ship= does in the browser."
+        - "[ai] The socket loop grew ONE door in #1353 and no more: a ConnectionUpgrade handler consulted before routing, so a request on a claimed path carrying a valid WebSocket upgrade is handed over with only its head read and everything else routes exactly as it did. Detection is pure and testable, a malformed upgrade is a clean HTTP refusal rather than a stalled socket, and the head read gained a timeout to go with its size cap — a connection thread must not be holdable for free once the port answers something other than files."
         - "[ai] Hand-rolled HTTP over std::net rather than a framework, for the reason headless::args is hand-rolled rather than clap: this crate's primary target is wasm32 under lto = true, so any dependency is paid for by the browser build unless target-gated, and what is needed is a static file server and two JSON endpoints."
         - "[ai] crate::delivery is unconditional on both targets and only the BINARY is behind the host feature. A feature-gated delivery module would have been exactly the fork the PRD forbids, and would also have left its tests out of the plain cargo test CI already runs. The host feature now DEPENDS on server, because #1121's authoritative half draws the viewscreen through crate::native_host, which names the presentation plugins."
         - "[ai] The authoritative half is a fourth BootProfile rather than a fourth hand-rolled App, so the four inventories cannot drift on what the renderer owes the simulation. It refuses to compose when the composed world's declared templates, or the selected hull, are missing from the native config cache: the cache-only readers have no filesystem fallback and answer Default on a miss, which would run a plausible mission with the wrong numbers and a clean log."
-        - "[ai] Superseded in issue #1121: this component previously recorded that the native host served delivery only and did not run a world. It does now. The transport clause moved with #1112: the browser route runs on the Phoenix rendezvous transport, but that transport is not yet wired into the native process, so browser crew clients still cannot join a native host."
+        - "[ai] Superseded in issue #1121: this component previously recorded that the native host served delivery only and did not run a world. It does now. The transport clause has moved twice since — #1113 wired the outbound rendezvous leg in, and #1353 made the delivery listener itself a join endpoint (native-direct-join-service), so the same socket loop that hands a phone the bundle also carries its game."
     architecture:
       kind: service
       authority: authoritative
@@ -130,6 +131,7 @@ entities:
           src/native_host/mod.rs,
           src/native_host/app.rs,
           src/native_host/transport.rs,
+          src/native_host/direct_join.rs,
           src/boot/mod.rs,
           src/entities/template_preload.rs,
           assets/scenarios.demo.toml,
@@ -155,6 +157,8 @@ entities:
           pin_content_root,
           NativeTransport,
           NativeTransportPlugin,
+          ConnectionUpgrade,
+          websocket_upgrade,
           preload_entity_templates,
         ]
       tests:
@@ -165,6 +169,7 @@ entities:
           tests/native_headless_digest.rs,
           tests/native_host_snapshot.rs,
           tests/native_viewscreen_render.rs,
+          tests/native_direct_join.rs,
         ]
 
   - component: native-runtime-world-load

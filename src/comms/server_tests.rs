@@ -1197,3 +1197,149 @@ fn channel2_injection_never_auto_responds_for_ai_comms() {
         "channel-2 delivery must not mark an AI-operated ship's message read"
     );
 }
+
+// ── The weighted picker across a save (issue #1343) ─────────────────────────
+
+/// Both halves of the picker's state survive a capture/restore: the per-response
+/// metadata a live node carries, and the wait an unmanned console had running
+/// against it.
+///
+/// Neither is re-derivable on the way back in. A restored node is rebuilt from
+/// the payload rather than from the script, so a save that dropped the weights
+/// would hand Falling Skyway's lift decisions back to the legacy
+/// first-response policy — an unmanned console would then sit on the stand-by
+/// for ever and the act would never resolve. And a dropped WAIT would restart
+/// every pause from zero, so a save taken four seconds into a five-second one
+/// would come back with nine seconds to run.
+#[test]
+fn a_weighted_dialogue_and_its_running_wait_survive_a_save() {
+    use crate::comms::content::{
+        ActiveDialogue, CommsDialogueNode, CommsResponse, CommsResponseAi, ScriptedDialogue,
+    };
+
+    let authored = |text: &str, weight: u32| CommsResponse {
+        text: text.into(),
+        important: weight > 0,
+        ai: CommsResponseAi {
+            weight: Some(weight),
+            delay_seconds: Some(5),
+        },
+    };
+    let node = CommsDialogueNode {
+        body: "world.falling_skyway.comms.committee_claims".into(),
+        body_params: Default::default(),
+        responses: vec![
+            authored("stand_by", 0),
+            authored("lift", 1),
+            authored("deny", 1),
+        ],
+    };
+
+    let mut world = World::new();
+    let mut runtime = CommsRuntime::default();
+    runtime.active_dialogues.insert(
+        "lift-1".into(),
+        ActiveDialogue {
+            current_node: node.clone(),
+            thread_id: "committee".into(),
+            script: ScriptedDialogue {
+                script_path: "falling_skyway.toml#script.main".into(),
+                origin_layer: None,
+                node_fn: "committee_claims".into(),
+                on_pick: vec![
+                    "on_committee_hold".into(),
+                    "on_lift_committee".into(),
+                    "on_deny_committee".into(),
+                ],
+            },
+        },
+    );
+    runtime.pending_ai_responses.insert(
+        "lift-1".into(),
+        crate::comms::server::PendingAiResponse {
+            due_tick: 421,
+            response_fingerprint: crate::comms::ai_choice::response_set_fingerprint(
+                &node.responses,
+                true,
+            ),
+        },
+    );
+    world.insert_resource(runtime);
+    world.insert_resource(CommsInboxRes::default());
+
+    let saved = crate::snapshot::capture(&world);
+
+    // Wipe both halves, exactly as a fresh process would have them.
+    {
+        let mut runtime = world.resource_mut::<CommsRuntime>();
+        runtime.active_dialogues.clear();
+        runtime.pending_ai_responses.clear();
+    }
+    crate::snapshot::restore(&mut world, &saved);
+
+    let runtime = world.resource::<CommsRuntime>();
+    let restored = runtime
+        .active_dialogues
+        .get("lift-1")
+        .expect("the dialogue comes back");
+    assert_eq!(
+        restored.current_node.responses, node.responses,
+        "every authored weight and pause must come back with the node"
+    );
+    assert!(
+        crate::comms::ai_choice::node_authors_ai_choice(&restored.current_node.responses),
+        "a restored lift node is still a weighted decision, not a legacy one"
+    );
+    assert_eq!(
+        runtime
+            .pending_ai_responses
+            .get("lift-1")
+            .map(|w| w.due_tick),
+        Some(421),
+        "the wait resumes where it was rather than restarting"
+    );
+}
+
+/// The compatibility half: a node that authors nothing serialises no metadata at
+/// all, so a save from a world with no weighted conversations is byte-identical
+/// to one written before the mechanism existed.
+#[test]
+fn a_node_without_metadata_writes_no_metadata() {
+    use crate::comms::content::{
+        ActiveDialogue, CommsDialogueNode, CommsResponse, ScriptedDialogue,
+    };
+
+    let mut world = World::new();
+    let mut runtime = CommsRuntime::default();
+    runtime.active_dialogues.insert(
+        "msg-1".into(),
+        ActiveDialogue {
+            current_node: CommsDialogueNode {
+                body: "Go ahead.".into(),
+                body_params: Default::default(),
+                responses: vec![CommsResponse {
+                    text: "Acknowledge.".into(),
+                    important: false,
+                    ai: Default::default(),
+                }],
+            },
+            thread_id: "thread-1".into(),
+            script: ScriptedDialogue {
+                script_path: "w.toml#script.main".into(),
+                origin_layer: None,
+                node_fn: "root".into(),
+                on_pick: vec!["on_ack".into()],
+            },
+        },
+    );
+    world.insert_resource(runtime);
+    world.insert_resource(CommsInboxRes::default());
+
+    let saved = crate::snapshot::capture(&world);
+    let comms = saved.comms.as_ref().expect("a comms world captures comms");
+    assert!(
+        comms.dialogues[0].response_ai.is_empty(),
+        "an unweighted node must not grow a payload field it has no use for"
+    );
+    assert!(comms.pending_ai_responses.is_empty());
+}

@@ -6375,25 +6375,52 @@ fn committee_reprices(ctx) { committee_node(ctx, "world.falling_skyway.comms.com
 fn havelock_reprices(ctx)  { havelock_node(ctx, "world.falling_skyway.comms.havelock_reprices") }
 fn convoy_reprices(ctx)    { convoy_node(ctx, "world.falling_skyway.comms.convoy_reprices") }
 
-// ── The workers ─────────────────────────────────────────────────────────────
-
+// WHAT AN EMPTY CHAIR DOES WITH A CLAIM (#1343). Every response on the three
+// lift nodes carries `ai_weight` and `ai_delay_seconds`, and the three tables
+// are deliberately identical: five seconds of silence, then grant or refuse with
+// equal weight, never the hold.
+//
+// THE HOLD IS WEIGHT ZERO AND THAT IS THE WHOLE POINT. It has to be index 0 —
+// it is what a person reaches for while they think — and the backfill policy
+// every hull authors answers by index, so before this the act's three claims
+// would all have been stood by for ever and the window would have closed on
+// nobody. Zero forbids it outright rather than making it merely unlikely.
+//
+// AND THE FIVE SECONDS ARE NOT DECORATION: `reprice_the_other_claims` reopens
+// these threads on a three-second beat while the board moves, so a console that
+// answered on sight would spend the window inside one watch tick. A pause longer
+// than the beat means an unmanned bridge decides against a ledger that has
+// settled, exactly as a crew reading the manifest would.
+//
+// The confrontation options on Havelock's node author NOTHING, which keeps them
+// out of the pool entirely — the comment there already said that was the last
+// thing a backfilled console should reach for, and now it is structurally true.
 fn committee_claims(ctx) { committee_node(ctx, "world.falling_skyway.comms.committee_claims") }
 
 fn committee_node(ctx, body) {
     let responses = [];
     if !claim_decided(ctx, "skyway_granted_committee", "skyway_refused_committee") {
-        responses.push(#{ text: "world.falling_skyway.comms.claim_stand_by", on_pick: "on_committee_hold" });
+        responses.push(#{
+            text: "world.falling_skyway.comms.claim_stand_by",
+            on_pick: "on_committee_hold",
+            ai_weight: 0,
+            ai_delay_seconds: 5,
+        });
         if window_room(ctx) >= ctx.flags["skyway_claim_committee"] {
             responses.push(#{
                 text: "world.falling_skyway.comms.lift_committee",
                 on_pick: "on_lift_committee",
                 important: true,
+                ai_weight: 1,
+                ai_delay_seconds: 5,
             });
         }
         responses.push(#{
             text: "world.falling_skyway.comms.deny_committee",
             on_pick: "on_deny_committee",
             important: true,
+            ai_weight: 1,
+            ai_delay_seconds: 5,
         });
     }
     #{ message: body, responses: responses }
@@ -6459,7 +6486,12 @@ fn havelock_node(ctx, body) {
     // all — including a node whose only remaining options are the confrontation,
     // which is the last thing a backfilled console should be able to reach for.
     if !decided || can_confront {
-        responses.push(#{ text: "world.falling_skyway.comms.claim_stand_by", on_pick: "on_havelock_hold" });
+        responses.push(#{
+            text: "world.falling_skyway.comms.claim_stand_by",
+            on_pick: "on_havelock_hold",
+            ai_weight: 0,
+            ai_delay_seconds: 5,
+        });
     }
     if !decided {
         if window_room(ctx) >= ctx.flags["skyway_claim_havelock"] {
@@ -6467,12 +6499,16 @@ fn havelock_node(ctx, body) {
                 text: "world.falling_skyway.comms.lift_havelock",
                 on_pick: "on_lift_havelock",
                 important: true,
+                ai_weight: 1,
+                ai_delay_seconds: 5,
             });
         }
         responses.push(#{
             text: "world.falling_skyway.comms.deny_havelock",
             on_pick: "on_deny_havelock",
             important: true,
+            ai_weight: 1,
+            ai_delay_seconds: 5,
         });
     }
     if can_confront {
@@ -6565,7 +6601,12 @@ fn convoy_claims(ctx) { convoy_node(ctx, "world.falling_skyway.comms.convoy_clai
 fn convoy_node(ctx, body) {
     let responses = [];
     if !claim_decided(ctx, "skyway_granted_convoy", "skyway_refused_convoy") {
-        responses.push(#{ text: "world.falling_skyway.comms.claim_stand_by", on_pick: "on_convoy_hold" });
+        responses.push(#{
+            text: "world.falling_skyway.comms.claim_stand_by",
+            on_pick: "on_convoy_hold",
+            ai_weight: 0,
+            ai_delay_seconds: 5,
+        });
         // `convoy_standing` and not just the ledger (#1340): the corridor can
         // lose this hull outright while its thread is still on a console, and a
         // lift offered to a craft that is no longer there would spend the window
@@ -6584,12 +6625,16 @@ fn convoy_node(ctx, body) {
                 text: "world.falling_skyway.comms.lift_convoy",
                 on_pick: "on_lift_convoy",
                 important: true,
+                ai_weight: 1,
+                ai_delay_seconds: 5,
             });
         }
         responses.push(#{
             text: "world.falling_skyway.comms.deny_convoy",
             on_pick: "on_deny_convoy",
             important: true,
+            ai_weight: 1,
+            ai_delay_seconds: 5,
         });
     }
     #{ message: body, responses: responses }

@@ -1962,6 +1962,12 @@ pub fn operate_comms_response_ai(
         String,
         crate::comms::server::PendingAiResponse,
     > = std::collections::BTreeMap::new();
+    // Whether any ship's own cadence actually let it walk its conversations this
+    // tick. A pass that decided NOTHING must not be mistaken for one that
+    // cancelled everything: a hull authoring `evaluate_every_ticks = 4` would
+    // otherwise have every running wait wiped on the three ticks in four it
+    // sits out, and so would a tick with no `LocalShip` at all.
+    let mut walked_any = false;
 
     for (
         entity,
@@ -1999,6 +2005,7 @@ pub fn operate_comms_response_ai(
         ) {
             continue;
         }
+        walked_any = true;
         // The read-only scenario flag chain (AC4), anchored at the layer that
         // spawned THIS ship (issue #891 stage 2).
         let flag_chain = ai_env.flag_chain(entity);
@@ -2151,7 +2158,13 @@ pub fn operate_comms_response_ai(
     // The one write of the pass. Assigning the whole map rather than mutating it
     // in place is what makes the cancellations structural: a wait that this pass
     // did not re-arm is gone, and no cancellation case needs a hook of its own.
-    comms_res.pending_ai_responses = pending_next;
+    //
+    // Guarded on the schedule having actually MOVED, so a steady-state tick does
+    // not flip `CommsRuntime`'s change-detection tick for a map that is
+    // identical to the one already there.
+    if walked_any && comms_res.pending_ai_responses != pending_next {
+        comms_res.pending_ai_responses = pending_next;
+    }
 }
 
 /// Everything [`emit_backfill_response`] needs, grouped so the two call sites
@@ -2348,7 +2361,6 @@ fn message_is_superseded(
 ) -> bool {
     inbox
         .0
-        .messages()
         .iter()
         .skip_while(|m| m.id != message.id)
         .skip(1)

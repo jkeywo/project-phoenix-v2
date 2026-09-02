@@ -117,8 +117,8 @@ pub enum SimStream {
     /// stable-world-id-order fold could not survive.
     ///
     /// It stays in the enum rather than being deleted because retiring it is
-    /// not free and buys nothing. [`SimStream::ALL`] is six long and
-    /// [`SimRngState`] serialises one generator per entry, with
+    /// not free and buys nothing. [`SimRngState`] serialises one generator per
+    /// [`SimStream::ALL`] entry, with
     /// [`SimRng::from_state`] *rejecting* a snapshot whose length disagrees;
     /// dropping the variant would invalidate every recorded snapshot and shift
     /// the fingerprint's `rng_positions`, for the sake of one unused mutex. An

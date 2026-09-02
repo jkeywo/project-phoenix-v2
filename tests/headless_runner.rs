@@ -17059,6 +17059,106 @@ fn window_objective_verdicts(
     (completed, failed)
 }
 
+/// Issue #1343, AC5 — the three lift conversations author the decision an empty
+/// chair is allowed to make: five seconds of silence, then grant or refuse with
+/// equal weight, never the hold.
+///
+/// Asserted through the SAME pure picker the running host uses rather than by
+/// re-reading the numbers off the authored map, so this passes only if the
+/// authored weights really do produce that pool. The stand-by is the whole
+/// point: it has to be index 0 — it is what a person reaches for while they
+/// think — and the backfill policy every hull authors answers by index, so
+/// before this an unmanned bridge would have stood by on all three claims until
+/// the window closed on nobody.
+///
+/// Havelock's confrontation options are checked in the same breath: they author
+/// nothing, which keeps them out of the pool entirely.
+#[test]
+fn falling_skyway_lift_nodes_author_a_five_second_weighted_backfill_decision() {
+    use project_phoenix::comms::ai_choice;
+    use project_phoenix::world::script::comms::project_node;
+
+    let script = WindowScript::compile();
+    let claims: Vec<i64> = SKYWAY_CLAIM_IDS
+        .iter()
+        .map(|id| script.authored(id))
+        .collect();
+    // Room for every claim at once, so all three nodes show their lift line.
+    let room = claims.iter().sum::<i64>();
+    let open_window = |decided: [Option<bool>; 3]| WindowLedger {
+        banked: room,
+        live: room,
+        reserved: 0,
+        decided,
+        convoy_lost: false,
+    };
+    let flags = script.flags(&open_window([None, None, None]));
+
+    let deny_lines = [
+        "world.falling_skyway.comms.deny_committee",
+        "world.falling_skyway.comms.deny_havelock",
+        "world.falling_skyway.comms.deny_convoy",
+    ];
+    for index in 0..3 {
+        let node = script.node(SKYWAY_CLAIM_NODES[index], &flags);
+        let (wire, _on_pick) = project_node(&node);
+        let name = SKYWAY_CLAIM_NODES[index];
+
+        assert!(
+            ai_choice::node_authors_ai_choice(&wire.responses),
+            "{name} must be a weighted decision, not a legacy first-response node"
+        );
+        assert_eq!(
+            ai_choice::choice_delay_seconds(&wire.responses),
+            5,
+            "{name} must make an unmanned console wait the agreed five seconds"
+        );
+        assert_eq!(
+            wire.responses[0].text, "world.falling_skyway.comms.claim_stand_by",
+            "{name} must keep the hold at index 0 — it is what a person reaches for"
+        );
+        assert_eq!(
+            wire.responses[0].ai.weight,
+            Some(0),
+            "{name}'s hold must be forbidden to an unmanned console, not merely unlikely"
+        );
+
+        let pool = ai_choice::weighted_pool(&wire.responses, true);
+        let picked: Vec<&str> = pool
+            .iter()
+            .map(|entry| wire.responses[entry.index].text.as_str())
+            .collect();
+        assert_eq!(
+            picked,
+            vec![SKYWAY_LIFT_LINES[index], deny_lines[index]],
+            "{name}: an unmanned console chooses between granting and refusing, \
+             and nothing else"
+        );
+        assert!(
+            pool.iter().all(|entry| entry.weight == pool[0].weight),
+            "{name}: grant and refuse carry equal weight"
+        );
+    }
+
+    // Havelock's other road: the claim decided, the confrontation unlocked. The
+    // node still stands and an unmanned console must find nothing on it.
+    let mut confront = script.flags(&open_window([None, Some(true), None]));
+    confront.set_flag_value("skyway_confront_unlocked", 1);
+    let node = script.node("havelock_claims", &confront);
+    let (wire, _on_pick) = project_node(&node);
+    assert!(
+        wire.responses
+            .iter()
+            .any(|r| r.text == "world.falling_skyway.comms.confront_named"),
+        "precondition: the confrontation is on this node"
+    );
+    assert!(
+        ai_choice::weighted_pool(&wire.responses, true).is_empty(),
+        "a confrontation authors no weight, so an unmanned console cannot reach \
+         one — and must not fall back to the hold either"
+    );
+}
+
 /// **Issue #1340, AC1/AC2/AC4 — every reachable ledger, and not one offer on
 /// it that the booking seam would refuse.**
 ///

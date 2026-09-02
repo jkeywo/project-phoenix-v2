@@ -166,6 +166,45 @@ fn every_authored_category_reaches_the_run_report() {
         answered.seq > opened.seq,
         "a thread cannot be answered before it opens"
     );
+    // …and they point in OPPOSITE directions. The hail is produced by Lyra and
+    // done to nobody in particular; the answer is produced by the crew and done
+    // to Lyra. Recording the hailer as the answer's `source` would credit the
+    // counterparty with the crew's own choice, which is exactly the reading a
+    // "who did this" analysis takes off `source.entity`.
+    let hailer = opened
+        .event
+        .source
+        .entity
+        .as_deref()
+        .expect("the hail names its sender");
+    assert_eq!(
+        answered.event.target.as_deref(),
+        Some(hailer),
+        "the answered thread's target is the entity that was answered"
+    );
+    assert_ne!(
+        answered.event.source.entity.as_deref(),
+        Some(hailer),
+        "the crew's choice must not be attributed to the hailing entity"
+    );
+    // The one narrative kind whose actor is a station-side decision — and so the
+    // only place the `station` / `system` axes of a `NarrativeActor` are live.
+    assert_eq!(
+        answered.event.source.system.as_deref(),
+        Some("comms"),
+        "the answer is produced on the comms system: {:?}",
+        answered.event.source
+    );
+    assert!(
+        answered.event.source.station.is_some(),
+        "the courier resolves a comms host station, and the answer names it: {:?}",
+        answered.event.source
+    );
+    assert!(
+        answered.event.source.entity.is_some(),
+        "the answering hull is the crew's own ship: {:?}",
+        answered.event.source
+    );
 
     // ── The marked entity ─────────────────────────────────────────────────────
     assert_eq!(

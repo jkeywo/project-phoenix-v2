@@ -6779,6 +6779,14 @@ fn a_game_start_entity_marked_narrative_carries_the_mark() {
     // The control: the same row without the flag. An unmarked hull produces no
     // timeline entry however violently it dies.
     world_cfg.entities.push(beacon("rock", false, 60.0));
+    // What the Startup assign pass leaves behind for every NAMED row, whatever
+    // its `spawn_on` — the map this spawner reads its uuids out of.
+    world_cfg
+        .name_to_uuid
+        .insert("lyra".into(), "uuid-lyra".into());
+    world_cfg
+        .name_to_uuid
+        .insert("rock".into(), "uuid-rock".into());
 
     let mut app = App::new();
     app.insert_resource(world_cfg);
@@ -6825,4 +6833,96 @@ fn a_nameless_game_start_entity_takes_no_mark() {
 
     let mut query = app.world_mut().query::<&NarrativeMark>();
     assert_eq!(query.iter(app.world()).count(), 0);
+}
+
+/// A marked GameStart hull must spawn under the SAME uuid its authored name
+/// resolves to, because the timeline records it under both.
+///
+/// `narrative::emit_marked_entity_narrative` reads the uuid off the spawned
+/// entity (`EntityUuid` + `NarrativeMark`) for `marked_entity_spawned`, while
+/// `ActionCmd::NarrativeOutcome` resolves the author's
+/// `ctx.effects.narrative_outcome("name", ..)` through
+/// `WorldContentRuntime.name_to_uuid` — the mirror of `WorldConfig.name_to_uuid`
+/// this spawner reads. When this spawner minted its own uuid instead, those two
+/// halves of one hull's story carried two different actors, and the one the
+/// outcome carried belonged to no entity in the world at all. Nothing name-
+/// resolving (comms `from`, trigger targets, `set_target`) could reach the hull
+/// either; the timeline is simply where the split became visible.
+#[test]
+fn a_named_game_start_entity_spawns_under_its_registered_uuid() {
+    use crate::core::narrative::NarrativeMark;
+    use crate::entities::spawner::EntityUuid;
+    use crate::world::config::{
+        TransformConfig, WorldConfig as UnifiedWorldConfig, WorldEntity, WorldEntitySpawnOn,
+    };
+
+    let mut world_cfg = UnifiedWorldConfig::default();
+    world_cfg.entities.push(WorldEntity {
+        template_path: "assets/entities/nav_beacon.toml".into(),
+        name: Some("lyra".into()),
+        narrative: true,
+        spawn_on: WorldEntitySpawnOn::GameStart,
+        transform: Some(TransformConfig {
+            position: Some([120.0, 0.0, 0.0]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    world_cfg
+        .name_to_uuid
+        .insert("lyra".into(), "uuid-lyra".into());
+
+    let mut app = App::new();
+    app.insert_resource(world_cfg);
+    app.add_systems(Update, spawn_game_start_entities);
+    app.update();
+
+    let mut query = app.world_mut().query::<(&EntityUuid, &NarrativeMark)>();
+    let spawned: Vec<(String, String)> = query
+        .iter(app.world())
+        .map(|(uuid, mark)| (mark.0.clone(), uuid.0.clone()))
+        .collect();
+    assert_eq!(
+        spawned,
+        vec![("lyra".to_string(), "uuid-lyra".to_string())],
+        "the marked hull must carry the uuid registered against its authored \
+         name, not a freshly minted one"
+    );
+}
+
+/// The Immediate half of the same contract, stated from the other side: an
+/// ANONYMOUS GameStart row (the player-ship placeholder every shipped world
+/// uses) has no name to anchor to and still mints. Guards the fix above from
+/// being read as "GameStart rows never mint".
+#[test]
+fn an_anonymous_game_start_entity_still_mints_its_own_uuid() {
+    use crate::entities::spawner::EntityUuid;
+    use crate::world::config::{
+        TransformConfig, WorldConfig as UnifiedWorldConfig, WorldEntity, WorldEntitySpawnOn,
+    };
+
+    let mut world_cfg = UnifiedWorldConfig::default();
+    world_cfg.entities.push(WorldEntity {
+        template_path: "assets/entities/nav_beacon.toml".into(),
+        name: None,
+        spawn_on: WorldEntitySpawnOn::GameStart,
+        transform: Some(TransformConfig {
+            position: Some([30.0, 0.0, 0.0]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+
+    let mut app = App::new();
+    app.insert_resource(world_cfg);
+    app.add_systems(Update, spawn_game_start_entities);
+    app.update();
+
+    let mut query = app.world_mut().query::<&EntityUuid>();
+    let uuids: Vec<String> = query.iter(app.world()).map(|u| u.0.clone()).collect();
+    assert_eq!(uuids.len(), 1, "the row still spawns");
+    assert!(
+        !uuids[0].is_empty(),
+        "an anonymous row mints its own uuid: {uuids:?}"
+    );
 }

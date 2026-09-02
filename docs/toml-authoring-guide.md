@@ -301,7 +301,7 @@ map — see the field notes below.
 |---|---|---|---|
 | `template_path` | string | **required** | Path to entity template (e.g. `"assets/entities/star_sun.toml"`). |
 | `id` | string | none | Stable instance ID for cross-reference. Also accepted as a `relative_to` target. |
-| `name` | string | none | When set, the unified pipeline assigns a UUID and registers `name → uuid` in `WorldConfig.name_to_uuid` and `WorldContentRuntime.name_to_uuid`. Triggers and comms resolve names through this map. |
+| `name` | string | none | When set, the unified pipeline assigns a UUID and registers `name → uuid` in `WorldConfig.name_to_uuid` and `WorldContentRuntime.name_to_uuid`. Triggers and comms resolve names through this map. Both spawn timings spawn under the REGISTERED UUID — a named `spawn_on = "game_start"` row uses the same UUID its name resolves to, exactly as an immediate one does — so `name → uuid` is single-sourced whenever the hull enters the world. |
 | `position` | `[f32; 3]` | `[0,0,0]` | World position. |
 | `anchor` | string | none | Named entry from `[anchors]`; resolved to `[x,y,z]` at spawn time. |
 | `relative_to` | string | none | Another `[[entity]]` **in the same file** to position relative to, named by its `id` **or** its `name` (a `name` wins if the two collide). Used with `offset`. Order does not matter — the target may be declared before or after. The target must use `anchor` or `position`, not another `relative_to` (no chains). Resolved against the entity list directly, *not* through `name_to_uuid`. A `relative_to` that does not resolve fails world validation and blocks the whole world from spawning (issue #969) — before, it cost exactly the one entity, silently. |

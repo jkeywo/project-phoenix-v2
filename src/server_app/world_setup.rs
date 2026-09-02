@@ -450,8 +450,51 @@ pub(crate) fn spawn_game_start_entities(
             config
         };
 
-        let uuid =
-            crate::world_id::mint_id_with(id_mint.as_deref(), crate::world_id::IdNamespace::Entity);
+        // A NAMED row's uuid is the one already registered in
+        // `WorldConfig.name_to_uuid`, exactly as
+        // `world::server::spawn_immediate_entities_internal` reads it for the
+        // Immediate half. `world::config::assign_named_entity_uuids` registers
+        // EVERY named `[[entity]]` row with no `spawn_on` filter, so a
+        // GameStart row's registration already exists before this system runs —
+        // and minting a second uuid here would leave `name → uuid` double
+        // sourced. Every name-resolving path (comms `from`, trigger targets,
+        // `set_target`, `ctx.effects.narrative_outcome(..)`) resolves the
+        // REGISTERED uuid, so a minted hull is addressable by nobody: the name
+        // resolves to a uuid that belongs to no entity in the world.
+        //
+        // Issue #1338 made that split visible in the run report — a marked
+        // GameStart hull would emit `marked_entity_spawned` under the uuid it
+        // spawned with and `narrative_outcome` under the phantom, two actors for
+        // one hull — but the split predates the timeline and this is where it
+        // belongs: single-sourcing the id is what makes `spawn_on` a statement
+        // about WHEN a hull enters the world and nothing else.
+        //
+        // Anonymous rows (the player-ship placeholder every shipped world uses)
+        // have no name to anchor to and mint as they always did. A named row
+        // with no registration is a programmer error — the Startup assign pass
+        // did not run — and is logged and then minted rather than skipped: this
+        // path spawns the player's ship, and refusing to spawn is the more
+        // damaging failure of the two.
+        let uuid = match entity_inst.name.as_ref() {
+            None => crate::world_id::mint_id_with(
+                id_mint.as_deref(),
+                crate::world_id::IdNamespace::Entity,
+            ),
+            Some(name) => match mc.name_to_uuid.get(name) {
+                Some(registered) => registered.clone(),
+                None => {
+                    bevy::log::error!(
+                        "spawn_game_start_entities: named entity '{name}' has no UUID in \
+                         WorldConfig.name_to_uuid — minting a fresh one, so nothing that \
+                         resolves this instance BY NAME will reach it"
+                    );
+                    crate::world_id::mint_id_with(
+                        id_mint.as_deref(),
+                        crate::world_id::IdNamespace::Entity,
+                    )
+                }
+            },
+        };
         let pos = match crate::world::config::resolve_entity_position_with(
             entity_inst,
             &mc.anchors,

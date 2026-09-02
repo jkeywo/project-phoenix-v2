@@ -304,6 +304,11 @@ pub(crate) fn handle_respond_to_message(
             // string-cast from the system id.
             Option<&crate::ship_plugin::ShipConfigComponent>,
             Option<&crate::ship_plugin::HumanSeekingHosts>,
+            // The answering side of a Comms beat (issue #1338): a
+            // `comms_answered` event is produced by THIS crew, so this hull is
+            // its narrative source. `Option` because a bare-`App` fixture can
+            // put `AdmittedCommands` on a hull with no `EntityUuid`.
+            Option<&EntityUuid>,
         ),
         With<crate::server_app::LocalShip>,
     >,
@@ -336,7 +341,8 @@ pub(crate) fn handle_respond_to_message(
     // the same sinks the trigger/callback paths use.
     mut effect_queues: EffectQueues,
 ) {
-    let Some((admitted, ship_config, seeking_hosts)) = ship_query.iter().next() else {
+    let Some((admitted, ship_config, seeking_hosts, local_ship_uuid)) = ship_query.iter().next()
+    else {
         return;
     };
     // Resolve the submitting comms token once per tick: the rejection channel
@@ -344,17 +350,22 @@ pub(crate) fn handle_respond_to_message(
     // station `station_for_system` resolves for the comms SYSTEM, which is the
     // sought human-seeking host when there is one and the hull's authored
     // station otherwise.
-    let comms_station = ship_config
-        .and_then(|c| {
-            crate::command_admission::station_for_system(
-                &c.0,
-                seeking_hosts,
-                &crate::ship::system_registry::comms_system_id(),
-            )
-        })
-        .unwrap_or_else(|| {
-            crate::core::messages::StationId(crate::ship::system_registry::COMMS_SYSTEM_ID.into())
-        });
+    //
+    // Kept as an `Option` alongside the fallback because the narrative source
+    // below (issue #1338) may only name a station the hull ACTUALLY resolved:
+    // the `unwrap_or_else` arm is a string-cast of the system id, good enough to
+    // address a rejection at, and a lie if the timeline records it as the seat
+    // the crew answered from (AGENTS.md rule 6 — never string-cast a station).
+    let resolved_comms_station = ship_config.and_then(|c| {
+        crate::command_admission::station_for_system(
+            &c.0,
+            seeking_hosts,
+            &crate::ship::system_registry::comms_system_id(),
+        )
+    });
+    let comms_station = resolved_comms_station.clone().unwrap_or_else(|| {
+        crate::core::messages::StationId(crate::ship::system_registry::COMMS_SYSTEM_ID.into())
+    });
     let comms_token = aux
         .sessions
         .0
@@ -678,11 +689,30 @@ pub(crate) fn handle_respond_to_message(
         // only answers that actually landed, and shared by human and AI alike
         // because `operate_comms_response_ai` submits the same admitted
         // `RespondToMessage` a console does.
+        //
+        // The event's DIRECTION is the crew's, not the hailer's. `source` is
+        // "who produced it" and this beat was produced by this ship, at this
+        // station, on the comms system — the one narrative kind whose actor is a
+        // station-side decision, and so the one place `NarrativeActor`'s
+        // station/system axes carry anything. `target` is the hailing entity,
+        // which is `comms_opened`'s `source`: opened-source == answered-target
+        // is what lets an analysis read the pair as one exchange without
+        // crediting the counterparty with the crew's choice.
+        //
+        // Each axis is named only when it is actually known: no `EntityUuid` on
+        // the local hull (a bare fixture) leaves `entity` null, and a station
+        // that `station_for_system` could not resolve leaves `station` null
+        // rather than recording the system id cast to a station.
         if let Some(msgs) = aux.narrative_events.as_deref_mut() {
             let mut event = crate::core::narrative::NarrativeEvent::new(
                 crate::core::narrative::NarrativeKind::CommsAnswered,
                 dialogue.thread_id.clone(),
             )
+            .from_actor(crate::core::narrative::NarrativeActor {
+                entity: local_ship_uuid.map(|uuid| uuid.0.clone()),
+                station: resolved_comms_station.as_ref().map(|s| s.0.clone()),
+                system: Some(crate::ship::system_registry::COMMS_SYSTEM_ID.to_string()),
+            })
             .text("message_id", message_id.clone())
             .detail(
                 "response_index",
@@ -693,9 +723,7 @@ pub(crate) fn handle_respond_to_message(
             // a semantic id for a choice.
             .text("on_pick", on_pick_fn.clone());
             if let Some(sender) = &sender_uuid {
-                event = event.from_actor(crate::core::narrative::NarrativeActor::entity(
-                    sender.clone(),
-                ));
+                event = event.to_target(sender.clone());
             }
             msgs.write(event);
         }

@@ -4,7 +4,7 @@
 
 ## TL;DR
 
-A browser-based spaceship bridge simulator. One browser tab shows a shared 3D view of space. Players join from phones by scanning a QR code, or by typing the five letters shown next to it — no installation. The host (view screen) runs Rust/Bevy compiled to WebAssembly and is the authoritative server; the client (phone console) is **pure HTML/CSS/JS** — no client-side WASM. Clients send inputs and receive state snapshots. Networking is the **Phoenix transport** (issue #1112) in a star topology: a Phoenix-owned rendezvous service (`worker-rendezvous/`, a Cloudflare Worker + Durable Object) carries typed join-code lookup and WebRTC signalling over a secure WebSocket, and the game traffic then runs over direct WebRTC DataChannels — a reliable ordered one for commands and reliable messages, and a lossy unordered one for the snapshot class. PeerJS and its public cloud broker were retired in #1112. When a network builds no direct link at all, the same rendezvous socket carries the game's own frames instead (issue #1113) — the two delivery classes preserved, the same admission gate, no second protocol — and that fallback is also how a browser client joins a **native** host, which has no WebRTC.
+A browser-based spaceship bridge simulator. One browser tab shows a shared 3D view of space. Players join from phones by scanning a QR code, or by typing the code shown next to it — no installation. The host (view screen) runs Rust/Bevy compiled to WebAssembly and is the authoritative server; the client (phone console) is **pure HTML/CSS/JS** — no client-side WASM. Clients send inputs and receive state snapshots. Networking is the **Phoenix transport** (issue #1112) in a star topology: a Phoenix-owned rendezvous service (`worker-rendezvous/`, a Cloudflare Worker + Durable Object) carries typed join-code lookup and WebRTC signalling over a secure WebSocket, and the game traffic then runs over direct WebRTC DataChannels — a reliable ordered one for commands and reliable messages, and a lossy unordered one for the snapshot class. PeerJS and its public cloud broker were retired in #1112. When a network builds no direct link at all, the same rendezvous socket carries the game's own frames instead (issue #1113) — the two delivery classes preserved, the same admission gate, no second protocol — and that fallback is also how a browser client joins a **native** host, which has no WebRTC.
 
 For the current feature set, read **[wiki/concepts/project-overview.md](./wiki/concepts/project-overview.md)** and the relevant PASM slice under [`pasm/spec/`](./pasm/spec/). Planned work lives on the GitHub issue tracker (label `PRD`). Domain vocabulary lives in **[CONTEXT.md](./CONTEXT.md)** — use those terms, don't invent synonyms.
 
@@ -402,9 +402,20 @@ cargo build --release --features host --bin phoenix-host
 #     reserved-token refusal and shedding rule are the same code on both legs
 #     and a phone cannot tell them apart. tests/native_direct_join.rs drives a
 #     real WebSocket client through a bound host and is NOT #[ignore]d.
+#     There is deliberately NO Origin allow-list on that door (same origin by
+#     construction; a list of every name a machine answers to refuses crews for
+#     no defence). What gates a JOIN instead is attempt-limiting, because the
+#     stamp is public and the code is the only secret: direct_join.rs's
+#     AdmissionBudgets holds a per-source failed-guess bucket that survives
+#     reconnection, a per-source cap on sockets that never join, and a global
+#     circuit-breaker that ramps a delay onto every lookup answer. All of it is
+#     SOFT — the bucket refills, refusals carry Retry-After — because a whole
+#     crew can share one address. The authored suffix is EIGHT letters for the
+#     same reason (25^8 ≈ 1.5e11; five was walkable in ~35 min), and all three
+#     readers of assets/join/join-codes.toml inherit that.
 #   --rendezvous <URL> --origin <URL>  is the OTHER leg (issue #1113): play
 #     beyond one LAN. The host registers with the rendezvous service, prints its
-#     five-letter code at startup, and every crew member reaches it over the
+#     typed code at startup, and every crew member reaches it over the
 #     service's WebSocket game relay — a native process has no WebRTC, so it
 #     registers saying `transports: ["ws-relay"]` and joiners skip the direct
 #     ladder instead of spending 90 s discovering that.
@@ -651,10 +662,10 @@ Prerequisites: Rust stable + `rustup target add wasm32-unknown-unknown`, `cargo 
 server.html initHostTransport()          gui/rendezvous-transport.js
   ↓  wss:// to the rendezvous service, `host-open`
 worker-rendezvous registry               worker-rendezvous/src/registry.js
-  ↓  mints a private five-letter suffix, answers `hosted`
+  ↓  mints a private suffix, answers `hosted`
 server.html showJoinCode()
   ↓  paints the letters + a QR of client/index.html#<PROJECT_VERSION_CODE>
-client.html startPhoenixJoin()           five letters typed, pasted, or scanned
+client.html startPhoenixJoin()           a code typed, pasted, or scanned
   ↓  wss:// `join` with the full code → `joined` (unknown / wrong-type /
   ↓  version-mismatch are three distinct refusals)
   ↓  SDP + ICE relayed by the service; the JOINER creates BOTH channels:
@@ -670,7 +681,7 @@ client.html → Identify { token, name }   the ordinary crew protocol starts her
 The signalling socket is expendable once the DataChannels are up. A link that
 drops is re-resolved against the SAME code on a backoff, with the same session
 token re-sent as `Identify` — the host restores the held station and pushes the
-current projection, and nobody re-types five letters.
+current projection, and nobody re-types the code.
 
 ### Assembling a fleet (issue #1114)
 
@@ -760,7 +771,7 @@ gui/            — CLIENT: pure JS modules + one HTML file per console (iframe)
 assets/         — TOML configs: worlds/, entities/, factions/; models, shaders, sounds
 server.html     — Host page: loads server WASM, runs Bevy, registers with the
                   rendezvous service and owns the per-token connection maps
-client.html     — Client page: pure HTML/JS, joins by typed five-letter code or
+client.html     — Client page: pure HTML/JS, joins by typed code or
                   by the structured code a QR link puts in the URL fragment
 worker-rendezvous/ — The rendezvous service (Cloudflare Worker + Durable
                   Object): typed join codes, presence, WebRTC signalling relay,
@@ -921,7 +932,7 @@ ultralight = ["host", "vellum-ultralight/ultralight"]
 
 - Server: `https://pp-dev.kiwigamedesign.co.uk/`
 - Client: `https://pp-dev.kiwigamedesign.co.uk/client/`
-- Server QR encodes: `https://pp-dev.kiwigamedesign.co.uk/client/index.html#<PROJECT_GUID>_<VERSION_GUID>_<CODE>` — the same structured code whose five-letter suffix is printed beside it, so scanning and typing are one join by two routes.
+- Server QR encodes: `https://pp-dev.kiwigamedesign.co.uk/client/index.html#<PROJECT_GUID>_<VERSION_GUID>_<CODE>` — the same structured code whose typed suffix is printed beside it, so scanning and typing are one join by two routes.
 
 ---
 

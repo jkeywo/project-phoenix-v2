@@ -752,7 +752,7 @@
     }
     /* The one text field in this panel: the fleet code an operator types off
        another viewscreen (issue #1114). Monospaced and letter-spaced because
-       what goes in it is five letters read aloud across a room. */
+       what goes in it is a code read aloud across a room. */
     .server-settings-input {
       padding: 6px 9px; width: 8ch;
       background: #10171f; border: 1px solid #223246; color: #dbe8f7;
@@ -1157,7 +1157,7 @@
             <span id="qr-url-label" data-i18n="server.qr_url_label">or type this in</span>
             <span id="qr-url"></span>
           </div>
-          <!-- The five letters a guest reads across the room and types into
+          <!-- The code a guest reads across the room and types into
                their phone (issue #1111). Populated once the rendezvous service
                has issued this host a code, and cleared if that record is lost;
                the URL row above carries the same code inside the QR link. -->
@@ -1435,7 +1435,7 @@
        bottom of this page, long after every module island here has loaded. -->
   <script type="module" src="gui/host-peer-routing.js"></script>
 
-  <!-- Typed five-letter join codes and the Phoenix crew transport (issues
+  <!-- Typed join codes and the Phoenix crew transport (issues
        #1111/#1112). Both publish onto window for the classic script below.
        Since #1112 this IS the transport — there is no PeerJS block and no flag
        choosing between routes; the host registers with the rendezvous service
@@ -1862,7 +1862,7 @@
     // ── Phoenix crew transport (issues #1111 / #1112) ──────────────────────
     //
     // This host registers with the rendezvous service, is issued a private
-    // five-letter code, and answers WebRTC offers from the phones that type it.
+    // typed code, and answers WebRTC offers from the phones that type it.
     // There is no second route any more: PeerJS, its public cloud broker and
     // the 32-hex peer id that used to be the join URL's fragment were retired
     // in #1112, and the fragment now carries the structured join code instead.
@@ -1889,7 +1889,7 @@
     // Recovering from a LOST service is the transport's own business — it
     // re-registers on a backoff and issues a fresh code through onCode.
     let rendezvousHost = null;
-    // Whether a five-letter code is currently on screen.
+    // Whether a typed code is currently on screen.
     let rendezvousCodeShown = false;
     // Set when the rendezvous service reports a failure, so renderConnDiag()
     // can tell the operator why no code appeared.
@@ -2052,7 +2052,7 @@
     let fleetHandle = null;
     /** The most recent roster body — the owner's own, or the lead's sync. */
     let fleetRoster = null;
-    /** The five letters on screen: this host's own code, or the one it typed. */
+    /** The code on screen: this host's own code, or the one it typed. */
     let fleetSuffix = null;
     /** A machine reason for why there is no fleet, already localisable. */
     let fleetFault = null;
@@ -2192,7 +2192,7 @@
     /**
      * The authored bound on a pasted fleet code, or null before the join table
      * has loaded. Read by the settings cog to size its one code field, so the
-     * five-letter route and the paste-the-whole-code route share a control
+     * typed-code route and the paste-the-whole-code route share a control
      * without either inventing a length.
      */
     window.__hostFleetCodeLimit = function() {

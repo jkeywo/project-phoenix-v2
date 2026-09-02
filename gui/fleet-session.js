@@ -501,7 +501,7 @@ export function createFleetOwner(opts) {
  *
  * @param {object} opts
  * @param {string} opts.base
- * @param {string} opts.code the five letters, or a pasted full code
+ * @param {string} opts.code the code letters, or a pasted full code
  * @param {object} opts.data the authored join table
  * @param {string|null} opts.stamp this host's own `p/id/epoch` field
  * @param {{template_path: string|null, name?: string}|null} [opts.ship]

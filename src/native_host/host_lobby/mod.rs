@@ -235,7 +235,7 @@ pub struct HostLobbyJoinResource {
     /// interchangeable, because the QR does not only carry a code — it carries
     /// the PAGE, and the page a LAN phone loads is served by this host, so the
     /// service it dials is this host (see `gui/join-url.js`'s origin rule).
-    /// Putting the worker's five letters on that QR would send every phone in
+    /// Putting the worker's code on that QR would send every phone in
     /// the room to a service that has never heard of them. The cloud code is
     /// still printed to the operator's terminal, which is where somebody
     /// arranging internet play reads it from.

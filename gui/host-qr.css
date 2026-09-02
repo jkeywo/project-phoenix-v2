@@ -79,7 +79,7 @@
   line-height: 1.35;
   -webkit-user-select: all; user-select: all;
 }
-/* The five-letter join code (issue #1111). Sized to be read across a room
+/* The typed join code (issue #1111). Sized to be read across a room
    — that is the entire reason it exists next to a 90-character URL. */
 #join-code-row {
   display: flex; flex-direction: column; align-items: center; gap: 2px;

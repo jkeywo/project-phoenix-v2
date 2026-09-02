@@ -780,7 +780,7 @@ fn main() {
 ///
 /// A Bevy system rather than a callback because the transport is a resource the
 /// scheduler owns, and because the code has to reach the operator's terminal on
-/// the frame the service issues it: the five letters are how anybody joins, and
+/// the frame the service issues it: the code is how anybody joins, and
 /// a native host has no viewscreen panel to paint them on.
 #[cfg(not(target_arch = "wasm32"))]
 fn report_relay_notices(

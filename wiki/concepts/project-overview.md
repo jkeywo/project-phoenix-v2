@@ -13,7 +13,7 @@ shared host tab runs the authoritative Rust/Bevy simulation and 3D viewscreen.
 Players scan its QR code and join from phone browsers; their consoles are pure
 HTML, CSS, and JavaScript connected to the host over WebRTC DataChannels; a
 project-owned rendezvous service resolves the join code and relays the
-handshake. Guests who cannot scan type the five letters printed beside the QR.
+handshake. Guests who cannot scan type the code printed beside the QR.
 
 ## Runtime shape
 
@@ -24,7 +24,7 @@ handshake. Guests who cannot scan type the five letters printed beside the QR.
   with each other.
 - Session tokens stored by the browser provide reconnect identity; rendezvous
   peer ids are transport details. An automatic reconnect re-resolves the same
-  join code and re-sends the same token, so nobody re-types five letters.
+  join code and re-sends the same token, so nobody re-types the code.
 - Human operators and Backfill AI emit the same `ControlSystem` commands. A
   ship's authored station ratings decide which source operates each system.
 - Simulation decisions advance on a deterministic fixed tick. AI decision

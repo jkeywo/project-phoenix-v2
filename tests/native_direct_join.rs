@@ -642,7 +642,7 @@ fn a_socket_that_upgrades_and_says_nothing_holds_nothing_open() {
 // `max_lookups_per_connection` is charged to a SOCKET, so a caller willing to
 // reconnect is not rate-limited at all: the reviewer measured ~2,340 wrong
 // guesses a second across churned connections, which walked the old
-// five-letter keyspace (25^5, 23.2 bits) in ~35 minutes. What is asserted here
+// typed keyspace (25^5, 23.2 bits) in ~35 minutes. What is asserted here
 // is the fix working end to end on a real socket, not the arithmetic — the
 // arithmetic is in `AdmissionBudgets`'s note and in the authored table.
 

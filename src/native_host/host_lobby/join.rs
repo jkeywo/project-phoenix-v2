@@ -67,7 +67,7 @@ pub enum JoinInvite {
     Off,
     /// The service issued this host a crew code.
     Code {
-        /// The five letters a guest types. `JoinCode::suffix`.
+        /// The code a guest types. `JoinCode::suffix`.
         code: String,
         /// The structured code a QR carries. `JoinCode::full`.
         full: String,

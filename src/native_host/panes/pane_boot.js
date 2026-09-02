@@ -35,7 +35,7 @@
 // console. A pane is not exempt from that route and must not try to be — it
 // joins through the page's ordinary `startPhoenixJoin`, over the in-process
 // transport pane_link.js installs. So the fragment carries BOTH: a well-formed
-// five-letter join code first, then the identity fields. This script consumes
+// typed join code first, then the identity fields. This script consumes
 // the identity and leaves the code, and from that line on the page's URL is
 // indistinguishable from a phone's that was handed a code — which is exactly
 // what it then behaves like. It also means the pane's own session token has

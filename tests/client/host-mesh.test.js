@@ -613,7 +613,7 @@ describe('every reason this module can produce has a sentence', () => {
   });
 
   it('leaves surface-independent refusals with exactly one wording', () => {
-    // A second copy of "A join code is five letters." is a second thing to
+    // A second copy of "A join code is eight letters." is a second thing to
     // keep true. Only the reasons whose wording DEPENDS on the surface are
     // listed, and the rest fall through to the one map.
     for (const reason of ['empty', 'length', 'charset', 'unreachable', 'malformed']) {

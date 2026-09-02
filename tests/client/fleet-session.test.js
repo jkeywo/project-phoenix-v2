@@ -400,7 +400,7 @@ describe('typed-code refusal', () => {
   });
 
   it('refuses a WHOLE crew code pasted into the fleet field', async () => {
-    // The five-letter case above was never the dangerous one: a bare suffix is
+    // The typed case above was never the dangerous one: a bare suffix is
     // composed under the field's own namespace, so it resolves the wrong
     // record or none. A FULL code carries its own project GUID, so the joiner
     // used to report the code's namespace instead of the field's — the asker

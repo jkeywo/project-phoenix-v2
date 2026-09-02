@@ -9,7 +9,7 @@
  *
  * Two halves, both here because they are two ends of one frame vocabulary:
  *
- *   createRendezvousHost   server.html — registers, is issued a five-letter
+ *   createRendezvousHost   server.html — registers, is issued a typed
  *                          code, answers offers, and hands each admitted joiner
  *                          to the page as a connection object carrying both of
  *                          its channels, so the page's Identify gate and token
@@ -225,7 +225,7 @@ export function isRetryableReason(reason) {
  * anyone who had not already got in once.
  *
  * Bounded rather than endless, though, because a guest who has never been
- * admitted may simply be reading the wrong five letters off the viewscreen,
+ * admitted may simply be reading the wrong code off the viewscreen,
  * and a silent backoff tells them nothing. Four attempts is roughly a minute
  * and a half of trying before the field comes back; after acceptance the loop
  * is unbounded, because the code is known good.
@@ -299,7 +299,7 @@ export function rendezvousBaseFromLocation(search, defaultBase = pageRendezvousB
  *
  *   `rendezvous`  something is in the fragment — a QR scan, a pasted full code,
  *                 or a stale bookmark: join with it straight away
- *   `entry`       nothing in the fragment: ask for five letters
+ *   `entry`       nothing in the fragment: ask for the code
  *
  * A fragment that is NOT a valid code is deliberately still `rendezvous`
  * rather than a third route. gui/join-code.js is the one place that decides
@@ -1094,12 +1094,12 @@ export function createRendezvousHost(opts) {
  * has accepted this build yet: the joiner re-resolves THE SAME code, re-offers,
  * re-sends the compatibility handshake and re-sends `Identify` with the same
  * session token — so the host restores the held station and pushes the current
- * projection, and the guest is never asked for five letters a second time.
+ * projection, and the guest is never asked for the code a second time.
  * `retryNow()` short-circuits the wait for the page's "retry now" control.
  *
  * Once the host has accepted this build the loop is unbounded; BEFORE that it
  * runs {@link JOIN_ATTEMPTS_BEFORE_ENTRY} times, because a guest who has never
- * got in may simply be reading the wrong five letters. Either way, only a
+ * got in may simply be reading the wrong code. Either way, only a
  * refusal a retry cannot fix (see {@link isRetryableReason}) ends the loop
  * early, and the entry field comes back with its own sentence.
  */
@@ -1155,7 +1155,7 @@ export function createRendezvousJoiner(opts) {
   const parsed = parseJoinCode(code, namespace, data);
   if (!parsed.ok) return refusedJoiner(parsed.reason);
   // A structured code names its OWN namespace, from the project GUID inside it
-  // — `namespace` above is only the fallback a bare five-letter suffix is
+  // — `namespace` above is only the fallback a bare typed suffix is
   // composed under. So a full code pasted into the wrong field parses happily
   // and disagrees with the field it was typed into, and that disagreement is
   // exactly what "you typed the other kind of code" means. Refused here, before
@@ -1267,7 +1267,7 @@ export function createRendezvousJoiner(opts) {
     // and only by advancing `attemptIndex` here does `connectTimeoutMs`'s
     // 8/16/30 s ladder become reachable by the cellular guest it exists for.
     // Before acceptance the loop is BOUNDED (see JOIN_ATTEMPTS_BEFORE_ENTRY):
-    // a guest who has never got in may be reading the wrong five letters, and
+    // a guest who has never got in may be reading the wrong code, and
     // a silent backoff would never say so. After acceptance it is unbounded —
     // on whichever rung the escalation above left this joiner on.
     if (isRetryableReason(reason)

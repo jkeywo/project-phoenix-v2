@@ -340,8 +340,49 @@ there — a public multi-tenant service on a different origin from every page it
 serves — but here the page and the socket are the same origin by construction,
 so a list would have to name every address and hostname a phone might reach the
 machine by, and getting it wrong refuses the crew with nothing on screen saying
-why. The join code, the compatibility handshake and the reserved-token gate are
-what admit a joiner.
+why.
+
+What makes that decision sound is the gate that stands in its place, and it is
+**attempt-limiting, not an origin list**. A hostile page open in a crew member's
+browser dials this port with its own site's `Origin`, so a header list would
+never have stopped it; the join stamp is public, because this host serves it;
+and that leaves the code as the only secret between a stranger on the LAN and an
+acting participant. So the code is defended at the transport, in three layers
+(`AdmissionBudgets` in `direct_join.rs` carries the numbers and the arithmetic):
+
+1. **Budgets that survive reconnection.** `max_lookups_per_connection` is
+   charged to a socket, and a socket is exactly what a guesser throws away —
+   before this was fixed the door answered ~1,856 wrong codes in 1.5 s across
+   churned connections. So the failed-guess budget is keyed on the peer address
+   read at accept and held by the *record*: a token bucket, 20 wrong guesses
+   burst and one refunded every 5 s, alongside a per-source cap on sockets that
+   never join. Only **failed** lookups are charged, so a correct code costs
+   nothing — a crew behind one NAT address is spending a typo allowance, never a
+   join allowance.
+2. **A global circuit-breaker.** Wrong guesses in a rolling minute ramp a delay
+   onto every lookup answer, correct ones included (answering a right code
+   faster during an attack would be a timing oracle), capped at 2 s — inside the
+   client's own 8 s first-connect timeout, so a guest caught in an attack waits
+   once and gets in. It is the layer that covers a guesser spread across more
+   addresses than the per-source table can hold.
+3. **Enough letters.** The authored suffix is eight, not five: 25^8 ≈ 1.5 × 10^11
+   (37.15 bits), about 377 days of expected search at the *old* unthrottled
+   rate, where five letters (25^5, 23.2 bits) fell in about 35 minutes.
+
+Every refusal is **soft** and says so — a stated reason in band, a `Retry-After`
+on a refused upgrade, a bucket that refills on a clock — because a whole crew
+can share one address, and a lockout that did not lift would be a self-inflicted
+outage waiting for one clumsy typist. On top of all of it, the compatibility
+handshake and the reserved-token gate still decide what a joiner may *be*.
+
+**Silence has its own budget.** A socket that upgrades and never joins is
+counted against `AdmissionBudgets::unjoined_total`, not the authored
+`max_peers_per_record`: a hostile device holding thirty-two silent sockets used
+to refuse the room with `join-sockets-full`. The thread ceiling this leg can
+reach is therefore peers *plus* un-joined, and both directions of a joiner
+socket are time-bounded — the write timeout is what stops a joiner that stalls
+its own reads from parking a host thread inside `send` for as long as the OS
+will hold a full buffer.
 
 **The client half is one rule**: `gui/join-url.js`'s
 `rendezvousBaseForOrigin` — *the service that served you the page is the service
@@ -372,6 +413,14 @@ QR](#the-join-qr-issue-1329).
 host: handshake, code, attach, stamp verdict, `Identify`, both delivery classes,
 and the socket dying as exactly one `Disconnected`. It needs no service running,
 so unlike `tests/native_relay_live.rs` it is **not** `#[ignore]`d.
+
+It also runs the attack, rather than asserting that the limits exist. The same
+churned-connection probe fires wrong codes at two hosts differing only in their
+budgets (1,856 guesses evaluated → 20, the burst, with the rest refused in
+band), and a real crew member with the right code joins **from the same
+loopback address the guessing is coming from** while it is going on — which is
+the property the soft limits are for, and the one an over-eager lockout would
+have quietly broken.
 
 ## Local Station panes (issue #1122)
 
@@ -494,7 +543,7 @@ The fragment is also the client page's **one join input**, and since #1112 there
 is no other route: `joinRouteFromLocation` reads any non-empty fragment as a
 code and hands it to `parseJoinCode`, which refuses `token=…&name=…` and drops
 the join-entry overlay over the console. So the pane's route is composed rather
-than dodged — the fragment leads with `document::PANE_JOIN_CODE`, a five-letter
+than dodged — the fragment leads with `document::PANE_JOIN_CODE`, a typed
 suffix the authored table in `assets/join/join-codes.toml` accepts, and
 `pane_boot.js` rewrites `location.hash` down to just that before any page code
 reads it. Two consequences worth naming: the page's URL is then

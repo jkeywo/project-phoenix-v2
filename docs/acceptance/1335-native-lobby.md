@@ -141,9 +141,13 @@ version of this test.
 - [ ] **The terminal prints the code**: `phoenix-host: crew join code XXXXX —
       phones join this host directly, no service needed (full: …)`, and beside it
       `the join QR is on the viewscreen, pointing phones at http://<address>`.
-- [ ] **The same code is on the viewscreen**, as a framed QR with the five
+- [ ] **The same code is on the viewscreen**, as a framed QR with the eight
       letters under it ("or type this code"). Not a terminal-only code: this is
-      the whole of #1329.
+      the whole of #1329. Eight, not five: the code is the only secret in front
+      of the game, so `assets/join/join-codes.toml` authors enough letters that
+      guessing it is out of reach (25^8 ≈ 1.5 × 10^11) — check the QR still
+      frames cleanly and the letters under it are readable across the room,
+      which is the only thing the extra length can cost.
 - [ ] **The QR draws with no CDN.** The encoder is vendored
       (`gui/vendor/qrcode.js`) and served by this process, so there is no external
       request to fail — a bridge machine is not assumed to have internet. If you
@@ -152,18 +156,29 @@ version of this test.
       the claim rests on the vendored file plus `tests/client/qr-encoder.test.js`,
       which loads it from disk with no network.
 - [ ] **A phone's camera opens the link.** Scan it. The phone lands on the client
-      page with the code already in the fragment — no five letters typed — and
+      page with the code already in the fragment — no code typed — and
       goes through the ordinary join flow.
 - [ ] **The phone claims a station.** Tap a station card on the phone. On the
       **viewscreen**, that station's card fills in with the holder's initials and
       the crew counter advances. A phone and a wall console are the same kind of
       participant; this is the baseline the consoles in §4 are measured against.
-- [ ] **Typing the five letters works too**, from a second phone — the QR and the
+- [ ] **Typing the code works too**, from a second phone — the QR and the
       code are two routes to one string.
 - [ ] **Unplugging is clean.** Put the joined phone into flight mode (or walk it
       out of Wi-Fi range). Within a few seconds the station it held goes back to
       Backfill on the viewscreen and the crew counter drops. Turn it back on: the
       page reconnects on its own and reclaims the seat.
+- [ ] **A mistyped code is a sentence, not a lockout.** On a third phone (or the
+      same one), type the code wrong two or three times and read the answer: "No
+      ship is using that code", in front of the field, with the field still
+      usable. Then type it right — it joins. There is a per-address budget behind
+      that (wrong guesses are rate-limited so the code cannot be walked from a
+      reconnecting socket), and it is deliberately sized so a room of people
+      fumbling eight letters never notices it; only a **correct** code costs
+      nothing, so this is a typo allowance rather than a join allowance. If you
+      ever see "Too many attempts" on an honest crew, that is a defect worth
+      reporting — wait a few seconds and it clears on its own, which is the other
+      half of the claim.
 
 ### 2b. Joining is off, in words (`--solo`)
 
@@ -265,10 +280,10 @@ on another network joins through the service from the deployed web page.
 - [ ] **The viewscreen shows the LAN code, not the cloud one**, and the terminal
       says why: `…with the LAN code, not the cloud one: the QR carries the page as
       well as the code`. This is the thing that would otherwise be silently
-      wrong — a QR served by this host but carrying the worker's five letters
+      wrong — a QR served by this host but carrying the worker's code
       sends every phone in the room to a service that never heard of them.
 - [ ] **A remote player joins with the cloud code** from the deployed page
-      (`https://pp-dev.kiwigamedesign.co.uk/client/`), typing the five letters
+      (`https://pp-dev.kiwigamedesign.co.uk/client/`), typing the code
       the terminal printed after `registering with`, while a LAN phone is on the
       direct leg. Both crew members hold stations at once and neither drops when
       the other joins or leaves.

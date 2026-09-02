@@ -656,7 +656,7 @@ export function simulationFrame(type, body, tick = null) {
  *
  * @param {object|null} roster
  * @param {{suffix?: string|null, mine?: string|null}} [opts] `suffix` is the
- *   five-letter server code (owner only); `mine` is this host's own slot id.
+ *   server code (owner only); `mine` is this host's own slot id.
  */
 export function fleetPanelViewModel(roster, { suffix = null, mine = null } = {}) {
   if (!roster) return { visible: false, rows: [], code: null, status: null };

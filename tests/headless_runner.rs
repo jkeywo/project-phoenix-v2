@@ -19788,9 +19788,12 @@ fn falling_skyway_clean_ledger_benchmark_lifts_exactly_two_of_three() {
     assert_eq!(
         skyway_options(&committee).first().map(String::as_str),
         Some("world.falling_skyway.comms.claim_stand_by"),
-        "INDEX 0 IS THE HOLD on every one of these trees: an AI-backfilled Tactical seat \
-         answers an open thread with its first response, and an empty chair must not be \
-         able to decide who rides the storm out"
+        "INDEX 0 IS THE HOLD on every one of these trees, because it is what a person \
+         reaches for while they think. It used to be load-bearing for a second reason — \
+         a backfilled console answered by index, so the hold was what kept an empty \
+         chair from deciding who rides the storm out. Issue #1343 moved that guarantee \
+         onto the authored `ai_weight = 0` the hold now carries, which forbids an \
+         unmanned console the option outright instead of relying on where it sits."
     );
 
     // AC2: the confrontation is on the operator's tree, and only because the

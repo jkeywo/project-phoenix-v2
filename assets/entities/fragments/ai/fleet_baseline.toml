@@ -397,6 +397,18 @@ level = 2
 
 [comms_console.ai]
 
+# THE FALLBACK, and only the fallback, since #1343. Answering by INDEX is the
+# right thing for a hail acknowledgement and the wrong thing for a decision:
+# the option a person reaches for while they think goes first, so a rule that
+# always picks index 0 stands by for ever on a conversation that was asking for
+# an answer. A node whose responses author `ai_weight` is therefore decided by
+# the weighted picker instead (`comms::ai_choice`) and never reaches this rule;
+# a node that authors none — which is every conversation but Falling Skyway's
+# lift band — keeps exactly the behaviour it has always had.
+#
+# This block still has to be here for BOTH mechanisms: strict AI declaration
+# (#885) means a fine system with no `[comms_console.ai]` at all takes no action
+# of any kind, weighted or otherwise.
 [[comms_console.ai.rule]]
 priority = 0
 channel = "comms_respond"

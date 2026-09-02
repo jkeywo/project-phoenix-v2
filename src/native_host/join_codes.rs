@@ -454,8 +454,16 @@ fn is_code_head(part: &str) -> bool {
 ///
 /// The join code is the one secret a LAN game has — anybody who can reach the
 /// delivery port and guess five letters is in the mission — so it is drawn from
-/// `rand`'s OS-seeded generator rather than from a clock, and never from any
-/// stream the simulation replays.
+/// `rand`'s OS-seeded generator rather than from a clock.
+///
+/// `rand::rng` is the disallowed method the determinism lint (#903/#897) exists
+/// to keep out of the simulation, and this is the documented cosmetic exception:
+/// a join code is **transport plane**. It is minted once at bind, before any
+/// world is ingested, never enters a snapshot, a digest or a command log, and
+/// pointedly does NOT come from `sim_rng::with_stream` — drawing it from a
+/// replayed stream would make a private code predictable from a recording of the
+/// mission, and would shift every simulation draw after it.
+#[allow(clippy::disallowed_methods)]
 pub fn os_draw(n: usize) -> usize {
     use rand::Rng;
     rand::rng().random_range(0..n.max(1))

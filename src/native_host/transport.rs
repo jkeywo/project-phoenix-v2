@@ -17,6 +17,16 @@
 //!   seam that is already wired, already ordered correctly against the fixed
 //!   tick, and already applying the reserved-token gate — so connecting it is
 //!   an `insert_resource`, not a re-plumb.
+//!
+//!   Both halves of that arrived, as `insert_resource`s and nothing else:
+//!   [`crate::native_host::relay_transport`] (#1113) carries crew over the
+//!   rendezvous service's game relay, and
+//!   [`crate::native_host::direct_join`] (#1353) makes the host its OWN
+//!   rendezvous so a LAN crew reaches it on its delivery port with no service
+//!   anywhere. The reserved-token obligation this module documents below is
+//!   owed by both, and both discharge it through the same code, because the
+//!   direct leg plugs in one layer lower — as a `RelaySocket` under the same
+//!   `RelayTransport`.
 //! * Issue #1122's in-process Ultralight pane is the same shape: PRD #1093 says
 //!   an in-process participant "may avoid network serialisation but cannot
 //!   bypass command admission or projection boundaries". A pane is therefore a

@@ -40,8 +40,9 @@ use crate::core::task_lifecycle::{TaskLifecycleRequest, TaskSlot, TaskTerminalRe
 use crate::effect_queue::EffectQueue;
 use crate::entities::spawner::{EntityName, EntitySystemHull, EntityUuid};
 use crate::security::teams::{
-    dispatch_status, select_assignments, SecurityAction, SecurityActionConfig, SecurityCandidate,
-    SecurityConfig, SecurityRefusal, SecurityTargetConfig, SecurityTeam, SecurityTeamState,
+    dispatch_status, is_assigned, select_assignments, unassigned_candidates, SecurityAction,
+    SecurityActionConfig, SecurityCandidate, SecurityConfig, SecurityRefusal, SecurityTargetConfig,
+    SecurityTeam, SecurityTeamState,
 };
 use crate::ship::damage::DamageTier;
 use crate::ship::system_registry::{security_system_id, SECURITY_KIND, SECURITY_SYSTEM_ID};
@@ -774,12 +775,18 @@ impl SecurityAiDispatched {
 
 /// Build the backfill host's candidate pool from the world (issue #1346).
 ///
-/// Every action every reachable target offers becomes one candidate, with its
-/// authored priority PROMOTED when a live `Secure` directive names that target —
-/// which is how "urgent Objective" enters a ranking that is otherwise entirely
-/// authored on the targets. `eligible` is the pure dispatch verdict with a free
-/// team substituted in, so the host can never propose something the applier would
-/// refuse.
+/// Every action every target offers becomes one candidate UNLESS its consequence
+/// has already landed ([`already_done`]) — finished work leaves the pool, so the
+/// host neither re-dispatches to it forever nor keeps a team standing on it. Each
+/// candidate's authored priority is PROMOTED when a live `Secure` directive names
+/// that target, which is how "urgent Objective" enters a ranking that is otherwise
+/// entirely authored on the targets. `eligible` is the pure dispatch verdict with
+/// a free team substituted in, so the host can never propose something the applier
+/// would refuse.
+///
+/// This is the pool the RECALL arm reads too, which is why completion is filtered
+/// here rather than at selection: a team still standing on work whose flag has
+/// come up finds its job gone from the pool and is called home.
 ///
 /// Pure but for its inputs, and deterministic: rows arrive in UUID order and each
 /// target's actions in authored order, and [`select_assignments`] re-sorts by
@@ -789,12 +796,16 @@ fn build_candidates(
     operator_pos: Vec3,
     range: f32,
     ordered_targets: &[String],
+    flags: Option<&crate::world::flags::FlagStore>,
 ) -> Vec<SecurityCandidate> {
     let mut candidates = Vec::new();
     for row in rows {
         let in_range = operator_pos.distance(row.position) <= range;
-        let named = ordered_targets.iter().any(|t| *t == row.uuid);
+        let named = ordered_targets.contains(&row.uuid);
         for action in &row.config.actions {
+            if already_done(action, flags) {
+                continue;
+            }
             let priority = if named {
                 action.priority.promoted_by_objective()
             } else {
@@ -809,6 +820,28 @@ fn build_candidates(
         }
     }
     candidates
+}
+
+/// Whether an authored action's consequence has ALREADY landed on the world flag
+/// store (issue #1346) — the pool's completion condition.
+///
+/// The authored `outcome_flag` is the whole consequence path of a Security action
+/// (`tick_security_teams` raises it on success and mirrors the edge onto the world
+/// event stream), so a raised flag is the one durable, authored record that this
+/// work is done. The host reads it back and stops proposing the job.
+///
+/// An action that authors NO flag has no completion condition anything can
+/// observe — the field's own contract is "an action whose only consequence is the
+/// doing of it" — so it stays in the pool. A scenario that wants a Security job to
+/// be finishable authors the flag; that is the same lever its triggers already use.
+fn already_done(
+    action: &SecurityActionConfig,
+    flags: Option<&crate::world::flags::FlagStore>,
+) -> bool {
+    match (action.outcome_flag.as_deref(), flags) {
+        (Some(flag), Some(store)) => store.flag(flag),
+        _ => false,
+    }
 }
 
 /// Backfill Security AI (issue #1346).
@@ -829,10 +862,13 @@ fn build_candidates(
 /// whether or not the mission mentioned it — which is what "prioritises immediate
 /// threats to life" means when the Objective pool is silent.
 ///
-/// A team the host committed is recalled when its target stops being worth the
-/// trip: it is no longer in the candidate pool at all (it left the world), or its
-/// authored work there is finished. It never recalls a team a console dispatched.
-/// Decides ONLY on the shared AI cadence (rule 7).
+/// A team the host committed is recalled when its job leaves the candidate pool:
+/// the target left the world, or the work there is FINISHED — its authored
+/// `outcome_flag` has come up, which is the one durable record of a Security
+/// action's consequence ([`already_done`]). It never recalls a team a console
+/// dispatched, and it lets go of a team the moment that team is home, so a later
+/// console dispatch of the same team is never mistaken for its own. Decides ONLY
+/// on the shared AI cadence (rule 7).
 #[allow(clippy::type_complexity)]
 pub fn operate_security_ai(
     mut commands: Commands,
@@ -916,15 +952,34 @@ pub fn operate_security_ai(
             transform.translation,
             security.config.range,
             &ordered_targets,
+            runtime.as_deref().map(|rt| &rt.flags),
         );
+        // What is actually left to assign. `select_assignments` returns at most
+        // one pick per FREE team, so a pool still carrying the job a busy team is
+        // already on would spend a free team's slot on a duplicate — and that team
+        // would sit at home while the next job down went unworked. Each free team
+        // is ranked against the best REMAINING job.
+        let unassigned = unassigned_candidates(&candidates, &security.teams);
         let free = security.free_team_indices();
-        let picks = select_assignments(&candidates, free.len());
+        let picks = select_assignments(&unassigned, free.len());
 
         let mut claimed = host_dispatched.copied().unwrap_or_default();
         let mut emitted = false;
 
-        // Recall first: a host-driven team whose target has left the pool has
-        // nothing left to do there.
+        // A team that is home is nobody's: let go of it before anything else, so
+        // the marker only ever means "the host is driving this COMMITTED team" and
+        // a console dispatching that team next tick is never recalled by us.
+        for (index, team) in security.teams.iter().enumerate() {
+            if !team.is_committed() {
+                claimed.release(index);
+            }
+        }
+
+        // Recall next: a host-driven team whose job has left the pool — the target
+        // left the world, or the work there is finished — has nothing left to do.
+        // (Drifting out of reach does NOT leave the pool: the candidate is still
+        // there, merely ineligible, and `tick_security_teams` ends that assignment
+        // itself with its own refusal. One interruption, one owner.)
         for (index, team) in security.teams.iter().enumerate() {
             if !team.is_interruptible() || !claimed.holds(index) {
                 continue;
@@ -956,15 +1011,15 @@ pub fn operate_security_ai(
             let Some(team_idx) = free.get(slot) else {
                 break;
             };
-            let candidate = &candidates[*pick];
-            // Idempotent: a team already on this exact job emits nothing. (A free
-            // team is by definition not on one, so this only guards the case
-            // where another team is already there.)
-            if security.teams.iter().any(|t| {
-                t.is_committed()
-                    && t.target.as_deref() == Some(candidate.target.as_str())
-                    && t.action == Some(candidate.action)
-            }) {
+            let candidate = &unassigned[*pick];
+            // An unreachable safety net, not a decision: `unassigned_candidates`
+            // already removed every job a committed team holds, so a duplicate
+            // here would mean the pool and the muster disagreed.
+            debug_assert!(
+                !is_assigned(candidate, &security.teams),
+                "the selection pool must never offer work a team already holds"
+            );
+            if is_assigned(candidate, &security.teams) {
                 continue;
             }
             claimed.claim(*team_idx);

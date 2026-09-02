@@ -500,7 +500,6 @@ describe('security teams (issue #1346)', () => {
     const send = mkSend();
     ACTION_MAP.dispatch_security_team(
       {
-        action: 'dispatch_security_team',
         team_idx: 1,
         target: '00000000-0000-8000-8000-000000000042',
         action: 'assist_evacuation',

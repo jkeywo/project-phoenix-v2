@@ -18,7 +18,8 @@ entities:
       kind: subsystem
       authority: authoritative
       owns: [security-team-state, security-target-state]
-      reads: [ship-station-system-topology-state, system-control-source-state, world-configuration-state, scenario-flag-state]
+      reads: [ship-station-system-topology-state, system-control-source-state, world-configuration-state]
+      writes: [world-flag-state]
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
@@ -57,11 +58,13 @@ entities:
         - "[ai] THE RANKING IS PURE AND UNIT-TESTABLE (rule 10). `select_assignments` takes a candidate pool and a free-team count and returns which candidates to commit, sorted by priority class with target-uuid and action-id tiebreaks so two hosts walking the same world in different archetype order select the same work. No clock, no RNG, no HashMap walk."
         - "[ai] THE RESERVATION IS ONE RULE APPLIED AT ONE MOMENT: before the LAST free team is committed. If any candidate of STRICTLY higher priority exists that is not currently dispatchable - the burning compartment out of reach this second but not in ten - the last team stays home rather than being spent on the lesser job. It is the direct analogue of the external-repair host's one-team-per-critical-local-repair reserve: both fold a policy into the one availability answer rather than second-guessing the applier, and both can only make the host MORE conservative than the applier's own gate, so a selection is always one `dispatch_status` admits. A candidate that is already the most urgent thing known is never held back - there is nothing above it to protect."
         - "[ai] THE MISSION CONTRIBUTES URGENCY, NOT VOCABULARY. An active `Secure` directive naming a target promotes that target's authored classes to `urgent_objective`, and NEVER below what they already were - a mission naming a fire cannot make it less urgent. Which of the target's authored actions gets served stays the target's own ranking, so a mission never has to know a compartment's internal vocabulary. With no directive at all the host still works the list: a fire is a fire whether or not the mission mentioned it, which is what prioritising immediate threats to life means when the Objective pool is silent."
-        - "[ai] HUMAN AND AI ISSUE THE SAME COMMANDS (rule 6). The host emits exactly the DispatchSecurityTeam / RecallSecurityTeam a human at the owning station sends, through the same emit_ai_command seam, so the command handler never learns who spoke. It recalls only a team whose bit is set in its own per-team claim marker, so it never recalls one a console dispatched on the same AI-operated system."
+        - "[ai] HUMAN AND AI ISSUE THE SAME COMMANDS (rule 6). The host emits exactly the DispatchSecurityTeam / RecallSecurityTeam a human at the owning station sends, through the same emit_ai_command seam, so the command handler never learns who spoke. It recalls only a team whose bit is set in its own per-team claim marker, and it releases that bit the moment the team is home, so it never recalls one a console dispatched on the same AI-operated system."
+        - "[ai] THE POOL IS FILTERED BEFORE IT IS RANKED, NOT AFTER. `select_assignments` returns at most one pick per FREE team, so work a committed team already holds has to leave the pool BEFORE selection (`unassigned_candidates`) - otherwise a free team's one pick is spent on a duplicate the emit loop can only drop, and that team idles while the next job down goes unworked. Filtering first also keeps the reservation honest: work already under way needs no team held back for it."
+        - "[ai] FINISHED WORK IS NOT WORK. A candidate whose authored `outcome_flag` is already raised on the world flag store leaves the pool, which is what stops the host re-dispatching a completed job on every tick forever and spamming the shared #1341 lifecycle with Start/Completed pairs for work already done. The flag is the action's whole consequence path, so it is also the only durable authored record that the job is finished - the host reads back exactly what the controller wrote. An action authoring no flag has no observable completion and stays in the pool, which is the field's own contract: its only consequence is the doing of it."
     architecture:
       kind: subsystem
       authority: advisory
-      reads: [security-team-state, security-target-state, objective-scoring-state]
+      reads: [security-team-state, security-target-state, scored-objective-pool-state, world-flag-state]
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
@@ -71,6 +74,7 @@ entities:
         - SecurityAiDispatched
         - SecurityCandidate
         - select_assignments
+        - unassigned_candidates
         - secure_directive_target
       tests: [cargo test]
 

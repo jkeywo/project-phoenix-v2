@@ -656,6 +656,41 @@ fn higher_priority_pending(candidates: &[SecurityCandidate], priority: SecurityP
         .any(|c| !c.eligible && c.priority < priority)
 }
 
+/// **The pool the selection actually ranks:** every candidate no team is already
+/// committed to (issue #1346).
+///
+/// [`select_assignments`] is asked for at most one pick per FREE team, so a pool
+/// that still carried the job a busy team is already working would spend a free
+/// team's slot on a duplicate the caller can only drop — and the free team would
+/// sit at home while genuinely unassigned work went unworked. Filtering FIRST is
+/// what makes every pick a real assignment: each free team is matched against the
+/// best REMAINING job rather than against the best job overall.
+///
+/// It keeps the reservation honest too. Work already under way needs no team held
+/// back for it, so removing it from the pool also removes it from
+/// [`higher_priority_pending`]'s reckoning.
+///
+/// Order-preserving, so the deterministic pool order the adapter built survives.
+pub fn unassigned_candidates(
+    candidates: &[SecurityCandidate],
+    teams: &[SecurityTeam],
+) -> Vec<SecurityCandidate> {
+    candidates
+        .iter()
+        .filter(|candidate| !is_assigned(candidate, teams))
+        .cloned()
+        .collect()
+}
+
+/// Whether some committed team already holds exactly this target-and-action.
+pub fn is_assigned(candidate: &SecurityCandidate, teams: &[SecurityTeam]) -> bool {
+    teams.iter().any(|team| {
+        team.is_committed()
+            && team.target.as_deref() == Some(candidate.target.as_str())
+            && team.action == Some(candidate.action)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1087,6 +1122,129 @@ mod tests {
             labels,
             vec!["alpha/board", "alpha/place_charges", "beta/secure_contain"]
         );
+    }
+
+    // ── The pool the selection ranks ─────────────────────────────────────────
+
+    fn working_on(target: &str, action: SecurityAction) -> SecurityTeam {
+        let mut team = SecurityTeam::default();
+        team.deploy(target.to_string(), action, 0.5, 2.0);
+        team.begin_work(4.0);
+        team
+    }
+
+    /// The job a committed team already holds leaves the pool, so the free team
+    /// beside it is ranked against what is genuinely left rather than against a
+    /// duplicate it can only drop.
+    #[test]
+    fn work_a_committed_team_already_holds_leaves_the_pool() {
+        let pool = vec![
+            candidate(
+                "skyhook",
+                SecurityAction::AssistEvacuation,
+                SecurityPriority::LifeSafety,
+                true,
+            ),
+            candidate(
+                "gallery",
+                SecurityAction::SecureContain,
+                SecurityPriority::ThreatContainment,
+                true,
+            ),
+        ];
+        let teams = vec![
+            working_on("skyhook", SecurityAction::AssistEvacuation),
+            SecurityTeam::default(),
+        ];
+
+        let left = unassigned_candidates(&pool, &teams);
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].target, "gallery");
+
+        // The regression the filter exists for: one free team, and the top of the
+        // unfiltered pool is the job the busy team is already on. Selecting from
+        // the raw pool spends the slot on that duplicate and strands the team;
+        // selecting from the filtered pool sends it to the fire.
+        let chosen = select_assignments(&left, 1);
+        assert_eq!(chosen.len(), 1, "the free team must be spent, not stranded");
+        assert_eq!(left[chosen[0]].target, "gallery");
+    }
+
+    /// Only the exact target-and-action pair is held: the same target's OTHER
+    /// authored actions, and the same action elsewhere, both stay assignable.
+    #[test]
+    fn only_the_exact_job_a_team_holds_leaves_the_pool() {
+        let pool = vec![
+            candidate(
+                "gallery",
+                SecurityAction::SecureContain,
+                SecurityPriority::ThreatContainment,
+                true,
+            ),
+            candidate(
+                "gallery",
+                SecurityAction::AssistEvacuation,
+                SecurityPriority::LifeSafety,
+                true,
+            ),
+            candidate(
+                "ladder",
+                SecurityAction::SecureContain,
+                SecurityPriority::ThreatContainment,
+                true,
+            ),
+        ];
+        let teams = vec![working_on("gallery", SecurityAction::SecureContain)];
+        let left = unassigned_candidates(&pool, &teams);
+        assert_eq!(left.len(), 2);
+        assert!(left
+            .iter()
+            .all(|c| !(c.target == "gallery" && c.action == SecurityAction::SecureContain)));
+    }
+
+    /// A team at home holds nothing, so an idle muster filters nothing out.
+    #[test]
+    fn an_idle_muster_holds_nothing_back() {
+        let pool = vec![candidate(
+            "gallery",
+            SecurityAction::SecureContain,
+            SecurityPriority::ThreatContainment,
+            true,
+        )];
+        let teams = vec![SecurityTeam::default(), SecurityTeam::default()];
+        assert_eq!(unassigned_candidates(&pool, &teams), pool);
+    }
+
+    /// Work under way needs no team reserved for it: removing it from the pool
+    /// also removes it from the reservation's reckoning, so the last free team
+    /// goes to the lesser job instead of being held for a fire already being
+    /// fought.
+    #[test]
+    fn the_reservation_does_not_hold_a_team_for_work_already_under_way() {
+        let pool = vec![
+            candidate(
+                "fire",
+                SecurityAction::SecureContain,
+                SecurityPriority::LifeSafety,
+                false,
+            ),
+            candidate(
+                "salvage",
+                SecurityAction::Board,
+                SecurityPriority::Optional,
+                true,
+            ),
+        ];
+        assert!(
+            select_assignments(&pool, 1).is_empty(),
+            "with the fire unassigned and out of reach the last team is held"
+        );
+
+        let teams = vec![working_on("fire", SecurityAction::SecureContain)];
+        let left = unassigned_candidates(&pool, &teams);
+        let chosen = select_assignments(&left, 1);
+        assert_eq!(chosen.len(), 1);
+        assert_eq!(left[chosen[0]].target, "salvage");
     }
 
     // ── Config validation ────────────────────────────────────────────────────

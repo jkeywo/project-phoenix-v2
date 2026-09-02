@@ -653,7 +653,430 @@ fn an_idle_muster_saves_as_default_and_a_committed_one_round_trips() {
     );
 }
 
-// ── The backfill host's claim bookkeeping ────────────────────────────────────
+// ── The backfill host, through the world (AC4, AC5) ──────────────────────────
+
+/// The life-safety job in the AI fixtures — the one that outranks everything
+/// else, carrying an outcome flag so its completion is observable.
+const EVACUATED: &str = "head_evacuation_assisted";
+/// The lower-priority containment job the host's trades are made against.
+const OTHER: &str = "gallery-1";
+const GALLERY_CONTAINED: &str = "gallery_contained";
+
+fn head_target_config() -> SecurityTargetConfig {
+    SecurityTargetConfig {
+        actions: vec![SecurityActionConfig {
+            action: SecurityAction::AssistEvacuation,
+            duration_secs: 4.0,
+            risk: 0.6,
+            priority: SecurityPriority::LifeSafety,
+            outcome_flag: Some(EVACUATED.to_string()),
+            outcome_value: 1,
+            warning: None,
+        }],
+    }
+}
+
+fn gallery_target_config() -> SecurityTargetConfig {
+    SecurityTargetConfig {
+        actions: vec![SecurityActionConfig {
+            action: SecurityAction::SecureContain,
+            duration_secs: 6.0,
+            risk: 0.4,
+            priority: SecurityPriority::ThreatContainment,
+            outcome_flag: Some(GALLERY_CONTAINED.to_string()),
+            outcome_value: 1,
+            warning: None,
+        }],
+    }
+}
+
+fn optional_target_config(action: SecurityAction) -> SecurityTargetConfig {
+    SecurityTargetConfig {
+        actions: vec![SecurityActionConfig {
+            action,
+            duration_secs: 5.0,
+            risk: 0.2,
+            priority: SecurityPriority::Optional,
+            outcome_flag: None,
+            outcome_value: 1,
+            warning: None,
+        }],
+    }
+}
+
+/// Spawn the AI-operated Security ship and the given targets into `app`.
+///
+/// The Security System's control source is `Ai`, which is the whole of what makes
+/// this the backfill seat: admission then takes the host's `ai:<uuid>` token down
+/// exactly the path a console's token walks.
+fn spawn_ai_operator(app: &mut App, targets: &[(&str, Vec3, SecurityTargetConfig)]) -> Entity {
+    use crate::ship::control_source::{ControlSource, ControlSourceResolver};
+
+    let mut sources = ControlSourceResolver::new();
+    sources.set(security_system_id(), ControlSource::Ai);
+
+    let operator = app
+        .world_mut()
+        .spawn((
+            EntityUuid(OPERATOR.to_string()),
+            Transform::from_translation(Vec3::ZERO),
+            AdmittedCommands::default(),
+            ShipSecurityTeams::new(config()),
+            crate::server_app::ShipSystemBlackboards::default(),
+            crate::ship_plugin::ShipSystemControlSources(sources),
+        ))
+        .id();
+    for (uuid, position, target_config) in targets {
+        app.world_mut().spawn((
+            EntityUuid((*uuid).to_string()),
+            EntityName(format!("world.test.{uuid}.name")),
+            Transform::from_translation(*position),
+            SecurityTargetActions(target_config.clone()),
+        ));
+    }
+    operator
+}
+
+/// The host and the resources admission needs, and NOTHING else — so a test can
+/// read the command the host emitted before any applier consumes it.
+fn host_only_app(targets: &[(&str, Vec3, SecurityTargetConfig)]) -> (App, Entity) {
+    let mut app = App::new();
+    app.init_resource::<WorldContentRuntime>();
+    app.insert_resource(crate::lobby::Sessions(
+        crate::lobby::session::SessionManager::new(),
+    ));
+    app.add_systems(Update, operate_security_ai);
+    let operator = spawn_ai_operator(&mut app, targets);
+    (app, operator)
+}
+
+/// The host wired to the SAME applier a console's message reaches, so one
+/// decision travels the whole path in a single `update()`.
+fn ai_app(targets: &[(&str, Vec3, SecurityTargetConfig)]) -> (App, Entity) {
+    let mut app = App::new();
+    app.init_resource::<WorldContentRuntime>();
+    app.init_resource::<EffectQueue<TaskLifecycleRequest>>();
+    app.insert_resource(crate::lobby::Sessions(
+        crate::lobby::session::SessionManager::new(),
+    ));
+    let mut time = Time::<()>::default();
+    time.advance_by(std::time::Duration::from_secs(1));
+    app.insert_resource(time);
+    app.add_systems(
+        Update,
+        (
+            operate_security_ai,
+            handle_security_commands,
+            tick_security_teams,
+            publish_security_blackboard,
+            clear_admitted,
+        )
+            .chain(),
+    );
+    let operator = spawn_ai_operator(&mut app, targets);
+    (app, operator)
+}
+
+/// Every Security payload the host put in this ship's inbox, in emission order.
+fn host_payloads(app: &App, operator: Entity) -> Vec<SystemControlPayload> {
+    app.world()
+        .entity(operator)
+        .get::<AdmittedCommands>()
+        .expect("the operator carries an admitted-command inbox")
+        .0
+        .iter()
+        .filter(|c| c.target == security_system_id())
+        .map(|c| c.payload.clone())
+        .collect()
+}
+
+/// AC5 at the seam: what the host emits is not merely *like* a console's command,
+/// it IS one — the same payload variant with the same fields, landing in the same
+/// `AdmittedCommands` inbox, so `handle_security_commands` cannot tell who spoke.
+#[test]
+fn the_host_emits_the_command_a_console_sends_and_the_applier_cannot_tell_them_apart() {
+    let (mut app, operator) =
+        host_only_app(&[(TARGET, Vec3::new(100.0, 0.0, 0.0), head_target_config())]);
+    app.update();
+
+    assert_eq!(
+        host_payloads(&app, operator),
+        vec![SystemControlPayload::DispatchSecurityTeam {
+            team_idx: 0,
+            target: TARGET.to_string(),
+            action: "assist_evacuation".to_string(),
+        }],
+        "the host's decision is the console's message, field for field"
+    );
+
+    // And the applier takes it: same inbox, same handler, same outcome.
+    let (mut app, operator) = ai_app(&[(TARGET, Vec3::new(100.0, 0.0, 0.0), head_target_config())]);
+    app.update();
+    let muster = teams(&app, operator);
+    assert_eq!(muster.teams[0].state, SecurityTeamState::Deploying);
+    assert_eq!(muster.teams[0].target.as_deref(), Some(TARGET));
+    assert_eq!(
+        muster.teams[0].action,
+        Some(SecurityAction::AssistEvacuation)
+    );
+    assert_eq!(
+        muster.last_refusal, None,
+        "the host never proposes something the applier refuses"
+    );
+}
+
+/// AC4's ordering half: two jobs in reach and two teams free, so both teams go
+/// out — and the life-safety job is taken first.
+#[test]
+fn both_free_teams_are_spent_on_the_two_distinct_jobs_in_priority_order() {
+    let (mut app, operator) = host_only_app(&[
+        (TARGET, Vec3::new(100.0, 0.0, 0.0), head_target_config()),
+        (OTHER, Vec3::new(120.0, 0.0, 0.0), gallery_target_config()),
+    ]);
+    app.update();
+
+    assert_eq!(
+        host_payloads(&app, operator),
+        vec![
+            SystemControlPayload::DispatchSecurityTeam {
+                team_idx: 0,
+                target: TARGET.to_string(),
+                action: "assist_evacuation".to_string(),
+            },
+            SystemControlPayload::DispatchSecurityTeam {
+                team_idx: 1,
+                target: OTHER.to_string(),
+                action: "secure_contain".to_string(),
+            },
+        ],
+        "life safety takes the first team, containment the second"
+    );
+}
+
+/// AC4's availability half, and the regression the pool filter exists for: with
+/// one team ALREADY on the higher-priority job, the remaining free team must be
+/// spent on the next job down. Selecting from an unfiltered pool returned the job
+/// already under way — one pick for one free team — which the emit loop could only
+/// drop, leaving the second team at home while the gallery burned.
+#[test]
+fn the_second_team_takes_the_lesser_job_while_the_first_works_the_urgent_one() {
+    let (mut app, operator) = ai_app(&[
+        (TARGET, Vec3::new(100.0, 0.0, 0.0), head_target_config()),
+        (OTHER, Vec3::new(120.0, 0.0, 0.0), gallery_target_config()),
+    ]);
+    {
+        let mut ship = app.world_mut().entity_mut(operator);
+        let mut muster = ship
+            .get_mut::<ShipSecurityTeams>()
+            .expect("the operator musters Security teams");
+        muster.teams[0].deploy(
+            TARGET.to_string(),
+            SecurityAction::AssistEvacuation,
+            0.6,
+            2.0,
+        );
+    }
+    app.update();
+
+    let muster = teams(&app, operator);
+    assert_eq!(
+        muster.teams[1].target.as_deref(),
+        Some(OTHER),
+        "the free team goes to the containment job rather than idling on a duplicate"
+    );
+    assert_eq!(muster.teams[1].action, Some(SecurityAction::SecureContain));
+    assert_eq!(
+        muster.teams[0].target.as_deref(),
+        Some(TARGET),
+        "and the team already working is left alone"
+    );
+}
+
+/// Finished work leaves the pool. Once an action's authored `outcome_flag` is up
+/// the host stops proposing it — otherwise every tick after the team walked home
+/// would re-dispatch it forever, spamming the shared #1341 lifecycle with
+/// Start/Completed pairs for work already done.
+#[test]
+fn the_host_stops_proposing_work_whose_outcome_flag_has_already_come_up() {
+    let (mut app, operator) =
+        host_only_app(&[(TARGET, Vec3::new(100.0, 0.0, 0.0), head_target_config())]);
+    app.world_mut()
+        .resource_mut::<WorldContentRuntime>()
+        .flags
+        .set_flag(EVACUATED);
+    app.update();
+    assert!(
+        host_payloads(&app, operator).is_empty(),
+        "the consequence has already landed; there is nothing left to send a team to"
+    );
+}
+
+/// The same rule on the clock, end to end: the host dispatches, the team works,
+/// the flag comes up, the team walks home — and the host does not send it out
+/// again on the tick after that, or on any tick after that.
+#[test]
+fn a_completed_job_is_never_re_dispatched_on_the_following_ticks() {
+    let (mut app, operator) = ai_app(&[(TARGET, Vec3::new(100.0, 0.0, 0.0), head_target_config())]);
+    // deploy 2s + work 4s + withdraw 2s at a second a tick, and then some.
+    for _ in 0..16 {
+        app.update();
+    }
+    assert!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .flag(EVACUATED),
+        "the work completed and raised its authored consequence"
+    );
+    let muster = teams(&app, operator);
+    assert!(
+        muster.teams.iter().all(|t| t.is_available()),
+        "both teams are home and stay home: the job is done, so the host proposes nothing"
+    );
+}
+
+/// The claim marker means "the host is driving this COMMITTED team", and nothing
+/// else: a team the console sent out is never recalled by the host.
+#[test]
+fn the_host_never_recalls_a_team_a_console_dispatched() {
+    // No targets at all, so anything committed has no job left in the pool —
+    // exactly the condition the recall arm fires on.
+    let (mut app, operator) = host_only_app(&[]);
+    {
+        let mut ship = app.world_mut().entity_mut(operator);
+        let mut muster = ship
+            .get_mut::<ShipSecurityTeams>()
+            .expect("the operator musters Security teams");
+        muster.teams[1].deploy(TARGET.to_string(), SecurityAction::Board, 0.5, 2.0);
+    }
+    app.update();
+    assert!(
+        host_payloads(&app, operator).is_empty(),
+        "team 1 is the console's; the host holds no claim on it and leaves it alone"
+    );
+
+    // The same team, but claimed by the host: now it comes home.
+    app.world_mut()
+        .entity_mut(operator)
+        .insert(SecurityAiDispatched(1 << 1));
+    app.update();
+    assert_eq!(
+        host_payloads(&app, operator),
+        vec![SystemControlPayload::RecallSecurityTeam { team_idx: 1 }],
+        "a team the host committed is recalled when its job leaves the pool"
+    );
+}
+
+/// A team that came home is no longer the host's. If the claim bit outlived the
+/// assignment, the next console dispatch of that team would be recalled by the
+/// host on the following tick.
+#[test]
+fn the_host_lets_go_of_a_team_the_moment_it_is_home() {
+    let (mut app, operator) = host_only_app(&[]);
+    app.world_mut()
+        .entity_mut(operator)
+        .insert(SecurityAiDispatched(0b11));
+    app.update();
+    assert_eq!(
+        app.world()
+            .entity(operator)
+            .get::<SecurityAiDispatched>()
+            .copied(),
+        Some(SecurityAiDispatched(0)),
+        "both teams are at home, so the host holds neither"
+    );
+}
+
+/// The mission's one contribution, through the adapter: a live `Secure` directive
+/// naming a target BY NAME is resolved to the uuid the world carries, and promotes
+/// that target's authored work above a job the tiebreak would otherwise serve
+/// first.
+#[test]
+fn a_secure_directive_names_a_target_by_name_and_promotes_its_authored_work() {
+    // Two equally optional jobs; on the uuid tiebreak alone `alpha` wins.
+    let (mut app, operator) = host_only_app(&[
+        (
+            "alpha",
+            Vec3::new(50.0, 0.0, 0.0),
+            optional_target_config(SecurityAction::Board),
+        ),
+        (
+            "zulu",
+            Vec3::new(60.0, 0.0, 0.0),
+            optional_target_config(SecurityAction::PlaceCharges),
+        ),
+    ]);
+
+    // The world binds the authored NAME the directive uses to `zulu`'s uuid.
+    app.world_mut()
+        .resource_mut::<WorldContentRuntime>()
+        .name_to_uuid
+        .insert("world.test.derelict".to_string(), "zulu".to_string());
+
+    // A scored Objective carrying a `Secure` directive for that name, relevant to
+    // Security — the shape the phase-1b aggregator publishes.
+    {
+        let mut ship = app.world_mut().entity_mut(operator);
+        let mut blackboards = ship
+            .get_mut::<crate::server_app::ShipSystemBlackboards>()
+            .expect("the operator carries a blackboard map");
+        let viewscreen = crate::core::messages::ViewscreenBlackboard {
+            scored_objectives: vec![crate::core::messages::ScoredObjective {
+                id: "secure_the_derelict".into(),
+                score: 40.0,
+                directive: crate::core::messages::AiDirective::Secure {
+                    target: "world.test.derelict".into(),
+                },
+                source: crate::core::messages::ObjectiveSource::Mission,
+                relevance: vec![SystemAffinity::Security],
+                snapshot: crate::core::messages::ObjectiveSnapshot {
+                    id: "secure_the_derelict".into(),
+                    text: "world.test.objective.secure".into(),
+                    text_params: Default::default(),
+                    mandatory: false,
+                    status: crate::core::messages::ObjectiveStatus::Active,
+                    targets: vec![],
+                    source: crate::core::messages::ObjectiveSource::Mission,
+                },
+            }],
+            ..Default::default()
+        };
+        blackboards.0.insert(
+            crate::ship::system_registry::viewscreen_system_id(),
+            SystemBlackboard::Viewscreen(viewscreen),
+        );
+    }
+    app.update();
+
+    let payloads = host_payloads(&app, operator);
+    assert!(
+        matches!(
+            payloads.first(),
+            Some(SystemControlPayload::DispatchSecurityTeam { target, .. }) if target == "zulu"
+        ),
+        "the promoted target is served first, ahead of the uuid tiebreak: {payloads:?}"
+    );
+}
+
+/// A Security System damaged out has no seat for the host to sit in either.
+#[test]
+fn a_disabled_security_system_silences_the_host() {
+    use crate::ship::damage::SystemHull;
+
+    let (mut app, operator) =
+        host_only_app(&[(TARGET, Vec3::new(100.0, 0.0, 0.0), head_target_config())]);
+    app.world_mut()
+        .entity_mut(operator)
+        .insert(EntitySystemHull(SystemHull::from_config(&[(
+            security_system_id(),
+            0.0,
+        )])));
+    app.update();
+    assert!(
+        host_payloads(&app, operator).is_empty(),
+        "the teams are off the board; the host proposes nothing"
+    );
+}
 
 // ── The shipped content (AC1, AC3) ───────────────────────────────────────────
 
@@ -821,7 +1244,7 @@ fn rows() -> Vec<TargetRow> {
 /// authored reach — nothing else. The host proposes only what the applier admits.
 #[test]
 fn the_candidate_pool_is_every_authored_action_gated_on_the_authored_reach() {
-    let candidates = build_candidates(&rows(), Vec3::ZERO, 150.0, &[]);
+    let candidates = build_candidates(&rows(), Vec3::ZERO, 150.0, &[], None);
     assert_eq!(candidates.len(), 2);
     assert_eq!(candidates[0].target, "fire");
     assert!(
@@ -842,7 +1265,7 @@ fn the_candidate_pool_is_every_authored_action_gated_on_the_authored_reach() {
 #[test]
 fn an_ordered_target_is_promoted_to_urgent_but_life_safety_is_never_demoted() {
     let ordered = vec!["salvage".to_string()];
-    let candidates = build_candidates(&rows(), Vec3::ZERO, 400.0, &ordered);
+    let candidates = build_candidates(&rows(), Vec3::ZERO, 400.0, &ordered, None);
     assert_eq!(
         candidates[1].priority,
         SecurityPriority::UrgentObjective,
@@ -855,7 +1278,7 @@ fn an_ordered_target_is_promoted_to_urgent_but_life_safety_is_never_demoted() {
     );
 
     let both = vec!["fire".to_string(), "salvage".to_string()];
-    let candidates = build_candidates(&rows(), Vec3::ZERO, 400.0, &both);
+    let candidates = build_candidates(&rows(), Vec3::ZERO, 400.0, &both, None);
     assert_eq!(candidates[0].priority, SecurityPriority::LifeSafety);
 }
 
@@ -864,7 +1287,7 @@ fn an_ordered_target_is_promoted_to_urgent_but_life_safety_is_never_demoted() {
 /// held rather than spent on the salvage.
 #[test]
 fn the_host_works_life_safety_first_and_reserves_for_a_blocked_higher_priority_job() {
-    let candidates = build_candidates(&rows(), Vec3::ZERO, 400.0, &[]);
+    let candidates = build_candidates(&rows(), Vec3::ZERO, 400.0, &[], None);
     let picks = select_assignments(&candidates, 2);
     assert_eq!(
         picks
@@ -882,7 +1305,7 @@ fn the_host_works_life_safety_first_and_reserves_for_a_blocked_higher_priority_j
         },
         rows().remove(1),
     ];
-    let candidates = build_candidates(&far, Vec3::ZERO, 400.0, &[]);
+    let candidates = build_candidates(&far, Vec3::ZERO, 400.0, &[], None);
     assert!(
         select_assignments(&candidates, 1).is_empty(),
         "the last team is kept for the fire rather than spent on optional salvage"
@@ -891,6 +1314,31 @@ fn the_host_works_life_safety_first_and_reserves_for_a_blocked_higher_priority_j
         select_assignments(&candidates, 2).len(),
         1,
         "with two teams one can be spent and one still held"
+    );
+}
+
+/// Work whose authored consequence has already landed is not work: the raised
+/// `outcome_flag` takes it out of the pool, which is what stops the host
+/// re-dispatching a finished job on every tick forever. An action that authors no
+/// flag has no observable completion and stays in.
+#[test]
+fn an_action_whose_outcome_flag_is_already_up_leaves_the_pool() {
+    let mut flagged = rows();
+    flagged[0].config.actions[0].outcome_flag = Some("fire_out".to_string());
+
+    let mut flags = crate::world::flags::FlagStore::new();
+    assert_eq!(
+        build_candidates(&flagged, Vec3::ZERO, 400.0, &[], Some(&flags)).len(),
+        2,
+        "nothing raised yet, so nothing is finished"
+    );
+
+    flags.set_flag("fire_out");
+    let candidates = build_candidates(&flagged, Vec3::ZERO, 400.0, &[], Some(&flags));
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(
+        candidates[0].target, "salvage",
+        "the finished job is gone; the flagless one is untouched"
     );
 }
 

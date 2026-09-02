@@ -75,6 +75,84 @@ pub fn station_for_system(
     None
 }
 
+/// Payload-aware System target used by every authority path. A viewscreen is
+/// only the transport target for `SetView`; authority and availability belong
+/// to the authored System that supplies the selected view.
+pub fn effective_target_for_command(
+    config: &crate::ship::config::ShipConfig,
+    target: &crate::core::messages::SystemId,
+    payload: &SystemControlPayload,
+) -> crate::core::messages::SystemId {
+    let is_viewscreen_target = config
+        .system(target)
+        .is_some_and(|system| system.kind == crate::ship::system_registry::VIEWSCREEN_KIND)
+        || (target.0 == crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID
+            && !config
+                .systems
+                .iter()
+                .any(|system| system.kind == crate::ship::system_registry::VIEWSCREEN_KIND));
+    if !is_viewscreen_target {
+        return target.clone();
+    }
+    let SystemControlPayload::SetView { mode } = payload else {
+        return target.clone();
+    };
+    let source_kind = match mode {
+        crate::core::messages::ViewMode::Camera(_) | crate::core::messages::ViewMode::Cinematic => {
+            crate::ship::system_registry::CAPTAIN_KIND
+        }
+        crate::core::messages::ViewMode::Radar => crate::ship::system_registry::HELM_RADAR_KIND,
+        crate::core::messages::ViewMode::ScienceRadar
+        | crate::core::messages::ViewMode::SensorsRadar => {
+            crate::ship::system_registry::SENSORS_KIND
+        }
+        crate::core::messages::ViewMode::SystemChart
+        | crate::core::messages::ViewMode::NavigationChart => {
+            crate::ship::system_registry::NAVIGATION_KIND
+        }
+        crate::core::messages::ViewMode::Comms => crate::ship::system_registry::COMMS_KIND,
+    };
+    config
+        .systems
+        .iter()
+        .find(|system| system.kind == source_kind)
+        .map(|system| system.id.clone())
+        .unwrap_or_else(|| crate::ship::viewscreen::source_system_for_view_mode(mode))
+}
+
+/// Refusal from the payload-aware Station authority/availability half of
+/// System Admission. Authentication is deliberately absent: the caller has
+/// already authenticated one GM operator and substitutes the selected Station
+/// as authority at this seam.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StationCommandPolicyFailure {
+    SystemOutsideStation,
+    SystemUnavailable,
+}
+
+/// Validate an authenticated GM Station command against the same effective
+/// target and live availability used by ordinary System Admission. This does
+/// not require the resolver's source to be Human: a legitimate takeover starts
+/// while the Station is Backfill (`Ai`) and substitutes Station authority at
+/// this boundary. Damage- and rating-offline Systems remain unavailable.
+pub fn authorize_station_command(
+    station: &StationId,
+    target: &crate::core::messages::SystemId,
+    payload: &SystemControlPayload,
+    control_sources: &crate::ship_plugin::ShipSystemControlSources,
+    config: &crate::ship::config::ShipConfig,
+    hosts: Option<&crate::ship_plugin::HumanSeekingHosts>,
+) -> Result<crate::core::messages::SystemId, StationCommandPolicyFailure> {
+    let effective_target = effective_target_for_command(config, target, payload);
+    if station_for_system(config, hosts, &effective_target).as_ref() != Some(station) {
+        return Err(StationCommandPolicyFailure::SystemOutsideStation);
+    }
+    if !control_sources.0.policy_for(&effective_target).coordinate {
+        return Err(StationCommandPolicyFailure::SystemUnavailable);
+    }
+    Ok(effective_target)
+}
+
 pub fn is_command_authorized(
     token: &str,
     target: &crate::core::messages::SystemId,
@@ -84,51 +162,7 @@ pub fn is_command_authorized(
     config: &crate::ship::config::ShipConfig,
     hosts: Option<&crate::ship_plugin::HumanSeekingHosts>,
 ) -> bool {
-    // Viewscreen SetView: authority derives from the view mode's authored
-    // source System, not from the viewscreen transport target itself. Instance
-    // ids are hull-authored, so recognise the target by kind and resolve the
-    // source kind back through this ship's topology. The canonical ids remain
-    // only as a legacy-fixture fallback when the corresponding kind is absent.
-    let is_viewscreen_target = config
-        .system(target)
-        .is_some_and(|system| system.kind == crate::ship::system_registry::VIEWSCREEN_KIND)
-        || (target.0 == crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID
-            && !config
-                .systems
-                .iter()
-                .any(|system| system.kind == crate::ship::system_registry::VIEWSCREEN_KIND));
-    let effective_target = if is_viewscreen_target {
-        if let SystemControlPayload::SetView { mode } = payload {
-            let source_kind = match mode {
-                crate::core::messages::ViewMode::Camera(_)
-                | crate::core::messages::ViewMode::Cinematic => {
-                    crate::ship::system_registry::CAPTAIN_KIND
-                }
-                crate::core::messages::ViewMode::Radar => {
-                    crate::ship::system_registry::HELM_RADAR_KIND
-                }
-                crate::core::messages::ViewMode::ScienceRadar
-                | crate::core::messages::ViewMode::SensorsRadar => {
-                    crate::ship::system_registry::SENSORS_KIND
-                }
-                crate::core::messages::ViewMode::SystemChart
-                | crate::core::messages::ViewMode::NavigationChart => {
-                    crate::ship::system_registry::NAVIGATION_KIND
-                }
-                crate::core::messages::ViewMode::Comms => crate::ship::system_registry::COMMS_KIND,
-            };
-            config
-                .systems
-                .iter()
-                .find(|system| system.kind == source_kind)
-                .map(|system| system.id.clone())
-                .unwrap_or_else(|| crate::ship::viewscreen::source_system_for_view_mode(mode))
-        } else {
-            target.clone()
-        }
-    } else {
-        target.clone()
-    };
+    let effective_target = effective_target_for_command(config, target, payload);
 
     let policy = control_sources.0.policy_for(&effective_target);
 

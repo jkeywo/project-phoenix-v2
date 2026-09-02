@@ -127,6 +127,49 @@ export function initConsole({
   var _semanticActions = null;
   var _semanticFeedbackEl = null;
   var _semanticFeedbackByAction = new Map();
+  var _gmTakeoverEl = null;
+
+  function _ensureGmTakeoverElement() {
+    if (_gmTakeoverEl && _gmTakeoverEl.isConnected) return;
+    if (typeof document === 'undefined') return;
+    _gmTakeoverEl = document.createElement('aside');
+    _gmTakeoverEl.id = 'gm-takeover-banner';
+    _gmTakeoverEl.className = 'gm-takeover-banner';
+    _gmTakeoverEl.hidden = true;
+    _gmTakeoverEl.setAttribute('role', 'status');
+    _gmTakeoverEl.setAttribute('aria-live', 'polite');
+    _gmTakeoverEl.setAttribute('aria-atomic', 'true');
+    (document.body || document.documentElement).appendChild(_gmTakeoverEl);
+  }
+
+  function _updateGmTakeover(state) {
+    const takeover = state && state.gm_takeover;
+    if (!takeover || !Array.isArray(takeover.operators) || takeover.operators.length === 0) {
+      if (_gmTakeoverEl) {
+        _gmTakeoverEl.hidden = true;
+        _gmTakeoverEl.textContent = '';
+        delete _gmTakeoverEl.dataset.station;
+        delete _gmTakeoverEl.dataset.latestOperator;
+      }
+      return;
+    }
+    _ensureGmTakeoverElement();
+    if (!_gmTakeoverEl) return;
+    const activity = takeover.latest_activity;
+    const params = { operators: takeover.operators.join(', ') };
+    if (activity && typeof activity === 'object') {
+      params.operator = activity.operator_id || '';
+      params.target = activity.target || '';
+      params.action = activity.action || '';
+      _gmTakeoverEl.textContent = t('console.gm_takeover.active_with_activity', params);
+      _gmTakeoverEl.dataset.latestOperator = params.operator;
+    } else {
+      _gmTakeoverEl.textContent = t('console.gm_takeover.active', params);
+      delete _gmTakeoverEl.dataset.latestOperator;
+    }
+    _gmTakeoverEl.dataset.station = takeover.station || name;
+    _gmTakeoverEl.hidden = false;
+  }
 
   function _ensureSemanticFeedbackElement() {
     if (_semanticFeedbackEl || typeof document === 'undefined') return;
@@ -375,6 +418,7 @@ export function initConsole({
     s = normalizeConsolePayload(s);
     _latestState = s;
     render(s);
+    _updateGmTakeover(s);
     _updateTutorialOverlay(s);
   };
 

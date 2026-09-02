@@ -54,12 +54,13 @@
 //!
 //! # The session token never enters the log
 //!
-//! An [`AdmittedCommand`] carries a `response_token` — the sender's session
-//! token — so a reply can be addressed back to whoever asked. That token is a
-//! **bearer credential**: AGENTS.md constraint 2 makes the UUIDv4 in a client's
-//! `localStorage` the whole of its identity, so anything holding the string can
-//! impersonate that player. The log's destinations are exactly the two places
-//! such a string must not go: a save file on disk, and a peer over the wire.
+//! An [`AdmittedCommand`] carries a `response_token` so a reply can be addressed
+//! back to its host-local origin route. For ordinary client input this is the
+//! sender's session token, a **bearer credential**: AGENTS.md constraint 2 makes
+//! the UUIDv4 in a client's `localStorage` the whole of its identity, so
+//! anything holding the string can impersonate that player. Internal producers
+//! may use only an unclaimable reserved target. Neither shape may enter the
+//! log: its destinations are a save file on disk and a peer over the wire.
 //!
 //! So a [`LoggedCommand`] is not an `AdmittedCommand` with a tick bolted on. It
 //! is the *non-secret projection* of one: the tick, the target system, the

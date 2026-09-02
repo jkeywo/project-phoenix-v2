@@ -493,6 +493,251 @@ impl Plugin for LobbyPlugin {
 }
 
 /// Update the Sessions resource with available consoles from the ship's EntityConfig.
+/// Project one resolved entity template into the exact static config sent by
+/// ordinary `Welcome`. GM Station iframes call this same pure seam, so
+/// authored console ranges, filters, arcs, tutorials, hull identity and assist
+/// gaps cannot drift into a smaller GM-only schema.
+pub(crate) fn project_ship_client_config(
+    ship_config: &crate::entities::config::EntityConfig,
+) -> ShipClientConfig {
+    // Build the client-facing ship config from the same source-of-truth.
+    // `HelmConsoleConfig::effective_radar_range()` prefers the structured
+    // [helm_console.radar] range when present, falling back to the legacy
+    // flat radar_range field, then to the Default.
+    let mut next = ShipClientConfig::default();
+    if let Some(hc) = &ship_config.helm_console {
+        let range = hc.effective_radar_range();
+        if range > 0.0 {
+            next.helm_radar_range = range;
+        }
+        // Push the configured impulse charge duration to the client so
+        // the helm progress bar advances at the same rate the server
+        // is ticking.
+        next.impulse_charge_duration = hc.impulse_charge_duration;
+        // Red-alert hostile weapon-arc overlay colour (issue #874). Same
+        // "exactly four entries or keep the default" shape as
+        // `torpedo_arc_color` below.
+        if hc.hostile_arc_color.len() == 4 {
+            next.hostile_arc_color = [
+                hc.hostile_arc_color[0],
+                hc.hostile_arc_color[1],
+                hc.hostile_arc_color[2],
+                hc.hostile_arc_color[3],
+            ];
+        }
+    }
+    // [repair] block — pushes repair-team timings to the client so the
+    // Repair panel can derive its progress-bar durations without knowing
+    // server-side constants. Absent block keeps defaults that match the
+    // historical hardcoded constants.
+    if let Some(rc) = &ship_config.repair {
+        if rc.repair_team_count > 0 {
+            next.repair_team_count = rc.repair_team_count as u8;
+        }
+        next.repair_travel_secs = rc.travel_duration_secs;
+        next.repair_rate_hp_per_sec = rc.repair_rate_hp_per_sec;
+    }
+    // [weapons_console] — push phaser banks (id/facing/fire_arc/cooldown
+    // only; auto_arc_deg stays server-side) and the beam/arc colours so
+    // the Tactical UI can render fire arcs, colour fire buttons, and
+    // size the per-bank cooldown bar.
+    if let Some(wc) = &ship_config.weapons_console {
+        next.phaser_banks = wc
+            .phaser_banks
+            .iter()
+            .map(|b| crate::core::messages::PhaserBankClientConfig {
+                id: b.id.clone(),
+                facing_deg: b.facing_deg,
+                fire_arc_deg: b.fire_arc_deg,
+                // Mirror the server's "zero means absent" fallback so
+                // the client always sees the real cooldown duration.
+                cooldown_secs: if b.cooldown_secs > 0.0 {
+                    b.cooldown_secs
+                } else {
+                    crate::entities::config::PhaserCombatConfig::DEFAULT_BEAM_COOLDOWN_SECS
+                },
+            })
+            .collect();
+        let empty_color: Vec<f32> = vec![];
+        let beam_color_src = wc
+            .phaser_banks
+            .first()
+            .map(|b| &b.beam_color)
+            .unwrap_or(&empty_color);
+        if beam_color_src.len() == 4 {
+            next.phaser_beam_color = [
+                beam_color_src[0],
+                beam_color_src[1],
+                beam_color_src[2],
+                beam_color_src[3],
+            ];
+        }
+        if wc.torpedo_arc_color.len() == 4 {
+            next.torpedo_arc_color = [
+                wc.torpedo_arc_color[0],
+                wc.torpedo_arc_color[1],
+                wc.torpedo_arc_color[2],
+                wc.torpedo_arc_color[3],
+            ];
+        }
+    }
+    // [torpedoes] — per-tube layout (id/facing/fire_arc).
+    if let Some(tc) = &ship_config.torpedoes {
+        next.torpedo_tubes = tc
+            .tubes
+            .iter()
+            .map(|t| crate::core::messages::TorpedoTubeClientConfig {
+                id: t.id.clone(),
+                facing_deg: t.facing_deg,
+                fire_arc_deg: t.fire_arc_deg,
+            })
+            .collect();
+    }
+    // [weapons_console.blaster_banks] — per-bank layout (id/facing/fire_arc/cooldown).
+    // Mirrors the phaser "zero means absent" fallback so clients always see the real
+    // cooldown duration. Default cooldown is 3.0 s (matches BlasterBankConfig default).
+    if let Some(wc) = &ship_config.weapons_console {
+        next.blaster_banks = wc
+            .blaster_banks
+            .iter()
+            .map(|b| crate::core::messages::BlasterBankClientConfig {
+                id: b.id.clone(),
+                facing_deg: b.facing_deg,
+                fire_arc_deg: b.fire_arc_deg,
+                cooldown_secs: if b.cooldown_secs > 0.0 {
+                    b.cooldown_secs
+                } else {
+                    3.0
+                },
+            })
+            .collect();
+    }
+    // Radar shows lists — push the TOML-configured tag filters to the
+    // client so each console widget can build its RadarFilter without
+    // hardcoding tag names.
+    if let Some(hc) = &ship_config.helm_console {
+        if let Some(r) = &hc.radar {
+            next.helm_radar_shows = r.shows.iter().map(|t| t.as_str().to_string()).collect();
+        }
+    }
+    if let Some(sc) = &ship_config.sensors_console {
+        next.sensors_radar_range = sc.long_range_radar.range;
+        next.sensors_radar_shows = sc
+            .long_range_radar
+            .shows
+            .iter()
+            .map(|t| t.as_str().to_string())
+            .collect();
+        next.sensors_radar_selects = sc
+            .long_range_radar
+            .selects
+            .iter()
+            .map(|t| t.as_str().to_string())
+            .collect();
+    }
+    if let Some(nc) = &ship_config.navigation_console {
+        next.nav_chart_shows = nc
+            .system_chart
+            .shows
+            .iter()
+            .map(|t| t.as_str().to_string())
+            .collect();
+        next.nav_chart_selects = nc
+            .system_chart
+            .selects
+            .iter()
+            .map(|t| t.as_str().to_string())
+            .collect();
+        if nc.system_chart.range > 0.0 {
+            next.nav_chart_range = nc.system_chart.range;
+        }
+    }
+    if let Some(wc) = &ship_config.weapons_console {
+        if let Some(r) = &wc.radar {
+            next.tactical_radar_shows = r.shows.iter().map(|t| t.as_str().to_string()).collect();
+            next.tactical_radar_selects =
+                r.selects.iter().map(|t| t.as_str().to_string()).collect();
+            next.tactical_radar_range = r.range;
+        }
+    }
+    // Ship identity metadata — class, hull_id, power_rating, css.
+    next.class = ship_config.class.clone();
+    next.hull_id = ship_config.hull_id.clone();
+    next.power_rating = ship_config.power_rating;
+    next.ship_css = ship_config.css.clone();
+    // Station→system membership map: lets the client aggregate per-station
+    // hull without knowing the ship layout. Iterate the stations block of
+    // the TOML and collect system ids per station.
+    if let Some(sc) = ship_config.ship_config.as_ref() {
+        next.station_systems = sc
+            .stations
+            .iter()
+            .map(|station| {
+                let system_ids = sc
+                    .systems_for_station(&station.id)
+                    .map(|sys| sys.id.0.clone())
+                    .collect();
+                (station.id.0.clone(), system_ids)
+            })
+            .collect();
+        // Authoritative System instance -> Console Family projection plus
+        // the separate reserved/aggregate blackboard-key presentation map.
+        // The second map is intentionally not folded into the first: those
+        // keys share a wire wrapper but have no System command authority.
+        let registry = crate::ship::system_registry::SystemKindRegistry::with_core_systems()
+            .expect("the built-in System descriptor registry must be valid");
+        next.system_console_families = registry.project_console_families(&sc.systems);
+        next.system_kinds = project_system_kinds(&sc.systems);
+        next.blackboard_console_families = registry.project_blackboard_console_families();
+        // Anonymous accessibility eligibility projection (issue #1103):
+        // per station → per rating → the T1 assist-functions the station
+        // would force its holder to operate manually at that rating. Derived
+        // purely from hull topology + rating automation
+        // (`eligibility::projected_assist_gaps`) so the client runs the SAME
+        // rule locally without any private profile leaving the device. Only
+        // stations with a non-empty gap map are carried.
+        next.station_assist_gaps = sc
+            .stations
+            .iter()
+            .map(|station| {
+                (
+                    station.id.0.clone(),
+                    crate::ship::eligibility::projected_assist_gaps(station, sc),
+                )
+            })
+            .filter(|(_, gaps)| !gaps.is_empty())
+            .collect();
+        // Contextual tutorial overlays (issue #916): carry every station's
+        // authored `[[station.tutorial]]` blocks to the client verbatim.
+        // Generic iteration — no station-specific branches; the client's
+        // tutorial state-builder owns the trigger vocabulary.
+        next.station_tutorials = sc
+            .stations
+            .iter()
+            .filter(|station| !station.tutorials.is_empty())
+            .map(|station| (station.id.0.clone(), station.tutorials.clone()))
+            .collect();
+    }
+    // Helm capability fields — sourced from [helm_capability] if present.
+    // helm_systems: all system ids owned by the helm station.
+    if let Some(sc) = ship_config.ship_config.as_ref() {
+        let helm_station_id = crate::core::messages::StationId("helm".into());
+        next.helm_systems = sc
+            .systems_for_station(&helm_station_id)
+            .map(|sys| sys.id.0.clone())
+            .collect();
+    }
+    if let Some(cap) = &ship_config.helm_capability {
+        next.vertical_movement_mode = match cap.vertical_movement_mode {
+            crate::entities::config::VerticalMovementMode::Planar => "planar".to_string(),
+            crate::entities::config::VerticalMovementMode::Bounded => "bounded".to_string(),
+            crate::entities::config::VerticalMovementMode::Full3D => "full_3d".to_string(),
+        };
+        next.impulse_steering_multiplier = cap.impulse.steering_multiplier;
+    }
+    next
+}
+
 fn update_session_with_config(
     mut ship_stations: ResMut<ShipStations>,
     mut ship_client_config: ResMut<ShipClientConfigResource>,
@@ -524,243 +769,7 @@ fn update_session_with_config(
         .unwrap_or("assets/entities/alliance_cruiser.toml");
 
     if let Some(ship_config) = crate::entities::config_cache::get_config_cache().get(config_path) {
-        // Build the client-facing ship config from the same source-of-truth.
-        // `HelmConsoleConfig::effective_radar_range()` prefers the structured
-        // [helm_console.radar] range when present, falling back to the legacy
-        // flat radar_range field, then to the Default.
-        let mut next = ShipClientConfig::default();
-        if let Some(hc) = &ship_config.helm_console {
-            let range = hc.effective_radar_range();
-            if range > 0.0 {
-                next.helm_radar_range = range;
-            }
-            // Push the configured impulse charge duration to the client so
-            // the helm progress bar advances at the same rate the server
-            // is ticking.
-            next.impulse_charge_duration = hc.impulse_charge_duration;
-            // Red-alert hostile weapon-arc overlay colour (issue #874). Same
-            // "exactly four entries or keep the default" shape as
-            // `torpedo_arc_color` below.
-            if hc.hostile_arc_color.len() == 4 {
-                next.hostile_arc_color = [
-                    hc.hostile_arc_color[0],
-                    hc.hostile_arc_color[1],
-                    hc.hostile_arc_color[2],
-                    hc.hostile_arc_color[3],
-                ];
-            }
-        }
-        // [repair] block — pushes repair-team timings to the client so the
-        // Repair panel can derive its progress-bar durations without knowing
-        // server-side constants. Absent block keeps defaults that match the
-        // historical hardcoded constants.
-        if let Some(rc) = &ship_config.repair {
-            if rc.repair_team_count > 0 {
-                next.repair_team_count = rc.repair_team_count as u8;
-            }
-            next.repair_travel_secs = rc.travel_duration_secs;
-            next.repair_rate_hp_per_sec = rc.repair_rate_hp_per_sec;
-        }
-        // [weapons_console] — push phaser banks (id/facing/fire_arc/cooldown
-        // only; auto_arc_deg stays server-side) and the beam/arc colours so
-        // the Tactical UI can render fire arcs, colour fire buttons, and
-        // size the per-bank cooldown bar.
-        if let Some(wc) = &ship_config.weapons_console {
-            next.phaser_banks = wc
-                .phaser_banks
-                .iter()
-                .map(|b| crate::core::messages::PhaserBankClientConfig {
-                    id: b.id.clone(),
-                    facing_deg: b.facing_deg,
-                    fire_arc_deg: b.fire_arc_deg,
-                    // Mirror the server's "zero means absent" fallback so
-                    // the client always sees the real cooldown duration.
-                    cooldown_secs: if b.cooldown_secs > 0.0 {
-                        b.cooldown_secs
-                    } else {
-                        crate::entities::config::PhaserCombatConfig::DEFAULT_BEAM_COOLDOWN_SECS
-                    },
-                })
-                .collect();
-            let empty_color: Vec<f32> = vec![];
-            let beam_color_src = wc
-                .phaser_banks
-                .first()
-                .map(|b| &b.beam_color)
-                .unwrap_or(&empty_color);
-            if beam_color_src.len() == 4 {
-                next.phaser_beam_color = [
-                    beam_color_src[0],
-                    beam_color_src[1],
-                    beam_color_src[2],
-                    beam_color_src[3],
-                ];
-            }
-            if wc.torpedo_arc_color.len() == 4 {
-                next.torpedo_arc_color = [
-                    wc.torpedo_arc_color[0],
-                    wc.torpedo_arc_color[1],
-                    wc.torpedo_arc_color[2],
-                    wc.torpedo_arc_color[3],
-                ];
-            }
-        }
-        // [torpedoes] — per-tube layout (id/facing/fire_arc).
-        if let Some(tc) = &ship_config.torpedoes {
-            next.torpedo_tubes = tc
-                .tubes
-                .iter()
-                .map(|t| crate::core::messages::TorpedoTubeClientConfig {
-                    id: t.id.clone(),
-                    facing_deg: t.facing_deg,
-                    fire_arc_deg: t.fire_arc_deg,
-                })
-                .collect();
-        }
-        // [weapons_console.blaster_banks] — per-bank layout (id/facing/fire_arc/cooldown).
-        // Mirrors the phaser "zero means absent" fallback so clients always see the real
-        // cooldown duration. Default cooldown is 3.0 s (matches BlasterBankConfig default).
-        if let Some(wc) = &ship_config.weapons_console {
-            next.blaster_banks = wc
-                .blaster_banks
-                .iter()
-                .map(|b| crate::core::messages::BlasterBankClientConfig {
-                    id: b.id.clone(),
-                    facing_deg: b.facing_deg,
-                    fire_arc_deg: b.fire_arc_deg,
-                    cooldown_secs: if b.cooldown_secs > 0.0 {
-                        b.cooldown_secs
-                    } else {
-                        3.0
-                    },
-                })
-                .collect();
-        }
-        // Radar shows lists — push the TOML-configured tag filters to the
-        // client so each console widget can build its RadarFilter without
-        // hardcoding tag names.
-        if let Some(hc) = &ship_config.helm_console {
-            if let Some(r) = &hc.radar {
-                next.helm_radar_shows = r.shows.iter().map(|t| t.as_str().to_string()).collect();
-            }
-        }
-        if let Some(sc) = &ship_config.sensors_console {
-            next.sensors_radar_range = sc.long_range_radar.range;
-            next.sensors_radar_shows = sc
-                .long_range_radar
-                .shows
-                .iter()
-                .map(|t| t.as_str().to_string())
-                .collect();
-            next.sensors_radar_selects = sc
-                .long_range_radar
-                .selects
-                .iter()
-                .map(|t| t.as_str().to_string())
-                .collect();
-        }
-        if let Some(nc) = &ship_config.navigation_console {
-            next.nav_chart_shows = nc
-                .system_chart
-                .shows
-                .iter()
-                .map(|t| t.as_str().to_string())
-                .collect();
-            next.nav_chart_selects = nc
-                .system_chart
-                .selects
-                .iter()
-                .map(|t| t.as_str().to_string())
-                .collect();
-            if nc.system_chart.range > 0.0 {
-                next.nav_chart_range = nc.system_chart.range;
-            }
-        }
-        if let Some(wc) = &ship_config.weapons_console {
-            if let Some(r) = &wc.radar {
-                next.tactical_radar_shows =
-                    r.shows.iter().map(|t| t.as_str().to_string()).collect();
-                next.tactical_radar_selects =
-                    r.selects.iter().map(|t| t.as_str().to_string()).collect();
-                next.tactical_radar_range = r.range;
-            }
-        }
-        // Ship identity metadata — class, hull_id, power_rating, css.
-        next.class = ship_config.class.clone();
-        next.hull_id = ship_config.hull_id.clone();
-        next.power_rating = ship_config.power_rating;
-        next.ship_css = ship_config.css.clone();
-        // Station→system membership map: lets the client aggregate per-station
-        // hull without knowing the ship layout. Iterate the stations block of
-        // the TOML and collect system ids per station.
-        if let Some(sc) = ship_config.ship_config.as_ref() {
-            next.station_systems = sc
-                .stations
-                .iter()
-                .map(|station| {
-                    let system_ids = sc
-                        .systems_for_station(&station.id)
-                        .map(|sys| sys.id.0.clone())
-                        .collect();
-                    (station.id.0.clone(), system_ids)
-                })
-                .collect();
-            // Authoritative System instance -> Console Family projection plus
-            // the separate reserved/aggregate blackboard-key presentation map.
-            // The second map is intentionally not folded into the first: those
-            // keys share a wire wrapper but have no System command authority.
-            let registry = crate::ship::system_registry::SystemKindRegistry::with_core_systems()
-                .expect("the built-in System descriptor registry must be valid");
-            next.system_console_families = registry.project_console_families(&sc.systems);
-            next.system_kinds = project_system_kinds(&sc.systems);
-            next.blackboard_console_families = registry.project_blackboard_console_families();
-            // Anonymous accessibility eligibility projection (issue #1103):
-            // per station → per rating → the T1 assist-functions the station
-            // would force its holder to operate manually at that rating. Derived
-            // purely from hull topology + rating automation
-            // (`eligibility::projected_assist_gaps`) so the client runs the SAME
-            // rule locally without any private profile leaving the device. Only
-            // stations with a non-empty gap map are carried.
-            next.station_assist_gaps = sc
-                .stations
-                .iter()
-                .map(|station| {
-                    (
-                        station.id.0.clone(),
-                        crate::ship::eligibility::projected_assist_gaps(station, sc),
-                    )
-                })
-                .filter(|(_, gaps)| !gaps.is_empty())
-                .collect();
-            // Contextual tutorial overlays (issue #916): carry every station's
-            // authored `[[station.tutorial]]` blocks to the client verbatim.
-            // Generic iteration — no station-specific branches; the client's
-            // tutorial state-builder owns the trigger vocabulary.
-            next.station_tutorials = sc
-                .stations
-                .iter()
-                .filter(|station| !station.tutorials.is_empty())
-                .map(|station| (station.id.0.clone(), station.tutorials.clone()))
-                .collect();
-        }
-        // Helm capability fields — sourced from [helm_capability] if present.
-        // helm_systems: all system ids owned by the helm station.
-        if let Some(sc) = ship_config.ship_config.as_ref() {
-            let helm_station_id = crate::core::messages::StationId("helm".into());
-            next.helm_systems = sc
-                .systems_for_station(&helm_station_id)
-                .map(|sys| sys.id.0.clone())
-                .collect();
-        }
-        if let Some(cap) = &ship_config.helm_capability {
-            next.vertical_movement_mode = match cap.vertical_movement_mode {
-                crate::entities::config::VerticalMovementMode::Planar => "planar".to_string(),
-                crate::entities::config::VerticalMovementMode::Bounded => "bounded".to_string(),
-                crate::entities::config::VerticalMovementMode::Full3D => "full_3d".to_string(),
-            };
-            next.impulse_steering_multiplier = cap.impulse.steering_multiplier;
-        }
-        ship_client_config.0 = next;
+        ship_client_config.0 = project_ship_client_config(ship_config);
 
         // Ship manual (issue #772): build the read-only per-station manual from
         // the same selected-ship config that feeds the client above. Generated
@@ -2758,6 +2767,80 @@ mod tests {
         let registry = crate::ship::manual::ManualProviderRegistry::with_shipped_providers();
         let manual = crate::ship::manual::build_ship_manual(&topology, &registry, &extras);
         (config, manual)
+    }
+
+    #[test]
+    fn shared_client_config_projector_preserves_complete_non_default_authored_values() {
+        let (config, _) = manual_from_hull("assets/entities/alliance_cruiser.toml");
+        let projected = project_ship_client_config(&config);
+
+        assert_eq!(projected.helm_radar_range, 93.75);
+        assert_eq!(projected.helm_radar_shows[0], "player");
+        assert_eq!(projected.sensors_radar_range, 300.0);
+        assert_eq!(
+            projected.sensors_radar_selects,
+            ["ship", "station", "planet"]
+        );
+        assert_eq!(projected.nav_chart_range, 800.0);
+        assert_eq!(
+            projected.nav_chart_selects,
+            ["station", "planet", "star", "region"]
+        );
+        assert_eq!(projected.hostile_arc_color, [1.0, 0.3, 0.3, 0.07]);
+        assert_eq!(
+            projected
+                .phaser_banks
+                .iter()
+                .map(|bank| (bank.id.as_str(), bank.facing_deg, bank.fire_arc_deg))
+                .collect::<Vec<_>>(),
+            [("fore", 0.0, 270.0), ("aft", 180.0, 270.0)]
+        );
+        assert_eq!(
+            projected
+                .torpedo_tubes
+                .iter()
+                .map(|tube| (tube.id.as_str(), tube.facing_deg, tube.fire_arc_deg))
+                .collect::<Vec<_>>(),
+            [
+                ("fore_port", 0.0, 90.0),
+                ("fore_starboard", 0.0, 90.0),
+                ("aft", 180.0, 90.0),
+            ]
+        );
+        assert_eq!(projected.class.as_deref(), Some("cruiser"));
+        assert_eq!(projected.hull_id.as_deref(), Some("NCC-1864"));
+        assert_eq!(projected.power_rating, Some(90));
+        assert_eq!(
+            projected.ship_css.as_deref(),
+            Some("gui/themes/cruiser.css")
+        );
+        assert!(
+            projected
+                .station_tutorials
+                .get("helm")
+                .is_some_and(|tutorials| tutorials.iter().any(|entry| entry.id == "helm-welcome")),
+            "the complete ordinary Welcome config carries authored tutorials"
+        );
+
+        let topology = config.ship_config.as_ref().expect("cruiser topology");
+        let expected_gaps = topology
+            .stations
+            .iter()
+            .map(|station| {
+                (
+                    station.id.0.clone(),
+                    crate::ship::eligibility::projected_assist_gaps(station, topology),
+                )
+            })
+            .filter(|(_, gaps)| !gaps.is_empty())
+            .collect::<std::collections::HashMap<_, _>>();
+        assert!(
+            !expected_gaps.is_empty(),
+            "fixture must exercise assist gaps"
+        );
+        assert_eq!(projected.station_assist_gaps, expected_gaps);
+        assert_eq!(projected.station_systems["helm"], projected.helm_systems);
+        assert_eq!(projected.system_kinds["helm-thrust"], "helm_thrust");
     }
 
     fn find_metric(

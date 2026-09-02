@@ -2341,6 +2341,21 @@ export function withTutorialOverlay(consoleName, state, json) {
   }
 }
 
+/**
+ * Add the crew-public GM takeover projection to every authentic Station
+ * payload. The iframe remains the authored interface; console-core renders one
+ * shared status banner from this metadata without station-specific clones.
+ */
+export function withGmTakeover(consoleName, state, json) {
+  try {
+    const obj = JSON.parse(json);
+    obj.gm_takeover = (state.stationPuppets || {})[consoleName] || null;
+    return JSON.stringify(obj);
+  } catch (_) {
+    return json;
+  }
+}
+
 if (typeof window !== 'undefined') {
   // Station labels for the inline client.html script (lobby chips, console
   // title) — the tab-bar CONSOLE_LABEL map was deleted with the tab bar (#827).
@@ -2350,16 +2365,20 @@ if (typeof window !== 'undefined') {
     // Visiting systems are merged BEFORE the tutorial pass, so a station's
     // authored `state`-kind triggers can reference a sought system's view the
     // same way they reference an owned one.
-    return withTutorialOverlay(
+    return withGmTakeover(
       consoleName,
       state,
-      withStationDamage(
+      withTutorialOverlay(
         consoleName,
         state,
-        withCommandAdvice(
+        withStationDamage(
           consoleName,
           state,
-          withVisitingSystems(consoleName, state, inner),
+          withCommandAdvice(
+            consoleName,
+            state,
+            withVisitingSystems(consoleName, state, inner),
+          ),
         ),
       ),
     );

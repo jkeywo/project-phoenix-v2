@@ -96,6 +96,7 @@ pub mod gm_action;
 pub mod gm_activity;
 pub mod gm_join;
 pub mod gm_projection;
+pub mod gm_puppet;
 /// Crew-public Game Master identities (issue #1289), kept separate from crew
 /// sessions and the player-ship fleet roster by construction.
 pub mod gm_roster;

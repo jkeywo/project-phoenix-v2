@@ -84,6 +84,13 @@ pub fn encode_gm_activity_feed(
     serde_json::to_string(payload)
 }
 
+/// Encode the rendererless GM peer's authentic Station-interface projection.
+pub fn encode_gm_station_projection(
+    payload: &crate::gm_projection::GmStationProjectionPayload,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(payload)
+}
+
 /// Encode a station-activity debug payload to JSON (issue #1145, PRD #1144).
 ///
 /// The single seam where `crate::debug::payload::StationActivityPayload` becomes
@@ -534,6 +541,7 @@ pub fn encode_mesh_frame(frame: &crate::lockstep::MeshFrame) -> Result<String, s
                     "requester": grant.from.0,
                     "operator_id": grant.operator_id,
                     "correlation": grant.correlation,
+                    "recovery_generation": grant.recovery_generation,
                     "apply_tick": grant.apply_tick,
                     "sequence": grant.order.sequence,
                     "action": serde_json::to_value(&grant.action)?,
@@ -548,6 +556,7 @@ pub fn encode_mesh_frame(frame: &crate::lockstep::MeshFrame) -> Result<String, s
                     "requester": refusal.requester.0,
                     "operator_id": refusal.operator_id,
                     "correlation": refusal.correlation,
+                    "action_kind": refusal.action_kind,
                     "requested_active": refusal.requested_active,
                     "reason": refusal.reason,
                 }),
@@ -731,6 +740,7 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
                         operator_id: body.get("operator_id")?.as_str()?.to_string(),
                         correlation: serde_json::from_value(body.get("correlation")?.clone())
                             .ok()?,
+                        recovery_generation: body.get("recovery_generation")?.as_u64()?,
                         apply_tick: body.get("apply_tick")?.as_u64()?,
                         order: crate::gm_action::GmActionOrder::new(
                             requester,
@@ -749,6 +759,8 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
                         requester: HostSlot(u32::try_from(body.get("requester")?.as_u64()?).ok()?),
                         operator_id: body.get("operator_id")?.as_str()?.to_string(),
                         correlation: serde_json::from_value(body.get("correlation")?.clone())
+                            .ok()?,
+                        action_kind: serde_json::from_value(body.get("action_kind")?.clone())
                             .ok()?,
                         requested_active: body.get("requested_active")?.as_bool()?,
                         tick,
@@ -938,25 +950,78 @@ pub fn decode_gm_roster(raw: &str) -> Option<crate::gm_roster::GmRoster> {
 pub fn decode_gm_action_request(raw: &str) -> Option<crate::gm_action::GmActionRequest> {
     let value: serde_json::Value = serde_json::from_str(raw).ok()?;
     let object = value.as_object()?;
-    if object.len() != 4
-        || !object.contains_key("operator_id")
-        || !object.contains_key("correlation")
-        || !object.contains_key("action")
-        || !object.contains_key("active")
-        || object.get("action")?.as_str()? != "set_session_paused"
-    {
-        return None;
-    }
+    let action = match object.get("action")?.as_str()? {
+        "set_session_paused" if object.len() == 4 && object.contains_key("active") => {
+            crate::gm_action::GmAction::SetSessionPaused {
+                active: object.get("active")?.as_bool()?,
+            }
+        }
+        "set_station_puppet"
+            if object.len() == 6
+                && object.contains_key("ship")
+                && object.contains_key("station")
+                && object.contains_key("active") =>
+        {
+            crate::gm_action::GmAction::SetStationPuppet {
+                ship: crate::command_admission::log::ShipKey(bounded_gm_target_id(
+                    object.get("ship")?.as_str()?,
+                )?),
+                station: crate::core::messages::StationId(bounded_gm_target_id(
+                    object.get("station")?.as_str()?,
+                )?),
+                active: object.get("active")?.as_bool()?,
+            }
+        }
+        "issue_station_command"
+            if object.len() == 7
+                && object.contains_key("ship")
+                && object.contains_key("station")
+                && object.contains_key("target")
+                && object.contains_key("payload") =>
+        {
+            let payload: crate::core::messages::SystemControlPayload =
+                serde_json::from_value(object.get("payload")?.clone()).ok()?;
+            crate::gm_action::GmAction::IssueStationCommand {
+                ship: crate::command_admission::log::ShipKey(bounded_gm_target_id(
+                    object.get("ship")?.as_str()?,
+                )?),
+                station: crate::core::messages::StationId(bounded_gm_target_id(
+                    object.get("station")?.as_str()?,
+                )?),
+                target: crate::core::messages::SystemId(bounded_gm_target_id(
+                    object.get("target")?.as_str()?,
+                )?),
+                payload: canonical_system_command(&payload)?,
+            }
+        }
+        _ => return None,
+    };
     let request = crate::gm_action::GmActionRequest {
         operator_id: object.get("operator_id")?.as_str()?.to_string(),
         correlation: serde_json::from_value(object.get("correlation")?.clone()).ok()?,
-        action: crate::gm_action::GmAction::SetSessionPaused {
-            active: object.get("active")?.as_bool()?,
-        },
+        action,
     };
     (!request.operator_id.is_empty()
         && request.operator_id.chars().count() <= crate::gm_roster::MAX_GM_OPERATOR_ID_CHARS)
         .then_some(request)
+}
+
+fn bounded_gm_target_id(value: &str) -> Option<String> {
+    (!value.is_empty() && value.len() <= 128 && !value.chars().any(char::is_control))
+        .then(|| value.to_string())
+}
+
+pub fn canonical_system_command(
+    payload: &crate::core::messages::SystemControlPayload,
+) -> Option<crate::gm_puppet::CanonicalSystemCommandPayload> {
+    crate::gm_puppet::CanonicalSystemCommandPayload::new(serde_json::to_string(payload).ok()?).ok()
+}
+
+pub fn decode_canonical_system_command(
+    raw: &str,
+) -> Option<crate::core::messages::SystemControlPayload> {
+    let payload = serde_json::from_str(raw).ok()?;
+    (canonical_system_command(&payload)?.as_str() == raw).then_some(payload)
 }
 
 pub fn encode_gm_session_projection(
@@ -1250,6 +1315,7 @@ mod mesh_frame_tests {
                 sequenced_by: HostSlot(1),
                 operator_id: "gm-1".into(),
                 correlation: crate::gm_action::GmActionId::new("pause-17").unwrap(),
+                recovery_generation: 0,
                 apply_tick: 419,
                 order: crate::gm_action::GmActionOrder::new(HostSlot(2), 17),
                 action: crate::gm_action::GmAction::SetSessionPaused { active: true },
@@ -1279,6 +1345,7 @@ mod mesh_frame_tests {
                 requester: HostSlot(2),
                 operator_id: "gm-1".into(),
                 correlation: crate::gm_action::GmActionId::new("proposal-1").unwrap(),
+                action_kind: crate::gm_action::GmActionKind::SessionPause,
                 requested_active: true,
                 tick: 419,
                 reason: crate::gm_action::GmActionRefusalReason::WrongPhase,
@@ -1351,13 +1418,58 @@ mod mesh_frame_tests {
         .expect("valid request");
         assert_eq!(request.operator_id, "gm-1");
         assert_eq!(request.correlation.as_str(), "pause-17");
-        assert!(request.action.requested_pause());
+        assert_eq!(request.action.requested_pause(), Some(true));
 
         for refused in [
             r#"{"operator_id":"","correlation":"pause-17","action":"set_session_paused","active":true}"#,
             r#"{"operator_id":"gm-1","correlation":"bad id","action":"set_session_paused","active":true}"#,
             r#"{"operator_id":"gm-1","correlation":"pause-17","action":"toggle_pause","active":true}"#,
             r#"{"operator_id":"gm-1","correlation":"pause-17","action":"set_session_paused","active":true,"component":"Transform"}"#,
+        ] {
+            assert!(
+                super::decode_gm_action_request(refused).is_none(),
+                "must fail closed: {refused}"
+            );
+        }
+    }
+
+    #[test]
+    fn station_takeover_and_existing_system_commands_share_the_exact_typed_ingress() {
+        let takeover = super::decode_gm_action_request(
+            r#"{"operator_id":"gm-1","correlation":"take-17","action":"set_station_puppet","ship":"ship-1","station":"captain","active":true}"#,
+        )
+        .expect("valid takeover request");
+        assert_eq!(
+            takeover.action,
+            crate::gm_action::GmAction::SetStationPuppet {
+                ship: crate::command_admission::log::ShipKey("ship-1".into()),
+                station: crate::core::messages::StationId("captain".into()),
+                active: true,
+            }
+        );
+
+        let command = super::decode_gm_action_request(
+            r#"{"operator_id":"gm-1","correlation":"command-17","action":"issue_station_command","ship":"ship-1","station":"captain","target":"red-alert","payload":{"type":"SetRedAlert","data":{"active":true}}}"#,
+        )
+        .expect("valid existing System command");
+        let crate::gm_action::GmAction::IssueStationCommand { payload, .. } = command.action else {
+            panic!("decoded the wrong typed action")
+        };
+        assert_eq!(
+            super::decode_canonical_system_command(payload.as_str()),
+            Some(crate::core::messages::SystemControlPayload::SetRedAlert { active: true })
+        );
+        assert!(
+            super::decode_canonical_system_command(
+                r#"{ "type":"SetRedAlert", "data":{"active":true} }"#
+            )
+            .is_none(),
+            "only the canonical command bytes replay"
+        );
+
+        for refused in [
+            r#"{"operator_id":"gm-1","correlation":"take-17","action":"set_station_puppet","ship":"ship-1","station":"captain","active":true,"authority":"human"}"#,
+            r#"{"operator_id":"gm-1","correlation":"command-17","action":"issue_station_command","ship":"ship-1","station":"captain","target":"red-alert","payload":{"type":"NotACommand"}}"#,
         ] {
             assert!(
                 super::decode_gm_action_request(refused).is_none(),

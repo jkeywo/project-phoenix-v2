@@ -36,6 +36,8 @@
 //! | `SimTick` | [`PhoenixSnapshot::tick`] |
 //! | `SimulationPaused` | [`PhoenixSnapshot::paused`] |
 //! | `GmActionJournal` | [`PhoenixSnapshot::gm_actions`] |
+//! | `StationPuppets` | [`PhoenixSnapshot::gm_puppets`] |
+//! | accepted pending GM Station commands | [`PhoenixSnapshot::gm_station_commands`] |
 //! | `SimRng`'s six stream positions | [`PhoenixSnapshot::rng`] (`SimRngState`) |
 //! | `WorldIdMint`'s tick + per-namespace counters | [`PhoenixSnapshot::mint`] |
 //! | `GamePhase` | [`PhoenixSnapshot::phase`] |
@@ -507,7 +509,17 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// one with an already-received future action), so defaulting those fields would
 /// silently resume or forget authoritative work. The format gate refuses that
 /// ambiguity rather than inventing a migration.
-pub const SNAPSHOT_FORMAT: u32 = 16;
+///
+/// Format 17 carries the authoritative Station takeover membership reduced
+/// from that action frontier. A format-16 record can contain a takeover grant
+/// but no reliable statement that its applied side effect crossed the snapshot
+/// boundary, so restore refuses to guess between active Backfill and puppeting.
+///
+/// Format 18 carries actual apply-boundary GM outcomes and the already-admitted
+/// Station command queue. A format-17 capture taken after PreUpdate but before
+/// the command's FixedUpdate delivery can otherwise say Applied while losing
+/// the only source-stripped payload that continues that effect.
+pub const SNAPSHOT_FORMAT: u32 = 18;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -2358,6 +2370,15 @@ pub struct PhoenixSnapshot {
     /// prefix. The prefix cannot be inferred from `tick`: immediately after
     /// FixedLast advances it, a grant at that new value still awaits PreUpdate.
     pub gm_actions: crate::gm_action::GmActionJournal,
+    /// Station-scoped takeover membership at the captured boundary. This is
+    /// stored alongside the journal so a future grant and an already-applied
+    /// grant remain distinguishable across FixedLast/PreUpdate boundaries.
+    #[serde(default)]
+    pub gm_puppets: crate::gm_puppet::StationPuppets,
+    /// Source-stripped Station commands already accepted by the canonical GM
+    /// reducer but not yet copied into this tick's `AdmittedCommands` buffer.
+    #[serde(default)]
+    pub gm_station_commands: crate::gm_puppet::PendingGmStationCommands,
     pub rng: Option<SimRngState>,
     pub mint: Option<WorldIdMintState>,
     pub phase: Option<GamePhase>,
@@ -2510,6 +2531,14 @@ pub fn capture(world: &World) -> PhoenixSnapshot {
             .and_then(|time| u64::try_from(time.overstep().as_nanos()).ok()),
         paused,
         gm_actions,
+        gm_puppets: world
+            .get_resource::<crate::gm_puppet::StationPuppets>()
+            .cloned()
+            .unwrap_or_default(),
+        gm_station_commands: world
+            .get_resource::<crate::gm_puppet::PendingGmStationCommands>()
+            .cloned()
+            .unwrap_or_default(),
         rng: world.get_resource::<SimRng>().map(SimRng::state),
         mint: world.get_resource::<WorldIdMint>().map(WorldIdMint::state),
         phase: world
@@ -5307,6 +5336,22 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
     // observe pre-restore results before the next PreUpdate recomputes them.
     world.insert_resource(gm_actions.applied_log());
     crate::gm_activity::rebase_after_restore(world);
+    world.insert_resource(snapshot.gm_puppets.clone());
+    // Rebase derived membership history to the restored authoritative set so
+    // the first continuation pass cannot interpret every active target as a
+    // fresh takeover or miss the next release.
+    world.insert_resource(
+        crate::gm_puppet::PreviousStationPuppetTargets::from_puppets(&snapshot.gm_puppets),
+    );
+    // Unlike ordinary network receipt queues, these payloads already passed
+    // live Station/System admission and are part of the captured boundary.
+    world.insert_resource(snapshot.gm_station_commands.clone());
+    // Consumer reply routes are transient and reconstructed from the accepted
+    // pending commands above.  A pre-restore route must never settle a command
+    // belonging to the new continuation.
+    world.insert_resource(crate::gm_puppet::PendingGmStationFeedbackRoutes::default());
+    // Activity is presentation rebuilt from the restored timeline.
+    world.insert_resource(crate::gm_puppet::StationPuppetActivity::default());
     if snapshot.paused {
         // Pausing is always safe and must take effect before this frame can enter
         // FixedUpdate. Do not symmetrically unpause here: lockstep recovery,

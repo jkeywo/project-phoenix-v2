@@ -866,6 +866,22 @@ pub fn register_lockstep(app: &mut App) {
                 StateClass::Folded,
                 "gm-action-state",
             )
+            .declare_state::<crate::gm_puppet::StationPuppets>(
+                StateClass::Folded,
+                "gm-action-state",
+            )
+            .declare_state::<crate::gm_puppet::PreviousStationPuppetTargets>(
+                StateClass::Derived,
+                "gm-action-state",
+            )
+            .declare_state::<crate::gm_puppet::PendingGmStationCommands>(
+                StateClass::Folded,
+                "gm-action-state",
+            )
+            .declare_state::<crate::gm_puppet::StationPuppetActivity>(
+                StateClass::Presentation,
+                "gm-action-state",
+            )
             .declare_state::<crate::gm_action::GmActionLog>(StateClass::Derived, "gm-action-state")
             .declare_state::<crate::gm_action::LocalGmActionRefusals>(
                 StateClass::Presentation,
@@ -898,6 +914,9 @@ pub fn register_lockstep(app: &mut App) {
         .init_resource::<host_loss::PendingHostLoss>()
         .init_resource::<crate::gm_action::SimulationPaused>()
         .init_resource::<crate::gm_action::GmActionJournal>()
+        .init_resource::<crate::gm_puppet::StationPuppets>()
+        .init_resource::<crate::gm_puppet::PendingGmStationCommands>()
+        .init_resource::<crate::gm_puppet::StationPuppetActivity>()
         .init_resource::<crate::gm_action::GmActionLog>()
         .init_resource::<crate::gm_action::LocalGmActionRefusals>()
         .init_resource::<crate::gm_action::LastGmSessionProjection>()
@@ -1240,7 +1259,7 @@ pub fn authored_delay(world: &World) -> u64 {
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
-pub struct StartGrantAdmission<'w> {
+pub struct StartGrantAdmission<'w, 's> {
     phase: Option<Res<'w, State<crate::core::messages::GamePhase>>>,
     next_phase: Option<Res<'w, NextState<crate::core::messages::GamePhase>>>,
     managed: Option<Res<'w, crate::lobby::server::FleetManagedLobby>>,
@@ -1248,6 +1267,17 @@ pub struct StartGrantAdmission<'w> {
     gm_paused: Res<'w, crate::gm_action::SimulationPaused>,
     gm_join_hold: Option<Res<'w, crate::gm_join::GmJoinPauseHold>>,
     gm_results: ResMut<'w, crate::gm_action::LocalGmActionRefusals>,
+    gm_puppets: Res<'w, crate::gm_puppet::StationPuppets>,
+    gm_station_ships: Query<
+        'w,
+        's,
+        (
+            &'static crate::entities::spawner::EntityUuid,
+            &'static crate::ship_plugin::ShipConfigComponent,
+            &'static crate::ship_plugin::ActiveStationRatings,
+        ),
+        With<crate::server_app::Ship>,
+    >,
 }
 
 /// Apply everything a transport has delivered: peer input into the future-tick
@@ -1754,18 +1784,33 @@ pub fn apply_mesh_inbox(
                             continue;
                         }
                         let now = sim_tick.as_deref().map_or(0, |tick| tick.0);
-                        let sequenced = crate::gm_action::sequence_owner_proposal(
-                            &mut start_admission.gm_journal,
-                            &proposal,
-                            owner,
-                            now,
-                            session.ready_through(now),
-                            start_admission.gm_paused.0,
+                        let found = proposal.action.ship_key().and_then(|ship| {
                             start_admission
-                                .gm_join_hold
-                                .as_deref()
-                                .is_some_and(crate::gm_join::GmJoinPauseHold::active),
-                        );
+                                .gm_station_ships
+                                .iter()
+                                .find(|(uuid, ..)| uuid.0 == ship.0)
+                        });
+                        let sequenced = crate::gm_puppet::validate_station_action(
+                            &proposal.action,
+                            &proposal.operator_id,
+                            &start_admission.gm_puppets,
+                            found.map(|(_, config, _)| &config.0),
+                            found.map(|(_, _, ratings)| ratings),
+                        )
+                        .and_then(|()| {
+                            crate::gm_action::sequence_owner_proposal(
+                                &mut start_admission.gm_journal,
+                                &proposal,
+                                owner,
+                                now,
+                                session.ready_through(now),
+                                start_admission.gm_paused.0,
+                                start_admission
+                                    .gm_join_hold
+                                    .as_deref()
+                                    .is_some_and(crate::gm_join::GmJoinPauseHold::active),
+                            )
+                        });
                         let decision = match sequenced {
                             Ok(grant) => crate::gm_action::GmActionFrame::Granted(grant),
                             Err(reason) => {
@@ -1774,7 +1819,8 @@ pub fn apply_mesh_inbox(
                                     requester: proposal.from,
                                     operator_id: proposal.operator_id.clone(),
                                     correlation: proposal.correlation.clone(),
-                                    requested_active: proposal.action.requested_pause(),
+                                    action_kind: proposal.action.kind(),
+                                    requested_active: proposal.action.requested_active(),
                                     tick: now,
                                     reason,
                                 };
@@ -2673,6 +2719,7 @@ mod tests {
                 sequenced_by: local,
                 operator_id: "solo-gm".into(),
                 correlation: crate::gm_action::GmActionId::new("catch-up-pause").unwrap(),
+                recovery_generation: 0,
                 apply_tick: 1,
                 order: crate::gm_action::GmActionOrder::new(local, 1),
                 action: crate::gm_action::GmAction::SetSessionPaused { active: true },
@@ -2760,6 +2807,7 @@ mod tests {
                         "standalone-now-pause"
                     })
                     .unwrap(),
+                    recovery_generation: 0,
                     apply_tick: 0,
                     order: crate::gm_action::GmActionOrder::new(local, 1),
                     action: crate::gm_action::GmAction::SetSessionPaused { active: true },

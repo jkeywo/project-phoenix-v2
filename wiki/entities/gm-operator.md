@@ -1,8 +1,8 @@
 ---
 title: GM Operator
 type: entity
-tags: [gm, operator, identity, reconnect, roster, readiness, force-start, action, pause, host-mesh, map, activity, damage, destruction, objectives, triggers, red-alert, connections, regions, asteroids]
-sources: [src/gm_roster.rs, src/gm_action.rs, src/gm_join.rs, src/gm_projection.rs, src/gm_activity.rs, src/objectives.rs, src/world/server.rs, src/ship/helm_ai/mod.rs, src/entities/config.rs, src/entities/tags.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/balance.rs, src/core/messages.rs, src/core/codec.rs, src/command_admission/log.rs, src/lobby/server.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server/bridge.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/host-channel.js, gui/gm-local-projection.js, gui/gm-activity-feed.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html]
+tags: [gm, operator, identity, reconnect, roster, readiness, force-start, action, pause, puppeting, backfill, host-mesh, map, activity, damage, destruction, objectives, triggers, red-alert, connections, regions, asteroids]
+sources: [src/gm_roster.rs, src/gm_action.rs, src/gm_join.rs, src/gm_projection.rs, src/gm_activity.rs, src/gm_puppet.rs, src/objectives.rs, src/world/server.rs, src/ship/helm_ai/mod.rs, src/entities/config.rs, src/entities/tags.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/balance.rs, src/core/messages.rs, src/core/codec.rs, src/command_admission/log.rs, src/lobby/server.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server/bridge.rs, src/server_app/broadcast.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/host-channel.js, gui/gm-local-projection.js, gui/gm-activity-feed.js, gui/gm-station-puppet.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/console-state.js, gui/console-core.js, gui/sim-state.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html]
 updated: 2026-09-02
 ---
 
@@ -191,12 +191,19 @@ frames without interpreting the Rust-owned action protocol.
 
 The complete bounded `GmActionJournal` is snapshotted as authoritative input
 and the whole journal remains the operator-scoped idempotency record. Current
-state and digest fold only `initial_paused`, the exact `applied_prefix()`, and
-`SimulationPaused`; future grants received early are not current state.
+state and digest fold `initial_paused`, the exact `applied_prefix()`, its
+persisted apply-boundary outcomes, and `SimulationPaused`; future grants
+received early are not current state.
 `apply_due_actions` advances the durable `applied_grants` reducer frontier in
 `PreUpdate`, so Resume remains consumable while Pause has starved `FixedUpdate`.
-Its derived log supplies attributed Applied/No-op results; canonical or local
-admission failures add Refused results without becoming successful history.
+It revalidates live authority in canonical action order and stores the actual
+Applied/No-op/Refused result beside each applied grant. A correlated Station
+command alone records an internal Pending boundary after admission, then
+replaces it exactly once with the ordinary System consumer's terminal Applied
+or Refused feedback; Pending is neither projected nor a terminal idempotency
+fact. Sequencing therefore
+cannot promise a takeover after a holder has reconnected or call a same-tick
+command Applied after an earlier release removed its authority.
 The existing lockstep gate still owns the combined virtual-time decision, so a
 GM resume cannot release a peer, recovery, or model-readiness hold.
 
@@ -207,9 +214,84 @@ reducer; an unapplied suffix never extends replay beyond the artifact's final
 tick. The GM page receives only an absolute local `gm_session` Host Channel
 projection and does not optimistically change the displayed pause state.
 
+## Authentic Station puppeting
+
+`SetStationPuppet` and `IssueStationCommand` extend the same attributed,
+idempotent `GmActionJournal`. A takeover may begin only on an authored Station
+whose live `ActiveStationRatings` entry is `Backfill`. `StationPuppets` stores
+the canonical `(ship, station, sorted equal-operator set)` membership; it is
+captured in snapshots and folded into the simulation digest alongside the
+applied GM journal. A Station command is decoded and passes the shared
+payload-aware System authority/availability policy at the action boundary;
+only then is its source-stripped payload queued. That already-admitted pending
+queue is captured and folded, so recovery between PreUpdate acceptance and
+FixedUpdate delivery cannot lose a command or settle it before its real System
+consumer does. The transient response route is reconstructed from that queue
+after restore; it carries only canonical order plus the iframe's opaque
+correlation, never GM authority. Activity remains a presentation projection
+and is cleared on restore.
+
+The rendererless GM reads each fleet player ship's exact `StationConfig.console`
+URL plus its topology, tagged blackboards, ratings, control sources,
+membership, activity, pose, waypoint, objectives, hull and absolute live world
+entity lane over the local-only `gm_station` Host Channel. It also receives the
+exact complete `ShipClientConfig` built by the ordinary `Welcome` projector,
+not a GM-owned subset: authored radar ranges and filters, weapon arcs, hostile
+arc colour, tutorials, hull identity and assist gaps therefore reach the same
+Helm, Sensors and Navigation builders. Static entity facts come from
+`WorldResource`; live position, hull and shield fields share the ordinary
+`SimState` producers. The browser folds those raw facts through `ClientSimState`
+and the shared radar-region builder before calling the ordinary
+`buildConsoleState`, so spatial Stations see the same complete replica as a
+player rather than a GM-only map model. The scrollable GM surface mounts the
+authored URL in an iframe that remains reachable at the standard 1280×720 host
+viewport. Messages from that exact iframe pass through the existing action map;
+the iframe's opaque correlation is preserved on the typed GM action and the
+canonical terminal result settles that same iframe's ordinary feedback
+lifecycle. Admission-time refusals settle immediately; accepted correlated
+commands remain Pending until their ordinary consumer reports Applied or
+Refused, and duplicate feedback cannot settle them again. A browser ingress
+refusal settles the originating iframe immediately as Refused without claiming
+a gameplay result. The parent-side pending-feedback map shares the ordinary
+bounded feedback capacity and timeout: capacity eviction or a missing result is
+presented as TimedOut, removed deterministically, and cannot be mutated by a
+late canonical result. Only the resulting `ControlSystem` command is wrapped; no
+GM-specific copy of a Captain, Helm, or other Station interface exists.
+
+At the System Admission boundary, a viewscreen command derives authority from
+the payload's authored source System (for example Radar from Helm), not from
+the viewscreen transport target. Canonical GM commands are ordered after any
+ordinary admitted human input for that tick and by their owner-assigned GM
+order. The sidecar activity entry retains operator attribution for GM and crew
+presentation, while the downstream `AdmittedCommand` has no response token or
+actor identity. Simulation systems therefore do not branch on human versus GM.
+
+Takeover makes only the selected Station's systems Human-controlled so its
+Backfill AI emitters stop; it never changes `Player.station`. The crew's
+`SimState` identifies active operators and the latest admitted activity, and
+the shared console runtime renders that truth in the affected authentic
+interface. Releasing the last operator reapplies the Station's ordinary live
+rating, so an absent holder returns to Backfill and the original token can
+still reconnect to the same Station.
+
+At an agreed GM host-loss boundary, that operator is removed from every
+takeover and its activity projection. Equal surviving operators retain their
+membership; when the departed GM was last, the Station's ordinary rating is
+reapplied at that same boundary. The frozen GM binding remains available to an
+authenticated recovered peer, which may take a Backfill Station again. Each
+recovery advances a canonical slot generation recorded in the journal: grants
+retain the generation in which they were sequenced, so pre-loss work remains
+durably Refused even after `rejoin` clears the transient departed flag, while
+genuinely post-recovery work applies. Both adjacent generations are eligible
+exactly on the recovery boundary to preserve established deterministic
+ordering. These generation facts are snapshotted, folded and replayed. A grant
+exactly on the still-unapplied loss boundary keeps the normal action-before-
+loss schedule order; equal surviving GMs remain members when cleanup follows.
+
 ## Related
 
 - [Session](./session.md)
 - [Player](./player.md)
 - [Networking](../concepts/networking.md)
 - [Server Lobby UI](../concepts/server-lobby-ui.md)
+- [Stations](../concepts/stations.md)

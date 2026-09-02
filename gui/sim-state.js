@@ -86,6 +86,7 @@ export class ClientSimState {
     const stationHosts = preserveAuthorityProjection ? this.stationHosts : {};
     const stationHealth = preserveAuthorityProjection ? this.stationHealth : {};
     const stationImportance = preserveAuthorityProjection ? this.stationImportance : {};
+    const stationPuppets = preserveAuthorityProjection ? this.stationPuppets : {};
     /** Static world snapshot { entities: [EntitySnapshot], scenario_title, scenario_description } */
     this.world = defaultWorld();
     /** 'Auto' | 'Manual' */
@@ -173,6 +174,8 @@ export class ClientSimState {
      * importance has resolved simply drops out of the map.
      */
     this.stationImportance = stationImportance;
+    /** Active GM takeover status by Station id, rebuilt from SimState. */
+    this.stationPuppets = stationPuppets;
     /** Per-system control source ("Human" or "Ai"), populated from SimSnapshot. */
     this.controlSources = controlSources;
     /** Per-system/reserved-channel blackboard mirror, keyed by wire id.
@@ -345,6 +348,10 @@ export class ClientSimState {
         // Missing on older protocol-compatible hosts, where the console
         // builders retain their station-rating fallback.
         this.controlSources = snap.control_sources || {};
+        this.stationPuppets = Object.fromEntries(
+          (snap.station_puppets || []).filter(Boolean)
+            .map(entry => [entry.station, entry]),
+        );
         // Update live positions/hull/shield of known entities IN PLACE — never append.
         for (const st of (snap.entity_states || [])) {
           const entity = this.world.entities.find(e => e.uuid === st.uuid);

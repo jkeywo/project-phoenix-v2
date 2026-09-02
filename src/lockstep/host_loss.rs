@@ -238,11 +238,14 @@ pub fn apply_host_loss_backfill(
     mut pending: ResMut<PendingHostLoss>,
     roster: Option<ResMut<super::FleetRoster>>,
     mut ships: Query<(
+        &crate::entities::spawner::EntityUuid,
         &crate::ship_plugin::ShipConfigComponent,
         &mut crate::ship_plugin::ShipSystemControlSources,
         &mut crate::ship_plugin::ActiveStationRatings,
         &super::FleetSlotOf,
     )>,
+    mut puppets: Option<ResMut<crate::gm_puppet::StationPuppets>>,
+    mut activity: Option<ResMut<crate::gm_puppet::StationPuppetActivity>>,
     log: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
     if pending.pending_len() == 0 {
@@ -258,16 +261,46 @@ pub fn apply_host_loss_backfill(
     };
     let now = sim_tick.map_or(0, |t| t.0);
     for record in pending.drain_due(now) {
+        let departed_operator = roster.gm_operator(record.slot).map(str::to_owned);
         // Empty the lost slot's frozen crewing so `resolve_human_seeking_hosts`
         // re-resolves its human-seeking systems to AI. Without this the next
         // tick's resolver would read the still-crewed roster and put Comms/Nav
         // back under a human on a ship whose crew is gone.
         roster.depart_slot(record.slot);
+        let released_targets = departed_operator
+            .as_deref()
+            .and_then(|operator| {
+                puppets.as_deref_mut().map(|puppets| {
+                    let changed = puppets.remove_operator_everywhere(operator);
+                    changed
+                        .into_iter()
+                        .filter(|target| !puppets.is_active(target))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .unwrap_or_default();
+        if let (Some(operator), Some(activity)) =
+            (departed_operator.as_deref(), activity.as_deref_mut())
+        {
+            activity.remove_operator(operator);
+        }
         // Flip every station the lost ship owns to Backfill — the SAME rating
         // transition a single-host disconnect applies, on the SAME machinery,
         // just to every station at once because the whole ship lost its crew.
         let mut flipped = false;
-        for (config, mut sources, mut ratings, slot_of) in ships.iter_mut() {
+        for (uuid, config, mut sources, mut ratings, slot_of) in ships.iter_mut() {
+            // A GM-only host owns no ship, but its last membership leaving a
+            // Station must restore that Station's ordinary live rating on this
+            // exact agreed boundary. If an equal GM survives, the target is not
+            // in `released_targets` and its Human overlay remains untouched.
+            for target in released_targets
+                .iter()
+                .filter(|target| target.ship.0 == uuid.0)
+            {
+                if let Some(rating) = ratings.0.get(&target.station).cloned() {
+                    rating::apply_rating(&config.0, &target.station, &rating, &mut sources.0);
+                }
+            }
             if slot_of.0 != record.slot {
                 continue;
             }
@@ -284,7 +317,7 @@ pub fn apply_host_loss_backfill(
             }
             flipped = true;
         }
-        if flipped {
+        if flipped || !released_targets.is_empty() {
             crate::pinfo!(
                 log,
                 LogCat::Admit,
@@ -309,6 +342,96 @@ pub fn apply_host_loss_backfill(
 mod tests {
     use super::*;
     use bevy::{app::Update, prelude::App};
+
+    fn gm_loss_app(
+        gms: &[(HostSlot, &str)],
+        lost: HostSlot,
+    ) -> (App, crate::gm_puppet::StationPuppetTarget) {
+        let ship_slot = HostSlot(1);
+        let participants = std::iter::once(ship_slot)
+            .chain(gms.iter().map(|(slot, _)| *slot))
+            .collect();
+        let roster = super::super::FleetRoster::with_participants_and_gms(
+            vec![super::super::FleetShip::new(ship_slot)],
+            participants,
+            gms.iter()
+                .map(|(host, operator_id)| super::super::FleetGm {
+                    host: *host,
+                    operator_id: (*operator_id).into(),
+                })
+                .collect(),
+            ship_slot,
+            ship_slot,
+        )
+        .unwrap();
+        let config = crate::ship::config::ShipConfig::from_toml(
+            r#"
+[[station]]
+id = "helm"
+name = "Helm"
+description = ""
+rank = ""
+console = "helm.html"
+
+[[station.rating]]
+name = "Manual"
+automated_systems = []
+
+[[system]]
+id = "helm-thrust"
+kind = "helm_thrust"
+station = "helm"
+"#,
+            &["helm_thrust"],
+        )
+        .unwrap();
+        let station = crate::core::messages::StationId("helm".into());
+        let target = crate::gm_puppet::StationPuppetTarget::new(
+            crate::command_admission::ShipKey("player-1".into()),
+            station.clone(),
+        );
+        let mut puppets = crate::gm_puppet::StationPuppets::default();
+        let mut activity = crate::gm_puppet::StationPuppetActivity::default();
+        for (sequence, (slot, operator)) in gms.iter().enumerate() {
+            puppets.set_operator(target.clone(), (*operator).into(), true);
+            activity.push(crate::gm_puppet::StationPuppetActivityEntry {
+                tick: 6,
+                order: crate::gm_action::GmActionOrder::new(*slot, sequence as u64 + 1),
+                operator_id: (*operator).into(),
+                ship: target.ship.clone(),
+                station: station.clone(),
+                target: crate::core::messages::SystemId("helm-thrust".into()),
+                action: "SetThrust".into(),
+            });
+        }
+        let mut pending = PendingHostLoss::default();
+        pending.observe(lost, 7);
+        let mut ratings = crate::ship_plugin::ActiveStationRatings::default();
+        ratings.0.insert(station, rating::BACKFILL_RATING.into());
+        let mut sources = crate::ship_plugin::ShipSystemControlSources::default();
+        sources.0.set(
+            crate::core::messages::SystemId("helm-thrust".into()),
+            crate::ship::control_source::ControlSource::Human,
+        );
+
+        let mut app = App::new();
+        app.insert_resource(crate::sim_tick::SimTick(7))
+            .insert_resource(pending)
+            .insert_resource(roster)
+            .insert_resource(puppets)
+            .insert_resource(activity)
+            .init_resource::<crate::gm_puppet::PreviousStationPuppetTargets>()
+            .add_systems(Update, apply_host_loss_backfill);
+        app.world_mut().spawn((
+            crate::server_app::Ship,
+            crate::entities::spawner::EntityUuid("player-1".into()),
+            crate::ship_plugin::ShipConfigComponent(config),
+            sources,
+            ratings,
+            super::super::FleetSlotOf(ship_slot),
+        ));
+        (app, target)
+    }
 
     /// The agreed tick is the first tick past the lost host's watermark, and it
     /// is the same on every host because it is a function of that watermark
@@ -425,6 +548,112 @@ mod tests {
             ],
             "earlier tick first, then lower slot — a total order every survivor \
              computes the same way"
+        );
+    }
+
+    #[test]
+    fn single_gm_loss_releases_takeover_restores_backfill_and_clears_activity() {
+        let (mut app, target) = gm_loss_app(&[(HostSlot(2), "gm-1")], HostSlot(2));
+        app.update();
+
+        assert!(!app
+            .world()
+            .resource::<crate::gm_puppet::StationPuppets>()
+            .is_active(&target));
+        assert!(app
+            .world()
+            .resource::<crate::gm_puppet::StationPuppetActivity>()
+            .entries()
+            .is_empty());
+        let sources = app
+            .world_mut()
+            .query::<&crate::ship_plugin::ShipSystemControlSources>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(
+            sources
+                .0
+                .source_for(&crate::core::messages::SystemId("helm-thrust".into())),
+            crate::ship::control_source::ControlSource::Ai,
+        );
+    }
+
+    #[test]
+    fn one_equal_gm_loss_preserves_the_surviving_takeover() {
+        let (mut app, target) =
+            gm_loss_app(&[(HostSlot(2), "gm-1"), (HostSlot(3), "gm-2")], HostSlot(2));
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .resource::<crate::gm_puppet::StationPuppets>()
+                .operators(&target),
+            &["gm-2"],
+        );
+        assert_eq!(
+            app.world()
+                .resource::<crate::gm_puppet::StationPuppetActivity>()
+                .entries()
+                .iter()
+                .map(|entry| entry.operator_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["gm-2"],
+        );
+        let sources = app
+            .world_mut()
+            .query::<&crate::ship_plugin::ShipSystemControlSources>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(
+            sources
+                .0
+                .source_for(&crate::core::messages::SystemId("helm-thrust".into())),
+            crate::ship::control_source::ControlSource::Human,
+        );
+    }
+
+    #[test]
+    fn recovered_gm_binding_can_retake_the_backfill_station() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let (mut app, target) = gm_loss_app(&[(HostSlot(2), "gm-1")], HostSlot(2));
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<super::super::FleetRoster>()
+                .gm_operator(HostSlot(2)),
+            Some("gm-1"),
+            "the frozen binding survives transport loss for authenticated recovery",
+        );
+        let action = crate::gm_action::GmAction::SetStationPuppet {
+            ship: target.ship.clone(),
+            station: target.station.clone(),
+            active: true,
+        };
+        assert_eq!(
+            crate::gm_puppet::validate_station_action_in_world(app.world_mut(), &action, "gm-1",),
+            Ok(()),
+        );
+        app.world_mut()
+            .resource_mut::<crate::gm_puppet::StationPuppets>()
+            .set_operator(target.clone(), "gm-1".into(), true);
+        app.world_mut()
+            .run_system_once(crate::gm_puppet::reconcile_station_puppet_control)
+            .unwrap();
+        assert!(app
+            .world()
+            .resource::<crate::gm_puppet::StationPuppets>()
+            .is_operated_by(&target, "gm-1"));
+        let sources = app
+            .world_mut()
+            .query::<&crate::ship_plugin::ShipSystemControlSources>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(
+            sources
+                .0
+                .source_for(&crate::core::messages::SystemId("helm-thrust".into())),
+            crate::ship::control_source::ControlSource::Human,
         );
     }
 }

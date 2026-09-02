@@ -714,6 +714,7 @@ mod tests {
             operator_id: "gm-recovery".into(),
             correlation: crate::gm_action::GmActionId::new(format!("gm-{sequence}"))
                 .expect("valid correlation"),
+            recovery_generation: 0,
             apply_tick,
             order: crate::gm_action::GmActionOrder::new(from, sequence),
             action: crate::gm_action::GmAction::SetSessionPaused {

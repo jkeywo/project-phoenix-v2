@@ -391,6 +391,7 @@ mod tests {
                     sequenced_by: HostSlot(1),
                     operator_id: "gm-1".into(),
                     correlation: crate::gm_action::GmActionId::new("pause-1").unwrap(),
+                    recovery_generation: 0,
                     apply_tick: 513,
                     order: crate::gm_action::GmActionOrder::new(HostSlot(2), 1),
                     action: crate::gm_action::GmAction::SetSessionPaused { active: true },

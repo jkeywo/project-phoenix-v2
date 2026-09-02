@@ -721,7 +721,7 @@ impl GmJoinPauseHold {
                 .applied_prefix()
                 .iter()
                 .skip(self.resume_frontier)
-                .any(|grant| !grant.action.requested_pause())
+                .any(|grant| grant.action.requested_pause() == Some(false))
         {
             self.active = false;
         }
@@ -1928,6 +1928,7 @@ mod tests {
             sequenced_by: HostSlot(1),
             operator_id: "gm-1".into(),
             correlation: crate::gm_action::GmActionId::new(format!("resume-{sequence}")).unwrap(),
+            recovery_generation: 0,
             apply_tick: tick,
             order: crate::gm_action::GmActionOrder::new(HostSlot(2), sequence),
             action: crate::gm_action::GmAction::SetSessionPaused { active: false },

@@ -413,6 +413,7 @@ impl PhoenixSim {
 /// in [`PhoenixSim::gm_actions`] until their recorded boundary is due, so an
 /// early receipt can never enter a checkpoint digest while an adopted restore
 /// pause is still preserved exactly.
+#[cfg(test)]
 fn seed_replay_initial_state(app: &mut App, source: &GmActionJournal) {
     seed_replay_world(app.world_mut(), source);
 }
@@ -429,6 +430,16 @@ fn seed_replay_world(world: &mut World, source: &GmActionJournal) {
     world
         .resource_mut::<GmActionJournal>()
         .adopt_initial_pause(paused);
+    for recovery in source.recovery_generations() {
+        let generation = world
+            .resource_mut::<GmActionJournal>()
+            .record_slot_recovery(recovery.slot, recovery.boundary_tick)
+            .expect("validated GM recovery generations enter an empty journal");
+        assert_eq!(
+            generation, recovery.generation,
+            "validated GM recovery generation remains canonical during replay"
+        );
+    }
     for grant in source.applied_prefix() {
         world
             .resource_mut::<GmActionJournal>()
@@ -772,14 +783,32 @@ impl ReplayArtifact {
 fn validate_gm_action_journal(journal: &GmActionJournal) -> Result<(), ArtifactError> {
     let mut rebuilt = GmActionJournal::default();
     rebuilt.adopt_initial_pause(journal.initial_paused());
+    for recovery in journal.recovery_generations() {
+        let generation = rebuilt
+            .record_slot_recovery(recovery.slot, recovery.boundary_tick)
+            .map_err(|why| ArtifactError::InvalidGmActions(why.into()))?;
+        if generation != recovery.generation {
+            return Err(ArtifactError::InvalidGmActions(
+                "GM slot recovery generation is not contiguous".into(),
+            ));
+        }
+    }
     for grant in journal.grants() {
         rebuilt.insert(grant.clone()).map_err(|reason| {
             ArtifactError::InvalidGmActions(format!("grant {:?}: {reason:?}", grant.key()))
         })?;
     }
-    rebuilt
-        .restore_applied_frontier(journal.applied_grants())
-        .map_err(|why| ArtifactError::InvalidGmActions(why.into()))?;
+    if journal.applied_results().is_empty() {
+        rebuilt
+            .restore_applied_frontier(journal.applied_grants())
+            .map_err(|why| ArtifactError::InvalidGmActions(why.into()))?;
+    } else {
+        for result in journal.applied_results() {
+            rebuilt
+                .record_applied_result(result.clone())
+                .map_err(|why| ArtifactError::InvalidGmActions(why.into()))?;
+        }
+    }
     if &rebuilt != journal {
         return Err(ArtifactError::InvalidGmActions(
             "journal is duplicated or not in canonical order".into(),
@@ -918,6 +947,7 @@ mod tests {
             operator_id: "gm-one".into(),
             correlation: crate::gm_action::GmActionId::new(format!("replay-{apply_tick}-{active}"))
                 .unwrap(),
+            recovery_generation: 0,
             apply_tick,
             order: crate::gm_action::GmActionOrder::new(HostSlot(1), 1),
             action: crate::gm_action::GmAction::SetSessionPaused { active },

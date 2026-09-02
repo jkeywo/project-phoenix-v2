@@ -123,6 +123,7 @@ fn gm_grant(operator: &str, correlation: &str) -> crate::gm_action::GmActionGran
         sequenced_by: origin,
         operator_id: operator.to_string(),
         correlation: crate::gm_action::GmActionId::new(correlation).unwrap(),
+        recovery_generation: 0,
         apply_tick: 20,
         order: crate::gm_action::GmActionOrder::new(origin, 1),
         action: crate::gm_action::GmAction::SetSessionPaused { active: true },
@@ -210,6 +211,42 @@ fn only_the_applied_gm_action_frontier_moves_the_digest() {
         world_digest(&applied_by_other),
         applied_digest,
         "operator attribution becomes part of the fold once applied"
+    );
+}
+
+#[test]
+fn canonical_station_puppet_membership_is_folded_independent_of_arrival_order() {
+    fn world_with(operators: &[&str]) -> World {
+        let mut world = fold_world();
+        world.insert_resource(SimTick(20));
+        world.insert_resource(crate::gm_action::SimulationPaused(false));
+        world.insert_resource(crate::gm_action::GmActionJournal::default());
+        let target = crate::gm_puppet::StationPuppetTarget::new(
+            crate::command_admission::log::ShipKey("ship-player-1".into()),
+            crate::core::messages::StationId("captain".into()),
+        );
+        let mut puppets = crate::gm_puppet::StationPuppets::default();
+        for operator in operators {
+            puppets.set_operator(target.clone(), (*operator).to_string(), true);
+        }
+        world.insert_resource(puppets);
+        world
+    }
+
+    let idle = world_with(&[]);
+    let forward = world_with(&["gm-b", "gm-a"]);
+    let reverse = world_with(&["gm-a", "gm-b"]);
+    let one = world_with(&["gm-a"]);
+    assert_ne!(world_digest(&idle), world_digest(&forward));
+    assert_eq!(
+        world_digest(&forward),
+        world_digest(&reverse),
+        "canonical operator order makes receipt order irrelevant"
+    );
+    assert_ne!(
+        world_digest(&one),
+        world_digest(&forward),
+        "equal-GM attribution membership is authoritative"
     );
 }
 

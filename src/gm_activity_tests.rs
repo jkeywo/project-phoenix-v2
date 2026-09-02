@@ -432,6 +432,7 @@ fn logged(
     crate::gm_action::LoggedGmAction {
         operator_id: operator_id.into(),
         correlation: crate::gm_action::GmActionId::new(correlation).unwrap(),
+        action_kind: crate::gm_action::GmActionKind::SessionPause,
         requested_active: true,
         outcome,
         tick: 12,

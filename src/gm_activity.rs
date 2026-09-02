@@ -1028,11 +1028,12 @@ fn gm_operator(
     }
 }
 
-fn gm_outcome(outcome: crate::gm_action::GmActionOutcome) -> GmActivityActionOutcome {
+fn gm_outcome(outcome: crate::gm_action::GmActionOutcome) -> Option<GmActivityActionOutcome> {
     match outcome {
-        crate::gm_action::GmActionOutcome::Applied => GmActivityActionOutcome::Applied,
-        crate::gm_action::GmActionOutcome::NoOp => GmActivityActionOutcome::NoOp,
-        crate::gm_action::GmActionOutcome::Refused => GmActivityActionOutcome::Refused,
+        crate::gm_action::GmActionOutcome::Pending => None,
+        crate::gm_action::GmActionOutcome::Applied => Some(GmActivityActionOutcome::Applied),
+        crate::gm_action::GmActionOutcome::NoOp => Some(GmActivityActionOutcome::NoOp),
+        crate::gm_action::GmActionOutcome::Refused => Some(GmActivityActionOutcome::Refused),
     }
 }
 
@@ -1043,6 +1044,13 @@ fn refusal_reason(reason: crate::gm_action::GmActionRefusalReason) -> &'static s
         Reason::NotGameMaster => "not-game-master",
         Reason::OperatorMismatch => "operator-mismatch",
         Reason::InvalidOperator => "invalid-operator",
+        Reason::InvalidAction => "invalid-action",
+        Reason::UnknownStation => "unknown-station",
+        Reason::StationNotBackfill => "station-not-backfill",
+        Reason::StationNotPuppeted => "station-not-puppeted",
+        Reason::SystemOutsideStation => "system-outside-station",
+        Reason::SystemUnavailable => "system-unavailable",
+        Reason::SystemRefused => "system-refused",
         Reason::OriginMismatch => "origin-mismatch",
         Reason::ConflictingGrant => "conflicting-grant",
         Reason::NonContiguousSequence => "non-contiguous-sequence",
@@ -1082,6 +1090,11 @@ fn terminal_action_entries(
     if let Some(refusals) = refusals {
         durable.extend(refusals.entries().iter().cloned());
     }
+    // A Station command is only operational history after its authentic System
+    // consumer has settled it. Keeping provisional Pending facts out of both
+    // the feed and the observed-key set lets the later terminal result surface
+    // exactly once under the same correlation.
+    durable.retain(|fact| fact.outcome != crate::gm_action::GmActionOutcome::Pending);
     durable.sort_by(|left, right| {
         (
             left.tick,
@@ -1123,21 +1136,23 @@ fn terminal_action_entries(
 
     let mut entries: Vec<GmActivityEntry> = durable
         .into_iter()
-        .map(|fact| GmActivityEntry {
-            tick: fact.tick,
-            category: GmActivityCategory::GmAction,
-            ships: Vec::new(),
-            links: Vec::new(),
-            detail: GmActivityDetail::GmAction(GmActivityGmAction {
-                operator: gm_operator(&fact.operator_id, roster),
-                correlation: fact.correlation.as_str().to_owned(),
-                action: GmActivityAction::SetSessionPaused {
-                    active: fact.requested_active,
-                },
-                outcome: gm_outcome(fact.outcome),
-                reason: fact.reason.map(refusal_reason).map(str::to_owned),
-                order: fact.order,
-            }),
+        .filter_map(|fact| {
+            Some(GmActivityEntry {
+                tick: fact.tick,
+                category: GmActivityCategory::GmAction,
+                ships: Vec::new(),
+                links: Vec::new(),
+                detail: GmActivityDetail::GmAction(GmActivityGmAction {
+                    operator: gm_operator(&fact.operator_id, roster),
+                    correlation: fact.correlation.as_str().to_owned(),
+                    action: GmActivityAction::SetSessionPaused {
+                        active: fact.requested_active,
+                    },
+                    outcome: gm_outcome(fact.outcome)?,
+                    reason: fact.reason.map(refusal_reason).map(str::to_owned),
+                    order: fact.order,
+                }),
+            })
         })
         .collect();
 

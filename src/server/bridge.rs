@@ -34,7 +34,8 @@ use {
     crate::boot::{BootPlan, BootProfile, WorldIngest},
     crate::console_bridge::{
         AiChatterEvent, AudioConfigChanged, AudioCueEvent, GmActivityFeedChanged,
-        GmEntityProjectionChanged, GmSessionChanged, HudStateChanged, LobbyStateChanged,
+        GmEntityProjectionChanged, GmSessionChanged, GmStationProjectionChanged, HudStateChanged,
+        LobbyStateChanged,
     },
     crate::core::codec::{self, JsonCodec, MessageCodec},
     crate::core::messages::{self, DeliveryClass},
@@ -1086,12 +1087,14 @@ pub mod host_channels {
     /// Rendererless GM peer's absolute bounded multi-category feed. This
     /// callback is page-local and never enters the peer transport.
     pub const GM_ACTIVITY: &str = "gm_activity";
+    /// Rendererless GM peer's authored Station-interface projection.
+    pub const GM_STATION: &str = "gm_station";
     /// Authoritative pause state plus attributed typed-action results.
     pub const GM_SESSION: &str = "gm_session";
 
     /// Every registered host channel name. The JS dispatcher table in
     /// `server.html` must have a handler per entry.
-    pub const ALL: [&str; 10] = [
+    pub const ALL: [&str; 11] = [
         HUD,
         LOBBY,
         CHATTER,
@@ -1101,6 +1104,7 @@ pub mod host_channels {
         AUDIO_LEVEL,
         GM_ENTITY,
         GM_ACTIVITY,
+        GM_STATION,
         GM_SESSION,
     ];
 }
@@ -2256,7 +2260,8 @@ fn drain_gm_action_input(world: &mut World) {
     for request in requests {
         let operator_id = request.operator_id.clone();
         let correlation = request.correlation.clone();
-        let requested_active = request.action.requested_pause();
+        let action_kind = request.action.kind();
+        let requested_active = request.action.requested_active();
         if let Err(reason) = crate::gm_action::submit_local(world, request) {
             let tick = world
                 .get_resource::<crate::sim_tick::SimTick>()
@@ -2266,6 +2271,7 @@ fn drain_gm_action_input(world: &mut World) {
                 .push(crate::gm_action::LoggedGmAction::refused(
                     operator_id,
                     correlation,
+                    action_kind,
                     requested_active,
                     tick,
                     reason,
@@ -4908,11 +4914,12 @@ fn flush_host_channels(
     mut audio_cue: MessageReader<AudioCueEvent>,
     mut gm_entity: MessageReader<GmEntityProjectionChanged>,
     mut gm_activity: MessageReader<GmActivityFeedChanged>,
+    mut gm_station: MessageReader<GmStationProjectionChanged>,
     mut gm_session: MessageReader<GmSessionChanged>,
 ) {
     // Declarative channel table: name → drained JSON payloads. Adding a
     // message channel = one row here (see `host_channels`).
-    let message_batches: [(&str, Vec<String>); 8] = [
+    let message_batches: [(&str, Vec<String>); 9] = [
         (
             host_channels::HUD,
             hud.read().map(|m| m.json.clone()).collect(),
@@ -4948,6 +4955,13 @@ fn flush_host_channels(
             gm_activity
                 .read()
                 .filter_map(|event| codec::encode_gm_activity_feed(&event.payload).ok())
+                .collect(),
+        ),
+        (
+            host_channels::GM_STATION,
+            gm_station
+                .read()
+                .filter_map(|event| codec::encode_gm_station_projection(&event.payload).ok())
                 .collect(),
         ),
         (
@@ -5702,6 +5716,7 @@ spawn_on = "game_start"
                 host_channels::AUDIO_LEVEL,
                 host_channels::GM_ENTITY,
                 host_channels::GM_ACTIVITY,
+                host_channels::GM_STATION,
                 host_channels::GM_SESSION,
             ]
         );

@@ -44,8 +44,9 @@
 //! covered, and nothing from its **OUT**/exclusion list. Precisely:
 //!
 //! **Folded (the run-scope preamble):** `SimTick`; the absolute
-//! `SimulationPaused` value and the applied canonical `GmActionJournal` prefix
-//! (including attribution and idempotency keys); the whole `SimRngState`
+//! `SimulationPaused` value; the applied canonical `GmActionJournal` prefix
+//! (including attribution and idempotency keys); canonical `StationPuppets`
+//! membership; the whole `SimRngState`
 //! (master seed, its provenance, and every `SimStream`'s exact `Pcg32`
 //! position) through `digest_postcard`, so a divergent *draw count* is caught
 //! the tick it happens; `WorldIdMint`'s tick and per-namespace counters (issue
@@ -493,8 +494,26 @@ fn fold_run_scope(world: &World, mut acc: u64) -> u64 {
         None => fold_str(acc, "simulation-paused:absent"),
     };
     acc = match world.get_resource::<crate::gm_action::GmActionJournal>() {
-        Some(journal) => fold_serde(acc, &(journal.initial_paused(), journal.applied_prefix())),
+        Some(journal) => fold_serde(
+            acc,
+            &(
+                journal.initial_paused(),
+                journal.applied_prefix(),
+                journal.applied_results(),
+                journal.recovery_generations_through(
+                    world.get_resource::<SimTick>().map_or(0, |tick| tick.0),
+                ),
+            ),
+        ),
         None => fold_str(acc, "gm-action-journal:absent"),
+    };
+    acc = match world.get_resource::<crate::gm_puppet::StationPuppets>() {
+        Some(puppets) => fold_serde(acc, puppets),
+        None => fold_str(acc, "gm-station-puppets:absent"),
+    };
+    acc = match world.get_resource::<crate::gm_puppet::PendingGmStationCommands>() {
+        Some(commands) => fold_serde(acc, commands),
+        None => fold_str(acc, "gm-station-commands:absent"),
     };
 
     // SimRng: the FULL state, not a probe draw. `RunFingerprint` takes one draw

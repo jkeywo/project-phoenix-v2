@@ -75,7 +75,31 @@ impl<'de> Deserialize<'de> for GmActionId {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GmAction {
-    SetSessionPaused { active: bool },
+    SetSessionPaused {
+        active: bool,
+    },
+    SetStationPuppet {
+        ship: crate::command_admission::log::ShipKey,
+        station: crate::core::messages::StationId,
+        active: bool,
+    },
+    IssueStationCommand {
+        ship: crate::command_admission::log::ShipKey,
+        station: crate::core::messages::StationId,
+        target: crate::core::messages::SystemId,
+        payload: crate::gm_puppet::CanonicalSystemCommandPayload,
+    },
+}
+
+/// Presentation/result family for a typed GM action. The complete action stays
+/// in the canonical journal; this small copy lets local result surfaces route a
+/// Pause result without mistaking a Station takeover for session state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GmActionKind {
+    SessionPause,
+    StationPuppet,
+    StationCommand,
 }
 
 /// Validated browser ingress before its technical slot and deterministic order
@@ -104,14 +128,67 @@ impl GmActionProposal {
         {
             return Err(GmActionRefusalReason::InvalidOperator);
         }
-        Ok(())
+        self.action.validate()
     }
 }
 
 impl GmAction {
-    pub fn requested_pause(&self) -> bool {
+    pub fn ship_key(&self) -> Option<&crate::command_admission::log::ShipKey> {
         match self {
-            Self::SetSessionPaused { active } => *active,
+            Self::SetSessionPaused { .. } => None,
+            Self::SetStationPuppet { ship, .. } | Self::IssueStationCommand { ship, .. } => {
+                Some(ship)
+            }
+        }
+    }
+
+    fn validate(&self) -> Result<(), GmActionRefusalReason> {
+        let bounded = |value: &str| {
+            !value.is_empty() && value.len() <= 128 && !value.chars().any(char::is_control)
+        };
+        match self {
+            Self::SetSessionPaused { .. } => Ok(()),
+            Self::SetStationPuppet { ship, station, .. }
+                if bounded(&ship.0) && bounded(&station.0) =>
+            {
+                Ok(())
+            }
+            Self::IssueStationCommand {
+                ship,
+                station,
+                target,
+                payload,
+            } if bounded(&ship.0)
+                && bounded(&station.0)
+                && bounded(&target.0)
+                && crate::core::codec::decode_canonical_system_command(payload.as_str())
+                    .is_some() =>
+            {
+                Ok(())
+            }
+            _ => Err(GmActionRefusalReason::InvalidAction),
+        }
+    }
+
+    pub fn kind(&self) -> GmActionKind {
+        match self {
+            Self::SetSessionPaused { .. } => GmActionKind::SessionPause,
+            Self::SetStationPuppet { .. } => GmActionKind::StationPuppet,
+            Self::IssueStationCommand { .. } => GmActionKind::StationCommand,
+        }
+    }
+
+    pub fn requested_pause(&self) -> Option<bool> {
+        match self {
+            Self::SetSessionPaused { active } => Some(*active),
+            Self::SetStationPuppet { .. } | Self::IssueStationCommand { .. } => None,
+        }
+    }
+
+    pub fn requested_active(&self) -> bool {
+        match self {
+            Self::SetSessionPaused { active } | Self::SetStationPuppet { active, .. } => *active,
+            Self::IssueStationCommand { .. } => true,
         }
     }
 }
@@ -146,10 +223,31 @@ pub struct GmActionGrant {
     pub sequenced_by: HostSlot,
     pub operator_id: String,
     pub correlation: GmActionId,
+    /// Canonical recovery generation of `from` when the owner sequenced this
+    /// grant. A slot recovery advances the generation without changing the
+    /// frozen GM binding, so work queued by the departed incarnation can never
+    /// become live again merely because `LockstepSession::rejoin` cleared its
+    /// transient departed flag.
+    #[serde(default)]
+    pub recovery_generation: u64,
     /// Logical boundary at which the absolute value becomes authoritative.
     pub apply_tick: u64,
     pub order: GmActionOrder,
     pub action: GmAction,
+}
+
+/// One canonical slot-recovery generation boundary retained by the GM journal.
+///
+/// Slot recovery is mesh state, not browser connection state. Keeping its
+/// generation beside the grants makes the stale-incarnation decision survive
+/// snapshot transfer and replay. Boundaries are effective after all GM actions
+/// already ordered for that same logical tick; a genuinely post-recovery grant
+/// carries the new generation and may also apply at the boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GmSlotRecoveryGeneration {
+    pub slot: HostSlot,
+    pub boundary_tick: u64,
+    pub generation: u64,
 }
 
 impl GmActionGrant {
@@ -166,7 +264,7 @@ impl GmActionGrant {
         {
             return Err(GmActionRefusalReason::InvalidOperator);
         }
-        Ok(())
+        self.action.validate()
     }
 }
 
@@ -179,6 +277,7 @@ pub struct GmActionRefusal {
     pub requester: HostSlot,
     pub operator_id: String,
     pub correlation: GmActionId,
+    pub action_kind: GmActionKind,
     pub requested_active: bool,
     pub tick: u64,
     pub reason: GmActionRefusalReason,
@@ -189,6 +288,7 @@ impl GmActionRefusal {
         LoggedGmAction::refused(
             self.operator_id.clone(),
             self.correlation.clone(),
+            self.action_kind,
             self.requested_active,
             self.tick,
             self.reason,
@@ -264,6 +364,9 @@ pub fn validate_fleet_frame(
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum GmActionOutcome {
+    /// Canonical admission succeeded, but the authentic System consumer has
+    /// not yet supplied its terminal result.
+    Pending,
     Applied,
     NoOp,
     Refused,
@@ -276,6 +379,15 @@ pub enum GmActionRefusalReason {
     NotGameMaster,
     OperatorMismatch,
     InvalidOperator,
+    InvalidAction,
+    UnknownStation,
+    StationNotBackfill,
+    StationNotPuppeted,
+    SystemOutsideStation,
+    SystemUnavailable,
+    /// The command passed Station/System admission, but its authentic System
+    /// consumer refused the requested state transition.
+    SystemRefused,
     OriginMismatch,
     ConflictingGrant,
     NonContiguousSequence,
@@ -289,6 +401,7 @@ pub enum GmActionRefusalReason {
 pub struct LoggedGmAction {
     pub operator_id: String,
     pub correlation: GmActionId,
+    pub action_kind: GmActionKind,
     pub requested_active: bool,
     pub outcome: GmActionOutcome,
     pub tick: u64,
@@ -302,6 +415,7 @@ impl LoggedGmAction {
     pub fn refused(
         operator_id: String,
         correlation: GmActionId,
+        action_kind: GmActionKind,
         requested_active: bool,
         tick: u64,
         reason: GmActionRefusalReason,
@@ -309,6 +423,7 @@ impl LoggedGmAction {
         Self {
             operator_id,
             correlation,
+            action_kind,
             requested_active,
             outcome: GmActionOutcome::Refused,
             tick,
@@ -331,6 +446,16 @@ pub struct GmActionJournal {
     /// tick names the next step, so a grant at exactly that value is still
     /// pending until the next PreUpdate.
     applied_grants: usize,
+    /// Actual terminal outcomes committed at the canonical apply boundary,
+    /// aligned one-for-one with `grants[..applied_grants]`. Sequencing-time
+    /// validation cannot substitute for this: live Backfill membership and
+    /// System availability may change before a delayed grant becomes due.
+    applied_results: Vec<LoggedGmAction>,
+    /// Canonical recovery incarnations, sorted by `(boundary_tick, slot)`.
+    /// This is intentionally retained even after recovery completes: clearing
+    /// it would make pre-loss queued grants valid again after a later rejoin.
+    #[serde(default)]
+    recovery_generations: Vec<GmSlotRecoveryGeneration>,
     grants: Vec<GmActionGrant>,
 }
 
@@ -343,6 +468,10 @@ impl<'de> Deserialize<'de> for GmActionJournal {
         struct StoredJournal {
             initial_paused: bool,
             applied_grants: usize,
+            #[serde(default)]
+            applied_results: Vec<LoggedGmAction>,
+            #[serde(default)]
+            recovery_generations: Vec<GmSlotRecoveryGeneration>,
             grants: Vec<GmActionGrant>,
         }
 
@@ -355,8 +484,26 @@ impl<'de> Deserialize<'de> for GmActionJournal {
         let mut journal = Self {
             initial_paused: stored.initial_paused,
             applied_grants: 0,
+            applied_results: Vec::new(),
+            recovery_generations: Vec::new(),
             grants: Vec::new(),
         };
+        let stored_recovery_generations = stored.recovery_generations;
+        for event in &stored_recovery_generations {
+            let generation = journal
+                .record_slot_recovery(event.slot, event.boundary_tick)
+                .map_err(serde::de::Error::custom)?;
+            if generation != event.generation {
+                return Err(serde::de::Error::custom(
+                    "GM slot recovery generation is not contiguous",
+                ));
+            }
+        }
+        if journal.recovery_generations != stored_recovery_generations {
+            return Err(serde::de::Error::custom(
+                "GM slot recovery generations are not in canonical order",
+            ));
+        }
         for grant in stored.grants {
             match journal
                 .insert(grant)
@@ -370,9 +517,24 @@ impl<'de> Deserialize<'de> for GmActionJournal {
                 }
             }
         }
-        journal
-            .restore_applied_frontier(stored.applied_grants)
-            .map_err(serde::de::Error::custom)?;
+        if stored.applied_results.is_empty() {
+            // Compatibility for development fixtures written before outcomes
+            // were persisted. Current snapshot format always stores them.
+            journal
+                .restore_applied_frontier(stored.applied_grants)
+                .map_err(serde::de::Error::custom)?;
+        } else {
+            if stored.applied_results.len() != stored.applied_grants {
+                return Err(serde::de::Error::custom(
+                    "GM applied result count does not match its frontier",
+                ));
+            }
+            for result in stored.applied_results {
+                journal
+                    .record_applied_result(result)
+                    .map_err(serde::de::Error::custom)?;
+            }
+        }
         Ok(journal)
     }
 }
@@ -416,13 +578,110 @@ impl GmActionJournal {
         &self.grants[..self.applied_grants]
     }
 
+    pub fn applied_results(&self) -> &[LoggedGmAction] {
+        &self.applied_results
+    }
+
+    /// Every retained canonical slot-recovery generation boundary.
+    pub fn recovery_generations(&self) -> &[GmSlotRecoveryGeneration] {
+        &self.recovery_generations
+    }
+
+    /// Record one canonical slot recovery and return its durable generation.
+    /// Exact repeats are inert; a slot cannot recover at an earlier or equal
+    /// distinct boundary after a later recovery has already been retained.
+    pub fn record_slot_recovery(
+        &mut self,
+        slot: HostSlot,
+        boundary_tick: u64,
+    ) -> Result<u64, &'static str> {
+        if let Some(existing) = self
+            .recovery_generations
+            .iter()
+            .find(|event| event.slot == slot && event.boundary_tick == boundary_tick)
+        {
+            return Ok(existing.generation);
+        }
+        let latest = self
+            .recovery_generations
+            .iter()
+            .filter(|event| event.slot == slot)
+            .max_by_key(|event| event.generation);
+        if latest.is_some_and(|event| event.boundary_tick >= boundary_tick) {
+            return Err("GM slot recovery boundary moved backwards");
+        }
+        let generation = latest
+            .map_or(0, |event| event.generation)
+            .checked_add(1)
+            .ok_or("GM slot recovery generation overflowed")?;
+        self.recovery_generations.push(GmSlotRecoveryGeneration {
+            slot,
+            boundary_tick,
+            generation,
+        });
+        self.recovery_generations
+            .sort_by_key(|event| (event.boundary_tick, event.slot, event.generation));
+        Ok(generation)
+    }
+
+    /// The latest generation the owner must stamp on genuinely new work.
+    pub fn current_recovery_generation(&self, slot: HostSlot) -> u64 {
+        self.recovery_generations
+            .iter()
+            .filter(|event| event.slot == slot)
+            .map(|event| event.generation)
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Earliest application boundary for work stamped with `generation`.
+    fn recovery_generation_boundary(&self, slot: HostSlot, generation: u64) -> Option<u64> {
+        self.recovery_generations
+            .iter()
+            .find(|event| event.slot == slot && event.generation == generation)
+            .map(|event| event.boundary_tick)
+    }
+
+    /// Whether a grant's slot incarnation is valid at this apply boundary.
+    /// Both adjacent generations are valid exactly ON a recovery boundary:
+    /// old work already ordered there precedes recovery, while work stamped
+    /// after the canonical recovery event may follow it. On the next tick only
+    /// the recovered incarnation remains valid.
+    pub fn grant_generation_is_valid(&self, grant: &GmActionGrant, tick: u64) -> bool {
+        let generation_before = self
+            .recovery_generations
+            .iter()
+            .filter(|event| event.slot == grant.from && event.boundary_tick < tick)
+            .map(|event| event.generation)
+            .max()
+            .unwrap_or(0);
+        let generation_through = self
+            .recovery_generations
+            .iter()
+            .filter(|event| event.slot == grant.from && event.boundary_tick <= tick)
+            .map(|event| event.generation)
+            .max()
+            .unwrap_or(0);
+        (generation_before..=generation_through).contains(&grant.recovery_generation)
+    }
+
+    /// Recovery events that have reached canonical simulation state at `tick`.
+    pub fn recovery_generations_through(&self, tick: u64) -> &[GmSlotRecoveryGeneration] {
+        let end = self
+            .recovery_generations
+            .partition_point(|event| event.boundary_tick <= tick);
+        &self.recovery_generations[..end]
+    }
+
     /// Restore/validate a captured application frontier without applying any
     /// new grant. The custom deserializer and replay validator both use this.
     pub fn restore_applied_frontier(&mut self, applied: usize) -> Result<(), &'static str> {
         if applied > self.grants.len() {
             return Err("GM applied frontier exceeds the journal");
         }
+        let derived = self.derived_log_prefix(applied);
         self.applied_grants = applied;
+        self.applied_results = derived.entries;
         Ok(())
     }
 
@@ -499,8 +758,8 @@ impl GmActionJournal {
                 // The sole overflow slot is a paused-state escape, never one
                 // more ordinary mutation. Owner sequencing makes this verdict
                 // canonical; deserialisation rebuilds through the same branch.
-                let escape =
-                    !grant.action.requested_pause() && self.log_through(grant.apply_tick).paused();
+                let escape = grant.action.requested_pause() == Some(false)
+                    && self.log_through(grant.apply_tick).paused();
                 if !escape {
                     return Err(GmActionRefusalReason::JournalFull);
                 }
@@ -531,8 +790,144 @@ impl GmActionJournal {
         let end = self
             .grants
             .partition_point(|grant| grant.apply_tick <= tick);
-        self.applied_grants = self.applied_grants.max(end);
+        if end > self.applied_grants {
+            // Compatibility helper for pure journal fixtures. Production uses
+            // `record_applied_result` so its live refusals are retained.
+            self.restore_applied_frontier(end)
+                .expect("partition point is within the journal");
+        }
         self.applied_log()
+    }
+
+    /// Commit one live outcome for the next canonical grant. The metadata is
+    /// checked against that grant so snapshot/replay can never detach a result
+    /// from the order and idempotency key whose application produced it.
+    pub(crate) fn record_applied_result(
+        &mut self,
+        result: LoggedGmAction,
+    ) -> Result<(), &'static str> {
+        let Some(grant) = self.grants.get(self.applied_grants) else {
+            return Err("GM applied result has no matching grant");
+        };
+        if result.operator_id != grant.operator_id
+            || result.correlation != grant.correlation
+            || result.action_kind != grant.action.kind()
+            || result.requested_active != grant.action.requested_active()
+            || result.tick != grant.apply_tick
+            || result.order != Some(grant.order)
+        {
+            return Err("GM applied result does not match its canonical grant");
+        }
+        match result.outcome {
+            GmActionOutcome::Pending
+                if !matches!(grant.action, GmAction::IssueStationCommand { .. }) =>
+            {
+                return Err("pending GM result is not a Station command");
+            }
+            GmActionOutcome::Refused if result.reason.is_none() => {
+                return Err("refused GM result has no reason");
+            }
+            GmActionOutcome::Pending | GmActionOutcome::Applied | GmActionOutcome::NoOp
+                if result.reason.is_some() =>
+            {
+                return Err("successful GM result has a refusal reason");
+            }
+            _ => {}
+        }
+        self.applied_results.push(result);
+        self.applied_grants += 1;
+        Ok(())
+    }
+
+    /// Replace the provisional acceptance result for one Station command with
+    /// the authentic System consumer's terminal answer.
+    ///
+    /// The applied frontier must advance when the canonical action boundary is
+    /// crossed, before the command enters `AdmittedCommands`; therefore its
+    /// initial result is `Pending`.  Correlated consumers run later in the same
+    /// fixed tick and call this seam with the actual outcome.  Production
+    /// projection, snapshot and digest systems all run after that consumer
+    /// feedback has been folded, and terminal projections omit the provisional
+    /// value even when a render frame advances no fixed tick.
+    pub(crate) fn settle_station_command_result(
+        &mut self,
+        order: GmActionOrder,
+        outcome: crate::core::messages::ActionFeedbackOutcome,
+    ) -> Result<bool, &'static str> {
+        let (terminal_outcome, terminal_reason) = match outcome {
+            crate::core::messages::ActionFeedbackOutcome::Applied => {
+                (GmActionOutcome::Applied, None)
+            }
+            crate::core::messages::ActionFeedbackOutcome::Refused => (
+                GmActionOutcome::Refused,
+                Some(GmActionRefusalReason::SystemRefused),
+            ),
+        };
+        self.settle_pending_station_command(order, terminal_outcome, terminal_reason, false)
+    }
+
+    /// Refuse an accepted command that cannot reach its already-validated ship
+    /// or cannot reserve its bounded consumer-reply route.
+    pub(crate) fn refuse_pending_station_command(
+        &mut self,
+        order: GmActionOrder,
+        reason: GmActionRefusalReason,
+    ) -> Result<bool, &'static str> {
+        self.settle_pending_station_command(order, GmActionOutcome::Refused, Some(reason), true)
+    }
+
+    fn settle_pending_station_command(
+        &mut self,
+        order: GmActionOrder,
+        terminal_outcome: GmActionOutcome,
+        terminal_reason: Option<GmActionRefusalReason>,
+        allow_immediate_applied: bool,
+    ) -> Result<bool, &'static str> {
+        let Some(index) = self
+            .grants
+            .iter()
+            .take(self.applied_grants)
+            .position(|grant| grant.order == order)
+        else {
+            return Err("GM Station feedback has no applied canonical grant");
+        };
+        if !matches!(
+            self.grants[index].action,
+            GmAction::IssueStationCommand { .. }
+        ) {
+            return Err("GM Station feedback matched a non-command grant");
+        }
+        let Some(result) = self.applied_results.get_mut(index) else {
+            return Err("GM Station feedback has no durable result");
+        };
+        if terminal_outcome == GmActionOutcome::Pending
+            || terminal_outcome == GmActionOutcome::NoOp
+            || (terminal_outcome == GmActionOutcome::Refused) != terminal_reason.is_some()
+        {
+            return Err("GM Station terminal result has an invalid outcome/reason pair");
+        }
+        if result.outcome == terminal_outcome && result.reason == terminal_reason {
+            return Ok(false);
+        }
+        if (result.outcome != GmActionOutcome::Pending
+            && !(allow_immediate_applied && result.outcome == GmActionOutcome::Applied))
+            || result.reason.is_some()
+        {
+            return Err("GM Station result was already settled differently");
+        }
+        result.outcome = terminal_outcome;
+        result.reason = terminal_reason;
+        Ok(true)
+    }
+
+    /// Grants newly due at `tick`, excluding the prefix already applied. The
+    /// caller clones this narrow slice before advancing the durable frontier so
+    /// non-pause reducers can apply each canonical mutation exactly once.
+    pub fn pending_through(&self, tick: u64) -> &[GmActionGrant] {
+        let end = self
+            .grants
+            .partition_point(|grant| grant.apply_tick <= tick);
+        &self.grants[self.applied_grants..end]
     }
 
     pub fn applied_log(&self) -> GmActionLog {
@@ -540,19 +935,114 @@ impl GmActionJournal {
     }
 
     fn log_prefix(&self, end: usize) -> GmActionLog {
+        if self.applied_results.is_empty() {
+            return self.derived_log_prefix(end);
+        }
         let mut paused = self.initial_paused;
+        let mut puppets = std::collections::BTreeSet::new();
         let mut entries = Vec::new();
-        for grant in self.grants.iter().take(end) {
-            let requested_active = grant.action.requested_pause();
-            let outcome = if paused == requested_active {
-                GmActionOutcome::NoOp
-            } else {
-                paused = requested_active;
-                GmActionOutcome::Applied
+        for (index, grant) in self.grants.iter().take(end).enumerate() {
+            let requested_active = grant.action.requested_active();
+            if let Some(result) = self.applied_results.get(index) {
+                if result.outcome == GmActionOutcome::Applied {
+                    match &grant.action {
+                        GmAction::SetSessionPaused { active } => paused = *active,
+                        GmAction::SetStationPuppet {
+                            ship,
+                            station,
+                            active,
+                        } => {
+                            let key =
+                                (ship.0.clone(), station.0.clone(), grant.operator_id.clone());
+                            if *active {
+                                puppets.insert(key);
+                            } else {
+                                puppets.remove(&key);
+                            }
+                        }
+                        GmAction::IssueStationCommand { .. } => {}
+                    }
+                }
+                entries.push(result.clone());
+                continue;
+            }
+            let outcome = match &grant.action {
+                GmAction::SetSessionPaused { active } if paused == *active => GmActionOutcome::NoOp,
+                GmAction::SetSessionPaused { active } => {
+                    paused = *active;
+                    GmActionOutcome::Applied
+                }
+                GmAction::SetStationPuppet {
+                    ship,
+                    station,
+                    active,
+                } => {
+                    let key = (ship.0.clone(), station.0.clone(), grant.operator_id.clone());
+                    let changed = if *active {
+                        puppets.insert(key)
+                    } else {
+                        puppets.remove(&key)
+                    };
+                    if changed {
+                        GmActionOutcome::Applied
+                    } else {
+                        GmActionOutcome::NoOp
+                    }
+                }
+                GmAction::IssueStationCommand { .. } => GmActionOutcome::Applied,
             };
             entries.push(LoggedGmAction {
                 operator_id: grant.operator_id.clone(),
                 correlation: grant.correlation.clone(),
+                action_kind: grant.action.kind(),
+                requested_active,
+                outcome,
+                tick: grant.apply_tick,
+                reason: None,
+                order: Some(grant.order),
+            });
+        }
+        GmActionLog { entries, paused }
+    }
+
+    /// Legacy/pure-fixture reducer used only when an applied frontier is
+    /// reconstructed without live world state. Current production snapshots
+    /// persist the actual results and therefore never guess here.
+    fn derived_log_prefix(&self, end: usize) -> GmActionLog {
+        let mut paused = self.initial_paused;
+        let mut puppets = std::collections::BTreeSet::new();
+        let mut entries = Vec::new();
+        for grant in self.grants.iter().take(end) {
+            let requested_active = grant.action.requested_active();
+            let outcome = match &grant.action {
+                GmAction::SetSessionPaused { active } if paused == *active => GmActionOutcome::NoOp,
+                GmAction::SetSessionPaused { active } => {
+                    paused = *active;
+                    GmActionOutcome::Applied
+                }
+                GmAction::SetStationPuppet {
+                    ship,
+                    station,
+                    active,
+                } => {
+                    let key = (ship.0.clone(), station.0.clone(), grant.operator_id.clone());
+                    let changed = if *active {
+                        puppets.insert(key)
+                    } else {
+                        puppets.remove(&key)
+                    };
+                    if changed {
+                        GmActionOutcome::Applied
+                    } else {
+                        GmActionOutcome::NoOp
+                    }
+                }
+                GmAction::IssueStationCommand { .. } => GmActionOutcome::Applied,
+            };
+            entries.push(LoggedGmAction {
+                operator_id: grant.operator_id.clone(),
+                correlation: grant.correlation.clone(),
+                action_kind: grant.action.kind(),
                 requested_active,
                 outcome,
                 tick: grant.apply_tick,
@@ -569,10 +1059,11 @@ impl GmActionJournal {
         correlation: &GmActionId,
         tick: u64,
     ) -> Option<LoggedGmAction> {
-        self.log_through(tick)
-            .entries
-            .into_iter()
-            .find(|entry| entry.operator_id == operator_id && entry.correlation == *correlation)
+        self.log_through(tick).entries.into_iter().find(|entry| {
+            entry.outcome != GmActionOutcome::Pending
+                && entry.operator_id == operator_id
+                && entry.correlation == *correlation
+        })
     }
 
     fn projected_pause(&self) -> bool {
@@ -607,7 +1098,11 @@ impl GmActionLog {
     ) -> Option<LoggedGmAction> {
         self.entries
             .iter()
-            .find(|entry| entry.operator_id == operator_id && entry.correlation == *correlation)
+            .find(|entry| {
+                entry.outcome != GmActionOutcome::Pending
+                    && entry.operator_id == operator_id
+                    && entry.correlation == *correlation
+            })
             .cloned()
     }
 }
@@ -648,18 +1143,39 @@ pub struct GmSessionProjection {
 #[derive(Resource, Clone, Debug, Default)]
 pub struct LastGmSessionProjection(Option<GmSessionProjection>);
 
-pub fn projection(
-    paused: bool,
+/// Presentation-bounded terminal facts for one typed GM action family.
+///
+/// The Session and authentic Station surfaces share this exact selection and
+/// ordering seam. Supplemental local refusals (including a replayed terminal
+/// fact that has fallen outside the canonical window) retain the same
+/// precedence as the Pause UI, while the durable journal remains complete.
+pub fn projected_results(
+    action_kind: GmActionKind,
     log: &GmActionLog,
     refusals: &LocalGmActionRefusals,
-) -> GmSessionProjection {
+) -> Vec<LoggedGmAction> {
     const RESULT_LIMIT: usize = 128;
-    let mut results = log.entries.clone();
+    let supplemental: Vec<_> = refusals
+        .entries
+        .iter()
+        .filter(|entry| {
+            entry.action_kind == action_kind && entry.outcome != GmActionOutcome::Pending
+        })
+        .cloned()
+        .collect();
+    let mut results: Vec<_> = log
+        .entries
+        .iter()
+        .filter(|entry| {
+            entry.action_kind == action_kind && entry.outcome != GmActionOutcome::Pending
+        })
+        .cloned()
+        .collect();
     // Supplemental facts are deliberately protected from the ordinary oldest-
     // first presentation bound. This is what makes an exact retry of a cached
     // action re-project that terminal fact even after 128 later results exist.
     results.retain(|entry| {
-        !refusals.entries.iter().any(|supplemental| {
+        !supplemental.iter().any(|supplemental| {
             supplemental.operator_id == entry.operator_id
                 && supplemental.correlation == entry.correlation
         })
@@ -678,12 +1194,23 @@ pub fn projection(
                 right.correlation.as_str(),
             ))
     });
-    let canonical_limit = RESULT_LIMIT.saturating_sub(refusals.entries.len());
+    let canonical_limit = RESULT_LIMIT.saturating_sub(supplemental.len());
     if results.len() > canonical_limit {
         results.drain(0..results.len() - canonical_limit);
     }
-    results.extend(refusals.entries.iter().cloned());
-    GmSessionProjection { paused, results }
+    results.extend(supplemental);
+    results
+}
+
+pub fn projection(
+    paused: bool,
+    log: &GmActionLog,
+    refusals: &LocalGmActionRefusals,
+) -> GmSessionProjection {
+    GmSessionProjection {
+        paused,
+        results: projected_results(GmActionKind::SessionPause, log, refusals),
+    }
 }
 
 /// Push an absolute page-local projection whenever pause or the bounded result
@@ -703,15 +1230,70 @@ pub fn publish_session_projection(
     writer.write(crate::console_bridge::GmSessionChanged { payload: next });
 }
 
+/// Whether a Station grant has crossed its operator's canonical agreed loss
+/// boundary.
+///
+/// `FleetLockstep::has_departed` is replicated mesh state, not a browser-local
+/// connection observation. [`crate::lockstep::PendingHostLoss`] supplies the cross-schedule
+/// boundary: an unapplied grant stamped AT that tick still precedes the
+/// FixedUpdate loss transition and may run, while a later grant may not add the
+/// departed operator again. Once the loss has applied every leftover grant is
+/// stale. Slot recovery's canonical `rejoin` clears `has_departed`, making new
+/// grants valid again without erasing the historical loss log.
+fn station_grant_outlives_operator(
+    grant: &GmActionGrant,
+    journal: &GmActionJournal,
+    now: u64,
+    session: Option<&crate::lockstep::FleetLockstep>,
+    losses: Option<&crate::lockstep::PendingHostLoss>,
+) -> bool {
+    // This is the durable half of the check. `rejoin` intentionally clears the
+    // barrier's departed bit; it must not thereby bless work queued by the old
+    // incarnation of the same frozen slot/operator binding.
+    if !journal.grant_generation_is_valid(grant, now) {
+        return true;
+    }
+    let Some(session) = session else {
+        return false;
+    };
+    if !session.has_departed(grant.from) {
+        return false;
+    }
+    let Some(losses) = losses else {
+        // A fleet session that canonically says the slot departed but carries no
+        // boundary record cannot safely let that identity mutate a Station.
+        return true;
+    };
+    if losses.is_applied(grant.from) {
+        return true;
+    }
+    losses
+        .agreed_tick(grant.from)
+        .is_none_or(|loss_tick| grant.apply_tick > loss_tick)
+}
+
 /// Recompute and apply every due action. It runs before the mesh gate, which
 /// may add its own hold after a GM resume; resume therefore removes only the GM
 /// pause and never overrides recovery/model-readiness holds.
 pub fn apply_due_actions(
     session: Option<Res<crate::lockstep::FleetLockstep>>,
+    losses: Option<Res<crate::lockstep::PendingHostLoss>>,
     tick: Option<Res<crate::sim_tick::SimTick>>,
     mut journal: ResMut<GmActionJournal>,
     mut log: ResMut<GmActionLog>,
     mut paused: ResMut<SimulationPaused>,
+    mut puppets: Option<ResMut<crate::gm_puppet::StationPuppets>>,
+    mut station_commands: Option<ResMut<crate::gm_puppet::PendingGmStationCommands>>,
+    ships: Query<
+        (
+            &crate::entities::spawner::EntityUuid,
+            &crate::ship::components::ShipConfigComponent,
+            &crate::ship::components::ActiveStationRatings,
+            &crate::ship::components::ShipSystemControlSources,
+            Option<&crate::ship_plugin::HumanSeekingHosts>,
+        ),
+        With<crate::server_app::Ship>,
+    >,
     mut virtual_time: Option<ResMut<Time<Virtual>>>,
     mut fixed_time: Option<ResMut<Time<Fixed>>>,
     mut join_hold: Option<ResMut<crate::gm_join::GmJoinPauseHold>>,
@@ -724,11 +1306,218 @@ pub fn apply_due_actions(
         return;
     }
     let now = tick.as_deref().map_or(0, |tick| tick.0);
-    let next = journal.apply_through(now);
+    let due = journal.pending_through(now).to_vec();
+    for grant in due {
+        let requested_active = grant.action.requested_active();
+        let station_grant_after_loss = station_grant_outlives_operator(
+            &grant,
+            &journal,
+            now,
+            session.as_deref(),
+            losses.as_deref(),
+        );
+        let (outcome, reason) = match &grant.action {
+            GmAction::SetSessionPaused { active } if paused.0 == *active => {
+                (GmActionOutcome::NoOp, None)
+            }
+            GmAction::SetSessionPaused { active } => {
+                paused.0 = *active;
+                (GmActionOutcome::Applied, None)
+            }
+            GmAction::SetStationPuppet { active: true, .. } if station_grant_after_loss => (
+                GmActionOutcome::Refused,
+                Some(GmActionRefusalReason::NotGameMaster),
+            ),
+            GmAction::SetStationPuppet {
+                ship,
+                station,
+                active,
+            } => {
+                let target =
+                    crate::gm_puppet::StationPuppetTarget::new(ship.clone(), station.clone());
+                let Some(puppets) = puppets.as_deref_mut() else {
+                    let reason = if *active {
+                        GmActionRefusalReason::UnknownStation
+                    } else {
+                        GmActionRefusalReason::StationNotPuppeted
+                    };
+                    let result = LoggedGmAction {
+                        operator_id: grant.operator_id.clone(),
+                        correlation: grant.correlation.clone(),
+                        action_kind: grant.action.kind(),
+                        requested_active,
+                        outcome: GmActionOutcome::Refused,
+                        tick: grant.apply_tick,
+                        reason: Some(reason),
+                        order: Some(grant.order),
+                    };
+                    journal
+                        .record_applied_result(result)
+                        .expect("live GM result matches its canonical grant");
+                    continue;
+                };
+
+                if puppets.is_operated_by(&target, &grant.operator_id) == *active {
+                    (GmActionOutcome::NoOp, None)
+                } else if !*active {
+                    puppets.set_operator(target, grant.operator_id.clone(), false);
+                    (GmActionOutcome::Applied, None)
+                } else {
+                    let found = ships
+                        .iter()
+                        .find(|(uuid, ..)| uuid.0 == ship.0)
+                        .map(|(_, config, ratings, ..)| (config, ratings));
+                    match crate::gm_puppet::validate_station_action(
+                        &grant.action,
+                        &grant.operator_id,
+                        puppets,
+                        found.map(|(config, _)| &config.0),
+                        found.map(|(_, ratings)| ratings),
+                    ) {
+                        Ok(()) => {
+                            puppets.set_operator(target, grant.operator_id.clone(), true);
+                            (GmActionOutcome::Applied, None)
+                        }
+                        Err(reason) => (GmActionOutcome::Refused, Some(reason)),
+                    }
+                }
+            }
+            GmAction::IssueStationCommand { .. } if station_grant_after_loss => (
+                GmActionOutcome::Refused,
+                Some(GmActionRefusalReason::NotGameMaster),
+            ),
+            GmAction::IssueStationCommand {
+                ship,
+                station,
+                target,
+                payload,
+            } => {
+                let puppet_target =
+                    crate::gm_puppet::StationPuppetTarget::new(ship.clone(), station.clone());
+                if !puppets.as_deref().is_some_and(|puppets| {
+                    puppets.is_operated_by(&puppet_target, &grant.operator_id)
+                }) {
+                    (
+                        GmActionOutcome::Refused,
+                        Some(GmActionRefusalReason::StationNotPuppeted),
+                    )
+                } else if station_commands.is_none() {
+                    (
+                        GmActionOutcome::Refused,
+                        Some(GmActionRefusalReason::SystemUnavailable),
+                    )
+                } else {
+                    let Some((_, config, _, sources, hosts)) =
+                        ships.iter().find(|(uuid, ..)| uuid.0 == ship.0)
+                    else {
+                        let result = LoggedGmAction {
+                            operator_id: grant.operator_id.clone(),
+                            correlation: grant.correlation.clone(),
+                            action_kind: grant.action.kind(),
+                            requested_active,
+                            outcome: GmActionOutcome::Refused,
+                            tick: grant.apply_tick,
+                            reason: Some(GmActionRefusalReason::UnknownStation),
+                            order: Some(grant.order),
+                        };
+                        journal
+                            .record_applied_result(result)
+                            .expect("live GM result matches its canonical grant");
+                        continue;
+                    };
+                    if config.0.station(station).is_none() {
+                        (
+                            GmActionOutcome::Refused,
+                            Some(GmActionRefusalReason::UnknownStation),
+                        )
+                    } else {
+                        match crate::core::codec::decode_canonical_system_command(payload.as_str())
+                        {
+                            None => (
+                                GmActionOutcome::Refused,
+                                Some(GmActionRefusalReason::InvalidAction),
+                            ),
+                            Some(payload) => match crate::command_admission::validate_station_command(
+                                station,
+                                target.clone(),
+                                payload,
+                                sources,
+                                &config.0,
+                                hosts,
+                            ) {
+                                Ok(command) => {
+                                    let target_kind = config
+                                        .0
+                                        .systems
+                                        .iter()
+                                        .find(|system| system.id == command.target)
+                                        .map(|system| system.kind.as_str());
+                                    let awaits_terminal_consumer = crate::command_admission::
+                                        supports_correlated_action_feedback_for_kind(
+                                            &command.target,
+                                            &command.payload,
+                                            target_kind,
+                                        );
+                                    station_commands.as_deref_mut().expect("checked above").push(
+                                        crate::gm_puppet::PendingGmStationCommand {
+                                            tick: grant.apply_tick,
+                                            order: grant.order,
+                                            operator_id: grant.operator_id.clone(),
+                                            correlation: grant.correlation.clone(),
+                                            ship: ship.clone(),
+                                            station: station.clone(),
+                                            target: command.target,
+                                            payload: command.payload,
+                                        },
+                                    );
+                                    (
+                                        if awaits_terminal_consumer {
+                                            GmActionOutcome::Pending
+                                        } else {
+                                            GmActionOutcome::Applied
+                                        },
+                                        None,
+                                    )
+                                }
+                                Err(
+                                    crate::command_admission::StationCommandPolicyFailure::SystemOutsideStation,
+                                ) => (
+                                    GmActionOutcome::Refused,
+                                    Some(GmActionRefusalReason::SystemOutsideStation),
+                                ),
+                                Err(
+                                    crate::command_admission::StationCommandPolicyFailure::SystemUnavailable,
+                                ) => (
+                                    GmActionOutcome::Refused,
+                                    Some(GmActionRefusalReason::SystemUnavailable),
+                                ),
+                            },
+                        }
+                    }
+                }
+            }
+        };
+        journal
+            .record_applied_result(LoggedGmAction {
+                operator_id: grant.operator_id,
+                correlation: grant.correlation,
+                action_kind: grant.action.kind(),
+                requested_active,
+                outcome,
+                tick: grant.apply_tick,
+                reason,
+                order: Some(grant.order),
+            })
+            .expect("live GM result matches its canonical grant");
+    }
+    *log = journal.applied_log();
+    // A first-time join's technical hold is independent of the product Pause
+    // reducer. It remains until an explicit canonical Resume reaches this
+    // journal, without masking the station mutations applied above.
     let join_paused = join_hold
         .as_deref_mut()
         .is_some_and(|hold| hold.retain_until_explicit_resume(&journal));
-    paused.0 = next.paused || join_paused;
+    paused.0 |= join_paused;
     if let Some(virtual_time) = virtual_time.as_deref_mut() {
         if paused.0 {
             virtual_time.pause();
@@ -753,7 +1542,6 @@ pub fn apply_due_actions(
             fixed.discard_overstep(remaining - remainder);
         }
     }
-    *log = next;
 }
 
 /// Reset the replicated GM lane at a new fleet/run boundary.
@@ -763,6 +1551,10 @@ pub fn reset(world: &mut World) {
     world.insert_resource(LocalGmActionRefusals::default());
     world.insert_resource(LastGmSessionProjection::default());
     world.insert_resource(SimulationPaused(false));
+    world.insert_resource(crate::gm_puppet::StationPuppets::default());
+    world.insert_resource(crate::gm_puppet::PendingGmStationCommands::default());
+    world.insert_resource(crate::gm_puppet::PendingGmStationFeedbackRoutes::default());
+    world.insert_resource(crate::gm_puppet::StationPuppetActivity::default());
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -788,7 +1580,8 @@ fn refusal_for(
         requester: proposal.from,
         operator_id: proposal.operator_id.clone(),
         correlation: proposal.correlation.clone(),
-        requested_active: proposal.action.requested_pause(),
+        action_kind: proposal.action.kind(),
+        requested_active: proposal.action.requested_active(),
         tick,
         reason,
     }
@@ -821,6 +1614,10 @@ pub fn sequence_owner_proposal(
     if journal.is_empty() {
         journal.adopt_initial_pause(current_paused);
     }
+    let recovery_generation = journal.current_recovery_generation(proposal.from);
+    let recovery_boundary = journal
+        .recovery_generation_boundary(proposal.from, recovery_generation)
+        .unwrap_or(0);
     let projected_paused = journal.projected_pause();
     let apply_tick = if projected_paused || (current_paused && technical_join_hold) {
         // A technical join hold can make the live session paused even when the
@@ -834,12 +1631,14 @@ pub fn sequence_owner_proposal(
                 .last_apply_tick()
                 .map_or(0, |closed| closed.saturating_add(1)),
         )
-    };
+    }
+    .max(recovery_boundary);
     let grant = GmActionGrant {
         from: proposal.from,
         sequenced_by: owner,
         operator_id: proposal.operator_id.clone(),
         correlation: proposal.correlation.clone(),
+        recovery_generation,
         apply_tick,
         order: GmActionOrder::new(proposal.from, journal.next_sequence()),
         action: proposal.action.clone(),
@@ -913,6 +1712,8 @@ pub fn submit_local(
         world.resource_mut::<LastGmSessionProjection>().0 = None;
         return Ok(GmActionSubmission::Replayed(existing));
     }
+    request.action.validate()?;
+    crate::gm_puppet::validate_station_action_in_world(world, &request.action, &bound)?;
     let paused = world
         .get_resource::<SimulationPaused>()
         .is_some_and(|paused| paused.0);
@@ -993,10 +1794,379 @@ mod tests {
             sequenced_by: HostSlot(1),
             operator_id: format!("gm-{slot}"),
             correlation: GmActionId::new(correlation).unwrap(),
+            recovery_generation: 0,
             apply_tick,
             order: GmActionOrder::new(origin, sequence),
             action: GmAction::SetSessionPaused { active },
         }
+    }
+
+    fn station_grant(
+        sequence: u64,
+        apply_tick: u64,
+        correlation: &str,
+        action: GmAction,
+    ) -> GmActionGrant {
+        GmActionGrant {
+            from: HostSlot(1),
+            sequenced_by: HostSlot(1),
+            operator_id: "gm-1".into(),
+            correlation: GmActionId::new(correlation).unwrap(),
+            recovery_generation: 0,
+            apply_tick,
+            order: GmActionOrder::new(HostSlot(1), sequence),
+            action,
+        }
+    }
+
+    fn station_apply_app(
+        tick: u64,
+        ratings: crate::ship::components::ActiveStationRatings,
+        puppets: crate::gm_puppet::StationPuppets,
+        grants: impl IntoIterator<Item = GmActionGrant>,
+    ) -> App {
+        let config = crate::ship::config::ShipConfig::from_toml(
+            r#"
+[[station]]
+id = "helm"
+name = "Helm"
+description = ""
+rank = ""
+console = "helm.html"
+
+[[station.rating]]
+name = "Manual"
+automated_systems = []
+
+[[system]]
+id = "helm-thrust"
+kind = "helm_thrust"
+station = "helm"
+"#,
+            &["helm_thrust"],
+        )
+        .unwrap();
+        let mut sources = crate::ship::components::ShipSystemControlSources::default();
+        sources.0.set(
+            crate::core::messages::SystemId("helm-thrust".into()),
+            crate::ship::control_source::ControlSource::Ai,
+        );
+        let mut journal = GmActionJournal::default();
+        for grant in grants {
+            journal.insert(grant).unwrap();
+        }
+        let mut app = App::new();
+        app.insert_resource(crate::sim_tick::SimTick(tick))
+            .insert_resource(SimulationPaused(false))
+            .insert_resource(journal)
+            .init_resource::<GmActionLog>()
+            .insert_resource(puppets)
+            .init_resource::<crate::gm_puppet::PendingGmStationCommands>()
+            .add_systems(Update, apply_due_actions);
+        app.world_mut().spawn((
+            crate::server_app::Ship,
+            crate::entities::spawner::EntityUuid("player-1".into()),
+            crate::ship::components::ShipConfigComponent(config),
+            ratings,
+            sources,
+        ));
+        app
+    }
+
+    #[test]
+    fn delayed_takeover_revalidates_backfill_at_the_apply_boundary() {
+        let helm = crate::core::messages::StationId("helm".into());
+        let ship = crate::command_admission::ShipKey("player-1".into());
+        let action = GmAction::SetStationPuppet {
+            ship: ship.clone(),
+            station: helm.clone(),
+            active: true,
+        };
+        let mut sequenced_ratings = crate::ship::components::ActiveStationRatings::default();
+        sequenced_ratings
+            .0
+            .insert(helm.clone(), crate::ship::rating::BACKFILL_RATING.into());
+        // The sequencing snapshot was valid while the holder was disconnected.
+        // A reconnect changes the live rating before the delayed grant is due.
+        let mut current_ratings = sequenced_ratings;
+        current_ratings.0.insert(helm.clone(), "Manual".into());
+        let mut app = station_apply_app(
+            12,
+            current_ratings,
+            crate::gm_puppet::StationPuppets::default(),
+            [station_grant(1, 12, "delayed-takeover", action)],
+        );
+        app.update();
+
+        let target = crate::gm_puppet::StationPuppetTarget::new(ship, helm);
+        assert!(!app
+            .world()
+            .resource::<crate::gm_puppet::StationPuppets>()
+            .is_active(&target));
+        let entry = &app.world().resource::<GmActionLog>().entries()[0];
+        assert_eq!(entry.outcome, GmActionOutcome::Refused);
+        assert_eq!(
+            entry.reason,
+            Some(GmActionRefusalReason::StationNotBackfill)
+        );
+        assert_eq!(
+            app.world().resource::<GmActionJournal>().applied_results(),
+            app.world().resource::<GmActionLog>().entries(),
+            "the apply-time refusal is durable journal state",
+        );
+    }
+
+    #[test]
+    fn recovery_generation_keeps_old_work_stale_after_rejoin_and_accepts_new_work() {
+        let helm = crate::core::messages::StationId("helm".into());
+        let ship = crate::command_admission::ShipKey("player-1".into());
+        let mut ratings = crate::ship::components::ActiveStationRatings::default();
+        ratings
+            .0
+            .insert(helm.clone(), crate::ship::rating::BACKFILL_RATING.into());
+        let mut new_takeover = station_grant(
+            2,
+            13,
+            "new-incarnation-takeover",
+            GmAction::SetStationPuppet {
+                ship: ship.clone(),
+                station: helm.clone(),
+                active: true,
+            },
+        );
+        new_takeover.recovery_generation = 1;
+        let mut app = station_apply_app(
+            12,
+            ratings,
+            crate::gm_puppet::StationPuppets::default(),
+            [
+                station_grant(
+                    1,
+                    12,
+                    "old-incarnation-takeover",
+                    GmAction::SetStationPuppet {
+                        ship: ship.clone(),
+                        station: helm.clone(),
+                        active: true,
+                    },
+                ),
+                new_takeover,
+            ],
+        );
+        app.world_mut()
+            .resource_mut::<GmActionJournal>()
+            .record_slot_recovery(HostSlot(1), 10)
+            .unwrap();
+        let mut session = crate::lockstep::LockstepSession::new(HostSlot(2), [HostSlot(1)], 0);
+        session.depart(HostSlot(1));
+        session.rejoin(HostSlot(1), 10);
+        assert!(!session.has_departed(HostSlot(1)), "fixture crossed rejoin");
+        app.world_mut()
+            .insert_resource(crate::lockstep::FleetLockstep(session));
+
+        app.update();
+        let first = &app.world().resource::<GmActionLog>().entries()[0];
+        assert_eq!(first.outcome, GmActionOutcome::Refused);
+        assert_eq!(first.reason, Some(GmActionRefusalReason::NotGameMaster));
+
+        app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 13;
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<GmActionLog>()
+                .entries()
+                .iter()
+                .map(|entry| (entry.outcome, entry.reason))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::NotGameMaster),
+                ),
+                (GmActionOutcome::Applied, None),
+            ],
+        );
+        assert!(app
+            .world()
+            .resource::<crate::gm_puppet::StationPuppets>()
+            .is_active(&crate::gm_puppet::StationPuppetTarget::new(ship, helm)));
+    }
+
+    #[test]
+    fn recovery_boundary_preserves_same_tick_order_and_round_trips() {
+        let helm = crate::core::messages::StationId("helm".into());
+        let ship = crate::command_admission::ShipKey("player-1".into());
+        let mut ratings = crate::ship::components::ActiveStationRatings::default();
+        ratings
+            .0
+            .insert(helm.clone(), crate::ship::rating::BACKFILL_RATING.into());
+        let mut recovered_release = station_grant(
+            2,
+            10,
+            "recovered-boundary-release",
+            GmAction::SetStationPuppet {
+                ship: ship.clone(),
+                station: helm.clone(),
+                active: false,
+            },
+        );
+        recovered_release.recovery_generation = 1;
+        let mut app = station_apply_app(
+            10,
+            ratings,
+            crate::gm_puppet::StationPuppets::default(),
+            [
+                station_grant(
+                    1,
+                    10,
+                    "old-boundary-takeover",
+                    GmAction::SetStationPuppet {
+                        ship: ship.clone(),
+                        station: helm.clone(),
+                        active: true,
+                    },
+                ),
+                recovered_release,
+            ],
+        );
+        app.world_mut()
+            .resource_mut::<GmActionJournal>()
+            .record_slot_recovery(HostSlot(1), 10)
+            .unwrap();
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<GmActionLog>()
+                .entries()
+                .iter()
+                .map(|entry| entry.outcome)
+                .collect::<Vec<_>>(),
+            [GmActionOutcome::Applied, GmActionOutcome::Applied],
+        );
+        assert!(!app
+            .world()
+            .resource::<crate::gm_puppet::StationPuppets>()
+            .is_active(&crate::gm_puppet::StationPuppetTarget::new(ship, helm)));
+
+        let journal = app.world().resource::<GmActionJournal>();
+        let text = ron::to_string(journal).unwrap();
+        let restored: GmActionJournal = ron::from_str(&text).unwrap();
+        assert_eq!(&restored, journal);
+    }
+
+    #[test]
+    fn owner_stamps_new_work_with_the_recovery_generation_and_boundary() {
+        let mut journal = GmActionJournal::default();
+        assert_eq!(journal.record_slot_recovery(HostSlot(2), 30), Ok(1));
+        let proposal = GmActionProposal {
+            from: HostSlot(2),
+            operator_id: "gm-2".into(),
+            correlation: GmActionId::new("after-recovery").unwrap(),
+            action: GmAction::SetSessionPaused { active: true },
+        };
+        let grant =
+            sequence_owner_proposal(&mut journal, &proposal, HostSlot(1), 20, 20, false, false)
+                .unwrap();
+        assert_eq!(grant.recovery_generation, 1);
+        assert_eq!(grant.apply_tick, 30);
+    }
+
+    #[test]
+    fn same_tick_station_command_and_release_keep_canonical_admission_order() {
+        use crate::core::messages::{StationId, SystemControlPayload, SystemId};
+
+        let ship = crate::command_admission::ShipKey("player-1".into());
+        let helm = StationId("helm".into());
+        let puppet_target = crate::gm_puppet::StationPuppetTarget::new(ship.clone(), helm.clone());
+        let command = || GmAction::IssueStationCommand {
+            ship: ship.clone(),
+            station: helm.clone(),
+            target: SystemId("helm-thrust".into()),
+            payload: crate::core::codec::canonical_system_command(
+                &SystemControlPayload::SetThrust { value: 0.75 },
+            )
+            .unwrap(),
+        };
+        let release = || GmAction::SetStationPuppet {
+            ship: ship.clone(),
+            station: helm.clone(),
+            active: false,
+        };
+        let mut ratings = crate::ship::components::ActiveStationRatings::default();
+        ratings
+            .0
+            .insert(helm.clone(), crate::ship::rating::BACKFILL_RATING.into());
+
+        let mut puppets = crate::gm_puppet::StationPuppets::default();
+        puppets.set_operator(puppet_target.clone(), "gm-1".into(), true);
+        let mut command_first = station_apply_app(
+            20,
+            ratings.clone(),
+            puppets.clone(),
+            [
+                station_grant(1, 20, "command-first", command()),
+                station_grant(2, 20, "release-second", release()),
+            ],
+        );
+        command_first.update();
+        assert_eq!(
+            command_first
+                .world()
+                .resource::<crate::gm_puppet::PendingGmStationCommands>()
+                .entries()
+                .len(),
+            1,
+            "a later same-tick release cannot retroactively drop an admitted command",
+        );
+        assert!(!command_first
+            .world()
+            .resource::<crate::gm_puppet::StationPuppets>()
+            .is_active(&puppet_target));
+        assert_eq!(
+            command_first
+                .world()
+                .resource::<GmActionLog>()
+                .entries()
+                .iter()
+                .map(|entry| (entry.outcome, entry.reason))
+                .collect::<Vec<_>>(),
+            vec![
+                (GmActionOutcome::Applied, None),
+                (GmActionOutcome::Applied, None),
+            ],
+        );
+
+        let mut release_first = station_apply_app(
+            20,
+            ratings,
+            puppets,
+            [
+                station_grant(1, 20, "release-first", release()),
+                station_grant(2, 20, "command-second", command()),
+            ],
+        );
+        release_first.update();
+        assert!(release_first
+            .world()
+            .resource::<crate::gm_puppet::PendingGmStationCommands>()
+            .entries()
+            .is_empty());
+        assert_eq!(
+            release_first
+                .world()
+                .resource::<GmActionLog>()
+                .entries()
+                .iter()
+                .map(|entry| (entry.outcome, entry.reason))
+                .collect::<Vec<_>>(),
+            vec![
+                (GmActionOutcome::Applied, None),
+                (
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::StationNotPuppeted),
+                ),
+            ],
+        );
     }
 
     #[test]
@@ -1193,6 +2363,7 @@ mod tests {
             sequenced_by: HostSlot(1),
             operator_id: proposal.operator_id.clone(),
             correlation: proposal.correlation.clone(),
+            recovery_generation: 0,
             apply_tick: 7,
             order: GmActionOrder::new(proposal.from, 1),
             action: proposal.action.clone(),
@@ -1213,6 +2384,7 @@ mod tests {
             requester: HostSlot(2),
             operator_id: "gm-2".into(),
             correlation: GmActionId::new("auth-refusal").unwrap(),
+            action_kind: GmActionKind::SessionPause,
             requested_active: true,
             tick: 7,
             reason: GmActionRefusalReason::JournalFull,
@@ -1300,6 +2472,80 @@ mod tests {
         let log = world.resource::<GmActionJournal>().log_through(10);
         assert!(!log.paused());
         assert_eq!(log.entries()[0].outcome, GmActionOutcome::Applied);
+    }
+
+    #[test]
+    fn station_command_projection_preserves_exact_terminal_correlations_and_outcomes() {
+        let station_applied = LoggedGmAction {
+            operator_id: "gm-1".into(),
+            correlation: GmActionId::new("iframe-applied").unwrap(),
+            action_kind: GmActionKind::StationCommand,
+            requested_active: true,
+            outcome: GmActionOutcome::Applied,
+            tick: 41,
+            reason: None,
+            order: Some(GmActionOrder::new(HostSlot(1), 1)),
+        };
+        let pause = LoggedGmAction {
+            operator_id: "gm-1".into(),
+            correlation: GmActionId::new("pause-other-surface").unwrap(),
+            action_kind: GmActionKind::SessionPause,
+            requested_active: true,
+            outcome: GmActionOutcome::Applied,
+            tick: 40,
+            reason: None,
+            order: Some(GmActionOrder::new(HostSlot(1), 0)),
+        };
+        let station_refused = LoggedGmAction::refused(
+            "gm-1".into(),
+            GmActionId::new("iframe-refused").unwrap(),
+            GmActionKind::StationCommand,
+            true,
+            42,
+            GmActionRefusalReason::StationNotPuppeted,
+        );
+        let station_pending = LoggedGmAction {
+            operator_id: "gm-1".into(),
+            correlation: GmActionId::new("iframe-still-pending").unwrap(),
+            action_kind: GmActionKind::StationCommand,
+            requested_active: true,
+            outcome: GmActionOutcome::Pending,
+            tick: 43,
+            reason: None,
+            order: Some(GmActionOrder::new(HostSlot(1), 2)),
+        };
+        let log = GmActionLog {
+            entries: vec![pause, station_applied.clone(), station_pending],
+            paused: true,
+        };
+        let mut supplemental = LocalGmActionRefusals::default();
+        supplemental.push(station_refused.clone());
+
+        assert_eq!(
+            projected_results(GmActionKind::StationCommand, &log, &supplemental),
+            [station_applied, station_refused]
+        );
+    }
+
+    #[test]
+    fn pending_is_valid_only_for_a_station_command_waiting_on_its_consumer() {
+        let mut journal = GmActionJournal::default();
+        let pause = grant(1, 1, 41, "pause-cannot-pend", true);
+        journal.insert(pause.clone()).unwrap();
+        assert_eq!(
+            journal.record_applied_result(LoggedGmAction {
+                operator_id: pause.operator_id,
+                correlation: pause.correlation,
+                action_kind: GmActionKind::SessionPause,
+                requested_active: true,
+                outcome: GmActionOutcome::Pending,
+                tick: pause.apply_tick,
+                reason: None,
+                order: Some(pause.order),
+            }),
+            Err("pending GM result is not a Station command"),
+        );
+        assert_eq!(journal.applied_grants(), 0);
     }
 
     #[test]

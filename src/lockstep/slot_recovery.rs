@@ -366,6 +366,18 @@ fn open_slot_recovery(world: &mut World, local: HostSlot, interval: u64, delay: 
             }
         }
         SlotRecoveryRole::Leader | SlotRecoveryRole::Bystander => {
+            // Bind future GM Station work to the replacement incarnation before
+            // clearing the transient departed bit. The journal is part of the
+            // canonical snapshot the leader transfers, so the recovering host
+            // receives the same durable generation rather than deriving it from
+            // browser-local connection timing. Exact duplicate opens are inert.
+            if !world.contains_resource::<crate::gm_action::GmActionJournal>() {
+                world.insert_resource(crate::gm_action::GmActionJournal::default());
+            }
+            world
+                .resource_mut::<crate::gm_action::GmActionJournal>()
+                .record_slot_recovery(slot, boundary)
+                .expect("canonical slot recoveries advance monotonically");
             // Re-admit the recovering slot to the barrier at the boundary, so it is
             // a full lockstep member again once the replacement resumes (which is
             // what lets its crew's future commands land at an agreed tick). The

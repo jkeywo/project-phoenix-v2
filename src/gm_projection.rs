@@ -11,7 +11,11 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::console::weapons::TacticalRadarSelection;
-use crate::console_bridge::GmEntityProjectionChanged;
+use crate::console_bridge::{GmEntityProjectionChanged, GmStationProjectionChanged};
+use crate::core::messages::{
+    EntitySnapshot, EntityStateSnapshot, ObjectiveSnapshot, ShipClientConfig, StationId,
+    SystemBlackboard, SystemHullStatus, SystemId, WaypointSnapshot,
+};
 use crate::entities::config_cache::FactionRegistryResource;
 use crate::entities::spawner::{
     AsteroidFieldSection, EntityId, EntityName, EntitySystemHull, EntityTagsSection, EntityUuid,
@@ -19,11 +23,16 @@ use crate::entities::spawner::{
     StaticPointDefence,
 };
 use crate::entities::tags::EntityTag;
+use crate::gm_action::{GmActionKind, GmActionLog, LocalGmActionRefusals, LoggedGmAction};
+use crate::gm_puppet::{StationPuppetActivityEntry, StationPuppetTarget, StationPuppets};
 use crate::infrastructure::InfrastructureCondition;
 use crate::lobby::WorldResource;
 use crate::lockstep::FleetSlotOf;
 use crate::regions::shape::RegionShape;
-use crate::server_app::Ship;
+use crate::server_app::{AsteroidUuid, Ship};
+use crate::ship::components::{
+    ActiveStationRatings, ShipConfigComponent, ShipSystemControlSources,
+};
 use crate::ship::state::ShipPhysics;
 use crate::world::server::WorldContentRuntime;
 
@@ -89,14 +98,97 @@ pub struct GmEntityProjectionPayload {
     pub entities: Vec<GmEntityProjection>,
 }
 
+/// One authored Station interface on a fleet/player ship. `console` is copied
+/// from `StationConfig.console`; the GM shell mounts that exact URL instead of
+/// cloning or approximating the interface.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct GmStationInterfaceProjection {
+    pub station_id: StationId,
+    pub name: String,
+    pub console: String,
+    pub rating: String,
+    pub operators: Vec<String>,
+}
+
+/// Absolute ship pose at the rendererless-GM projection boundary.
+///
+/// Ordinary clients receive this same truth through the Helm blackboard.  It is
+/// repeated explicitly here because a GM may open Helm before that aggregate
+/// blackboard has ever been published; an authentic console must not silently
+/// fall back to the origin in that interval.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub struct GmShipPoseProjection {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub yaw: f32,
+    pub forward_speed: f32,
+}
+
+/// The local read model needed to drive an authentic Station iframe.
+/// Blackboard values remain the exact tagged `SystemBlackboard` variants the
+/// ordinary client receives, while topology is projected from the ship's
+/// authored config rather than guessed from System ids.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct GmPuppetShipProjection {
+    pub ship_id: String,
+    pub name: String,
+    pub stations: Vec<GmStationInterfaceProjection>,
+    /// The exact complete config ordinary players receive on `Welcome`, built
+    /// by the same Rust projector. This is deliberately one wire object rather
+    /// than a GM-maintained subset: authentic Station builders consume authored
+    /// radar filters/ranges, arcs, tutorials, identity and assist gaps from it.
+    pub ship_config: ShipClientConfig,
+    pub station_ratings: BTreeMap<String, String>,
+    pub control_sources: BTreeMap<SystemId, String>,
+    pub blackboards: Vec<(SystemId, SystemBlackboard)>,
+    /// Static/reconnect world registry from `WorldResource`. The browser folds
+    /// `entity_states` over this through the ordinary `ClientSimState` reducer,
+    /// exactly as `WorldSetup` followed by `SimState` does for a player.
+    pub entities: Vec<EntitySnapshot>,
+    /// Absolute (not delta-compressed) version of the ordinary `SimState`
+    /// entity lane. Field meanings and shield derivation are identical; being
+    /// absolute is what makes a newly opened GM iframe complete immediately.
+    pub entity_states: Vec<EntityStateSnapshot>,
+    /// Current mission objective snapshots from `ObjectiveManager`.
+    pub objectives: Vec<ObjectiveSnapshot>,
+    /// Explicit current pose from the selected fleet ship's `ShipPhysics`.
+    pub ship_pose: GmShipPoseProjection,
+    /// The ship-owned Navigation goal, using the ordinary wire shape.
+    pub navigation_waypoint: Option<WaypointSnapshot>,
+    /// Full authoritative hull rows. The GM is not a player-recipient, so this
+    /// local projection is intentionally not passed through station privacy.
+    pub console_hull: Vec<SystemHullStatus>,
+}
+
+/// Absolute rendererless-GM Station projection. Activity is emitted from the
+/// attribution sidecar written at GM admission; downstream System consumers
+/// continue to see only source-stripped commands.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct GmStationProjectionPayload {
+    pub ships: Vec<GmPuppetShipProjection>,
+    pub activity: Vec<StationPuppetActivityEntry>,
+    /// Canonical terminal results for authentic Station commands. Correlation
+    /// remains the exact opaque identity minted by the originating iframe, so
+    /// the shell can settle that iframe's ordinary feedback lifecycle.
+    pub results: Vec<LoggedGmAction>,
+}
+
 pub struct GmProjectionPlugin;
 
 impl Plugin for GmProjectionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<GmEntityProjectionChanged>().add_systems(
-            FixedLast,
-            publish_local_projection.run_if(resource_exists::<BrowserGameMaster>),
-        );
+        app.init_resource::<StationPuppets>()
+            .init_resource::<crate::gm_puppet::StationPuppetActivity>()
+            .init_resource::<GmActionLog>()
+            .init_resource::<LocalGmActionRefusals>()
+            .add_message::<GmEntityProjectionChanged>()
+            .add_message::<GmStationProjectionChanged>()
+            .add_systems(
+                FixedLast,
+                (publish_local_projection, publish_station_projection)
+                    .run_if(resource_exists::<BrowserGameMaster>),
+            );
     }
 }
 
@@ -396,6 +488,238 @@ fn publish_local_projection(
     }
 }
 
+fn publish_station_projection(
+    puppets: Res<StationPuppets>,
+    activity: Res<crate::gm_puppet::StationPuppetActivity>,
+    action_log: Res<GmActionLog>,
+    local_refusals: Res<LocalGmActionRefusals>,
+    roster: Option<Res<crate::lockstep::FleetRoster>>,
+    selected_ship: Option<Res<crate::lobby::SelectedShipResource>>,
+    world_data: Option<Res<crate::lobby::server::WorldResource>>,
+    objectives: Option<Res<crate::world::server::ObjectiveManagerRes>>,
+    live_entities: Query<
+        (
+            Option<&EntityUuid>,
+            Option<&AsteroidUuid>,
+            Option<&Transform>,
+            Option<&EntitySystemHull>,
+            Option<&crate::ship::shields::ShipShields>,
+        ),
+        Or<(With<EntityUuid>, With<AsteroidUuid>)>,
+    >,
+    ships: Query<
+        (
+            &EntityUuid,
+            Option<&EntityName>,
+            &crate::lockstep::FleetSlotOf,
+            &ShipConfigComponent,
+            &ActiveStationRatings,
+            &ShipSystemControlSources,
+            &crate::server_app::ShipSystemBlackboards,
+            Option<&ShipPhysics>,
+            Option<&crate::console::navigation::server::NavigationWaypoint>,
+            Option<&EntitySystemHull>,
+        ),
+        (
+            With<crate::server_app::Ship>,
+            With<crate::lockstep::FleetSlotOf>,
+        ),
+    >,
+    mut previous: Local<Option<GmStationProjectionPayload>>,
+    mut changed: MessageWriter<GmStationProjectionChanged>,
+) {
+    // This is the absolute counterpart of `build_sim_state_entity_states`:
+    // same wire fields, same authoritative ECS components, but no broadcaster
+    // caches and therefore no delta suppression. The GM browser then feeds it
+    // through the ordinary `ClientSimState` reducer over `WorldResource`, so
+    // there is one raw/local projection boundary rather than a GM-only radar
+    // model.
+    let mut entity_states = live_entities
+        .iter()
+        .filter_map(|(uuid, asteroid_uuid, transform, hull, shields)| {
+            let uuid = uuid
+                .map(|uuid| uuid.0.clone())
+                .or_else(|| asteroid_uuid.map(|uuid| uuid.0.clone()))?;
+            let hull_fraction = crate::server_app::project_entity_hull_fraction(hull);
+            let (shield_fraction, shields_wire, shield_freq) =
+                crate::server_app::project_entity_shield_state(shields);
+            let (position, yaw) = if asteroid_uuid.is_some() {
+                // Asteroid transforms are immutable and already live in the
+                // `WorldResource` entry, matching ordinary SimState omission.
+                (None, None)
+            } else {
+                transform.map_or((None, None), |transform| {
+                    (
+                        Some([
+                            transform.translation.x,
+                            transform.translation.y,
+                            transform.translation.z,
+                        ]),
+                        Some(transform.rotation.to_euler(EulerRot::YXZ).0),
+                    )
+                })
+            };
+            Some(EntityStateSnapshot {
+                uuid,
+                position,
+                yaw,
+                hull_fraction,
+                shield_fraction,
+                flags: Vec::new(),
+                shields: shields_wire,
+                shield_freq,
+                warp_out_remaining_secs: None,
+            })
+        })
+        .collect::<Vec<_>>();
+    entity_states.sort_by(|left, right| left.uuid.cmp(&right.uuid));
+    let entities = world_data
+        .as_ref()
+        .map(|world| world.0.entities.clone())
+        .unwrap_or_default();
+    let objectives = objectives
+        .as_ref()
+        .map(|objectives| objectives.0.sorted_snapshots())
+        .unwrap_or_default();
+
+    let mut projected_ships = ships
+        .iter()
+        .map(
+            |(uuid, name, slot, config, ratings, sources, blackboards, physics, waypoint, hull)| {
+                let config_path = roster
+                    .as_ref()
+                    .and_then(|roster| {
+                        roster
+                            .ships()
+                            .iter()
+                            .find(|ship| ship.host == slot.0)
+                            .and_then(|ship| ship.ship_path.as_deref())
+                    })
+                    .or_else(|| selected_ship.as_ref().map(|selected| selected.0.as_str()));
+                let config_cache = crate::entities::config_cache::get_config_cache();
+                let ship_client_config = config_path
+                    .and_then(|path| config_cache.get(path))
+                    .map(|config| crate::lobby::server::project_ship_client_config(&config))
+                    .unwrap_or_default();
+                let station_ratings = config
+                    .0
+                    .stations
+                    .iter()
+                    .map(|station| {
+                        (
+                            station.id.0.clone(),
+                            ratings.0.get(&station.id).cloned().unwrap_or_default(),
+                        )
+                    })
+                    .collect::<BTreeMap<_, _>>();
+                let stations = config
+                    .0
+                    .stations
+                    .iter()
+                    .filter_map(|station| {
+                        let console = station
+                            .console
+                            .as_deref()
+                            .filter(|console| !console.is_empty())?;
+                        let target = StationPuppetTarget::new(
+                            crate::command_admission::log::ShipKey(uuid.0.clone()),
+                            station.id.clone(),
+                        );
+                        Some(GmStationInterfaceProjection {
+                            station_id: station.id.clone(),
+                            name: station.name.clone(),
+                            console: console.to_string(),
+                            rating: ratings.0.get(&station.id).cloned().unwrap_or_default(),
+                            operators: puppets.operators(&target).to_vec(),
+                        })
+                    })
+                    .collect();
+                let control_sources = sources
+                    .0
+                    .entries()
+                    .map(|(system, source)| {
+                        let source = if sources.0.is_offline(system) {
+                            crate::ship::control_source::ControlSource::Offline
+                        } else {
+                            *source
+                        };
+                        let label = match source {
+                            crate::ship::control_source::ControlSource::Human => "Human",
+                            crate::ship::control_source::ControlSource::Ai => "Ai",
+                            crate::ship::control_source::ControlSource::Offline => "Offline",
+                        };
+                        (system.clone(), label.to_string())
+                    })
+                    .collect();
+                let mut blackboards = blackboards
+                    .0
+                    .iter()
+                    .map(|(system, value)| (system.clone(), value.clone()))
+                    .collect::<Vec<_>>();
+                blackboards.sort_by(|left, right| left.0.cmp(&right.0));
+                let console_hull = hull
+                    .map(|hull| {
+                        hull.0
+                            .iter()
+                            .map(|(system_id, entry)| SystemHullStatus {
+                                system_id: system_id.clone(),
+                                display_name: entry.display_name.clone(),
+                                current: entry.current,
+                                max_hp: entry.max,
+                                tier: hull.0.tier_for(system_id),
+                                debuff_magnitude: hull.0.debuff_magnitude_for(system_id),
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let ship_pose = physics.map_or_else(GmShipPoseProjection::default, |physics| {
+                    GmShipPoseProjection {
+                        x: physics.x,
+                        y: physics.y,
+                        z: physics.z,
+                        yaw: physics.yaw,
+                        forward_speed: physics.forward_speed,
+                    }
+                });
+
+                GmPuppetShipProjection {
+                    ship_id: uuid.0.clone(),
+                    name: name.map_or_else(|| uuid.0.clone(), |name| name.0.clone()),
+                    stations,
+                    ship_config: ship_client_config,
+                    station_ratings,
+                    control_sources,
+                    blackboards,
+                    entities: entities.clone(),
+                    entity_states: entity_states.clone(),
+                    objectives: objectives.clone(),
+                    ship_pose,
+                    navigation_waypoint: waypoint.and_then(|waypoint| waypoint.snapshot()),
+                    console_hull,
+                }
+            },
+        )
+        .filter(|ship| !ship.stations.is_empty())
+        .collect::<Vec<_>>();
+    projected_ships.sort_by(|left, right| left.ship_id.cmp(&right.ship_id));
+
+    let next = GmStationProjectionPayload {
+        ships: projected_ships,
+        activity: activity.entries().to_vec(),
+        results: crate::gm_action::projected_results(
+            GmActionKind::StationCommand,
+            &action_log,
+            &local_refusals,
+        ),
+    };
+    if previous.as_ref() != Some(&next) {
+        changed.write(GmStationProjectionChanged {
+            payload: next.clone(),
+        });
+        *previous = Some(next);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -445,6 +769,14 @@ mod tests {
             .insert_resource(WorldResource::default())
             .add_plugins(GmProjectionPlugin);
         app
+    }
+
+    fn take_stations(app: &mut App) -> Vec<GmStationProjectionPayload> {
+        app.world_mut()
+            .resource_mut::<Messages<GmStationProjectionChanged>>()
+            .drain()
+            .map(|event| event.payload)
+            .collect()
     }
 
     #[test]
@@ -853,5 +1185,194 @@ mod tests {
         assert_eq!(reappeared.entities.len(), 1);
         assert_eq!(reappeared.entities[0].entity_id, FIRST_ID);
         assert_eq!(reappeared.entities[0].position, [77.0, 0.0, -9.0]);
+    }
+
+    #[test]
+    fn projects_only_fleet_ship_authored_station_interfaces_with_takeover_membership() {
+        let config = crate::ship::config::ShipConfig::from_toml(
+            r#"
+[[station]]
+id = "captain"
+name = "Captain"
+description = ""
+rank = ""
+console = "gui/captain-console.html"
+
+[[station]]
+id = "hidden"
+name = "Hidden"
+description = ""
+rank = ""
+
+[[system]]
+id = "red-alert"
+kind = "captain"
+station = "captain"
+"#,
+            &["captain"],
+        )
+        .unwrap();
+        let uuid = "player-ship-1";
+        let mut ratings = ActiveStationRatings::default();
+        ratings.0.insert(
+            StationId("captain".into()),
+            crate::ship::rating::BACKFILL_RATING.into(),
+        );
+        let target = StationPuppetTarget::new(
+            crate::command_admission::log::ShipKey(uuid.into()),
+            StationId("captain".into()),
+        );
+
+        let mut app = App::new();
+        app.insert_resource(BrowserGameMaster)
+            .add_plugins(GmProjectionPlugin);
+        app.world_mut()
+            .resource_mut::<StationPuppets>()
+            .set_operator(target, "gm-1".into(), true);
+        app.world_mut().spawn((
+            crate::server_app::Ship,
+            crate::lockstep::FleetSlotOf(crate::command_admission::HostSlot::SOLO),
+            EntityUuid(uuid.into()),
+            EntityName("Resolute".into()),
+            ShipConfigComponent(config),
+            ratings,
+            ShipSystemControlSources::default(),
+            crate::server_app::ShipSystemBlackboards::default(),
+        ));
+        // A configured NPC is intentionally absent from this local projection.
+        app.world_mut().spawn((
+            crate::server_app::Ship,
+            EntityUuid("npc-ship".into()),
+            ShipConfigComponent::default(),
+            ActiveStationRatings::default(),
+            ShipSystemControlSources::default(),
+            crate::server_app::ShipSystemBlackboards::default(),
+        ));
+
+        app.world_mut().run_schedule(FixedLast);
+        let payloads = take_stations(&mut app);
+        assert_eq!(payloads.len(), 1);
+        let ship = &payloads[0].ships[0];
+        assert_eq!(ship.ship_id, uuid);
+        assert_eq!(ship.stations.len(), 1, "no console means no interface row");
+        assert_eq!(ship.stations[0].console, "gui/captain-console.html");
+        assert_eq!(ship.stations[0].operators, ["gm-1"]);
+        assert_eq!(
+            ship.ship_config,
+            ShipClientConfig::default(),
+            "a fixture with no resolved entity-template path must not invent a partial GM config"
+        );
+    }
+
+    #[test]
+    fn helm_projection_carries_absolute_world_pose_objective_waypoint_and_hull_truth() {
+        let config = crate::ship::config::ShipConfig::from_toml(
+            r#"
+[[station]]
+id = "helm"
+name = "Helm"
+description = ""
+rank = ""
+console = "gui/cruiser/helm.html"
+
+[[system]]
+id = "drive-main"
+kind = "helm_thrust"
+station = "helm"
+"#,
+            &["helm_thrust"],
+        )
+        .unwrap();
+        let ship_uuid = "player-ship-helm";
+        let contact_uuid = "moving-contact";
+        let mut app = App::new();
+        app.insert_resource(BrowserGameMaster)
+            .insert_resource(crate::lobby::server::WorldResource(
+                crate::core::messages::WorldData {
+                    entities: vec![EntitySnapshot {
+                        uuid: contact_uuid.into(),
+                        name: Some("contact.name".into()),
+                        position: Some([1.0, 0.0, 2.0]),
+                        tags: vec!["ship".into()],
+                        radar_icon: Some("ship".into()),
+                        region_colour: Some([0.1, 0.2, 0.3]),
+                        radius: Some(12.0),
+                        ..EntitySnapshot::default()
+                    }],
+                    scenario_title: "scenario.title".into(),
+                    scenario_description: "scenario.description".into(),
+                },
+            ))
+            .insert_resource(crate::world::server::ObjectiveManagerRes::default())
+            .add_plugins(GmProjectionPlugin);
+        app.world_mut()
+            .resource_mut::<crate::world::server::ObjectiveManagerRes>()
+            .0
+            .add(
+                "reach-contact",
+                "objective.reach_contact",
+                true,
+                vec!["contact.name".into()],
+            );
+        app.world_mut().spawn((
+            EntityUuid(contact_uuid.into()),
+            Transform::from_xyz(40.0, 3.0, -25.0),
+            hull(50.0),
+        ));
+        app.world_mut().spawn((
+            crate::server_app::Ship,
+            crate::lockstep::FleetSlotOf(crate::command_admission::HostSlot::SOLO),
+            EntityUuid(ship_uuid.into()),
+            EntityName("Resolute".into()),
+            ShipConfigComponent(config),
+            ActiveStationRatings::default(),
+            ShipSystemControlSources::default(),
+            crate::server_app::ShipSystemBlackboards::default(),
+            ShipPhysics {
+                x: 125.0,
+                y: 4.0,
+                z: -75.0,
+                yaw: 0.75,
+                forward_speed: 18.0,
+                ..ShipPhysics::default()
+            },
+            crate::console::navigation::server::NavigationWaypoint::new(
+                crate::console::navigation::server::WaypointMode::Free {
+                    x: 240.0,
+                    z: -160.0,
+                },
+            ),
+            hull(80.0),
+        ));
+
+        app.world_mut().run_schedule(FixedLast);
+        let payload = take_stations(&mut app).pop().expect("projection");
+        let ship = payload
+            .ships
+            .iter()
+            .find(|ship| ship.ship_id == ship_uuid)
+            .expect("fleet ship");
+        assert_eq!(ship.ship_pose.x, 125.0);
+        assert_eq!(ship.ship_pose.z, -75.0);
+        assert_eq!(ship.ship_pose.yaw, 0.75);
+        assert_eq!(ship.ship_pose.forward_speed, 18.0);
+        assert_eq!(
+            ship.navigation_waypoint,
+            Some(WaypointSnapshot {
+                x: 240.0,
+                z: -160.0,
+                source_uuid: None,
+            })
+        );
+        assert_eq!(ship.objectives.len(), 1);
+        assert_eq!(ship.objectives[0].id, "reach-contact");
+        assert_eq!(ship.entities[0].position, Some([1.0, 0.0, 2.0]));
+        let live_contact = ship
+            .entity_states
+            .iter()
+            .find(|entity| entity.uuid == contact_uuid)
+            .expect("absolute live entity state");
+        assert_eq!(live_contact.position, Some([40.0, 3.0, -25.0]));
+        assert_eq!(ship.console_hull[0].current, 80.0);
     }
 }

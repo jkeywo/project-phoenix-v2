@@ -134,7 +134,7 @@ fn finish_action_feedback(
 /// `SetRedAlert` into each ship's own `AdmittedCommands` when its Captain
 /// system is AI-controlled. Without per-entity dispatch, NPC captain-AI
 /// red-alert changes would be silently dropped.
-fn handle_set_red_alert(
+pub(crate) fn handle_set_red_alert(
     mut ship_query: Query<
         (
             &AdmittedCommands,

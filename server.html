@@ -160,12 +160,22 @@
     #canvas { display: block; width: 100%; height: 100%; background: #000; }
     #gm-console {
       display: none; position: absolute; inset: 0; z-index: 80;
-      box-sizing: border-box; padding: max(4rem, var(--settings-cog-keepout)) clamp(1rem, 4vw, 4rem) 2rem;
+      box-sizing: border-box;
+      padding: max(4rem, var(--settings-cog-keepout)) clamp(1rem, 4vw, 4rem) clamp(1.5rem, 4vh, 3rem);
       color: var(--ink-primary); background: #05080d;
       font-family: 'Chakra Petch', monospace;
-      flex-direction: column; gap: 1.25rem; overflow-y: auto;
+      flex-direction: column; gap: 1.25rem;
+      overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain;
+      scroll-padding-block: var(--settings-cog-keepout) 1.5rem;
     }
     html.phoenix-gm-page #gm-console { display: flex; }
+    /* The join/connection overlay is viewscreen chrome. Its absolute z-index is
+       deliberately above the ordinary canvas, but on the scrollable GM page it
+       can cover whichever real control has been brought to the viewport edge.
+       A GM joins through the dedicated fleet/session surface above, so remove
+       this sibling while that route is active rather than letting diagnostics
+       visually cover or intercept an authentic Station control. */
+    html.phoenix-gm-page #overlay { display: none !important; }
     html.phoenix-gm-page #canvas,
     html.phoenix-gm-page #hud-overlay { display: none; }
     #gm-console h1, #gm-console h2, #gm-console h3 { margin: 0; }
@@ -239,6 +249,35 @@
     @media (max-width: 880px) {
       #gm-workspace { grid-template-columns: 1fr; }
       #gm-entity-map { height: 24rem; }
+    }
+    #gm-station-controls {
+      width: min(76rem, 100%); min-height: 0; padding: 1.25rem;
+      box-sizing: border-box; border: 1px solid var(--edge-control);
+      display: grid; grid-template-columns: minmax(13rem, 20rem) 1fr;
+      grid-template-rows: auto auto auto auto;
+      gap: .75rem 1rem;
+    }
+    #gm-station-controls[hidden] { display: none; }
+    #gm-station-controls h2 { grid-column: 1 / -1; }
+    #gm-station-select, #gm-station-toggle {
+      min-height: 2.75rem; padding: .55rem .75rem; color: var(--ink-primary);
+      background: var(--surface-panel-up); border: 1px solid var(--edge-control);
+      font: inherit;
+    }
+    #gm-station-toggle { cursor: pointer; }
+    #gm-station-toggle:disabled { opacity: .45; cursor: default; }
+    #gm-station-status { grid-column: 1 / -1; margin: 0; color: var(--ink-muted); }
+    #gm-station-frame {
+      grid-column: 1 / -1; width: 100%; height: clamp(22rem, 58vh, 46rem);
+      border: 1px solid var(--edge-control); background: #000;
+    }
+    #gm-station-activity-heading, #gm-station-activity { grid-column: 1 / -1; }
+    #gm-station-activity { margin: 0; max-height: 10rem; overflow-y: auto; }
+    @media (max-height: 800px) {
+      #gm-console { gap: .9rem; }
+      #gm-session-controls, #gm-entity-card { padding: 1rem; }
+      #gm-station-controls { padding: 1rem; }
+      #gm-station-frame { height: clamp(20rem, 55vh, 32rem); }
     }
     #overlay { position: absolute; bottom: 1rem; right: 1rem; z-index: 190; display: none; }
     /* Before a world is selected the join surface is a real flex child of the
@@ -1864,6 +1903,17 @@
               aria-live="polite" aria-relevant="additions text"></ol>
           </section>
         </div>
+        <p id="gm-station-pending" role="status" data-i18n="server.gm.station.pending"></p>
+        <section id="gm-station-controls" hidden role="region" aria-labelledby="gm-station-heading">
+          <h2 id="gm-station-heading" data-i18n="server.gm.station.heading"></h2>
+          <select id="gm-station-select" aria-labelledby="gm-station-heading"></select>
+          <button id="gm-station-toggle" type="button"></button>
+          <p id="gm-station-status" role="status" aria-live="polite" aria-atomic="true"></p>
+          <iframe id="gm-station-frame" title="" sandbox="allow-scripts allow-same-origin"></iframe>
+          <h3 id="gm-station-activity-heading" data-i18n="server.gm.station.activity_heading"></h3>
+          <ol id="gm-station-activity" role="log" aria-labelledby="gm-station-activity-heading"
+            aria-live="polite" aria-relevant="additions text"></ol>
+        </section>
       </main>
 
       <!-- Game-over overlay: shown when GamePhase::GameOver via __updateHud. -->
@@ -2253,6 +2303,7 @@
     import { createGmActivityFeed } from './gui/gm-activity-feed.js';
     import { createGmLocalProjection } from './gui/gm-local-projection.js';
     import { createGmSessionControls } from './gui/gm-session-controls.js';
+    import { createGmStationPuppet } from './gui/gm-station-puppet.js';
     import {
       ActionFeedbackLifecycle,
       emitActionFeedbackTransition,
@@ -2293,6 +2344,21 @@
     window.__hostGmSessionReset = gmSessionControls.reset;
     window.__hostGmSessionState = gmSessionControls.state;
     window.__hostGmActivityState = gmActivity.state;
+    const gmStationPuppet = createGmStationPuppet({
+      doc: document,
+      win: window,
+      t,
+      getOperator: () => typeof window.__hostLocalGm === 'function'
+        ? window.__hostLocalGm() : null,
+      submitStationPuppet: (request) =>
+        typeof window.__hostSetStationPuppet === 'function'
+          && window.__hostSetStationPuppet(request),
+      submitStationCommand: (request) =>
+        typeof window.__hostIssueStationCommand === 'function'
+          && window.__hostIssueStationCommand(request),
+    });
+    window.__hostGmStationRefresh = gmStationPuppet.refresh;
+    window.__hostGmStationState = gmStationPuppet.state;
     window.__hostSemanticActions = hostSemanticActions;
     window.__hostActionFeedback = hostActionFeedback;
     const hostChannelDispatch = createHostChannel({
@@ -2308,6 +2374,7 @@
           if (gmProjection.update(p)) gmActivity.reconcileAvailability();
         },
         gm_activity:  function(p) { gmActivity.update(p); },
+        gm_station:   function(p) { gmStationPuppet.update(p); },
         gm_session:   function(p) { gmSessionControls.update(p); },
       },
       strings: { t, has, localiseTree },
@@ -3388,6 +3455,54 @@
       }
     };
 
+    /** Submit one absolute Station takeover membership assignment. */
+    window.__hostSetStationPuppet = function(request) {
+      const gm = localGm();
+      if (!gm || !request || typeof request !== 'object'
+          || typeof request.ship !== 'string' || !request.ship
+          || typeof request.station !== 'string' || !request.station
+          || typeof request.correlation !== 'string' || !request.correlation
+          || typeof request.active !== 'boolean'
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      try {
+        return window.wasm_submit_gm_action(JSON.stringify({
+          operator_id: gm.id,
+          correlation: request.correlation,
+          action: 'set_station_puppet',
+          ship: request.ship,
+          station: request.station,
+          active: request.active,
+        })) !== false;
+      } catch (_) {
+        return false;
+      }
+    };
+
+    /** Submit one existing Station System command through typed GM Admission. */
+    window.__hostIssueStationCommand = function(request) {
+      const gm = localGm();
+      if (!gm || !request || typeof request !== 'object'
+          || typeof request.ship !== 'string' || !request.ship
+          || typeof request.station !== 'string' || !request.station
+          || typeof request.target !== 'string' || !request.target
+          || !request.payload || typeof request.payload !== 'object'
+          || typeof request.correlation !== 'string' || !request.correlation
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      try {
+        return window.wasm_submit_gm_action(JSON.stringify({
+          operator_id: gm.id,
+          correlation: request.correlation,
+          action: 'issue_station_command',
+          ship: request.ship,
+          station: request.station,
+          target: request.target,
+          payload: request.payload,
+        })) !== false;
+      } catch (_) {
+        return false;
+      }
+    };
+
     /** Local content/boot validation contributed to the collective policy. */
     function fleetStartValidation() {
       const evaluate = window.fleetStartValidationState;
@@ -3793,6 +3908,9 @@
       const resultEl = document.getElementById('gm-start-result');
       if (typeof window.__hostGmSessionRefresh === 'function') {
         window.__hostGmSessionRefresh();
+      }
+      if (typeof window.__hostGmStationRefresh === 'function') {
+        window.__hostGmStationRefresh();
       }
       if (!controls || !readyBtn || !forceBtn) return;
       const gm = localGm();

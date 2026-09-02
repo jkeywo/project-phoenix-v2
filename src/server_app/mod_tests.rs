@@ -333,6 +333,57 @@ fn control_source_projection_tracks_visiting_and_ai_navigation_authority() {
     );
 }
 
+#[test]
+fn crew_projection_names_only_the_local_station_takeover_and_latest_admitted_activity() {
+    let mut world = World::new();
+    world.spawn((
+        LocalShip,
+        crate::entities::spawner::EntityUuid("ship-local".into()),
+    ));
+    world.spawn((
+        Ship,
+        crate::entities::spawner::EntityUuid("ship-peer".into()),
+    ));
+    let local_target = crate::gm_puppet::StationPuppetTarget::new(
+        crate::command_admission::log::ShipKey("ship-local".into()),
+        StationId("captain".into()),
+    );
+    let peer_target = crate::gm_puppet::StationPuppetTarget::new(
+        crate::command_admission::log::ShipKey("ship-peer".into()),
+        StationId("helm".into()),
+    );
+    let mut puppets = crate::gm_puppet::StationPuppets::default();
+    puppets.set_operator(local_target, "gm-1".into(), true);
+    puppets.set_operator(peer_target, "gm-2".into(), true);
+    world.insert_resource(puppets);
+    let mut activity = crate::gm_puppet::StationPuppetActivity::default();
+    activity.push(crate::gm_puppet::StationPuppetActivityEntry {
+        tick: 45,
+        order: crate::gm_action::GmActionOrder::new(crate::command_admission::HostSlot(1), 7),
+        operator_id: "gm-1".into(),
+        ship: crate::command_admission::log::ShipKey("ship-local".into()),
+        station: StationId("captain".into()),
+        target: SystemId("red-alert".into()),
+        action: "SetRedAlert".into(),
+    });
+    world.insert_resource(activity);
+
+    assert_eq!(
+        build_station_puppet_snapshots(&mut world),
+        vec![StationPuppetSnapshot {
+            station: StationId("captain".into()),
+            operators: vec!["gm-1".into()],
+            latest_activity: Some(StationPuppetActivitySnapshot {
+                tick: 45,
+                operator_id: "gm-1".into(),
+                target: SystemId("red-alert".into()),
+                action: "SetRedAlert".into(),
+            }),
+        }],
+        "other fleet ships never leak into this crew's Station projection"
+    );
+}
+
 // ── station_for_system ───────────────────────────────────────────────
 
 /// Issue #801 deleted `station_for_system`'s "tactical" special case
@@ -2019,6 +2070,7 @@ fn host_return_to_lobby_remains_live_while_a_fleet_session_is_product_paused() {
             sequenced_by: local,
             operator_id: "gm-one".into(),
             correlation: crate::gm_action::GmActionId::new("round-one-pause").unwrap(),
+            recovery_generation: 0,
             apply_tick: first_tick,
             order: crate::gm_action::GmActionOrder::new(local, 1),
             action: crate::gm_action::GmAction::SetSessionPaused { active: true },
@@ -2099,6 +2151,7 @@ fn host_return_to_lobby_remains_live_while_a_fleet_session_is_product_paused() {
             sequenced_by: local,
             operator_id: "gm-one".into(),
             correlation: crate::gm_action::GmActionId::new("round-two-pause").unwrap(),
+            recovery_generation: 0,
             apply_tick: second_tick,
             order: crate::gm_action::GmActionOrder::new(local, 1),
             action: crate::gm_action::GmAction::SetSessionPaused { active: true },
@@ -2149,6 +2202,7 @@ fn same_frame_typed_pause_and_return_cannot_repause_the_lobby() {
                     sequenced_by: owner,
                     operator_id: "gm-one".into(),
                     correlation: crate::gm_action::GmActionId::new("same-frame-pause").unwrap(),
+                    recovery_generation: 0,
                     apply_tick: now,
                     order: crate::gm_action::GmActionOrder::new(local, 1),
                     action: crate::gm_action::GmAction::SetSessionPaused { active: true },

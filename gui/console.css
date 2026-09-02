@@ -528,6 +528,26 @@ body .frame { height: 100dvh; }
 /* Legacy hidden utility; station ratings replaced complexity-preset hiding. */
 .cpx-hidden { display: none !important; }
 
+/* Crew-public Game Master takeover status (issue #1299). Mounted by the shared
+   console runtime so every authored Station interface exposes the same truth. */
+.gm-takeover-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 900;
+  box-sizing: border-box;
+  padding: 0.45rem 0.8rem;
+  border-bottom: 1px solid var(--reloading);
+  background: rgba(var(--rgb-deep), 0.96);
+  color: var(--reloading-bright);
+  font-family: "JetBrains Mono", monospace;
+  font-size: var(--text-sm);
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+.gm-takeover-banner[hidden] { display: none; }
+
 /* ── Contextual tutorial overlays (issue #916) ─────────────────────────
    The overlay card itself is <ph-tutorial-overlay> shadow DOM (mounted into
    every console by gui/console-core.js). This class is stamped onto the

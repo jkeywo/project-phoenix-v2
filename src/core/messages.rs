@@ -1761,6 +1761,31 @@ pub struct SimSnapshot {
     /// map keeps the authoritative byte stream deterministic.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub control_sources: BTreeMap<SystemId, String>,
+    /// Active GM takeover rows for the local player ship. Station-scoped and
+    /// crew-public: this lets every authentic console show that its ordinary
+    /// Backfill AI is currently suppressed, including the last attributed GM
+    /// System action admitted on that Station.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub station_puppets: Vec<StationPuppetSnapshot>,
+}
+
+/// Crew-visible takeover status for one Station on the recipient's ship.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StationPuppetSnapshot {
+    pub station: StationId,
+    pub operators: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_activity: Option<StationPuppetActivitySnapshot>,
+}
+
+/// Attribution retained at the GM admission/activity seam. This projection is
+/// presentation only; System command consumers never receive these fields.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StationPuppetActivitySnapshot {
+    pub tick: u64,
+    pub operator_id: String,
+    pub target: SystemId,
+    pub action: String,
 }
 
 /// One complete human-seeking Station's current placement and effective rating.
@@ -4622,9 +4647,10 @@ pub struct PowerBlackboard {
 
 /// An authority-checked intra-system command produced by `admit_system_commands`.
 ///
-/// The source identity is stripped at admission; `response_token` carries the
-/// originating client's token purely for routing replies (not for behavioral
-/// branching).
+/// The source identity is stripped at admission; `response_token` is an opaque
+/// host-local reply target used purely for routing (not for behavioral
+/// branching). Ordinary client input carries that client's bearer token; an
+/// internal producer may instead use an unclaimable reserved target.
 ///
 /// Deliberately **not** `Serialize` (issue #898). This type is in-process only.
 /// The command log's entry type is
@@ -4637,7 +4663,7 @@ pub struct PowerBlackboard {
 pub struct AdmittedCommand {
     pub target: SystemId,
     pub payload: SystemControlPayload,
-    /// Token used to address a reply back to the originating client.
+    /// Opaque host-local target used to address a reply to the origin route.
     /// Handlers must not branch on this for any behavioral decision.
     pub response_token: Option<String>,
     /// Transient correlated-feedback identity.  It survives command delay so

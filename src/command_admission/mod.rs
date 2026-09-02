@@ -47,7 +47,10 @@ pub use log::{
     reset_command_log, CommandDelay, CommandLog, CommandLogReplay, CommandOrder, HostSlot,
     LoggedCommand, PendingCommands, ShipKey,
 };
-pub use policy::{is_command_authorized, station_for_system};
+pub use policy::{
+    authorize_station_command, effective_target_for_command, is_command_authorized,
+    station_for_system, StationCommandPolicyFailure,
+};
 pub use router::{
     unrouted_command_targets, unrouted_commandable_systems, warn_unrouted_admitted_commands,
     AdmittedConsumerRegistry, ConsumerMatcher, RegisterAdmittedConsumer,
@@ -70,7 +73,7 @@ pub struct AdmissionPlugin;
 /// Exact target/payload pairs whose owning consumers complete the correlated
 /// operator lifecycle. A correlation never widens command authority: this is
 /// only the protocol allowlist for commands that can promise a terminal reply.
-fn supports_correlated_action_feedback_for_kind(
+pub(crate) fn supports_correlated_action_feedback_for_kind(
     target: &crate::core::messages::SystemId,
     payload: &crate::core::messages::SystemControlPayload,
     target_kind: Option<&str>,
@@ -394,6 +397,28 @@ pub fn validate_command(
         target,
         payload,
         response_token: Some(token.to_string()),
+        feedback_correlation: None,
+    })
+}
+
+/// Payload-aware admission for an authenticated GM acting through one
+/// authoritatively puppeted Station. This shares effective-target and live
+/// availability policy with ordinary human/AI admission, then constructs the
+/// same source-stripped command shape. GM attribution remains at the caller's
+/// journal/activity seam and never reaches System consumers.
+pub fn validate_station_command(
+    station: &crate::core::messages::StationId,
+    target: crate::core::messages::SystemId,
+    payload: crate::core::messages::SystemControlPayload,
+    control_sources: &crate::ship_plugin::ShipSystemControlSources,
+    config: &crate::ship::config::ShipConfig,
+    hosts: Option<&crate::ship_plugin::HumanSeekingHosts>,
+) -> Result<crate::core::messages::AdmittedCommand, StationCommandPolicyFailure> {
+    authorize_station_command(station, &target, &payload, control_sources, config, hosts)?;
+    Ok(crate::core::messages::AdmittedCommand {
+        target,
+        payload,
+        response_token: None,
         feedback_correlation: None,
     })
 }

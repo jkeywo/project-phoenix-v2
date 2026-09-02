@@ -107,6 +107,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
         ingest_station_importance(world);
         let station_importance = build_station_importance_snapshots(world);
         let control_sources = build_control_source_snapshots(world);
+        let station_puppets = build_station_puppet_snapshots(world);
 
         // ── Emit SystemHullUpdate per recipient, only when that recipient's
         // *visible* detail changed (issue #737).
@@ -124,9 +125,59 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             station_health,
             station_importance,
             control_sources,
+            station_puppets,
         };
         vec![ServerMessage::SimState { snapshot }]
     })
+}
+
+pub(crate) fn build_station_puppet_snapshots(
+    world: &mut World,
+) -> Vec<crate::core::messages::StationPuppetSnapshot> {
+    let local_ship = {
+        let mut query =
+            world.query_filtered::<&crate::entities::spawner::EntityUuid, With<LocalShip>>();
+        query.iter(world).next().map(|uuid| uuid.0.clone())
+    };
+    let Some(local_ship) = local_ship else {
+        return Vec::new();
+    };
+    let puppets = world
+        .get_resource::<crate::gm_puppet::StationPuppets>()
+        .cloned()
+        .unwrap_or_default();
+    let activity = world
+        .get_resource::<crate::gm_puppet::StationPuppetActivity>()
+        .cloned()
+        .unwrap_or_default();
+
+    puppets
+        .entries()
+        .iter()
+        .filter(|entry| entry.target.ship.0 == local_ship)
+        .map(|entry| {
+            let latest_activity = activity
+                .entries()
+                .iter()
+                .rev()
+                .find(|activity| {
+                    activity.ship.0 == local_ship && activity.station == entry.target.station
+                })
+                .map(
+                    |activity| crate::core::messages::StationPuppetActivitySnapshot {
+                        tick: activity.tick,
+                        operator_id: activity.operator_id.clone(),
+                        target: activity.target.clone(),
+                        action: activity.action.clone(),
+                    },
+                );
+            crate::core::messages::StationPuppetSnapshot {
+                station: entry.target.station.clone(),
+                operators: entry.operators.clone(),
+                latest_activity,
+            }
+        })
+        .collect()
 }
 
 pub(crate) fn build_control_source_snapshots(
@@ -336,6 +387,46 @@ pub(crate) fn build_station_host_snapshots(
         .unwrap_or_default()
 }
 
+/// Project the common live hull scalar carried by both ordinary `SimState` and
+/// the rendererless GM's absolute entity lane.
+pub(crate) fn project_entity_hull_fraction(
+    hull: Option<&crate::entities::spawner::EntitySystemHull>,
+) -> Option<f32> {
+    hull.map(|hull| {
+        let max = hull.0.total_max();
+        if max > 0.0 {
+            hull.0.total_current() / max
+        } else {
+            1.0
+        }
+    })
+}
+
+/// Project the common shield fields carried by both ordinary `SimState` and
+/// the rendererless GM's absolute entity lane. Keeping this producer shared is
+/// what prevents the local GM view from becoming a second sensor truth path.
+pub(crate) fn project_entity_shield_state(
+    shields: Option<&crate::ship::shields::ShipShields>,
+) -> (
+    Option<f32>,
+    Option<Vec<crate::core::messages::ShieldFacingStatus>>,
+    Option<f32>,
+) {
+    let fraction = shields.map(|shields| {
+        let total_hp: i32 = shields.0.facings.iter().map(|facing| facing.hp).sum();
+        let total_max: i32 = shields.0.facings.iter().map(|facing| facing.max_hp).sum();
+        if total_max > 0 {
+            total_hp as f32 / total_max as f32
+        } else {
+            0.0
+        }
+    });
+    let facings =
+        shields.map(|shields| crate::ship::shields::shield_facing_statuses(&shields.0.snapshot()));
+    let frequency = shields.map(|shields| shields.frequency());
+    (fraction, facings, frequency)
+}
+
 /// Compute this tick's `EntityStateSnapshot` list for the `SimState` broadcast.
 ///
 /// Extracted from [`sim_state_broadcaster`]'s producer closure (issue #927)
@@ -365,23 +456,7 @@ pub(crate) fn build_sim_state_entity_states(
         )>();
         q.iter(world)
             .filter_map(|(uuid, hull_comp, shield_comp)| {
-                let hull_fraction = hull_comp.map(|h| {
-                    let max = h.0.total_max();
-                    if max > 0.0 {
-                        h.0.total_current() / max
-                    } else {
-                        1.0
-                    }
-                });
-                let shield_fraction = shield_comp.map(|s| {
-                    let total_hp: i32 = s.0.facings.iter().map(|f| f.hp).sum();
-                    let total_max: i32 = s.0.facings.iter().map(|f| f.max_hp).sum();
-                    if total_max > 0 {
-                        total_hp as f32 / total_max as f32
-                    } else {
-                        0.0
-                    }
-                });
+                let hull_fraction = project_entity_hull_fraction(hull_comp);
                 // Per-facing detail + generator frequency (issue #927): the
                 // SAME producer this ship's own `ShieldsBlackboard.facings`
                 // uses (`ship::shields::shield_facing_statuses`) and the
@@ -391,9 +466,8 @@ pub(crate) fn build_sim_state_entity_states(
                 // These were always sent as `None` before #927, which is
                 // why `target_shields`/`target_shield_freq` were always
                 // empty on the wire regardless of which console rendered them.
-                let shields_wire = shield_comp
-                    .map(|s| crate::ship::shields::shield_facing_statuses(&s.0.snapshot()));
-                let shield_freq = shield_comp.map(|s| s.frequency());
+                let (shield_fraction, shields_wire, shield_freq) =
+                    project_entity_shield_state(shield_comp);
                 // Skip entirely when there are no health components (unbreakable asteroids).
                 if hull_fraction.is_none() && shield_fraction.is_none() {
                     return None;
@@ -479,29 +553,12 @@ pub(crate) fn build_sim_state_entity_states(
         ), Without<Asteroid>>();
         q.iter(world)
             .map(|(transform, uuid, hull_comp, shield_comp)| {
-                let hull_fraction = hull_comp.map(|h| {
-                    let max = h.0.total_max();
-                    if max > 0.0 {
-                        h.0.total_current() / max
-                    } else {
-                        1.0
-                    }
-                });
-                let shield_fraction = shield_comp.map(|s| {
-                    let total_hp: i32 = s.0.facings.iter().map(|f| f.hp).sum();
-                    let total_max: i32 = s.0.facings.iter().map(|f| f.max_hp).sum();
-                    if total_max > 0 {
-                        total_hp as f32 / total_max as f32
-                    } else {
-                        0.0
-                    }
-                });
+                let hull_fraction = project_entity_hull_fraction(hull_comp);
                 // Per-facing detail + generator frequency (issue #927) —
                 // same producer as the asteroid branch above; see the
                 // comment there for why this closes the Sensors-panel gap.
-                let shields_wire = shield_comp
-                    .map(|s| crate::ship::shields::shield_facing_statuses(&s.0.snapshot()));
-                let shield_freq = shield_comp.map(|s| s.frequency());
+                let (shield_fraction, shields_wire, shield_freq) =
+                    project_entity_shield_state(shield_comp);
                 let yaw = transform.rotation.to_euler(bevy::math::EulerRot::YXZ).0;
                 (
                     uuid.0.clone(),

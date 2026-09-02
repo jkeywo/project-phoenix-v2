@@ -95,7 +95,8 @@ describe('PhTutorialOverlay', () => {
     const { el } = setup({ sendAction });
     el.state = { active: WELCOME, remaining: 1 };
     // Two re-parents = two extra connectedCallback runs; the click listener
-    // is wired once in the constructor, so one click stays one action.
+    // is wired once while the shadow template is created, so one click stays
+    // one action.
     const other = document.createElement('div');
     document.body.appendChild(other);
     other.appendChild(el);
@@ -103,6 +104,17 @@ describe('PhTutorialOverlay', () => {
     el.shadowRoot.getElementById('dismiss').click();
     expect(sendAction).toHaveBeenCalledTimes(1);
     expect(sendAction).toHaveBeenCalledWith('tutorial_dismiss', { overlay_id: 'helm-welcome' });
+  });
+
+  it('supports lazy document.createElement construction before mounting', () => {
+    const el = document.createElement('ph-tutorial-overlay');
+
+    expect(el.hasAttribute('hidden')).toBe(false);
+    document.body.appendChild(el);
+    expect(el.hidden).toBe(true);
+
+    el.state = { active: WELCOME, remaining: 1 };
+    expect(el.hidden).toBe(false);
   });
 
   it('highlights the anchored light-DOM control and moves the highlight with the state', () => {

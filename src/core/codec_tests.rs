@@ -418,6 +418,16 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
                         (SystemId("navigation".into()), "Human".into()),
                         (SystemId("shields-system".into()), "Ai".into()),
                     ]),
+                    station_puppets: vec![StationPuppetSnapshot {
+                        station: StationId("navigation".into()),
+                        operators: vec!["gm-1".into()],
+                        latest_activity: Some(StationPuppetActivitySnapshot {
+                            tick: 44,
+                            operator_id: "gm-1".into(),
+                            target: SystemId("navigation".into()),
+                            action: "SetWaypoint".into(),
+                        }),
+                    }],
                 },
             },
         ),

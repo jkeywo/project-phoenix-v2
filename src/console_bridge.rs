@@ -94,6 +94,14 @@ pub struct GmActivityFeedChanged {
     pub payload: crate::gm_activity::GmActivityFeedPayload,
 }
 
+/// Absolute authentic-Station projection for the rendererless GM page. Like
+/// `GmEntityProjectionChanged`, this is page-local Host Channel data and never
+/// a peer protocol message.
+#[derive(Message, Clone, Debug)]
+pub struct GmStationProjectionChanged {
+    pub payload: crate::gm_projection::GmStationProjectionPayload,
+}
+
 /// Absolute GM session state and bounded attributed result feed. Local Host
 /// Channel only; the grants themselves cross the typed host mesh.
 #[derive(Message, Clone, Debug)]

@@ -65,3 +65,99 @@ max_failures = 0
 # Seeds 1..5 preserve that historical comparison; 6..20 give the ratified
 # 80–95% band five-point resolution (16–19 completions). Do not move the seeds
 # or shorten the run to manufacture movement.
+
+# ── NARRATIVE-TIMELINE BASELINE RECORDED ON #1338 (2026-09-02) ───────────────
+#
+# Taken BEFORE any scenario tuning, which is what issue #1338 asks for: the
+# mission-timeline recorder is new, Falling Skyway is unchanged by that slice
+# (not one line of assets/worlds/falling_skyway.toml moved), and this block is
+# the thing the tuning slices of PRD #1337 will be A/B'd against.
+#
+# Exact run — ONE fixed seed, not the 20-seed sweep above, because this is a
+# story reading rather than a rate:
+#   cargo run --features headless --bin phoenix-headless -- \
+#     --world assets/worlds/falling_skyway.toml \
+#     --ship assets/entities/alliance_destroyer.toml \
+#     --seed 1 --hz 30 --sim-seconds 1850 --report-format json
+#
+# RUN SHAPE
+#   ended  GameOver at t=1836.07 (110,163 ticks), classified `victory`
+#   player 2527/2690 hull remaining (93.9 %), 1511.0 damage taken, 0 dealt
+#   32 entities alive at exit, 7 ships carrying damage ledgers
+#
+# NARRATIVE TIMELINE — 132 events
+#   objective_posted     25      comms_opened     46
+#   objective_completed  22      comms_answered   23
+#   objective_failed      3      deadline_fired   13
+#   beat_fired            0      marked_entity_*   0
+#
+# The two zeroes are the honest state of the world, not a gap in the recorder:
+# Falling Skyway authors no `ctx.effects.narrative_beat(..)` call and marks no
+# `[[entity]]` with `narrative = true` yet, because #1338 deliberately did not
+# edit the scenario. `assets/worlds/probe_narrative.toml` exercises both, and
+# `tests/narrative_timeline.rs` proves them. Marking Lyra, the Skyhook and the
+# three claimants — and punctuating the storm bands with beats — is the first
+# thing a tuning slice should do, and this block is what it will move.
+#
+# SHORT-STORY INTERPRETATION (read straight off the timeline, in order)
+#   t=0      The crew arrive to two mandatory jobs: clear the corridor, triage
+#            the ladder. The corridor is clear by t=50.
+#   t=120    The strike committee hardens before anybody has spoken to them.
+#   t=160    The whole opening breaks at once. The tether slips (deadline
+#            `tether_slip`), the survey and the picket-line objectives post
+#            with four optional ones behind them, and BOTH claimants hail
+#            inside the same tick. The crew listen to the committee, ask
+#            Havelock for the file, promise safe passage, refuse to force the
+#            line, promise the surface records, show the file, and settle the
+#            strike — eleven Comms choices between t=160.07 and t=160.20. The
+#            line is back up by t=180.
+#   t=212    Rigger Tacket hails; the crew hear her account and promise to
+#            protect her. Her testimony makes the evidence filable, and the
+#            confrontation objective posts.
+#   t=300    The evidence is filed; corroboration completes.
+#   t=325    The last rung is scanned, the survey is reported to Skyway
+#            Control, and the mandatory survey completes.
+#   t=330    Hauler Lark is hailed about the weather and holds — one deadline
+#            (`lark_first_hail_due`) met, its final one at t=360 spent.
+#   t=400    The storm front arrives. Shelter, rescue and storm objectives
+#            post; the rescue scan completes at t=420 and the rescue itself at
+#            t=433 — the fastest work of the mission.
+#   t=580-900 Three storm bands pass. At t=768 Lyra's clear-by deadline fires
+#            with the approach already made, and the lee objective posts.
+#   t=1072   The storm passes. Every shelter objective completes together, the
+#            skyhook head reports its load, and Act 3 posts.
+#   t=1528   The head holds — and the `skyhook_failure_due` deadline fires in
+#            the same tick, which is the mission's hinge stated twice.
+#   t=1600   The transfer window opens SHORT. All three claimants press their
+#            claim at t=1602 and the crew tell each of them to hold — twice
+#            over, as each re-hails between t=1624 and t=1642.
+#   t=1800   The window closes with nobody through it. `obj-a3-window` fails.
+#   t=1826   The three claimants ride it out, the debrief is empty, and both
+#            `obj-a3-choice` (mandatory) and `obj-a3-confront` fail.
+#
+#   READ AS A STORY: the crew are excellent at the work and cannot make a
+#   decision. They settle a strike in a fifth of a second and then spend the
+#   entire transfer window telling all three claimants to wait until the window
+#   shuts. That is the AI Backfill's shape, not the scenario's — the mission
+#   offers the choice and the crew decline it — and it is exactly the finding
+#   this surface exists to make legible. Note also the eleven Comms choices
+#   inside 0.13 s at t=160: the Backfill answers as fast as the router will let
+#   it, which reads nothing like a crew talking.
+#
+# STATION-ACTIVITY REVIEW (`station_activity`, always-on, 33 retained 15 s
+# buckets — the tracker is bounded, so this is the run's TAIL, not its whole)
+#   station       human      ai   offline
+#   captain           0       1         0
+#   comms             0       6         0
+#   engineering       0       1         0
+#   helm              0  59,373         0
+#   navigation        0       2         0
+#   tactical          0  17,575         0
+#
+#   Every command in the run is AI: a headless run has no crew, which is the
+#   control this baseline needs. Helm and Tactical dominate by four orders of
+#   magnitude — they are per-tick control surfaces — while Comms, Captain,
+#   Navigation and Engineering are event-shaped. That is the split the mission
+#   timeline is the other half of: the 132 narrative events above are the whole
+#   of what the low-frequency stations DID, and no amount of reading the
+#   activity counters would recover a single one of them.

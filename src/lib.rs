@@ -102,6 +102,10 @@ pub mod lobby;
 /// decision it makes is testable on native with no networking at all.
 pub mod lockstep;
 pub mod modifiers;
+/// The authored mission-timeline emitters (issue #1338, PRD #1337): the systems
+/// that turn Objective / deadline / beat / Comms / marked-entity transitions
+/// into `core::narrative::NarrativeEvent`s for the headless run report.
+pub mod narrative;
 pub mod objectives;
 pub mod radar;
 pub mod radar_config;

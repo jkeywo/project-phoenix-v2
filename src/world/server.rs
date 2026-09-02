@@ -1544,6 +1544,17 @@ pub fn spawn_immediate_entities_internal(
             uuid,
             entity_inst.id.clone(),
         );
+        // The authored narrative mark (issue #1338). Attached here rather than
+        // in a `SpawnSection` because the payload is the WORLD's authored
+        // `name` — the unique reference id triggers, comms and objectives all
+        // address this instance by — and the entity template knows nothing
+        // about it. Only this named branch can mark: an anonymous or
+        // asteroid-field instance has no name to carry.
+        if entity_inst.narrative {
+            commands
+                .entity(entity)
+                .insert(crate::core::narrative::NarrativeMark(name.clone()));
+        }
         spawned.push(entity);
     }
 
@@ -2962,12 +2973,12 @@ pub(crate) fn apply_script_commands(
     }
 }
 
-/// The four transient per-tick effect queues an applied dispatch can enqueue
+/// The transient per-tick effect queues an applied dispatch can enqueue
 /// (issue #1223), borrowed as plain `&mut Vec<T>` so [`apply_dispatch_result`]
 /// and [`apply_script_commands`] stay Bevy-agnostic — the same shape their
 /// `runtime: &mut WorldContentRuntime` parameter already has. An effect-applying
-/// SYSTEM holds the four `EffectQueue<T>` resources (via [`EffectQueues`]) and
-/// lends them here with [`EffectQueues::out`]; a bare-`App` test lends four local
+/// SYSTEM holds the `EffectQueue<T>` resources (via [`EffectQueues`]) and
+/// lends them here with [`EffectQueues::out`]; a bare-`App` test lends local
 /// `Vec`s instead.
 pub(crate) struct EffectQueuesOut<'a> {
     /// Drained by `crate::infrastructure::tick_infrastructure_condition`.
@@ -2979,6 +2990,10 @@ pub(crate) struct EffectQueuesOut<'a> {
     /// Drained by `crate::console::captain::server::apply_scripted_weapons_holds`,
     /// as `(ship uuid, held)`.
     pub weapons_holds: &'a mut Vec<(String, bool)>,
+    /// Drained by `crate::narrative::drain_narrative_requests` (issue #1338):
+    /// the authored beats and marked-entity outcomes a script declared this
+    /// tick, on their way to `Messages<NarrativeEvent>`.
+    pub narrative: &'a mut Vec<crate::core::narrative::NarrativeRequest>,
 }
 
 /// The four per-owner [`EffectQueue`] resources an effect-applying SYSTEM needs,
@@ -2999,10 +3014,12 @@ pub(crate) struct EffectQueues<'w, 's> {
     capacity: Option<ResMut<'w, EffectQueue<crate::infrastructure::CapacityAdjustment>>>,
     civilian_orders: Option<ResMut<'w, EffectQueue<crate::civilian::PendingCivilianOrder>>>,
     weapons_holds: Option<ResMut<'w, EffectQueue<(String, bool)>>>,
+    narrative: Option<ResMut<'w, EffectQueue<crate::core::narrative::NarrativeRequest>>>,
     condition_fallback: Local<'s, Vec<crate::infrastructure::ConditionAdjustment>>,
     capacity_fallback: Local<'s, Vec<crate::infrastructure::CapacityAdjustment>>,
     civilian_orders_fallback: Local<'s, Vec<crate::civilian::PendingCivilianOrder>>,
     weapons_holds_fallback: Local<'s, Vec<(String, bool)>>,
+    narrative_fallback: Local<'s, Vec<crate::core::narrative::NarrativeRequest>>,
 }
 
 impl EffectQueues<'_, '_> {
@@ -3025,6 +3042,10 @@ impl EffectQueues<'_, '_> {
             weapons_holds: match &mut self.weapons_holds {
                 Some(q) => &mut q.0,
                 None => &mut self.weapons_holds_fallback,
+            },
+            narrative: match &mut self.narrative {
+                Some(q) => &mut q.0,
+                None => &mut self.narrative_fallback,
             },
         }
     }
@@ -3169,6 +3190,40 @@ pub(crate) fn apply_dispatch_result(
 
             ActionCmd::FailObjective { id } => {
                 objectives.0.fail(&id);
+            }
+
+            // ── The authored mission timeline (issue #1338) ──────────────────
+            //
+            // Both arms only BUFFER. Nothing in the world moves, no state is
+            // read back, and no message is written here — the applier holds no
+            // message writers, and the three systems that call it are at Bevy's
+            // parameter limit, which is exactly what the #1223 effect-queue
+            // pattern exists for. `narrative::drain_narrative_requests` turns
+            // each request into its event on the same tick.
+            ActionCmd::NarrativeBeat { id } => {
+                effects
+                    .narrative
+                    .push(crate::core::narrative::NarrativeRequest {
+                        kind: crate::core::narrative::NarrativeKind::BeatFired,
+                        id,
+                        entity_uuid: None,
+                    });
+            }
+
+            ActionCmd::NarrativeOutcome { entity, outcome } => {
+                // Resolved by NAME against the runtime's map, like every other
+                // name-carrying command here. An unresolvable name is still
+                // recorded — the authored id is the timeline's identity, and a
+                // beat about an entity that has already despawned is precisely
+                // the case an "escaped"/"destroyed" outcome is authored for.
+                let entity_uuid = runtime.name_to_uuid.get(&entity).cloned();
+                effects
+                    .narrative
+                    .push(crate::core::narrative::NarrativeRequest {
+                        kind: outcome,
+                        id: entity,
+                        entity_uuid,
+                    });
             }
 
             ActionCmd::ApplyModifier {

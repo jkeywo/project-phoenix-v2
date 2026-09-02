@@ -271,6 +271,12 @@ pub(crate) struct CommsRespondAux<'w> {
     id_mint: Option<Res<'w, crate::world_id::WorldIdMint>>,
     balance_events:
         Option<ResMut<'w, bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>>,
+    /// The mission-timeline ledger (issue #1338). Bundled here for the same
+    /// reason `balance_events` is — the system is at Bevy's argument limit —
+    /// and `Option` for the same reason too: a bare-`App` fixture that never
+    /// registered the narrative message writes nothing rather than panicking.
+    narrative_events:
+        Option<ResMut<'w, bevy::ecs::message::Messages<crate::core::narrative::NarrativeEvent>>>,
     /// The Rhai runtime a scripted thread's `on_pick` fn runs on, plus the tick
     /// its deferred work is stamped against (issue #984). Bundled here rather
     /// than added as system params because the system is already at Bevy's
@@ -667,6 +673,32 @@ pub(crate) fn handle_respond_to_message(
         // Record the chosen response on the inbox message (the tail both
         // arms share).
         inbox.0.record_response(message_id, *response_index);
+        // The mission timeline's Comms-choice beat (issue #1338), taken at this
+        // one chokepoint — past every refusal above, so the timeline records
+        // only answers that actually landed, and shared by human and AI alike
+        // because `operate_comms_response_ai` submits the same admitted
+        // `RespondToMessage` a console does.
+        if let Some(msgs) = aux.narrative_events.as_deref_mut() {
+            let mut event = crate::core::narrative::NarrativeEvent::new(
+                crate::core::narrative::NarrativeKind::CommsAnswered,
+                dialogue.thread_id.clone(),
+            )
+            .text("message_id", message_id.clone())
+            .detail(
+                "response_index",
+                crate::core::narrative::NarrativeValue::Int(*response_index as i64),
+            )
+            // The `on_pick` fn name is the author's own identifier for the
+            // branch the crew took — the closest thing a scripted thread has to
+            // a semantic id for a choice.
+            .text("on_pick", on_pick_fn.clone());
+            if let Some(sender) = &sender_uuid {
+                event = event.from_actor(crate::core::narrative::NarrativeActor::entity(
+                    sender.clone(),
+                ));
+            }
+            msgs.write(event);
+        }
         // Issue #984 finding 9: retire the answered node's dialogue entry so a
         // duplicate submission on the same message id cannot re-run `on_pick` —
         // which for a spawning or objective-mutating response would apply its
@@ -879,10 +911,27 @@ pub(crate) fn handle_show_on_screen(
 /// `RespondToMessage` for the SAME router a human's response traverses, so
 /// actions fire and follow-ups advance identically for both. This system no
 /// longer reads `ShipSystemControlSources` at all.
+///
+/// # The narrative tap (issue #1338)
+///
+/// This is the ONE place a comms message actually reaches the crew, whichever
+/// path authored it — a declarative `[[comms]]` template, a scripted
+/// `ctx.effects.open_comms(..)` thread, or a follow-up node advancing — so it is
+/// where `NarrativeKind::CommsOpened` is emitted. Emitted *after* the delivery
+/// gate above, deliberately: a message whose dialogue was retired before it
+/// landed never reached anybody, and the mission timeline must not claim a
+/// channel opened that the crew never saw.
 pub(crate) fn handle_comms_channel2(
     mut reader: MessageReader<CommsChannel2Event>,
     mut inbox: ResMut<CommsInboxRes>,
     comms: Res<CommsRuntime>,
+    // `Option<ResMut<Messages<_>>>` rather than a `MessageWriter`, matching the
+    // balance ledger's own shape: a bare-`App` fixture that runs this system
+    // without registering the narrative message gets `None` and writes nothing,
+    // instead of panicking on a missing resource.
+    mut narrative: Option<
+        ResMut<bevy::ecs::message::Messages<crate::core::narrative::NarrativeEvent>>,
+    >,
 ) {
     for ev in reader.read() {
         if ev.delivery == crate::comms::server::CommsChannel2Delivery::ScriptedDialogue
@@ -894,6 +943,37 @@ pub(crate) fn handle_comms_channel2(
             // Messages buffer, which would mint new IDs and replay survivors to
             // readers that already consumed them.
             continue;
+        }
+        // The thread is the story's unit — an initial hail and its follow-ups
+        // share one `thread_id` — so it is the event's identity. A message with
+        // no thread is its own thread, the same fallback the client uses.
+        if let Some(msgs) = narrative.as_deref_mut() {
+            let thread_id = if ev.message.thread_id.is_empty() {
+                ev.message.id.clone()
+            } else {
+                ev.message.thread_id.clone()
+            };
+            msgs.write(
+                crate::core::narrative::NarrativeEvent::new(
+                    crate::core::narrative::NarrativeKind::CommsOpened,
+                    thread_id,
+                )
+                .from_actor(crate::core::narrative::NarrativeActor::entity(
+                    ev.message.sender_uuid.clone(),
+                ))
+                // `body` is the message's `strings.csv` id, carried verbatim —
+                // the rendered English never enters the timeline.
+                .text("body", ev.message.body.clone())
+                .text("message_id", ev.message.id.clone())
+                .detail(
+                    "responses",
+                    crate::core::narrative::NarrativeValue::Int(ev.message.responses.len() as i64),
+                )
+                .detail(
+                    "urgent",
+                    crate::core::narrative::NarrativeValue::Flag(ev.message.is_urgent),
+                ),
+            );
         }
         inbox.0.inject(ev.message.clone());
     }

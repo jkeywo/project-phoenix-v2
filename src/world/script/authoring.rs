@@ -238,6 +238,11 @@ mod tests {
         // ctx.effects.*
         ("effects", "complete_objective", &["id"]),
         ("effects", "fail_objective", &["id"]),
+        // The mission-timeline vocabulary (issue #1338). Deliberately exposed:
+        // marking a beat and judging a marked entity's outcome are things only
+        // a scenario author can do, so they belong in the autocomplete set.
+        ("effects", "narrative_beat", &["id"]),
+        ("effects", "narrative_outcome", &["entity", "outcome"]),
         ("effects", "reset_trigger", &["id"]),
         ("effects", "load_world", &["path"]),
         ("effects", "unload_world", &["path"]),

@@ -307,6 +307,7 @@ map — see the field notes below.
 | `relative_to` | string | none | Another `[[entity]]` **in the same file** to position relative to, named by its `id` **or** its `name` (a `name` wins if the two collide). Used with `offset`. Order does not matter — the target may be declared before or after. The target must use `anchor` or `position`, not another `relative_to` (no chains). Resolved against the entity list directly, *not* through `name_to_uuid`. A `relative_to` that does not resolve fails world validation and blocks the whole world from spawning (issue #969) — before, it cost exactly the one entity, silently. |
 | `offset` | `[f32; 3]` | `[0,0,0]` | Offset added to the `relative_to` entity's resolved position. |
 | `spawn_on` | `"immediate"` \| `"game_start"` | `"immediate"` | `"immediate"` spawns at world load (lobby phase); `"game_start"` spawns when phase enters `InProgress`. |
+| `narrative` | bool | `false` | Opt this entity into the authored mission timeline (issue #1338). The headless run report then records when it entered the world and when it died, under its `name`. Requires a `name` — the mark's payload *is* the name. Everything else (escaped, rescued, abandoned, disabled) is your judgement, through `ctx.effects.narrative_outcome(..)`. An unmarked hull produces no timeline entry however violently it dies: a story event is authored, never inferred. |
 | `overrides` | inline table | none | TOML overrides merged on top of the template (per-instance field tweaks). |
 
 Position precedence (when more than one is supplied): `relative_to` >
@@ -382,6 +383,8 @@ A handler fn takes `ctx` and calls `ctx.effects.*` / `ctx.flags.*` / `ctx.schedu
 |---|---|
 | `ctx.effects.add_objective(#{ id, text, mandatory?, targets?, source?, base_priority?, directive_kind?, … })` | Add to the objectives list, with its AI directive and utility scoring. |
 | `ctx.effects.complete_objective(id)` / `fail_objective(id)` | |
+| `ctx.effects.narrative_beat(id)` | Record an authored story beat on the mission timeline (issue #1338). Changes nothing in the world — it is the scenario's own punctuation, so an after-action reading carries the beats *you* considered beats. Objective, deadline and Comms transitions are recorded automatically; you do not mark those. |
+| `ctx.effects.narrative_outcome(entity, outcome)` | Record a marked entity's outcome: `"spawned"`, `"disabled"`, `"destroyed"`, `"escaped"`, `"rescued"` or `"abandoned"`. Any other word raises. Spawning and dying are recorded automatically for any `[[entity]]` carrying `narrative = true`; this is the door for the outcomes only you can judge. |
 | `ctx.effects.spawn_entity(#{ template_path, name, position?/anchor?, rotation?, scale?, overrides? })` | `template_path` string literals are scanned statically for asset preload. |
 | `ctx.effects.destroy_entity(name)` | The counterpart to `spawn_entity`: removes the named entity. It CHAINS — `on_destroyed` and `on_all_destroyed` fire off it in the same tick, exactly as they do off a combat kill, which is what lets a scripted collapse drive mission state. An unknown name warns and does nothing. Reusing a destroyed entity's name in a later `spawn_entity` is fine. Also available deferred: `ctx.schedule.in_seconds(n).destroy_entity(name)`. |
 | `ctx.effects.load_world(path)` / `unload_world(path)` | Runtime composition of sub-world layers. |

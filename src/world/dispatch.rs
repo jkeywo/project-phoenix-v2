@@ -201,6 +201,33 @@ pub enum ActionCmd {
         /// layer-owned objective ids so `UnloadWorld` removes them.
         origin_layer: Option<String>,
     },
+    /// Record an authored story beat on the mission timeline (issue #1338).
+    ///
+    /// `id` is the author's own semantic identifier — the scenario's
+    /// punctuation, with no other meaning to the simulation. Nothing branches
+    /// on it and no state moves: the applier buffers it onto the narrative
+    /// effect queue and `narrative::drain_narrative_requests` turns it into a
+    /// `NarrativeKind::BeatFired` event. This is the "authors explicitly mark
+    /// beats" half of PRD #1337 — the sim never infers one.
+    NarrativeBeat { id: String },
+    /// Record an authored outcome for a marked narrative entity (issue #1338).
+    ///
+    /// `entity` is the world's authored entity NAME, not a UUID, resolved by
+    /// the applier against `WorldContentRuntime::name_to_uuid` for the reason
+    /// every other name-carrying command here is. `outcome` is already
+    /// validated at the script boundary
+    /// ([`crate::core::narrative::NarrativeKind::parse_outcome`]), so a typo
+    /// raises there rather than reaching this queue as a silently different
+    /// beat.
+    ///
+    /// Spawn and death are emitted automatically for any entity carrying a
+    /// [`crate::core::narrative::NarrativeMark`]; this is the door for the
+    /// outcomes only an author can judge — escaped, rescued, abandoned,
+    /// disabled.
+    NarrativeOutcome {
+        entity: String,
+        outcome: crate::core::narrative::NarrativeKind,
+    },
     /// Mark an objective complete. A no-op for unknown / non-Active ids.
     CompleteObjective { id: String },
     /// Re-arm the trigger(s) with the given authored id (issue #751).

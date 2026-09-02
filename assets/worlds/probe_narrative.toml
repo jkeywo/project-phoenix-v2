@@ -1,0 +1,122 @@
+# Probe world for issue #1338 — the authored mission timeline, end to end.
+#
+# No combat, no traffic, no hazard. Every event this world produces is one a
+# SCENARIO AUTHOR asked for, which is the whole claim PRD #1337 makes about the
+# narrative surface: the timeline is the story the world chose to tell, not a
+# second copy of the damage log. A run of this world with nothing but a player
+# hull and one marked civilian must produce exactly the beats listed below and
+# nothing else.
+#
+# The authored timeline, in mission seconds:
+#
+#   t=1   `post` runs. Two objectives are posted (one mandatory, one not), the
+#         opening beat fires, and Lyra Ascending hails the crew.
+#   t=4   `resolve` runs. The mandatory objective completes, the optional one
+#         fails, and the author declares Lyra rescued — an outcome no amount of
+#         simulation could have inferred, which is why it is authorable at all.
+#   t=6   `window_opens` fires. Its handler records the beat that says the
+#         deadline mattered.
+#
+# Every one of those reaches the headless run report's `narrative` field and,
+# under `--format ndjson`, the inline stream — plus `marked_entity_spawned` for
+# Lyra on the tick she enters the world, and `comms_opened` on the tick her hail
+# lands. The unmarked player hull produces no entity beat at all: marking is the
+# gate, and this world proves it by leaving the player unmarked.
+#
+# THE PLAYER HULL IS A COURIER, not the destroyer the other probes fly, and the
+# reason is `[comms_console.ai]`: a headless run has no human on Comms, so the
+# only way a *choice* gets made is the Comms AI submitting the same admitted
+# `RespondToMessage` a console would. The destroyer authors no such policy and
+# would leave Lyra's hail unanswered forever.
+
+[global]
+seed = 1338
+ai_helm_tick_hz = 30.0
+title = "world.probe_narrative.global.title"
+description = "world.probe_narrative.global.description"
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# The player ship — AI-backfilled in a headless run.
+[[entity]]
+template_path = "assets/entities/alliance_courier.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# The marked entity. `narrative = true` is the author saying "this hull is part
+# of the story"; without it she would spawn, hail, and be declared rescued
+# without a single line of it reaching the timeline.
+#
+# Parked 120 units off so her hail is comfortably inside comms range for the
+# whole run — an out-of-range sender's responses are greyed, and a probe that
+# depended on the crew drifting into range would be testing helm, not the
+# timeline.
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+id = "lyra"
+name = "world.probe_narrative.entity.lyra.name"
+narrative = true
+transform = { position = [120.0, 0.0, 0.0] }
+overrides = { comms = { hailable = true } }
+
+# The clock. One named deadline, visible, with a handler that records the beat.
+[[deadline]]
+id = "window_opens"
+label = "world.probe_narrative.deadline.window_opens.label"
+due_secs = 6
+visible = true
+
+[script]
+setup = """
+on_timer(1, "post");
+on_timer(4, "resolve");
+on_deadline("window_opens", "on_window_opens");
+
+// The opening. Two objectives, one authored beat, one hail.
+fn post(ctx) {
+    ctx.effects.add_objective(#{
+        id: "hold_the_channel",
+        text: "world.probe_narrative.objective.hold_the_channel",
+        mandatory: true,
+    });
+    ctx.effects.add_objective(#{
+        id: "log_the_wreck",
+        text: "world.probe_narrative.objective.log_the_wreck",
+        mandatory: false,
+    });
+    ctx.effects.narrative_beat("probe_opening");
+    ctx.effects.open_comms(#{
+        from: "world.probe_narrative.entity.lyra.name",
+        node_fn: "lyra_hails",
+        urgent: true,
+    });
+}
+
+// One node, one response, so the Comms AI's pick is unambiguous.
+fn lyra_hails(ctx) {
+    #{
+        message: "world.probe_narrative.comms.lyra_hails",
+        responses: [
+            #{ text: "world.probe_narrative.comms.stand_by", on_pick: "on_stand_by" },
+        ],
+    }
+}
+
+// A terminal response: it records its own beat and ends the thread.
+fn on_stand_by(ctx) {
+    ctx.effects.narrative_beat("probe_answered");
+}
+
+// The resolution. One objective each way, and the author's judgement on Lyra.
+fn resolve(ctx) {
+    ctx.effects.complete_objective("hold_the_channel");
+    ctx.effects.fail_objective("log_the_wreck");
+    ctx.effects.narrative_outcome("world.probe_narrative.entity.lyra.name", "rescued");
+}
+
+fn on_window_opens(ctx) {
+    ctx.effects.narrative_beat("probe_deadline_beat");
+}
+"""

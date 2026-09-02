@@ -578,6 +578,23 @@ pub struct WorldEntity {
     /// data, not a code string — no `strings.csv` entry required.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
+    /// Opt this entity into the authored mission timeline (issue #1338).
+    ///
+    /// A scenario author sets `narrative = true` to say "this hull is part of
+    /// the story": the spawner then attaches a
+    /// [`crate::core::narrative::NarrativeMark`] carrying the entity's authored
+    /// [`name`](Self::name), and the run report records when it entered the
+    /// world and when it died. Everything else — escaped, rescued, abandoned,
+    /// disabled — is judged by the author through
+    /// `ctx.effects.narrative_outcome(..)`.
+    ///
+    /// Default `false`, and deliberately: PRD #1337's rule is that a story
+    /// event is authored, never inferred, so an unmarked hull produces no
+    /// timeline entry however violently it dies. Only NAMED entities can be
+    /// marked — the mark's payload IS the name — so setting it on an anonymous
+    /// instance does nothing.
+    #[serde(default)]
+    pub narrative: bool,
     /// Positioning, rotation and scale.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transform: Option<TransformConfig>,

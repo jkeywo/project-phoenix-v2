@@ -1,0 +1,87 @@
+entities:
+  - component: narrative-event-emitter
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Narrative Event Emitter
+      summary: Emits a NarrativeEvent for every authored mission-timeline moment — Objective posted/completed/failed, named deadline fired, authored beat fired, Comms thread opened, Comms response answered, and a MARKED entity spawning or being destroyed — unconditionally on every runtime, so the after-action timeline exists whether or not anyone is collecting it.
+      rationale:
+        - "Kept a SEPARATE message from BalanceEvent (PRD #1337). The combat ledger is a fold of the balance stream alone and must stay so: a story beat that also happens to be a kill produces one event in each stream, and nothing narrative can move a damage total."
+        - "Authored, never inferred. An Objective/deadline/Comms transition is authored by construction; a beat is an explicit ctx.effects.narrative_beat call; an entity outcome requires the scenario to have set narrative = true on the [[entity]], which attaches a NarrativeMark. An unmarked hull produces no timeline entry however violently it dies — that gate is what keeps the timeline readable instead of a second copy of the damage log."
+        - "Three of the emitters are OBSERVERS rather than chokepoint writes. An Objective can be completed from a trigger action, a Rhai effect, a comms response, or the Helm AI satisfying its own directive; the systems owning those sites are at Bevy's 16-parameter limit already. Diffing the ordered ObjectiveManager and DeadlineTable against the previous tick observes every path, cannot invent one, and cannot be missed by the next site added. The per-system Local each diff keeps is deliberately NOT a resource: derived, non-authoritative, and therefore out of the #894 census and out of the snapshot."
+        - "Authored beats and authored entity outcomes DO have one true chokepoint — the script boundary — so they ride the #1223 effect-queue pattern: apply_dispatch_result buffers a NarrativeRequest and drain_narrative_requests turns it into an event, because the applier holds no message writers."
+        - "String Ids, never localized prose: an Objective's text, a Comms body, a deadline's label all pass through verbatim, so the timeline is byte-stable across locales and downstream analysis can localize or narrate it consistently."
+    architecture:
+      kind: telemetry-emitter
+      authority: observational
+      reads: [objective-runtime-state, mission-deadline-state, balance-event-stream, comms-inbox-state]
+      produces: [narrative-event-stream]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/core/narrative.rs, src/narrative.rs, src/world/dispatch.rs, src/world/server.rs, src/world/script/effects.rs, src/world/config.rs, src/console/comms/server.rs, src/server_app/registration.rs]
+      symbols: [NarrativeEvent, NarrativeKind, NarrativeActor, NarrativeValue, NarrativeMark, NarrativeRequest, emit_scenario_narrative, emit_marked_entity_narrative, drain_narrative_requests]
+      tests: [cargo test, tests/narrative_timeline.rs]
+
+  - state: narrative-event-stream
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Narrative Event Stream
+      summary: The NarrativeEvent message stream and the authored NarrativeMark component that gates its entity half — one event per authored mission-timeline moment, carrying an event kind, an authored semantic identifier or String Id, an optional source Station/System/entity, an optional target, and structured outcome data.
+      rationale:
+        - "NarrativeMark is Presentation-class for the #894 digest boundary: the fixed tick never reads it, nothing branches on it, and neither sim_digest nor snapshot walks it. It decides only what the after-action surface SHOWS."
+        - "The event itself carries no timestamp. The monotonic sequence, the fixed sim tick and the derived sim time are stamped at COLLECTION, so a chokepoint only has to know what it knows and the sequence is a total order across every emitter."
+    architecture:
+      classification: observational
+      owner: narrative-event-emitter
+      writers: [narrative-event-emitter]
+      readers: [narrative-telemetry-collector]
+    implementation:
+      status: declared
+      paths: [src/core/narrative.rs]
+      symbols: [NarrativeEvent, NarrativeKind, NarrativeMark]
+      tests: [cargo test]
+
+  - component: narrative-telemetry-collector
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Narrative Telemetry Collector
+      summary: Headless-only system that drains the NarrativeEvent stream each tick, assigning each event its run-scoped monotonic sequence and stamping it with the fixed SimTick and derived sim time, into the run telemetry buffer's narrative vector — and, under --format ndjson, pushing the timeline-eligible ones onto the inline stream.
+      rationale:
+        - "A SECOND collector beside collect_balance_events rather than an extra arm of it, chained after it in Last so an ndjson tick reads traffic-then-combat-then-story and the sequence is a fixed function of the tick rather than of executor order."
+        - "Always folds, filters only the stream — the same split the balance collector makes. NarrativeKind::in_timeline_stream holds ReportRowUpdated out of the ndjson flow because a re-scored report row is a rate, not a beat; its final value arrives in the folded timeline and in ReportFinalized."
+    architecture:
+      kind: telemetry-collector
+      authority: observational
+      reads: [narrative-event-stream]
+      produces: [run-telemetry-state]
+      runs_in: [headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/headless/report.rs, src/headless/app.rs, src/core/telemetry.rs]
+      symbols: [collect_narrative_events, StampedNarrativeEvent, RunTelemetry]
+      tests: [cargo test, tests/narrative_timeline.rs]
+
+  - component: narrative-timeline-projector
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Narrative Timeline Projector
+      summary: Pure fold over the stamped narrative log producing the run report's mission timeline — every event in monotonic sequence order plus a per-kind census — hand-encoded into the report JSON beside the combat ledgers.
+      rationale:
+        - "Pure, with no ECS access, so the projection is unit-testable without booting an app — the same shape combat-ledger-aggregator has, and deliberately NOT folded into the ledgers or the outcome classification: PRD #1337 keeps the story surface beside the combat ledger, never inside it."
+        - "Present in EVERY report with no debug flag, like damage_by_ship and station_activity. A run with nothing authored reports count: 0, which says the scenario told no story without a reader having to know whether a flag was on. Only the inline ndjson stream is format-gated."
+        - "Determinism: nothing in sim_digest.rs or snapshot.rs reads a narrative event, and no fold stage walks RunTelemetry's narrative vector, so recording is inert to the authoritative digest by construction. tests/narrative_timeline.rs A/Bs the JSON and NDJSON formats of the same seeded run and requires every digest-relevant report field to match byte for byte."
+    architecture:
+      kind: pure-aggregator
+      authority: observational
+      reads: [run-telemetry-state]
+      produces: [run-report-artifact]
+      runs_in: [headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/core/narrative.rs, src/headless/report.rs]
+      symbols: [fold_narrative, NarrativeTimeline, RunReport]
+      tests: [cargo test, tests/narrative_timeline.rs]

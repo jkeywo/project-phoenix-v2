@@ -332,6 +332,22 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 StateClass::ClearedAtFold,
                 "inter-system-message-state",
             )
+            // The authored-beat queue (issue #1338): pushed by the shared
+            // dispatch applier, drained in full every tick by
+            // `narrative::drain_narrative_requests`, so it is empty at every
+            // fold/snapshot boundary — the same `ClearedAtFold` contract every
+            // other `EffectQueue<T>` carries.
+            .declare_state::<
+                crate::effect_queue::EffectQueue<crate::core::narrative::NarrativeRequest>,
+            >(StateClass::ClearedAtFold, "digest-exclusion-classes")
+            // Presentation: the authored narrative mark (issue #1338). Scenario
+            // data that decides only what the after-action timeline SHOWS —
+            // nothing in the fixed tick branches on it, and neither
+            // `sim_digest` nor `snapshot` walks it.
+            .declare_state::<crate::core::narrative::NarrativeMark>(
+                StateClass::Presentation,
+                "narrative-event-stream",
+            )
             // Presentation: the host per-Station attention surface (issue #1101);
             // it drives which tab asks for attention, never what the tick computes.
             .declare_state::<StationImportanceRes>(
@@ -785,6 +801,20 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         // chokepoints can emit unconditionally — only the *collection* is
         // headless-only.
         .add_message::<crate::core::balance::BalanceEvent>()
+        // Narrative telemetry (issue #1338, PRD #1337). Registered beside the
+        // balance message and for the same reason: the emitters run on every
+        // target so a beat is produced whether or not anyone is collecting, and
+        // only the *collection* (`headless::report::collect_narrative_events`)
+        // is headless-only. Kept a SEPARATE message from `BalanceEvent` because
+        // the PRD keeps the story surface beside the combat ledger rather than
+        // inside it — the per-ship ledgers must stay a fold of the balance
+        // stream alone.
+        .add_message::<crate::core::narrative::NarrativeEvent>()
+        // The authored-beat / authored-entity-outcome queue the shared dispatch
+        // applier pushes onto (issue #1223's pattern, issue #1338's payload).
+        .init_resource::<
+            crate::effect_queue::EffectQueue<crate::core::narrative::NarrativeRequest>,
+        >()
         .init_resource::<CaptainPriorityBoost>()
         // The sim's one source of randomness. `init_resource` draws an OS seed, so
         // an unconfigured app (browser host, unit tests) behaves as it always did;
@@ -862,6 +892,24 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         // In the fixed schedule so its events land in tick order with the rest of
         // the balance stream.
         .add_systems(FixedUpdate, emit_phase_change_balance_events)
+        // The authored mission timeline (issue #1338). Chained and ordered after
+        // `SimSet::Broadcast` — the last set of the tick — so every emitter sees
+        // the state this tick finished with: the Objective the trigger pipeline
+        // just completed, the deadline the callback drain just fired, the
+        // `EntityDestroyed` the damage set just wrote, and the beat a script
+        // queued anywhere in between. Chained among themselves so the monotonic
+        // sequence `collect_narrative_events` assigns is a fixed function of the
+        // tick rather than of executor order.
+        .add_systems(
+            FixedUpdate,
+            (
+                crate::narrative::emit_scenario_narrative,
+                crate::narrative::emit_marked_entity_narrative,
+                crate::narrative::drain_narrative_requests,
+            )
+                .chain()
+                .after(crate::sim_sets::SimSet::Broadcast),
+        )
         .insert_resource(GameOverReason(None, None))
         .add_systems(
             FixedUpdate,

@@ -320,6 +320,46 @@ pub(crate) fn register_effects(engine: &mut HostRegistry) {
     );
     host_fn!(
         engine,
+        "narrative_beat",
+        receiver = "effects",
+        category = "effect",
+        params = ["id"],
+        summary = "Record an authored story beat on the mission timeline.",
+        |sink: &mut EffectSink, id: ImmutableString| {
+            // Issue #1338. Nothing in the world moves — this is the scenario's
+            // own punctuation, and it exists so a headless after-action reading
+            // carries the beats the AUTHOR considered beats rather than every
+            // event the simulation happened to produce.
+            sink.push(ActionCmd::NarrativeBeat { id: id.to_string() });
+        },
+    );
+    host_fn!(
+        engine,
+        "narrative_outcome",
+        receiver = "effects",
+        category = "effect",
+        params = ["entity", "outcome"],
+        summary = "Record a marked entity's authored outcome: spawned, disabled, \
+                   destroyed, escaped, rescued or abandoned.",
+        |sink: &mut EffectSink,
+         entity: ImmutableString,
+         outcome: ImmutableString|
+         -> Result<(), Box<EvalAltResult>> {
+            // Validated at the boundary through the SAME parser the vocabulary
+            // defines, exactly as `game_over`'s outcome is: a typo raises,
+            // discarding this call's effects (settled decision 10), rather than
+            // recording a silently different beat.
+            let kind =
+                crate::core::narrative::NarrativeKind::parse_outcome(&outcome).map_err(raise)?;
+            sink.push(ActionCmd::NarrativeOutcome {
+                entity: entity.to_string(),
+                outcome: kind,
+            });
+            Ok(())
+        },
+    );
+    host_fn!(
+        engine,
         "reset_trigger",
         receiver = "effects",
         category = "effect",

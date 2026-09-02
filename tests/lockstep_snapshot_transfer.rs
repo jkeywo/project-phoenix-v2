@@ -30,7 +30,7 @@
 
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 
-use bevy::prelude::{App, FixedUpdate, ResMut, Resource, With};
+use bevy::prelude::{App, Entity, Fixed, FixedUpdate, ResMut, Resource, Time, With};
 
 use project_phoenix::command_admission::{
     CommandLog, CommandOrder, HostSlot, LoggedCommand, ShipKey,
@@ -313,6 +313,7 @@ fn a_join_record_restores_full_command_and_gm_history() {
                     "history-{sequence}"
                 ))
                 .unwrap(),
+                recovery_generation: 0,
                 apply_tick: CAPTURE_AT - 3 + sequence,
                 order: project_phoenix::gm_action::GmActionOrder::new(HostSlot(2), sequence),
                 action: project_phoenix::gm_action::GmAction::SetSessionPaused { active },
@@ -424,6 +425,7 @@ fn first_time_gm_join_commits_three_apps_only_after_digest_then_typed_resume() {
                 sequenced_by: HostSlot(1),
                 operator_id: "gm-1".into(),
                 correlation: GmActionId::new(format!("join-history-{sequence}")).unwrap(),
+                recovery_generation: 0,
                 apply_tick: boundary_base - 4 + sequence,
                 order: project_phoenix::gm_action::GmActionOrder::new(HostSlot(2), sequence),
                 action: GmAction::SetSessionPaused { active },
@@ -648,6 +650,442 @@ fn first_time_gm_join_commits_three_apps_only_after_digest_then_typed_resume() {
     }
 }
 
+/// #1294 reconnects a known departed GM through the same owner-canonical
+/// transfer as #1293. There are only two technical slots here: the sole
+/// survivor and a deliberately stale returning peer, so no majority exists to
+/// elect a record. The private candidate cannot enter agreement or the wait-set;
+/// the survivor's typed transaction is the only canonical source.
+#[test]
+fn departed_gm_reconnect_restores_owner_history_and_digest_before_rejoin_and_resume() {
+    use project_phoenix::ai::cadence::{AiBaseInterval, AiSnapshotReady, AiTickReady};
+    use project_phoenix::gm_action::{
+        GmAction, GmActionId, GmActionJournal, GmActionRequest, GmActionSubmission,
+        SimulationPaused,
+    };
+    use project_phoenix::gm_join::{
+        begin_reconnect, prepare_candidate_bootstrap, GmJoinCandidate, GmJoinFrame, GmJoinId,
+        GmJoinKind, GmJoinPauseHold,
+    };
+    use project_phoenix::gm_roster::{GmOperator, GmRoster};
+
+    let mut owner = boot();
+    let mut returning = boot();
+    step(&mut owner, 90);
+    step(&mut returning, 7);
+    // `boot()` is the ordinary headless ship profile. A real returning GM uses
+    // BrowserGameMaster and therefore has no host-local ship projection; remove
+    // that presentation/ownership marker while retaining the same authored
+    // world that the private bootstrap and canonical restore overwrite.
+    let stale_local_ships: Vec<Entity> = {
+        let mut query = returning
+            .world_mut()
+            .query_filtered::<Entity, With<LocalShip>>();
+        query.iter(returning.world()).collect()
+    };
+    for entity in stale_local_ships {
+        returning
+            .world_mut()
+            .entity_mut(entity)
+            .remove::<LocalShip>();
+    }
+    let stale_tick = returning.world().resource::<SimTick>().0;
+    let stale_digest = world_digest(returning.world());
+    assert_ne!(
+        stale_digest,
+        world_digest(owner.world()),
+        "the returning process must genuinely begin from unequal stale state"
+    );
+
+    let boundary_base = owner.world().resource::<SimTick>().0;
+    let delay = project_phoenix::lockstep::authored_delay(owner.world());
+    install_existing_join_peer(&mut owner, HostSlot(1), boundary_base, delay);
+    install_existing_join_peer(&mut returning, HostSlot(2), stale_tick, delay);
+    owner
+        .world_mut()
+        .resource_mut::<FleetLockstep>()
+        .depart(HostSlot(2));
+    assert!(owner
+        .world()
+        .resource::<FleetLockstep>()
+        .has_departed(HostSlot(2)));
+
+    // A crashed/reloaded GM page may carry a stale local world, but it is not a
+    // live mesh peer. Strip the obsolete wait-set and install only the private
+    // bootstrap topology; no digest/election lane can see slot 2 before Commit.
+    returning.world_mut().remove_resource::<FleetLockstep>();
+    returning.world_mut().remove_resource::<FleetRoster>();
+    prepare_candidate_bootstrap(returning.world_mut(), existing_join_roster(HostSlot(2))).unwrap();
+    assert!(returning.world().get_resource::<FleetRoster>().is_none());
+    assert!(returning.world().get_resource::<FleetLockstep>().is_none());
+
+    let commands = vec![
+        historical_command(boundary_base - 20, 1, "helm"),
+        historical_command(boundary_base - 10, 2, "red-alert"),
+    ];
+    owner
+        .world_mut()
+        .resource_mut::<CommandLog>()
+        .replace_from_transfer(commands.clone());
+    returning
+        .world_mut()
+        .resource_mut::<CommandLog>()
+        .replace_from_transfer(vec![historical_command(1, 99, "stale")]);
+
+    let mut history = GmActionJournal::default();
+    history
+        .insert(project_phoenix::gm_action::GmActionGrant {
+            from: HostSlot(2),
+            sequenced_by: HostSlot(1),
+            operator_id: "gm-1".into(),
+            correlation: GmActionId::new("reconnect-history-pause").unwrap(),
+            recovery_generation: 0,
+            apply_tick: boundary_base - 3,
+            order: project_phoenix::gm_action::GmActionOrder::new(HostSlot(2), 1),
+            action: GmAction::SetSessionPaused { active: true },
+        })
+        .unwrap();
+    history
+        .insert(project_phoenix::gm_action::GmActionGrant {
+            from: HostSlot(2),
+            sequenced_by: HostSlot(1),
+            operator_id: "gm-1".into(),
+            correlation: GmActionId::new("reconnect-history-resume").unwrap(),
+            recovery_generation: 0,
+            apply_tick: boundary_base - 2,
+            order: project_phoenix::gm_action::GmActionOrder::new(HostSlot(2), 2),
+            action: GmAction::SetSessionPaused { active: false },
+        })
+        .unwrap();
+    history.restore_applied_frontier(2).unwrap();
+    owner.world_mut().insert_resource(history.clone());
+    owner.world_mut().insert_resource(history.applied_log());
+    owner.world_mut().insert_resource(SimulationPaused(false));
+    drain_mesh(&mut owner);
+    drain_mesh(&mut returning);
+
+    let approval = begin_reconnect(
+        owner.world_mut(),
+        GmJoinId(1294),
+        GmJoinCandidate {
+            host: HostSlot(2),
+            operator_id: "gm-1".into(),
+        },
+        DUEL,
+    )
+    .unwrap();
+    assert_eq!(approval.kind, GmJoinKind::Reconnect);
+    assert_eq!(approval.owner, HostSlot(1));
+    assert_eq!(approval.approved_by, HostSlot(1));
+    assert_eq!(approval.transfer_id >> 48, 0x1294);
+    let pause = drain_mesh(&mut owner)
+        .into_iter()
+        .find(|frame| matches!(frame, MeshFrame::GmJoin(GmJoinFrame::Pause(_))))
+        .expect("the owner emits the reconnect Pause");
+    deliver(&mut returning, pause, HostSlot(1));
+
+    owner.world_mut().resource_mut::<SimTick>().0 = approval.apply_tick;
+    owner.update();
+    returning.update();
+    assert!(owner.world().resource::<GmJoinPauseHold>().active());
+    assert!(returning.world().get_resource::<FleetRoster>().is_none());
+    assert!(returning.world().get_resource::<FleetLockstep>().is_none());
+    assert_ne!(
+        world_digest(returning.world()),
+        world_digest(owner.world()),
+        "the private stale peer cannot become canonical merely by reaching Pause"
+    );
+
+    let transfer = drain_mesh(&mut owner);
+    let chunks: Vec<_> = transfer
+        .into_iter()
+        .filter(|frame| matches!(frame, MeshFrame::Snapshot(_)))
+        .collect();
+    assert!(
+        chunks.len() > 1,
+        "the real whole record crosses the chunker"
+    );
+    for frame in chunks {
+        deliver(&mut returning, frame, HostSlot(1));
+    }
+    returning.update();
+    let restored = drain_mesh(&mut returning)
+        .into_iter()
+        .find(|frame| matches!(frame, MeshFrame::GmJoin(GmJoinFrame::Restored { .. })))
+        .expect("the restored stale peer proves the canonical digest");
+    deliver(&mut owner, restored, HostSlot(2));
+    owner.update();
+    let commit = drain_mesh(&mut owner)
+        .into_iter()
+        .find(|frame| matches!(frame, MeshFrame::GmJoin(GmJoinFrame::Committed(_))))
+        .expect("matching digest yields the reconnect Commit");
+
+    let frozen_before = existing_join_roster(HostSlot(1));
+    assert_eq!(owner.world().resource::<FleetRoster>(), &frozen_before);
+    assert!(!owner
+        .world()
+        .resource::<FleetLockstep>()
+        .has_departed(HostSlot(2)));
+    assert_eq!(
+        owner
+            .world()
+            .resource::<FleetLockstep>()
+            .watermark_of(HostSlot(2)),
+        Some(approval.apply_tick),
+        "reconnect uses LockstepSession::rejoin at the proven boundary"
+    );
+
+    deliver(&mut returning, commit, HostSlot(1));
+    returning.update();
+    assert!(
+        !returning.world().resource::<MeshRestoreArm>().is_armed(),
+        "Commit must close the transaction-scoped whole-record permission"
+    );
+    assert_eq!(
+        returning.world().resource::<FleetRoster>(),
+        &existing_join_roster(HostSlot(2)),
+        "the same row is restored rather than appended"
+    );
+    assert_eq!(
+        returning.world().resource::<CommandLog>().entries(),
+        commands
+    );
+    assert_eq!(returning.world().resource::<GmActionJournal>(), &history);
+    assert_eq!(world_digest(owner.world()), world_digest(returning.world()));
+    let cadence_state = |app: &App| {
+        let snapshot = capture(app.world());
+        (
+            app.world().resource::<SimTick>().0,
+            app.world().resource::<AiTickReady>().0,
+            app.world().resource::<AiSnapshotReady>().0,
+            app.world().resource::<AiBaseInterval>().0,
+            snapshot.ai_policy_clock,
+            snapshot.fixed_overstep_nanos,
+            app.world().resource::<Time<Fixed>>().overstep().as_nanos(),
+        )
+    };
+    assert_eq!(
+        cadence_state(&owner),
+        cadence_state(&returning),
+        "Commit must leave the restored peer on the owner's exact next-decision boundary",
+    );
+    for app in [&owner, &returning] {
+        assert!(app.world().resource::<SimulationPaused>().0);
+        assert!(app.world().resource::<GmJoinPauseHold>().active());
+    }
+
+    let public_gms = GmRoster::try_new(vec![GmOperator::new(
+        "gm-1".into(),
+        "Returning".into(),
+        true,
+    )])
+    .unwrap();
+    for app in [&mut owner, &mut returning] {
+        app.world_mut().insert_resource(public_gms.clone());
+    }
+    assert_eq!(
+        project_phoenix::gm_action::submit_local(
+            returning.world_mut(),
+            GmActionRequest {
+                operator_id: "gm-1".into(),
+                correlation: GmActionId::new("resume-after-gm-reconnect").unwrap(),
+                action: GmAction::SetSessionPaused { active: false },
+            },
+        ),
+        Ok(GmActionSubmission::Pending)
+    );
+    let proposal = drain_mesh(&mut returning)
+        .into_iter()
+        .find(|frame| matches!(frame, MeshFrame::GmAction(_)))
+        .expect("the reconnected identity submits an explicit typed Resume");
+    deliver(&mut owner, proposal, HostSlot(2));
+    owner.update();
+    let grant = drain_mesh(&mut owner)
+        .into_iter()
+        .find(|frame| matches!(frame, MeshFrame::GmAction(_)))
+        .expect("the owner sequences Resume after reconnect Commit");
+    deliver(&mut returning, grant, HostSlot(1));
+    returning.update();
+    for app in [&owner, &returning] {
+        assert!(!app.world().resource::<SimulationPaused>().0);
+        assert!(!app.world().resource::<GmJoinPauseHold>().active());
+    }
+    assert_eq!(
+        cadence_state(&owner),
+        cadence_state(&returning),
+        "the explicit Resume must not re-phase the restored peer's AI cadence",
+    );
+
+    // Exchange genuine post-restore watermarks while both peers continue. The
+    // two worlds must advance beyond the recovered boundary and remain folded
+    // to the same digest.
+    for round in 0..24 {
+        let owner_frames = drain_mesh(&mut owner);
+        let returning_frames = drain_mesh(&mut returning);
+        for frame in owner_frames {
+            deliver(&mut returning, frame, HostSlot(1));
+        }
+        for frame in returning_frames {
+            deliver(&mut owner, frame, HostSlot(2));
+        }
+        owner.update();
+        returning.update();
+        if world_digest(owner.world()) != world_digest(returning.world()) {
+            let owner_entities = capture(owner.world()).entities;
+            let returning_entities = capture(returning.world()).entities;
+            let (owner_entity, returning_entity) = owner_entities
+                .iter()
+                .zip(&returning_entities)
+                .find(|(owner_entity, returning_entity)| owner_entity != returning_entity)
+                .expect("an entity-scope digest split names an entity row");
+            assert_eq!(
+                owner_entity.physics, returning_entity.physics,
+                "first divergent entity {} differs in physics",
+                owner_entity.uuid,
+            );
+            assert_eq!(
+                owner_entity.control, returning_entity.control,
+                "first divergent entity {} differs in helm control",
+                owner_entity.uuid,
+            );
+            assert_eq!(
+                owner_entity.drive, returning_entity.drive,
+                "first divergent entity {} differs in drive state",
+                owner_entity.uuid,
+            );
+            assert_eq!(
+                owner_entity.hull, returning_entity.hull,
+                "first divergent entity {} differs in hull state",
+                owner_entity.uuid,
+            );
+            assert_eq!(
+                owner_entity.weapons, returning_entity.weapons,
+                "first divergent entity {} differs in weapon state",
+                owner_entity.uuid,
+            );
+            panic!(
+                "first divergent entity {}:\nowner={owner_entity:#?}\nreturning={returning_entity:#?}",
+                owner_entity.uuid,
+            );
+        }
+        let returning_stages = project_phoenix::sim_digest::digest_stages(returning.world());
+        assert_eq!(
+            world_digest(owner.world()),
+            world_digest(returning.world()),
+            "post-reconnect continuation diverged in round {round} at {:?}",
+            project_phoenix::sim_digest::first_divergent_scope(owner.world(), &returning_stages,),
+        );
+    }
+    assert!(owner.world().resource::<SimTick>().0 > approval.apply_tick);
+    assert_eq!(
+        owner.world().resource::<SimTick>().0,
+        returning.world().resource::<SimTick>().0
+    );
+}
+
+/// A reconnect uses #1118's rollback-safe receiver, not a lighter in-place
+/// overwrite. A terminal chunk fault therefore leaves the stale private world
+/// untouched, keeps the frozen public row departed, and can never manufacture
+/// either a roster or Commit for the candidate.
+#[test]
+fn corrupted_reconnect_record_rolls_back_without_admitting_the_candidate() {
+    use project_phoenix::gm_join::{
+        begin_reconnect, prepare_candidate_bootstrap, GmJoinCandidate, GmJoinFrame, GmJoinId,
+        GmJoinRefusal,
+    };
+
+    let mut owner = boot();
+    let mut returning = boot();
+    step(&mut owner, 40);
+    step(&mut returning, 5);
+    let boundary_base = owner.world().resource::<SimTick>().0;
+    let delay = project_phoenix::lockstep::authored_delay(owner.world());
+    install_existing_join_peer(&mut owner, HostSlot(1), boundary_base, delay);
+    owner
+        .world_mut()
+        .resource_mut::<FleetLockstep>()
+        .depart(HostSlot(2));
+    returning.world_mut().remove_resource::<FleetLockstep>();
+    returning.world_mut().remove_resource::<FleetRoster>();
+    prepare_candidate_bootstrap(returning.world_mut(), existing_join_roster(HostSlot(2))).unwrap();
+    drain_mesh(&mut owner);
+    drain_mesh(&mut returning);
+
+    let approval = begin_reconnect(
+        owner.world_mut(),
+        GmJoinId(12_940),
+        GmJoinCandidate {
+            host: HostSlot(2),
+            operator_id: "gm-1".into(),
+        },
+        DUEL,
+    )
+    .unwrap();
+    let pause = drain_mesh(&mut owner)
+        .into_iter()
+        .find(|frame| matches!(frame, MeshFrame::GmJoin(GmJoinFrame::Pause(_))))
+        .expect("reconnect emits Pause");
+    deliver(&mut returning, pause, HostSlot(1));
+    owner.world_mut().resource_mut::<SimTick>().0 = approval.apply_tick;
+    owner.update();
+    returning.update();
+
+    // Hold the private stale process still while the receiver processes the
+    // terminal fault, so any digest movement below can only be a partial
+    // restore rather than an unrelated stale-world fixed step.
+    returning
+        .world_mut()
+        .resource_mut::<Time<bevy::time::Virtual>>()
+        .pause();
+    let stale_before = world_digest(returning.world());
+    let mut chunks: Vec<SnapshotChunk> = drain_mesh(&mut owner)
+        .into_iter()
+        .filter_map(|frame| match frame {
+            MeshFrame::Snapshot(chunk) => Some(chunk),
+            _ => None,
+        })
+        .collect();
+    assert!(chunks.len() > 1);
+    let victim = 1;
+    let mut corrupted = chunks.remove(victim);
+    let mut bytes = corrupted.text.into_bytes();
+    let at = bytes.len() / 2;
+    bytes[at] = bytes[at].wrapping_add(1);
+    corrupted.text = String::from_utf8(bytes).expect("duel RON is ascii");
+    for chunk in chunks {
+        deliver(&mut returning, MeshFrame::Snapshot(chunk), HostSlot(1));
+    }
+    deliver(&mut returning, MeshFrame::Snapshot(corrupted), HostSlot(1));
+    returning.update();
+
+    let terminal = drain_mesh(&mut returning);
+    assert!(terminal.iter().any(|frame| matches!(
+        frame,
+        MeshFrame::GmJoin(GmJoinFrame::Refused {
+            id: GmJoinId(12_940),
+            reason: GmJoinRefusal::TransferFailed,
+            ..
+        })
+    )));
+    assert!(!terminal
+        .iter()
+        .any(|frame| matches!(frame, MeshFrame::GmJoin(GmJoinFrame::Committed(_)))));
+    assert_eq!(
+        world_digest(returning.world()),
+        stale_before,
+        "the rollback-safe receiver must not partially overwrite stale state",
+    );
+    assert!(returning.world().get_resource::<FleetRoster>().is_none());
+    assert!(returning.world().get_resource::<FleetLockstep>().is_none());
+    assert!(owner
+        .world()
+        .resource::<FleetLockstep>()
+        .has_departed(HostSlot(2)));
+    assert_eq!(
+        owner.world().resource::<FleetRoster>(),
+        &existing_join_roster(HostSlot(1)),
+    );
+}
+
 /// A peer can disappear after the owner's canonical record was captured but
 /// before digest Commit. The private candidate must receive and authenticate
 /// that already-agreed loss without gaining a roster early, then install a
@@ -687,6 +1125,7 @@ fn host_loss_during_join_transfer_is_staged_until_commit_and_does_not_stall_resu
                 sequenced_by: HostSlot(1),
                 operator_id: "gm-1".into(),
                 correlation: GmActionId::new(format!("loss-history-{sequence}")).unwrap(),
+                recovery_generation: 0,
                 apply_tick: boundary_base - 4 + sequence,
                 order: project_phoenix::gm_action::GmActionOrder::new(HostSlot(2), sequence),
                 action: GmAction::SetSessionPaused { active },

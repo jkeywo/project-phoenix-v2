@@ -3272,7 +3272,7 @@
     /** The admitted local GM row, or null before/after authenticated presence. */
     function localGm() {
       if (!fleetHandle || normaliseFleetRole(fleetHandle.role || fleetRole) !== 'gm'
-          || !fleetHandle.operatorId) return null;
+          || !fleetHandle.operatorId || fleetHandle.gmJoinCandidate) return null;
       const gms = fleetRoster && Array.isArray(fleetRoster.gms) ? fleetRoster.gms : [];
       const row = gms.find(gm => gm && gm.id === fleetHandle.operatorId);
       if (row && !row.connected) return null;
@@ -3331,6 +3331,7 @@
         ? 'server.gm.join.pause_active'
         : 'server.gm.join.pause_inactive');
       const canAnswer = status === 'awaiting-decision'
+        && (!fleetGmJoinRequest || fleetGmJoinRequest.kind !== 'reconnect')
         && !!fleetHandle && !!fleetHandle.canDecideGmJoin
         && typeof fleetHandle.decideGmJoin === 'function';
       accept.hidden = !canAnswer;
@@ -3349,7 +3350,9 @@
     function receiveFleetGmJoinStatus(progress) {
       if (!progress || !Number.isSafeInteger(progress.id)) return;
       if (progress.candidate) fleetGmJoinRequest = {
-        id: progress.id, candidate: progress.candidate,
+        id: progress.id,
+        kind: progress.kind || 'first-time',
+        candidate: progress.candidate,
       };
       fleetGmJoinProgress = progress;
       paintGmJoinControls();
@@ -3360,11 +3363,12 @@
       const scenario = typeof selectedScenario === 'string' ? selectedScenario : '';
       try {
         return window.wasm_begin_gm_join(
-          request.id,
+          BigInt(request.id),
           request.approvedBy,
           request.candidateHost,
           request.operatorId,
           scenario,
+          request.kind || 'first-time',
         ) !== false;
       } catch (_) {
         return false;
@@ -3377,7 +3381,7 @@
           || typeof window.wasm_prepare_gm_join_candidate !== 'function') return false;
       let encoded;
       try { encoded = JSON.stringify(roster); } catch (_) { return false; }
-      try { return window.wasm_prepare_gm_join_candidate(id, encoded) !== false; }
+      try { return window.wasm_prepare_gm_join_candidate(BigInt(id), encoded) !== false; }
       catch (_) { return false; }
     }
 
@@ -3385,7 +3389,7 @@
       if (!Number.isSafeInteger(id) || typeof window.wasm_refuse_gm_join !== 'function') {
         return false;
       }
-      try { return window.wasm_refuse_gm_join(id, reason) !== false; }
+      try { return window.wasm_refuse_gm_join(BigInt(id), reason) !== false; }
       catch (_) { return false; }
     }
 
@@ -3404,9 +3408,11 @@
       const commit = progress.commit || null;
       const id = (approval && approval.id) || (commit && commit.id) || progress.id;
       const candidate = (approval && approval.candidate) || (commit && commit.candidate);
+      const kind = (approval && approval.kind) || (commit && commit.kind) || 'first-time';
       if (Number.isSafeInteger(id) && candidate && !fleetGmJoinRequest) {
         fleetGmJoinRequest = {
           id,
+          kind,
           candidate: {
             operator_id: candidate.operator_id,
             host: candidate.host,
@@ -3981,7 +3987,7 @@
         return value && value.code === String(code)
           && typeof value.reconnectCredential === 'string'
           && value.reconnectCredential
-          ? value
+          ? { ...value, rolePreset: null }
           : null;
       } catch (_) {
         return null;
@@ -3997,6 +4003,7 @@
           code: String(code),
           operatorId: identity.operatorId || null,
           reconnectCredential: identity.reconnectCredential,
+          rolePreset: null,
         }));
       } catch (_) {}
     }
@@ -4639,6 +4646,7 @@
         role: handle.role,
         operatorId: handle.operatorId,
         reconnectCredential: handle.reconnectCredential,
+        rolePreset: null,
       });
       fleetSuffix = handle.code ? handle.code.suffix : null;
       paintFleetPanel();

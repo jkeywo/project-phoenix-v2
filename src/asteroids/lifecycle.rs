@@ -380,7 +380,7 @@ fn fleet_stream_centre(
 /// mid-run composition changes (world layers loading or unloading a field).
 /// Debug formatting is stable within a run, which is all the key needs —
 /// it never has to survive a process restart.
-fn composition_key(fields: &[FieldContribution]) -> u64 {
+pub(crate) fn composition_key(fields: &[FieldContribution]) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in format!("{fields:?}").bytes() {
         hash ^= byte as u64;
@@ -1196,6 +1196,56 @@ mod tests {
         assert_eq!(window.spawn_cells, 2);
         assert_eq!(window.despawn_cells, 3);
         assert!(!window.needs_init, "first tick must run the full rebuild");
+    }
+
+    #[test]
+    fn canonical_window_is_restore_ready_before_a_paused_candidate_spends_a_tick() {
+        use crate::entities::spawner::EntityUuid;
+
+        let mut canonical = test_app();
+        canonical
+            .world_mut()
+            .spawn((AsteroidFieldSection(field(15.0)), Transform::default()));
+        canonical
+            .world_mut()
+            .spawn(EntityUuid("standing-entity".into()));
+        canonical.update();
+        let snapshot = crate::snapshot::capture(canonical.world());
+        assert!(
+            !snapshot
+                .asteroid_window
+                .as_ref()
+                .expect("the canonical host captures its window")
+                .needs_init
+        );
+
+        // This is the reconnect candidate immediately after its GameStart
+        // topology arrived under the technical Pause: fields and roster rows
+        // exist, but FixedUpdate has not run and must not run before restore.
+        let mut candidate = test_app();
+        candidate
+            .world_mut()
+            .spawn((AsteroidFieldSection(field(15.0)), Transform::default()));
+        candidate
+            .world_mut()
+            .spawn(EntityUuid("standing-entity".into()));
+        assert!(candidate.world().resource::<AsteroidWindow>().needs_init);
+        assert!(
+            crate::snapshot::ready_to_restore(candidate.world(), &snapshot),
+            "matching live fields make the canonical window safe to install without a private tick"
+        );
+
+        let mut wrong = test_app();
+        wrong
+            .world_mut()
+            .spawn((AsteroidFieldSection(field(30.0)), Transform::default()));
+        wrong
+            .world_mut()
+            .spawn(EntityUuid("standing-entity".into()));
+        assert!(
+            !crate::snapshot::ready_to_restore(wrong.world(), &snapshot),
+            "a different field composition must still fail closed"
+        );
     }
 
     #[test]

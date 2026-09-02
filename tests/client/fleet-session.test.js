@@ -494,6 +494,7 @@ describe('privileged GM host role and reconnect (issue #1289)', () => {
       role: HOST_ROLE_GM,
       operatorId: 'gm-1',
       reconnectCredential: 'gm-one-private',
+      rolePreset: null,
     }]);
     expect(lastRoster(lead).slots).toHaveLength(1);
     expect(lastRoster(lead).gms).toEqual([
@@ -626,10 +627,12 @@ describe('privileged GM host role and reconnect (issue #1289)', () => {
     expect(lead.fleet.slot).toBe('slot-1'); // technical star-centre identity
     expect(lead.fleet.operatorId).toBe('gm-1');
     expect(lead.fleet.reconnectCredential).toBe('owner-private-capability');
+    expect(lead.fleet.gmJoinCandidate).toBe(false);
     expect(ownerIdentity).toEqual([{
       role: HOST_ROLE_GM,
       operatorId: 'gm-1',
       reconnectCredential: 'owner-private-capability',
+      rolePreset: null,
     }]);
     expect(lastRoster(lead).slots).toEqual([]);
     expect(lastRoster(lead).gms).toEqual([
@@ -675,6 +678,9 @@ describe('visible first-time mid-session GM admission (issue #1293)', () => {
     expect(pending).toHaveLength(1);
     expect(candidate.simulationRosters).toEqual([]);
     expect(candidate.gmBootstraps).toHaveLength(1);
+    expect(candidate.member.pendingGmJoin).toBe(true);
+    expect(candidate.member.gmJoinCandidate).toBe(true);
+    expect(lead.fleet.gmJoinCandidate).toBe(false);
     expect(candidate.gmBootstraps[0]).toMatchObject({
       id: ownerRequests[0].id,
       roster: { local: 3, owner: 1, participants: [1, 2, 3] },
@@ -688,6 +694,7 @@ describe('visible first-time mid-session GM admission (issue #1293)', () => {
     await settle();
     expect(beginCalls).toEqual([{
       id: request.id,
+      kind: 'first-time',
       approvedBy: 2,
       candidateHost: 3,
       operatorId: 'gm-1',
@@ -707,6 +714,8 @@ describe('visible first-time mid-session GM admission (issue #1293)', () => {
     expect(lastRoster(candidate).gms).toEqual(lastRoster(lead).gms);
     expect(candidate.member.operatorId).toBe('gm-1');
     expect(candidate.member.reconnectCredential).toBe('join-secret-1');
+    expect(candidate.member.pendingGmJoin).toBe(false);
+    expect(candidate.member.gmJoinCandidate).toBe(false);
     expect(lead.fleet.completeGmJoin(request.id, 'committed')).toBe(true);
     expect(lastRoster(lead).gms).toHaveLength(1);
   });
@@ -1347,10 +1356,12 @@ describe('collective GM and crew start transport (issue #1290)', () => {
     expect(ship.grants).toEqual([]);
   });
 
-  it('refuses a frozen GM recovery that cannot replay the deterministic start boundary', async () => {
+  it('restores a frozen GM privately without replaying the one-shot start grant', async () => {
+    const begins = [];
     const { factories, world, lead } = await fleetOf({
       ship: { template_path: 'lead.toml' },
       credentialFactory: credentialSequence('gm-secret'),
+      onBeginGmJoin: (request) => { begins.push(request); return true; },
     });
     const gm = await memberOn(world, factories, lead.code.suffix, {
       role: HOST_ROLE_GM, name: 'Morgan',
@@ -1370,11 +1381,36 @@ describe('collective GM and crew start transport (issue #1290)', () => {
       role: HOST_ROLE_GM,
       reconnectCredential,
     });
-    expect(replacement.member.operatorId).toBeNull();
-    expect(replacement.refusals.map(({ reason }) => reason)).toContain('recovery-only');
+    expect(replacement.refusals).toEqual([]);
+    expect(replacement.member.operatorId).toBe('gm-1');
+    expect(replacement.member.reconnectCredential).toBe(reconnectCredential);
+    expect(replacement.member.pendingGmJoin).toBe(true);
     expect(replacement.simulationRosters).toEqual([]);
+    expect(replacement.gmBootstraps).toHaveLength(1);
     expect(replacement.grants).toEqual([]);
     expect(lead.grants).toHaveLength(1);
+    expect(begins).toEqual([{
+      id: lead.fleet.pendingGmJoin().id,
+      kind: 'reconnect',
+      approvedBy: 1,
+      candidateHost: 2,
+      operatorId: 'gm-1',
+    }]);
+    expect(lastRoster(lead).gms).toEqual([
+      { id: 'gm-1', name: 'Morgan', connected: false, ready: false },
+    ]);
+
+    expect(lead.fleet.completeGmJoin(begins[0].id, 'committed')).toBe(true);
+    await settle();
+    expect(lastRoster(lead).gms).toEqual([
+      { id: 'gm-1', name: 'Morgan', connected: true, ready: false },
+    ]);
+    expect(lastRoster(replacement).gms).toEqual(lastRoster(lead).gms);
+    expect(replacement.member.pendingGmJoin).toBe(false);
+    expect(replacement.grants).toEqual([]);
+    expect(lead.grants).toHaveLength(1);
+    expect(lead.fleet.completeGmJoin(begins[0].id, 'committed')).toBe(true);
+    expect(lastRoster(lead).gms).toHaveLength(1);
   });
 
   it('leaves an incompatible would-be GM unable to force', async () => {

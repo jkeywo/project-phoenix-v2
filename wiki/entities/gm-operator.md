@@ -2,7 +2,7 @@
 title: GM Operator
 type: entity
 tags: [gm, operator, identity, reconnect, roster, readiness, force-start, action, pause, puppeting, backfill, host-mesh, map, activity, damage, destruction, objectives, triggers, red-alert, connections, regions, asteroids]
-sources: [src/gm_roster.rs, src/gm_action.rs, src/gm_join.rs, src/gm_projection.rs, src/gm_activity.rs, src/gm_puppet.rs, src/objectives.rs, src/world/server.rs, src/ship/helm_ai/mod.rs, src/entities/config.rs, src/entities/tags.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/balance.rs, src/core/messages.rs, src/core/codec.rs, src/command_admission/log.rs, src/lobby/server.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server/bridge.rs, src/server_app/broadcast.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/host-channel.js, gui/gm-local-projection.js, gui/gm-activity-feed.js, gui/gm-station-puppet.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/console-state.js, gui/console-core.js, gui/sim-state.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html]
+sources: [src/gm_roster.rs, src/gm_action.rs, src/gm_join.rs, src/gm_projection.rs, src/gm_activity.rs, src/gm_puppet.rs, src/objectives.rs, src/world/server.rs, src/ship/helm_ai/mod.rs, src/entities/config.rs, src/entities/tags.rs, src/asteroids/lifecycle.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/balance.rs, src/core/messages.rs, src/core/codec.rs, src/command_admission/log.rs, src/lobby/server.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server/bridge.rs, src/server_app/broadcast.rs, src/server_app/world_setup.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/host-channel.js, gui/gm-local-projection.js, gui/gm-activity-feed.js, gui/gm-station-puppet.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/console-state.js, gui/console-core.js, gui/sim-state.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html]
 updated: 2026-09-02
 ---
 
@@ -28,9 +28,15 @@ Neither they nor the reconnect capability enter the public roster. While the
 Lobby topology is still mutable, a known disconnected GM can bind a new
 connection to the same operator row without consuming a ship slot or displacing
 a connected operator. Once frozen, that technical slot is part of Rust's
-deterministic wait-set. A departed GM is then refused `recovery-only` even with
-the correct capability until #1294 can restore the authoritative snapshot,
-watermark, and any one-shot start boundary it missed.
+deterministic wait-set. A known frozen-session reconnect is admitted only when
+the private capability names the exact disconnected public operator and the
+frozen roster maps that operator to the exact departed technical slot. A live,
+mismatched, or competing duplicate is refused without changing the roster.
+
+The optional GM role preset currently has no gameplay value. Its explicit
+`rolePreset: null` placeholder is retained only with the browser's private
+identity and local-storage capability. It never enters `GmOperator`, a public
+roster, a snapshot, or a digest.
 
 ## First-time mid-session admission
 
@@ -66,6 +72,52 @@ after either terminal Rust outcome. It is a protocol hold, not a fabricated GM
 action, and is released only when a newly applied, attributed
 `SetSessionPaused { active: false }` follows that terminal result. Consequently
 admission can never resume as a side effect of roster or transport completion.
+
+## Known-GM reconnect
+
+A correct frozen-session capability automatically starts one bounded
+`GmJoinKind::Reconnect` transaction; existing peers do not receive Accept or
+Reject controls. This is the same owner-sequenced paused transfer as first-time
+admission, not a second recovery protocol. The public GM row remains the
+original disconnected row while the returning connection is private. Exact
+retries replay the retained transaction, while a competing connection loses
+deterministically.
+
+The returning process is never a canonical snapshot source or an election
+candidate, including the two-peer case where no majority can exist. The sole
+survivor supplies the canonical #1118 record: world snapshot, complete admitted
+command history, snapshotted GM journal, and owner boundary. Only the matching
+restored digest commits. Commit preserves the operator id, name, technical slot,
+capability, and fleet counters, then calls `LockstepSession::rejoin` at the
+proven watermark instead of appending or admitting a peer. Corrupt or incomplete
+records follow the existing rollback-safe restore seam and never publish the
+returning connection.
+
+The candidate Pause is applied before its fresh GameStart topology can spend a
+private fixed tick. Pause arms the existing restore transaction but does not
+enter `InProgress`: only after the canonical record passes its format, content,
+and boot-identity gate does the private candidate stage that record's exact
+authored-row/UUID map through `stage_resume_game_start_entity_uuids` and request
+GameStart. Thus the returning process never mints a competing player-ship
+identity before restore. On asteroid worlds, restore readiness compares the
+standing authored field composition directly with the canonical saved window;
+an exact match lets restore install that initialized window without advancing
+the candidate, while a different composition still fails closed. The bounded
+restore clock starts only after `GameStartEntityUuids` proves the deferred spawn
+walked every authored row. If normal initialization has then still not produced
+rebuildable rows, only the final authenticated owner-granted restore boundary
+may enable the existing rebuild branch of the same rollback-safe restore seam.
+A world that remains non-rebuildable reaches the deterministic timeout instead.
+
+`GmJoinPauseHold` is technical protocol state, so snapshot capture and restore
+preserve an empty `GmActionJournal` byte-for-byte instead of rewriting its
+initial pause. When the first real typed grant is replicated, every peer adopts
+its current paused state as the journal baseline before inserting the grant;
+the owner and returning peer therefore digest the same durable GM history.
+
+Commit keeps `GmJoinPauseHold` active. The returning GM becomes command-eligible
+only after its canonical state and histories are installed, and the fleet still
+requires a later attributed `SetSessionPaused { active: false }` to Resume.
 
 ## Authoritative projection
 

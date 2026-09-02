@@ -1320,7 +1320,7 @@ pub fn apply_mesh_inbox(
     // whose frames are legitimate even when the barrier no longer waits for them.
     // Absent roster ⇒ no fleet: nothing to authenticate against, so trust the
     // frame exactly as the pre-#1120 path did (a bare fixture).
-    // A first-time GM candidate intentionally has no authoritative FleetRoster
+    // A joining GM candidate intentionally has no authoritative FleetRoster
     // before digest proof. Its private bootstrap topology may authenticate the
     // owner's relay connection, but it is never used below as admission or as a
     // simulation wait-set.
@@ -1852,7 +1852,19 @@ pub fn apply_mesh_inbox(
                         );
                             continue;
                         }
-                        if let Err(reason) = start_admission.gm_journal.insert(grant) {
+                        // The owner adopts the live pre-journal pause before it
+                        // sequences the first typed grant. Every receiver must
+                        // make the same one-time adoption before inserting that
+                        // grant, otherwise a technical join hold (or a restored
+                        // standalone pause) makes the owner's Resume `Applied`
+                        // while peers derive `NoOp` from an empty false baseline.
+                        // Capture/restore can therefore preserve the exact folded
+                        // journal instead of smuggling the technical hold into it.
+                        if let Err(reason) = crate::gm_action::insert_replicated_grant(
+                            &mut start_admission.gm_journal,
+                            start_admission.gm_paused.0,
+                            grant,
+                        ) {
                             crate::pwarn!(
                                 log,
                                 LogCat::Admit,

@@ -232,7 +232,7 @@ describe('the envelope', () => {
     // silently fails to agree a tick; refusing an unrecognised `m` is what
     // makes that fail loudly, and this pair of pins is what catches a
     // one-sided bump.
-    expect(HOST_MESH_PROTOCOL).toBe(10);
+    expect(HOST_MESH_PROTOCOL).toBe(11);
     const rust = readFileSync(
       path.join(path.dirname(fileURLToPath(import.meta.url)), '../../src/lockstep/frame.rs'),
       'utf8',
@@ -416,7 +416,7 @@ describe('privileged GM host role (issue #1289)', () => {
     expect(rebound.fleet.gms).toHaveLength(1);
   });
 
-  it('fails closed on GM recovery after freeze even with the right credential', () => {
+  it('auto-pends a known frozen GM without changing its public row or identity counters', () => {
     const admitted = admitHost(
       fleetOf({ credentialFactory: credentials('only-real-secret') }),
       { peer: 'old-peer', role: HOST_ROLE_GM },
@@ -437,9 +437,59 @@ describe('privileged GM host role (issue #1289)', () => {
       role: HOST_ROLE_GM,
       reconnectCredential: 'only-real-secret',
     });
-    expect(rebound).toEqual({ ok: false, reason: REASON_RECOVERY_ONLY });
+    expect(rebound).toMatchObject({
+      ok: true,
+      pending: true,
+      reconnect: true,
+      operatorId: 'gm-1',
+      meshSlot: 'slot-2',
+      reconnectCredential: 'only-real-secret',
+      request: { kind: 'reconnect', status: 'accepted' },
+    });
+    expect(rebound.fleet.nextSeq).toBe(frozen.nextSeq);
+    expect(rebound.fleet.nextGmSeq).toBe(frozen.nextGmSeq);
+    expect(rosterOf(rebound.fleet).gms).toEqual([
+      { id: 'gm-1', name: '', connected: false, ready: false },
+    ]);
     expect(frozen.gms).toHaveLength(1);
     expect(frozen.gms[0]).toMatchObject({ connected: false, peer: null });
+
+    const committed = commitFirstTimeGmJoin(rebound.fleet, rebound.request.id);
+    expect(committed).toMatchObject({ ok: true, gm: {
+      id: 'gm-1', meshSlot: 'slot-2', peer: 'replacement',
+      name: '', credential: 'only-real-secret', connected: true,
+    } });
+    expect(committed.fleet.gms).toHaveLength(1);
+    expect(rosterOf(committed.fleet).gms).toEqual([
+      { id: 'gm-1', name: '', connected: true, ready: false },
+    ]);
+  });
+
+  it('replays the exact frozen reconnect and deterministically refuses a competitor', () => {
+    const admitted = admitHost(
+      fleetOf({ credentialFactory: credentials('stable-secret') }),
+      { peer: 'old-peer', role: HOST_ROLE_GM, name: 'Morgan' },
+    );
+    const frozen = freezeFleet(dropHost(admitted.fleet, 'old-peer'));
+    const first = admitHost(frozen, {
+      peer: 'winner', role: HOST_ROLE_GM, reconnectCredential: 'stable-secret',
+    });
+    const retry = admitHost(first.fleet, {
+      peer: 'winner', role: HOST_ROLE_GM, reconnectCredential: 'stable-secret',
+    });
+    expect(retry).toMatchObject({
+      ok: true, pending: true, duplicate: true,
+      request: { id: first.request.id, kind: 'reconnect' },
+    });
+    expect(retry.fleet).toBe(first.fleet);
+
+    const competitor = admitHost(first.fleet, {
+      peer: 'competitor', role: HOST_ROLE_GM, reconnectCredential: 'stable-secret',
+    });
+    expect(competitor).toEqual({ ok: false, reason: 'join-in-progress' });
+    expect(rosterOf(first.fleet).gms).toEqual([
+      { id: 'gm-1', name: 'Morgan', connected: false, ready: false },
+    ]);
   });
 
   it('keeps a first-time mid-session GM private until matching-digest commit', () => {

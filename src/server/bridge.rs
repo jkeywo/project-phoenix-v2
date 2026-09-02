@@ -180,14 +180,17 @@ struct PendingFleetJoin {
 }
 
 #[cfg(target_arch = "wasm32")]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct PendingGmJoin {
     id: crate::gm_join::GmJoinId,
+    kind: crate::gm_join::GmJoinKind,
     approved_by: crate::command_admission::HostSlot,
     candidate: crate::gm_join::GmJoinCandidate,
     scenario: String,
 }
 
 #[cfg(target_arch = "wasm32")]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct PendingGmJoinBootstrap {
     id: crate::gm_join::GmJoinId,
     provisional: crate::lockstep::FleetRoster,
@@ -664,8 +667,9 @@ thread_local! {
     static PENDING_GM_ACTIONS: RefCell<VecDeque<crate::gm_action::GmActionRequest>> =
         const { RefCell::new(VecDeque::new()) };
 
-    /// Visible owner-page Accept decisions waiting for the deterministic join
-    /// sequencer. Kept separate from GM actions: a ship host may accept too.
+    /// Accepted GM join transactions waiting for the deterministic sequencer.
+    /// First-time decisions came from a visible peer; reconnects came from the
+    /// exact private capability. Kept separate from GM actions in both cases.
     static PENDING_GM_JOINS: RefCell<VecDeque<PendingGmJoin>> =
         const { RefCell::new(VecDeque::new()) };
     /// Read-only progress mirror polled by every server-page surface.
@@ -1841,9 +1845,10 @@ pub fn wasm_submit_gm_action(request_json: &str) -> bool {
     })
 }
 
-/// Queue one visible first-time GM acceptance for owner sequencing (#1293).
-/// Rejection is transport-only and never calls this export, which is why a
-/// rejected request cannot touch the live pause or roster resources.
+/// Queue one GM paused-transfer transaction for owner sequencing (#1293/#1294).
+/// A first-time request reaches this only after visible acceptance; a reconnect
+/// reaches it automatically after the private capability selected an existing
+/// disconnected operator.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_begin_gm_join(
@@ -1852,6 +1857,7 @@ pub fn wasm_begin_gm_join(
     candidate_host: u32,
     operator_id: &str,
     scenario: &str,
+    join_kind: &str,
 ) -> bool {
     const LIMIT: usize = 4;
     if join_id == 0
@@ -1864,25 +1870,35 @@ pub fn wasm_begin_gm_join(
     {
         return false;
     }
+    let kind = match join_kind {
+        "first-time" => crate::gm_join::GmJoinKind::FirstTime,
+        "reconnect" => crate::gm_join::GmJoinKind::Reconnect,
+        _ => return false,
+    };
+    let request = PendingGmJoin {
+        id: crate::gm_join::GmJoinId(join_id),
+        kind,
+        approved_by: crate::command_admission::HostSlot(approved_by),
+        candidate: crate::gm_join::GmJoinCandidate {
+            host: crate::command_admission::HostSlot(candidate_host),
+            operator_id: operator_id.to_string(),
+        },
+        scenario: scenario.to_string(),
+    };
     PENDING_GM_JOINS.with(|pending| {
         let mut pending = pending.borrow_mut();
+        if let Some(existing) = pending.iter().find(|existing| existing.id == request.id) {
+            return existing == &request;
+        }
         if pending.len() >= LIMIT {
             return false;
         }
-        pending.push_back(PendingGmJoin {
-            id: crate::gm_join::GmJoinId(join_id),
-            approved_by: crate::command_admission::HostSlot(approved_by),
-            candidate: crate::gm_join::GmJoinCandidate {
-                host: crate::command_admission::HostSlot(candidate_host),
-                operator_id: operator_id.to_string(),
-            },
-            scenario: scenario.to_string(),
-        });
+        pending.push_back(request);
         true
     })
 }
 
-/// Prepare a first-time candidate's world topology without admitting it to the
+/// Prepare a candidate's world topology without admitting it to the
 /// authoritative roster or lockstep wait-set. Commit is the only code path
 /// which installs those resources.
 #[cfg(target_arch = "wasm32")]
@@ -1898,15 +1914,19 @@ pub fn wasm_prepare_gm_join_candidate(join_id: u64, roster_json: &str) -> bool {
     if crate::gm_join::GmJoinBootstrap::from_provisional(provisional.clone()).is_err() {
         return false;
     }
+    let request = PendingGmJoinBootstrap {
+        id: crate::gm_join::GmJoinId(join_id),
+        provisional,
+    };
     PENDING_GM_JOIN_BOOTSTRAPS.with(|pending| {
         let mut pending = pending.borrow_mut();
+        if let Some(existing) = pending.iter().find(|existing| existing.id == request.id) {
+            return existing == &request;
+        }
         if pending.len() >= LIMIT {
             return false;
         }
-        pending.push_back(PendingGmJoinBootstrap {
-            id: crate::gm_join::GmJoinId(join_id),
-            provisional,
-        });
+        pending.push_back(request);
         true
     })
 }
@@ -2280,7 +2300,8 @@ fn drain_gm_action_input(world: &mut World) {
     }
 }
 
-/// Turn the owner page's visible Accept into one deterministic pause agreement.
+/// Turn an accepted or capability-authenticated request into one deterministic
+/// pause agreement.
 #[cfg(target_arch = "wasm32")]
 fn drain_gm_join_input(world: &mut World) {
     let refusals = PENDING_GM_JOIN_REFUSALS.with(|pending| {
@@ -2296,13 +2317,19 @@ fn drain_gm_join_input(world: &mut World) {
     });
     for request in requests {
         let id = request.id;
-        if let Err(reason) = crate::gm_join::begin_join(
-            world,
-            id,
-            request.approved_by,
-            request.candidate,
-            request.scenario,
-        ) {
+        let result = match request.kind {
+            crate::gm_join::GmJoinKind::FirstTime => crate::gm_join::begin_join(
+                world,
+                id,
+                request.approved_by,
+                request.candidate,
+                request.scenario,
+            ),
+            crate::gm_join::GmJoinKind::Reconnect => {
+                crate::gm_join::begin_reconnect(world, id, request.candidate, request.scenario)
+            }
+        };
+        if let Err(reason) = result {
             world
                 .resource_mut::<crate::gm_join::GmJoinRuntime>()
                 .refuse(id, reason);

@@ -63,6 +63,9 @@ use crate::lockstep::transfer::SnapshotChunk;
 /// otherwise apply the grant on its next locally observed fixed step.
 /// `8` adds the paused-safe, typed and attributed GM action grant. `9` adds the
 /// visible first-time GM admission controls and Rust-owned paused transfer frame.
+/// `10` added the owner-sequenced restore-boundary clock. `11` distinguishes a
+/// known departed GM reconnect from a first-time admission while keeping both on
+/// that same paused transfer transaction.
 /// Bumped rather than
 /// extended-in-place because #1114's decoder refuses a frame whose `m` it does
 /// not recognise, which is precisely the behaviour that makes a mixed-build fleet
@@ -70,7 +73,7 @@ use crate::lockstep::transfer::SnapshotChunk;
 /// silently DROPPED a slot-claim frame would keep the recovered ship on Backfill
 /// while the revision-4 hosts handed it back to the replacement — a split with no
 /// symptom but a divergence.
-pub const HOST_MESH_PROTOCOL: u32 = 10;
+pub const HOST_MESH_PROTOCOL: u32 = 11;
 
 /// One command a host admitted from its own crew, as it crosses to the fleet.
 ///
@@ -417,7 +420,7 @@ mod tests {
     #[test]
     fn the_protocol_revision_is_pinned() {
         assert_eq!(
-            HOST_MESH_PROTOCOL, 10,
+            HOST_MESH_PROTOCOL, 11,
             "bumping this is a fleet-wide incompatible change: gui/host-mesh.js \
              refuses a frame whose `m` it does not know, so both halves and the \
              Vitest pin move together or a mixed fleet fails to agree a tick"

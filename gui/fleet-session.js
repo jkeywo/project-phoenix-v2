@@ -94,6 +94,7 @@ import {
   HOST_FRAME_WELCOME,
   HOST_ROLE_GM,
   HOST_ROLE_SHIP,
+  GM_JOIN_RECONNECT,
   REASON_GM_JOIN_REFUSED,
   admissionFrame,
   adjudicateForceStart,
@@ -175,6 +176,7 @@ const simulationRosterRefusal = (value) => {
 
 const rawRequestOf = (request) => ({
   id: request.id,
+  kind: request.kind === GM_JOIN_RECONNECT ? GM_JOIN_RECONNECT : 'first-time',
   candidate: {
     operator_id: request.candidate.id,
     host: hostSlotOrdinal(request.candidate.meshSlot),
@@ -231,7 +233,7 @@ function defaultAuthenticateFrame(raw, authSlot) {
  *   [opts.onSimulationRoster] private frozen-topology adoption; a Promise keeps
  *   roster/policy/grant publication pending, while `false` or a non-empty
  *   refusal string fails closed
- * @param {(identity:{role:string,operatorId:string,reconnectCredential:string})=>void}
+ * @param {(identity:{role:string,operatorId:string,reconnectCredential:string,rolePreset:null})=>void}
  *   [opts.onIdentity] the local GM identity only; never called for another GM
  * @param {(policy:object)=>void} [opts.onStartPolicy] aggregate readiness and
  *   validation from the owner; the owner receives the same projection
@@ -468,6 +470,7 @@ export function createFleetOwner(opts) {
     const request = verdict.request;
     const queued = onBeginGmJoin({
       id: request.id,
+      kind: request.kind,
       approvedBy: hostSlotOrdinal(approvedBy),
       candidateHost: hostSlotOrdinal(request.candidate.meshSlot),
       operatorId: request.candidate.id,
@@ -559,8 +562,27 @@ export function createFleetOwner(opts) {
       connSlots.set(conn.peer, hostSlotOrdinal(verdict.meshSlot));
       const provisional = provisionalGmJoinRoster(fleet);
       conn.send(encodeHostFrame(gmJoinPendingFrame(verdict.request, provisional)));
-      publishGmJoinRequest(verdict.request);
-      onLog(`[fleet] ${verdict.operatorId} is awaiting visible mid-session acceptance`);
+      if (verdict.request.kind === GM_JOIN_RECONNECT) {
+        const queued = onBeginGmJoin({
+          id: verdict.request.id,
+          kind: verdict.request.kind,
+          approvedBy: hostSlotOrdinal(fleet.owner),
+          candidateHost: hostSlotOrdinal(verdict.request.candidate.meshSlot),
+          operatorId: verdict.request.candidate.id,
+        });
+        if (queued === false || typeof queued === 'string') {
+          refusePendingJoin(
+            verdict.request,
+            typeof queued === 'string' ? queued : REASON_GM_JOIN_REFUSED,
+          );
+          return;
+        }
+        publishGmJoinStatus(verdict.request, 'accepted');
+        onLog(`[fleet] ${verdict.operatorId} is restoring its departed GM slot`);
+      } else {
+        publishGmJoinRequest(verdict.request);
+        onLog(`[fleet] ${verdict.operatorId} is awaiting visible mid-session acceptance`);
+      }
       return;
     }
     fleet = verdict.fleet;
@@ -809,6 +831,7 @@ export function createFleetOwner(opts) {
       role: HOST_ROLE_GM,
       operatorId: ownerGm.id,
       reconnectCredential: ownerGm.credential,
+      rolePreset: null,
     });
   }
 
@@ -819,6 +842,7 @@ export function createFleetOwner(opts) {
     get role() { return ownerGm ? HOST_ROLE_GM : HOST_ROLE_SHIP; },
     get operatorId() { return ownerGm ? ownerGm.id : null; },
     get reconnectCredential() { return ownerGm ? ownerGm.credential : null; },
+    get gmJoinCandidate() { return false; },
     get canDecideGmJoin() { return true; },
     roster: () => rosterOf(fleet),
     pendingGmJoin: () => fleet.pendingGmJoin ? rawRequestOf(fleet.pendingGmJoin) : null,
@@ -835,8 +859,9 @@ export function createFleetOwner(opts) {
     completeGmJoin(id, status, reason = null) {
       const pending = fleet.pendingGmJoin;
       if (!pending || pending.id !== id) {
-        return status === 'committed'
-          && (fleet.gms || []).some((gm) => gm.joinId === id);
+        if (status !== 'committed') return false;
+        const duplicate = commitFirstTimeGmJoin(fleet, id);
+        return duplicate.ok && duplicate.duplicate === true;
       }
       if (status !== 'committed') {
         refusePendingJoin(pending, reason || REASON_GM_JOIN_REFUSED);
@@ -1024,7 +1049,7 @@ export function createFleetOwner(opts) {
  *   by an earlier GM welcome; it is never a public roster field
  * @param {(roster:object)=>void} [opts.onRoster]
  * @param {(slotId:string, roster:object)=>void} [opts.onWelcome]
- * @param {(identity:{role:string,operatorId:string,reconnectCredential:string})=>void}
+ * @param {(identity:{role:string,operatorId:string,reconnectCredential:string,rolePreset:null})=>void}
  *   [opts.onIdentity] this member's own GM identity only
  * @param {(roster:{local:number,owner:number,participants:number[],ships:object[]})=>(void|boolean|string|Promise<void|boolean|string>)}
  *   [opts.onSimulationRoster] private frozen-topology adoption; a Promise
@@ -1268,6 +1293,7 @@ export function createFleetMember(opts) {
           role: acceptedRole,
           operatorId,
           reconnectCredential: privateReconnectCredential,
+          rolePreset: null,
         };
         onWelcome(mine, roster, identity);
         if (acceptedRole === HOST_ROLE_GM) onIdentity(identity);
@@ -1293,6 +1319,7 @@ export function createFleetMember(opts) {
           role: HOST_ROLE_GM,
           operatorId,
           reconnectCredential: privateReconnectCredential,
+          rolePreset: null,
         };
         onIdentity(identity);
         onGmJoinPending({ request, identity });
@@ -1374,6 +1401,8 @@ export function createFleetMember(opts) {
     get role() { return acceptedRole; },
     get operatorId() { return operatorId; },
     get reconnectCredential() { return privateReconnectCredential; },
+    get gmJoinCandidate() { return gmJoinCandidate; },
+    get pendingGmJoin() { return gmJoinCandidate; },
     get canDecideGmJoin() { return !gmJoinCandidate && !!mine; },
     get code() { return joiner.failed ? null : { suffix: joiner.suffix, full: joiner.full }; },
     roster: () => roster,

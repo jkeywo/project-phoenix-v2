@@ -1647,6 +1647,24 @@ pub fn sequence_owner_proposal(
     Ok(grant)
 }
 
+/// Insert an owner-sequenced grant on a receiving peer with the same initial
+/// pause baseline the owner used when it sequenced the first grant.
+///
+/// This is intentionally the replicated admission boundary rather than
+/// snapshot capture: a technical join hold is current pause state, not a
+/// historical GM action, so the transferred journal must remain byte-exact
+/// until a real typed action exists.
+pub(crate) fn insert_replicated_grant(
+    journal: &mut GmActionJournal,
+    current_paused: bool,
+    grant: GmActionGrant,
+) -> Result<(), GmActionRefusalReason> {
+    if journal.is_empty() {
+        journal.adopt_initial_pause(current_paused);
+    }
+    journal.insert(grant).map(|_| ())
+}
+
 /// Privileged local admission. Identity comes from the frozen private slot
 /// binding; the request's operator id is only a claim checked against it.
 pub fn submit_local(
@@ -2232,6 +2250,31 @@ station = "helm"
         assert_eq!(early_delivery, batched_delivery);
         assert!(!early_delivery.log_through(20).paused());
         assert!(early_delivery.log_through(21).paused());
+    }
+
+    #[test]
+    fn a_replicated_first_resume_adopts_the_same_paused_baseline_as_the_owner() {
+        let owner = HostSlot(1);
+        let proposal = GmActionProposal {
+            from: HostSlot(2),
+            operator_id: "gm-2".into(),
+            correlation: GmActionId::new("resume-technical-hold").unwrap(),
+            action: GmAction::SetSessionPaused { active: false },
+        };
+        let mut canonical = GmActionJournal::default();
+        let resume = sequence_owner_proposal(&mut canonical, &proposal, owner, 20, 20, true, true)
+            .expect("the owner sequences the typed Resume at the stopped boundary");
+
+        let mut receiver = GmActionJournal::default();
+        insert_replicated_grant(&mut receiver, true, resume)
+            .expect("the authenticated owner grant is admitted");
+
+        assert_eq!(receiver, canonical);
+        assert_eq!(
+            receiver.log_through(20).entries()[0].outcome,
+            GmActionOutcome::Applied
+        );
+        assert!(!receiver.log_through(20).paused());
     }
 
     #[test]

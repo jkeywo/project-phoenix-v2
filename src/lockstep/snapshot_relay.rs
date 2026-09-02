@@ -242,23 +242,54 @@ impl MeshSnapshotReceiver {
 /// Until then condition (b) is an honest-peer guard, not a byzantine one; condition
 /// (a) is what makes an unarmed host uncommittable regardless of `from`.
 ///
-/// A future join/slot-recovery path (issue #1120) is the other legitimate arm; it
-/// will set this for a joining host the same way. Until then the only armer is
-/// divergence recovery, and an unarmed host commits nothing.
+/// Slot recovery and the paused GM-join transaction are the other legitimate
+/// armers. They set this locally from their already-authenticated transaction;
+/// an unarmed host still commits nothing.
 #[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
 pub struct MeshRestoreArm {
     armed_from: Option<HostSlot>,
+    /// A returning GM is a fresh private world, not an already-booted recovery
+    /// target. Its accepted canonical record must stage the saved GameStart
+    /// identities before that world enters `InProgress`; otherwise the normal
+    /// GameStart mint creates different UUIDs and a by-UUID restore can never
+    /// become ready. Ordinary divergence and slot recovery never use this mode.
+    bootstrap_reconnect: bool,
+    /// The bounded join bootstrap exhausted its owner-granted wait boundary,
+    /// so snapshot restore may build captured authored rows which the fresh
+    /// world still has not produced. Ordinary divergence/slot recovery keeps
+    /// the stricter fully-bootstrapped gate.
+    allow_rebuild: bool,
 }
 
 impl MeshRestoreArm {
     /// Arm this host to restore a record from `leader`.
     pub fn arm(&mut self, leader: HostSlot) {
         self.armed_from = Some(leader);
+        self.bootstrap_reconnect = false;
+        self.allow_rebuild = false;
+    }
+
+    /// Arm a fresh returning-GM candidate whose private GameStart identities
+    /// must come from the accepted canonical record.
+    pub(crate) fn arm_reconnect(&mut self, leader: HostSlot) {
+        self.armed_from = Some(leader);
+        self.bootstrap_reconnect = true;
+        self.allow_rebuild = false;
+    }
+
+    /// At the terminal owner-granted bootstrap boundary, permit the existing
+    /// #863 restore builder to supply captured rows which never appeared.
+    pub fn permit_rebuild(&mut self, leader: HostSlot) {
+        if self.armed_from == Some(leader) {
+            self.allow_rebuild = true;
+        }
     }
 
     /// Disarm: a staged record must not overwrite the world.
     pub fn disarm(&mut self) {
         self.armed_from = None;
+        self.bootstrap_reconnect = false;
+        self.allow_rebuild = false;
     }
 
     /// The slot this host will accept a restore from, or `None` when disarmed.
@@ -269,6 +300,14 @@ impl MeshRestoreArm {
     /// Whether this host is expecting to restore a record at all.
     pub fn is_armed(&self) -> bool {
         self.armed_from.is_some()
+    }
+
+    pub(crate) fn allows_rebuild(&self) -> bool {
+        self.allow_rebuild
+    }
+
+    pub(crate) fn bootstraps_reconnect(&self) -> bool {
+        self.bootstrap_reconnect
     }
 }
 
@@ -429,6 +468,16 @@ pub fn gate_and_restore_against(
     text: &str,
     current: &Versions,
 ) -> MeshRestoreOutcome {
+    gate_and_restore_against_with_readiness(world, text, current, false, false)
+}
+
+fn gate_and_restore_against_with_readiness(
+    world: &mut World,
+    text: &str,
+    current: &Versions,
+    allow_rebuild: bool,
+    bootstrap_reconnect: bool,
+) -> MeshRestoreOutcome {
     // 1. The gate. Parse and version-check BEFORE touching the world.
     let run = match snapshot::import_artifact(text, current) {
         Ok(run) => run,
@@ -439,6 +488,58 @@ pub fn gate_and_restore_against(
             "the transferred record carries no captured state".to_string(),
         );
     };
+
+    // A fresh reconnect candidate cannot mint its GameStart identities before
+    // seeing the canonical record: those UUIDs are part of the by-UUID restore
+    // contract. `import_artifact` above has already version- and
+    // semantic-gated `boot_identity`, so it is safe to stage only that private
+    // boot metadata now. The candidate remains technically paused, outside the
+    // public roster and lockstep wait-set, and this record stays staged for the
+    // ordinary restore retry after `OnEnter(InProgress)` finishes.
+    //
+    // This intentionally precedes the rollback checkpoint. Staging boot UUIDs
+    // and requesting the candidate-private GameStart transition is bootstrap,
+    // not a partial authoritative restore; a later corrupt-record rollback must
+    // return to the now-booted private world so a terminal refusal can be
+    // reported without trying to undo a state transition.
+    if bootstrap_reconnect && !world.contains_resource::<crate::server_app::GameStartEntityUuids>()
+    {
+        let Some(phase) = world
+            .get_resource::<State<crate::core::messages::GamePhase>>()
+            .map(|phase| phase.get().clone())
+        else {
+            return MeshRestoreOutcome::RefusedGate(
+                "the reconnect candidate has no GamePhase bootstrap state".to_string(),
+            );
+        };
+        if phase == crate::core::messages::GamePhase::InProgress {
+            return MeshRestoreOutcome::RefusedGate(
+                "the reconnect candidate entered GameStart before canonical identities were staged"
+                    .to_string(),
+            );
+        }
+        if !world.contains_resource::<NextState<crate::core::messages::GamePhase>>() {
+            return MeshRestoreOutcome::RefusedGate(
+                "the reconnect candidate cannot request its GameStart bootstrap".to_string(),
+            );
+        }
+        let boot = snap
+            .state
+            .boot_identity
+            .as_ref()
+            .expect("import_artifact gates the current snapshot's boot identity");
+        let Some(world_config) = world.get_resource::<crate::world::config::WorldConfig>() else {
+            return MeshRestoreOutcome::NotReady;
+        };
+        if let Err(refusal) = snapshot::validate_boot_identity_for_world(boot, world_config) {
+            return MeshRestoreOutcome::RefusedGate(refusal.to_string());
+        }
+        crate::server_app::stage_resume_game_start_entity_uuids(world, boot);
+        world
+            .resource_mut::<NextState<crate::core::messages::GamePhase>>()
+            .set(crate::core::messages::GamePhase::InProgress);
+        return MeshRestoreOutcome::NotReady;
+    }
 
     // 2. Checkpoint the live world BEFORE anything below can mutate it, so an
     //    integrity or completeness failure can be rolled back to the TRUE pre-gate
@@ -474,7 +575,9 @@ pub fn gate_and_restore_against(
             ))
         }
     }
-    if !snapshot::ready_to_restore(world, &snap.state) {
+    if !snapshot::ready_to_restore(world, &snap.state)
+        && !(allow_rebuild && snapshot::ready_to_rebuild(world, &snap.state))
+    {
         return MeshRestoreOutcome::NotReady;
     }
 
@@ -555,9 +658,15 @@ pub fn drain_mesh_restore(world: &mut World) {
     let staged_from = world
         .get_resource::<MeshSnapshotReceiver>()
         .and_then(|r| r.staged_from);
-    let armed_from = world
+    let (armed_from, allow_rebuild, bootstrap_reconnect) = world
         .get_resource::<MeshRestoreArm>()
-        .and_then(|arm| arm.armed_from());
+        .map_or((None, false, false), |arm| {
+            (
+                arm.armed_from(),
+                arm.allows_rebuild(),
+                arm.bootstraps_reconnect(),
+            )
+        });
 
     let outcome = match armed_from {
         // Not a designated recovering host: a peer must never overwrite this
@@ -570,7 +679,16 @@ pub fn drain_mesh_restore(world: &mut World) {
             from: staged_from,
         },
         // Armed, and from the leader: run the rollback-able gate and restore.
-        Some(_leader) => gate_and_restore(world, &text),
+        Some(_leader) => {
+            let current = snapshot::versions(&crate::content_ledger::frozen_or_live());
+            gate_and_restore_against_with_readiness(
+                world,
+                &text,
+                &current,
+                allow_rebuild,
+                bootstrap_reconnect,
+            )
+        }
     };
 
     if matches!(outcome, MeshRestoreOutcome::NotReady) {
@@ -619,4 +737,71 @@ pub fn register_snapshot_relay(app: &mut App) {
             PreUpdate,
             drain_mesh_restore.after(crate::lockstep::MeshSet),
         );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reconnect_record_stages_exact_game_start_ids_before_requesting_the_phase() {
+        let entity_uuid =
+            crate::world_id::WorldId::new(crate::world_id::IdNamespace::Entity, 17, 3).render();
+        let mut source = World::new();
+        source.insert_resource(crate::lobby::SelectedShipResource(
+            "assets/entities/alliance_cruiser.toml".into(),
+        ));
+        source.insert_resource(crate::lockstep::FleetRoster::default());
+        source.insert_resource(crate::server_app::GameStartEntityUuids(vec![
+            crate::snapshot::GameStartEntityUuid {
+                authored_index: 0,
+                entity_uuid: entity_uuid.clone(),
+            },
+        ]));
+        let run = capture_run(&source, "assets/worlds/default.toml");
+        let boot = run
+            .snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.state.boot_identity.clone())
+            .expect("the source carries a complete boot identity");
+        let text = crate::snapshot::export_artifact(&run).unwrap();
+        let current = crate::snapshot::versions(&crate::content_ledger::frozen_or_live());
+
+        let mut candidate = World::new();
+        candidate.insert_resource(State::new(crate::core::messages::GamePhase::Lobby));
+        candidate.insert_resource(NextState::<crate::core::messages::GamePhase>::default());
+        let mut world_config = crate::world::config::WorldConfig::default();
+        world_config
+            .entities
+            .push(crate::world::config::WorldEntity {
+                spawn_on: crate::world::config::WorldEntitySpawnOn::GameStart,
+                ..Default::default()
+            });
+        candidate.insert_resource(world_config);
+
+        assert_eq!(
+            gate_and_restore_against_with_readiness(&mut candidate, &text, &current, false, true,),
+            MeshRestoreOutcome::NotReady,
+        );
+        assert!(matches!(
+            candidate.resource::<NextState<crate::core::messages::GamePhase>>(),
+            NextState::Pending(crate::core::messages::GamePhase::InProgress)
+        ));
+        assert!(!candidate.contains_resource::<crate::server_app::GameStartEntityUuids>());
+
+        let mut expected = World::new();
+        crate::server_app::stage_resume_game_start_entity_uuids(&mut expected, &boot);
+        assert_eq!(
+            candidate.get_resource::<crate::server_app::ResumeGameStartEntityUuids>(),
+            expected.get_resource::<crate::server_app::ResumeGameStartEntityUuids>(),
+            "the candidate must stage the canonical authored-index/UUID map exactly"
+        );
+        assert_eq!(
+            boot.game_start_entity_uuids,
+            vec![crate::snapshot::GameStartEntityUuid {
+                authored_index: 0,
+                entity_uuid,
+            }]
+        );
+    }
 }

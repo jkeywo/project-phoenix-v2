@@ -166,6 +166,44 @@ fn station_puppet_membership_round_trips_at_the_authoritative_boundary() {
 }
 
 #[test]
+fn a_technical_pause_does_not_rewrite_an_empty_gm_history_during_restore() {
+    let mut live = App::new();
+    live.add_plugins(MinimalPlugins);
+    live.world_mut().insert_resource(SimTick(10));
+    live.world_mut().insert_resource(SimulationPaused(true));
+    live.world_mut().insert_resource(GmActionJournal::default());
+
+    let payload = capture(live.world());
+    assert!(!payload.gm_actions.initial_paused());
+    let source_report = restore(live.world_mut(), &payload);
+    assert!(
+        source_report.is_complete(),
+        "source gaps: {:?}",
+        source_report.gaps
+    );
+    let live_digest = crate::sim_digest::world_digest(live.world());
+
+    let mut resumed = App::new();
+    resumed.add_plugins(MinimalPlugins);
+    resumed.world_mut().insert_resource(SimTick(2));
+    resumed.world_mut().insert_resource(SimulationPaused(false));
+    resumed
+        .world_mut()
+        .insert_resource(GmActionJournal::default());
+    let report = restore(resumed.world_mut(), &payload);
+
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    assert!(!resumed
+        .world()
+        .resource::<GmActionJournal>()
+        .initial_paused());
+    assert_eq!(
+        crate::sim_digest::world_digest(resumed.world()),
+        live_digest
+    );
+}
+
+#[test]
 fn recovery_immediately_after_a_due_gm_command_preserves_its_effect_and_digest() {
     use crate::core::messages::{AdmittedCommands, StationId, SystemControlPayload, SystemId};
     use crate::ship::control_source::ControlSource;

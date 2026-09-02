@@ -342,7 +342,7 @@ describe('hostLobbyViewModel GM presence', () => {
     expect(SERVER_HTML).toContain('presentationReady: fleetPresentationReady');
     expect(SERVER_HTML).toContain('function validatePlayerHull(templatePath, toml)');
     expect(SERVER_HTML).toContain('if (!status || status.generation !== pending.generation) return false;');
-    expect(SERVER_HTML).toContain('if (pollFleetSimulationRoster()) return;');
+    expect(SERVER_HTML).toContain('if (pollFleetSimulationRoster()) {\n        pollFleetGmJoin();\n        return;');
     expect(SERVER_HTML).toContain('if (fleetSimulationRosterKey) flushFleetStartGrants();');
     expect(SERVER_HTML).toContain("if (refusal !== 'fleet-lobby-input-queue-full')");
     expect(SERVER_HTML).toContain("if (refusal === 'start-grant-queue-full')");

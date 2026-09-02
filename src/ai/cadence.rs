@@ -121,6 +121,21 @@ pub fn tick_ai_cadence(
     base_interval.0 = per_ai;
 }
 
+/// Re-derive the cadence latches immediately at a state-transfer boundary.
+///
+/// Ordinarily [`tick_ai_cadence`] runs in `FixedLast` and leaves the latches
+/// armed for the next fixed step. A paused transfer can enter before another
+/// fixed step runs, however, while a restored peer necessarily reconstructs
+/// its derived state directly from [`SimTick`](crate::sim_tick::SimTick). Run
+/// the same derivation on the live side at that boundary so both peers resume
+/// with the same next-decision latch. Partial fixture worlds may not have
+/// installed every cadence resource, so this keeps the snapshot restore seam's
+/// existing best-effort contract.
+pub fn rederive_ai_cadence(world: &mut World) {
+    use bevy::ecs::system::RunSystemOnce;
+    let _ = world.run_system_once(tick_ai_cadence);
+}
+
 /// Whether an authored `evaluate_every_ticks = n` multiple (issue #889) is due
 /// to decide on THIS tick, given the shared base interval [`tick_ai_cadence`]
 /// derives.

@@ -119,9 +119,12 @@
  * revision-6 host would omit GM peers from Rust's lockstep wait-set and could
  * apply the decision before every deterministic peer reached its tick. `8`
  * adds the paused-safe typed GM-action frame. `9` adds the visible first-time
- * GM request/decision controls and the Rust-owned paused transfer frame.
+ * GM request/decision controls and the Rust-owned paused transfer frame. `10`
+ * adds its owner-sequenced restore clock. `11` carries the transaction kind so
+ * a known departed GM reconnect can reuse that transfer without being mistaken
+ * for a new public operator.
  */
-export const HOST_MESH_PROTOCOL = 10;
+export const HOST_MESH_PROTOCOL = 11;
 
 /** Frame types this revision speaks. */
 export const HOST_FRAME_HELLO = 'hello';
@@ -326,6 +329,8 @@ export const REASON_RECOVERY_ONLY = 'recovery-only';
 export const REASON_SLOT_TAKEN = 'slot-taken';
 export const REASON_JOIN_IN_PROGRESS = 'join-in-progress';
 export const REASON_GM_JOIN_REFUSED = 'gm-join-refused';
+export const GM_JOIN_FIRST_TIME = 'first-time';
+export const GM_JOIN_RECONNECT = 'reconnect';
 
 /** How a slot id is spelled. */
 const slotId = (seq) => `slot-${seq}`;
@@ -602,12 +607,10 @@ export function admitHost(fleet, {
       if (!known || known.connected) {
         return { ok: false, reason: REASON_RECOVERY_ONLY };
       }
-      // Once frozen, the technical slot has joined Rust's deterministic
-      // wait-set. A departed slot cannot safely reappear without transferring
-      // the authoritative snapshot and watermark it missed (including the
-      // one-shot mission-start grant), so recovery remains fail-closed until
-      // that protocol exists.
-      if (fleet.frozen) return { ok: false, reason: REASON_RECOVERY_ONLY };
+      // Once frozen the identity must traverse the same private paused restore
+      // as a first-time mid-session GM. Merely rebinding the socket would put a
+      // stale simulation back into the deterministic wait-set.
+      if (fleet.frozen) return requestGmReconnect(fleet, { peer, known });
       const rebound = {
         ...known,
         peer,
@@ -733,6 +736,7 @@ export function requestFirstTimeGmJoin(fleet, { peer, name = '' }) {
   };
   const request = {
     id: fleet.nextGmJoinSeq,
+    kind: GM_JOIN_FIRST_TIME,
     candidate,
     status: 'awaiting-decision',
     approvedBy: null,
@@ -748,6 +752,66 @@ export function requestFirstTimeGmJoin(fleet, { peer, name = '' }) {
       ...fleet,
       nextSeq: fleet.nextSeq + 1,
       nextGmSeq: fleet.nextGmSeq + 1,
+      nextGmJoinSeq: fleet.nextGmJoinSeq + 1,
+      pendingGmJoin: request,
+    },
+  };
+}
+
+/**
+ * Reserve one known disconnected GM for divergence-safe reconnect.
+ *
+ * The frozen row itself remains byte-for-byte disconnected until Rust proves
+ * the candidate restored the canonical digest. An exact Hello retry on the
+ * winning socket replays the same reservation; a competing socket loses to the
+ * already owner-ordered transaction instead of displacing it.
+ */
+export function requestGmReconnect(fleet, { peer, known }) {
+  const existing = known && gmById(fleet, known.id);
+  if (!fleet.frozen || !existing || existing.connected
+      || existing.meshSlot !== known.meshSlot
+      || existing.credential !== known.credential) {
+    return { ok: false, reason: REASON_RECOVERY_ONLY };
+  }
+  known = existing;
+  const pending = fleet.pendingGmJoin;
+  if (pending) {
+    if (pending.kind === GM_JOIN_RECONNECT
+        && pending.candidate.id === known.id
+        && pending.candidate.meshSlot === known.meshSlot
+        && pending.candidate.credential === known.credential
+        && pending.candidate.peer === peer) {
+      return {
+        ok: true,
+        pending: true,
+        duplicate: true,
+        request: pending,
+        meshSlot: known.meshSlot,
+        operatorId: known.id,
+        reconnectCredential: known.credential,
+        fleet,
+      };
+    }
+    return { ok: false, reason: REASON_JOIN_IN_PROGRESS };
+  }
+  const candidate = { ...known, peer, connected: true };
+  const request = {
+    id: fleet.nextGmJoinSeq,
+    kind: GM_JOIN_RECONNECT,
+    candidate,
+    status: 'accepted',
+    approvedBy: fleet.owner,
+  };
+  return {
+    ok: true,
+    pending: true,
+    reconnect: true,
+    request,
+    meshSlot: known.meshSlot,
+    operatorId: known.id,
+    reconnectCredential: known.credential,
+    fleet: {
+      ...fleet,
       nextGmJoinSeq: fleet.nextGmJoinSeq + 1,
       pendingGmJoin: request,
     },
@@ -779,22 +843,56 @@ export function decideFirstTimeGmJoin(fleet, id, accepted, approvedBy) {
 }
 
 /**
- * Add the candidate only after Rust reports a matching restored digest.
+ * Add or reconnect the candidate only after Rust reports a matching restored
+ * digest.
  * Exact retries are inert; an approval or transfer-progress update cannot call
  * this helper because it does not carry the terminal `committed` status.
  */
 export function commitFirstTimeGmJoin(fleet, id) {
   const pending = fleet.pendingGmJoin;
   if (!pending || pending.id !== id || pending.status !== 'accepted') {
+    if (fleet.lastGmJoin && fleet.lastGmJoin.id === id) {
+      const existing = gmById(fleet, fleet.lastGmJoin.operatorId);
+      return existing ? { ok: true, fleet, gm: existing, duplicate: true }
+        : { ok: false, reason: 'unknown' };
+    }
     const existing = (fleet.gms || []).find((gm) => gm.joinId === id);
     return existing ? { ok: true, fleet, gm: existing, duplicate: true }
       : { ok: false, reason: 'unknown' };
+  }
+  if (pending.kind === GM_JOIN_RECONNECT) {
+    const existing = gmById(fleet, pending.candidate.id);
+    if (!existing || existing.connected
+        || existing.meshSlot !== pending.candidate.meshSlot
+        || existing.credential !== pending.candidate.credential) {
+      return { ok: false, reason: REASON_RECOVERY_ONLY };
+    }
+    const gm = {
+      ...existing,
+      peer: pending.candidate.peer,
+      connected: true,
+    };
+    return {
+      ok: true,
+      gm,
+      fleet: {
+        ...fleet,
+        pendingGmJoin: null,
+        lastGmJoin: { id, kind: pending.kind, operatorId: gm.id },
+        gms: fleet.gms.map((candidate) => candidate.id === gm.id ? gm : candidate),
+      },
+    };
   }
   const gm = { ...pending.candidate, joinId: id };
   return {
     ok: true,
     gm,
-    fleet: { ...fleet, pendingGmJoin: null, gms: [...(fleet.gms || []), gm] },
+    fleet: {
+      ...fleet,
+      pendingGmJoin: null,
+      lastGmJoin: { id, kind: pending.kind, operatorId: gm.id },
+      gms: [...(fleet.gms || []), gm],
+    },
   };
 }
 
@@ -813,7 +911,10 @@ export function refuseFirstTimeGmJoin(fleet, id) {
 export function provisionalGmJoinRoster(fleet) {
   const pending = fleet.pendingGmJoin;
   if (!pending) return null;
-  return rosterOf({ ...fleet, gms: [...(fleet.gms || []), pending.candidate] });
+  const gms = pending.kind === GM_JOIN_RECONNECT
+    ? (fleet.gms || []).map((gm) => gm.id === pending.candidate.id ? pending.candidate : gm)
+    : [...(fleet.gms || []), pending.candidate];
+  return rosterOf({ ...fleet, gms });
 }
 
 /**
@@ -1305,6 +1406,7 @@ export const rosterFrame = (fleet) => hostFrame(HOST_FRAME_ROSTER, { roster: ros
 
 const publicJoinRequest = (request) => ({
   id: request.id,
+  kind: request.kind === GM_JOIN_RECONNECT ? GM_JOIN_RECONNECT : GM_JOIN_FIRST_TIME,
   candidate: {
     operator_id: request.candidate.id,
     host: hostSlotOrdinal(request.candidate.meshSlot),

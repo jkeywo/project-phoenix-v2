@@ -2508,11 +2508,10 @@ pub fn capture(world: &World) -> PhoenixSnapshot {
     let paused = world
         .get_resource::<crate::gm_action::SimulationPaused>()
         .is_some_and(|paused| paused.0);
-    let mut gm_actions = world
+    let gm_actions = world
         .get_resource::<crate::gm_action::GmActionJournal>()
         .cloned()
         .unwrap_or_default();
-    gm_actions.adopt_initial_pause(paused);
     PhoenixSnapshot {
         tick: world.get_resource::<SimTick>().map_or(0, |t| t.0),
         boot_identity: world
@@ -5242,11 +5241,10 @@ fn restore_coordination_staging(
 /// first post-restore frame can consume a coincidentally armed or disarmed
 /// latch before `FixedLast` corrects it.
 fn restore_ai_cadence(world: &mut World) {
-    use bevy::ecs::system::RunSystemOnce;
     // A partial bare-World fixture may not have installed the cadence
     // resources. That is the same best-effort partial-restore contract used by
     // `restore_ai_world_snapshot` below.
-    let _ = world.run_system_once(crate::ai::cadence::tick_ai_cadence);
+    crate::ai::cadence::rederive_ai_cadence(world);
 }
 
 /// Rebuild each ship's `ShipModifiers` from the reactor allocation this restore
@@ -5328,8 +5326,14 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
     world.insert_resource(SimTick(snapshot.tick));
 
     world.insert_resource(crate::gm_action::SimulationPaused(snapshot.paused));
-    let mut gm_actions = snapshot.gm_actions.clone();
-    gm_actions.adopt_initial_pause(snapshot.paused);
+    // The journal is itself folded authoritative state, so restore it exactly.
+    // In particular a technical GM-join hold may make `SimulationPaused` true
+    // without being a durable GM action; changing an empty journal's initial
+    // baseline here would make the restored digest differ from the sender's.
+    // The first later typed grant adopts the current pause on every peer at its
+    // replicated admission boundary (`lockstep::apply_mesh_inbox`), which keeps
+    // Resume effective without rewriting the captured history.
+    let gm_actions = snapshot.gm_actions.clone();
     world.insert_resource(gm_actions.clone());
     // The journal's terminal result log is derived, never stored. Replace a
     // bootstrap's stale projection immediately so host-channel readers cannot
@@ -7471,9 +7475,43 @@ fn belt_ready(world: &World, snapshot: &PhoenixSnapshot) -> bool {
     if stored.needs_init {
         return true;
     }
-    world
-        .get_resource::<AsteroidWindow>()
-        .is_some_and(|live| !live.needs_init && live.composition_key == stored.composition_key)
+    let Some(live) = world.get_resource::<AsteroidWindow>() else {
+        return false;
+    };
+    if !live.needs_init {
+        return live.composition_key == stored.composition_key;
+    }
+
+    // A paused GM-reconnect candidate is deliberately forbidden from taking a
+    // private fixed tick before the owner's canonical record commits. That
+    // means its fresh AsteroidWindow can still carry `needs_init = true` even
+    // though every authored field entity has finished loading. Waiting for
+    // `update_asteroid_window` here would deadlock: that system is itself in
+    // FixedUpdate, behind the pause this transaction must preserve.
+    //
+    // The initialized window was only a proxy for the fact we actually need:
+    // the live field composition must be the one the stored window was built
+    // from, so the first post-Resume fixed tick cannot rebuild the restored
+    // belt. Compute that same order-sensitive key directly from the standing
+    // field components. `restore_asteroid_window` then installs the canonical
+    // initialized window (including this key) without spending a simulation
+    // tick. Ordinary save resume still takes its existing initialized-window
+    // branch above.
+    let Some(mut fields) =
+        world.try_query::<(Entity, &crate::entities::spawner::AsteroidFieldSection)>()
+    else {
+        return false;
+    };
+    let mut sections: Vec<(Entity, &crate::entities::spawner::AsteroidFieldSection)> =
+        fields.iter(world).collect();
+    sections.sort_by_key(|(entity, _)| *entity);
+    let contributions: Vec<crate::asteroids::spawner::FieldContribution> = sections
+        .into_iter()
+        .filter_map(|(_, section)| {
+            crate::asteroids::spawner::FieldContribution::from_config(&section.0)
+        })
+        .collect();
+    crate::asteroids::lifecycle::composition_key(&contributions) == stored.composition_key
 }
 
 // ── Verification ─────────────────────────────────────────────────────────────
